@@ -111,7 +111,6 @@ export function SettingsPage({
     handleSaveCustomMcp,
     handleToggleProvider,
     handleWebSearchProviderChange,
-    hasPendingRestart,
     hostEngineApplying,
     imageGenerationDirty,
     imageGenerationForm,
@@ -245,7 +244,6 @@ export function SettingsPage({
         return (
           <OverviewSettings
             settings={settings}
-            requiresRestart={hasPendingRestart}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
           />

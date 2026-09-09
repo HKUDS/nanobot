@@ -321,15 +321,6 @@ export function useSettingsController({
     [settings],
   );
 
-  const hasPendingRestart = useMemo(
-    () =>
-      !!settings?.requires_restart ||
-      pendingRestartSections.runtime ||
-      pendingRestartSections.browser ||
-      pendingRestartSections.image,
-    [pendingRestartSections, settings?.requires_restart],
-  );
-
   const restartViaSettingsSurface = useCallback(async () => {
     const isNativeHost = (settings?.surface ?? settings?.runtime_surface) === "native";
     if (
@@ -518,7 +509,6 @@ export function useSettingsController({
     handleSaveCustomMcp,
     handleToggleProvider,
     handleWebSearchProviderChange,
-    hasPendingRestart,
     hostEngineApplying,
     imageGenerationDirty,
     imageGenerationForm,

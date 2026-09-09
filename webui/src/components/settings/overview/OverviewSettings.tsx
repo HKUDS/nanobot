@@ -6,11 +6,9 @@ import {
   ChevronRight,
   ExternalLink,
   Globe2,
-  HardDrive,
   ImageIcon,
   Loader2,
   Mic,
-  Server,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -39,17 +37,14 @@ import type {
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
 import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { shortWorkspacePath } from "@/lib/workspace";
 import { useClient } from "@/providers/ClientProvider";
 
 export function OverviewSettings({
   settings,
-  requiresRestart,
   onSelectSection,
   showBrandLogos,
 }: {
   settings: SettingsPayload;
-  requiresRestart: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
 }) {
@@ -75,58 +70,13 @@ export function OverviewSettings({
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const webSearchProvider =
-    settings.web_search.providers.find((provider) => provider.name === settings.web_search.provider) ??
-    settings.web_search.providers[0];
-  const webSearchProviderLabel = providerDisplayLabel(
-    settings.web_search.providers,
-    settings.web_search.provider,
-  );
-  const webSearchCredentialStatus =
-    webSearchProvider?.credential === "none"
-      ? tx("settings.byok.webSearch.noCredentialRequired", "No key required")
-      : webSearchProvider?.credential === "optional_api_key"
-        ? settings.web_search.api_key_hint
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.byok.webSearch.noCredentialRequired", "No key required")
-      : webSearchProvider?.credential === "base_url"
-        ? settings.web_search.base_url
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.values.notConfigured", "Not configured")
-        : settings.web_search.api_key_hint
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.values.notConfigured", "Not configured");
-  const webCaption = `${webSearchProviderLabel} · ${webSearchCredentialStatus}`;
   const imageStatus = settings.image_generation.enabled
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const imageCaption = `${providerDisplayLabel(settings.image_generation.providers, settings.image_generation.provider)} · ${
-    settings.image_generation.provider_configured
-      ? tx("settings.values.configured", "Configured")
-      : tx("settings.values.notConfigured", "Not configured")
-  }`;
   const transcription = settings.transcription ?? DEFAULT_TRANSCRIPTION_SETTINGS;
   const voiceStatus = transcription.enabled
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const voiceCaption = `${providerDisplayLabel(transcription.providers, transcription.provider)} · ${
-    transcription.provider_configured
-      ? tx("settings.values.configured", "Configured")
-      : tx("settings.values.notConfigured", "Not configured")
-  }`;
-  const isNativeHost = (settings.surface ?? settings.runtime_surface) === "native";
-  const workspaceCaption = shortWorkspacePath(settings.runtime.workspace_path);
-  const runtimeTitle = isNativeHost
-    ? tx("settings.rows.engine", "Engine")
-    : tx("settings.rows.gateway", "Gateway");
-  const runtimeValue = isNativeHost
-    ? tx("settings.values.privateEngine", "Private engine")
-    : `${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`;
-  const runtimeCaption = isNativeHost
-    ? tx("settings.values.unixSocket", "Unix socket")
-    : requiresRestart
-      ? tx("settings.values.restartPending", "Restart pending")
-      : tx("settings.values.ready", "Ready");
   return (
     <div className="space-y-7">
       <section className="rounded-panel bg-settings-surface px-4 py-4 sm:px-5">
@@ -156,7 +106,6 @@ export function OverviewSettings({
             valueLogoProvider={settings.web_search.provider}
             title={tx("settings.overview.webSearch", "Web search")}
             value={webStatus}
-            caption={webCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("browser")}
           />
@@ -165,7 +114,6 @@ export function OverviewSettings({
             valueLogoProvider={settings.image_generation.provider}
             title={tx("settings.overview.imageGeneration", "Image generation")}
             value={imageStatus}
-            caption={imageCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("image")}
           />
@@ -174,29 +122,8 @@ export function OverviewSettings({
             valueLogoProvider={transcription.provider}
             title={tx("settings.overview.voiceInput", "Voice input")}
             value={voiceStatus}
-            caption={voiceCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("voice")}
-          />
-        </SettingsGroup>
-      </section>
-
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.system", "System")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <OverviewListRow
-            icon={Server}
-            title={runtimeTitle}
-            value={runtimeValue}
-            caption={runtimeCaption}
-            onClick={() => onSelectSection("runtime")}
-          />
-          <OverviewListRow
-            icon={HardDrive}
-            title={tx("settings.overview.workspace", "Workspace")}
-            value={tx("settings.values.defaultWorkspace", "Default workspace")}
-            caption={workspaceCaption}
-            onClick={() => onSelectSection("runtime")}
           />
         </SettingsGroup>
       </section>
@@ -527,7 +454,7 @@ function OverviewListRow({
   valueLogoProvider?: string | null;
   title: string;
   value: string;
-  caption: string;
+  caption?: string;
   showBrandLogos?: boolean;
   onClick: () => void;
 }) {
@@ -540,7 +467,7 @@ function OverviewListRow({
       <OverviewRowIcon icon={Icon} />
       <span className="min-w-0 flex-1">
         <span className="block text-[14px] font-medium leading-5 text-foreground">{title}</span>
-        <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">{caption}</span>
+        {caption ? <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">{caption}</span> : null}
       </span>
       <span className="ml-auto flex min-w-0 max-w-[48%] items-center gap-2">
         <OverviewValueLogo provider={valueLogoProvider} showBrandLogos={showBrandLogos} />
