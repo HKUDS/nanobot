@@ -91,25 +91,9 @@
           "label": "Timezone",
           "help": "IANA timezone, for example Asia/Shanghai. Editable in manual mode."
         },
-        "agents_defaults_long_term_memory_enabled": {
-          "label": "Long-term memory",
-          "help": "Use and automatically record long-term memories. Turning this off pauses Dream; existing memories are kept."
-        },
-        "agents_defaults_session_ttl_minutes": {
-          "label": "Idle compaction",
-          "help": "Automatically summarize idle conversations."
-        },
         "agents_defaults_dream_enabled": {
           "label": "Memory consolidation",
-          "help": "Periodically consolidate conversation memory with Dream."
-        },
-        "agents_defaults_dream_interval_h": {
-          "label": "Consolidate every (hours)",
-          "help": "Used when no custom cron schedule is set in Advanced."
-        },
-        "agents_defaults_dream_model_override": {
-          "label": "Memory model",
-          "help": "Use the active model or select a saved model configuration."
+          "help": "Automatically organize useful information from conversations. Turning this off keeps existing memories available."
         },
         "gateway_heartbeat_enabled": {
           "label": "Heartbeat",
@@ -150,14 +134,6 @@
         "agents_defaults_unified_session": {
           "label": "Share sessions across channels",
           "help": "Use one session across channels for a single user."
-        },
-        "agents_defaults_idle_compact_check_interval_seconds": {
-          "label": "Idle scan interval (seconds)",
-          "help": "Minimum time between scans for idle conversations."
-        },
-        "agents_defaults_dream_cron": {
-          "label": "Custom memory schedule",
-          "help": "Cron expression overriding the hourly interval. Leave empty to use the interval."
         },
         "tools_exec_enable": {
           "label": "Shell tool",

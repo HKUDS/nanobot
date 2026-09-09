@@ -8,7 +8,6 @@ import re
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
-from croniter import croniter
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from nanobot.config.schema import Config
@@ -27,13 +26,7 @@ RUNTIME_CONFIG_PATHS = (
     "agents.defaults.max_tool_result_chars",
     "agents.defaults.provider_retry_mode",
     "agents.defaults.tool_hint_max_length",
-    "agents.defaults.session_ttl_minutes",
-    "agents.defaults.long_term_memory_enabled",
-    "agents.defaults.idle_compact_check_interval_seconds",
     "agents.defaults.dream.enabled",
-    "agents.defaults.dream.interval_h",
-    "agents.defaults.dream.model_override",
-    "agents.defaults.dream.cron",
     "gateway.host",
     "gateway.port",
     "gateway.restart_mode",
@@ -168,10 +161,6 @@ def update_runtime_config(
                     re.compile(pattern)
                 except re.error:
                     raise WebUISettingsError(f"{path}: invalid regular expression") from None
-    if "agents.defaults.dream.cron" in values:
-        expression = validated.agents.defaults.dream.cron
-        if expression and not croniter.is_valid(expression):
-            raise WebUISettingsError("agents.defaults.dream.cron: invalid cron expression")
     before = runtime_config_payload(config)
     after = runtime_config_payload(validated)
     if before == after:

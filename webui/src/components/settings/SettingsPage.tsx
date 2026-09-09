@@ -1,4 +1,3 @@
-import { DreamPromptSettings } from "@/components/settings/system/DreamPromptSettings";
 import { ChevronLeft, Loader2 } from "lucide-react";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -223,7 +222,6 @@ export function SettingsPage({
     <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
       onRestart={restartViaSettingsSurface} isRestarting={isRestarting || hostEngineApplying}
       remoteBrowserAccess={remoteBrowserAccess}>
-      {page === "memory" ? <DreamPromptSettings state={controller.dreamPromptState} /> : null}
       {page === "advanced" ? (
         <AdvancedSettings
           form={networkSafetyForm}

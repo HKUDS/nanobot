@@ -91,25 +91,9 @@
           "label": "时区",
           "help": "IANA 时区，例如 Asia/Shanghai。手动模式下可编辑。"
         },
-        "agents_defaults_long_term_memory_enabled": {
-          "label": "长期记忆",
-          "help": "使用并自动记录长期记忆。关闭后暂停 Dream 整理，已有记忆会保留。"
-        },
-        "agents_defaults_session_ttl_minutes": {
-          "label": "空闲压缩",
-          "help": "自动压缩空闲会话的上下文。"
-        },
         "agents_defaults_dream_enabled": {
           "label": "记忆整理",
-          "help": "使用 Dream 定期整理会话记忆。"
-        },
-        "agents_defaults_dream_interval_h": {
-          "label": "记忆整理间隔（小时）",
-          "help": "高级设置中未指定 cron 表达式时使用。"
-        },
-        "agents_defaults_dream_model_override": {
-          "label": "记忆整理模型",
-          "help": "使用当前模型，或选择已保存的模型配置。"
+          "help": "自动整理对话中的有用信息。关闭后停止整理，已有记忆仍可使用。"
         },
         "gateway_heartbeat_enabled": {
           "label": "心跳任务",
@@ -150,14 +134,6 @@
         "agents_defaults_unified_session": {
           "label": "跨渠道共享会话",
           "help": "单用户在不同渠道间共享一个会话。"
-        },
-        "agents_defaults_idle_compact_check_interval_seconds": {
-          "label": "空闲扫描间隔（秒）",
-          "help": "两次空闲会话扫描之间的最短时间。"
-        },
-        "agents_defaults_dream_cron": {
-          "label": "自定义记忆整理计划",
-          "help": "cron 表达式，优先于小时周期。留空恢复按周期运行。"
         },
         "tools_exec_enable": {
           "label": "Shell 工具",

@@ -1,4 +1,3 @@
-import { useDreamPromptSettings } from "@/components/settings/system/DreamPromptSettings";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -173,9 +172,6 @@ export function useSettingsController({
     [onSettingsChange],
   );
 
-  const dreamPromptState = useDreamPromptSettings(settings, client, (prompt) => {
-    setSettings((current) => current ? { ...current, dream_prompt: prompt } : current);
-  });
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
 
   const closeProviderOAuthFlow = useCallback(() => {
@@ -469,7 +465,6 @@ export function useSettingsController({
   } = systemActions;
 
   return {
-    dreamPromptState,
     activeSection,
     runtimeConfigState,
     apiService,

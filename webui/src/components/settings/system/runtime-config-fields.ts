@@ -1,9 +1,8 @@
 export interface RuntimeConfigField {
   group: string;
   path: string;
-  kind: "duration-toggle" | "toggle" | "text" | "nullable" | "number" | "boolean" | "select" | "list" | "preset";
+  kind: "toggle" | "text" | "nullable" | "number" | "boolean" | "select" | "list" | "preset";
   options?: string[];
-  enabledValue?: number;
   when?: { path: string; value: string | boolean };
   manual?: boolean;
   min?: number;
@@ -19,7 +18,6 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage }[] = 
   { id: "chat", page: "advanced" },
   { id: "execution", page: "advanced" },
   { id: "sessions", page: "runtime" },
-  { id: "maintenance", page: "memory" },
   { id: "tools", page: "runtime" },
   { id: "web", page: "browser" },
   { id: "applications", page: "apps" },
@@ -35,11 +33,7 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage }[] = 
 export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "identity", path: "agents.defaults.timezone_mode", kind: "toggle", options: ["manual", "auto"] },
   { group: "identity", path: "agents.defaults.timezone", kind: "text", when: { path: "agents.defaults.timezone_mode", value: "manual" } },
-  { group: "memory", path: "agents.defaults.session_ttl_minutes", kind: "duration-toggle", enabledValue: 15 },
-  { group: "memory", path: "agents.defaults.long_term_memory_enabled", kind: "boolean" },
   { group: "memory", path: "agents.defaults.dream.enabled", kind: "boolean" },
-  { group: "memory", path: "agents.defaults.dream.interval_h", kind: "number", min: 1, when: { path: "agents.defaults.dream.enabled", value: true } },
-  { group: "memory", path: "agents.defaults.dream.model_override", kind: "preset", when: { path: "agents.defaults.dream.enabled", value: true } },
   { group: "heartbeat", path: "gateway.heartbeat.enabled", kind: "boolean" },
   { group: "heartbeat", path: "gateway.heartbeat.interval_s", kind: "number", min: 1, when: { path: "gateway.heartbeat.enabled", value: true } },
   { group: "execution", path: "agents.defaults.max_tool_iterations", kind: "number", min: 1 },
@@ -50,8 +44,6 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "execution", path: "tools.max_session_messages_per_minute", kind: "number", min: 1 },
   { group: "sessions", path: "agents.defaults.workspace", kind: "text", manual: true },
   { group: "sessions", path: "agents.defaults.unified_session", kind: "boolean" },
-  { group: "maintenance", path: "agents.defaults.idle_compact_check_interval_seconds", kind: "number", min: 0 },
-  { group: "maintenance", path: "agents.defaults.dream.cron", kind: "nullable", when: { path: "agents.defaults.dream.enabled", value: true } },
   { group: "tools", path: "tools.exec.enable", kind: "boolean" },
   { group: "tools", path: "tools.file.enable", kind: "boolean" },
   { group: "web", path: "tools.web.enable", kind: "boolean" },

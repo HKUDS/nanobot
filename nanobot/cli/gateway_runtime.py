@@ -561,8 +561,6 @@ def _run_gateway(
 
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
-            if not agent.context.memory.enabled:
-                return None
             from nanobot.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
@@ -741,7 +739,7 @@ def _run_gateway(
         from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 
         schedules = {
-            "dream": defaults.dream.build_schedule(defaults.timezone) if defaults.dream.enabled and defaults.long_term_memory_enabled else None,
+            "dream": defaults.dream.build_schedule(defaults.timezone) if defaults.dream.enabled else None,
             "heartbeat": CronSchedule(kind="every", every_ms=latest.gateway.heartbeat.interval_s * 1000,
                                       tz=defaults.timezone) if latest.gateway.heartbeat.enabled else None,
         }
@@ -901,7 +899,7 @@ def _run_gateway(
     # Register Dream system job (idempotent on restart)
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     dream_cfg = config.agents.defaults.dream
-    if dream_cfg.enabled and config.agents.defaults.long_term_memory_enabled:
+    if dream_cfg.enabled:
         cron.register_system_job(CronJob(
             id="dream",
             name="dream",

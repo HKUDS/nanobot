@@ -56,21 +56,19 @@ describe("Runtime configuration settings", () => {
     expect(document.getElementById("runtime-gateway.heartbeat.enabled")).toBeVisible();
   });
 
-  it("autosaves idle compaction and long-term memory as independent switches", async () => {
+
+
+  it("offers only the memory consolidation switch and saves only dream.enabled", async () => {
     const payload = runtimeSettings();
-    Object.assign(payload.runtime_config, {
-      "agents.defaults.session_ttl_minutes": 15,
-      "agents.defaults.long_term_memory_enabled": true,
-    });
-    requestMutationMock.mockResolvedValue(payload);
+    requestMutationMock.mockResolvedValue({ ...payload, runtime_config: { ...payload.runtime_config, "agents.defaults.dream.enabled": false } });
     renderSettingsView({ initialSection: "memory", initialSettings: payload });
-    expect(screen.getByRole("switch", { name: "Idle compaction" })).toBeChecked();
-    expect(document.getElementById("runtime-agents.defaults.session_ttl_minutes")).not.toHaveAttribute("type", "number");
-    fireEvent.click(screen.getByRole("switch", { name: "Idle compaction" }));
-    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "agents.defaults.session_ttl_minutes": 0 } }, 20_000));
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Long-term memory" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("switch", { name: "Long-term memory" }));
-    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith("settings.runtime_config.update", { values: { "agents.defaults.long_term_memory_enabled": false } }, 20_000));
+    expect(screen.getAllByRole("switch")).toHaveLength(1);
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByText("Advanced options")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Memory consolidation" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "agents.defaults.dream.enabled": false } }, 20_000));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Memory consolidation" })).not.toBeChecked());
   });
 
   it("explains unavailable memory settings instead of rendering a blank page", () => {
@@ -78,40 +76,11 @@ describe("Runtime configuration settings", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Update the gateway to edit these settings.");
   });
 
-  it("keeps the Dream editor collapsed until requested", () => {
-    renderSettingsView({ initialSection: "memory", initialSettings: runtimeSettings() });
-    expect(document.getElementById("dream-prompt")).not.toBeVisible();
-    fireEvent.click(screen.getByText("Dream prompt", { selector: "summary" }));
-    expect(screen.getByRole("textbox", { name: "Memory consolidation instructions" })).toBeVisible();
-  });
 
-  it("groups all memory controls in a dedicated settings page", () => {
-    renderSettingsView({ initialSection: "runtime", initialSettings: runtimeSettings() });
-    expect(document.getElementById("runtime-agents.defaults.bot_name")).not.toBeInTheDocument();
-    expect(document.getElementById("runtime-agents.defaults.bot_icon")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Memory", exact: true }));
-    expect(document.getElementById("runtime-agents.defaults.dream.enabled")).toBeVisible();
-    expect(document.getElementById("runtime-agents.defaults.session_ttl_minutes")).toBeVisible();
-    expect(document.getElementById("runtime-agents.defaults.dream.cron")).not.toBeVisible();
-    fireEvent.click(screen.getByText("Advanced options"));
-    expect(document.getElementById("runtime-agents.defaults.dream.cron")).toBeVisible();
-    expect(document.getElementById("runtime-agents.defaults.idle_compact_check_interval_seconds")).toBeVisible();
-  });
 
-  it("saves and restores Dream prompt overrides in memory settings", async () => {
-    const payload = runtimeSettings();
-    requestMutationMock.mockResolvedValue({ ...payload.dream_prompt, custom: true, content: "Custom Dream instructions" });
-    renderSettingsView({ initialSection: "memory", initialSettings: payload });
-    fireEvent.click(screen.getByText("Dream prompt", { selector: "summary" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Memory consolidation instructions" }), { target: { value: "Custom Dream instructions" } });
-    const section = within(screen.getByRole("region", { name: "Dream prompt" }));
-    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.dream_prompt.update", { content: "Custom Dream instructions" }, 20_000));
-    await screen.findByText("Saved. Applies to the next Dream run.");
-    requestMutationMock.mockResolvedValue(payload.dream_prompt);
-    fireEvent.click(section.getByRole("button", { name: "Restore default" }));
-    expect(screen.getByRole("textbox", { name: "Memory consolidation instructions" })).toHaveValue("Default Dream instructions");
-    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith("settings.dream_prompt.update", { content: null }, 20_000));
-  });
+
+
+
 
   it("uses switches for binary modes and reveals sandbox fields only when enabled", async () => {
     const payload = runtimeSettings();
@@ -123,12 +92,7 @@ describe("Runtime configuration settings", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "tools.exec.sandbox": "bwrap" } }, 20_000));
   });
 
-  it("hides dependent Dream controls when memory consolidation is disabled", () => {
-    renderSettingsView({ initialSection: "memory", initialSettings: runtimeSettings() });
-    expect(document.getElementById("runtime-agents.defaults.dream.model_override")).toBeVisible();
-    fireEvent.click(document.getElementById("runtime-agents.defaults.dream.enabled")!);
-    expect(document.getElementById("runtime-agents.defaults.dream.model_override")).not.toBeInTheDocument();
-  });
+
 
   it("starts the API with newly saved advanced settings", async () => {
     const payload = runtimeSettings();

@@ -295,7 +295,6 @@ class AgentLoop:
         preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
         model_preset: str | None = None,
         dream_model_preset: str | None = None,
-        long_term_memory_enabled: bool = True,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         turn_delivery_factory: TurnDeliveryFactory | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
@@ -376,7 +375,6 @@ class AgentLoop:
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
-        self.context.memory.enabled = long_term_memory_enabled
         self.sessions = session_manager or SessionManager(workspace)
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
@@ -522,7 +520,6 @@ class AgentLoop:
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
             dream_model_preset=defaults.dream.model_override,
-            long_term_memory_enabled=defaults.long_term_memory_enabled,
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
@@ -549,10 +546,8 @@ class AgentLoop:
             raise RuntimeError("Workspace changes must wait for active work to finish")
         self.sessions.switch_workspace(workspace)
         self.workspace = workspace
-        memory_enabled = self.context.memory.enabled
         self.context = ContextBuilder(workspace, timezone=self.context.timezone,
                                       disabled_skills=list(self.context.skills.disabled_skills))
-        self.context.memory.enabled = memory_enabled
         self.workspace_scopes = WorkspaceScopeResolver(
             default_workspace=workspace, default_restrict_to_workspace=self.restrict_to_workspace,
         )
@@ -573,7 +568,6 @@ class AgentLoop:
         """Apply settings used by subsequent turns without stopping active work."""
         defaults = config.agents.defaults
         self.set_timezone(defaults.timezone)
-        self.context.memory.enabled = defaults.long_term_memory_enabled
         self.max_iterations = defaults.max_tool_iterations
         self.max_tool_result_chars = defaults.max_tool_result_chars
         self.provider_retry_mode = defaults.provider_retry_mode

@@ -100,11 +100,11 @@ def test_timezone_auto_and_nullable_fields():
         "timezoneMode": "manual", "timezone": "UTC", "dream": {"cron": "0 2 * * *"},
     }}})
     assert update_runtime_config(config, {
-        "agents.defaults.timezone_mode": "auto", "agents.defaults.dream.cron": None,
+        "agents.defaults.timezone_mode": "auto",
         "tools.web.proxy": None,
     }, local_browser=True)
     assert config.agents.defaults.timezone_mode == "auto"
-    assert config.agents.defaults.dream.cron is None
+    assert config.agents.defaults.dream.cron == "0 2 * * *"
     assert not update_runtime_config(config, {}, local_browser=True)
 
 
@@ -120,3 +120,12 @@ def test_every_exposed_runtime_setting_has_a_frontend_control():
     paths = re.findall(r'group: "[^"]+", path: "([^"]+)"', fields.read_text(encoding="utf-8"))
     assert len(paths) == len(set(paths))
     assert set(paths) == set(RUNTIME_CONFIG_PATHS)
+
+
+def test_disabling_memory_consolidation_preserves_other_memory_settings():
+    config = Config()
+    before = config.agents.defaults.model_dump()
+    assert update_runtime_config(config, {"agents.defaults.dream.enabled": False}, local_browser=True)
+    after = config.agents.defaults.model_dump()
+    before["dream"]["enabled"] = False
+    assert after == before
