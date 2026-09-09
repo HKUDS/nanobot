@@ -428,6 +428,7 @@
       "dailyTrend": "일별 토큰 사용량",
       "bySource": "출처별 사용량",
       "byModel": "모델별 사용량",
+      "modelTrend": "모델별 사용량 추이",
       "modelsUnavailable": "모델별 내역이 없습니다.",
       "otherModels": "기타 / 미분류",
       "unclassified": "미분류",

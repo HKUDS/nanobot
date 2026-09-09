@@ -823,6 +823,12 @@ export interface SettingsPayload {
       timed_requests: number;
       duration_ms: number;
     }>;
+    model_days_30d?: Array<{
+      date: string;
+      provider: string;
+      model: string;
+      total_tokens: number;
+    }>;
     updated_at?: string | null;
   };
   advanced: {

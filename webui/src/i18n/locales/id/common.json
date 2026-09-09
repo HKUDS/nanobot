@@ -428,6 +428,7 @@
       "dailyTrend": "Penggunaan token harian",
       "bySource": "Penggunaan berdasarkan sumber",
       "byModel": "Penggunaan per model",
+      "modelTrend": "Tren penggunaan model",
       "modelsUnavailable": "Rincian per model tidak tersedia.",
       "otherModels": "Lainnya / belum dikategorikan",
       "unclassified": "Tidak dikategorikan",

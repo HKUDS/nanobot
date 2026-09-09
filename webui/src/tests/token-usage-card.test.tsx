@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
 import { TokenUsageModels } from "@/components/settings/TokenUsageModels";
+import { TokenUsageModelTrend } from "@/components/settings/TokenUsageModelTrend";
 import type { SettingsPayload } from "@/lib/types";
 
 type Usage = NonNullable<SettingsPayload["usage"]>;
@@ -86,5 +87,21 @@ describe("Token usage card", () => {
     expect(screen.getByText("60%")).toBeInTheDocument();
     expect(screen.getByText("Other / unattributed")).toBeInTheDocument();
     expect(screen.getByText("200 · 20%")).toBeInTheDocument();
+  });
+
+  it("keeps the five leading model series and reconciles the rest to the daily total", () => {
+    const days = Array.from({ length: 30 }, (_, index) => {
+      const date = new Date("2026-09-09T00:00:00Z");
+      date.setUTCDate(date.getUTCDate() - 29 + index);
+      const key = date.toISOString().slice(0, 10);
+      return { date: key, usage: day(key, index === 29 ? 2200 : 0) };
+    });
+    render(<TokenUsageModelTrend days={days}
+      modelDays={Array.from({ length: 6 }, (_, index) => ({ date: "2026-09-09", provider: "provider", model: `model-${index}`, total_tokens: (index + 1) * 100 }))} />);
+    const column = screen.getAllByRole("img")[29];
+    expect(column).toHaveAccessibleName(/2026-09-09: 2,200 tokens/);
+    expect(column).toHaveAccessibleName(/model-5 · provider: 600/);
+    expect(column).toHaveAccessibleName(/Other \/ unattributed: 200/);
+    expect(screen.queryByText("model-0 · provider")).not.toBeInTheDocument();
   });
 });

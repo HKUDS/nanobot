@@ -829,6 +829,7 @@
       "dailyTrend": "Daily token usage",
       "bySource": "Usage by source",
       "byModel": "Usage by model",
+      "modelTrend": "Model usage over time",
       "modelsUnavailable": "No model breakdown available.",
       "otherModels": "Other / unattributed",
       "unclassified": "Unclassified",

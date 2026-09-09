@@ -5,13 +5,15 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { SettingsPayload } from "@/lib/types";
 import { TokenUsageModels } from "@/components/settings/TokenUsageModels";
+import { TokenUsageModelTrend } from "@/components/settings/TokenUsageModelTrend";
 
 type UsageDay = NonNullable<SettingsPayload["usage"]>["days"][number];
 
-export function TokenUsageDetails({ days, sources, models }: {
+export function TokenUsageDetails({ days, sources, models, modelDays }: {
   days: { date: string; usage?: UsageDay }[];
   sources: { label: string; tokens: number }[];
   models?: NonNullable<SettingsPayload["usage"]>["providers_30d"];
+  modelDays?: NonNullable<SettingsPayload["usage"]>["model_days_30d"];
 }) {
   const { t, i18n } = useTranslation();
   const number = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 0 });
@@ -49,6 +51,7 @@ export function TokenUsageDetails({ days, sources, models }: {
           </div>)}
         </dl>
         <p className="text-xs text-muted-foreground">{t("settings.usage.cacheRateHelp", { defaultValue: "Cache hit rate excludes input with unknown cache status." })}</p>
+        {modelDays && <TokenUsageModelTrend days={days} modelDays={modelDays} />}
         <TokenUsageModels models={models} total={total} />
         <section className="mt-2">
           <h3 className="mb-3 text-sm font-medium">{t("settings.usage.requestTrend", { defaultValue: "Daily requests" })}</h3>

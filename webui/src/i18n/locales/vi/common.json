@@ -428,6 +428,7 @@
       "dailyTrend": "Mức dùng token hằng ngày",
       "bySource": "Mức dùng theo nguồn",
       "byModel": "Mức dùng theo mô hình",
+      "modelTrend": "Xu hướng sử dụng mô hình",
       "modelsUnavailable": "Chưa có chi tiết theo mô hình.",
       "otherModels": "Khác / chưa phân loại",
       "unclassified": "Chưa phân loại",

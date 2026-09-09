@@ -643,6 +643,7 @@
       "dailyTrend": "Uso diário de tokens",
       "bySource": "Uso por origem",
       "byModel": "Uso por modelo",
+      "modelTrend": "Tendência de uso por modelo",
       "modelsUnavailable": "Sem detalhamento por modelo.",
       "otherModels": "Outros / não atribuídos",
       "unclassified": "Não classificado",

@@ -428,6 +428,7 @@
       "dailyTrend": "日別トークン使用量",
       "bySource": "利用元別の使用量",
       "byModel": "モデル別使用量",
+      "modelTrend": "モデル別使用量の推移",
       "modelsUnavailable": "モデル別の内訳はありません。",
       "otherModels": "その他 / 未分類",
       "unclassified": "未分類",

@@ -829,6 +829,7 @@
       "dailyTrend": "每日 Token 用量",
       "bySource": "用量来源",
       "byModel": "模型用量",
+      "modelTrend": "模型用量趋势",
       "modelsUnavailable": "暂无模型用量明细。",
       "otherModels": "其他模型 / 未归类",
       "unclassified": "未分类",
