@@ -141,7 +141,7 @@ export function RuntimeConfigSettings({
     || (settings.requires_restart && Object.values(state.saved).some(Boolean));
   return (
     <div className="settings-stack">
-      {restartPending ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
+      {restartPending && onRestart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
         onRestart={onRestart} isRestarting={isRestarting} /> : null}
       {groups.map((group) => {
         if (group.enabledBy && state.value(group.enabledBy) === false) return null;

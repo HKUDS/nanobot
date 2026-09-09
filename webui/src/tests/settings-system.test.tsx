@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
@@ -40,6 +40,27 @@ const agentPlugin = {
 
 describe("Settings system domains", () => {
   installSettingsViewTestHooks();
+
+  it("keeps one restart action and pending notice in the sidebar across settings pages", async () => {
+    renderSettingsView({
+      initialSection: "runtime",
+      initialSettings: {
+        ...settingsPayload(),
+        requires_restart: true,
+        restart_required_sections: ["runtime", "image"],
+      },
+    });
+    const sidebar = screen.getByRole("complementary");
+    const restart = within(sidebar).getByRole("button", { name: "Restart nanobot" });
+    for (const section of ["Capabilities", "Models", "Advanced", "System"]) {
+      fireEvent.click(within(sidebar).getByRole("button", { name: section, exact: true }));
+      await waitFor(() => {
+        expect(screen.getAllByRole("button", { name: "Restart nanobot" })).toEqual([restart]);
+        expect(screen.getAllByText("Saved. Restart when ready.")).toHaveLength(1);
+        expect(within(sidebar).getByText("Saved. Restart when ready.")).toBeVisible();
+      });
+    }
+  });
 
   it("keeps enabled Agent Plugins out of MCP composer attachments", () => {
     const enabled = { ...agentPlugin, enabled: true, available: true, status: "enabled" };

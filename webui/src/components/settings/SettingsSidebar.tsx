@@ -5,6 +5,8 @@ import {
   ChevronDown,
   ChevronLeft,
   LogOut,
+  Loader2,
+  RotateCcw,
   MessageCircle,
   Blocks,
   Palette,
@@ -52,12 +54,20 @@ export function SettingsSidebar({
   onBackToChat,
   onLogout,
   hostChromeInset,
+  onRestart,
+  isRestarting,
+  restartPending,
+  isNativeHost,
 }: {
   activeSection: SettingsSectionKey;
   onSelectSection: (section: SettingsSectionKey) => void;
   onBackToChat: () => void;
   onLogout?: () => void;
   hostChromeInset?: boolean;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+  restartPending?: boolean;
+  isNativeHost?: boolean;
 }) {
   const { t } = useTranslation();
   activeSection = isCapabilitySection(activeSection) ? "capabilities" : activeSection;
@@ -165,13 +175,35 @@ export function SettingsSidebar({
         </SidebarSelectionHighlight>
       </nav>
 
-      <div className="hidden lg:mt-auto lg:block lg:pt-4">
+      <div className="pt-2 lg:mt-auto lg:pt-4">
+        {onRestart ? (
+          <div>
+            {restartPending ? (
+              <p role="status" className="px-2.5 pb-1 text-[12px] leading-5 text-muted-foreground">
+                {t("settings.status.savedRestartApply")}
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onRestart}
+              disabled={isRestarting}
+              className="h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+            >
+              {isRestarting ? <Loader2 className="h-[1em] w-[1em] animate-spin" aria-hidden />
+                : <RotateCcw className="h-[1em] w-[1em]" aria-hidden />}
+              {t(isNativeHost
+                ? isRestarting ? "app.system.restartingEngine" : "app.system.restartEngine"
+                : isRestarting ? "app.system.restarting" : "app.system.restart")}
+            </Button>
+          </div>
+        ) : null}
         {onLogout && !hostChromeInset ? (
           <Button
             type="button"
             variant="ghost"
             onClick={onLogout}
-            className="h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
+            className="hidden h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive lg:flex"
           >
             <LogOut className="h-[1em] w-[1em]" aria-hidden />
             {t("app.account.logout")}

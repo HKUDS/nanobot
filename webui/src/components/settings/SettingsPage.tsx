@@ -153,7 +153,7 @@ export function SettingsPage({
     networkSafetyDirty,
     networkSafetyForm,
     networkSafetySaving,
-    pendingRestartSections,
+    pendingRestartSections: controllerPendingRestartSections,
     providerForms,
     providerOAuthCompleting,
     providerOAuthDialogError,
@@ -222,9 +222,13 @@ export function SettingsPage({
     webSearchSaving,
   } = controller;
 
+  const pendingRestartSections = showSidebar
+    ? { runtime: false, image: false, browser: false }
+    : controllerPendingRestartSections;
+
   const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
     <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
-      onRestart={restartViaSettingsSurface} isRestarting={isRestarting || hostEngineApplying}
+      onRestart={showSidebar ? undefined : restartViaSettingsSurface} isRestarting={isRestarting || hostEngineApplying}
       remoteBrowserAccess={remoteBrowserAccess}>
       {page === "advanced" ? (
         <AdvancedSettings
@@ -257,7 +261,7 @@ export function SettingsPage({
           <section className="settings-stack">
             <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 [&_.settings-section-title]:m-0 [&_.settings-section-title]:p-0">
               <SettingsSectionTitle>{t("settings.nav.capabilities")}</SettingsSectionTitle>
-              {settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
+              {!showSidebar && settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
                 onRestart={restartViaSettingsSurface} isRestarting={busy} /> : null}
             </div>
             <SettingsFeature title={t("settings.rows.imageGeneration")} enabled={imageGenerationForm.enabled}
@@ -571,7 +575,7 @@ export function SettingsPage({
             <RuntimeSettings
               form={form}
               settings={settings}
-              onRestart={restartViaSettingsSurface}
+              onRestart={showSidebar ? undefined : restartViaSettingsSurface}
               isRestarting={isRestarting || hostEngineApplying}
               requiresRestartPending={pendingRestartSections.runtime}
               apiService={apiService}
@@ -605,6 +609,10 @@ export function SettingsPage({
           onBackToChat={onBackToChat}
           onLogout={onLogout}
           hostChromeInset={hostChromeInset}
+          onRestart={settings ? restartViaSettingsSurface : undefined}
+          isRestarting={isRestarting || hostEngineApplying}
+          restartPending={settings?.requires_restart}
+          isNativeHost={(settings?.surface ?? settings?.runtime_surface) === "native"}
         />
       ) : null}
 
