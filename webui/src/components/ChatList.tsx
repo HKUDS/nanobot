@@ -628,7 +628,7 @@ export const ChatList = memo(function ChatList({
   };
   return (
     <TooltipProvider delayDuration={650} skipDelayDuration={120}>
-    <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
+    <div className="sidebar-scroll-fade h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain py-4 scrollbar-thin scrollbar-track-transparent">
       <div
         data-chat-list-content
         data-pane-detach-target={

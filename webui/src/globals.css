@@ -1089,3 +1089,9 @@
     .settings-grid { --settings-inset: 24px; }
   }
 }
+
+.sidebar-scroll-fade {
+  scroll-padding-block: 1rem;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 1rem, #000 calc(100% - 1rem), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 1rem, #000 calc(100% - 1rem), transparent);
+}
