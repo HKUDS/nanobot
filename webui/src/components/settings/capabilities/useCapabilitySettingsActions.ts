@@ -82,7 +82,7 @@ export function useCapabilitySettingsActions({
       const payload = await updateImageGenerationSettings(client, imageGenerationForm);
       applyPayload(payload, { preserveCapabilityForms: true });
       state.setImageGenerationForm(imageGenerationFormFromPayload(payload));
-      if (payload.requires_restart) {
+      if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
       await maybeRestartHostEngine(payload);
@@ -104,7 +104,7 @@ export function useCapabilitySettingsActions({
       const payload = await updateTranscriptionSettings(client, transcriptionForm);
       applyPayload(payload, { preserveCapabilityForms: true });
       state.setTranscriptionForm(transcriptionFormFromPayload(payload));
-      if (payload.requires_restart) {
+      if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
       await maybeRestartHostEngine(payload);
@@ -124,7 +124,7 @@ export function useCapabilitySettingsActions({
       const payload = await updateNetworkSafetySettings(client, networkSafetyForm);
       applyPayload(payload, { preserveCapabilityForms: true });
       state.setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
-      if (payload.requires_restart) {
+      if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
       await maybeRestartHostEngine(payload);
@@ -176,7 +176,7 @@ export function useCapabilitySettingsActions({
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
       const payload = await updateWebSearchSettings(client, update);
       applyPayload(payload, { preserveCapabilityForms: true });
-      if (payload.requires_restart || webFetchRestartRequired) {
+      if (!payload.restart_required_sections && (payload.requires_restart || webFetchRestartRequired)) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
       await maybeRestartHostEngine(payload);

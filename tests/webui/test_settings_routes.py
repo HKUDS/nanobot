@@ -566,3 +566,60 @@ async def test_runtime_settings_only_save_without_refreshing_or_rebinding(tmp_pa
     assert json.loads(response.body)["requires_restart"]
     refresh.assert_not_called()
     runtime.restart.assert_not_called()
+
+
+async def test_reverting_runtime_switch_clears_restart_but_preserves_other_changes(tmp_path):
+    router = _router(config_path=tmp_path / "config.json")
+    config = router.settings.config.load()
+    original_memory = config.agents.defaults.dream.enabled
+    original_web = config.tools.web.enable
+    path = "/api/settings/runtime-config/update"
+
+    async def update(values):
+        response = await router.dispatch(None, _mutation_request(path, {"values": values}), path)
+        assert response.status_code == 200
+        return json.loads(response.body)
+
+    assert (await update({"agents.defaults.dream.enabled": not original_memory}))["requires_restart"]
+    await update({"tools.web.enable": not original_web})
+    assert (await update({"agents.defaults.dream.enabled": original_memory}))["requires_restart"]
+    reverted = await update({"tools.web.enable": original_web})
+    assert reverted["requires_restart"] is False
+    assert reverted["restart_required_sections"] == []
+    refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
+    assert json.loads(refreshed.body)["requires_restart"] is False
+
+
+async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path):
+    router = _router(config_path=tmp_path / "config.json")
+    original = router.settings.config.load().tools.web.fetch.use_jina_reader
+    path = "/api/settings/web-search/update"
+    first = await router.dispatch(None, _mutation_request(path, {"provider": "duckduckgo", "use_jina_reader": not original}), path)
+    assert json.loads(first.body)["restart_required_sections"] == ["browser"]
+    router._restart_sections.add("runtime")
+    restored = await router.dispatch(None, _mutation_request(path, {"provider": "duckduckgo", "use_jina_reader": original}), path)
+    assert json.loads(restored.body)["restart_required_sections"] == ["runtime"]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_image_switch_round_trip_clears_restart(tmp_path, monkeypatch, enabled):
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+
+    config = Config()
+    config.providers.openrouter.api_key = "sk-test"
+    config.tools.image_generation.enabled = enabled
+    config_path = tmp_path / "config.json"
+    save_config(config, config_path)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.request_image_generation_reload",
+        AsyncMock(return_value={"ok": False, "requires_restart": True}),
+    )
+    router = _router(config_path=config_path)
+    router.logger.warning = MagicMock()
+    path = "/api/settings/image-generation/update"
+    changed = await router.dispatch(None, _mutation_request(path, {"enabled": not enabled}), path)
+    assert json.loads(changed.body)["requires_restart"] is True
+    reverted = await router.dispatch(None, _mutation_request(path, {"enabled": enabled}), path)
+    assert json.loads(reverted.body)["requires_restart"] is False
+    assert json.loads(reverted.body)["restart_required_sections"] == []
