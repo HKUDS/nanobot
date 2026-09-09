@@ -29,6 +29,18 @@ class TestBwrapBackend:
         sep = tokens.index("--")
         assert tokens[sep + 1:] == ["sh", "-c", "echo hi"]
 
+    def test_explicit_launcher_is_used(self, tmp_path):
+        ws = str(tmp_path / "project")
+        result = wrap_command(
+            "bwrap",
+            "echo hi",
+            ws,
+            ws,
+            launcher="/trusted/bin/bwrap",
+        )
+
+        assert _parse(result)[0] == "/trusted/bin/bwrap"
+
     def test_workspace_bind_mounted_rw(self, tmp_path):
         ws = str(tmp_path / "project")
         result = wrap_command("bwrap", "ls", ws, ws)

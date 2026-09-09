@@ -8,7 +8,7 @@ Filesystem tools (`read_file`, `write_file`, `edit_file`, `list_dir`, `apply_pat
 
 Additional filesystem roots must be capability-specific. `extra_allowed_dirs` is a legacy read-only alias. Use `extra_read_allowed_dirs` for read-only roots, `extra_write_allowed_dirs` only when a write-capable tool is intentionally allowed to modify an extra directory, and exact file allowlists when a tool may modify only specific files.
 
-Shell execution (`ExecTool`, `agent/tools/shell.py`) also respects `restrict_to_workspace` as an application-level guard: if enabled and `working_dir` is outside the workspace, the command is rejected before execution, and command text is checked for obvious workspace escapes. This is not process-level isolation; use an exec sandbox backend for that.
+Shell execution (`ExecTool`, `agent/tools/shell.py`) also respects `restrict_to_workspace`: if enabled and `working_dir` is outside the workspace, the command is rejected before execution, and command text is checked for obvious workspace escapes. Because command-string inspection cannot prove where relative paths resolve after shell expansion or symlink traversal, restricted shell execution also requires a supported OS-level sandbox (such as `bwrap`) or an explicitly marked external sandbox; it fails closed when neither is available. Full workspace access is an explicit trust decision and is not a process-level sandbox.
 
 **Rule**: Any new path-handling logic must go through the workspace path resolver or perform an equivalent containment check with explicit read/write capability semantics.
 
@@ -24,6 +24,9 @@ HTTP/SSE MCP transports are part of this boundary: validate configured MCP URLs 
 
 ## Shell Sandbox
 
-`tools/sandbox.py` provides optional command wrapping. The only backend currently shipped is `bwrap` (bubblewrap), intended for containerized deployments. On Windows and bare-metal Linux without `bwrap`, commands run in the native shell with workspace restriction as an application-level guard only.
+`tools/sandbox.py` provides optional command wrapping. The only backend currently shipped is `bwrap` (bubblewrap), intended for containerized deployments. On Windows and bare-metal Linux without `bwrap`, restricted commands fail closed instead of falling back to a native shell. Commands running with full workspace access can still use the native shell, but that mode is an explicit trust decision.
+
+Sandbox launchers are resolved to an absolute path before applying `tools.exec.pathPrepend` or
+`pathAppend`; command-specific PATH configuration must never select the process boundary itself.
 
 **Rule**: If adding a new sandbox backend, implement `_wrap_<name>(command, workspace, cwd) -> str` and register it in `_BACKENDS`.
