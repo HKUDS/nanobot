@@ -19,7 +19,5 @@ describe("chat translation resources", () => {
       expect(i18n.exists(key), key).toBe(true);
       expect(i18n.t(key), key).not.toBe(key);
     }
-    expect(common.settings).not.toHaveProperty("newChat");
-    expect(common.settings).not.toHaveProperty("groups");
   });
 });

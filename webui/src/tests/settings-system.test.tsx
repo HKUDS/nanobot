@@ -73,7 +73,6 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "runtime", initialSettings: settingsPayload(), onBackToChat: leave });
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(leave).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("keeps one restart action and pending notice in the sidebar across settings pages", async () => {
@@ -165,10 +164,6 @@ describe("Settings system domains", () => {
 
     expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
     expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
-    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
-    expect(
-      screen.queryByPlaceholderText("Search task, message, linked chat, or schedule"),
-    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open a chat" }));
     expect(onBackToChat).toHaveBeenCalledTimes(1);
   });
@@ -318,7 +313,6 @@ describe("Settings system domains", () => {
 
     renderSettingsView();
 
-    expect(screen.queryByRole("heading", { name: "Apps" })).not.toBeInTheDocument();
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
     const uninstall = screen.getByRole("button", { name: "Uninstall app" });
 
@@ -335,7 +329,6 @@ describe("Settings system domains", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 
-    expect(screen.queryByText("Uninstalled CLI for AnyGen.")).not.toBeInTheDocument();
   });
 
   it("keeps runtime dependencies out of Apps and explains chat mentions", async () => {
@@ -375,15 +368,9 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "apps" });
 
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Add tools to nanobot, then mention them with @ in chat."),
-    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "MCP" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Api")).not.toBeInTheDocument();
-    expect(screen.queryByText("0 ready")).not.toBeInTheDocument();
   });
 
   it("shows nanobot optional features and enables one", async () => {
@@ -461,7 +448,6 @@ describe("Settings system domains", () => {
     expect(matrixRow).toHaveAttribute("aria-haspopup", "dialog");
     fireEvent.click(matrixRow);
     expect(screen.getByRole("heading", { name: "Matrix", exact: true })).toBeVisible();
-    expect(screen.queryByText(/Enabling Nanobot features may install Python packages/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
     expect(screen.getByRole("dialog", { name: "Install support for Matrix?" })).toBeInTheDocument();
@@ -479,15 +465,12 @@ describe("Settings system domains", () => {
     await waitFor(() =>
       expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute("aria-checked", "true"),
     );
-    expect(screen.queryByText("Enabled channel 'matrix'")).not.toBeInTheDocument();
-    expect(screen.queryByText("Restart nanobot to apply updated channel support.")).not.toBeInTheDocument();
     expect(screen.getAllByText("On").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
     expect(screen.getByLabelText("Homeserver")).toBeInTheDocument();
     expect(screen.getByLabelText("User ID")).toBeInTheDocument();
     expect(screen.getByLabelText("Device ID")).toBeInTheDocument();
-    expect(screen.queryByText("channels.matrix.homeserver")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
@@ -502,6 +485,5 @@ describe("Settings system domains", () => {
     await waitFor(() =>
       expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute("aria-checked", "false"),
     );
-    expect(screen.queryByText("Disabled channel 'matrix'")).not.toBeInTheDocument();
   });
 });

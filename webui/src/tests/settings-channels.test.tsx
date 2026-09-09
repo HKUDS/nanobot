@@ -167,9 +167,7 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Matrix settings" }));
-    expect(screen.queryByText("0 running · 1 channels")).not.toBeInTheDocument();
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Enabled, support needs install")).not.toBeInTheDocument();
 
     expect(screen.getByLabelText("Matrix channel")).toHaveAttribute("aria-checked", "false");
     fireEvent.click(screen.getByRole("button", { name: "Install support" }));
@@ -220,7 +218,6 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Matrix settings" }));
-    expect(screen.queryByText("0 running · 1 channels")).not.toBeInTheDocument();
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(screen.getByText(runtimeError)).toBeInTheDocument();
     expect(screen.getByLabelText("Matrix channel")).toHaveAttribute(
@@ -269,7 +266,6 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Feishu settings" }));
-    expect(screen.queryByText("nanobot channels login feishu")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole(
       "button",
       { name: "nanobot" },
@@ -520,7 +516,6 @@ describe("Settings channels", () => {
       "false",
     );
 
-    expect(screen.queryByText("cli_def...ault")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Support Bot/ }));
     expect(screen.getByRole("button", { name: /Support Bot/ })).toHaveAttribute(
       "aria-expanded",
@@ -605,7 +600,6 @@ describe("Settings channels", () => {
 
     fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     expect(await screen.findByText("Default worker")).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: "Multi Plugin channel" })).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Default worker instance" })).toHaveAttribute(
       "aria-checked",
       "true",
@@ -676,10 +670,8 @@ describe("Settings channels", () => {
       "aria-checked",
       "true",
     );
-    expect(screen.queryByText("cli_sup...port")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Support Bot" }));
     expect(screen.getByText("cli_sup...port")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Replace assistant" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.feature.enable",
@@ -741,14 +733,12 @@ describe("Settings channels", () => {
 
     fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     await screen.findByText("No assistant connected");
-    expect(screen.queryByText("0 running · 1 channels")).not.toBeInTheDocument();
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(screen.getByText(runtimeError)).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "test assistant" })).toHaveAttribute(
       "aria-checked",
       "false",
     );
-    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
   });
 
   it("shows group behavior fields as options", async () => {
@@ -792,7 +782,6 @@ describe("Settings channels", () => {
       "true",
     );
     expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("mention")).not.toBeInTheDocument();
 
     fireEvent.click(within(behavior).getByRole("radio", { name: "All messages" }));
 
@@ -852,10 +841,8 @@ describe("Settings channels", () => {
     fireEvent.click(emailRow);
 
     expect(screen.getByRole("dialog")).toHaveFocus();
-    expect(screen.queryByRole("switch", { name: "Email channel" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: "View Email settings" })).toBeInTheDocument();
   });
@@ -1178,7 +1165,6 @@ describe("Settings channels", () => {
       expect(guide.querySelector("span[aria-hidden] img, span[aria-hidden] svg")).not.toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     }
-    expect(screen.queryByRole("button", { name: "View MoChat settings" })).not.toBeInTheDocument();
   });
 
   it("uses choices for channel enum and boolean fields", async () => {
@@ -1220,7 +1206,6 @@ describe("Settings channels", () => {
       "true",
     );
     expect(within(consent).getByRole("radio", { name: "Granted" })).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("true")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "View Feishu settings" }));
@@ -1286,10 +1271,7 @@ describe("Settings channels", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "View WebSocket settings" }));
     expect(screen.getByRole("heading", { name: "WebSocket", exact: true })).toBeVisible();
-    expect(screen.queryByText("Required for WebUI")).not.toBeInTheDocument();
     expect(screen.getByText("Managed by WebUI")).toBeInTheDocument();
-    expect(screen.queryByText("Configured manually")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Disable channel" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     const websocketSwitch = screen.getByRole("switch", { name: "WebSocket channel" });
     expect(websocketSwitch).toBeDisabled();

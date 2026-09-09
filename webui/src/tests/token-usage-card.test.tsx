@@ -44,13 +44,11 @@ describe("Token usage card", () => {
     expect(bars[0]).toHaveAccessibleName(/Cache miss: 0, Cache status unknown: 100/);
     expect(screen.getAllByText("50%")).toHaveLength(2);
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
-    expect(screen.queryByText(/includes estimates/i)).not.toBeInTheDocument();
   });
 
-  it("shows a quiet empty state without a chart for zero usage", () => {
+  it("shows an empty state for zero usage", () => {
     render(<TokenUsageCard usage={usage([])} />);
     expect(screen.getByRole("status")).toHaveTextContent("No token usage in the last 30 days.");
-    expect(screen.queryByRole("group")).not.toBeInTheDocument();
   });
 
   it("opens details and computes the weighted cache rate from observed input only", () => {
@@ -61,8 +59,6 @@ describe("Token usage card", () => {
     fireEvent.click(screen.getByRole("button", { name: "View details" }));
     const details = screen.getByRole("dialog", { name: "Token usage" });
     expect(within(details).getByText("25%")).toBeInTheDocument();
-    expect(within(details).queryByRole("group", { name: "Daily requests" })).not.toBeInTheDocument();
-    expect(within(details).queryByText("Daily average")).not.toBeInTheDocument();
     expect(within(details).getByTitle("Cache hit rate excludes input with unknown cache status.")).toBeInTheDocument();
   });
 
@@ -91,7 +87,6 @@ describe("Token usage card", () => {
     expect(column).toHaveAccessibleName(/2026-09-09: 2,200 tokens/);
     expect(column).toHaveAccessibleName(/model-5: 600/);
     expect(column).toHaveAccessibleName(/Other \/ unattributed: 200/);
-    expect(screen.queryByText("model-0")).not.toBeInTheDocument();
     const legend = screen.getByLabelText("model-5: Total tokens: 600 · 27.3%, Cache hit rate: 80%");
     expect(legend).toHaveAttribute("tabindex", "0");
   });

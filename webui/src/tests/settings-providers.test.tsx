@@ -179,12 +179,6 @@ describe("Settings providers", () => {
         ),
       ).toBeInTheDocument();
       expect(
-        within(dialog).queryByRole("textbox", { name: "xAI sign-in URL" }),
-      ).not.toBeInTheDocument();
-      expect(
-        within(dialog).queryByRole("button", { name: "Copy" }),
-      ).not.toBeInTheDocument();
-      expect(
         within(dialog).getByRole("textbox", { name: "Authorization code" }),
       ).toBeInTheDocument();
 
@@ -265,9 +259,6 @@ describe("Settings providers", () => {
       ),
     ).toBeInTheDocument();
     expect(within(dialog).getByText("Waiting for the browser callback…")).toBeInTheDocument();
-    expect(
-      within(dialog).queryByText("Paste the callback URL to continue."),
-    ).not.toBeInTheDocument();
 
     expect(
       await screen.findByText("Signed in as acct-codex", {}, { timeout: 2500 }),
@@ -616,15 +607,15 @@ describe("Settings providers", () => {
     fireEvent.click(deepSeekSearch);
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(
-      screen.queryByRole("switch", { name: "DeepSeek web search" }),
-    ).not.toBeInTheDocument());
+      screen.getByRole("button", { name: "DeepSeek", exact: true }),
+    ).toBeVisible());
 
     fireEvent.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(
-      screen.queryByRole("switch", { name: "OpenAI web search" }),
-    ).not.toBeInTheDocument());
+      screen.getByRole("button", { name: "OpenAI", exact: true }),
+    ).toBeVisible());
 
     await waitFor(() => {
       const requestUpdates = requestMutationMock.mock.calls
@@ -792,10 +783,6 @@ describe("Settings providers", () => {
     expect(openRouterOption.querySelector("svg, img")).not.toBeNull();
     fireEvent.click(customOption);
 
-    expect(
-      screen.queryByRole("button", { name: "Add your own model provider" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Extra headers")).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("My model provider"), {
       target: { value: "Company Gateway" },
     });

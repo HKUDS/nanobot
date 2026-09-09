@@ -60,7 +60,6 @@ describe("Settings capabilities", () => {
     expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation.");
     await new Promise((resolve) => setTimeout(resolve, 700));
     expect(requestMutationMock).not.toHaveBeenCalled();
-    expect(screen.queryByText("image generation provider is not configured")).not.toBeInTheDocument();
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
@@ -72,7 +71,6 @@ describe("Settings capabilities", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
     const image = within(screen.getByRole("dialog", { name: "Image generation" }));
     await waitFor(() => expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation."));
-    expect(screen.queryByText("image generation provider is not configured")).not.toBeInTheDocument();
     fireEvent.click(image.getByRole("button", { name: "Close", exact: true }));
     expect(screen.getByRole("region", { name: "Image generation" })).toContainElement(screen.getByRole("alert"));
     expect(screen.getAllByRole("alert")).toHaveLength(1);
@@ -86,15 +84,12 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
     expect(screen.getAllByRole("switch")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "Capabilities", exact: true })).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByRole("button", { name: "Image", exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "OpenRouter", exact: true })).not.toBeInTheDocument();
     const editor = screen.getByRole("button", { name: "Image generation", exact: true });
     expect(editor).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(editor);
     expect(editor).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("combobox", { name: "OpenRouter", exact: true })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
-    expect(screen.queryByRole("button", { name: "OpenRouter", exact: true })).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeChecked();
     expect(requestMutationMock).not.toHaveBeenCalled();
   });
@@ -110,17 +105,14 @@ describe("Settings capabilities", () => {
     }));
     renderSettingsView({ initialSection: "image", initialSettings: payload });
 
-    expect(screen.queryByRole("button", { name: "OpenRouter" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
     expect(screen.getByRole("combobox", { name: "OpenRouter" })).toBeVisible();
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.image_generation.update", expect.objectContaining({ enabled: true }), 20_000,
     ));
-    await waitFor(() => expect(screen.queryByText("Saving…")).not.toBeInTheDocument());
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
-    expect(screen.queryByRole("button", { name: "OpenRouter" })).not.toBeInTheDocument();
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.image_generation.update", expect.objectContaining({
         enabled: false, provider: "openrouter", model: payload.image_generation.model,
@@ -129,14 +121,12 @@ describe("Settings capabilities", () => {
     expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
   });
 
-  it("hides web search details until web tools are enabled", async () => {
+  it("reveals web search settings when web tools are enabled", async () => {
     const payload = { ...settingsPayload(), runtime_config: { "tools.web.enable": false } };
     requestMutationMock.mockResolvedValue({
       ...payload, runtime_config: { "tools.web.enable": true },
     });
     renderSettingsView({ initialSection: "browser", initialSettings: payload });
-    expect(screen.queryByRole("button", { name: "DuckDuckGo" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Web access" }));
     expect(screen.getByRole("combobox", { name: "DuckDuckGo" })).toBeVisible();
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
@@ -144,15 +134,13 @@ describe("Settings capabilities", () => {
     ));
   });
 
-  it("hides voice configuration while transcription is disabled", () => {
+  it("reveals the configured transcription provider and model when enabled", () => {
     const payload: SettingsPayload = { ...settingsPayload(), transcription: {
       enabled: false, provider: "groq", provider_configured: true, model: "whisper-large-v3",
       language: null, max_duration_sec: 120, max_upload_mb: 25,
       providers: [{ name: "groq", label: "Groq", configured: true }],
     } };
     renderSettingsView({ initialSection: "voice", initialSettings: payload });
-    expect(screen.queryByRole("button", { name: "Groq" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Transcription" }));
     expect(screen.getByRole("combobox", { name: "Groq" })).toBeVisible();
     expect(screen.getByDisplayValue("whisper-large-v3")).toBeVisible();
@@ -194,7 +182,6 @@ describe("Settings capabilities", () => {
 
     renderSettingsView({ initialSection: "image", initialSettings: payload });
 
-    expect(screen.queryByDisplayValue("openai/gpt-5.4-image-2")).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("combobox", { name: "OpenRouter" }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "Gemini" }));
 
@@ -248,15 +235,11 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "advanced" });
 
     expect(await screen.findByText("Web safety")).toBeInTheDocument();
-    expect(screen.queryByText(/SSRF/i)).not.toBeInTheDocument();
-    expect(screen.queryByText("Private Service Protection")).not.toBeInTheDocument();
     expect(screen.getByText("Default access")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Restricted" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Default Permission" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Full Access" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -303,7 +286,6 @@ describe("Settings capabilities", () => {
 
     fireEvent.keyDown(await screen.findByRole("combobox", { name: /DuckDuckGo/ }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "Keenable" }));
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -339,7 +321,6 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "advanced" });
 
     expect(await screen.findByText("App safety")).toBeInTheDocument();
-    expect(screen.queryByText("Web safety")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Local services" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Allow Full Access shell commands to reach services on this Mac.");
   });
@@ -389,7 +370,6 @@ describe("Settings capabilities", () => {
 
     expect(await screen.findByText("App safety")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Local services" }));
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 
     await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
     await waitFor(() =>

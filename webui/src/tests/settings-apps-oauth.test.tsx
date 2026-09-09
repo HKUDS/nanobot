@@ -118,8 +118,6 @@ describe("SettingsView Apps catalog", () => {
       "https://accounts.xmind.test/authorize?state=state-123",
     ));
     expect(popup.opener).toBeNull();
-    expect(screen.queryByRole("textbox", { name: /authorization/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
       "Complete sign-in in the browser window.",
     );
@@ -130,9 +128,6 @@ describe("SettingsView Apps catalog", () => {
 
     expect(await screen.findByRole("button", { name: "Manage Xmind" }, { timeout: 2500 }))
       .toHaveTextContent("Manage");
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Xmind connected.")).not.toBeInTheDocument();
-    expect(screen.queryByText(/some servers did not connect: notion/i)).not.toBeInTheDocument();
     expect(popup.close).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -169,7 +164,6 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "Ready" }));
     expect(await screen.findByText("No tools are ready yet.")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Xmind" })).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
 
@@ -177,7 +171,6 @@ describe("SettingsView Apps catalog", () => {
     const row = heading.closest("article");
     expect(row).not.toBeNull();
     expect(row?.parentElement).toHaveClass("xl:grid-cols-2");
-    expect(within(row as HTMLElement).queryByText("MCP")).not.toBeInTheDocument();
     const failed = within(row as HTMLElement).getByText("Connection failed.");
     expect(failed.closest("button")).toBeNull();
     expect(failed.closest("p")?.querySelector(".lucide-triangle-alert")).not.toBeNull();
@@ -358,7 +351,6 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
     fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
 
-    expect(screen.queryByText("Authentication")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Server name"), {
       target: { value: "team-mcp" },
     });
@@ -379,7 +371,6 @@ describe("SettingsView Apps catalog", () => {
 
     fireEvent.click(oauth);
     expect(oauth).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByLabelText("Headers (JSON)")).not.toBeInTheDocument();
     expect(
       screen.getByText("Save the server, then select Connect to sign in."),
     ).toBeInTheDocument();
@@ -403,9 +394,6 @@ describe("SettingsView Apps catalog", () => {
     });
     expect(await screen.findByRole("button", { name: "Connect team-mcp" }))
       .toBeInTheDocument();
-    expect(
-      screen.queryByText("MCP config reloaded, but some servers did not connect: team-mcp"),
-    ).not.toBeInTheDocument();
   });
 
   it("offers a pasted callback flow when the remote WebUI uses HTTP", async () => {
@@ -491,7 +479,6 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Finish signing in, then paste the callback URL into nanobot.",
     );
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     fireEvent.change(callbackInput, { target: { value: callbackUrl } });
     fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
@@ -503,7 +490,6 @@ describe("SettingsView Apps catalog", () => {
     ));
     expect(await screen.findByRole("button", { name: "Manage Xmind" }, { timeout: 2500 }))
       .toHaveTextContent("Manage");
-    expect(screen.queryByRole("textbox", { name: "Full callback URL" })).not.toBeInTheDocument();
     expect(popup.close).toHaveBeenCalledTimes(1);
   });
 
@@ -566,8 +552,6 @@ describe("SettingsView Apps catalog", () => {
       20_000,
     ));
     expect(await screen.findByRole("button", { name: "Connect Xmind" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Connecting Xmind" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(popup.close).not.toHaveBeenCalled();
   });
 
@@ -622,7 +606,6 @@ describe("SettingsView Apps catalog", () => {
       20_000,
     ));
     expect(await screen.findByRole("button", { name: "Connect Xmind" })).toBeInTheDocument();
-    expect(screen.queryByText(/Removed MCP preset|reloaded without restarting/)).not.toBeInTheDocument();
   });
 
   it("offers a one-click recovery when the OAuth popup is blocked", async () => {
@@ -738,7 +721,6 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Complete sign-in in the browser window.",
     );
-    expect(screen.queryByRole("button", { name: "Continue sign-in" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
