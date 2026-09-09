@@ -1,3 +1,4 @@
+import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
@@ -730,7 +731,7 @@ export function ModelsSettings({
                         }
                       }}
                       className={cn(
-                        "group relative flex min-h-[76px] select-none items-center gap-3 px-4 py-3 outline-none transition-[background-color,opacity] duration-150 sm:px-5",
+                        "settings-list-row group relative flex select-none items-center gap-3 py-3 outline-none transition-[background-color,opacity] duration-150",
                         ordered &&
                           (callOrderBusy
                             ? "cursor-wait"
@@ -747,14 +748,6 @@ export function ModelsSettings({
                         "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                       )}
                     >
-                      {ordered ? (
-                        <GripVertical
-                          className="pointer-events-none h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
-                          aria-hidden
-                        />
-                      ) : (
-                        <span className="h-4 w-4 shrink-0" aria-hidden />
-                      )}
                       <button
                         type="button"
                         aria-pressed={selectedPreset?.name === name}
@@ -764,18 +757,13 @@ export function ModelsSettings({
                         onClick={() => preset && selectPreset(preset, key)}
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-control text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        {ordered ? (
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
-                            {orderIndex + 1}
-                          </span>
+                        {presetConfigured ? (
+                          <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} />
                         ) : (
-                          <span className="h-7 w-7 shrink-0" aria-hidden />
+                          <span className="grid h-10 w-10 shrink-0 place-items-center">
+                            <ProviderPickerIcon provider={provider} showBrandLogos={showBrandLogos} unconfigured />
+                          </span>
                         )}
-                        <ProviderPickerIcon
-                          provider={provider}
-                          showBrandLogos={showBrandLogos}
-                          unconfigured={!presetConfigured}
-                        />
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 flex-wrap items-center gap-2">
                             <span className="truncate text-[14px] font-medium text-foreground">
@@ -811,6 +799,14 @@ export function ModelsSettings({
                           aria-hidden
                         />
                       </button>
+                      {ordered ? (
+                        <GripVertical
+                          className="pointer-events-none h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
+                          aria-hidden
+                        />
+                      ) : (
+                        <span className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
                       <button
                         type="button"
                         role="switch"
@@ -854,7 +850,7 @@ export function ModelsSettings({
               {!creating ? (
                 <button
                   type="button"
-                  className="flex min-h-[58px] w-full items-center justify-between gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
+                  className="flex min-h-[58px] w-full items-center justify-between gap-3 settings-list-inset py-3 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={callOrderBusy}
                   onClick={() => {
                     setEditorRowKey(null);
@@ -862,8 +858,8 @@ export function ModelsSettings({
                     onBeginCreate();
                   }}
                 >
-                  <span className="inline-flex items-center text-[13px] font-medium">
-                    <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  <span className="inline-flex items-center gap-3 text-[14px] font-medium">
+                    <span className="grid w-10 shrink-0 place-items-center"><Plus className="h-5 w-5" aria-hidden /></span>
                     {tx("settings.models.newPreset", "New model preset")}
                   </span>
                   {orderSaving ? (

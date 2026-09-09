@@ -781,7 +781,7 @@ export function ProvidersSettings({
           type="button"
           aria-expanded={expanded}
           onClick={() => toggleProvider(provider.name)}
-          className="flex min-h-[70px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
+          className="settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors hover:bg-muted/35"
         >
           <span className="flex min-w-0 items-center gap-3">
             <ProviderIcon
@@ -789,7 +789,7 @@ export function ProvidersSettings({
               showBrandLogos={showBrandLogos}
             />
             <span className="min-w-0">
-              <span className="block truncate text-[15px] font-semibold leading-5 text-foreground">
+              <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
                 {provider.label}
               </span>
               {provider.api_base ? (
@@ -1066,11 +1066,11 @@ export function ProvidersSettings({
         type="button"
         aria-expanded
         onClick={cancelCustomProviderCreation}
-        className="flex min-h-[70px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
+        className="settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors hover:bg-muted/35"
       >
         <span className="flex min-w-0 items-center gap-3">
           <ProviderIcon provider="custom" showBrandLogos={showBrandLogos} />
-          <span className="truncate text-[15px] font-semibold text-foreground">
+          <span className="truncate text-[14px] font-medium text-foreground">
             {tx("settings.providers.customProvider", "Custom provider")}
           </span>
         </span>
@@ -1237,13 +1237,13 @@ export function ProvidersSettings({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="group flex min-h-[70px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
+                  className="group settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors hover:bg-muted/35"
                 >
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
                       <Plus className="h-5 w-5" aria-hidden />
                     </span>
-                    <span className="truncate text-[15px] font-semibold text-foreground">
+                    <span className="truncate text-[14px] font-medium text-foreground">
                       {tx(
                         "settings.providers.addOwnProvider",
                         "Add your own model provider",
@@ -1319,7 +1319,7 @@ function providerVisibilityRank(provider: SettingsPayload["providers"][number]):
   return 200;
 }
 
-function ProviderIcon({
+export function ProviderIcon({
   provider,
   showBrandLogos,
 }: {

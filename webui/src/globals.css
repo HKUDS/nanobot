@@ -1036,6 +1036,8 @@
   .settings-disclosure > summary:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
   .settings-disclosure[open] > summary { margin-block-end: 8px; }
 
+  .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
+  .settings-list-row { min-block-size: 76px; }
   .settings-editor { padding: 16px var(--settings-inset, 16px); }
   @media (min-width: 640px) {
     .settings-grid { --settings-margin: 32px; }
