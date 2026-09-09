@@ -348,7 +348,7 @@ export function SettingsPage({
               isRestarting={isRestarting || hostEngineApplying}
               requiresRestartPending={pendingRestartSections.image}
             />
-            {runtimeConfiguration("image")}
+            {imageGenerationForm.enabled ? runtimeConfiguration("image") : null}
           </div>
         );
       case "voice":
@@ -372,6 +372,9 @@ export function SettingsPage({
           <div className="settings-stack">
             {runtimeConfiguration("browser")}
             <WebSettings
+              enabled={settings.runtime_config
+                ? controller.runtimeConfigState.value("tools.web.enable") !== false
+                : settings.web.enable}
               settings={settings}
               form={webSearchForm}
               keyVisible={webSearchKeyVisible}

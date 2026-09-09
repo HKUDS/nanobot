@@ -7,6 +7,64 @@ import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView,
 describe("Settings capabilities", () => {
   installSettingsViewTestHooks();
 
+  it("reveals image settings only after enabling and preserves them when disabled", async () => {
+    const payload = settingsPayload();
+    payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
+    requestMutationMock.mockImplementation(async (_method, update) => ({
+      ...payload,
+      image_generation: { ...payload.image_generation, enabled: update.enabled },
+      requires_restart: true,
+      restart_required_sections: ["image"],
+    }));
+    renderSettingsView({ initialSection: "image", initialSettings: payload });
+
+    expect(screen.queryByRole("button", { name: "OpenRouter" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    expect(screen.getByRole("button", { name: "OpenRouter" })).toBeVisible();
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.image_generation.update", expect.objectContaining({ enabled: true }), 20_000,
+    ));
+    await waitFor(() => expect(screen.queryByText("Saving…")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    expect(screen.queryByRole("button", { name: "OpenRouter" })).not.toBeInTheDocument();
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.image_generation.update", expect.objectContaining({
+        enabled: false, provider: "openrouter", model: payload.image_generation.model,
+      }), 20_000,
+    ));
+    expect(await screen.findByText("Saved. Restart when ready.")).toBeVisible();
+  });
+
+  it("hides web search details until web tools are enabled", async () => {
+    const payload = { ...settingsPayload(), runtime_config: { "tools.web.enable": false } };
+    requestMutationMock.mockResolvedValue({
+      ...payload, runtime_config: { "tools.web.enable": true },
+    });
+    renderSettingsView({ initialSection: "browser", initialSettings: payload });
+    expect(screen.queryByRole("button", { name: "DuckDuckGo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Web tools" }));
+    expect(screen.getByRole("button", { name: "DuckDuckGo" })).toBeVisible();
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "tools.web.enable": true } }, 20_000,
+    ));
+  });
+
+  it("hides voice configuration while transcription is disabled", () => {
+    const payload: SettingsPayload = { ...settingsPayload(), transcription: {
+      enabled: false, provider: "groq", provider_configured: true, model: "whisper-large-v3",
+      language: null, max_duration_sec: 120, max_upload_mb: 25,
+      providers: [{ name: "groq", label: "Groq", configured: true }],
+    } };
+    renderSettingsView({ initialSection: "voice", initialSettings: payload });
+    expect(screen.queryByRole("button", { name: "Groq" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Transcription" }));
+    expect(screen.getByRole("button", { name: "Groq" })).toBeVisible();
+    expect(screen.getByDisplayValue("whisper-large-v3")).toBeVisible();
+  });
+
 
   it("selects image models from provider-specific options", async () => {
     const base = settingsPayload();
@@ -14,6 +72,7 @@ describe("Settings capabilities", () => {
       ...base,
       image_generation: {
         ...base.image_generation,
+        enabled: true,
         providers: [
           {
             name: "openrouter",

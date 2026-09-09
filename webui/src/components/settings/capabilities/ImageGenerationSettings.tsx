@@ -104,6 +104,7 @@ export function ImageGenerationSettings({
               label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          {form.enabled ? <>
           <SettingsRow title={tx("settings.rows.imageProvider", "Image provider")}>
             <ProviderPicker
               providers={settings.image_generation.providers}
@@ -135,12 +136,6 @@ export function ImageGenerationSettings({
               {selectedProvider?.api_base || selectedProvider?.default_api_base || selectedProvider?.name || tx("settings.values.notAvailable", "Not available")}
             </span>
           </SettingsRow>
-        </SettingsGroup>
-      </section>
-
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.imageDefaults", "Defaults")}</SettingsSectionTitle>
-        <SettingsGroup>
           <SettingsRow title={tx("settings.rows.imageModel", "Image model")}>
             <ModelIdPicker
               token={token}
@@ -194,7 +189,9 @@ export function ImageGenerationSettings({
           {!settings.runtime_config ? (
             <ReadOnlyRow title={tx("settings.rows.imageSaveDir", "Save directory")} value={settings.image_generation.save_dir} />
           ) : null}
+          </> : null}
           <RestartSettingsFooter
+            autoSave={!form.enabled}
             dirty={dirty}
             saving={saving}
             pendingRestart={requiresRestartPending}

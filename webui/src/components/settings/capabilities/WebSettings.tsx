@@ -56,6 +56,7 @@ export function webSearchProviderRequiresApiKey(provider?: WebSearchProviderOpti
 }
 
 export function WebSettings({
+  enabled = true,
   settings,
   form,
   keyVisible,
@@ -75,6 +76,7 @@ export function WebSettings({
   olostepInstalling,
   capabilityError,
 }: {
+  enabled?: boolean;
   settings: SettingsPayload;
   form: WebSearchSettingsUpdate;
   keyVisible: boolean;
@@ -127,7 +129,8 @@ export function WebSettings({
   return (
     <div className="space-y-7">
       <section>
-        <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle>
+        {enabled ? <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle> : null}
+        <div hidden={!enabled}>
         {form.provider === "olostep" && olostepFeature && !olostepFeature.installed ? (
           <div className="mb-3">
             <CapabilityInstallNotice
@@ -143,7 +146,9 @@ export function WebSettings({
         {capabilityError ? (
           <p className="mb-3 text-[12px] text-destructive">{capabilityError}</p>
         ) : null}
+        </div>
         <SettingsGroup>
+          <div hidden={!enabled} className="space-y-1">
           <SettingsRow title={t("settings.byok.webSearch.provider")}>
             <ProviderPicker
               providers={settings.web_search.providers}
@@ -234,12 +239,6 @@ export function WebSettings({
               />
             </SettingsRow>
           ) : null}
-        </SettingsGroup>
-      </section>
-
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.webBehavior", "Behavior")}</SettingsSectionTitle>
-        <SettingsGroup>
           <SettingsRow title={tx("settings.rows.maxResults", "Max results")}>
             <NumberInput
               value={form.maxResults ?? settings.web_search.max_results}
@@ -268,7 +267,9 @@ export function WebSettings({
               label={effectiveJinaReader ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          </div>
           <RestartSettingsFooter
+            autoSave={!enabled}
             dirty={dirty}
             saving={saving}
             pendingRestart={requiresRestartPending}

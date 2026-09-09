@@ -97,6 +97,7 @@ export function TranscriptionSettings({
             label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
           />
         </SettingsRow>
+        {form.enabled ? <>
         <SettingsRow title={tx("settings.rows.transcriptionProvider", "Provider")}>
           <ProviderPicker
             providers={transcription.providers}
@@ -162,7 +163,9 @@ export function TranscriptionSettings({
             />
           </div>
         </SettingsRow>
+        </> : null}
         <RestartSettingsFooter
+          autoSave={!form.enabled}
           dirty={dirty}
           saving={saving}
           pendingRestart={requiresRestartPending}

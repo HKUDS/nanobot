@@ -139,6 +139,7 @@ export function RuntimeConfigSettings({
       {restartPending ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
         onRestart={onRestart} isRestarting={isRestarting} /> : null}
       {groups.map((group) => {
+        if (group.enabledBy && state.value(group.enabledBy) === false) return null;
         if (group.id === "chat") return <div key={group.id}>{children}</div>;
         const fields = RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id);
         const dirty = fields.filter(state.visible).some(state.dirty);

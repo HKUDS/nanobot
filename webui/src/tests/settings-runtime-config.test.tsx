@@ -26,6 +26,20 @@ function runtimeSettings() {
 describe("Runtime configuration settings", () => {
   installSettingsViewTestHooks();
 
+  it("hides advanced options for disabled tool families", () => {
+    const payload = runtimeSettings();
+    renderSettingsView({ initialSection: "advanced", initialSettings: {
+      ...payload, runtime_config: {
+        ...payload.runtime_config, "tools.exec.enable": false,
+        "tools.web.enable": false, "tools.cli_apps.enable": false,
+      },
+    } });
+    expect(screen.queryByRole("region", { name: "Shell and sandbox" })).not.toBeInTheDocument();
+    expect(document.getElementById("runtime-tools.web.proxy")).not.toBeInTheDocument();
+    expect(document.getElementById("runtime-tools.cli_apps.run_timeout")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Local services" })).toBeVisible();
+  });
+
   it("keeps chat permission settings discoverable within the advanced page", () => {
     renderSettingsView({ initialSection: "advanced", initialSettings: runtimeSettings() });
     expect(screen.getByRole("switch", { name: "Local services" })).toBeInTheDocument();
@@ -40,6 +54,8 @@ describe("Runtime configuration settings", () => {
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).not.toBeInTheDocument();
     expect(document.getElementById("runtime-tools.exec.sandbox")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Image" }));
+    expect(document.getElementById("runtime-tools.image_generation.save_dir")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Web" }));
     expect(document.getElementById("runtime-tools.web.enable")).toBeInTheDocument();

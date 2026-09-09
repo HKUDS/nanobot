@@ -11,7 +11,7 @@ export interface RuntimeConfigField {
 
 export type RuntimeConfigPage = "memory" | "runtime" | "automations" | "advanced" | "browser" | "image" | "apps";
 
-export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage }[] = [
+export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabledBy?: string }[] = [
   { id: "identity", page: "runtime" },
   { id: "memory", page: "memory" },
   { id: "heartbeat", page: "automations" },
@@ -21,10 +21,10 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage }[] = 
   { id: "tools", page: "runtime" },
   { id: "web", page: "browser" },
   { id: "applications", page: "apps" },
-  { id: "shell", page: "advanced" },
-  { id: "network", page: "advanced" },
+  { id: "shell", page: "advanced", enabledBy: "tools.exec.enable" },
+  { id: "network", page: "advanced", enabledBy: "tools.web.enable" },
   { id: "safety", page: "advanced" },
-  { id: "cli", page: "advanced" },
+  { id: "cli", page: "advanced", enabledBy: "tools.cli_apps.enable" },
   { id: "gateway", page: "advanced" },
   { id: "api", page: "advanced" },
   { id: "storage", page: "image" },
@@ -48,7 +48,7 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "web", path: "tools.web.enable", kind: "boolean" },
   { group: "applications", path: "tools.cli_apps.enable", kind: "boolean" },
   { group: "tools", path: "tools.my.enable", kind: "boolean" },
-  { group: "tools", path: "tools.my.allow_set", kind: "boolean" },
+  { group: "tools", path: "tools.my.allow_set", kind: "boolean", when: { path: "tools.my.enable", value: true } },
   { group: "shell", path: "tools.exec.timeout", kind: "number", min: 0 },
   { group: "shell", path: "tools.exec.path_prepend", kind: "text" },
   { group: "shell", path: "tools.exec.path_append", kind: "text" },
