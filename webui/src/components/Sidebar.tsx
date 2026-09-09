@@ -351,7 +351,7 @@ function SidebarActionButton({
           : "w-full justify-start gap-2 px-3 text-[14px] leading-5",
         active
           ? "text-sidebar-accent-foreground"
-          : "text-sidebar-foreground/85 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
+          : "text-muted-foreground settings-hover hover:text-foreground",
         className,
       )}
     >

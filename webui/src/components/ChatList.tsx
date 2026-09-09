@@ -948,12 +948,12 @@ export const ChatList = memo(function ChatList({
                             actionMenus.openFromContextMenu(event, actionMenuId)
                           )}
                           className={cn(
-                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px]",
+                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[14px] font-medium leading-5",
                             SIDEBAR_SELECTION_ITEM_CLASS,
                             compact ? "min-h-7" : "min-h-8",
                             topicActive
                               ? "text-sidebar-foreground"
-                              : "text-sidebar-foreground/82 hover:text-sidebar-foreground",
+                              : "text-muted-foreground hover:text-foreground",
                             deleteSelectionMode && (tabSelected || tabPartiallySelected)
                               && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
                           )}
@@ -1220,7 +1220,7 @@ function WorkbenchTabHeader({
       data-workbench-tab
       onContextMenu={(event) => actionMenus.openFromContextMenu(event, actionMenuId)}
       className={cn(
-        "group/tab flex min-w-0 items-center gap-0.5 rounded-control px-1.5 text-sidebar-foreground/85",
+        "group/tab flex min-w-0 items-center gap-0.5 rounded-control px-1.5 text-muted-foreground",
         collapsed ? "min-h-6" : "min-h-7",
       )}
     >
@@ -1238,7 +1238,7 @@ function WorkbenchTabHeader({
           aria-pressed={deleteSelectionMode ? selected : undefined}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-0.5 py-1 text-left",
-            "text-[12.5px] font-normal leading-5",
+            "text-[14px] font-medium leading-5",
             deleteSelectionMode && "cursor-default",
           )}
         >
@@ -1426,12 +1426,12 @@ function ActivePaneRows({
                 actionMenus.openFromContextMenu(event, actionMenuId)
               )}
               className={cn(
-                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px]",
+                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[14px] font-medium leading-5",
                 SIDEBAR_SELECTION_ITEM_CLASS,
                 compact ? "min-h-7" : "min-h-8",
                 active
                   ? "text-sidebar-foreground"
-                  : "text-sidebar-foreground/82 hover:text-sidebar-foreground",
+                  : "text-muted-foreground hover:text-foreground",
                 deleteSelectionMode && selected
                   && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
               )}
@@ -1642,11 +1642,11 @@ function TemporaryChatSection({
               <div
                 data-temporary-chat-row={session.key}
                 className={cn(
-                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px]",
+                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[14px] font-medium leading-5",
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "bg-sidebar-selected text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/82 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
+                    : "text-muted-foreground settings-hover hover:text-foreground",
                 )}
               >
                 <button
@@ -1725,7 +1725,7 @@ function ProjectGroupHeader({
         onContextMenu={onRequestRename || onNewChat
           ? (event) => actionMenus.openFromContextMenu(event, actionMenuId)
           : undefined}
-        className="group flex min-w-0 items-center gap-1 px-1 pb-1 pt-1 text-[12px] font-medium text-muted-foreground/78"
+        className="group flex min-w-0 items-center gap-1 px-1 pb-1 pt-1 text-[14px] font-medium leading-5 text-muted-foreground"
       >
         {path ? (
           <Tooltip>
