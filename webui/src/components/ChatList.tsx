@@ -132,7 +132,7 @@ function SidebarSessionHandle({ handle }: { handle: ChatSummary["handle"] }) {
   return (
     <span
       data-sidebar-session-handle
-      className="flex max-w-20 shrink-0 items-center overflow-hidden whitespace-nowrap text-[11px] font-medium leading-5"
+      className="flex max-w-20 shrink-0 items-center overflow-hidden whitespace-nowrap font-mono text-[11px] font-medium leading-5"
     >
       <span
         data-sidebar-session-handle-underline
