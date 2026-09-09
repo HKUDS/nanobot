@@ -485,7 +485,7 @@ describe("App layout", () => {
     expect(backButton.closest("aside")).toHaveClass("pt-4", "lg:pt-4");
     expect(backButton).not.toHaveClass("-ml-1");
     expect(container.querySelectorAll("main")).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
   });
 
   it("opens the full Models settings directly from the first-run prompt", async () => {
@@ -2346,430 +2346,23 @@ describe("App layout", () => {
   });
 
   it("opens the settings view from the sidebar footer", async () => {
-    const user = userEvent.setup();
-    mockSessions = [
-      {
-        key: "websocket:chat-a",
-        channel: "websocket",
-        chatId: "chat-a",
-        createdAt: "2026-04-16T10:00:00Z",
-        updatedAt: "2026-04-16T10:00:00Z",
-        preview: "Existing chat",
-      },
-    ];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const href = String(input);
-        if (href === "/api/settings/api-service") {
-          return jsonResponse({
-            installed: false,
-            running: false,
-            managed: false,
-            host: "127.0.0.1",
-            port: 8900,
-            timeout: 120,
-            endpoint: "http://127.0.0.1:8900/v1",
-            command: "nanobot serve",
-          });
-        }
-        if (href === "/api/settings/provider-models?provider=openai") {
-          return jsonResponse({
-            provider: "openai",
-            label: "OpenAI",
-            status: "available",
-            catalog_kind: "official",
-            models: [
-              { id: "openai/gpt-4o", owned_by: "openai", context_window: 128000 },
-              { id: "openai/gpt-4o-mini", owned_by: "openai", context_window: 128000 },
-            ],
-            model_count: 2,
-            fetched_at: 1,
-          });
-        }
-        if (href.includes("/api/settings")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              agent: {
-                model: "openai/gpt-4o",
-                provider: "auto",
-                resolved_provider: "openai",
-                has_api_key: true,
-                model_preset: "primary",
-                max_tokens: 8192,
-                context_window_tokens: 65536,
-                temperature: 0.1,
-                reasoning_effort: null,
-                timezone: "UTC",
-                tool_hint_max_length: 40,
-              },
-              model_presets: [
-                {
-                  name: "primary",
-                  label: "Primary",
-                  active: true,
-                  is_default: false,
-                  model: "openai/gpt-4o",
-                  provider: "auto",
-                  resolved_provider: "openai",
-                  max_tokens: 8192,
-                  context_window_tokens: 65536,
-                  temperature: 0.1,
-                  reasoning_effort: null,
-                },
-                {
-                  name: "deep",
-                  label: "deep",
-                  active: false,
-                  is_default: false,
-                  model: "anthropic/claude-opus-4-5",
-                  provider: "anthropic",
-                  max_tokens: 8192,
-                  context_window_tokens: 200000,
-                  temperature: 0.1,
-                  reasoning_effort: "high",
-                },
-              ],
-              model_call_order: ["primary", "deep"],
-              model_call_order_editable: true,
-              providers: [
-                {
-                  name: "openai",
-                  label: "OpenAI",
-                  configured: true,
-                  api_key_hint: "open••••-key",
-                },
-                {
-                  name: "openrouter",
-                  label: "OpenRouter",
-                  configured: false,
-                  api_key_required: true,
-                  default_api_base: "https://openrouter.ai/api/v1",
-                },
-                {
-                  name: "ant_ling",
-                  label: "Ant Ling",
-                  configured: false,
-                  api_key_required: true,
-                  default_api_base: "https://api.ant-ling.com/v1",
-                },
-                {
-                  name: "azure_openai",
-                  label: "Azure OpenAI",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "huggingface",
-                  label: "Hugging Face",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "siliconflow",
-                  label: "SiliconFlow",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "volcengine",
-                  label: "VolcEngine",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "byteplus",
-                  label: "BytePlus",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "qianfan",
-                  label: "Qianfan",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "atomic_chat",
-                  label: "Atomic Chat",
-                  configured: false,
-                  api_key_required: false,
-                  default_api_base: "http://localhost:1337/v1",
-                },
-              ],
-              web_search: {
-                provider: "brave",
-                api_key_hint: "BSAo••••ew20",
-                base_url: null,
-                max_results: 5,
-                timeout: 30,
-                providers: [
-                  { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
-                  { name: "brave", label: "Brave Search", credential: "api_key" },
-                  { name: "tavily", label: "Tavily", credential: "api_key" },
-                ],
-              },
-              web: {
-                enable: true,
-                proxy: null,
-                user_agent: null,
-                search: { max_results: 5, timeout: 30 },
-                fetch: { use_jina_reader: true },
-              },
-              image_generation: {
-                enabled: false,
-                provider: "openrouter",
-                provider_configured: true,
-                model: "openai/gpt-5.4-image-2",
-                default_aspect_ratio: "1:1",
-                default_image_size: "1K",
-                max_images_per_turn: 4,
-                save_dir: "generated",
-                providers: [
-                  {
-                    name: "openrouter",
-                    label: "OpenRouter",
-                    configured: true,
-                    api_key_hint: "sk-o••••test",
-                    api_base: "https://openrouter.ai/api/v1",
-                    default_api_base: "https://openrouter.ai/api/v1",
-                  },
-                  {
-                    name: "gemini",
-                    label: "Gemini",
-                    configured: false,
-                    api_key_hint: null,
-                    api_base: null,
-                    default_api_base: "https://generativelanguage.googleapis.com/v1beta/openai/",
-                  },
-                ],
-              },
-              runtime: {
-                config_path: "/tmp/config.json",
-                workspace_path: "/tmp/workspace",
-                gateway_host: "127.0.0.1",
-                gateway_port: 18790,
-                heartbeat: {
-                  enabled: true,
-                  interval_s: 1800,
-                },
-                dream: {
-                  schedule: "every 2h",
-                },
-                unified_session: false,
-              },
-              advanced: {
-                restrict_to_workspace: false,
-                webui_allow_local_service_access: true,
-                webui_default_access_mode: "default",
-                private_service_protection_enabled: true,
-                ssrf_whitelist_count: 0,
-                mcp_server_count: 0,
-                exec_enabled: true,
-                exec_sandbox: null,
-                exec_path_prepend_set: false,
-                exec_path_append_set: false,
-              },
-              requires_restart: false,
-            }),
-          };
-        }
-        return { ok: false, status: 404, json: async () => ({}) };
-      }),
-    );
-
-    localStorage.setItem(
-      "nanobot-webui.settings-preferences",
-      JSON.stringify({ brandLogos: true }),
-    );
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
     render(<App />);
-
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const searchButton = within(sidebar).getByRole("button", { name: "Search" });
-    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
-    expect(searchButton.compareDocumentPosition(appsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    await user.click(within(sidebar).getByRole("button", { name: "Settings" }));
-
-    expect(
-      await screen.findByRole("navigation", { name: "Settings sections" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
-    expect(document.title).toBe("Settings · nanobot");
-    expect(screen.getByTestId("overview-logo-openai")).toBeInTheDocument();
-    expect(screen.getByTestId("overview-logo-brave")).toBeInTheDocument();
-    expect(screen.getByTestId("overview-logo-openrouter")).toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-nanobot-gateway")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-nanobot-workspace")).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
-    const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(settingsNav.className).not.toContain("overflow-x-auto");
-    expect(within(settingsNav).getByRole("button", { name: "Settings: Overview" })).toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Overview" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Providers" })).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Files" })).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
-    fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Overview" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Appearance" }));
-    expect(screen.getByText("Brand logos")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
-    expect(
-      screen.queryByText("Switch between light and dark appearance."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("Choose the language used by the WebUI.")).not.toBeInTheDocument();
-    expect(screen.queryByText("Stored only in this browser.")).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Settings: Appearance" })).toBeInTheDocument();
-    fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Appearance" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Models" }));
-    expect(screen.queryByText("AI")).not.toBeInTheDocument();
-    expect(screen.getByText("Model presets")).toBeInTheDocument();
-    expect(screen.queryByText("Model call order")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
-    expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), {
-      target: { value: "Fast writing" },
-    });
-    expect(
-      screen
-        .getAllByRole("button", { name: /OpenAI/ })
-        .some((button) => button.getAttribute("aria-haspopup") === "menu"),
-    ).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Select model" }));
-    await user.click(await screen.findByRole("option", { name: /openai\/gpt-4o-mini/ }));
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText("Up to date.")).not.toBeInTheDocument();
-    fireEvent.click(
-      within(screen.getByTestId("model-call-order-row-primary")).getAllByRole("button")[0],
-    );
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Auto/ }));
-    expect(screen.getAllByTestId("provider-picker-logo-openai").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("menuitem", { name: /Auto/ }));
-    const openModelPicker = async () => {
-      const modelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o/ });
-      await user.click(modelButtons[modelButtons.length - 1]);
-    };
-    await openModelPicker();
-    await user.click(await screen.findByRole("option", { name: /openai\/gpt-4o-mini/ }));
-    expect(screen.queryByText("Unsaved changes.")).not.toBeInTheDocument();
-    expect(screen.getByText("Model providers")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add your own model provider" })).toBeInTheDocument();
-    expect(screen.queryByText("OpenRouter")).not.toBeInTheDocument();
-    expect(screen.queryByText("Ant Ling")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Bring your own provider keys. Nanobot reads these values from the current config and only configured providers can be used in model presets.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("azure_openai")).not.toBeInTheDocument();
-    expect(screen.getByTestId("provider-logo-openai")).toBeInTheDocument();
-    expect(screen.queryByText(/Product names, logos, and brands/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
-    const clickProviderRow = async (label: string) => {
-      const providerLabel = (await screen.findAllByText(label))
-        .find((element) => element.className.includes("font-semibold"));
-      expect(providerLabel).toBeTruthy();
-      fireEvent.click(providerLabel!);
-    };
-    const chooseProvider = async (label: string) => {
-      fireEvent.pointerDown(
-        screen.getByRole("button", { name: "Add your own model provider" }),
-      );
-      fireEvent.click(await screen.findByRole("menuitem", { name: label }));
-    };
-    await clickProviderRow("OpenAI");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
-      target: { value: "unsaved-openai-key" },
-    });
-    await clickProviderRow("OpenAI");
-    await chooseProvider("OpenRouter");
-    await clickProviderRow("OpenRouter");
-    await clickProviderRow("OpenAI");
-    expect(screen.getByText("open••••-key")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
-    await clickProviderRow("OpenAI");
-    await chooseProvider("Ant Ling");
-    expect(screen.getByDisplayValue("https://api.ant-ling.com/v1")).toBeInTheDocument();
-    await clickProviderRow("Ant Ling");
-    await chooseProvider("Atomic Chat");
-    expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save provider" })).toBeEnabled();
-
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Image" }));
-    expect(screen.queryByRole("heading", { name: "Image" })).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
+      .getByRole("button", { name: "Settings" }));
+    const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+    for (const name of ["Overview", "Appearance", "Models", "Capabilities", "Channels", "System", "Advanced", "About"]) {
+      expect(within(nav).getByRole("button", { name, exact: true })).toBeInTheDocument();
+    }
+    fireEvent.click(within(nav).getByRole("button", { name: "Appearance", exact: true }));
+    expect(await screen.findByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "Models", exact: true }));
+    expect(await screen.findByText("Model presets")).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "Capabilities", exact: true }));
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeInTheDocument();
-    expect(screen.getByText("Provider status")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "openai/gpt-5.4-image-2" })).toBeInTheDocument();
-    expect(screen.getByText("Save directory")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    expect(
-      screen.queryByText(
-        "Expose generate_image in chats when a configured image provider is available.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Choose a model supported by the selected image provider."),
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Web" }));
-    expect(screen.getByText("Search provider")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Jina reader" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Brave Search/ })).toBeInTheDocument();
-    expect(screen.getByTestId("provider-picker-logo-brave")).toBeInTheDocument();
-    expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Choose the backend used by the web search tool."),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Results returned by each web_search call."),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
-      target: { value: "unsaved-brave-key" },
-    });
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Brave Search/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Tavily" }));
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Tavily/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Brave Search" }));
-    expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
-
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "System" }));
-    expect(screen.queryByText("Regional")).not.toBeInTheDocument();
-    expect(screen.getByText("Timezone")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Used for schedules and time-aware replies."),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Restart nanobot to apply runtime changes."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("Bot name")).not.toBeInTheDocument();
-    expect(screen.queryByText("Bot icon")).not.toBeInTheDocument();
-    expect(screen.queryByText("Tool hint length")).not.toBeInTheDocument();
-    expect(screen.queryByText("Heartbeat")).not.toBeInTheDocument();
-    expect(screen.queryByText("Dream")).not.toBeInTheDocument();
-    expect(screen.queryByText("Unified session")).not.toBeInTheDocument();
-    expect(screen.getByText("Default workspace")).toBeInTheDocument();
-    expect(screen.getByText("UTC")).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Search timezone")).not.toBeInTheDocument();
-    expect(screen.queryByRole("listbox", { name: "Select timezone" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "UTC" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Connect SDKs and agents through a local /v1 endpoint."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("The API uses this local port.")).not.toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "About", exact: true }));
+    expect(await screen.findByRole("button", { name: "Check for updates" })).toBeInTheDocument();
   });
 
   it("restores the settings section from the URL hash after a page reload", async () => {
@@ -2779,7 +2372,7 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Transcription" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=voice");
   });
 
@@ -2805,11 +2398,8 @@ describe("App layout", () => {
     const systemSection = screen.getByRole("heading", { name: "System" }).closest("section");
     expect(systemSection).not.toBeNull();
     const system = within(systemSection as HTMLElement);
-    const timezoneLabel = system.getByText("Timezone");
-    const restartButton = system.getByRole("button", { name: "Restart nanobot" });
-    expect(
-      timezoneLabel.compareDocumentPosition(restartButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(system.getByText("Timezone")).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).getByRole("button", { name: "Restart", exact: true })).toBeInTheDocument();
     expect(
       system.queryByText("Restart nanobot to apply runtime changes."),
     ).not.toBeInTheDocument();
@@ -2868,15 +2458,15 @@ describe("App layout", () => {
     expect(settingsHighlight).toHaveAttribute("data-active-id", "models");
 
     const voiceButton = within(settingsNav).getByRole("button", {
-      name: "Voice",
+      name: "Capabilities",
       exact: true,
     });
     fireEvent.click(voiceButton);
 
-    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
-    expect(window.location.hash).toBe("#/settings?section=voice");
+    expect(await screen.findByRole("switch", { name: "Transcription" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/settings?section=capabilities");
     expect(voiceButton).toHaveAttribute("aria-current", "page");
-    expect(settingsHighlight).toHaveAttribute("data-active-id", "voice");
+    expect(settingsHighlight).toHaveAttribute("data-active-id", "capabilities");
   });
 
   it("transitions between Apps and Skills without replacing the sidebar", async () => {

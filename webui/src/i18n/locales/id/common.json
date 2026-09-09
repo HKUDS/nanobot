@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "Mulai ulang sebelum keluar?",
+      "description": "Perubahan sudah disimpan. Mulai ulang untuk menerapkannya.",
+      "later": "Mulai ulang nanti"
+    },
     "runtimeConfig": {
       "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",
       "fields": {
@@ -158,6 +163,7 @@
       "ariaLabel": "Bagian pengaturan"
     },
     "nav": {
+      "about": "Tentang",
       "capabilities": "Fitur",
       "general": "Umum",
       "byok": "BYOK",
@@ -515,7 +521,7 @@
       "disabled": "Nonaktif",
       "noPresets": "Belum ada prasetel model",
       "noPresetsHelp": "Buat prasetel, lalu tambahkan ke urutan pemanggilan.",
-      "removeBeforeDelete": "Hapus prasetel ini dari urutan pemanggilan sebelum menghapusnya.",
+      "removeBeforeDelete": "Pilih prasetel utama lain sebelum menghapus prasetel ini.",
       "providerSetupRequired": "Penyedia perlu dikonfigurasi",
       "configureProviderBeforeSaving": "Konfigurasikan penyedia ini sebelum menyimpan prasetel.",
       "deletePresetTitle": "Hapus prasetel model?",
@@ -568,6 +574,9 @@
       "noDescription": "Tidak ada deskripsi."
     },
     "about": {
+      "documentation": "Dokumentasi",
+      "sourceCode": "Kode sumber",
+      "reportIssue": "Laporkan masalah",
       "version": "Versi",
       "checking": "Memeriksa pembaruan...",
       "checkForUpdates": "Periksa pembaruan",

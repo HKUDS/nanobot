@@ -851,6 +851,16 @@
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+@keyframes settings-restart-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .settings-restart-pending { animation: settings-restart-breathe 3s ease-in-out infinite; }
+  .settings-restart-pending:hover, .settings-restart-pending:focus-visible { animation: none; }
+}
+
 @keyframes preset-name-shake {
   0%,
   100% {
@@ -987,7 +997,7 @@
     --settings-inset: 16px;
     --settings-module-gap: 32px;
     container-type: inline-size;
-    max-inline-size: 920px;
+    max-inline-size: 720px;
     padding-inline: var(--settings-margin);
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
@@ -998,6 +1008,7 @@
     padding-inline: var(--settings-inset, 16px);
     line-height: 20px;
   }
+  .settings-grid[data-settings-section="models"] .settings-list-row { min-block-size: 56px; }
   .settings-section-heading {
     display: flex;
     flex-wrap: wrap;
@@ -1022,7 +1033,6 @@
   .settings-control > * { max-inline-size: 100%; }
   .settings-control input, .settings-control textarea { max-inline-size: 100%; }
   .settings-control input[type="number"] { text-align: end; font-variant-numeric: tabular-nums; }
-  .settings-control button[aria-haspopup="menu"] { inline-size: 100%; }
   .settings-footer { min-block-size: 64px; }
   .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
   .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
@@ -1048,6 +1058,16 @@
 
   .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
   .settings-list-row { min-block-size: 76px; border-radius: 12px; }
+  .sidebar-action-label:lang(zh) {
+    display: inline-block;
+    min-inline-size: var(--sidebar-label-width, 3em);
+    text-align: justify;
+    text-align-last: justify;
+  }
+  @media (hover: hover) {
+    .settings-hover:hover { background-color: hsl(var(--sidebar-foreground) / 0.055); }
+    .dark .settings-hover:hover { background-color: rgb(255 255 255 / 0.07); }
+  }
   .settings-editor { padding: 16px var(--settings-inset, 16px); }
   @media (min-width: 640px) {
     .settings-grid { --settings-margin: 32px; }

@@ -166,12 +166,12 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View Matrix settings" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View Matrix settings" }));
     expect(screen.queryByText("0 running · 1 channels")).not.toBeInTheDocument();
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(screen.queryByText("Enabled, support needs install")).not.toBeInTheDocument();
 
-    expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByLabelText("Matrix channel")).toHaveAttribute("aria-checked", "false");
     fireEvent.click(screen.getByRole("button", { name: "Install support" }));
     fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
 
@@ -219,11 +219,11 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View Matrix settings" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View Matrix settings" }));
     expect(screen.queryByText("0 running · 1 channels")).not.toBeInTheDocument();
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(screen.getByText(runtimeError)).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Matrix channel" })).toHaveAttribute(
+    expect(screen.getByLabelText("Matrix channel")).toHaveAttribute(
       "aria-checked",
       "false",
     );
@@ -268,7 +268,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View Feishu settings" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View Feishu settings" }));
     expect(screen.queryByText("nanobot channels login feishu")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole(
       "button",
@@ -327,7 +327,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View Feishu settings" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View Feishu settings" }));
     fireEvent.click(await screen.findByRole(
       "button",
       { name: "nanobot" },
@@ -416,6 +416,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     fireEvent.click(await screen.findByRole("button", { name: "nanobot" }));
     fireEvent.click(await screen.findByRole("switch", { name: "nanobot assistant" }));
 
@@ -505,6 +506,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     expect(await screen.findByText("Product Helper")).toBeInTheDocument();
     expect(screen.getAllByText("Support Bot")).toHaveLength(1);
     expect(document.querySelector('img[src="https://example.com/support.png"]')).toBeTruthy();
@@ -601,6 +603,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     expect(await screen.findByText("Default worker")).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Multi Plugin channel" })).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Default worker instance" })).toHaveAttribute(
@@ -665,6 +668,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     await screen.findByText("Support Bot");
     expect(screen.getAllByText("Support Bot")).toHaveLength(1);
     expect(screen.getByText("1 assistant connected")).toBeInTheDocument();
@@ -735,6 +739,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
+    fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     await screen.findByText("No assistant connected");
     expect(screen.queryByText("0 running · 1 channels")).not.toBeInTheDocument();
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
@@ -778,7 +783,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View Discord settings" }));
     fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
 
     const behavior = screen.getByRole("radiogroup", { name: "Group behavior" });
@@ -841,22 +846,17 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     const emailRow = await screen.findByRole("button", { name: "View Email settings" });
-    expect(screen.getByPlaceholderText("Search channels")).toHaveClass(
-      "focus-visible:ring-2",
-      "focus-visible:ring-inset",
-      "focus-visible:ring-ring/50",
-    );
-    expect(screen.queryByRole("switch", { name: "Email channel" })).not.toBeInTheDocument();
+    expect(emailRow).toBeVisible();
+    expect(screen.getByRole("switch", { name: "Email channel" })).toBeInTheDocument();
 
     fireEvent.click(emailRow);
 
-    expect(screen.getByRole("button", { name: "All channels" })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Email channel" })).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Search channels")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    expect(screen.queryByRole("switch", { name: "Email channel" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "All channels" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    expect(screen.getByPlaceholderText("Search channels")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View Email settings" })).toBeInTheDocument();
   });
 
@@ -929,12 +929,12 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View Discord settings" }));
     expect(screen.getByRole("link", { name: "Open Discord setup" })).toHaveAttribute(
       "href",
       "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps#discord",
     );
-    expect(screen.getByRole("switch", { name: "Discord channel" })).toBeDisabled();
+    expect(screen.getByLabelText("Discord channel")).toBeEnabled();
     fireEvent.change(screen.getByPlaceholderText("Discord bot token"), {
       target: { value: "discord-token" },
     });
@@ -969,7 +969,7 @@ describe("Settings channels", () => {
       150_000,
     );
     expect(await screen.findByText("Checked and enabled.")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Discord channel" })).toHaveAttribute(
+    expect(screen.getByLabelText("Discord channel")).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -1033,12 +1033,12 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View Discord settings" })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Discord channel" })).toHaveAttribute(
+    fireEvent.click(await screen.findByRole("button", { name: "View Discord settings" }));
+    expect(screen.getByLabelText("Discord channel")).toHaveAttribute(
       "aria-checked",
       "false",
     );
-    expect(screen.getByRole("switch", { name: "Discord channel" })).toBeEnabled();
+    expect(screen.getByLabelText("Discord channel")).toBeEnabled();
     expect(screen.getByText("Configured manually")).toBeInTheDocument();
     expect(screen.getByText("Saved")).toBeInTheDocument();
     const savedSecret = screen.getByPlaceholderText("Saved secret");
@@ -1054,6 +1054,7 @@ describe("Settings channels", () => {
       { name: "All messages" },
     )).toHaveAttribute("aria-checked", "true");
 
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "Discord channel" }));
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -1095,7 +1096,7 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View Telegram settings" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View Telegram settings" }));
     expect(screen.getByRole("link", { name: "Open Telegram setup" })).toHaveAttribute(
       "href",
       "https://nanobot.wiki/docs/0.2.2/getting-started/chat-apps#telegram",
@@ -1175,6 +1176,7 @@ describe("Settings channels", () => {
       const guide = await screen.findByRole("link", { name: guideLabel });
       expect(guide).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
       expect(guide.querySelector("span[aria-hidden] img, span[aria-hidden] svg")).not.toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     }
     expect(screen.queryByRole("button", { name: "View MoChat settings" })).not.toBeInTheDocument();
   });
@@ -1220,6 +1222,7 @@ describe("Settings channels", () => {
     expect(within(consent).getByRole("radio", { name: "Granted" })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("true")).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "View Feishu settings" }));
     fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
     fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
@@ -1230,6 +1233,7 @@ describe("Settings channels", () => {
     );
     expect(within(region).getByRole("radio", { name: "Lark" })).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
     fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
     const matrixBehavior = screen.getByRole("radiogroup", { name: "Group behavior" });
@@ -1239,6 +1243,7 @@ describe("Settings channels", () => {
     );
     expect(within(matrixBehavior).getByRole("radio", { name: "Allowlist" })).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
     fireEvent.click(screen.getByText("Advanced", { selector: "summary span" }));
     const format = screen.getByRole("radiogroup", { name: "Message format" });
@@ -1279,13 +1284,13 @@ describe("Settings channels", () => {
 
     renderSettingsView({ initialSection: "channels" });
 
-    expect(await screen.findByRole("button", { name: "View WebSocket settings" })).toBeInTheDocument();
-    expect(screen.getAllByText("WebSocket")).toHaveLength(2);
+    fireEvent.click(await screen.findByRole("button", { name: "View WebSocket settings" }));
+    expect(screen.getByRole("heading", { name: "WebSocket", exact: true })).toBeVisible();
     expect(screen.queryByText("Required for WebUI")).not.toBeInTheDocument();
-    expect(screen.getAllByText("On").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Managed by WebUI")).toBeInTheDocument();
     expect(screen.queryByText("Configured manually")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disable channel" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     const websocketSwitch = screen.getByRole("switch", { name: "WebSocket channel" });
     expect(websocketSwitch).toBeDisabled();
     expect(websocketSwitch).toHaveAttribute("aria-checked", "true");

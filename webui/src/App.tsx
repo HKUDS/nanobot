@@ -15,6 +15,7 @@ import { Sidebar } from "@/components/Sidebar";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
+import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import {
   MAX_WORKBENCH_PANES,
@@ -163,6 +164,7 @@ function SurfaceLoadingFallback({ label }: { label?: string }) {
 const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "capabilities",
   "overview",
+  "about",
   "appearance",
   "models",
   "image",
@@ -1091,6 +1093,12 @@ function Shell({
   const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const settingsExitGuardRef = useRef<SettingsExitGuard | null>(null);
+  const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
+  currentShellRouteRef.current = { view, activeKey, settingsSection: settingsInitialSection };
+  const registerSettingsExitGuard = useCallback((guard: SettingsExitGuard | null) => {
+    settingsExitGuardRef.current = guard;
+  }, []);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [draftWorkspaceScope, setDraftWorkspaceScope] =
     useState<WorkspaceScopePayload | null>(null);
@@ -1121,10 +1129,15 @@ function Shell({
 
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean }) => {
-      setActiveKey(route.activeKey);
-      setView(route.view);
-      setSettingsInitialSection(route.settingsSection);
-      writeShellRoute(route, options?.replace);
+      const leave = () => {
+        setActiveKey(route.activeKey);
+        setView(route.view);
+        setSettingsInitialSection(route.settingsSection);
+        writeShellRoute(route, options?.replace);
+      };
+      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
+        settingsExitGuardRef.current(leave);
+      } else leave();
     },
     [],
   );
@@ -1132,6 +1145,18 @@ function Shell({
   useEffect(() => {
     const applyRoute = () => {
       const route = readShellRoute();
+      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
+        writeShellRoute(currentShellRouteRef.current, true);
+        settingsExitGuardRef.current(() => {
+          setActiveKey(route.activeKey);
+          setView(route.view);
+          setSettingsInitialSection(route.settingsSection);
+          writeShellRoute(route, true);
+          setWorkspaceError(null);
+          if (route.view === "chat" && !route.activeKey) setDraftWorkspaceScope(null);
+        });
+        return;
+      }
       setActiveKey(route.activeKey);
       setView(route.view);
       setSettingsInitialSection(route.settingsSection);
@@ -2766,6 +2791,7 @@ function Shell({
               <div className="absolute inset-0 flex flex-col">
                 <Suspense fallback={<SurfaceLoadingFallback />}>
                   <SettingsView
+                    registerExitGuard={registerSettingsExitGuard}
                     theme={theme}
                     initialSection={settingsInitialSection}
                     initialSettings={settingsSnapshot}

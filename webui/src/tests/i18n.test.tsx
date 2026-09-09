@@ -483,10 +483,10 @@ describe("webui i18n", () => {
     const user = userEvent.setup();
 
     render(<LanguageSwitcher />);
-    await user.click(screen.getByRole("button", { name: "Change language" }));
+    await user.click(screen.getByRole("combobox", { name: "Change language" }));
 
     for (const { nativeLabel } of supportedLocales) {
-      expect(screen.getByRole("menuitemradio", { name: nativeLabel })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: nativeLabel })).toBeInTheDocument();
     }
   });
 
@@ -505,8 +505,8 @@ describe("webui i18n", () => {
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");
 
-    await user.click(screen.getByRole("button", { name: "Change language" }));
-    await user.click(screen.getByRole("menuitemradio", { name: /简体中文/i }));
+    await user.click(screen.getByRole("combobox", { name: "Change language" }));
+    await user.click(screen.getByRole("option", { name: /简体中文/i }));
 
     await waitFor(() => {
       expect(document.documentElement.lang).toBe("zh-CN");

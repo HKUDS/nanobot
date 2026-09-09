@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import {
   Activity,
+  Info,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -39,6 +40,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "channels", icon: MessageCircle, fallback: "Channels" },
   { key: "runtime", icon: Server, fallback: "System" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
+  { key: "about", icon: Info, fallback: "About" },
 ];
 
 export function standaloneSectionTitle(section: SettingsSectionKey): string {
@@ -73,9 +75,9 @@ export function SettingsSidebar({
   const restartLabel = isRestarting
     ? t(isNativeHost ? "app.system.restartingEngine" : "app.system.restarting")
     : t("app.system.restartAction");
-  activeSection = isCapabilitySection(activeSection) ? "capabilities" : activeSection;
+  const navSection = isCapabilitySection(activeSection) ? "capabilities" : activeSection;
   const activeNavItemRef = useRef<HTMLButtonElement>(null);
-  const activeItem = SETTINGS_NAV_ITEMS.find((item) => item.key === activeSection)
+  const activeItem = SETTINGS_NAV_ITEMS.find((item) => item.key === navSection)
     ?? SETTINGS_NAV_ITEMS[0];
   const ActiveIcon = activeItem.icon;
   const activeLabel = t(`settings.nav.${activeItem.key}`, {
@@ -85,7 +87,7 @@ export function SettingsSidebar({
   return (
     <aside
       className={cn(
-        "flex w-full shrink-0 flex-col bg-settings-surface px-3 pb-2 lg:w-[17rem] lg:px-3 lg:pb-4",
+        "flex w-full shrink-0 select-none flex-col bg-settings-surface px-3 pb-2 lg:w-48 lg:px-3 lg:pb-4",
         hostChromeInset ? "pt-10 lg:pt-10" : "pt-4 lg:pt-4",
       )}
     >
@@ -94,7 +96,7 @@ export function SettingsSidebar({
         onClick={onBackToChat}
         aria-label={t("settings.backToChat")}
         className={cn(
-          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:mb-3",
+          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-medium text-muted-foreground transition-colors settings-hover hover:text-foreground lg:mb-3",
           hostChromeInset && "-ml-1",
         )}
       >
@@ -110,7 +112,7 @@ export function SettingsSidebar({
             <button
               type="button"
               aria-label={`${t("settings.sidebar.title")}: ${activeLabel}`}
-              className="touch-target flex h-11 w-full items-center gap-2.5 rounded-control bg-sidebar-accent px-3 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-sidebar-accent/80 lg:hidden"
+              className="touch-target flex h-11 w-full items-center gap-2.5 rounded-control bg-sidebar-accent px-3 text-left text-[13px] font-medium text-foreground transition-colors settings-hover lg:hidden"
             >
               <ActiveIcon className="h-[1em] w-[1em] shrink-0" strokeWidth={2} aria-hidden />
               <span className="min-w-0 flex-1 truncate">{activeLabel}</span>
@@ -123,7 +125,7 @@ export function SettingsSidebar({
             className="w-[var(--radix-dropdown-menu-trigger-width)] max-w-[calc(100vw-1.5rem)]"
           >
             {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
-              const active = key === activeSection;
+              const active = key === navSection;
               return (
                 <DropdownMenuItem
                   key={key}
@@ -147,12 +149,12 @@ export function SettingsSidebar({
 
         <SidebarSelectionHighlight
           targetRef={activeNavItemRef}
-          activeId={activeSection}
+          activeId={navSection}
           scope="settings"
           className="relative hidden space-y-1 lg:block"
         >
           {SETTINGS_NAV_ITEMS.map(({ key, icon: Icon, fallback }) => {
-            const active = key === activeSection;
+            const active = key === navSection;
             return (
               <button
                 ref={active ? activeNavItemRef : undefined}
@@ -165,7 +167,7 @@ export function SettingsSidebar({
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "text-sidebar-accent-foreground"
-                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
+                    : "text-muted-foreground settings-hover hover:text-foreground",
                 )}
               >
                 <Icon className="h-[1em] w-[1em] shrink-0" strokeWidth={2} aria-hidden />
@@ -182,7 +184,7 @@ export function SettingsSidebar({
         {onRestart ? (
           <div>
             {restartPending ? (
-              <p role="status" className="px-2.5 pb-1 text-[12px] leading-5 text-muted-foreground">
+              <p id="settings-restart-status" role="status" className="sr-only">
                 {t("settings.status.savedRestartApply")}
               </p>
             ) : null}
@@ -191,11 +193,15 @@ export function SettingsSidebar({
               variant="ghost"
               onClick={onRestart}
               disabled={isRestarting}
-              className="h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+              aria-describedby={restartPending ? "settings-restart-status" : undefined}
+              className={cn("h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] font-medium settings-hover",
+                restartPending && !isRestarting
+                  ? "settings-restart-pending text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
+                  : "text-muted-foreground hover:text-foreground")}
             >
               {isRestarting ? <Loader2 className="h-[1em] w-[1em] animate-spin" aria-hidden />
                 : <RotateCcw className="h-[1em] w-[1em]" aria-hidden />}
-              {restartLabel}
+              <span className="sidebar-action-label [--sidebar-label-width:4em]">{restartLabel}</span>
             </Button>
           </div>
         ) : null}
@@ -207,7 +213,7 @@ export function SettingsSidebar({
             className="hidden h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive lg:flex"
           >
             <LogOut className="h-[1em] w-[1em]" aria-hidden />
-            {t("app.account.logout")}
+            <span className="sidebar-action-label [--sidebar-label-width:4em]">{t("app.account.logout")}</span>
           </Button>
         ) : null}
       </div>

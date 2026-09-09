@@ -57,6 +57,7 @@ describe("Runtime configuration settings", () => {
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.getByRole("switch", { name: "Web access" })).toBeInTheDocument();
   });
 

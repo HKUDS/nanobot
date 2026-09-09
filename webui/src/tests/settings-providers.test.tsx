@@ -170,7 +170,7 @@ describe("Settings providers", () => {
       ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-      const dialog = await screen.findByRole("dialog");
+      const dialog = (await screen.findByText("Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.")).closest('[role="dialog"]') as HTMLElement;
 
       expect(openMock).not.toHaveBeenCalled();
       expect(
@@ -251,7 +251,7 @@ describe("Settings providers", () => {
 
     await chooseProviderToConfigure("OpenAI Codex");
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = (await screen.findByText("Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, copy the full localhost callback URL from the address bar and paste it below.")).closest('[role="dialog"]') as HTMLElement;
 
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.provider.oauth_login",
@@ -354,7 +354,7 @@ describe("Settings providers", () => {
       ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-      const dialog = await screen.findByRole("dialog");
+      const dialog = (await screen.findByText("Open ChatGPT in this browser and finish signing in. When the localhost page fails to load, copy the full URL from the address bar and paste it below.")).closest('[role="dialog"]') as HTMLElement;
 
       expect(openMock).not.toHaveBeenCalled();
       expect(
@@ -496,7 +496,7 @@ describe("Settings providers", () => {
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     await chooseProviderToConfigure("OpenAI Codex");
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     const codexProxy = screen.getByLabelText("Network proxy");
@@ -595,7 +595,7 @@ describe("Settings providers", () => {
       screen.getByRole("button", { name: "Save provider" }),
     ).toBeEnabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
     fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
@@ -608,7 +608,7 @@ describe("Settings providers", () => {
       screen.getByRole("button", { name: "Save provider" }),
     ).toBeEnabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: /^DeepSeek/ }));
     expect(screen.getByText(/DeepSeek V4 Flash/)).toBeInTheDocument();
     const deepSeekSearch = screen.getByRole("switch", { name: "DeepSeek web search" });

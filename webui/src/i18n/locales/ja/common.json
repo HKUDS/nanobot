@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "終了する前に再起動しますか？",
+      "description": "変更は保存されています。反映するには再起動してください。",
+      "later": "後で再起動"
+    },
     "runtimeConfig": {
       "apiSaved": "保存しました。API サービスを再起動すると反映されます。",
       "fields": {
@@ -158,6 +163,7 @@
       "ariaLabel": "設定セクション"
     },
     "nav": {
+      "about": "概要",
       "capabilities": "機能",
       "general": "一般",
       "byok": "BYOK",
@@ -515,7 +521,7 @@
       "disabled": "無効",
       "noPresets": "モデルプリセットはまだありません",
       "noPresetsHelp": "プリセットを作成してから呼び出し順序に追加してください。",
-      "removeBeforeDelete": "削除する前に、このプリセットを呼び出し順序から外してください。",
+      "removeBeforeDelete": "削除する前に、別のプリセットをメインに設定してください。",
       "providerSetupRequired": "プロバイダーの設定が必要です",
       "configureProviderBeforeSaving": "プリセットを保存する前に、このプロバイダーを設定してください。",
       "deletePresetTitle": "モデルプリセットを削除しますか？",
@@ -568,6 +574,9 @@
       "noDescription": "説明はありません。"
     },
     "about": {
+      "documentation": "公式ドキュメント",
+      "sourceCode": "ソースコード",
+      "reportIssue": "問題を報告",
       "version": "バージョン",
       "checking": "確認中...",
       "checkForUpdates": "アップデートを確認",

@@ -41,6 +41,39 @@ const agentPlugin = {
 describe("Settings system domains", () => {
   installSettingsViewTestHooks();
 
+  it("asks before leaving with pending changes and lets the user restart later", () => {
+    const leave = vi.fn();
+    renderSettingsView({ initialSection: "runtime", initialSettings: {
+      ...settingsPayload(), requires_restart: true, restart_required_sections: ["runtime"],
+    }, onBackToChat: leave });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    const dialog = screen.getByRole("dialog", { name: "Restart before leaving?" });
+    expect(leave).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("Your changes are saved. Restart to apply them.")).toBeVisible();
+    expect(within(dialog).queryByText("Continue settings")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restart later" }));
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("restarts from the exit prompt", () => {
+    const restart = vi.fn();
+    renderSettingsView({ initialSection: "runtime", initialSettings: {
+      ...settingsPayload(), requires_restart: true,
+    }, onRestart: restart });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restart", exact: true }));
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves directly when no restart is pending", () => {
+    const leave = vi.fn();
+    renderSettingsView({ initialSection: "runtime", initialSettings: settingsPayload(), onBackToChat: leave });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("keeps one restart action and pending notice in the sidebar across settings pages", async () => {
     renderSettingsView({
       initialSection: "runtime",
@@ -423,10 +456,11 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "channels" });
 
     const matrixRow = await screen.findByRole("button", { name: "View Matrix settings" });
-    expect(matrixRow).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getAllByText("Matrix")).toHaveLength(2);
-    expect(screen.getAllByText("Use nanobot from Matrix rooms.")).toHaveLength(2);
+    expect(matrixRow).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(matrixRow);
+    expect(screen.getByRole("heading", { name: "Matrix", exact: true })).toBeVisible();
     expect(screen.queryByText(/Enabling Nanobot features may install Python packages/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
     expect(screen.getByRole("dialog", { name: "Install support for Matrix?" })).toBeInTheDocument();
     expect(screen.getByText("nanobot will add what Matrix needs, then turn it on. Continue?")).toBeInTheDocument();
@@ -447,11 +481,13 @@ describe("Settings system domains", () => {
     expect(screen.queryByText("Restart nanobot to apply updated channel support.")).not.toBeInTheDocument();
     expect(screen.getAllByText("On").length).toBeGreaterThan(0);
 
+    fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
     expect(screen.getByLabelText("Homeserver")).toBeInTheDocument();
     expect(screen.getByLabelText("User ID")).toBeInTheDocument();
     expect(screen.getByLabelText("Device ID")).toBeInTheDocument();
     expect(screen.queryByText("channels.matrix.homeserver")).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
 
     await waitFor(() =>

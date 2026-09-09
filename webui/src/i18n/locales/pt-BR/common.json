@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "Reiniciar antes de sair?",
+      "description": "As alterações foram salvas. Reinicie para aplicá-las.",
+      "later": "Reiniciar mais tarde"
+    },
     "runtimeConfig": {
       "apiSaved": "Salvo. Reinicie o serviço de API para aplicar as alterações.",
       "fields": {
@@ -158,6 +163,7 @@
       "ariaLabel": "Seções de configurações"
     },
     "nav": {
+      "about": "Sobre",
       "capabilities": "Recursos",
       "general": "Geral",
       "byok": "BYOK",
@@ -237,7 +243,7 @@
       "disabled": "Desabilitado",
       "noPresets": "Ainda não há predefinições de modelo",
       "noPresetsHelp": "Crie uma predefinição e adicione-a à ordem de chamada.",
-      "removeBeforeDelete": "Remova esta predefinição da ordem de chamada antes de excluí-la.",
+      "removeBeforeDelete": "Escolha outra predefinição principal antes de excluir esta.",
       "providerSetupRequired": "Configuração do provedor necessária",
       "configureProviderBeforeSaving": "Configure este provedor antes de salvar a predefinição.",
       "deletePresetTitle": "Excluir predefinição de modelo?",
@@ -383,6 +389,9 @@
       "noDescription": "Nenhuma descrição disponível."
     },
     "about": {
+      "documentation": "Documentação",
+      "sourceCode": "Código-fonte",
+      "reportIssue": "Relatar um problema",
       "version": "Versão",
       "checking": "Verificando...",
       "checkForUpdates": "Verificar atualizações",

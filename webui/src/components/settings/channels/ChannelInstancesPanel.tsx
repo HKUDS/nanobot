@@ -180,7 +180,7 @@ export function ChannelInstancesPanel({
                 "overflow-hidden rounded-floating transition-colors",
                 expanded
                   ? "bg-background"
-                  : "bg-background/70 hover:bg-muted",
+                  : "bg-background/70 settings-hover",
               )}
             >
               <div className="flex items-center gap-3 px-3 py-3">
@@ -291,7 +291,7 @@ export function ChannelInstancesPanel({
                             type="submit"
                             size="sm"
                             variant="secondary"
-                            className="h-8 rounded-full bg-muted/70 px-3 text-[12px] font-semibold hover:bg-muted"
+                            className="h-8 rounded-full bg-muted/70 px-3 text-[12px] font-semibold settings-hover"
                             disabled={savingFields}
                           >
                             {savingFields ? (

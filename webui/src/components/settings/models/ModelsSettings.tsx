@@ -3,7 +3,6 @@ import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ChevronDown,
-  ChevronRight,
   GripVertical,
   ListOrdered,
   Loader2,
@@ -233,12 +232,18 @@ export function ModelsSettings({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
+  const editorTriggerRef = useRef<HTMLElement | null>(null);
   const presetNameInputRef = useRef<HTMLInputElement>(null);
   const suggestedPresetNameRef = useRef<string | null>(null);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
   const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
+  const [draggedRowHeight, setDraggedRowHeight] = useState(0);
+  const dragStartY = useRef(0);
+  const pendingDrag = useRef<number | null>(null);
+  const suppressDragClick = useRef(false);
+  const [draggedOffset, setDraggedOffset] = useState(0);
 
   useEffect(() => {
     if (presetNameError) presetNameInputRef.current?.focus();
@@ -306,13 +311,14 @@ export function ModelsSettings({
     form.temperature < 0 ||
     form.temperature > 2;
   const selectedPresetReferenced = Boolean(
-    selectedPreset && callOrder.includes(selectedPreset.name),
+    selectedPreset && callOrder[0] === selectedPreset.name,
   );
   const callOrderBusy = orderSaving || saving;
   const selectPreset = (
     preset: SettingsPayload["model_presets"][number],
     rowKey: string,
   ) => {
+    editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const toggleCurrentPreset =
       !creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey;
     onSelectConfiguration(preset.name);
@@ -375,18 +381,8 @@ export function ModelsSettings({
     <div
       id="model-preset-editor"
       data-testid="model-preset-editor"
-      className={cn(
-        "mx-3 mb-3 space-y-1 overflow-hidden rounded-floating bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl",
-        creating && "mt-3",
-      )}
+      className="space-y-1 pb-4"
     >
-      {creating ? (
-        <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
-          <span className="text-[13px] font-semibold text-foreground/85">
-            {tx("settings.models.newPreset", "New model preset")}
-          </span>
-        </div>
-      ) : null}
       <SettingsRow
         title={tx("settings.models.presetName", "Preset name")}
         description={tx(
@@ -396,7 +392,7 @@ export function ModelsSettings({
       >
         <div
           className={cn(
-            "w-[min(280px,70vw)] motion-reduce:animate-none",
+            "w-full motion-reduce:animate-none",
             presetNameError && "animate-[preset-name-shake_180ms_ease-in-out]",
           )}
         >
@@ -414,7 +410,7 @@ export function ModelsSettings({
               setForm((prev) => ({ ...prev, modelPreset: event.target.value }));
             }}
             className={cn(
-              "h-8 rounded-full text-[13px]",
+              "h-9 rounded-full text-[13px]",
               presetNameError &&
                 "border-destructive/70 focus-visible:border-destructive focus-visible:ring-destructive/25",
             )}
@@ -504,7 +500,7 @@ export function ModelsSettings({
         type="button"
         aria-expanded={advancedOpen}
         onClick={() => setAdvancedOpen((value) => !value)}
-        className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
+        className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors settings-hover sm:px-5"
       >
         <span>
           <span className="block text-[14px] font-medium text-foreground">
@@ -576,7 +572,7 @@ export function ModelsSettings({
               >
                 {tx(
                   "settings.models.removeBeforeDelete",
-                  "Remove this preset from the call order before deleting it.",
+                  "Choose another primary preset before deleting this one.",
                 )}
               </span>
             ) : null}
@@ -661,14 +657,13 @@ export function ModelsSettings({
                         preset.resolved_provider,
                       )
                     : true;
-                  const isDropTarget =
-                    ordered &&
-                    dragOverCallOrderIndex === orderIndex &&
-                    draggedCallOrderIndex !== orderIndex;
-                  const dropAfterTarget =
-                    isDropTarget &&
-                    draggedCallOrderIndex !== null &&
-                    draggedCallOrderIndex < orderIndex;
+                  let dragOffset = 0;
+                  const isDragging = ordered && draggedCallOrderIndex === orderIndex;
+                  if (ordered && draggedCallOrderIndex !== null && dragOverCallOrderIndex !== null) {
+                    if (isDragging) dragOffset = draggedOffset;
+                    if (orderIndex > draggedCallOrderIndex && orderIndex <= dragOverCallOrderIndex) dragOffset = -draggedRowHeight;
+                    if (orderIndex < draggedCallOrderIndex && orderIndex >= dragOverCallOrderIndex) dragOffset = draggedRowHeight;
+                  }
                   const isSelected =
                     editorOpen &&
                     !creating &&
@@ -677,7 +672,7 @@ export function ModelsSettings({
                   const presetRow = (
                     <div
                       tabIndex={ordered ? 0 : -1}
-                      draggable={ordered && !callOrderBusy}
+                      onDragStart={(event) => event.preventDefault()}
                       aria-label={
                         ordered
                           ? `${name}. ${tx(
@@ -687,35 +682,42 @@ export function ModelsSettings({
                           : name
                       }
                       data-testid={`model-call-order-row-${name}`}
-                      onDragStart={(event) => {
-                        if (!ordered || callOrderBusy) {
-                          event.preventDefault();
-                          return;
-                        }
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", name);
-                        setDraggedCallOrderIndex(orderIndex);
-                        setDragOverCallOrderIndex(orderIndex);
+                      onPointerDown={(event) => {
+                        if (!ordered || callOrderBusy || event.button !== 0 || (event.target as HTMLElement).closest('[role="switch"]')) return;
+                        pendingDrag.current = orderIndex;
+                        suppressDragClick.current = false;
+                        dragStartY.current = event.clientY;
+                        setDraggedOffset(0);
+                        const wrapper = event.currentTarget.parentElement;
+                        setDraggedRowHeight((wrapper?.getBoundingClientRect().height ?? 56) + 4);
                       }}
-                      onDragEnd={() => {
+                      onPointerMove={(event) => {
+                        if (!event.buttons) { pendingDrag.current = null; return; }
+                        if (pendingDrag.current !== orderIndex || callOrderBusy) return;
+                        const offset = event.clientY - dragStartY.current;
+                        if (draggedCallOrderIndex === null && Math.abs(offset) < 5) return;
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        suppressDragClick.current = true;
+                        setDraggedCallOrderIndex(orderIndex);
+                        const target = Math.max(0, Math.min(callOrder.length - 1, orderIndex + Math.round(offset / draggedRowHeight)));
+                        setDragOverCallOrderIndex(target);
+                        setDraggedOffset(Math.max(-orderIndex * draggedRowHeight, Math.min((callOrder.length - orderIndex - 1) * draggedRowHeight, offset)));
+                      }}
+                      onPointerUp={() => {
+                        pendingDrag.current = null;
+                        if (draggedCallOrderIndex !== null) dropCallOrderItem(dragOverCallOrderIndex ?? orderIndex);
+                      }}
+                      onPointerCancel={() => {
+                        pendingDrag.current = null;
                         setDraggedCallOrderIndex(null);
                         setDragOverCallOrderIndex(null);
                       }}
-                      onDragEnter={(event) => {
-                        if (ordered && draggedCallOrderIndex !== null) {
+                      onClickCapture={(event) => {
+                        if (suppressDragClick.current) {
                           event.preventDefault();
-                          setDragOverCallOrderIndex(orderIndex);
+                          event.stopPropagation();
+                          suppressDragClick.current = false;
                         }
-                      }}
-                      onDragOver={(event) => {
-                        if (!ordered || draggedCallOrderIndex === null) return;
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = "move";
-                      }}
-                      onDrop={(event) => {
-                        if (!ordered) return;
-                        event.preventDefault();
-                        dropCallOrderItem(orderIndex);
                       }}
                       onKeyDown={(event) => {
                         if (event.currentTarget !== event.target) return;
@@ -731,28 +733,21 @@ export function ModelsSettings({
                         }
                       }}
                       className={cn(
-                        "settings-list-row group relative flex select-none items-center gap-3 py-3 outline-none transition-[background-color,opacity] duration-150",
+                        "settings-list-row group relative flex select-none items-center gap-3 py-2 outline-none transition-colors duration-150",
                         ordered &&
                           (callOrderBusy
                             ? "cursor-wait"
                             : "cursor-grab active:cursor-grabbing"),
-                        "hover:bg-muted/25",
-                        isDropTarget &&
-                          !dropAfterTarget &&
-                          "before:absolute before:inset-x-4 before:top-0 before:z-10 before:h-0.5 before:rounded-full before:bg-foreground sm:before:inset-x-5",
-                        isDropTarget &&
-                          dropAfterTarget &&
-                          "after:absolute after:inset-x-4 after:bottom-0 after:z-10 after:h-0.5 after:rounded-full after:bg-foreground sm:after:inset-x-5",
-                        ordered && draggedCallOrderIndex === orderIndex && "opacity-35",
-                        isSelected && "bg-muted/45 hover:bg-muted/45",
+                        !isDragging && "settings-hover",
+                        isDragging && "bg-settings-surface shadow-md",
+                        isSelected && "bg-muted/45 settings-hover",
                         "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                       )}
                     >
                       <button
                         type="button"
                         aria-pressed={selectedPreset?.name === name}
-                        aria-expanded={isSelected}
-                        aria-controls={isSelected ? "model-preset-editor" : undefined}
+                        aria-haspopup="dialog"
                         disabled={!preset}
                         onClick={() => preset && selectPreset(preset, key)}
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-control text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -760,7 +755,7 @@ export function ModelsSettings({
                         {presetConfigured ? (
                           <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} />
                         ) : (
-                          <span className="grid h-10 w-10 shrink-0 place-items-center">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center">
                             <ProviderPickerIcon provider={provider} showBrandLogos={showBrandLogos} unconfigured />
                           </span>
                         )}
@@ -784,17 +779,10 @@ export function ModelsSettings({
                             ) : null}
                           </span>
                         </span>
-                        <ChevronRight
-                          className={cn(
-                            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                            isSelected && "rotate-90",
-                          )}
-                          aria-hidden
-                        />
                       </button>
                       {ordered ? (
                         <GripVertical
-                          className="pointer-events-none h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
+                          className="h-4 w-4 shrink-0 touch-none text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
                           aria-hidden
                         />
                       ) : (
@@ -833,9 +821,11 @@ export function ModelsSettings({
                     </div>
                   );
                   return (
-                    <div key={key} role="listitem">
-                      {presetRow}
-                      {isSelected ? renderPresetEditor() : null}
+                    <div key={key} role="listitem" data-call-order-index={orderIndex}>
+                      <div className={cn("relative", isDragging ? "z-10" : "transition-transform duration-150 ease-out motion-reduce:transition-none")}
+                        style={{ transform: `translateY(${dragOffset}px)` }}>
+                        {presetRow}
+                      </div>
                     </div>
                   );
                 })}
@@ -843,9 +833,10 @@ export function ModelsSettings({
               {!creating ? (
                 <button
                   type="button"
-                  className="flex min-h-[58px] w-full items-center justify-between gap-3 settings-list-inset py-3 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex min-h-[58px] w-full items-center justify-between gap-3 settings-list-inset py-3 text-left outline-none transition-colors settings-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={callOrderBusy}
-                  onClick={() => {
+                  onClick={(event) => {
+                    editorTriggerRef.current = event.currentTarget;
                     setEditorRowKey(null);
                     setEditorOpen(true);
                     onBeginCreate();
@@ -865,11 +856,26 @@ export function ModelsSettings({
                   ) : null}
                 </button>
               ) : null}
-              {creating && editorOpen ? renderPresetEditor() : null}
             </>
           )}
         </SettingsGroup>
       </section>
+      <Dialog open={editorOpen && (creating || selectedPreset !== null)} onOpenChange={(open) => {
+        setEditorOpen(open);
+        if (!open && creating) onCancelCreate();
+      }}>
+        <DialogContent aria-describedby={undefined}
+          className="relative max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            editorTriggerRef.current?.focus();
+          }}>
+          <DialogHeader className="px-6 pb-2 pt-5 pr-12">
+            <DialogTitle>{creating ? tx("settings.models.newPreset", "New model preset") : selectedPreset?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="settings-grid !px-0">{renderPresetEditor()}</div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

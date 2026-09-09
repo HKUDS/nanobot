@@ -175,7 +175,7 @@ export function AutomationsSettings({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-control border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
+                    className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-control border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors settings-hover hover:text-foreground sm:w-auto"
                   >
                     <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                     <span>{sortLabel[sort]}</span>
@@ -316,7 +316,7 @@ function AutomationListItem({
           "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-floating px-3 py-3.5 text-left transition-colors",
           selected
             ? "bg-background/80 text-foreground"
-            : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
+            : "text-muted-foreground settings-hover hover:text-foreground",
         )}
       >
         <span className="min-w-0">

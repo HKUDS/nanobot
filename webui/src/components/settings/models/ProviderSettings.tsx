@@ -29,6 +29,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -387,7 +388,7 @@ function ProviderRequestOptions({
         return (
           <div
             key={option.titleKey}
-            className="flex items-center justify-between gap-4 rounded-xl px-4 py-3 transition-colors hover:bg-sidebar-accent/60 focus-within:bg-sidebar-accent/60"
+            className="flex items-center justify-between gap-4 rounded-xl px-4 py-3 transition-colors settings-hover focus-within:bg-sidebar-accent/60"
           >
             <div className="flex min-w-0 items-start gap-3">
               <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
@@ -766,12 +767,13 @@ export function ProvidersSettings({
       ? (nanobotFeatures?.features ?? []).find((feature) => feature.name === supportName)
       : null;
     return (
-      <div key={provider.name} className="space-y-1">
+      <Dialog key={provider.name} open={expanded} onOpenChange={(open) => {
+        if (open !== expanded) toggleProvider(provider.name);
+      }}>
+        <DialogTrigger asChild>
         <button
           type="button"
-          aria-expanded={expanded}
-          onClick={() => toggleProvider(provider.name)}
-          className="settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors hover:bg-muted/35"
+          className="settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors settings-hover"
         >
           <span className="flex min-w-0 items-center gap-3">
             <ProviderIcon
@@ -784,17 +786,12 @@ export function ProvidersSettings({
               </span>
             </span>
           </span>
-          <ChevronDown
-            className={cn(
-              "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-              expanded && "rotate-180",
-            )}
-            aria-hidden
-          />
         </button>
+        </DialogTrigger>
 
         {expanded ? (
-          <div className="space-y-3 bg-muted/18 px-4 py-4 sm:px-5">
+          <DialogContent aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto">
+            <DialogHeader><DialogTitle>{provider.label}</DialogTitle></DialogHeader>
             {supportFeature && !supportFeature.installed ? (
               <CapabilityInstallNotice
                 title={tx("settings.capabilities.providerSupport", "Provider support")}
@@ -961,7 +958,7 @@ export function ProvidersSettings({
                               ? t("settings.byok.hideApiKey")
                               : t("settings.byok.showApiKey")
                           }
-                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
                         >
                           {keyVisible ? (
                             <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -981,7 +978,7 @@ export function ProvidersSettings({
                           size="icon"
                           onClick={() => onToggleProviderKeyEditing(provider.name)}
                           aria-label={t("settings.actions.edit")}
-                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
                         >
                           <Pencil className="h-3.5 w-3.5" aria-hidden />
                         </Button>
@@ -1040,31 +1037,16 @@ export function ProvidersSettings({
                 </div>
               </>
             )}
-          </div>
+          </DialogContent>
         ) : null}
-      </div>
+      </Dialog>
     );
   };
   const customProviderForm = creatingCustomProvider ? (
-    <div className="space-y-1">
-      <button
-        type="button"
-        aria-expanded
-        onClick={cancelCustomProviderCreation}
-        className="settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors hover:bg-muted/35"
-      >
-        <span className="flex min-w-0 items-center gap-3">
-          <ProviderIcon provider="custom" showBrandLogos={showBrandLogos} />
-          <span className="truncate text-[14px] font-medium text-foreground">
-            {tx("settings.providers.customProvider", "Custom provider")}
-          </span>
-        </span>
-        <ChevronDown
-          className="h-4 w-4 shrink-0 rotate-180 text-muted-foreground"
-          aria-hidden
-        />
-      </button>
-      <div className="space-y-3 bg-muted/18 px-4 py-4 sm:px-5">
+    <Dialog open onOpenChange={(open) => { if (!open) cancelCustomProviderCreation(); }}>
+      <DialogContent aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto">
+        <DialogHeader><DialogTitle>{tx("settings.providers.customProvider", "Custom provider")}</DialogTitle></DialogHeader>
+      <div className="space-y-3">
         <label className="block space-y-1.5">
           <span className="text-[12px] font-medium text-muted-foreground">
             {tx("settings.providers.customProviderName", "Provider name")}
@@ -1136,7 +1118,7 @@ export function ProvidersSettings({
                   ? t("settings.byok.hideApiKey")
                   : t("settings.byok.showApiKey")
               }
-              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
             >
               {customProviderKeyVisible ? (
                 <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -1180,7 +1162,8 @@ export function ProvidersSettings({
           </Button>
         </div>
       </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   ) : null;
   return (
     <div className="space-y-6">
@@ -1199,7 +1182,7 @@ export function ProvidersSettings({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="group settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors hover:bg-muted/35"
+                  className="group settings-list-row flex w-full items-center justify-between gap-4 py-3 text-left transition-colors settings-hover"
                 >
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
@@ -1296,7 +1279,7 @@ export function ProviderIcon({
     return (
       <span
         data-testid={`provider-logo-${provider}`}
-        className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-control border border-border/45 bg-background"
+        className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-control border border-border/45 bg-background"
       >
         <img
           src={logoUrl}
@@ -1314,7 +1297,7 @@ export function ProviderIcon({
     return (
       <span
         data-testid={`provider-logo-fallback-${provider}`}
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-control text-[11px] font-semibold text-white"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-control text-[11px] font-semibold text-white"
         style={{ backgroundColor: brand.color }}
         aria-hidden
       >
@@ -1323,7 +1306,7 @@ export function ProviderIcon({
     );
   }
   return (
-    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-muted text-foreground/82 dark:bg-muted/70">
+    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 dark:bg-muted/70">
       <Icon className="h-5 w-5" strokeWidth={2} aria-hidden />
     </span>
   );

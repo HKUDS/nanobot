@@ -213,7 +213,7 @@ export function CredentialForm({
                       : tx("settings.channels.showSecret", "Show secret")
                   }
                   onClick={() => onToggleSecret(field.key)}
-                  className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                  className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground settings-hover hover:text-foreground"
                 >
                   {visible ? (
                     <EyeOff className="h-3.5 w-3.5" aria-hidden />

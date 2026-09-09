@@ -222,7 +222,7 @@ function SkillCatalogRow({
       className={cn(
         "group flex w-full min-w-0 items-center gap-3 rounded-control px-2 py-3 text-left",
         "transition-colors duration-150",
-        "hover:bg-muted/70",
+        "settings-hover",
         "focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         !enabled && "opacity-60",
       )}
@@ -368,7 +368,7 @@ function SkillDetailSheet({
           side="right"
           closeButtonClassName={cn(
             "right-2 top-2 inline-flex h-10 w-10 items-center justify-center rounded-full opacity-100",
-            "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+            "text-muted-foreground transition-colors settings-hover hover:text-foreground",
             "sm:right-3 sm:top-3",
           )}
           className={cn(
@@ -661,7 +661,7 @@ function RequirementsSection({
               })}
               title={option.label}
               onClick={() => void copyCommand(option.command)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors settings-hover hover:text-foreground sm:h-7 sm:w-7"
             >
               {copiedCommand === option.command ? (
                 <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />

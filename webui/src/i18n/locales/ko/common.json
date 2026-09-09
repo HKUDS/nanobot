@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "나가기 전에 다시 시작할까요?",
+      "description": "변경 사항이 저장되었습니다. 적용하려면 다시 시작하세요.",
+      "later": "나중에 다시 시작"
+    },
     "runtimeConfig": {
       "apiSaved": "저장했습니다. API 서비스를 다시 시작하면 적용됩니다.",
       "fields": {
@@ -158,6 +163,7 @@
       "ariaLabel": "설정 섹션"
     },
     "nav": {
+      "about": "정보",
       "capabilities": "기능",
       "general": "일반",
       "byok": "BYOK",
@@ -515,7 +521,7 @@
       "disabled": "비활성화됨",
       "noPresets": "아직 모델 프리셋이 없습니다",
       "noPresetsHelp": "프리셋을 만든 다음 호출 순서에 추가하세요.",
-      "removeBeforeDelete": "삭제하기 전에 이 프리셋을 호출 순서에서 제거하세요.",
+      "removeBeforeDelete": "삭제하기 전에 다른 프리셋을 기본으로 선택하세요.",
       "providerSetupRequired": "제공자 설정 필요",
       "configureProviderBeforeSaving": "프리셋을 저장하기 전에 이 제공자를 설정하세요.",
       "deletePresetTitle": "모델 프리셋을 삭제할까요?",
@@ -568,6 +574,9 @@
       "noDescription": "설명이 없습니다."
     },
     "about": {
+      "documentation": "공식 문서",
+      "sourceCode": "소스 코드",
+      "reportIssue": "문제 신고",
       "version": "버전",
       "checking": "확인 중...",
       "checkForUpdates": "업데이트 확인",

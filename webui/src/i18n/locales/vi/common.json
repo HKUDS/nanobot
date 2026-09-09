@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "Khởi động lại trước khi thoát?",
+      "description": "Thay đổi đã được lưu. Khởi động lại để áp dụng.",
+      "later": "Khởi động lại sau"
+    },
     "runtimeConfig": {
       "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",
       "fields": {
@@ -158,6 +163,7 @@
       "ariaLabel": "Mục cài đặt"
     },
     "nav": {
+      "about": "Giới thiệu",
       "capabilities": "Tính năng",
       "general": "Chung",
       "byok": "BYOK",
@@ -515,7 +521,7 @@
       "disabled": "Đã tắt",
       "noPresets": "Chưa có cấu hình mô hình đặt trước",
       "noPresetsHelp": "Tạo cấu hình đặt trước rồi thêm vào thứ tự gọi.",
-      "removeBeforeDelete": "Hãy xóa cấu hình này khỏi thứ tự gọi trước khi xóa.",
+      "removeBeforeDelete": "Chọn cấu hình chính khác trước khi xóa cấu hình này.",
       "providerSetupRequired": "Cần cấu hình nhà cung cấp",
       "configureProviderBeforeSaving": "Hãy cấu hình nhà cung cấp này trước khi lưu cấu hình đặt trước.",
       "deletePresetTitle": "Xóa cấu hình mô hình đặt trước?",
@@ -568,6 +574,9 @@
       "noDescription": "Không có mô tả."
     },
     "about": {
+      "documentation": "Tài liệu",
+      "sourceCode": "Mã nguồn",
+      "reportIssue": "Báo cáo sự cố",
       "version": "Phiên bản",
       "checking": "Đang kiểm tra...",
       "checkForUpdates": "Kiểm tra bản cập nhật",

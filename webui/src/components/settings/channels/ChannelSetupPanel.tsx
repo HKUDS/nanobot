@@ -8,7 +8,6 @@ import {
 import {
   Check,
   ChevronDown,
-  ChevronRight,
   Clipboard,
   Loader2,
   Plus,
@@ -31,7 +30,6 @@ import {
   ChannelLogo,
   ChannelRuntimeError,
   ChannelStatusBadge,
-  channelDescription,
   channelRequirements,
   channelSetup,
   channelStatusLabel,
@@ -64,31 +62,36 @@ import { useClient } from "@/providers/ClientProvider";
 
 export function ChannelCatalogRow({
   feature,
-  selected,
   showBrandLogos,
   onSelect,
+  actionKey,
+  onAction,
 }: {
   feature: NanobotFeatureInfo;
-  selected: boolean;
   showBrandLogos: boolean;
-  onSelect: () => void;
+  onSelect: (connect?: boolean) => void;
+  actionKey: string | null;
+  onAction: (action: "enable" | "disable", name: string) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
+  const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
+  const checked = alwaysEnabled || channelToggleChecked(feature);
+  const busy = actionKey === `enable:${feature.name}` || actionKey === `disable:${feature.name}`;
 
   return (
+    <div className="settings-list-row flex items-center gap-3 py-3 transition-colors settings-hover">
     <button
       type="button"
       aria-label={t("settings.channels.selectChannel", {
         name: displayName,
         defaultValue: "View {{name}} settings",
       })}
-      aria-pressed={selected}
-      onClick={onSelect}
+      aria-haspopup="dialog"
+      onClick={() => onSelect()}
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-control px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
-        selected ? "bg-background" : "hover:bg-muted",
+        "group flex min-w-0 flex-1 select-none items-center gap-3 rounded-control text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
       )}
     >
       <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
@@ -96,23 +99,24 @@ export function ChannelCatalogRow({
         <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
           {displayName}
         </h3>
-        <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">
-          {channelDescription(feature, t)}
-        </p>
       </div>
+    </button>
       <div className="flex shrink-0 items-center gap-2">
+        {feature.runtime_status === "failed" ? (
         <ChannelStatusBadge status={feature.runtime_status}>
           {channelStatusLabel(feature, tx)}
         </ChannelStatusBadge>
-        <ChevronRight
-          className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-            selected && "translate-x-0.5 text-foreground",
-          )}
-          aria-hidden
-        />
+        ) : null}
+        <ToggleButton checked={checked}
+          label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+          disabled={alwaysEnabled || busy || (!feature.install_supported && !feature.installed && !feature.enabled)}
+          ariaLabel={t("settings.channels.toggleChannel", { name: displayName, defaultValue: "{{name}} channel" })}
+          onChange={(enabled) => {
+            if (enabled && feature.configured === false) onSelect(true);
+            else onAction(enabled ? "enable" : "disable", feature.name);
+          }} />
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -124,6 +128,7 @@ export function ChannelSetupPanel({
   showBrandLogos,
   onAction,
   onFeaturesUpdate,
+  connectRequestId = 0,
 }: {
   token: string;
   feature: NanobotFeatureInfo;
@@ -132,17 +137,18 @@ export function ChannelSetupPanel({
   showBrandLogos: boolean;
   onAction: (action: "enable" | "disable", name: string) => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  connectRequestId?: number;
 }) {
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
-  const [connectRequestId, setConnectRequestId] = useState(0);
   const uiContribution = channelUiContribution(feature.name, feature.webui);
   const PluginPanel = uiContribution?.Panel;
   if (PluginPanel) {
     return (
       <Suspense fallback={<ChannelPluginLoading />}>
         <PluginPanel
+          connectRequestId={connectRequestId}
           token={token}
           feature={feature}
           actionKey={actionKey}
@@ -165,39 +171,19 @@ export function ChannelSetupPanel({
     );
   }
   const enableBusy = actionKey === `enable:${feature.name}`;
-  const disableBusy = actionKey === `disable:${feature.name}`;
   const missingSupport = feature.enabled && !feature.installed;
-  const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
-  const channelChecked = alwaysEnabled || channelToggleChecked(feature);
-  const channelBusy = enableBusy || disableBusy;
   const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
-  const needsSetupBeforeEnable =
-    !channelChecked
-    && feature.configured === false
-    && !(uiContribution?.canConnectBeforeConfigured && setup.mode === "connect");
-  const channelToggleDisabled =
-    alwaysEnabled
-    || channelBusy
-    || needsSetupBeforeEnable
-    || (!feature.install_supported && !feature.installed && !feature.enabled);
   const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
-  const toggleAriaLabel = t("settings.channels.toggleChannel", {
-    name: displayName,
-    defaultValue: "{{name}} channel",
-  });
 
   return (
-    <aside className="min-h-full rounded-panel bg-settings-surface p-5">
-      <div className="flex items-start justify-between gap-4">
+    <aside className="settings-editor rounded-panel bg-settings-surface">
+      <div className="flex items-start justify-between gap-4 pr-8">
         <div className="flex min-w-0 items-start gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
+            <h3 className="truncate select-none text-[14px] font-semibold leading-5 text-foreground">
               {displayName}
             </h3>
-            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-              {channelDescription(feature, t)}
-            </p>
             {missingSupport && feature.install_supported ? (
               <Button
                 type="button"
@@ -216,32 +202,6 @@ export function ChannelSetupPanel({
               </Button>
             ) : null}
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 pt-1">
-          <ChannelStatusBadge status={feature.runtime_status}>
-            {channelStatusLabel(feature, tx)}
-          </ChannelStatusBadge>
-          {channelBusy ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
-          ) : null}
-          <ToggleButton
-            checked={channelChecked}
-            disabled={channelToggleDisabled}
-            ariaLabel={toggleAriaLabel}
-            label={channelChecked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            onChange={(checked) => {
-              if (
-                uiContribution?.canConnectBeforeConfigured
-                && checked
-                && !channelChecked
-                && feature.configured === false
-              ) {
-                setConnectRequestId((current) => current + 1);
-                return;
-              }
-              onAction(checked ? "enable" : "disable", feature.name);
-            }}
-          />
         </div>
       </div>
 
@@ -456,7 +416,7 @@ function ChannelSetupSurface({
                 type="button"
                 size="sm"
                 variant="secondary"
-                className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold hover:bg-background"
+                className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold settings-hover"
                 onClick={() =>
                   setNotice(
                     tx(
@@ -510,7 +470,7 @@ function ChannelSetupSurface({
                 type="submit"
                 size="sm"
                 variant="secondary"
-                className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold hover:bg-background"
+                className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold settings-hover"
                 disabled={saving}
               >
                 {saving || validating ? (

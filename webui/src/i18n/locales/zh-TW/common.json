@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "離開前重新啟動？",
+      "description": "變更已儲存，重新啟動後生效。",
+      "later": "稍後重新啟動"
+    },
     "runtimeConfig": {
       "apiSaved": "已儲存，重新啟動 API 服務後生效。",
       "fields": {
@@ -158,6 +163,7 @@
       "ariaLabel": "設定區段"
     },
     "nav": {
+      "about": "關於",
       "capabilities": "能力",
       "general": "一般",
       "byok": "BYOK",
@@ -515,7 +521,7 @@
       "disabled": "未啟用",
       "noPresets": "尚無模型預設",
       "noPresetsHelp": "先建立預設，再將它加入呼叫順序。",
-      "removeBeforeDelete": "刪除前請先將此預設從呼叫順序中移除。",
+      "removeBeforeDelete": "刪除前請先選擇其他首選預設。",
       "providerSetupRequired": "供應商需要設定",
       "configureProviderBeforeSaving": "請先設定此供應商，再儲存預設。",
       "deletePresetTitle": "刪除模型預設？",
@@ -568,6 +574,9 @@
       "noDescription": "目前沒有描述。"
     },
     "about": {
+      "documentation": "官方文件",
+      "sourceCode": "程式碼儲存庫",
+      "reportIssue": "問題回報",
       "version": "版本",
       "checking": "正在檢查…",
       "checkForUpdates": "檢查更新",

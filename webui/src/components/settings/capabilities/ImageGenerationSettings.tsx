@@ -80,7 +80,7 @@ export function ImageGenerationSettings({
     settings.image_generation.providers[0];
   const providerConfigured = !!selectedProvider?.configured;
   const missingCredential = form.enabled && !providerConfigured;
-  useAutoSave(form, dirty, saving, onSave, !missingCredential);
+  useAutoSave(form, dirty, saving, onSave, !embedded && !missingCredential);
   const aspectOptions = optionRowsWithCurrent(
     IMAGE_ASPECT_RATIO_OPTIONS.map((value) => ({ name: value, label: value })),
     form.defaultAspectRatio,
@@ -113,7 +113,7 @@ export function ImageGenerationSettings({
             />
           </SettingsRow>
           ) : null}
-          {form.enabled ? <>
+          {embedded || form.enabled ? <>
           <SettingsRow title={tx("settings.rows.imageProvider", "Image provider")}>
             <ProviderPicker
               providers={settings.image_generation.providers}

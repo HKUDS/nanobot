@@ -1,5 +1,8 @@
 import { ChevronLeft, Loader2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 
@@ -17,7 +20,7 @@ import {
   ProvidersSettings,
   providerFormFromRow,
 } from "@/components/settings/models/ProviderSettings";
-import { AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
+import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
 import { SettingsSidebar, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
 import {
   NanobotFeatureInstallDialog,
@@ -41,6 +44,7 @@ import type { SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
+  registerExitGuard?: (guard: SettingsExitGuard | null) => void;
   controller: SettingsController;
   theme: "light" | "dark";
   showSidebar: boolean;
@@ -53,6 +57,7 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({
+  registerExitGuard,
   controller,
   theme,
   showSidebar,
@@ -63,6 +68,8 @@ export function SettingsPage({
   isRestarting,
   hostChromeInset,
 }: SettingsPageProps) {
+  const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
+  const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
   const {
     activeSection,
     apiService,
@@ -83,7 +90,6 @@ export function SettingsPage({
     beginModelPresetCreation,
     cancelModelPresetCreation,
     changeModelCallOrder,
-    channelsQuery,
     cliApps,
     cliAppsAction,
     cliAppsError,
@@ -179,7 +185,6 @@ export function SettingsPage({
     setAutomationsFilter,
     setAutomationsQuery,
     setAutomationsSort,
-    setChannelsQuery,
     setCliAppsError,
     setCliAppsMessage,
     setCustomMcpForm,
@@ -222,13 +227,23 @@ export function SettingsPage({
     webSearchSaving,
   } = controller;
 
+  const restartInProgress = isRestarting || hostEngineApplying;
+  const requestExit = useCallback<SettingsExitGuard>((leave) => {
+    if (settings?.requires_restart && !restartInProgress) setPendingExit(() => leave);
+    else leave();
+  }, [settings?.requires_restart, restartInProgress]);
+  useEffect(() => {
+    registerExitGuard?.(requestExit);
+    return () => registerExitGuard?.(null);
+  }, [registerExitGuard, requestExit]);
+  const backToChat = () => registerExitGuard ? onBackToChat() : requestExit(onBackToChat);
   const pendingRestartSections = showSidebar
     ? { runtime: false, image: false, browser: false }
     : controllerPendingRestartSections;
 
   const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
     <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
-      onRestart={showSidebar ? undefined : restartViaSettingsSurface} isRestarting={isRestarting || hostEngineApplying}
+      onRestart={showSidebar ? undefined : restartViaSettingsSurface} isRestarting={restartInProgress}
       remoteBrowserAccess={remoteBrowserAccess}>
       {page === "advanced" ? (
         <AdvancedSettings
@@ -240,7 +255,7 @@ export function SettingsPage({
           onChangeForm={setNetworkSafetyForm}
           onSave={saveNetworkSafetySettings}
           onRestart={restartViaSettingsSurface}
-          isRestarting={isRestarting || hostEngineApplying}
+          isRestarting={restartInProgress}
           requiresRestartPending={pendingRestartSections.runtime}
         />
       ) : null}
@@ -256,37 +271,36 @@ export function SettingsPage({
           const field = RUNTIME_CONFIG_FIELDS.find((item) => item.path === path);
           if (field) state.change(field, enabled);
         };
-        const busy = isRestarting || hostEngineApplying;
         return (
           <section className="settings-stack">
             <div className="settings-section-heading">
               <SettingsSectionTitle>{t("settings.nav.capabilities")}</SettingsSectionTitle>
               {!showSidebar && settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
-                onRestart={restartViaSettingsSurface} isRestarting={busy} /> : null}
+                onRestart={restartViaSettingsSurface} isRestarting={restartInProgress} /> : null}
             </div>
             <SettingsFeature title={t("settings.rows.imageGeneration")} enabled={imageGenerationForm.enabled}
               error={imageGenerationForm.enabled && !settings.image_generation.providers.find((provider) => provider.name === imageGenerationForm.provider)?.configured
                 ? t("settings.image.missingCredential") : controller.capabilityErrors.image}
-              disabled={busy || imageGenerationSaving} initialOpen={activeSection === "image"}
+              disabled={restartInProgress || imageGenerationSaving} initialOpen={activeSection === "image"}
               onChange={(enabled) => setImageGenerationForm((prev) => ({ ...prev, enabled }))}>
               {renderSection("image", true)}
             </SettingsFeature>
             <SettingsFeature title={t("settings.rows.transcription")} enabled={transcriptionForm.enabled}
               error={controller.capabilityErrors.voice}
-              disabled={busy || transcriptionSaving} initialOpen={activeSection === "voice"}
+              disabled={restartInProgress || transcriptionSaving} initialOpen={activeSection === "voice"}
               onChange={(enabled) => setTranscriptionForm((prev) => ({ ...prev, enabled }))}>
               {renderSection("voice", true)}
             </SettingsFeature>
             <SettingsFeature title={t("settings.runtimeConfig.groups.web.title")}
               enabled={settings.runtime_config ? state.value("tools.web.enable") === true : settings.web.enable}
-              disabled={busy || state.saving === "web" || !settings.runtime_config}
+              disabled={restartInProgress || state.saving === "web" || !settings.runtime_config}
               initialOpen={activeSection === "browser"} error={state.errors.web || controller.capabilityErrors.web}
               onChange={(enabled) => toggleRuntime("tools.web.enable", enabled)}>
               {renderSection("browser", true)}
             </SettingsFeature>
             <SettingsFeature title={t("settings.runtimeConfig.fields.agents_defaults_dream_enabled.label")}
               enabled={state.value("agents.defaults.dream.enabled") === true}
-              disabled={busy || state.saving === "memory" || !settings.runtime_config} error={state.errors.memory}
+              disabled={restartInProgress || state.saving === "memory" || !settings.runtime_config} error={state.errors.memory}
               onChange={(enabled) => toggleRuntime("agents.defaults.dream.enabled", enabled)} />
             {!settings.runtime_config ? <p className="settings-list-inset text-[13px] text-muted-foreground">{t("settings.runtimeConfig.unavailable")}</p> : null}
           </section>
@@ -300,6 +314,8 @@ export function SettingsPage({
             onSelectSection={selectSection}
           />
         );
+      case "about":
+        return <AboutSettings currentVersion={settings.version?.current} />;
       case "appearance":
         return (
           <AppearanceSettings
@@ -396,7 +412,7 @@ export function SettingsPage({
               onOpenProviders={() => selectSection("models")}
               showBrandLogos={localPrefs.brandLogos}
               onRestart={restartViaSettingsSurface}
-              isRestarting={isRestarting || hostEngineApplying}
+              isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.image}
             >
               {imageGenerationForm.enabled ? runtimeConfiguration("image") : null}
@@ -417,7 +433,7 @@ export function SettingsPage({
             onOpenProviders={() => selectSection("models")}
             showBrandLogos={localPrefs.brandLogos}
             onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
+            isRestarting={restartInProgress}
             requiresRestartPending={pendingRestartSections.browser}
           />
         );
@@ -448,7 +464,7 @@ export function SettingsPage({
               onSave={saveWebSearch}
               showBrandLogos={localPrefs.brandLogos}
               onRestart={restartViaSettingsSurface}
-              isRestarting={isRestarting || hostEngineApplying}
+              isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.browser}
               olostepFeature={featureCatalog.find((feature) => feature.name === "olostep")}
               olostepInstalling={nanobotFeatureAction === "enable:olostep"}
@@ -462,20 +478,18 @@ export function SettingsPage({
             token={token}
             nanobotFeatures={nanobotFeatures}
             loading={nanobotFeaturesLoading}
-            query={channelsQuery}
             actionKey={nanobotFeatureAction}
             chatAppsDocsUrl={settings.docs?.chat_apps_url}
             showBrandLogos={localPrefs.brandLogos}
             error={nanobotFeaturesError}
             requiresRestartPending={pendingRestartSections.runtime}
-            onQueryChange={setChannelsQuery}
             onAction={handleNanobotFeatureAction}
             onFeaturesUpdate={setNanobotFeatures}
             onDismissStatus={() => {
               setNanobotFeaturesError(null);
             }}
             onRestart={restartViaSettingsSurface}
-            isRestarting={isRestarting || hostEngineApplying}
+            isRestarting={restartInProgress}
           />
         );
       case "apps":
@@ -540,7 +554,7 @@ export function SettingsPage({
               onImportMcpConfig={handleImportMcpConfig}
               onMcpToolsChange={handleMcpToolsChange}
               onRestart={restartViaSettingsSurface}
-              isRestarting={isRestarting || hostEngineApplying}
+              isRestarting={restartInProgress}
             />
           </div>
         );
@@ -576,7 +590,7 @@ export function SettingsPage({
               form={form}
               settings={settings}
               onRestart={showSidebar ? undefined : restartViaSettingsSurface}
-              isRestarting={isRestarting || hostEngineApplying}
+              isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.runtime}
               apiService={apiService}
               apiServiceLoading={apiServiceLoading}
@@ -601,16 +615,29 @@ export function SettingsPage({
   };
 
   return (
+    <DialogLayoutContext.Provider value={dialogLayoutAnchor}>
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-settings-canvas lg:flex-row">
+      <Dialog open={pendingExit !== null} onOpenChange={(open) => { if (!open) setPendingExit(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("settings.exit.title")}</DialogTitle>
+            <DialogDescription>{t("settings.exit.description")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { const leave = pendingExit; setPendingExit(null); leave?.(); }}>{t("settings.exit.later")}</Button>
+            <Button onClick={() => { setPendingExit(null); void restartViaSettingsSurface(); }}>{t("app.system.restartAction")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {showSidebar ? (
         <SettingsSidebar
           activeSection={activeSection}
           onSelectSection={selectSection}
-          onBackToChat={onBackToChat}
-          onLogout={onLogout}
+          onBackToChat={backToChat}
+          onLogout={onLogout ? () => requestExit(onLogout) : undefined}
           hostChromeInset={hostChromeInset}
           onRestart={settings ? restartViaSettingsSurface : undefined}
-          isRestarting={isRestarting || hostEngineApplying}
+          isRestarting={restartInProgress}
           restartPending={settings?.requires_restart}
           isNativeHost={(settings?.surface ?? settings?.runtime_surface) === "native"}
         />
@@ -684,18 +711,18 @@ export function SettingsPage({
       <div
         className={cn(
           "min-w-0 flex-1 bg-settings-canvas [scrollbar-gutter:stable]",
-          activeSection === "channels" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto",
+          "overflow-y-auto",
         )}
       >
         <div
           key={activeSection}
           data-testid="settings-section-transition"
+          ref={setDialogLayoutAnchor}
           data-settings-section={activeSection}
           className={cn(
             "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
             "motion-reduce:animate-none sm:py-8 lg:py-12",
-            activeSection === "channels" ? "max-w-[1240px] px-4 sm:px-8 xl:px-10" : "settings-grid",
-            activeSection === "channels" && "flex min-h-full flex-col xl:h-full xl:min-h-0",
+            "settings-grid",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -703,8 +730,8 @@ export function SettingsPage({
             <div className="mb-7">
               <button
                 type="button"
-                onClick={onBackToChat}
-                className="touch-target mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground lg:hidden"
+                onClick={backToChat}
+                className="touch-target mb-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors settings-hover hover:text-foreground lg:hidden"
               >
                 <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
                 {t("settings.backToChat")}
@@ -747,5 +774,6 @@ export function SettingsPage({
         </div>
       </div>
     </div>
+    </DialogLayoutContext.Provider>
   );
 }

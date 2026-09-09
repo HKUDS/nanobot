@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "¿Reiniciar antes de salir?",
+      "description": "Los cambios están guardados. Reinicia para aplicarlos.",
+      "later": "Reiniciar más tarde"
+    },
     "runtimeConfig": {
       "apiSaved": "Guardado. Reinicia el servicio API para aplicar los cambios.",
       "fields": {
@@ -158,6 +163,7 @@
       "ariaLabel": "Secciones de ajustes"
     },
     "nav": {
+      "about": "Acerca de",
       "capabilities": "Funciones",
       "general": "General",
       "byok": "BYOK",
@@ -515,7 +521,7 @@
       "disabled": "Desactivado",
       "noPresets": "Aún no hay preajustes de modelo",
       "noPresetsHelp": "Crea un preajuste y añádelo al orden de llamada.",
-      "removeBeforeDelete": "Quita este preajuste del orden de llamada antes de eliminarlo.",
+      "removeBeforeDelete": "Elige otro preajuste principal antes de eliminar este.",
       "providerSetupRequired": "El proveedor requiere configuración",
       "configureProviderBeforeSaving": "Configura este proveedor antes de guardar el preajuste.",
       "deletePresetTitle": "¿Eliminar el preajuste de modelo?",
@@ -568,6 +574,9 @@
       "noDescription": "Sin descripción disponible."
     },
     "about": {
+      "documentation": "Documentación",
+      "sourceCode": "Código fuente",
+      "reportIssue": "Informar de un problema",
       "version": "Versión",
       "checking": "Buscando actualizaciones...",
       "checkForUpdates": "Buscar actualizaciones",

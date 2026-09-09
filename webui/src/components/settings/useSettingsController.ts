@@ -12,7 +12,7 @@ import {
 } from "@/components/settings/capabilities/TranscriptionSettings";
 import { useCapabilitySettingsActions } from "@/components/settings/capabilities/useCapabilitySettingsActions";
 import { useCapabilitySettingsState } from "@/components/settings/capabilities/useCapabilitySettingsState";
-import { webSearchFormFromPayload } from "@/components/settings/capabilities/WebSettings";
+import { webSearchDraftState, webSearchFormFromPayload } from "@/components/settings/capabilities/WebSettings";
 import type {
   ApplySettingsPayload,
   PendingRestartSections,
@@ -32,6 +32,7 @@ import { createSystemSettingsActions } from "@/components/settings/system/create
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { fetchSettings, fetchSettingsUsage } from "@/lib/api";
 import {
   readLocalPreferences,
@@ -116,14 +117,14 @@ export function useSettingsController({
     apiService, apiServiceAction, apiServiceError, apiServiceLoading, appsKindFilter, appsQuery,
     automationAction, automationPendingDelete, automationPendingEdit, automations,
     automationsError, automationsFilter, automationsLoading, automationsQuery, automationsSort,
-    channelsQuery, cliApps, cliAppsAction, cliAppsError, cliAppsFocusName, cliAppsLoading,
+    cliApps, cliAppsAction, cliAppsError, cliAppsFocusName, cliAppsLoading,
     cliAppsMessage, customMcpForm, mcpConfigImport, mcpError, mcpFieldValues, mcpMessage,
     mcpOAuthCallbackError, mcpOAuthCallbackUrl, mcpOAuthCompleting, mcpOAuthFlow,
     mcpOAuthPopupBlocked, mcpPresetAction, mcpPresets, mcpPresetsLoading, nanobotFeatureAction,
     nanobotFeatureConfirm, nanobotFeatures, nanobotFeaturesError, nanobotFeaturesLoading,
     setAppsKindFilter, setAppsQuery, setAutomationPendingDelete,
     setAutomationPendingEdit, setAutomationsFilter,
-    setAutomationsQuery, setAutomationsSort, setChannelsQuery,
+    setAutomationsQuery, setAutomationsSort,
     setCliAppsError,
     setCliAppsMessage, setCustomMcpForm, setMcpConfigImport, setMcpError, setMcpFieldValues,
     setMcpMessage, setMcpOAuthCallbackError, setMcpOAuthCallbackUrl,
@@ -438,6 +439,15 @@ export function useSettingsController({
     saveTranscriptionSettings,
     saveWebSearch,
   } = capabilityActions;
+  useAutoSave(imageGenerationForm, imageGenerationDirty, imageGenerationSaving, saveImageGenerationSettings,
+    !imageGenerationForm.enabled || Boolean(settings?.image_generation.providers.find(
+      (provider) => provider.name === imageGenerationForm.provider,
+    )?.configured));
+  useAutoSave(transcriptionForm, transcriptionDirty, transcriptionSaving, saveTranscriptionSettings);
+  const webDraft = settings ? webSearchDraftState(settings, webSearchForm) : null;
+  useAutoSave(webSearchForm, webDraft?.dirty ?? false, webSearchSaving, saveWebSearch,
+    !webDraft?.missingCredential && (webSearchForm.provider !== "olostep" ||
+      featureCatalog.some((feature) => feature.name === "olostep" && feature.installed)));
   const {
     handleApiServiceAction,
     handleAutomationAction,
@@ -476,7 +486,6 @@ export function useSettingsController({
     beginModelPresetCreation,
     cancelModelPresetCreation,
     changeModelCallOrder,
-    channelsQuery,
     cliApps,
     cliAppsAction,
     cliAppsError,
@@ -572,7 +581,6 @@ export function useSettingsController({
     setAutomationsFilter,
     setAutomationsQuery,
     setAutomationsSort,
-    setChannelsQuery,
     setCliAppsError,
     setCliAppsMessage,
     setCustomMcpForm,

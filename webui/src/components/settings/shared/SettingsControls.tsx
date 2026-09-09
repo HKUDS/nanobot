@@ -84,7 +84,7 @@ export function NanobotFeatureInstallDialog({
             variant="ghost"
             onClick={() => onOpenChange(false)}
             disabled={installing}
-            className="h-11 w-full min-w-0 bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
+            className="h-11 w-full min-w-0 bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none settings-hover"
           >
             {tx("settings.automations.cancel", "Cancel")}
           </Button>
@@ -133,7 +133,7 @@ export function DismissibleStatusMessage({
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
           isError
             ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-            : "text-muted-foreground/70 hover:bg-muted hover:text-foreground",
+            : "text-muted-foreground/70 settings-hover hover:text-foreground",
         )}
       >
         <X className="h-3.5 w-3.5" aria-hidden />
@@ -178,7 +178,7 @@ export function RestartRequiredNotice({
 
 export function SettingsSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="settings-section-title text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+    <h2 className="settings-section-title select-none text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
       {children}
     </h2>
   );
@@ -202,9 +202,9 @@ export function SettingsRow({
   children?: ReactNode;
 }) {
   return (
-    <div className="settings-row rounded-xl transition-colors hover:bg-sidebar-accent/60 focus-within:bg-sidebar-accent/60">
+    <div className="settings-row rounded-xl transition-colors settings-hover focus-within:bg-sidebar-accent/60">
       <div className="min-w-0">
-        <div className="text-[14px] font-medium leading-5 text-foreground">{title}</div>
+        <div className="select-none text-[14px] font-medium leading-5 text-foreground">{title}</div>
         {description ? (
           <div className="sr-only">
             {description}
@@ -379,7 +379,7 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex max-w-[260px] items-center rounded-full px-2.5 py-1 text-[12px] font-medium",
+        "inline-flex max-w-[260px] select-none items-center rounded-full px-2.5 py-1 text-[12px] font-medium",
         tone === "success" && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
         tone === "warning" && "bg-amber-500/10 text-amber-700 dark:text-amber-300",
         tone === "neutral" && "bg-muted text-muted-foreground",
@@ -404,7 +404,7 @@ export function NumberInput({
   suffix?: string;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="relative w-full">
       <Input
         type="number"
         min={min}
@@ -414,9 +414,9 @@ export function NumberInput({
           const parsed = Number(event.target.value);
           if (Number.isFinite(parsed)) onChange(parsed);
         }}
-        className="h-8 w-24 max-w-full rounded-full text-[13px]"
+        className={cn("h-9 w-full rounded-full text-[13px]", suffix && "pr-12")}
       />
-      {suffix ? <span className="text-[12px] text-muted-foreground">{suffix}</span> : null}
+      {suffix ? <span className="pointer-events-none absolute inset-y-0 right-3 flex select-none items-center text-[12px] text-muted-foreground">{suffix}</span> : null}
     </div>
   );
 }

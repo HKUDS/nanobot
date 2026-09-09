@@ -182,7 +182,7 @@ export function RuntimeConfigSettings({
                           <ToggleButton {...common} checked={field.kind === "toggle" ? current === field.options?.[1] : current === true} label={text}
                             onChange={(next) => state.change(field, field.kind === "toggle" ? field.options![next ? 1 : 0] : next)} />
                         ) : (
-                          <div className={field.kind === "number" ? "w-24" : "w-full"}>
+                          <div className="w-full">
                             {field.kind === "list" ? (
                               <Textarea {...common} value={String(current)} rows={3} spellCheck={false}
                                 onChange={(event) => state.change(field, event.target.value)}

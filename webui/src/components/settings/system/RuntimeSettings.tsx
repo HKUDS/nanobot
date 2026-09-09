@@ -292,7 +292,7 @@ export function RuntimeSettings({
                       : tx("settings.api.apiKeyHelp", "Clients send this as a Bearer token.")
                   }
                 >
-                  <div className="relative w-[280px] max-w-full">
+                  <div className="relative w-full">
                     <Input
                       type={apiKeyVisible ? "text" : "password"}
                       value={apiKey}

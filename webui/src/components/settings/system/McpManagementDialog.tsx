@@ -449,7 +449,7 @@ function ToolsPanel({
           return (
             <label
               key={toolName}
-              className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-border/45 px-3.5 py-2.5 transition-colors last:border-b-0 hover:bg-muted/35 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring"
+              className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-border/45 px-3.5 py-2.5 transition-colors last:border-b-0 settings-hover has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring"
             >
               <span className="relative h-5 w-5 shrink-0">
                 <input

@@ -27,12 +27,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -109,20 +104,19 @@ export function ProviderPicker({
   const disabled = !!triggerProps?.disabled || providers.length === 0;
 
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild disabled={disabled}>
-        <Button
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger
           {...triggerProps}
+          aria-label={triggerProps?.["aria-label"] ?? selectedProvider?.label ?? emptyLabel}
           type="button"
-          variant="outline"
           disabled={disabled}
           className={cn(
-            "h-9 w-[210px] max-w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
-            "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
+            "h-9 w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
+            "settings-hover focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "text-muted-foreground",
           )}
         >
-          <span className="flex min-w-0 items-center gap-2">
+          <SelectValue placeholder={emptyLabel}><span className="flex min-w-0 items-center gap-2">
             {selectedProvider && showProviderLogos ? (
               <ProviderPickerIcon
                 provider={selectedProvider.name}
@@ -130,24 +124,14 @@ export function ProviderPicker({
               />
             ) : null}
             <span className="truncate">{selectedProvider?.label ?? emptyLabel}</span>
-          </span>
-          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="max-h-[18rem] w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
-      >
+          </span></SelectValue>
+        </SelectTrigger>
+      <SelectContent>
         {providers.map((provider) => {
-          const selected = provider.name === value;
           return (
-            <DropdownMenuItem
+            <SelectItem
               key={provider.name}
-              onSelect={() => onChange(provider.name)}
-              className={cn(
-                "flex cursor-default items-center justify-between gap-2 text-[13px]",
-                selected && "bg-muted/80 text-foreground focus:bg-muted",
-              )}
+              value={provider.name}
             >
               <span className="flex min-w-0 items-center gap-2">
                 {showProviderLogos ? (
@@ -158,12 +142,11 @@ export function ProviderPicker({
                 ) : null}
                 <span className="truncate">{provider.label}</span>
               </span>
-              {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
-            </DropdownMenuItem>
+            </SelectItem>
           );
         })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -352,8 +335,8 @@ export function ModelIdPicker({
           type="button"
           variant="outline"
           className={cn(
-            "h-9 w-[min(360px,70vw)] justify-between rounded-full border-input bg-background px-3 text-[12px] font-normal shadow-none",
-            "hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring",
+            "h-9 w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
+            "settings-hover focus-visible:ring-2 focus-visible:ring-ring",
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
@@ -376,7 +359,7 @@ export function ModelIdPicker({
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-[360px] max-w-[calc(100vw-2rem)] p-1.5"
+        className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-1.5"
       >
         <div className="p-1 pb-1.5">
           <div className="relative">

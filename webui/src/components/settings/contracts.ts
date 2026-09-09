@@ -1,7 +1,10 @@
 import type { SettingsPayload } from "@/lib/types";
 
+export type SettingsExitGuard = (leave: () => void) => void;
+
 export type SettingsSectionKey =
   | "overview"
+  | "about"
   | "appearance"
   | "models"
   | "capabilities"

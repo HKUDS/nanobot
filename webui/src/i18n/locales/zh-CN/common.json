@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "退出前重启？",
+      "description": "更改已保存，重启后生效。",
+      "later": "稍后重启"
+    },
     "runtimeConfig": {
       "apiSaved": "已保存，重启 API 服务后生效。",
       "fields": {
@@ -344,6 +349,7 @@
       "ariaLabel": "设置分区"
     },
     "nav": {
+      "about": "关于",
       "capabilities": "能力",
       "general": "通用",
       "byok": "BYOK",
@@ -423,7 +429,7 @@
       "disabled": "未启用",
       "noPresets": "还没有模型预设",
       "noPresetsHelp": "先创建预设，再将它加入调用顺序。",
-      "removeBeforeDelete": "删除前请先将此预设从调用顺序中移除。",
+      "removeBeforeDelete": "删除前请先选择其他首选预设。",
       "providerSetupRequired": "提供商需要配置",
       "configureProviderBeforeSaving": "请先配置此提供商，再保存预设。",
       "deletePresetTitle": "删除模型预设？",
@@ -569,6 +575,9 @@
       "noDescription": "暂无描述。"
     },
     "about": {
+      "documentation": "官方文档",
+      "sourceCode": "代码仓库",
+      "reportIssue": "问题反馈",
       "version": "版本",
       "checking": "正在检查...",
       "checkForUpdates": "检查更新",

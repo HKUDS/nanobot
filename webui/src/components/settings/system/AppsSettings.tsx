@@ -412,7 +412,7 @@ function CliAppsCatalogRow({
   const description = app.description || app.requires || app.entry_point || app.name;
 
   return (
-    <article className="apps-catalog-row group flex min-w-0 items-center gap-3 rounded-control px-3 py-3 transition-colors hover:bg-muted/45">
+    <article className="apps-catalog-row group flex min-w-0 items-center gap-3 rounded-control px-3 py-3 transition-colors settings-hover">
       <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
@@ -583,7 +583,7 @@ function McpAppsCatalogRow({
   };
 
   return (
-    <article className="min-w-0 rounded-control transition-colors hover:bg-muted/45">
+    <article className="min-w-0 rounded-control transition-colors settings-hover">
       <div className="group flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3">
         <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
         <div className="min-w-[8rem] flex-[1_1_8rem]">
@@ -918,9 +918,9 @@ export const AppsActionButton = forwardRef<HTMLButtonElement, AppsActionButtonPr
           visibleLabel
             ? "h-8 w-auto gap-1.5 px-3 text-[12px] font-semibold"
             : "h-9 w-9",
-          tone === "installed" && "bg-transparent hover:bg-muted/70 hover:text-foreground",
+          tone === "installed" && "bg-transparent settings-hover hover:text-foreground",
           tone === "danger" && "bg-transparent hover:bg-destructive/10 hover:text-destructive",
-          tone === "default" && "bg-muted/70 hover:bg-muted hover:text-foreground",
+          tone === "default" && "bg-muted/70 settings-hover hover:text-foreground",
           className,
         )}
       >
@@ -1433,7 +1433,7 @@ function CliAppReadyPanel({
             size="sm"
             variant="ghost"
             onClick={copyPrompt}
-            className="h-8 rounded-full px-3 text-[12px] font-medium text-muted-foreground hover:bg-muted/65 hover:text-foreground"
+            className="h-8 rounded-full px-3 text-[12px] font-medium text-muted-foreground settings-hover hover:text-foreground"
           >
             {copied ? <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden /> : null}
             {copied

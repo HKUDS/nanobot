@@ -519,7 +519,7 @@ function MarketplaceSkillRow({
               provider: providerLabel(skill.provider),
               defaultValue: "Open {{name}} on {{provider}}",
             })}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors settings-hover hover:text-foreground"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           </a>

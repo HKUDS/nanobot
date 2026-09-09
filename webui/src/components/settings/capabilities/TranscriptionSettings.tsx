@@ -79,7 +79,7 @@ export function TranscriptionSettings({
   requiresRestartPending: boolean;
 }) {
   const { t } = useTranslation();
-  useAutoSave(form, dirty, saving, onSave);
+  useAutoSave(form, dirty, saving, onSave, !embedded);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const transcription = settings.transcription ?? DEFAULT_TRANSCRIPTION_SETTINGS;
   const selectedProvider =
@@ -104,7 +104,7 @@ export function TranscriptionSettings({
           />
         </SettingsRow>
         ) : null}
-        {form.enabled ? <>
+        {embedded || form.enabled ? <>
         <SettingsRow title={tx("settings.rows.transcriptionProvider", "Provider")}>
           <ProviderPicker
             providers={transcription.providers}
@@ -138,7 +138,7 @@ export function TranscriptionSettings({
           <Input
             value={form.model}
             onChange={(event) => onChangeForm((prev) => ({ ...prev, model: event.target.value }))}
-            className="h-9 w-[min(300px,70vw)] rounded-full text-[13px]"
+            className="h-9 w-full rounded-full text-end text-[13px]"
           />
         </SettingsRow>
         <SettingsRow
@@ -149,12 +149,12 @@ export function TranscriptionSettings({
             value={form.language}
             onChange={(event) => onChangeForm((prev) => ({ ...prev, language: event.target.value }))}
             placeholder={tx("settings.voice.languageAuto", "Auto")}
-            className="h-9 w-[min(180px,60vw)] rounded-full text-[13px]"
+            className="h-9 w-full rounded-full text-end text-[13px]"
           />
         </SettingsRow>
         <SettingsAdvancedOptions>
         <SettingsRow title={tx("settings.rows.voiceLimits", "Limits")}>
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="grid w-full gap-2">
             <NumberInput
               value={form.maxDurationSec}
               min={1}

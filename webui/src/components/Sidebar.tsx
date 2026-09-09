@@ -145,7 +145,7 @@ export function Sidebar(props: SidebarProps) {
           onClick={collapsed ? props.onExpand : undefined}
           tabIndex={collapsed ? 0 : -1}
           className={cn(
-            "host-no-drag flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl transition-colors",
+            "host-no-drag flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-xl transition-colors",
             props.hostChromeInset && "mt-5",
             collapsed
               ? "-ml-0.5 hover:bg-sidebar-accent/75"
@@ -155,7 +155,7 @@ export function Sidebar(props: SidebarProps) {
           <img
             src="/brand/nanobot_mark.svg"
             alt=""
-            className="h-8 w-8 select-none object-contain"
+            className="h-6 w-6 select-none object-contain"
             draggable={false}
           />
         </button>
@@ -367,6 +367,7 @@ function SidebarActionButton({
       <span
         className={cn(
           "min-w-0 overflow-hidden truncate whitespace-nowrap transition-[max-width,opacity,transform] duration-200 ease-out",
+          !collapsed && "sidebar-action-label",
           collapsed
             ? "max-w-0 -translate-x-1 opacity-0"
             : "max-w-[12rem] translate-x-0 opacity-100",

@@ -56,6 +56,24 @@ export function webSearchProviderRequiresApiKey(provider?: WebSearchProviderOpti
   return provider?.credential === "api_key";
 }
 
+export function webSearchDraftState(settings: SettingsPayload, form: WebSearchSettingsUpdate) {
+  const provider = settings.web_search.providers.find((row) => row.name === form.provider);
+  const apiKey = form.apiKey?.trim() ?? "";
+  const baseUrl = form.baseUrl?.trim() ?? "";
+  const hasExistingSecret = webSearchProviderAcceptsApiKey(provider) &&
+    form.provider === settings.web_search.provider && Boolean(settings.web_search.api_key_hint);
+  const jinaReaderDirty = (form.useJinaReader ?? settings.web.fetch.use_jina_reader) !== settings.web.fetch.use_jina_reader;
+  return {
+    hasExistingSecret,
+    jinaReaderDirty,
+    dirty: form.provider !== settings.web_search.provider || apiKey.length > 0 ||
+      baseUrl !== (settings.web_search.base_url ?? "") || form.maxResults !== settings.web_search.max_results ||
+      form.timeout !== settings.web_search.timeout || jinaReaderDirty,
+    missingCredential: webSearchProviderRequiresApiKey(provider) ? !apiKey && !hasExistingSecret
+      : provider?.credential === "base_url" ? !baseUrl : false,
+  };
+}
+
 export function WebSettings({
   embedded = false,
   error,
@@ -106,36 +124,17 @@ export function WebSettings({
   const selectedProvider =
     settings.web_search.providers.find((provider) => provider.name === form.provider) ??
     settings.web_search.providers[0];
-  const hasExistingSecret =
-    webSearchProviderAcceptsApiKey(selectedProvider) &&
-    form.provider === settings.web_search.provider &&
-    !!settings.web_search.api_key_hint;
-  const showKeyInput = webSearchProviderAcceptsApiKey(selectedProvider) && (!hasExistingSecret || keyEditing);
-  const apiKey = form.apiKey?.trim() ?? "";
-  const baseUrl = form.baseUrl?.trim() ?? "";
+  const { hasExistingSecret, dirty, jinaReaderDirty, missingCredential } = webSearchDraftState(settings, form);
   const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
-  const dirty =
-    form.provider !== settings.web_search.provider ||
-    apiKey.length > 0 ||
-    baseUrl !== (settings.web_search.base_url ?? "") ||
-    form.maxResults !== settings.web_search.max_results ||
-    form.timeout !== settings.web_search.timeout ||
-    effectiveJinaReader !== settings.web.fetch.use_jina_reader;
-  const jinaReaderDirty = effectiveJinaReader !== settings.web.fetch.use_jina_reader;
-  const missingCredential =
-    webSearchProviderRequiresApiKey(selectedProvider)
-      ? !apiKey && !hasExistingSecret
-      : selectedProvider?.credential === "base_url"
-        ? !baseUrl
-        : false;
+  const showKeyInput = webSearchProviderAcceptsApiKey(selectedProvider) && (!hasExistingSecret || keyEditing);
 
-  useAutoSave(form, dirty, saving, onSave, !missingCredential && (form.provider !== "olostep" || olostepFeature?.installed === true));
+  useAutoSave(form, dirty, saving, onSave, !embedded && !missingCredential && (form.provider !== "olostep" || olostepFeature?.installed === true));
 
   return (
     <div className="space-y-7">
       <section>
         {enabled && !embedded ? <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle> : null}
-        <div hidden={!enabled}>
+        <div hidden={!embedded && !enabled}>
         {form.provider === "olostep" && olostepFeature && !olostepFeature.installed ? (
           <div className="mb-3">
             <CapabilityInstallNotice
@@ -153,7 +152,7 @@ export function WebSettings({
         ) : null}
         </div>
         <SettingsGroup>
-          <div hidden={!enabled} className="space-y-1">
+          <div hidden={!embedded && !enabled} className="space-y-1">
           <SettingsRow title={t("settings.byok.webSearch.provider")}>
             <ProviderPicker
               providers={settings.web_search.providers}
@@ -175,7 +174,7 @@ export function WebSettings({
               title={t("settings.byok.apiKey")}
               description={t("settings.byok.webSearch.apiKeyHelp")}
             >
-              <div className="relative w-[280px] max-w-full">
+              <div className="relative w-full">
                 {showKeyInput ? (
                   <>
                     <Input
@@ -199,7 +198,7 @@ export function WebSettings({
                       aria-label={
                         keyVisible ? t("settings.byok.hideApiKey") : t("settings.byok.showApiKey")
                       }
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
                     >
                       {keyVisible ? (
                         <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -219,7 +218,7 @@ export function WebSettings({
                       size="icon"
                       onClick={onToggleKeyEditing}
                       aria-label={t("settings.actions.edit")}
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
                     >
                       <Pencil className="h-3.5 w-3.5" aria-hidden />
                     </Button>
@@ -240,7 +239,7 @@ export function WebSettings({
                   onChangeForm((prev) => ({ ...prev, baseUrl: event.target.value }))
                 }
                 placeholder={t("settings.byok.webSearch.baseUrlPlaceholder")}
-                className="h-9 w-[280px] rounded-full text-[13px]"
+                className="h-9 w-full rounded-full text-[13px]"
               />
             </SettingsRow>
           ) : null}

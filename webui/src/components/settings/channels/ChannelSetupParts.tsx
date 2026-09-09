@@ -57,7 +57,7 @@ export function ChannelGuideLink({
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "inline-flex max-w-full items-center gap-2 bg-background/80 font-semibold text-foreground transition-colors hover:bg-background",
+        "inline-flex max-w-full items-center gap-2 bg-background/80 font-semibold text-foreground transition-colors settings-hover",
         compact
           ? "shrink-0 rounded-full py-1 pl-1 pr-2.5 text-[11.5px]"
           : "mt-3 rounded-control py-1.5 pl-1.5 pr-3 text-[12px]",
@@ -135,7 +135,7 @@ function ChannelOfficialLink({
       href={setup.officialUrl}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex max-w-full shrink-0 items-center gap-2 rounded-full bg-background/80 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground transition-colors hover:bg-background"
+      className="inline-flex max-w-full shrink-0 items-center gap-2 rounded-full bg-background/80 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground transition-colors settings-hover"
     >
       <span
         className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full bg-muted/70"
@@ -183,7 +183,7 @@ export function ChannelSetupActions({
           type="button"
           size="sm"
           variant="secondary"
-          className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold hover:bg-background"
+          className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold settings-hover"
           onClick={() => {
             if (action.copyText) {
               void copyTextToClipboard(action.copyText).then((ok) =>

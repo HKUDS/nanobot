@@ -81,6 +81,11 @@
     }
   },
   "settings": {
+    "exit": {
+      "title": "Restart before leaving?",
+      "description": "Your changes are saved. Restart to apply them.",
+      "later": "Restart later"
+    },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",
       "fields": {
@@ -344,6 +349,7 @@
       "ariaLabel": "Settings sections"
     },
     "nav": {
+      "about": "About",
       "capabilities": "Capabilities",
       "general": "General",
       "byok": "BYOK",
@@ -423,7 +429,7 @@
       "disabled": "Disabled",
       "noPresets": "No model presets yet",
       "noPresetsHelp": "Create a preset, then add it to the call order.",
-      "removeBeforeDelete": "Remove this preset from the call order before deleting it.",
+      "removeBeforeDelete": "Choose another primary preset before deleting this one.",
       "providerSetupRequired": "Provider setup required",
       "configureProviderBeforeSaving": "Configure this provider before saving the preset.",
       "deletePresetTitle": "Delete model preset?",
@@ -569,6 +575,9 @@
       "noDescription": "No description available."
     },
     "about": {
+      "documentation": "Documentation",
+      "sourceCode": "Source code",
+      "reportIssue": "Report an issue",
       "version": "Version",
       "checking": "Checking...",
       "checkForUpdates": "Check for updates",

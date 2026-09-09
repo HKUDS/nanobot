@@ -1,11 +1,12 @@
 import { SettingsPage } from "@/components/settings/SettingsPage";
-import type { SettingsSectionKey } from "@/components/settings/contracts";
+import type { SettingsExitGuard, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
 import type { SettingsPayload, SkillSummary } from "@/lib/types";
 
 export type { SettingsSectionKey } from "@/components/settings/contracts";
 
 interface SettingsViewProps {
+  registerExitGuard?: (guard: SettingsExitGuard | null) => void;
   theme: "light" | "dark";
   initialSection?: SettingsSectionKey;
   initialSettings?: SettingsPayload | null;
@@ -24,6 +25,7 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({
+  registerExitGuard,
   theme,
   initialSection = "overview",
   initialSettings = null,
@@ -52,6 +54,7 @@ export function SettingsView({
 
   return (
     <SettingsPage
+      registerExitGuard={registerExitGuard}
       controller={controller}
       theme={theme}
       showSidebar={showSidebar}

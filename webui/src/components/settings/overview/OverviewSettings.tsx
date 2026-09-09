@@ -2,6 +2,9 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   ArrowUpCircle,
   Bot,
+  BookOpen,
+  Github,
+  MessageCircle,
   Check,
   ChevronRight,
   ExternalLink,
@@ -128,12 +131,34 @@ export function OverviewSettings({
         </SettingsGroup>
       </section>
 
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.about", "About")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <VersionCheckRow currentVersion={settings.version?.current} />
-        </SettingsGroup>
-      </section>
+    </div>
+  );
+}
+
+export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
+  const { t } = useTranslation();
+  const links = [
+    { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
+    { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
+    { key: "reportIssue", icon: MessageCircle, href: "https://github.com/HKUDS/nanobot/issues" },
+  ];
+  return (
+    <div className="settings-stack">
+      <div className="flex flex-col items-center gap-4 py-6 text-center">
+        <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
+        <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
+        <VersionCheckRow currentVersion={currentVersion} />
+      </div>
+      <SettingsGroup>
+        {links.map(({ key, icon: Icon, href }) => (
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer"
+            className="settings-list-row flex select-none items-center gap-3 text-[14px] settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            <span className="flex-1">{t(`settings.about.${key}`)}</span>
+            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+          </a>
+        ))}
+      </SettingsGroup>
     </div>
   );
 }
@@ -172,16 +197,16 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
   };
 
   return (
-    <div className="flex min-h-[62px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className="flex flex-col items-center gap-4">
       <div className="min-w-0">
-        <div className="text-[14px] font-medium leading-5 text-foreground">
+        <div className="sr-only">
           {tx("settings.about.version", "Version")}
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
           {currentVersion ? `v${currentVersion}` : "nanobot"}
         </div>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
+      <div className="flex shrink-0 flex-col items-center gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -462,7 +487,7 @@ function OverviewListRow({
     <button
       type="button"
       onClick={onClick}
-      className="group flex min-h-[68px] w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
+      className="group flex min-h-[68px] w-full select-none items-center gap-3 px-4 py-3.5 text-left transition-colors settings-hover sm:px-5"
     >
       <OverviewRowIcon icon={Icon} />
       <span className="min-w-0 flex-1">

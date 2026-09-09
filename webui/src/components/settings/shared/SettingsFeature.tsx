@@ -1,14 +1,15 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 export function SettingsAdvancedOptions({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   return (
-    <details className="group/advanced">
-      <summary className="settings-list-inset flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded-xl text-[13px] leading-5 text-muted-foreground hover:bg-sidebar-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+    <details className="group/advanced [&>summary]:select-none">
+      <summary className="settings-list-inset flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded-xl text-[13px] leading-5 text-muted-foreground settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         {t("settings.runtimeConfig.advancedOptions")}
         <ChevronDown aria-hidden className="h-3.5 w-3.5 shrink-0 group-open/advanced:rotate-180" />
       </summary>
@@ -28,33 +29,36 @@ export function SettingsFeature({
   error?: string;
   children?: ReactNode;
 }) {
-  const [open, setOpen] = useState(initialOpen);
-  const id = useId();
+  const [open, setOpen] = useState(initialOpen && enabled);
   const section = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (initialOpen) {
+    if (initialOpen && enabled) {
       setOpen(true);
       section.current?.scrollIntoView?.({ block: "nearest" });
     }
-  }, [initialOpen]);
-  const expanded = Boolean(children) && enabled && open;
+  }, [initialOpen, enabled]);
   return (
     <section ref={section} aria-label={title}>
+      <Dialog open={Boolean(children) && open} onOpenChange={setOpen}>
       <SettingsGroup>
-        <SettingsRow title={children && enabled ? (
-          <button type="button" aria-expanded={expanded} aria-controls={id}
-            className="flex min-h-9 w-full items-center gap-2 rounded-lg text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => setOpen((value) => !value)}>
+        <SettingsRow title={children ? (
+          <DialogTrigger asChild>
+          <button type="button"
+            className="flex min-h-9 w-full items-center rounded-lg text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             {title}
-            <ChevronDown aria-hidden className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${expanded ? "rotate-180" : ""}`} />
           </button>
+          </DialogTrigger>
         ) : title}>
           <ToggleButton checked={enabled} disabled={disabled} ariaLabel={title} label={title}
             onChange={(next) => { setOpen(next); onChange(next); }} />
         </SettingsRow>
-        {children ? <div id={id} hidden={!expanded}>{children}</div> : null}
       </SettingsGroup>
-      {error && !expanded ? <p role="alert" className="settings-list-inset pt-2 text-[13px] leading-5 text-destructive">{error}</p> : null}
+      {children ? <DialogContent aria-describedby={undefined} className="settings-grid max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto p-0 [--settings-surface:var(--background)]">
+        <DialogTitle className="sr-only">{title}</DialogTitle>
+        <div className="pb-4 pt-8">{children}</div>
+      </DialogContent> : null}
+      </Dialog>
+      {error && !open ? <p role="alert" className="settings-list-inset pt-2 text-[13px] leading-5 text-destructive">{error}</p> : null}
     </section>
   );
 }
