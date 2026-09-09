@@ -52,7 +52,9 @@ export function TokenUsageModelTrend({ days, modelDays, models }: {
       </div>
       <div role="group" aria-label={title} className="relative grid h-[clamp(144px,30vh,280px)] grid-cols-[repeat(30,minmax(0,1fr))] gap-px">
         <TooltipProvider delayDuration={120}>
-          {columns.map(column => <Tooltip key={column.date}>
+          {columns.map(column => column.total === 0 ? (
+            <span key={column.date} role="img" aria-label={`${column.date}: ${number.format(0)} tokens`} />
+          ) : <Tooltip key={column.date}>
             <TooltipTrigger asChild>
               <span role="img" tabIndex={0} aria-label={`${column.date}: ${number.format(column.total)} tokens; ${column.values.map((value, index) => `${labels[index]}: ${number.format(value)}`).join(", ")}`} className="flex min-w-0 items-end focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500">
                 <span className="flex w-full flex-col-reverse" style={{ height: `${column.total / peak * 100}%` }}>

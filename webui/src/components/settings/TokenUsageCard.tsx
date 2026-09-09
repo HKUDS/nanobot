@@ -123,6 +123,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
                     defaultValue: "{{date}}: {{tokens}} tokens, {{requests}} requests",
                     date: day.date, tokens: exact.format(tokens), requests: day.usage?.requests ?? 0,
                   });
+                  if (tokens === 0) return <span key={day.date} role="img" aria-label={label} />;
                   return (
                     <Tooltip key={day.date}>
                       <TooltipTrigger asChild>

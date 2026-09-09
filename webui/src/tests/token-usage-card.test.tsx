@@ -32,6 +32,7 @@ describe("Token usage card", () => {
     expect(screen.getByLabelText("400 tokens")).toBeInTheDocument();
     const bars = within(screen.getByRole("group", { name: "Daily token usage" })).getAllByRole("img");
     expect(bars).toHaveLength(30);
+    expect(bars.filter((bar) => bar.tabIndex === 0)).toEqual([bars[0], bars[29]]);
     expect(bars[0]).toHaveAccessibleName(/2026-08-11: 100 tokens, 1 requests/);
     expect(bars[29]).toHaveAccessibleName(/Cached input: 120, Cache miss: 60, Cache status unknown: 60, Output: 60/);
     const segments = bars[29].firstElementChild?.children;
@@ -86,6 +87,7 @@ describe("Token usage card", () => {
         ttft_ms: 0, timed_requests: 0, duration_ms: 0 }]}
       modelDays={Array.from({ length: 6 }, (_, index) => ({ date: "2026-09-09", provider: "provider", model: `model-${index}`, total_tokens: (index + 1) * 100 }))} />);
     const column = screen.getAllByRole("img")[29];
+    expect(screen.getAllByRole("img").filter((bar) => bar.tabIndex === 0)).toEqual([column]);
     expect(column).toHaveAccessibleName(/2026-09-09: 2,200 tokens/);
     expect(column).toHaveAccessibleName(/model-5: 600/);
     expect(column).toHaveAccessibleName(/Other \/ unattributed: 200/);
