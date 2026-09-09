@@ -79,13 +79,19 @@ describe("useSkills", () => {
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
-  it("coalesces in-flight refreshes and stops listening after unmount", async () => {
+  it("coalesces opens during an older fetch into one trailing refresh", async () => {
     let resolveSkills!: (value: Awaited<ReturnType<typeof fetchSkills>>) => void;
+    const installed = {
+      name: "simple-pr-review",
+      description: "Review pull requests.",
+      source: "workspace",
+      available: true,
+    };
     vi.mocked(fetchSkills).mockReset().mockImplementationOnce(
       () => new Promise((resolve) => {
         resolveSkills = resolve;
       }),
-    );
+    ).mockResolvedValue({ skills: [installed] });
     const getToken = () => "tok";
     const { result, unmount } = renderHook(() => useSkills(getToken));
 
@@ -97,11 +103,13 @@ describe("useSkills", () => {
     await act(async () => {
       resolveSkills({ skills: [] });
     });
-    expect(result.current).toEqual([]);
+    // The old response was captured before installation; it cannot satisfy the new opens.
+    expect(fetchSkills).toHaveBeenCalledTimes(2);
+    expect(result.current).toEqual([installed]);
 
     unmount();
     requestSkillsRefresh();
-    expect(fetchSkills).toHaveBeenCalledTimes(1);
+    expect(fetchSkills).toHaveBeenCalledTimes(2);
   });
 
   it("keeps existing skills on refresh failure and retries on the next open", async () => {
@@ -131,6 +139,27 @@ describe("useSkills", () => {
     });
     expect(fetchSkills).toHaveBeenCalledTimes(3);
     expect(result.current).toEqual([]);
+  });
+
+  it.each([false, true])("does not start a queued refresh after unmount (failure: %s)", async (fails) => {
+    let settle!: () => void;
+    vi.mocked(fetchSkills).mockReset().mockImplementationOnce(
+      () => new Promise((resolve, reject) => {
+        settle = () => fails ? reject(new Error("Offline")) : resolve({ skills: [] });
+      }),
+    );
+    const getToken = () => "tok";
+    const { unmount } = renderHook(() => useSkills(getToken));
+    act(() => {
+      requestSkillsRefresh();
+    });
+    unmount();
+
+    await act(async () => {
+      settle();
+    });
+    requestSkillsRefresh();
+    expect(fetchSkills).toHaveBeenCalledTimes(1);
   });
 
   it("does not let an older request overwrite a newer skill event", async () => {

@@ -11,9 +11,16 @@ export function useSkills(getToken: () => string): SkillSummary[] {
     let cancelled = false;
     let payloadVersion = 0;
     let refreshing = false;
+    let refreshQueued = false;
     const refresh = () => {
-      if (cancelled || refreshing) return;
+      if (cancelled) return;
+      if (refreshing) {
+        // The in-flight response may predate installation. Keep one trailing refresh.
+        refreshQueued = true;
+        return;
+      }
       refreshing = true;
+      refreshQueued = false;
       const version = payloadVersion;
       fetchSkills(getToken())
         .then(({ skills: nextSkills }) => {
@@ -24,6 +31,7 @@ export function useSkills(getToken: () => string): SkillSummary[] {
         })
         .finally(() => {
           refreshing = false;
+          if (refreshQueued) refresh();
         });
     };
     const onSkillsChanged = (event: Event) => {
