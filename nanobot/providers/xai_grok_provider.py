@@ -660,6 +660,17 @@ def invalidate_xai_grok_model_catalog() -> None:
     _XAI_GROK_MODEL_CATALOG.invalidate()
 
 
+def check_xai_grok_access(proxy: str | None = None) -> None:
+    """Check authenticated model access without cached or built-in catalog fallback."""
+    try:
+        _fetch_xai_grok_models(proxy)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 401:
+            raise
+        get_xai_oauth_token(proxy=proxy, force_refresh=True)
+        _fetch_xai_grok_models(proxy)
+
+
 def _fetch_xai_grok_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
     token = get_xai_oauth_token(proxy=proxy)
     client_kwargs: dict[str, Any] = {"timeout": 10.0, "follow_redirects": False}

@@ -8,6 +8,7 @@ export type CommandMenuTheme = PickerMenuTheme
 type TuiCommandAction =
   | "sessions"
   | "new-chat"
+  | "config"
   | "context"
   | "diff"
   | "branch"

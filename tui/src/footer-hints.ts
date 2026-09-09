@@ -59,7 +59,7 @@ export function footerTelemetry(
 export function footerHints(hints: readonly FooterHint[], theme: FooterHintTheme): StyledText {
   const chunks: TextChunk[] = []
   hints.forEach((hint, index) => {
-    if (index) chunks.push(chunk(" · ", theme.separator))
+    if (index) chunks.push(chunk("   ", theme.separator))
     const color = hint.tone === "danger" ? theme.danger : theme.accent
     chunks.push(chunk(hint.key, color, true))
     chunks.push(chunk(` ${hint.label}`, theme.muted))

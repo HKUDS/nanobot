@@ -57,11 +57,16 @@ If the installer did not open the browser, run:
 nanobot webui
 ```
 
-SSH, headless, existing-config, and older-release installs retain the terminal setup path:
+SSH, headless, and existing-config installs can open the same complete configuration editor used
+by `nanobot agent`:
 
 ```bash
 nanobot onboard --wizard
 ```
+
+The first page contains the workspace and active model essentials. Open a section or press `/` to
+find any advanced provider, channel, tool, API, MCP, memory, or runtime setting. Changes are staged
+until you press `Ctrl+S`.
 
 ## 3. Check the Setup
 

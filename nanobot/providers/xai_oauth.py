@@ -59,6 +59,15 @@ _HTTP_TIMEOUT_S = 15.0
 class XAIOAuthError(RuntimeError):
     """An actionable xAI OAuth failure with no credential material."""
 
+    status_code: int | None = None
+    oauth_error: str | None = None
+
+
+class XAIOAuthLoginRequiredError(XAIOAuthError):
+    """No locally recoverable login is available."""
+
+    status_code = 401
+
 
 @dataclass(frozen=True)
 class XAIToken:
@@ -357,7 +366,7 @@ def get_xai_oauth_token(
     """Load a usable token, refreshing it under an inter-process lock when needed."""
     token = _load_token()
     if token is None:
-        raise XAIOAuthError(
+        raise XAIOAuthLoginRequiredError(
             "xAI is not signed in. Run `nanobot provider login xai-grok` first."
         )
     if not force_refresh and _token_is_fresh(token, min_ttl_ms):
@@ -365,7 +374,7 @@ def get_xai_oauth_token(
     if not token.refresh:
         if not force_refresh and token.expires > _now_ms():
             return token
-        raise XAIOAuthError(
+        raise XAIOAuthLoginRequiredError(
             "The xAI login has expired and cannot be refreshed. "
             "Run `nanobot provider login xai-grok` again."
         )
@@ -373,13 +382,13 @@ def get_xai_oauth_token(
     with _token_lock():
         latest = _load_token()
         if latest is None:
-            raise XAIOAuthError(
+            raise XAIOAuthLoginRequiredError(
                 "xAI is not signed in. Run `nanobot provider login xai-grok` first."
             )
         if not force_refresh and _token_is_fresh(latest, min_ttl_ms):
             return latest
         if not latest.refresh:
-            raise XAIOAuthError(
+            raise XAIOAuthLoginRequiredError(
                 "The xAI login has expired and cannot be refreshed. "
                 "Run `nanobot provider login xai-grok` again."
             )
@@ -705,7 +714,10 @@ def _oauth_http_error(response: httpx.Response, action: str) -> XAIOAuthError:
             description = raw_description[:200] if isinstance(raw_description, str) else None
     detail = ": ".join(value for value in (code, description) if value)
     suffix = f" ({detail})" if detail else ""
-    return XAIOAuthError(f"xAI OAuth {action} failed with HTTP {response.status_code}{suffix}.")
+    error = XAIOAuthError(f"xAI OAuth {action} failed with HTTP {response.status_code}{suffix}.")
+    error.status_code = response.status_code
+    error.oauth_error = code
+    return error
 
 
 def _http_client(proxy: str | None) -> httpx.Client:

@@ -12,7 +12,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.datastructures import Headers
 
-from nanobot.config.loader import get_config_path
+from nanobot.config.loader import get_config_path, load_config, save_config
+from nanobot.config.schema import Config
 from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.mcp_presets_api import custom_mcp_action
 from nanobot.webui.settings_routes import WebUISettingsRouter
@@ -57,6 +58,55 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
     request._nanobot_webui_mutation_payload = payload
     request._nanobot_trusted_proxy_authenticated = True
     return request
+
+
+@pytest.mark.asyncio
+async def test_config_editor_route_reads_and_updates_complete_config(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    refreshed: list[bool] = []
+    router = _router(
+        config_path=config_path,
+        refresh_runtime_config=lambda: refreshed.append(True),
+    )
+
+    read_request = SimpleNamespace(path="/api/settings/config-editor", headers=Headers())
+    read_request._nanobot_trusted_proxy_authenticated = True
+    response = await router.dispatch(None, read_request, "/api/settings/config-editor")
+
+    assert response is not None
+    snapshot = json.loads(response.body)
+    snapshot["config"]["agents"]["defaults"]["botName"] = "Mochi"
+    update_request = _mutation_request(
+        "/api/settings/config-editor/update",
+        {"revision": snapshot["revision"], "config": snapshot["config"]},
+    )
+    updated = await router.dispatch(
+        None,
+        update_request,
+        "/api/settings/config-editor/update",
+    )
+
+    assert updated is not None
+    assert updated.status_code == 200
+    assert json.loads(updated.body)["requires_restart"] is True
+    assert load_config(config_path).agents.defaults.bot_name == "Mochi"
+    assert refreshed == [True]
+
+
+@pytest.mark.asyncio
+async def test_config_editor_update_rejects_plain_http(tmp_path) -> None:
+    router = _router(config_path=tmp_path / "config.json")
+    request = SimpleNamespace(path="/api/settings/config-editor/update", headers=Headers())
+
+    response = await router.dispatch(
+        None,
+        request,
+        "/api/settings/config-editor/update",
+    )
+
+    assert response is not None
+    assert response.status_code == 405
 
 
 @pytest.mark.asyncio
@@ -526,3 +576,26 @@ async def test_version_check_route_enforces_auth_and_bounds_failures(
     assert failed.status_code == 500
     assert json.loads(failed.body) == {"error": "version check failed"}
     assert "upstream secret body" not in failed.body.decode()
+
+
+@pytest.mark.asyncio
+async def test_provider_probe_requires_websocket_auth_and_uses_gateway_config(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.model = "scoped-model"
+    save_config(config, config_path)
+    probe = AsyncMock(return_value={"status": "ok", "message": "Hello"})
+    monkeypatch.setattr("nanobot.webui.settings_routes.test_provider_connection", probe)
+    path = "/api/settings/provider/test"
+    router = _router(config_path=config_path)
+    plain = SimpleNamespace(path=path, headers=Headers())
+    assert (await router.dispatch(None, plain, path)).status_code == 405
+    payload = {"provider": "anthropic", "model": "chosen-model"}
+    request = _mutation_request(path, payload)
+    denied = _router(config_path=config_path, authorized=False)
+    assert (await denied.dispatch(None, request, path)).status_code == 401
+    probe.assert_not_awaited()
+    response = await router.dispatch(None, request, path)
+    assert json.loads(response.body)["message"] == "Hello"
+    assert probe.await_args.args[0].agents.defaults.model == "scoped-model"
+    assert probe.await_args.args[1] == payload

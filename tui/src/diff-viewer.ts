@@ -123,7 +123,7 @@ export class DiffViewer {
     })
     this.header = new TextRenderable(renderer, {
       id: "nanobot-tui-diff-header",
-      content: "Diff · Last turn",
+      content: "Diff   Last turn",
       width: "100%",
       height: 1,
       flexShrink: 0,
@@ -159,7 +159,7 @@ export class DiffViewer {
     hideScrollbars(this.scroll)
     this.footer = new TextRenderable(renderer, {
       id: "nanobot-tui-diff-footer",
-      content: "←/→ file · pgup/pgdn scroll · esc close",
+      content: "←/→ file   pgup/pgdn scroll   esc close",
       width: "100%",
       height: 1,
       flexShrink: 0,
@@ -222,8 +222,8 @@ export class DiffViewer {
 
   resize(width: number): void {
     this.footer.content = width >= 58
-      ? "←/→ file · pgup/pgdn scroll · home/end · esc close"
-      : "←/→ file · pgup/pgdn · esc"
+      ? "←/→ file   pgup/pgdn scroll   home/end   esc close"
+      : "←/→ file   pgup/pgdn   esc"
   }
 
   setTheme(theme: DiffViewerTheme): void {
@@ -255,8 +255,8 @@ export class DiffViewer {
     const totalDeleted = this.items.reduce((sum, item) => sum + Math.max(0, item.edit.deleted || 0), 0)
     const count = this.items.length
     this.header.content = count
-      ? `Diff · Last turn · ${count} ${count === 1 ? "change" : "changes"} · +${totalAdded} -${totalDeleted}`
-      : "Diff · Last turn"
+      ? `Diff   Last turn   ${count} ${count === 1 ? "change" : "changes"}   +${totalAdded} -${totalDeleted}`
+      : "Diff   Last turn"
     const item = this.items[this.selected]
     if (!item) {
       this.fileHeader.content = "No file changes in the last turn."
@@ -264,9 +264,9 @@ export class DiffViewer {
       return
     }
     const edit = item.edit
-    const index = this.items.length > 1 ? `${this.selected + 1}/${this.items.length} · ` : ""
-    const state = edit.status === "editing" ? " · editing" : edit.status === "error" ? " · failed" : ""
-    this.fileHeader.content = `${index}${edit.path || "Unknown file"} · ${stat(edit)}${state}`
+    const index = this.items.length > 1 ? `${this.selected + 1}/${this.items.length}   ` : ""
+    const state = edit.status === "editing" ? "   editing" : edit.status === "error" ? "   failed" : ""
+    this.fileHeader.content = `${index}${edit.path || "Unknown file"}   ${stat(edit)}${state}`
     const text = edit.diff?.format === "unified" ? edit.diff.text?.trimEnd() : ""
     if (text) {
       this.scroll.add(new DiffRenderable(this.renderer, {

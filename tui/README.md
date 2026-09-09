@@ -40,6 +40,43 @@ visible in the transcript.
 Type `/` to discover slash commands published by the connected gateway. Use the arrow keys
 to move, `Tab` to complete, and `Esc` to close the menu.
 
+Use `/config` or `nanobot onboard --wizard` to open Quick start. Choose **Sign in with an
+account**, **Use an API key**, or **Connect a local model**. Type to search providers and models;
+results appear eight at a time. If your default already has credentials, you can continue chatting
+or configure a preset without repeating sign-in.
+
+Opening the account list checks saved credentials against each provider's live authenticated model
+catalog in the background. Status shows **Checking…**, **Available**, **Sign in again**,
+**Network error**, or **Check failed**. These checks bypass cached and built-in model lists,
+refresh tokens when needed, and send no chat messages. **Reload providers** repeats the checks.
+An accepted account does not guarantee access or quota for every model; test the saved preset to
+verify a model reply.
+
+Browser sign-in opens automatically. Codex receives its callback on the terminal machine;
+Copilot displays a device code and waits for approval. Grok asks for the authorization code.
+**Browser didn't open?** exposes copy-link, manual callback, and restart options. If the local
+callback port is unavailable, the manual callback input appears automatically.
+
+API credentials are saved when you select **Save connection and configure preset**; OAuth credentials
+are saved when authorization completes. Both routes then open **Configure preset**. Name the preset,
+choose its model, and optionally adjust its output token limit, context window, temperature, and
+reasoning effort under **Generation settings**. You can also explicitly select an existing preset
+to edit. **Use as default** controls whether new chats select the saved preset; other presets and
+legacy model fields are preserved.
+
+Save the preset, then optionally select **Send a test message**. This sends one short request using
+the saved preset's model and generation settings, with output capped at 256 tokens; provider charges
+may apply.
+Saving credentials alone is not reported as a successful model check. A failed check keeps the
+saved configuration and offers connection and model changes. **Start a new chat** uses the saved
+default and preserves the previous conversation.
+
+**Advanced settings** contains workspace, channel, tool, and other settings. `/` searches every
+schema and plugin field outside Quick start. Advanced edits remain staged until `Ctrl+S`; `Esc`
+asks before discarding unsaved work. Secret input is hidden. `Ctrl+C` exits configuration even
+while typing, saving, or waiting for sign-in; unsaved edits are discarded and login listeners and
+polling are stopped.
+
 Type `@` to complete installed CLI apps, configured MCP servers, or saved sessions through the
 same gateway metadata used by the WebUI. While nanobot is working, `Enter` sends immediately,
 `Tab` waits until the current response is finished, and `Option+Up` on macOS (`Alt+Up` on

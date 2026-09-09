@@ -68,7 +68,7 @@ export class QueuePreview {
     this.header.content = new StyledText([
       chunk("Queued next", this.theme.accent, true),
       chunk(`  ${messages.length}`, this.theme.faint),
-      chunk(`  ·  ${this.editKey} edit last`, this.theme.faint),
+      chunk(`     ${this.editKey} edit last`, this.theme.faint),
     ])
     this.rows.forEach((row, index) => {
       const message = visible[index]

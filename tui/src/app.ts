@@ -23,6 +23,9 @@ import {
   connectionEndpoint,
   fetchAvailableSkills,
   fetchGatewayHealth,
+  decodeConfigEditorSnapshot,
+  fetchConfigEditor,
+  fetchSetupData,
   fetchHistory,
   fetchGatewayConnection,
   fetchMentionCandidates,
@@ -97,6 +100,8 @@ import {
   type FooterHintTheme,
 } from "./footer-hints"
 import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "./host"
+import { ConfigEditor, type ConfigEditorTheme } from "./config-editor"
+import { listenForSetupCallback } from "./setup-callback"
 
 interface AppOptions {
   resolveConnection?: () => Promise<GatewayConnection>
@@ -114,6 +119,7 @@ interface AppOptions {
   version: string
   access: string
   theme: "auto" | ThemeMode
+  initialView?: "config"
   onDetach?: (chatId?: string) => void
   onExit?: (chatId: string) => void
 }
@@ -132,6 +138,7 @@ interface ChatClient {
     chatId: string,
     recoveryId: string,
   ): Promise<RecoveryState>
+  requestMutation?(action: string, payload: Record<string, unknown>): Promise<unknown>
 }
 
 interface Palette {
@@ -188,14 +195,20 @@ const LIGHT: Palette = {
 }
 
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
-const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now · Tab send next"
-const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
+const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now   Tab send next"
+const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now   Tab next"
 const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
 const SESSION_REFRESH_INTERVAL_MS = 1_000
 const LOCAL_COMMANDS: TuiCommand[] = [
+  {
+    command: "/config",
+    title: "Configuration",
+    description: "Edit every nanobot setting",
+    action: "config",
+  },
   {
     command: "/sessions",
     title: "Sessions",
@@ -311,6 +324,19 @@ function contextPanelTheme(palette: Palette): ContextPanelTheme {
   }
 }
 
+function configEditorTheme(palette: Palette): ConfigEditorTheme {
+  return {
+    text: palette.text,
+    muted: palette.muted,
+    faint: palette.faint,
+    border: palette.border,
+    accent: palette.accent,
+    success: palette.success,
+    error: palette.error,
+    selectedBackground: palette.userBackground,
+  }
+}
+
 function diffViewerTheme(palette: Palette, backgroundKnown: boolean): DiffViewerTheme {
   const light = palette === LIGHT
   return {
@@ -402,7 +428,7 @@ function connectionStatusText(
       ? "Still getting ready…"
       : "Nanobot is taking longer to respond…"
   }
-  if (status === "error") return "Nanobot unavailable · restart nanobot"
+  if (status === "error") return "Nanobot unavailable   restart nanobot"
   return "Session ended"
 }
 
@@ -432,7 +458,7 @@ interface RenderedRetryStatus extends RetryStatus {
 
 export function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now()): string {
   const label = retryFailureLabel(status.error_kind)
-  if (status.state === "exhausted") return `${label} · ending turn`
+  if (status.state === "exhausted") return `${label}   ending turn`
   if (status.state === "recovered") return "Connection restored"
   if (status.state === "cleared") return "Retry status cleared"
   const remaining = Math.max(
@@ -442,7 +468,7 @@ export function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now())
   const attempt = status.max_attempts
     ? `${status.attempt}/${status.max_attempts}`
     : String(status.attempt)
-  return `${label} · retrying in ${remaining}s · attempt ${attempt}`
+  return `${label}   retrying in ${remaining}s   attempt ${attempt}`
 }
 
 export function sessionExitMessage(chatId: string): string {
@@ -480,6 +506,7 @@ export class NanobotTui {
   private readonly runtimeControls: RuntimeControls
   private readonly contextPanel: ContextPanel
   private readonly diffViewer: DiffViewer
+  private readonly configEditor: ConfigEditor
   private readonly queuePreview: QueuePreview
   private readonly recoveryNotice: RecoveryNotice
   private readonly client: ChatClient
@@ -561,6 +588,8 @@ export class NanobotTui {
   private composerValue = ""
   private composerCursor = 0
   private reconcilingComposer = false
+  private initialViewPending: AppOptions["initialView"]
+  private rendererStarted = false
 
   private constructor(
     renderer: CliRenderer,
@@ -572,6 +601,7 @@ export class NanobotTui {
   ) {
     this.renderer = renderer
     this.clipboardImageReader = clipboardImageReader
+    this.initialViewPending = options.initialView
     this.defaultModelName = options.model
     this.defaultModelPreset = options.modelPreset
     this.modelName = options.model
@@ -667,7 +697,7 @@ export class NanobotTui {
       backgroundColor: RGBA.defaultBackground(),
       onMouseDown: (event) => {
         if (event.button !== 0) return
-        if (!this.diffViewer.visible) {
+        if (!this.diffViewer.visible && !this.configEditor.visible) {
           // OpenTUI applies automatic focus after mouse handlers run. Prevent
           // a focusable transcript ancestor from stealing text focus back
           // after the composer has been restored here.
@@ -808,6 +838,51 @@ export class NanobotTui {
       flexShrink: 1,
       selectable: false,
     })
+    this.configEditor = new ConfigEditor(
+      renderer,
+      configEditorTheme(this.palette),
+      {
+        read: (path) => fetchSetupData(this.options.apiUrl, this.options.apiToken, path, this.apiReauthenticator),
+        listenForCallback: listenForSetupCallback,
+        startChat: () => this.startNewChat(),
+        copyText: async (text) => {
+          if (!this.renderer.copyToClipboardOSC52(text)) await copyWithSystemClipboard(text)
+        },
+        request: async (action, payload) => {
+          if (!this.client.requestMutation) throw new Error("Wait for the gateway to connect, then try again.")
+          return this.client.requestMutation(action, payload)
+        },
+        openUrl: async (url) => {
+          const parsed = new URL(url)
+          if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Invalid sign-in link.")
+          const command = process.platform === "win32" ? ["rundll32.exe", "url.dll,FileProtocolHandler", url]
+            : process.platform === "darwin" ? ["open", url] : ["xdg-open", url]
+          const child = Bun.spawn(command, { stdout: "ignore", stderr: "ignore" })
+          if (await child.exited !== 0) throw new Error("Unable to open a browser. Copy the sign-in link and open it manually.")
+        },
+        load: () => fetchConfigEditor(
+          this.options.apiUrl,
+          this.options.apiToken,
+          this.apiReauthenticator,
+        ),
+        save: async (revision, config) => {
+          if (!this.client.requestMutation) {
+            throw new Error("configuration updates require a current gateway")
+          }
+          return decodeConfigEditorSnapshot(await this.client.requestMutation(
+            "settings.config_editor.update",
+            { revision, config },
+          ))
+        },
+        onVisibilityChange: (visible) => {
+          if (!visible) {
+            this.composer.focus()
+            if (!this.activeTurn && this.ready) this.status.content = this.readyStatus()
+          }
+        },
+        onStatus: (message) => { this.status.content = message },
+      },
+    )
 
     const statusRow = new BoxRenderable(renderer, {
       id: "nanobot-tui-status-row",
@@ -835,6 +910,7 @@ export class NanobotTui {
     this.shell.add(this.composerFrame)
     this.shell.add(statusRow)
     this.shell.add(this.diffViewer.root)
+    this.shell.add(this.configEditor.root)
     this.renderer.root.add(this.shell)
 
     this.renderer.keyInput.on("keypress", this.handleKey)
@@ -846,6 +922,10 @@ export class NanobotTui {
     this.handleResize()
     this.composer.focus()
     this.transcript.header(options)
+    if (this.initialViewPending === "config") {
+      this.configEditor.showWaitingForGateway()
+      this.composer.blur()
+    }
   }
 
   static async create(options: AppOptions): Promise<NanobotTui> {
@@ -890,6 +970,8 @@ export class NanobotTui {
     void this.loadSkills()
     this.runtimeControls.preload()
     this.renderer.start()
+    this.rendererStarted = true
+    this.openInitialViewIfReady()
     // OpenTUI learns the real terminal background through OSC 10/11. Wait for
     // that bounded probe after first paint. The neutral terminal background is
     // safe to render immediately, and the detected palette can be applied later.
@@ -978,11 +1060,12 @@ export class NanobotTui {
     }
     const command = this.commandMenu.resolve(visibleContent)
     if ((command || visibleContent.startsWith("!")) && this.draft.media(visibleContent).length) {
-      this.status.content = "Images cannot be used with commands · remove the image first"
+      this.status.content = "Images cannot be used with commands   remove the image first"
       return
     }
     if (command?.source === "tui") {
       if (command.command.action === "sessions") void this.openSessions()
+      else if (command.command.action === "config") void this.openConfig()
       else if (command.command.action === "context") void this.openContext()
       else if (command.command.action === "diff") this.openDiff()
       else if (command.command.action === "branch") void this.openBranch()
@@ -1386,8 +1469,8 @@ export class NanobotTui {
       this.setActive(false)
       this.recoveryNotice.show(state)
       this.status.content = state.can_continue === false
-        ? "Interrupted · dismiss to start a new message"
-        : "Interrupted · continue or dismiss"
+        ? "Interrupted   dismiss to start a new message"
+        : "Interrupted   continue or dismiss"
       this.composer.focus()
       return
     }
@@ -1439,9 +1522,22 @@ export class NanobotTui {
 
   private useGatewayConnection(apiUrl: string, apiToken: string): void {
     this.updateGatewayApiConnection(apiUrl, apiToken)
+    this.openInitialViewIfReady()
     void this.loadCommands()
     void this.loadMentions()
     void this.loadSkills()
+  }
+
+  private openInitialViewIfReady(): void {
+    if (
+      this.quitting
+      || !this.rendererStarted
+      || this.initialViewPending !== "config"
+      || !this.options.apiUrl
+      || !this.options.apiToken
+    ) return
+    this.initialViewPending = undefined
+    void this.openConfig(true)
   }
 
   private async refreshApiConnection(
@@ -1478,7 +1574,7 @@ export class NanobotTui {
     if (status === "error" && !info) return
     this.connectionMessage = connectionStatusText(status, info)
     if (this.options.desktopGatewayId && status === "error") {
-      this.connectionMessage = "Desktop disconnected or incompatible · exit and run nanobot to reconnect"
+      this.connectionMessage = "Desktop disconnected or incompatible   exit and run nanobot to reconnect"
     }
     if (status === "connected") {
       this.ready = false
@@ -1505,15 +1601,16 @@ export class NanobotTui {
   }
 
   private renderConnectionMessage(): void {
+    this.configEditor.updateConnectionStatus(this.connectionMessage)
     this.status.content = this.unsentSubmit
-      ? `Not sent · press Enter to retry when ready · ${this.connectionMessage}`
+      ? `Not sent   press Enter to retry when ready   ${this.connectionMessage}`
       : this.connectionMessage
   }
 
   private markSubmitUnsent(sendFailed = false): void {
     this.unsentSubmit = true
     if (sendFailed) {
-      this.status.content = "Not sent · send failed; press Enter to retry when ready"
+      this.status.content = "Not sent   send failed; press Enter to retry when ready"
       return
     }
     this.renderConnectionMessage()
@@ -1546,14 +1643,14 @@ export class NanobotTui {
   private renderActiveStatus(): void {
     if (this.sessionLoading || this.sessionMenu.visible) return
     if (this.retryStatus) {
-      const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
-      const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
+      const navigation = this.transcriptNavigation.awayFromBottom ? "   Ctrl+End latest" : ""
+      const queued = this.promptQueue.length ? `   ${this.promptQueue.length} queued` : ""
       this.status.content = `${retryStatusLine(this.retryStatus)}${queued}${navigation}`
       return
     }
     const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
-    const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
-    const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
+    const navigation = this.transcriptNavigation.awayFromBottom ? "   Ctrl+End latest" : ""
+    const queued = this.promptQueue.length ? `   ${this.promptQueue.length} queued` : ""
     this.status.content = shimmerStatus(
       this.activeLabel,
       `  ${elapsed}${queued}${navigation}`,
@@ -1563,14 +1660,14 @@ export class NanobotTui {
   }
 
   private readyStatus(detail = this.readyDetail): string {
-    if (this.unsentSubmit) return "Not sent · press Enter to retry"
+    if (this.unsentSubmit) return "Not sent   press Enter to retry"
     if (this.transcriptNavigation.awayFromBottom) {
       return this.transcriptNavigation.unseenOutput
-        ? "New output · Ctrl+End latest"
-        : "History · Ctrl+End latest"
+        ? "New output   Ctrl+End latest"
+        : "History   Ctrl+End latest"
     }
-    if (detail) return `Ready · ${detail}`
-    return this.historyHasMore ? "Ready · PageUp for earlier history" : "Ready"
+    if (detail) return `Ready   ${detail}`
+    return this.historyHasMore ? "Ready   PageUp for earlier history" : "Ready"
   }
 
   private sendNextFollowUp(): void {
@@ -1612,7 +1709,7 @@ export class NanobotTui {
 
   private canSendPrompt(prompt: QueuedPrompt): boolean {
     if (this.draft.hasImageLabelConflict(this.composer.plainText)) {
-      this.status.content = "Duplicate image placeholder text · rename or remove it before sending"
+      this.status.content = "Duplicate image placeholder text   rename or remove it before sending"
       return false
     }
     if (!this.hasPrompt(prompt)) return false
@@ -1633,7 +1730,7 @@ export class NanobotTui {
     if (!this.activeTurn || !this.ready) return
     const visibleContent = this.composer.plainText.trim()
     if (this.draft.media(visibleContent).length) {
-      this.status.content = "Images cannot be queued · press Enter to send now"
+      this.status.content = "Images cannot be queued   press Enter to send now"
       return
     }
     const content = this.draft.expand(visibleContent).trim()
@@ -1688,6 +1785,15 @@ export class NanobotTui {
         key.preventDefault()
         return
       }
+    }
+    if (this.configEditor.visible) {
+      if (key.ctrl && key.name === "c") {
+        key.preventDefault()
+        setTimeout(() => this.quit(), 0)
+        return
+      }
+      if (this.configEditor.handleKey(key)) key.preventDefault()
+      return
     }
     if (this.diffViewer.visible) {
       if (key.ctrl && key.name === "c") {
@@ -1970,6 +2076,7 @@ export class NanobotTui {
     this.runtimeControls.setTheme(runtimeControlsTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
+    this.configEditor.setTheme(configEditorTheme(this.palette))
     this.queuePreview.setTheme(queuePreviewTheme(this.palette))
     this.recoveryNotice.setTheme(recoveryNoticeTheme(this.palette))
     this.updateComposerAppearance()
@@ -1991,6 +2098,7 @@ export class NanobotTui {
     this.syncComposerPlaceholder()
     this.contextPanel.resize(this.renderer.height)
     this.diffViewer.resize(this.renderer.width)
+    this.configEditor.resize(this.renderer.width, this.renderer.height)
     this.title.visible = this.renderer.height >= 14
     this.runtimeControls.resize(this.renderer.width)
     this.updateTitle()
@@ -2113,7 +2221,7 @@ export class NanobotTui {
   }
 
   private syncCommandMenu(): void {
-    const limit = this.renderer.height >= 20 ? 7 : 3
+    const limit = this.renderer.height >= 20 ? 8 : 3
     this.commandMenu.update(this.composer.plainText, limit)
     this.updateMeta()
   }
@@ -2294,7 +2402,7 @@ export class NanobotTui {
         return
       }
       this.composer.insertText(insertion.text)
-      this.status.content = `Pasted ${insertion.description} · review before sending`
+      this.status.content = `Pasted ${insertion.description}   review before sending`
     } catch (error) {
       if (
         this.quitting
@@ -2318,7 +2426,7 @@ export class NanobotTui {
     if (!insertion.text) return
     this.composer.insertText(insertion.text)
     if (insertion.compacted) {
-      this.status.content = `Pasted ${insertion.description} · review before sending`
+      this.status.content = `Pasted ${insertion.description}   review before sending`
     }
   }
 
@@ -2333,6 +2441,7 @@ export class NanobotTui {
     } catch {
       // Local navigation remains available against older gateways.
     }
+    if (this.quitting) return
     const commands = new Map(discovered.map((command) => [command.command, command]))
     this.commandMenu.setCommands([...commands.values()], LOCAL_COMMANDS)
     this.syncCommandMenu()
@@ -2366,6 +2475,7 @@ export class NanobotTui {
         this.options.apiToken,
         this.apiReauthenticator,
       )
+      if (this.quitting) return
       if (this.activeMentionQuery) this.syncComposerMenus()
     } catch {
       // Mentions are additive; plain text input remains fully functional.
@@ -2444,7 +2554,7 @@ export class NanobotTui {
       this.ready = false
       this.clearPromptQueue()
       this.sessionMetadataId += 1
-      this.sessionTitle = `Fork · ${preview.slice(0, 48)}`
+      this.sessionTitle = `Fork   ${preview.slice(0, 48)}`
       this.host.reportTitle(preview)
       this.contextTokens = null
       this.lastUsage = null
@@ -2602,7 +2712,7 @@ export class NanobotTui {
       return
     }
     if (this.activeTurn && lifecycle === "agent_turn") {
-      this.status.content = "A turn is already running · Ctrl+C to stop"
+      this.status.content = "A turn is already running   Ctrl+C to stop"
       return
     }
     let turnId: string
@@ -2740,7 +2850,7 @@ export class NanobotTui {
         this.apiReauthenticator,
       )
       if (!context) {
-        this.status.content = "Context unavailable · new session or older gateway"
+        this.status.content = "Context unavailable   new session or older gateway"
         return
       }
       this.contextTokens = context.estimatedSessionTokens
@@ -2813,6 +2923,18 @@ export class NanobotTui {
     this.updateMeta()
   }
 
+  private async openConfig(quickStart = false): Promise<void> {
+    if (this.activeTurn) {
+      this.status.content = "Wait for the current turn or press Ctrl+C"
+      return
+    }
+    this.closeTransientMenus()
+    this.dismissRuntimeControls()
+    this.clearComposer()
+    this.composer.blur()
+    await this.configEditor.show(quickStart)
+  }
+
   private async loadOlderHistory(): Promise<void> {
     if (
       this.historyLoadingOlder
@@ -2838,7 +2960,7 @@ export class NanobotTui {
       this.historyBeforeCursor = history.beforeCursor
       this.historyHasMore = history.hasMoreBefore
       this.status.content = history.hasMoreBefore
-        ? `${history.messages.length} earlier messages · PageUp for more`
+        ? `${history.messages.length} earlier messages   PageUp for more`
         : "Start of session"
     } catch (error) {
       if (hydrationId !== this.hydrationId) return
@@ -2866,6 +2988,7 @@ export class NanobotTui {
     this.submitPending = false
     this.stopSessionRefresh()
     this.host.release()
+    this.configEditor.destroy()
     this.client.close()
     this.renderer.destroy()
     const chatId = this.client.activeChatId || this.options.chatId
@@ -2882,6 +3005,7 @@ export class NanobotTui {
     this.transcript.destroy()
     this.diffViewer.destroy()
     void this.clipboardImageReader.dispose().catch(() => {})
+    this.configEditor.destroy()
     this.host.release()
     this.client.close()
   }

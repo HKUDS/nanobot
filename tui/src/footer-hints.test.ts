@@ -16,7 +16,7 @@ describe("footerHints", () => {
       { key: "ctrl+c", label: "stop", tone: "danger" },
     ], theme)
 
-    expect(result.chunks.map(({ text }) => text).join("")).toBe("enter steer · ctrl+c stop")
+    expect(result.chunks.map(({ text }) => text).join("")).toBe("enter steer   ctrl+c stop")
     expect(result.chunks[0]?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
     expect(result.chunks[3]?.fg?.toInts().slice(0, 3)).toEqual([248, 113, 113])
   })

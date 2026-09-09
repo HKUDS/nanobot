@@ -154,6 +154,19 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    data = config_to_persisted_data(config)
+    # Temp + replace so a crash mid-write cannot leave a truncated config.json.
+    _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def config_to_persisted_data(config: Config) -> dict[str, Any]:
+    """Return the exact JSON object persisted by :func:`save_config`.
+
+    Configuration UIs use this projection so their drafts match the file on
+    disk, including the small non-credential subset retained for OAuth
+    providers. Keeping the projection here prevents each settings surface from
+    growing its own subtly different serializer.
+    """
     data = config.model_dump(mode="json", by_alias=True)
     # OAuth credentials live in dedicated token stores. Persist only the
     # non-credential request settings consumed by these provider backends.
@@ -169,9 +182,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         )
         if settings:
             data.setdefault("providers", {})[alias] = settings
-
-    # Temp + replace so a crash mid-write cannot leave a truncated config.json.
-    _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
+    return data
 
 
 def merge_missing_defaults(existing: object, defaults: object) -> object:

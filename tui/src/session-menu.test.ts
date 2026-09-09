@@ -189,7 +189,7 @@ describe("SessionMenu", () => {
 
     menu.open(scoped, "one", 6)
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).not.toContain("nanobot · Codex")
+    expect(setup.captureCharFrame()).not.toContain("nanobot   Codex")
 
     menu.open([
       scoped[0]!,
@@ -204,7 +204,7 @@ describe("SessionMenu", () => {
     ], "one", 6)
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
-    expect(frame).toContain("nanobot · Codex")
+    expect(frame).toContain("nanobot   Codex")
     expect(frame).toContain("desktop")
 
     menu.update("desktop", 6)

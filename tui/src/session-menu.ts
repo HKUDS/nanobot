@@ -64,7 +64,7 @@ export class SessionMenu {
           this.modelOverride(session),
         ]
           .filter(Boolean)
-          .join(" · ")
+          .join("   ")
         const marker = this.marker(session)
         const foreground = this.interrupted(session)
           ? this.theme.warning || this.theme.accent || this.theme.text

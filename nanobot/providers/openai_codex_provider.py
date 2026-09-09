@@ -654,6 +654,11 @@ def invalidate_openai_codex_model_catalog() -> None:
     _OPENAI_CODEX_MODEL_CATALOG.invalidate()
 
 
+def check_openai_codex_access(proxy: str | None = None) -> None:
+    """Check authenticated model access without cached or built-in catalog fallback."""
+    _fetch_openai_codex_models(proxy)
+
+
 def _fetch_openai_codex_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
     token = get_codex_token(proxy=proxy)
     account_id = getattr(token, "account_id", None)
