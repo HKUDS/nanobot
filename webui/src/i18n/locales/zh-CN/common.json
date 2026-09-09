@@ -127,10 +127,6 @@
           "label": "会话消息工具限流（每分钟）",
           "help": "限制工具向会话发送消息的频率。"
         },
-        "agents_defaults_workspace": {
-          "label": "默认工作目录",
-          "help": "代理文件和记忆的默认目录，已有文件不会自动迁移。"
-        },
         "agents_defaults_unified_session": {
           "label": "跨渠道共享会话",
           "help": "单用户在不同渠道间共享一个会话。"
@@ -274,8 +270,8 @@
           "help": "调整工具执行上限和重试行为。"
         },
         "sessions": {
-          "title": "工作区与会话",
-          "help": "全局存储、会话共享和记忆计划细节。"
+          "title": "会话",
+          "help": "设置跨渠道的会话共享。"
         },
         "tools": {
           "title": "内置工具",

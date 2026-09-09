@@ -42,7 +42,6 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "execution", path: "agents.defaults.provider_retry_mode", kind: "toggle", options: ["standard", "persistent"] },
   { group: "execution", path: "agents.defaults.tool_hint_max_length", kind: "number", min: 20, max: 500 },
   { group: "execution", path: "tools.max_session_messages_per_minute", kind: "number", min: 1 },
-  { group: "sessions", path: "agents.defaults.workspace", kind: "text", manual: true },
   { group: "sessions", path: "agents.defaults.unified_session", kind: "boolean" },
   { group: "tools", path: "tools.exec.enable", kind: "boolean" },
   { group: "tools", path: "tools.file.enable", kind: "boolean" },

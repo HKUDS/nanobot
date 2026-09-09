@@ -19,7 +19,6 @@ from nanobot.webui.settings_contracts import WebUISettingsError
 RUNTIME_CONFIG_PATHS = (
     "agents.defaults.timezone",
     "agents.defaults.timezone_mode",
-    "agents.defaults.workspace",
     "agents.defaults.unified_session",
     "agents.defaults.max_tool_iterations",
     "agents.defaults.max_concurrent_subagents",
@@ -132,7 +131,7 @@ def update_runtime_config(
         raise WebUISettingsError("gateway.port: must be at most 65535")
     if "api.timeout" in values and validated.api.timeout > 3600:
         raise WebUISettingsError("api.timeout: must be at most 3600 seconds")
-    for path in ("agents.defaults.workspace", "gateway.host", "api.host", "tools.image_generation.save_dir"):
+    for path in ("gateway.host", "api.host", "tools.image_generation.save_dir"):
         if path in values:
             parent, leaf = _parent(validated, path)
             if not str(getattr(parent, leaf)).strip():

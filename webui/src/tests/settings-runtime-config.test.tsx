@@ -34,7 +34,7 @@ describe("Runtime configuration settings", () => {
   it("places common settings in their feature pages and reserves advanced for low-frequency controls", () => {
     renderSettingsView({ initialSection: "runtime", initialSettings: runtimeSettings() });
     expect(document.getElementById("runtime-tools.exec.enable")).toBeInTheDocument();
-    expect(document.getElementById("runtime-agents.defaults.workspace")).toBeInTheDocument();
+    expect(document.getElementById("runtime-agents.defaults.workspace")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(document.getElementById("runtime-tools.exec.enable")).not.toBeInTheDocument();
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).not.toBeInTheDocument();

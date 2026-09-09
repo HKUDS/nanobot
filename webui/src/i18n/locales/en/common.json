@@ -127,10 +127,6 @@
           "label": "Session message tool limit (per minute)",
           "help": "Limit how often tools can send messages to a session."
         },
-        "agents_defaults_workspace": {
-          "label": "Default workspace",
-          "help": "Base directory for agent files and memory. Existing files are not moved."
-        },
         "agents_defaults_unified_session": {
           "label": "Share sessions across channels",
           "help": "Use one session across channels for a single user."
@@ -274,8 +270,8 @@
           "help": "Tune tool execution and retry behavior."
         },
         "sessions": {
-          "title": "Workspace and sessions",
-          "help": "Global storage, session sharing, and memory scheduling details."
+          "title": "Sessions",
+          "help": "Share conversations across channels."
         },
         "tools": {
           "title": "Built-in tools",

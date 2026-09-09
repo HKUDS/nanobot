@@ -47,6 +47,7 @@ def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
 
 @pytest.mark.parametrize("values", [
     {"channels.telegram.token": "bad"},
+    {"agents.defaults.workspace": "/not-editable-from-settings"},
     {"providers.openai.api_key": "bad"},
     {"tools.exec": {"enable": False}},
     {"agents.defaults.max_concurrent_subagents": 0},
@@ -77,7 +78,7 @@ def test_invalid_patch_is_atomic(tmp_path, values):
     before = path.read_bytes()
     with pytest.raises(WebUISettingsError):
         update_runtime_config_settings({
-            "agents.defaults.workspace": "/must-not-be-saved", **values,
+            "agents.defaults.max_tool_iterations": 71, **values,
         }, local_browser=True, config_path=path)
     assert path.read_bytes() == before
 
