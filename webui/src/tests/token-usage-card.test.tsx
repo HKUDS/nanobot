@@ -1,6 +1,7 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
+import { TokenUsageModels } from "@/components/settings/TokenUsageModels";
 import type { SettingsPayload } from "@/lib/types";
 
 type Usage = NonNullable<SettingsPayload["usage"]>;
@@ -51,9 +52,39 @@ describe("Token usage card", () => {
     expect(screen.queryByRole("group")).not.toBeInTheDocument();
   });
 
+  it("opens details and computes the weighted cache rate from observed input only", () => {
+    render(<TokenUsageCard usage={usage([
+      { ...day("2026-09-08", 100), cache_read_tokens: 80, cache_read_observed_input_tokens: 100 },
+      { ...day("2026-09-09", 900), cache_read_tokens: 20, cache_read_observed_input_tokens: 300 },
+    ])} />);
+    fireEvent.click(screen.getByRole("button", { name: "View details" }));
+    const details = screen.getByRole("dialog", { name: "Token Usage" });
+    expect(within(details).getByText("25%")).toBeInTheDocument();
+    expect(within(details).getByRole("group", { name: "Daily requests" })).toBeInTheDocument();
+    expect(within(details).getByText("Cache hit rate excludes input with unknown cache status.")).toBeInTheDocument();
+  });
+
   it("does not misrepresent unavailable usage as zero", () => {
     render(<TokenUsageCard />);
     expect(screen.getByRole("status")).toHaveTextContent("Usage data is unavailable.");
     expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("ranks model usage without merging providers or hiding unattributed tokens", () => {
+    const model = (provider: string, tokens: number): NonNullable<Usage["providers_30d"]>[number] => ({
+      ...day("2026-09-09", tokens), provider, model: "shared-model", reported_tokens: tokens,
+      estimated_tokens: 0, successful_requests: 1, failed_requests: 0, reported_requests: 1,
+      estimated_requests: 0, generation_ms: 0, measured_output_tokens: 0, ttft_ms: 0,
+      timed_requests: 0, duration_ms: 0,
+    });
+    render(<TokenUsageModels total={1000} models={[model("provider-a", 200), model("provider-b", 600), model("unused-provider", 0)]} />);
+    const rows = screen.getAllByRole("img");
+    expect(rows).toHaveLength(2);
+    expect(screen.queryByText("unused-provider")).not.toBeInTheDocument();
+    expect(rows[0]).toHaveAccessibleName(/provider-b · shared-model: 600 tokens/);
+    expect(rows[1]).toHaveAccessibleName(/provider-a · shared-model: 200 tokens/);
+    expect(screen.getByText("60%")).toBeInTheDocument();
+    expect(screen.getByText("Other / unattributed")).toBeInTheDocument();
+    expect(screen.getByText("200 · 20%")).toBeInTheDocument();
   });
 });

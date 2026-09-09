@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { TokenUsageDetails } from "@/components/settings/TokenUsageDetails";
 
 type Usage = NonNullable<SettingsPayload["usage"]>;
 const SOURCE_KEYS = ["user", "api", "cron", "dream", "system"] as const;
@@ -54,6 +55,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
   const peak = Math.max(0, ...days.map(day => day.usage?.total_tokens ?? 0));
   const compact = new Intl.NumberFormat(i18n.language, { notation: "compact", maximumFractionDigits: 1 });
   const exact = new Intl.NumberFormat(i18n.language);
+  const percent = new Intl.NumberFormat(i18n.language, { style: "percent", maximumFractionDigits: 1 });
   const dateFormat = new Intl.DateTimeFormat(i18n.language, { month: "short", day: "numeric", timeZone: "UTC" });
   const formatDate = (date: string) => dateFormat.format(new Date(`${date}T00:00:00Z`));
   const segmentLabels = [
@@ -94,6 +96,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
             {usage ? compact.format(total) : "—"}
           </p>
         </div>
+        {usage && <TokenUsageDetails days={days} models={usage.providers_30d} sources={breakdown.map(([source, tokens]) => ({ label: sourceLabels[source], tokens }))} />}
       </div>
 
       {!usage || total === 0 ? (
@@ -135,6 +138,10 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
                             <dt className="flex items-center gap-2 text-muted-foreground"><span aria-hidden className={cn("size-2.5 rounded-sm", SEGMENT_CLASSES[index])} style={index === 0 ? CACHE_PATTERN : undefined} />{segmentLabels[index]}</dt>
                             <dd className="tabular-nums">{exact.format(value)}</dd>
                           </div>)}
+                          <div className="flex justify-between gap-6 border-t border-border/50 pt-2">
+                            <dt className="text-muted-foreground">{t("settings.usage.cacheHitRate", { defaultValue: "Cache hit rate" })}</dt>
+                            <dd className="tabular-nums">{day.usage?.cache_read_observed_input_tokens ? percent.format(day.usage.cache_read_tokens / day.usage.cache_read_observed_input_tokens) : "—"}</dd>
+                          </div>
                         </dl>
                       </TooltipContent>
                     </Tooltip>
