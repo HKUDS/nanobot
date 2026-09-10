@@ -312,8 +312,9 @@ class MCPOAuthStorage:
             return True
 
     def _snapshot_from_entry(self, entry: _StoredServer | None) -> _OAuthSnapshot:
+        entry = entry or {}
         tokens: OAuthToken | None = None
-        raw_tokens = entry.get("tokens") if entry is not None else None
+        raw_tokens = entry.get("tokens")
         if isinstance(raw_tokens, dict):
             try:
                 tokens = OAuthToken.model_validate(raw_tokens)
@@ -321,17 +322,17 @@ class MCPOAuthStorage:
                 logger.warning("Ignoring invalid MCP OAuth tokens for '{}'", self.server_name)
 
         expires_at: float | None = None
-        raw_expiry = entry.get("expires_at") if entry is not None else None
+        raw_expiry = entry.get("expires_at")
         if isinstance(raw_expiry, (int, float)) and not isinstance(raw_expiry, bool):
             expires_at = float(raw_expiry)
 
         token_issuer: str | None = None
-        raw_token_issuer = entry.get("token_issuer") if entry is not None else None
+        raw_token_issuer = entry.get("token_issuer")
         if isinstance(raw_token_issuer, str) and raw_token_issuer:
             token_issuer = raw_token_issuer
 
         client_info: OAuthClientInformationFull | None = None
-        raw_client = entry.get("client_info") if entry is not None else None
+        raw_client = entry.get("client_info")
         if isinstance(raw_client, dict):
             try:
                 client_info = OAuthClientInformationFull.model_validate(raw_client)
@@ -342,7 +343,7 @@ class MCPOAuthStorage:
                 )
 
         oauth_metadata: OAuthMetadata | None = None
-        raw_metadata = entry.get("oauth_metadata") if entry is not None else None
+        raw_metadata = entry.get("oauth_metadata")
         if isinstance(raw_metadata, dict):
             try:
                 oauth_metadata = OAuthMetadata.model_validate(raw_metadata)
@@ -353,7 +354,7 @@ class MCPOAuthStorage:
                 )
 
         oauth_issuer: str | None = None
-        raw_oauth_issuer = entry.get("oauth_issuer") if entry is not None else None
+        raw_oauth_issuer = entry.get("oauth_issuer")
         if isinstance(raw_oauth_issuer, str) and raw_oauth_issuer:
             oauth_issuer = _normalize_issuer(raw_oauth_issuer)
 
@@ -611,6 +612,10 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
     def _apply_snapshot(self, snapshot: _OAuthSnapshot) -> None:
         self.context.current_tokens = snapshot.tokens
         self.context.token_expiry_time = snapshot.expires_at
+        if snapshot.oauth_metadata is None or snapshot.oauth_issuer is None:
+            # Defer the SDK's pre-request refresh until a 401 discovers metadata.
+            # Keep the persisted expiry and issuer binding for retries and restarts.
+            self.context.token_expiry_time = None
         self._token_issuer = snapshot.token_issuer
         self.context.client_info = snapshot.client_info
         self.context.oauth_metadata = snapshot.oauth_metadata
@@ -746,13 +751,9 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
         if metadata is not None:
             oauth_issuer = _normalize_issuer(self.context.auth_server_url or str(metadata.issuer))
             await self._nanobot_storage.set_oauth_metadata(metadata, issuer=oauth_issuer)
-        if (
-            self._refresh_after_discovery.get()
-            and metadata is not None
-            and oauth_issuer == self._token_issuer
-        ):
-            raise _RetryOAuthWithDiscoveredMetadata
         if self._refresh_after_discovery.get():
+            if metadata is not None and oauth_issuer == self._token_issuer:
+                raise _RetryOAuthWithDiscoveredMetadata
             await self._nanobot_storage.clear_tokens_and_client()
             self.context.clear_tokens()
             self.context.client_info = None
@@ -779,7 +780,7 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
                             response = yield outgoing
                             if (
                                 attempt == 0
-                                and str(outgoing.url) == self.context.server_url
+                                and outgoing is request
                                 and response.status_code == 401
                                 and not self._refresh_attempted.get()
                                 and self.context.can_refresh_token()

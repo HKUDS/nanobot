@@ -317,12 +317,15 @@ async def test_expired_token_refreshes_from_persisted_metadata_after_restart(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("message_path", ["/mcp", "/messages?session_id=123"])
 async def test_issuer_bound_token_refreshes_after_401_discovers_endpoint(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    message_path: str,
 ) -> None:
     _use_data_dir(tmp_path, monkeypatch)
     server_url = "https://mcp.example.com/mcp"
+    message_url = f"https://mcp.example.com{message_path}"
     storage = MCPOAuthStorage("linear", server_url)
     await storage.set_oauth_metadata(_oauth_metadata())
     await storage.set_tokens(OAuthToken(
@@ -339,7 +342,7 @@ async def test_issuer_bound_token_refreshes_after_401_discovers_endpoint(
 
     async def respond(request: httpx.Request) -> httpx.Response:
         nonlocal resource_requests
-        if str(request.url) == server_url:
+        if str(request.url) == message_url:
             resource_requests += 1
             if request.headers.get("Authorization") == "Bearer fresh-access":
                 return httpx.Response(200, json={"ok": True})
@@ -366,7 +369,7 @@ async def test_issuer_bound_token_refreshes_after_401_discovers_endpoint(
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond), auth=auth) as client:
-        response = await client.get(server_url)
+        response = await client.post(message_url, json={"method": "tools/list"})
 
     assert response.status_code == 200
     assert resource_requests == 2
@@ -487,9 +490,11 @@ async def test_transient_refresh_failure_preserves_credentials(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", ["immediate", "retry", "restart"])
 async def test_stale_token_endpoint_is_rediscovered_once(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    recovery: str,
 ) -> None:
     _use_data_dir(tmp_path, monkeypatch)
     server_url = "https://mcp.example.com/mcp"
@@ -509,8 +514,10 @@ async def test_stale_token_endpoint_is_rediscovered_once(
     ))
     auth = await create_mcp_oauth_auth("linear", server_url)
     refresh_urls: list[str] = []
+    discovery_unavailable = recovery != "immediate"
 
     async def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal discovery_unavailable
         if request.url.path == "/old/token":
             refresh_urls.append(str(request.url))
             return httpx.Response(404)
@@ -524,6 +531,9 @@ async def test_stale_token_endpoint_is_rediscovered_once(
                 )
             })
         if request.url.path == "/.well-known/oauth-protected-resource":
+            if discovery_unavailable:
+                discovery_unavailable = False
+                raise httpx.ConnectError("temporary discovery outage", request=request)
             return httpx.Response(200, json={
                 "resource": server_url,
                 "authorization_servers": ["https://auth.example.com"],
@@ -541,6 +551,17 @@ async def test_stale_token_endpoint_is_rediscovered_once(
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond), auth=auth) as client:
+        if recovery != "immediate":
+            with pytest.raises(httpx.ConnectError, match="temporary discovery outage"):
+                await client.get(server_url)
+            snapshot = await storage.get_snapshot()
+            assert snapshot.tokens is not None
+            assert snapshot.tokens.refresh_token == "refresh-token"
+            assert snapshot.token_issuer == "https://auth.example.com"
+            assert snapshot.oauth_metadata is None
+            assert snapshot.expires_at is not None
+            if recovery == "restart":
+                client.auth = await create_mcp_oauth_auth("linear", server_url)
         response = await client.get(server_url)
 
     assert response.status_code == 200
@@ -550,6 +571,8 @@ async def test_stale_token_endpoint_is_rediscovered_once(
     ]
     reloaded = await MCPOAuthStorage("linear", server_url).get_snapshot()
     assert reloaded.oauth_metadata == _oauth_metadata()
+    assert reloaded.tokens is not None
+    assert reloaded.tokens.refresh_token == "rotated-refresh"
 
 
 @pytest.mark.asyncio
