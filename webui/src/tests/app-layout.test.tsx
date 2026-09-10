@@ -2444,7 +2444,7 @@ describe("App layout", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Search timezone")).not.toBeInTheDocument();
-    const systemSection = screen.getByRole("region", { name: "System", exact: true });
+    const systemSection = screen.getByRole("heading", { name: "System" }).closest("section");
     expect(systemSection).not.toBeNull();
     const system = within(systemSection as HTMLElement);
     expect(system.getByText("Timezone")).toBeInTheDocument();
@@ -2464,7 +2464,7 @@ describe("App layout", () => {
     expect(
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Overview", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
   });
 
   it("updates the URL hash when switching settings sections", async () => {
@@ -2501,7 +2501,7 @@ describe("App layout", () => {
     fireEvent.click(modelsButton);
 
     expect(await screen.findByText("Model presets")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Models", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Models" })).not.toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=models");
     expect(modelsButton).toHaveAttribute("aria-current", "page");
     expect(settingsHighlight).toHaveAttribute("data-active-id", "models");
