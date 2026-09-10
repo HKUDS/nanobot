@@ -1,16 +1,7 @@
 {
-  "description": "Use nanobot from Matrix rooms.",
-  "requirements": "Homeserver, account token, room access",
   "setup": {
     "docsLabel": "Open Matrix setup",
     "officialLabel": "Open Matrix clients",
-    "tryIt": "Invite the Matrix account into a room and send a test message.",
-    "summary": "Enter your Matrix homeserver and sign in with a password or access token.",
-    "steps": [
-      "Create or choose a Matrix account for nanobot.",
-      "Enter the homeserver, user ID, and either password or access-token credentials.",
-      "Save and enable Matrix, invite the account to a room, and send a test message."
-    ],
     "fields": {
       "homeserver": {
         "label": "Homeserver",
@@ -22,18 +13,15 @@
       },
       "password": {
         "label": "Password",
-        "placeholder": "••••••",
-        "help": "Use either password login or access token login."
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "Access token",
-        "placeholder": "Enter an access token",
-        "help": "Preferred when your Matrix client exposes an access token."
+        "placeholder": "Enter an access token"
       },
       "deviceId": {
         "label": "Device ID",
-        "placeholder": "Required with an access token",
-        "help": "Copy the device ID associated with the access token. Password login does not need it."
+        "placeholder": "Required with an access token"
       },
       "groupPolicy": {
         "label": "Group behavior",

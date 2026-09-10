@@ -1,26 +1,15 @@
 {
-  "description": "Gunakan nanobot dari kanal dan DM Mattermost.",
-  "requirements": "URL server Mattermost, token bot, dan akses kanal",
   "setup": {
     "docsLabel": "Buka panduan Mattermost",
     "officialLabel": "Buka panduan bot Mattermost",
-    "tryIt": "Sebut bot di kanal Mattermost atau kirim pesan langsung.",
-    "summary": "Mattermost terhubung melalui akun bot di server dan menerima pesan kanal serta pesan langsung.",
-    "steps": [
-      "Buat akun bot Mattermost dan salin token aksesnya.",
-      "Masukkan URL server dan berikan akses ke tim serta kanal tujuan.",
-      "Simpan dan aktifkan Mattermost, lalu sebut bot atau kirim DM."
-    ],
     "fields": {
       "serverUrl": {
         "label": "URL server",
-        "placeholder": "https://mattermost.example.com",
-        "help": "Gunakan URL dasar ruang kerja Mattermost."
+        "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "Token bot",
-        "placeholder": "Token bot Mattermost",
-        "help": "Buat dari akun bot Mattermost."
+        "placeholder": "Token bot Mattermost"
       },
       "teamId": {
         "label": "ID tim",

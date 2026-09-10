@@ -1,21 +1,11 @@
 {
-  "description": "Connect nanobot through a NapCat gateway.",
-  "requirements": "NapCat WebSocket endpoint, optional access token",
   "setup": {
     "docsLabel": "Open NapCat setup",
     "officialLabel": "Open NapCat docs",
-    "tryIt": "Send a QQ test message through NapCat.",
-    "summary": "NapCat connects nanobot to QQ through a local or remote OneBot WebSocket endpoint.",
-    "steps": [
-      "Start NapCat and enable a Forward WebSocket service.",
-      "Copy the WebSocket URL and optional access token into nanobot.",
-      "Save and enable NapCat, then send a QQ test message."
-    ],
     "fields": {
       "wsUrl": {
         "label": "WebSocket URL",
-        "placeholder": "ws://127.0.0.1:3001",
-        "help": "Use the Forward WebSocket URL from NapCat."
+        "placeholder": "ws://127.0.0.1:3001"
       },
       "accessToken": {
         "label": "Access token",

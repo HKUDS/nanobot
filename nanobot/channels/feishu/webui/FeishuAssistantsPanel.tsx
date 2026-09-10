@@ -16,7 +16,6 @@ export function FeishuAssistantsPanel({
   token,
   feature,
   showBrandLogos,
-  chatAppsDocsUrl,
   onFeaturesUpdate,
 }: ChannelPluginPanelProps) {
   const { t } = useTranslation();
@@ -29,7 +28,6 @@ export function FeishuAssistantsPanel({
     <ChannelInstancesPanel
       feature={feature}
       showBrandLogos={showBrandLogos}
-      chatAppsDocsUrl={chatAppsDocsUrl}
       instances={instances}
       onFeaturesUpdate={onFeaturesUpdate}
       customization={{

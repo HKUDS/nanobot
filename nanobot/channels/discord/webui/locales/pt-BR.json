@@ -1,26 +1,15 @@
 {
-  "description": "Use o nanobot em servidores e DMs do Discord.",
-  "requirements": "Token do bot Discord, permissões e gateway",
   "setup": {
     "docsLabel": "Abrir guia do Discord",
     "officialLabel": "Abrir portal do Discord",
-    "tryIt": "Mencione o bot em um servidor ou envie uma mensagem direta.",
-    "summary": "Para conectar o Discord, você precisa de um token de bot e das permissões adequadas no servidor.",
-    "steps": [
-      "Crie um bot no Discord Developer Portal e copie o token.",
-      "Convide-o para o servidor com permissões de leitura/envio e comandos slash.",
-      "Salve e ative o Discord; depois, mencione o bot ou envie uma DM."
-    ],
     "fields": {
       "token": {
         "label": "Token do bot",
-        "placeholder": "Token do bot Discord",
-        "help": "Crie-o na página Bot do Discord Developer Portal."
+        "placeholder": "Token do bot Discord"
       },
       "allowChannels": {
         "label": "Canais permitidos",
-        "placeholder": "IDs de canal separados por vírgulas",
-        "help": "Deixe vazio para permitir qualquer canal que o bot consiga ler."
+        "placeholder": "IDs de canal separados por vírgulas"
       },
       "groupPolicy": {
         "label": "Comportamento em grupos",

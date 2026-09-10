@@ -1,21 +1,11 @@
 {
-  "description": "Trò chuyện với nanobot từ Telegram.",
-  "requirements": "Token bot, người dùng được phép và gateway",
   "setup": {
     "docsLabel": "Mở hướng dẫn Telegram",
     "officialLabel": "Mở BotFather",
-    "tryIt": "Gửi /start hoặc tin nhắn riêng ngắn đến bot Telegram.",
-    "summary": "Thêm token bot lấy từ BotFather để gửi và nhận tin nhắn Telegram.",
-    "steps": [
-      "Tạo bot bằng BotFather và sao chép token.",
-      "Thêm token và chọn người có thể nhắn cho bot.",
-      "Lưu và bật Telegram, sau đó gửi tin nhắn riêng hoặc nhắc bot trong nhóm."
-    ],
     "fields": {
       "token": {
         "label": "Token bot",
-        "placeholder": "123456:ABC...",
-        "help": "Tạo bằng BotFather."
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "Proxy mạng",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "Người dùng được phép",
-        "placeholder": "* hoặc ID người dùng Telegram",
-        "help": "Để trống để dùng mã ghép nối."
+        "placeholder": "* hoặc ID người dùng Telegram"
       },
       "groupPolicy": {
         "label": "Hành vi trong nhóm",

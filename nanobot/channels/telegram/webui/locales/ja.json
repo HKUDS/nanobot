@@ -1,21 +1,11 @@
 {
-  "description": "Telegram で nanobot とチャットします。",
-  "requirements": "ボットトークン、許可するユーザー、ゲートウェイ",
   "setup": {
     "docsLabel": "Telegram 設定ガイドを開く",
     "officialLabel": "BotFather を開く",
-    "tryIt": "Telegram ボットに /start または短い DM を送信します。",
-    "summary": "Telegram でメッセージを送受信するには、BotFather で取得したボットトークンを入力してください。",
-    "steps": [
-      "BotFather でボットを作成し、トークンをコピーします。",
-      "トークンを追加し、ボットに連絡できるユーザーを選びます。",
-      "保存して Telegram を有効にし、DM を送るかグループでメンションします。"
-    ],
     "fields": {
       "token": {
         "label": "ボットトークン",
-        "placeholder": "123456:ABC...",
-        "help": "BotFather で作成します。"
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "ネットワークプロキシ",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "許可するユーザー",
-        "placeholder": "* または Telegram ユーザー ID",
-        "help": "ペアリングコードを使う場合は空欄にします。"
+        "placeholder": "* または Telegram ユーザー ID"
       },
       "groupPolicy": {
         "label": "グループでの動作",

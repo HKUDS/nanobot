@@ -22,7 +22,6 @@ export type ChannelPluginPanelProps = {
   token: string;
   feature: NanobotFeatureInfo;
   actionKey: string | null;
-  chatAppsDocsUrl?: string;
   showBrandLogos: boolean;
   onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;

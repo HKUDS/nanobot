@@ -1,17 +1,8 @@
 {
   "displayName": "Email",
-  "description": "Cho phép nanobot nhận và trả lời email.",
-  "requirements": "Hộp thư IMAP, gửi SMTP, mật khẩu ứng dụng và sự đồng ý rõ ràng",
   "setup": {
     "docsLabel": "Mở hướng dẫn Email",
     "officialLabel": "Mở hướng dẫn mật khẩu ứng dụng",
-    "tryIt": "Gửi email thử đến hộp thư đã kết nối.",
-    "summary": "Email đọc thư qua IMAP và trả lời qua SMTP. Dùng hộp thư riêng và cấp quyền trước khi bật.",
-    "steps": [
-      "Tạo hộp thư riêng và mật khẩu ứng dụng nếu cần.",
-      "Chọn nhà cung cấp hoặc nhập thủ công cài đặt IMAP và SMTP.",
-      "Cấp quyền, lưu và bật Email, sau đó gửi tin nhắn thử."
-    ],
     "sections": {
       "receiving": "Nhận thư",
       "sending": "Gửi thư"
@@ -25,7 +16,6 @@
     "fields": {
       "consentGranted": {
         "label": "Cho phép nanobot đọc và gửi email",
-        "help": "Bật để cho phép nanobot truy cập hộp thư này. Hãy kiểm tra đây là hộp thư dành riêng cho bot.",
         "choices": {
           "true": "Đã đồng ý",
           "false": "Chưa đồng ý"
@@ -41,8 +31,7 @@
       },
       "imapPassword": {
         "label": "Mật khẩu IMAP",
-        "placeholder": "Mật khẩu ứng dụng",
-        "help": "Dùng mật khẩu ứng dụng khi nhà cung cấp yêu cầu."
+        "placeholder": "Mật khẩu ứng dụng"
       },
       "smtpHost": {
         "label": "Máy chủ SMTP",
@@ -54,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "Mật khẩu SMTP",
-        "placeholder": "Mật khẩu ứng dụng",
-        "help": "Thường giống mật khẩu ứng dụng dùng cho IMAP."
+        "placeholder": "Mật khẩu ứng dụng"
       },
       "imapPort": {
         "label": "Cổng IMAP",
@@ -75,8 +63,7 @@
       },
       "allowFrom": {
         "label": "Người gửi được phép",
-        "placeholder": "Địa chỉ email, phân tách bằng dấu phẩy",
-        "help": "Để trống để yêu cầu ghép nối trước."
+        "placeholder": "Địa chỉ email, phân tách bằng dấu phẩy"
       },
       "verifyDkim": {
         "label": "Xác minh DKIM",

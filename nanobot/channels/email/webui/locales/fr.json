@@ -1,17 +1,8 @@
 {
   "displayName": "E-mail",
-  "description": "Permettez à nanobot de recevoir des e-mails et d’y répondre.",
-  "requirements": "Boîte IMAP, envoi SMTP, mot de passe d’application et consentement explicite",
   "setup": {
     "docsLabel": "Ouvrir le guide Email",
     "officialLabel": "Ouvrir le guide des mots de passe d’application",
-    "tryIt": "Envoyez un e-mail test à la boîte connectée.",
-    "summary": "nanobot lit les messages via IMAP et répond via SMTP. Utilisez une boîte dédiée et autorisez l’accès avant d’activer le canal.",
-    "steps": [
-      "Créez une boîte dédiée et, si nécessaire, un mot de passe d’application.",
-      "Choisissez un fournisseur ou saisissez les paramètres IMAP et SMTP.",
-      "Accordez le consentement, enregistrez et activez Email, puis envoyez un message test."
-    ],
     "sections": {
       "receiving": "Réception des e-mails",
       "sending": "Envoi des e-mails"
@@ -25,7 +16,6 @@
     "fields": {
       "consentGranted": {
         "label": "Autoriser nanobot à lire et envoyer des e-mails",
-        "help": "Activez cette option pour autoriser l’accès à cette boîte. Vérifiez qu’il s’agit bien de la boîte dédiée au bot.",
         "choices": {
           "true": "Accordé",
           "false": "Non accordé"
@@ -41,8 +31,7 @@
       },
       "imapPassword": {
         "label": "Mot de passe IMAP",
-        "placeholder": "Mot de passe d’application",
-        "help": "Utilisez un mot de passe d’application si le fournisseur l’exige."
+        "placeholder": "Mot de passe d’application"
       },
       "smtpHost": {
         "label": "Hôte SMTP",
@@ -54,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "Mot de passe SMTP",
-        "placeholder": "Mot de passe d’application",
-        "help": "Généralement identique à celui d’IMAP."
+        "placeholder": "Mot de passe d’application"
       },
       "imapPort": {
         "label": "Port IMAP",
@@ -75,8 +63,7 @@
       },
       "allowFrom": {
         "label": "Expéditeurs autorisés",
-        "placeholder": "Adresses séparées par des virgules",
-        "help": "Laissez vide pour que les expéditeurs doivent d’abord s’associer au bot."
+        "placeholder": "Adresses séparées par des virgules"
       },
       "verifyDkim": {
         "label": "Vérifier DKIM",

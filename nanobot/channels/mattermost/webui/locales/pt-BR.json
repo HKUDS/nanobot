@@ -1,26 +1,15 @@
 {
-  "description": "Use o nanobot em canais e DMs do Mattermost.",
-  "requirements": "URL do servidor Mattermost, token do bot e acesso aos canais",
   "setup": {
     "docsLabel": "Abrir guia do Mattermost",
     "officialLabel": "Abrir guia de bots do Mattermost",
-    "tryIt": "Mencione o bot em um canal Mattermost ou envie uma mensagem direta.",
-    "summary": "O nanobot se conecta ao servidor Mattermost com uma conta de bot para receber mensagens de canais e mensagens diretas.",
-    "steps": [
-      "Crie uma conta de bot Mattermost e copie o token de acesso.",
-      "Informe a URL do servidor e conceda acesso à equipe e aos canais desejados.",
-      "Salve e ative o Mattermost; depois, mencione o bot ou envie uma DM."
-    ],
     "fields": {
       "serverUrl": {
         "label": "URL do servidor",
-        "placeholder": "https://mattermost.example.com",
-        "help": "Use a URL base do seu espaço de trabalho Mattermost."
+        "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "Token do bot",
-        "placeholder": "Token do bot Mattermost",
-        "help": "Crie-o em uma conta de bot Mattermost."
+        "placeholder": "Token do bot Mattermost"
       },
       "teamId": {
         "label": "ID da equipe",

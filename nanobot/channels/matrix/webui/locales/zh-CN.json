@@ -1,16 +1,7 @@
 {
-  "description": "在 Matrix 房间中使用 nanobot。",
-  "requirements": "主服务器、账户令牌和房间访问权限",
   "setup": {
     "docsLabel": "打开 Matrix 配置指南",
     "officialLabel": "打开 Matrix 客户端列表",
-    "tryIt": "将 Matrix 账户邀请进房间并发送一条测试消息。",
-    "summary": "填写 Matrix 账户所在的服务器，并使用密码或访问令牌登录。",
-    "steps": [
-      "为 nanobot 创建或选择一个 Matrix 账户。",
-      "填写主服务器、用户 ID，以及密码或访问令牌凭据。",
-      "保存并启用 Matrix，将账户邀请进房间，然后发送一条测试消息。"
-    ],
     "fields": {
       "homeserver": {
         "label": "账户服务器",
@@ -22,18 +13,15 @@
       },
       "password": {
         "label": "密码",
-        "placeholder": "••••••",
-        "help": "密码登录和访问令牌登录任选其一。"
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "访问令牌",
-        "placeholder": "输入访问令牌",
-        "help": "如果 Matrix 客户端可以显示访问令牌，建议使用该方式。"
+        "placeholder": "输入访问令牌"
       },
       "deviceId": {
         "label": "设备 ID",
-        "placeholder": "使用访问令牌时必填",
-        "help": "复制与访问令牌关联的设备 ID；密码登录不需要。"
+        "placeholder": "使用访问令牌时必填"
       },
       "groupPolicy": {
         "label": "群组行为",

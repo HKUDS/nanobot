@@ -1,15 +1,6 @@
 {
-  "description": "Use nanobot in your browser.",
-  "requirements": "Local gateway, WebSocket token",
   "setup": {
     "docsLabel": "Open WebSocket setup",
-    "officialLabel": "Open local WebUI",
-    "tryIt": "Open the WebUI and send a short message.",
-    "summary": "The WebUI connects to nanobot over WebSocket. Running nanobot webui sets up this connection automatically.",
-    "steps": [
-      "Start nanobot with the webui command.",
-      "Open the local URL printed in the terminal.",
-      "Keep WebSocket enabled while using the browser workbench."
-    ]
+    "officialLabel": "Open local WebUI"
   }
 }

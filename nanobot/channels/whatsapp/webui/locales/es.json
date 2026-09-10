@@ -1,17 +1,8 @@
 {
-  "description": "Usa nanobot desde conversaciones de WhatsApp.",
-  "requirements": "Configuración de conexión de WhatsApp y pasarela",
   "setup": {
     "primaryAction": "Conectar WhatsApp",
     "docsLabel": "Abrir guía de WhatsApp",
     "officialLabel": "Abrir la ayuda de WhatsApp",
-    "tryIt": "Tras vincular la cuenta, envía un DM a la cuenta conectada.",
-    "summary": "WhatsApp se conecta escaneando un QR con la cuenta que ejecutará el bot.",
-    "steps": [
-      "Elige Conectar WhatsApp para mostrar un código QR en el navegador.",
-      "Abre Dispositivos vinculados en WhatsApp y escanea el código.",
-      "Después de vincular, activa WhatsApp y envía un mensaje directo de prueba."
-    ],
     "fields": {
       "allowFrom": {
         "label": "Contactos permitidos",

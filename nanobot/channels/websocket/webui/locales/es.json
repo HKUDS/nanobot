@@ -1,15 +1,6 @@
 {
-  "description": "Usa nanobot en tu navegador.",
-  "requirements": "Pasarela local y token WebSocket",
   "setup": {
     "docsLabel": "Abrir guía de WebSocket",
-    "officialLabel": "Abrir WebUI local",
-    "tryIt": "Abre la WebUI y envía un mensaje corto.",
-    "summary": "La WebUI se conecta a nanobot mediante WebSocket. El comando nanobot webui configura esta conexión automáticamente.",
-    "steps": [
-      "Inicia nanobot con el comando webui.",
-      "Abre la URL local mostrada en la terminal.",
-      "Mantén WebSocket activado mientras uses la WebUI."
-    ]
+    "officialLabel": "Abrir WebUI local"
   }
 }

@@ -178,7 +178,6 @@ export function ChannelSetupPanel({
   token,
   feature,
   actionKey,
-  chatAppsDocsUrl,
   showBrandLogos,
   onAction,
   onFeaturesUpdate,
@@ -187,7 +186,6 @@ export function ChannelSetupPanel({
   token: string;
   feature: NanobotFeatureInfo;
   actionKey: string | null;
-  chatAppsDocsUrl?: string;
   showBrandLogos: boolean;
   onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
@@ -209,7 +207,6 @@ export function ChannelSetupPanel({
           feature={feature}
           actionKey={actionKey}
           showBrandLogos={showBrandLogos}
-          chatAppsDocsUrl={chatAppsDocsUrl}
           onAction={onAction}
           onFeaturesUpdate={onFeaturesUpdate}
         />
@@ -221,7 +218,6 @@ export function ChannelSetupPanel({
       <ChannelInstancesPanel
         feature={feature}
         showBrandLogos={showBrandLogos}
-        chatAppsDocsUrl={chatAppsDocsUrl}
         onFeaturesUpdate={onFeaturesUpdate}
       />
     );
@@ -285,7 +281,6 @@ function ChannelSetupSurface({
   token: string;
   feature: NanobotFeatureInfo;
   setup: ChannelSetupPresentation;
-  chatAppsDocsUrl?: string;
   connectRequestId: number;
   ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;

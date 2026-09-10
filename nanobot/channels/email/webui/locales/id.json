@@ -1,17 +1,8 @@
 {
   "displayName": "Email",
-  "description": "Izinkan nanobot menerima dan membalas email.",
-  "requirements": "Kotak masuk IMAP, pengirim SMTP, kata sandi aplikasi, dan persetujuan eksplisit",
   "setup": {
     "docsLabel": "Buka panduan Email",
     "officialLabel": "Buka panduan kata sandi aplikasi",
-    "tryIt": "Kirim email uji ke kotak surat yang terhubung.",
-    "summary": "Email membaca pesan melalui IMAP dan membalas melalui SMTP. Gunakan kotak surat khusus dan berikan persetujuan sebelum mengaktifkan.",
-    "steps": [
-      "Buat kotak surat khusus dan kata sandi aplikasi bila diperlukan.",
-      "Pilih prasetel penyedia atau masukkan pengaturan IMAP dan SMTP secara manual.",
-      "Berikan persetujuan, simpan dan aktifkan Email, lalu kirim pesan uji."
-    ],
     "sections": {
       "receiving": "Penerimaan email",
       "sending": "Pengiriman email"
@@ -25,7 +16,6 @@
     "fields": {
       "consentGranted": {
         "label": "Izinkan nanobot membaca dan mengirim email",
-        "help": "Aktifkan untuk memberi nanobot akses ke kotak surat ini. Pastikan kotak surat tersebut memang dikhususkan untuk bot.",
         "choices": {
           "true": "Diberikan",
           "false": "Belum diberikan"
@@ -41,8 +31,7 @@
       },
       "imapPassword": {
         "label": "Kata sandi IMAP",
-        "placeholder": "Kata sandi aplikasi",
-        "help": "Gunakan kata sandi aplikasi jika diwajibkan penyedia."
+        "placeholder": "Kata sandi aplikasi"
       },
       "smtpHost": {
         "label": "Host SMTP",
@@ -54,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "Kata sandi SMTP",
-        "placeholder": "Kata sandi aplikasi",
-        "help": "Biasanya sama dengan kata sandi aplikasi IMAP."
+        "placeholder": "Kata sandi aplikasi"
       },
       "imapPort": {
         "label": "Port IMAP",
@@ -75,8 +63,7 @@
       },
       "allowFrom": {
         "label": "Pengirim yang diizinkan",
-        "placeholder": "Alamat email, dipisahkan koma",
-        "help": "Kosongkan untuk mewajibkan pairing terlebih dahulu."
+        "placeholder": "Alamat email, dipisahkan koma"
       },
       "verifyDkim": {
         "label": "Verifikasi DKIM",

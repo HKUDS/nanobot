@@ -45,7 +45,7 @@ describe("CredentialForm", () => {
   it("associates option errors and exposes a stable focus target", () => {
     render(
       <CredentialForm
-        fields={[{ ...fields[1]!, help: "Controls which room messages are handled." }]}
+        fields={[fields[1]!]}
         values={{ "channels.matrix.groupPolicy": "mention" }}
         visibleSecrets={{}}
         onChange={vi.fn()}

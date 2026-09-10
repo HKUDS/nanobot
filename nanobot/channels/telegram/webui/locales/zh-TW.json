@@ -1,21 +1,11 @@
 {
-  "description": "在 Telegram 中與 nanobot 聊天。",
-  "requirements": "機器人權杖、允許的使用者和閘道",
   "setup": {
     "docsLabel": "開啟 Telegram 設定指南",
     "officialLabel": "開啟 BotFather",
-    "tryIt": "向 Telegram 機器人傳送 /start 或一則簡短私訊。",
-    "summary": "填入從 BotFather 取得的機器人權杖，才能收發 Telegram 訊息。",
-    "steps": [
-      "使用 BotFather 建立機器人並複製權杖。",
-      "填入權杖並選擇哪些使用者可以向機器人傳送訊息。",
-      "儲存並啟用 Telegram，然後傳送私訊或在群組中提及機器人。"
-    ],
     "fields": {
       "token": {
         "label": "機器人權杖",
-        "placeholder": "123456:ABC...",
-        "help": "使用 BotFather 建立。"
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "網路代理",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "允許的使用者",
-        "placeholder": "* 或 Telegram 使用者 ID",
-        "help": "留空則使用配對碼。"
+        "placeholder": "* 或 Telegram 使用者 ID"
       },
       "groupPolicy": {
         "label": "群組行為",

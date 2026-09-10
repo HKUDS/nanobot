@@ -1,15 +1,6 @@
 {
-  "description": "ブラウザーで nanobot を利用します。",
-  "requirements": "ローカルゲートウェイと WebSocket トークン",
   "setup": {
     "docsLabel": "WebSocket 設定ガイドを開く",
-    "officialLabel": "ローカル WebUI を開く",
-    "tryIt": "WebUI を開き、短いメッセージを送信します。",
-    "summary": "WebUI は WebSocket 経由で nanobot に接続します。nanobot webui コマンドを実行すると、この接続が自動で設定されます。",
-    "steps": [
-      "webui コマンドで nanobot を起動します。",
-      "ターミナルに表示されたローカル URL を開きます。",
-      "WebUI の使用中は WebSocket を有効にしておいてください。"
-    ]
+    "officialLabel": "ローカル WebUI を開く"
   }
 }

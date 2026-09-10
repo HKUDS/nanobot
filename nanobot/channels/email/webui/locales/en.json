@@ -1,16 +1,7 @@
 {
-  "description": "Let nanobot receive and answer email messages.",
-  "requirements": "IMAP inbox, SMTP sender, app password, explicit consent",
   "setup": {
     "docsLabel": "Open Email setup",
     "officialLabel": "Open app password guide",
-    "tryIt": "Send a test email to the connected mailbox.",
-    "summary": "Email reads messages over IMAP and replies over SMTP. Use a dedicated mailbox and grant consent before enabling it.",
-    "steps": [
-      "Create a dedicated mailbox and, when required, an app password.",
-      "Choose a provider preset or enter the IMAP and SMTP settings manually.",
-      "Grant consent, save and enable Email, then send a test message to the mailbox."
-    ],
     "sections": {
       "receiving": "Receiving mail",
       "sending": "Sending mail"
@@ -24,7 +15,6 @@
     "fields": {
       "consentGranted": {
         "label": "Allow nanobot to read and send email",
-        "help": "Turn on to give nanobot access to this mailbox. Make sure this is the dedicated mailbox you want the bot to use.",
         "choices": {
           "true": "Granted",
           "false": "Not granted"
@@ -40,8 +30,7 @@
       },
       "imapPassword": {
         "label": "IMAP password",
-        "placeholder": "App password",
-        "help": "Use an app password when your mail provider requires one."
+        "placeholder": "App password"
       },
       "smtpHost": {
         "label": "SMTP host",
@@ -53,8 +42,7 @@
       },
       "smtpPassword": {
         "label": "SMTP password",
-        "placeholder": "App password",
-        "help": "Usually the same app password used for IMAP."
+        "placeholder": "App password"
       },
       "imapPort": {
         "label": "IMAP port",
@@ -74,8 +62,7 @@
       },
       "allowFrom": {
         "label": "Allowed senders",
-        "placeholder": "Email addresses, comma separated",
-        "help": "Leave empty to require pairing before a sender can use email."
+        "placeholder": "Email addresses, comma separated"
       },
       "verifyDkim": {
         "label": "Verify DKIM",

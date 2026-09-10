@@ -1,18 +1,9 @@
 {
   "displayName": "微信",
-  "description": "在微信對話中使用 nanobot。",
-  "requirements": "微信管道設定和閘道",
   "setup": {
     "primaryAction": "連接微信",
     "docsLabel": "開啟微信設定指南",
     "officialLabel": "開啟微信",
-    "tryIt": "QR Code登入完成後，向已連接的帳戶傳送一則微信私訊。",
-    "summary": "微信透過QR Code登入，並將帳戶狀態儲存在本機。",
-    "steps": [
-      "點選連接，用手機微信掃描QR Code。",
-      "微信接收訊息期間請保持本機閘道執行。",
-      "傳送一則私訊測試，確認帳戶已連接。"
-    ],
     "fields": {
       "allowFrom": {
         "label": "允許的使用者",
@@ -41,7 +32,6 @@
   "custom": {
     "qrAlt": "微信登入QR Code",
     "scanTitle": "使用微信掃描 QR Code",
-    "scanDescription": "用手機微信掃描此QR Code。登入後，nanobot 會將帳戶狀態儲存在本機。",
     "waiting": "等待使用微信掃描 QR Code…",
     "connected": "微信已連接。",
     "stopped": "微信登入已停止。",

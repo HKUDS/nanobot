@@ -1,21 +1,11 @@
 {
-  "description": "Converse com o nanobot pelo Telegram.",
-  "requirements": "Token do bot, usuários permitidos e gateway",
   "setup": {
     "docsLabel": "Abrir guia do Telegram",
     "officialLabel": "Abrir BotFather",
-    "tryIt": "Envie /start ou uma DM curta ao seu bot do Telegram.",
-    "summary": "Adicione o token de bot obtido no BotFather para enviar e receber mensagens do Telegram.",
-    "steps": [
-      "Crie um bot com o BotFather e copie o token.",
-      "Adicione o token e escolha quem pode enviar mensagens ao bot.",
-      "Salve e ative o Telegram; depois, envie uma DM ou mencione o bot em um grupo."
-    ],
     "fields": {
       "token": {
         "label": "Token do bot",
-        "placeholder": "123456:ABC...",
-        "help": "Crie-o com o BotFather."
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "Proxy de rede",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "Usuários permitidos",
-        "placeholder": "* ou IDs de usuário do Telegram",
-        "help": "Deixe vazio para usar códigos de pareamento."
+        "placeholder": "* ou IDs de usuário do Telegram"
       },
       "groupPolicy": {
         "label": "Comportamento em grupos",

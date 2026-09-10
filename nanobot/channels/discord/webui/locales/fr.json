@@ -1,26 +1,15 @@
 {
-  "description": "Utilisez nanobot sur les serveurs Discord et en messages privés.",
-  "requirements": "Jeton du bot Discord, permissions et passerelle",
   "setup": {
     "docsLabel": "Ouvrir le guide Discord",
     "officialLabel": "Ouvrir le portail Discord",
-    "tryIt": "Mentionnez le bot sur un serveur ou envoyez-lui un message privé.",
-    "summary": "La connexion à Discord nécessite un jeton de bot et les permissions appropriées sur le serveur.",
-    "steps": [
-      "Créez un bot dans le portail développeur Discord et copiez son jeton.",
-      "Invitez-le sur votre serveur avec les permissions de lecture, d’envoi et de commandes slash.",
-      "Enregistrez et activez Discord, puis mentionnez le bot ou envoyez-lui un message privé."
-    ],
     "fields": {
       "token": {
         "label": "Jeton du bot",
-        "placeholder": "Jeton du bot Discord",
-        "help": "Créez-le depuis la page Bot du portail développeur Discord."
+        "placeholder": "Jeton du bot Discord"
       },
       "allowChannels": {
         "label": "Salons autorisés",
-        "placeholder": "ID de salon séparés par des virgules",
-        "help": "Laissez vide pour autoriser tous les salons lisibles par le bot."
+        "placeholder": "ID de salon séparés par des virgules"
       },
       "groupPolicy": {
         "label": "Comportement en groupe",

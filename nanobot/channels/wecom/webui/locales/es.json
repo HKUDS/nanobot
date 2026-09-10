@@ -1,26 +1,15 @@
 {
-  "description": "Usa nanobot desde chats de trabajo de WeCom.",
-  "requirements": "Bot ID y Secret del bot de IA de WeCom",
   "setup": {
     "docsLabel": "Abrir guía de WeCom",
     "officialLabel": "Abrir consola de WeCom",
-    "tryIt": "Envía un mensaje de prueba al bot de WeCom.",
-    "summary": "WeCom necesita el ID y el secreto de un bot de IA desde la consola de administración.",
-    "steps": [
-      "Crea un bot de IA en WeCom y elige el modo API.",
-      "Copia el Bot ID y el Secret en nanobot.",
-      "Guarda y activa WeCom; después envía un mensaje de prueba."
-    ],
     "fields": {
       "botId": {
         "label": "Bot ID",
-        "placeholder": "Bot ID de WeCom",
-        "help": "Cópialo de la página del modo API del bot de IA de WeCom."
+        "placeholder": "Bot ID de WeCom"
       },
       "secret": {
         "label": "Secret",
-        "placeholder": "••••••",
-        "help": "Mantén privado el secreto del bot de WeCom."
+        "placeholder": "••••••"
       },
       "allowFrom": {
         "label": "Usuarios permitidos",

@@ -1,17 +1,8 @@
 {
-  "description": "在 WhatsApp 会话中使用 nanobot。",
-  "requirements": "WhatsApp 连接配置和网关",
   "setup": {
     "primaryAction": "连接 WhatsApp",
     "docsLabel": "打开 WhatsApp 配置指南",
     "officialLabel": "打开 WhatsApp 帮助",
-    "tryIt": "关联完成后，向已连接的账户发送一条 WhatsApp 私信。",
-    "summary": "使用要运行机器人的 WhatsApp 账户扫描二维码即可完成连接。",
-    "steps": [
-      "点击“连接 WhatsApp”，在浏览器中显示二维码。",
-      "在手机 WhatsApp 中打开“已关联的设备”并扫描二维码。",
-      "关联后启用 WhatsApp，然后发送一条私信测试。"
-    ],
     "fields": {
       "allowFrom": {
         "label": "允许的联系人",

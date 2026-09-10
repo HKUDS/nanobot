@@ -1,12 +1,11 @@
 import { channelValidationMessage } from "./validationMessages";
-import { useMemo, useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Clipboard, ExternalLink, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Button } from "@/components/ui/button";
 import {
-  docsUrlWithBase,
   type ChannelProviderPreset,
   type ChannelSetupPresentation,
 } from "@/components/settings/channels/catalog";
@@ -17,155 +16,12 @@ import {
   channelValidationStatusIcon,
   channelValidationStatusLabel,
 } from "@/components/settings/channels/CredentialForm";
-import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { logoFallbackUrls } from "@/lib/provider-brand";
 import type {
   ChannelValidationPayload,
   NanobotFeatureInfo,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-export function ChannelGuideLink({
-  feature,
-  setup,
-  chatAppsDocsUrl,
-  compact = false,
-}: {
-  feature: NanobotFeatureInfo;
-  setup: ChannelSetupPresentation;
-  chatAppsDocsUrl?: string;
-  compact?: boolean;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const presentation = channelUiPresentation(feature.name, feature.webui)
-    ?? channelUiPresentation(feature.name);
-  const logoUrls = useMemo(
-    () => logoFallbackUrls(setup.docsLogoUrl ?? presentation?.logoUrl),
-    [presentation?.logoUrl, setup.docsLogoUrl],
-  );
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-  const Icon = presentation?.icon;
-  const initials = presentation?.initials ?? feature.display_name.slice(0, 2).toUpperCase();
-  const color = presentation?.color ?? "#6B7280";
-  const docsUrl = docsUrlWithBase(setup.docsUrl, chatAppsDocsUrl);
-
-  if (!docsUrl) return null;
-
-  return (
-    <a
-      href={docsUrl}
-      target="_blank"
-      rel="noreferrer"
-      className={cn(
-        "inline-flex max-w-full items-center gap-2 bg-background/80 font-semibold text-foreground transition-colors settings-hover",
-        compact
-          ? "shrink-0 rounded-full py-1 pl-1 pr-2.5 text-[11.5px]"
-          : "mt-3 rounded-control py-1.5 pl-1.5 pr-3 text-[12px]",
-      )}
-    >
-      <span
-        className={cn(
-          "grid shrink-0 place-items-center overflow-hidden bg-muted/70 font-bold",
-          compact ? "h-5 w-5 rounded-full text-[9px]" : "h-6 w-6 rounded-compact text-[10px]",
-        )}
-        style={{ color }}
-        aria-hidden
-      >
-        {logoUrl ? (
-          <img
-            src={logoUrl}
-            alt=""
-            decoding="async"
-            loading="lazy"
-            className={cn("object-contain", compact ? "h-3.5 w-3.5" : "h-4 w-4")}
-            onLoad={onLogoLoad}
-            onError={onLogoError}
-          />
-        ) : Icon ? (
-          <Icon className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} strokeWidth={2.25} />
-        ) : (
-          initials
-        )}
-      </span>
-      <span className="truncate">
-        {setup.docsLabel ?? tx("settings.channels.officialGuide", "Official guide")}
-      </span>
-      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-    </a>
-  );
-}
-
-export function ChannelSetupLinks({
-  feature,
-  setup,
-  chatAppsDocsUrl,
-}: {
-  feature: NanobotFeatureInfo;
-  setup: ChannelSetupPresentation;
-  chatAppsDocsUrl?: string;
-}) {
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      <ChannelOfficialLink feature={feature} setup={setup} />
-      <ChannelGuideLink feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} compact />
-    </div>
-  );
-}
-
-function ChannelOfficialLink({
-  feature,
-  setup,
-}: {
-  feature: NanobotFeatureInfo;
-  setup: ChannelSetupPresentation;
-}) {
-  const presentation = channelUiPresentation(feature.name, feature.webui)
-    ?? channelUiPresentation(feature.name);
-  const logoUrls = useMemo(
-    () => logoFallbackUrls(setup.docsLogoUrl ?? presentation?.logoUrl),
-    [presentation?.logoUrl, setup.docsLogoUrl],
-  );
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-  const Icon = presentation?.icon;
-  const initials = presentation?.initials ?? feature.display_name.slice(0, 2).toUpperCase();
-  const color = presentation?.color ?? "#6B7280";
-  const label = setup.officialLabel;
-  if (!setup.officialUrl || !label) return null;
-  return (
-    <a
-      href={setup.officialUrl}
-      target="_blank"
-      rel="noreferrer"
-      className="inline-flex max-w-full shrink-0 items-center gap-2 rounded-full bg-background/80 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground transition-colors settings-hover"
-    >
-      <span
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full bg-muted/70"
-        style={{ color }}
-        aria-hidden
-      >
-        {logoUrl ? (
-          <img
-            src={logoUrl}
-            alt=""
-            decoding="async"
-            loading="lazy"
-            className="h-3.5 w-3.5 object-contain"
-            onLoad={onLogoLoad}
-            onError={onLogoError}
-          />
-        ) : Icon ? (
-          <Icon className="h-3 w-3" strokeWidth={2.25} />
-        ) : (
-          <span className="text-[8px] font-bold">{initials}</span>
-        )}
-      </span>
-      <span className="truncate">{label}</span>
-      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-    </a>
-  );
-}
 
 export function ChannelSetupActions({
   feature,
@@ -339,49 +195,6 @@ export function ChannelValidationChecks({ validation }: { validation: ChannelVal
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-export function ChannelSetupSteps({
-  steps,
-  action,
-  tryIt,
-}: {
-  steps: string[];
-  action?: ReactNode;
-  tryIt?: string;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  return (
-    <div className="text-[12.5px] leading-5 text-muted-foreground">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="text-[12px] font-semibold text-foreground">
-          {tx("settings.channels.setupSteps", "Next steps")}
-        </div>
-        {action}
-      </div>
-      <ol className="space-y-1.5">
-        {steps.map((step, index) => (
-          <li key={step} className="flex gap-2">
-            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
-              {index + 1}
-            </span>
-            <span>{step}</span>
-          </li>
-        ))}
-      </ol>
-      {tryIt ? (
-        <div className="mt-3 rounded-control bg-background/75 px-3 py-2 text-[12px] text-muted-foreground">
-          <span className="font-medium text-foreground">
-            {tx("settings.channels.tryIt", "Try it")}
-          </span>
-          <span className="ml-2">
-            {tryIt}
-          </span>
-        </div>
-      ) : null}
     </div>
   );
 }

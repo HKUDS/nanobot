@@ -1,17 +1,8 @@
 {
-  "description": "WhatsApp 대화에서 nanobot을 사용합니다.",
-  "requirements": "WhatsApp 연결 설정 및 게이트웨이",
   "setup": {
     "primaryAction": "WhatsApp 연결",
     "docsLabel": "WhatsApp 설정 가이드 열기",
     "officialLabel": "WhatsApp 도움말 열기",
-    "tryIt": "연결이 끝나면 연결된 계정으로 WhatsApp DM을 보내세요.",
-    "summary": "봇을 실행할 WhatsApp 계정으로 QR 코드를 스캔해 연결합니다.",
-    "steps": [
-      "WhatsApp 연결을 선택해 브라우저에 QR 코드를 표시하세요.",
-      "휴대폰 WhatsApp에서 연결된 기기를 열고 코드를 스캔하세요.",
-      "연결 후 WhatsApp을 활성화하고 DM으로 테스트하세요."
-    ],
     "fields": {
       "allowFrom": {
         "label": "허용된 연락처",

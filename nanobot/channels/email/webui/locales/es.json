@@ -1,17 +1,8 @@
 {
   "displayName": "Correo electrónico",
-  "description": "Permite que nanobot reciba y responda correos.",
-  "requirements": "Bandeja IMAP, envío SMTP, contraseña de app y consentimiento explícito",
   "setup": {
     "docsLabel": "Abrir guía de Email",
     "officialLabel": "Abrir guía de contraseñas de app",
-    "tryIt": "Envía un correo de prueba al buzón conectado.",
-    "summary": "Email lee mensajes por IMAP y responde por SMTP. Usa un buzón dedicado y da tu consentimiento antes de activarlo.",
-    "steps": [
-      "Crea un buzón dedicado y, si hace falta, una contraseña de app.",
-      "Elige un proveedor o introduce manualmente IMAP y SMTP.",
-      "Da tu consentimiento, guarda y activa Email; después envía un mensaje de prueba."
-    ],
     "sections": {
       "receiving": "Recepción de correo",
       "sending": "Envío de correo"
@@ -25,7 +16,6 @@
     "fields": {
       "consentGranted": {
         "label": "Permitir que nanobot lea y envíe correos",
-        "help": "Activa esta opción para permitir el acceso al buzón. Comprueba que sea el buzón dedicado al bot.",
         "choices": {
           "true": "Concedido",
           "false": "No concedido"
@@ -41,8 +31,7 @@
       },
       "imapPassword": {
         "label": "Contraseña IMAP",
-        "placeholder": "Contraseña de app",
-        "help": "Usa una contraseña de app si el proveedor la exige."
+        "placeholder": "Contraseña de app"
       },
       "smtpHost": {
         "label": "Host SMTP",
@@ -54,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "Contraseña SMTP",
-        "placeholder": "Contraseña de app",
-        "help": "Normalmente es la misma que para IMAP."
+        "placeholder": "Contraseña de app"
       },
       "imapPort": {
         "label": "Puerto IMAP",
@@ -75,8 +63,7 @@
       },
       "allowFrom": {
         "label": "Remitentes permitidos",
-        "placeholder": "Correos separados por comas",
-        "help": "Déjalo vacío para exigir vinculación previa."
+        "placeholder": "Correos separados por comas"
       },
       "verifyDkim": {
         "label": "Verificar DKIM",

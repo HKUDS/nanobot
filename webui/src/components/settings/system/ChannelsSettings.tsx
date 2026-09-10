@@ -122,7 +122,7 @@ export function ChannelsSettings({
           <div className="max-h-[85dvh] min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {error ? <DismissibleStatusMessage message={error} isError onDismiss={onDismissStatus} /> : null}
             {selectedChannel ? <ChannelSetupPanel token={token} feature={selectedChannel} actionKey={actionKey}
-              chatAppsDocsUrl={chatAppsDocsUrl} showBrandLogos={showBrandLogos}
+              showBrandLogos={showBrandLogos}
               onAction={onAction} onFeaturesUpdate={onFeaturesUpdate} connectRequestId={connectRequestId} /> : null}
           </div>
         </DialogContent>

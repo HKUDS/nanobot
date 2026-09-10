@@ -15,12 +15,8 @@ export type ChannelSetupPresentation = {
   command?: string;
   docsUrl?: string;
   docsLabel?: string;
-  docsLogoUrl?: string;
   officialUrl?: string;
   officialLabel?: string;
-  summary?: string;
-  tryIt?: string;
-  steps: string[];
   sectionLabels?: Record<string, string>;
   fields?: ChannelConfigField[];
   manualFields?: ChannelConfigField[];
@@ -33,7 +29,6 @@ type ChannelCatalogSetupPresentation = {
   mode?: "webui" | "credentials" | "connect";
   command?: string;
   docsUrl?: string;
-  docsLogoUrl?: string;
   fields?: ChannelFieldPresentation[];
   manualFields?: ChannelFieldPresentation[];
   actions?: ChannelSetupActionDefinition[];
@@ -82,7 +77,6 @@ export type ChannelConfigField = {
   placeholder?: string;
   secret?: boolean;
   optional?: boolean;
-  help?: string;
   inputType?: "text" | "number" | "url" | "email" | "tel";
   kind?: "string" | "secret" | "int" | "bool" | "list" | "enum" | string;
   section?: string;

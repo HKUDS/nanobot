@@ -1,15 +1,6 @@
 {
-  "description": "在瀏覽器中使用 nanobot。",
-  "requirements": "本機閘道和 WebSocket 權杖",
   "setup": {
     "docsLabel": "開啟 WebSocket 設定指南",
-    "officialLabel": "開啟本機 WebUI",
-    "tryIt": "開啟 WebUI 並傳送一則簡短訊息。",
-    "summary": "WebUI 透過 WebSocket 連接 nanobot。執行 nanobot webui 時會自動設定此連線。",
-    "steps": [
-      "使用 webui 指令啟動 nanobot。",
-      "開啟終端機中顯示的本機網址。",
-      "使用 WebUI 時，請保持 WebSocket 啟用。"
-    ]
+    "officialLabel": "開啟本機 WebUI"
   }
 }

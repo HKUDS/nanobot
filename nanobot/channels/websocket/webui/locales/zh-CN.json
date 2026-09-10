@@ -1,15 +1,6 @@
 {
-  "description": "在浏览器中使用 nanobot。",
-  "requirements": "本地网关和 WebSocket 令牌",
   "setup": {
     "docsLabel": "打开 WebSocket 配置指南",
-    "officialLabel": "打开本地 WebUI",
-    "tryIt": "打开 WebUI 并发送一条简短消息。",
-    "summary": "WebUI 通过 WebSocket 连接 nanobot。运行 nanobot webui 时会自动配置此连接。",
-    "steps": [
-      "使用 webui 命令启动 nanobot。",
-      "打开终端中显示的本地地址。",
-      "使用浏览器工作台期间请保持 WebSocket 启用。"
-    ]
+    "officialLabel": "打开本地 WebUI"
   }
 }

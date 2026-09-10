@@ -21,8 +21,6 @@ import { normalizeLocale } from "@/i18n/config";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { ChannelRuntimeStatus, NanobotFeatureInfo } from "@/lib/types";
 
-export type ChannelFilter = "all" | "on" | "off";
-
 export function channelSetup(
   feature: NanobotFeatureInfo,
   locale = "en",
@@ -37,7 +35,6 @@ export function channelSetup(
       key,
       label: copy?.label ?? fieldLabel(key.split(".").at(-1) ?? key),
       placeholder: copy?.placeholder,
-      help: copy?.help,
     };
   };
   const localizePresentedField = (
@@ -51,15 +48,6 @@ export function channelSetup(
     primaryActionLabel: setupMessages?.primaryAction,
     docsLabel: setupMessages?.docsLabel,
     officialLabel: setupMessages?.officialLabel,
-    summary:
-      setupMessages?.summary
-      ?? "Enable turns on this channel in nanobot, but this integration still needs platform-specific setup before it can receive messages.",
-    tryIt: setupMessages?.tryIt,
-    steps: setupMessages?.steps ?? [
-      `Open ~/.nanobot/config.json and find channels.${feature.name}.`,
-      "Add the credentials required by that platform, using the channel documentation as the source of truth.",
-      "Restart nanobot, then send a small test message from that platform.",
-    ],
     sectionLabels: setupMessages?.sections,
     fields: definition?.fields?.map(localizePresentedField),
     manualFields: definition?.manualFields?.map(localizePresentedField),
@@ -210,24 +198,6 @@ export function localizedChannelDisplayName(
   return channelTranslator(t, channelUiOwner(feature.name))("displayName", fallback);
 }
 
-export function channelDescription(feature: NanobotFeatureInfo, t: ReturnType<typeof useTranslation>["t"]): string {
-  const fallback =
-    `Use nanobot from ${channelDisplayName(feature)}.`;
-  return channelTranslator(t, channelUiOwner(feature.name))("description", fallback);
-}
-
-export function channelRequirements(feature: NanobotFeatureInfo, t: ReturnType<typeof useTranslation>["t"]): string {
-  const fallback =
-    "Channel credentials and gateway settings";
-  return channelTranslator(t, channelUiOwner(feature.name))("requirements", fallback);
-}
-
-export function channelMatchesFilter(feature: NanobotFeatureInfo, filter: ChannelFilter): boolean {
-  if (filter === "on") return channelIsRunning(feature);
-  if (filter === "off") return !channelIsRunning(feature);
-  return true;
-}
-
 export function channelIsRunning(feature: NanobotFeatureInfo): boolean {
   return feature.runtime_status === "running";
 }
@@ -252,24 +222,6 @@ export function channelStatusLabel(
   if (feature.configured === true) return tx("settings.nanobotFeatures.ready", "Ready");
   return tx("settings.values.off", "Off");
 }
-
-export function channelSearchText(
-  feature: NanobotFeatureInfo,
-  t?: ReturnType<typeof useTranslation>["t"],
-): string {
-  return [
-    t ? localizedChannelDisplayName(feature, t) : undefined,
-    channelDisplayName(feature),
-    feature.display_name,
-    feature.name,
-    feature.status,
-    t ? channelDescription(feature, t) : undefined,
-    t ? channelRequirements(feature, t) : undefined,
-  ]
-    .join(" ")
-    .toLowerCase();
-}
-
 
 export function ChannelStatusBadge({
   children,

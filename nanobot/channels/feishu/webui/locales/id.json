@@ -1,17 +1,8 @@
 {
-  "description": "Gunakan nanobot dari chat dan grup Feishu.",
-  "requirements": "Kredensial Feishu, langganan event, dan gateway",
   "setup": {
     "primaryAction": "Hubungkan Feishu",
     "docsLabel": "Buka panduan Feishu",
     "officialLabel": "Buka konsol Feishu",
-    "tryIt": "Kirim DM atau sebut asisten di grup.",
-    "summary": "Koneksi membuat atau menautkan aplikasi Feishu lewat QR dan menyimpan kredensialnya.",
-    "steps": [
-      "Klik Hubungkan dan pindai QR dengan Feishu atau Lark.",
-      "Setujui koneksi. nanobot menyimpan App ID dan Secret otomatis.",
-      "Kirim DM ke bot atau sebut di grup Feishu."
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
@@ -19,8 +10,7 @@
       },
       "appSecret": {
         "label": "App Secret",
-        "placeholder": "Kosongkan untuk mempertahankan secret",
-        "help": "Masukkan App Secret baru hanya untuk mengganti nilai yang tersimpan."
+        "placeholder": "Kosongkan untuk mempertahankan secret"
       },
       "domain": {
         "label": "Wilayah",
@@ -54,14 +44,9 @@
     "toggleAssistant": "Aktifkan asisten {{name}}",
     "configured": "Terhubung",
     "needsSetup": "Perlu otorisasi",
-    "noAppId": "Tidak ada App ID",
     "createAnother": "Buat asisten lain",
     "createHint": "Buat bot Feishu terpisah untuk tim atau alur kerja lain.",
     "createAssistant": "Buat asisten",
-    "reconnect": "Hubungkan ulang",
-    "countNone": "Belum ada asisten terhubung",
-    "countOne": "1 asisten terhubung",
-    "countMany": "{{count}} asisten terhubung",
     "qrAlt": "Kode QR koneksi Feishu",
     "scanTitle": "Pindai dengan Feishu",
     "scanDescription": "Pindai kode ini dengan Feishu atau Lark di ponsel. nanobot akan menyelesaikan penyiapan setelah Anda menyetujui akses.",

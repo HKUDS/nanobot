@@ -1,15 +1,6 @@
 {
-  "description": "Gunakan nanobot di browser Anda.",
-  "requirements": "Gateway lokal dan token WebSocket",
   "setup": {
     "docsLabel": "Buka panduan WebSocket",
-    "officialLabel": "Buka WebUI lokal",
-    "tryIt": "Buka WebUI dan kirim pesan singkat.",
-    "summary": "WebUI terhubung ke nanobot melalui WebSocket. Perintah nanobot webui menyiapkan koneksi ini secara otomatis.",
-    "steps": [
-      "Mulai nanobot dengan perintah webui.",
-      "Buka URL lokal yang ditampilkan di terminal.",
-      "Biarkan WebSocket aktif selama menggunakan WebUI."
-    ]
+    "officialLabel": "Buka WebUI lokal"
   }
 }

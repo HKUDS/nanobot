@@ -18,8 +18,6 @@ import {
   channelSetup,
   localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
-import {
-} from "@/components/settings/channels/ChannelSetupParts";
 import { Button } from "@/components/ui/button";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import {
@@ -54,7 +52,6 @@ export function ChannelInstancesPanel({
 }: {
   feature: NanobotFeatureInfo;
   showBrandLogos: boolean;
-  chatAppsDocsUrl?: string;
   instances?: NanobotChannelInstanceInfo[];
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   customization?: ChannelInstancesPanelCustomization;

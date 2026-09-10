@@ -1,15 +1,6 @@
 {
-  "description": "Utilisez nanobot dans votre navigateur.",
-  "requirements": "Passerelle locale et jeton WebSocket",
   "setup": {
     "docsLabel": "Ouvrir le guide WebSocket",
-    "officialLabel": "Ouvrir la WebUI locale",
-    "tryIt": "Ouvrez la WebUI et envoyez un court message.",
-    "summary": "La WebUI se connecte à nanobot via WebSocket. La commande nanobot webui configure automatiquement cette connexion.",
-    "steps": [
-      "Démarrez nanobot avec la commande webui.",
-      "Ouvrez l’URL locale affichée dans le terminal.",
-      "Gardez WebSocket activé pendant l’utilisation de la WebUI."
-    ]
+    "officialLabel": "Ouvrir la WebUI locale"
   }
 }

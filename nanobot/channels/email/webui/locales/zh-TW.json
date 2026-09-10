@@ -1,17 +1,8 @@
 {
   "displayName": "電子郵件",
-  "description": "讓 nanobot 接收並回覆電子郵件。",
-  "requirements": "IMAP 收件匣、SMTP 寄件服務、應用程式密碼和明確授權",
   "setup": {
     "docsLabel": "開啟郵件設定指南",
     "officialLabel": "開啟應用程式密碼指南",
-    "tryIt": "向已連接的信箱傳送一封測試郵件。",
-    "summary": "郵件管道透過 IMAP 讀取郵件並透過 SMTP 回覆。請使用專用信箱，並在啟用前明確授權。",
-    "steps": [
-      "建立專用信箱，並在服務商要求時建立應用程式密碼。",
-      "選擇服務商預設，或手動填入 IMAP 和 SMTP 設定。",
-      "授予權限，儲存並啟用郵件管道，然後向信箱傳送一封測試郵件。"
-    ],
     "sections": {
       "receiving": "接收郵件",
       "sending": "傳送郵件"
@@ -25,7 +16,6 @@
     "fields": {
       "consentGranted": {
         "label": "允許 nanobot 讀取及傳送電子郵件",
-        "help": "開啟即表示同意 nanobot 存取此信箱。請確認這是要提供給機器人使用的專用信箱。",
         "choices": {
           "true": "已授權",
           "false": "未授權"
@@ -41,8 +31,7 @@
       },
       "imapPassword": {
         "label": "IMAP 密碼",
-        "placeholder": "應用程式密碼",
-        "help": "若郵件服務商要求，請使用應用程式密碼。"
+        "placeholder": "應用程式密碼"
       },
       "smtpHost": {
         "label": "SMTP 主機",
@@ -54,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "SMTP 密碼",
-        "placeholder": "應用程式密碼",
-        "help": "通常與 IMAP 使用同一個應用程式密碼。"
+        "placeholder": "應用程式密碼"
       },
       "imapPort": {
         "label": "IMAP 連接埠",
@@ -75,8 +63,7 @@
       },
       "allowFrom": {
         "label": "允許的寄件者",
-        "placeholder": "電子郵件地址，以逗號分隔",
-        "help": "留空則要求寄件者先完成配對。"
+        "placeholder": "電子郵件地址，以逗號分隔"
       },
       "verifyDkim": {
         "label": "驗證 DKIM",

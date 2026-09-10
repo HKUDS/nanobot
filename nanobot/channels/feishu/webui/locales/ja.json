@@ -1,17 +1,8 @@
 {
-  "description": "Feishu のチャットとグループから nanobot を利用します。",
-  "requirements": "Feishu アプリ認証情報、イベント購読、ゲートウェイ",
   "setup": {
     "primaryAction": "Feishu に接続",
     "docsLabel": "Feishu 設定ガイドを開く",
     "officialLabel": "Feishu コンソールを開く",
-    "tryIt": "DM を送るか、グループで Feishu アシスタントをメンションします。",
-    "summary": "QR コードで Feishu アプリを作成または連携し、認証情報を自動保存します。",
-    "steps": [
-      "接続をクリックし、スマートフォンの Feishu または Lark で QR コードを読み取ります。",
-      "アプリ接続を承認すると、nanobot が App ID と Secret を保存します。",
-      "ボットに DM を送るか Feishu グループでメンションします。"
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
@@ -19,8 +10,7 @@
       },
       "appSecret": {
         "label": "App Secret",
-        "placeholder": "現在のシークレットを保持するには空欄",
-        "help": "認証情報を更新するときだけ新しい App Secret を貼り付けます。"
+        "placeholder": "現在のシークレットを保持するには空欄"
       },
       "domain": {
         "label": "地域",
@@ -54,14 +44,9 @@
     "toggleAssistant": "アシスタント {{name}} を有効にする",
     "configured": "接続済み",
     "needsSetup": "認可が必要",
-    "noAppId": "App ID なし",
     "createAnother": "別のアシスタントを作成",
     "createHint": "別のチームやワークフロー用に独立した Feishu ボットを作成します。",
     "createAssistant": "アシスタントを作成",
-    "reconnect": "再接続",
-    "countNone": "接続済みアシスタントなし",
-    "countOne": "接続済みアシスタント：1 件",
-    "countMany": "接続済みアシスタント：{{count}} 件",
     "qrAlt": "Feishu 接続 QR コード",
     "scanTitle": "Feishu でスキャン",
     "scanDescription": "スマートフォンの Feishu または Lark でスキャンしてください。認可後に nanobot が設定を完了します。",

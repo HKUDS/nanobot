@@ -1,17 +1,8 @@
 {
-  "description": "Gunakan nanobot dari percakapan WhatsApp.",
-  "requirements": "Pengaturan koneksi WhatsApp dan gateway",
   "setup": {
     "primaryAction": "Hubungkan WhatsApp",
     "docsLabel": "Buka panduan WhatsApp",
     "officialLabel": "Buka bantuan WhatsApp",
-    "tryIt": "Setelah penautan selesai, kirim DM ke akun yang terhubung.",
-    "summary": "WhatsApp terhubung dengan memindai kode QR dari akun yang akan menjalankan bot.",
-    "steps": [
-      "Pilih Hubungkan WhatsApp untuk menampilkan kode QR di browser.",
-      "Buka Perangkat tertaut di WhatsApp lalu pindai kodenya.",
-      "Setelah tertaut, aktifkan WhatsApp lalu kirim pesan langsung uji."
-    ],
     "fields": {
       "allowFrom": {
         "label": "Kontak yang diizinkan",

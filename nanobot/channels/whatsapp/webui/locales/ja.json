@@ -1,17 +1,8 @@
 {
-  "description": "WhatsApp の会話から nanobot を利用します。",
-  "requirements": "WhatsApp 接続設定とゲートウェイ",
   "setup": {
     "primaryAction": "WhatsApp に接続",
     "docsLabel": "WhatsApp 設定ガイドを開く",
     "officialLabel": "WhatsApp ヘルプを開く",
-    "tryIt": "リンク完了後、接続したアカウントに WhatsApp の DM を送信します。",
-    "summary": "ボットを動かす WhatsApp アカウントで QR コードを読み取って接続します。",
-    "steps": [
-      "WhatsApp に接続を選び、ブラウザーに QR コードを表示します。",
-      "スマートフォンの WhatsApp でリンク済みデバイスを開き、コードを読み取ります。",
-      "リンク後に WhatsApp を有効にして DM でテストします。"
-    ],
     "fields": {
       "allowFrom": {
         "label": "許可する連絡先",

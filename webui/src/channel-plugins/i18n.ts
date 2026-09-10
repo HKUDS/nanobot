@@ -3,21 +3,15 @@ import type { TFunction } from "i18next";
 type ChannelFieldMessages = {
   label: string;
   placeholder?: string;
-  help?: string;
   choices?: Record<string, string>;
 };
 
 export type ChannelMessages = {
   displayName?: string;
-  description: string;
-  requirements: string;
   setup: {
     primaryAction?: string;
     docsLabel?: string;
     officialLabel?: string;
-    summary?: string;
-    tryIt?: string;
-    steps: string[];
     sections?: Record<string, string>;
     fields?: Record<string, ChannelFieldMessages>;
     actions?: Record<string, string>;

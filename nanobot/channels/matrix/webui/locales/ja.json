@@ -1,16 +1,7 @@
 {
-  "description": "Matrix ルームから nanobot を利用します。",
-  "requirements": "ホームサーバー、アカウントトークン、ルームへのアクセス",
   "setup": {
     "docsLabel": "Matrix 設定ガイドを開く",
     "officialLabel": "Matrix クライアント一覧を開く",
-    "tryIt": "Matrix アカウントをルームに招待し、テストメッセージを送信します。",
-    "summary": "Matrix アカウントのホームサーバーを入力し、パスワードまたはアクセストークンでログインします。",
-    "steps": [
-      "nanobot 用の Matrix アカウントを作成または選択します。",
-      "ホームサーバー、ユーザー ID、パスワードまたはアクセストークンを入力します。",
-      "保存して Matrix を有効にし、アカウントをルームに招待してテストメッセージを送信します。"
-    ],
     "fields": {
       "homeserver": {
         "label": "ホームサーバー",
@@ -22,18 +13,15 @@
       },
       "password": {
         "label": "パスワード",
-        "placeholder": "••••••",
-        "help": "パスワードまたはアクセストークンのどちらかを使います。"
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "アクセストークン",
-        "placeholder": "アクセストークンを入力",
-        "help": "Matrix クライアントでアクセストークンを取得できる場合に推奨します。"
+        "placeholder": "アクセストークンを入力"
       },
       "deviceId": {
         "label": "デバイス ID",
-        "placeholder": "アクセストークン使用時に必須",
-        "help": "トークンに関連付けられたデバイス ID をコピーします。パスワードログインでは不要です。"
+        "placeholder": "アクセストークン使用時に必須"
       },
       "groupPolicy": {
         "label": "グループでの動作",

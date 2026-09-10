@@ -1,17 +1,8 @@
 {
-  "description": "Use nanobot from WhatsApp conversations.",
-  "requirements": "WhatsApp connection setup and gateway",
   "setup": {
     "primaryAction": "Connect WhatsApp",
     "docsLabel": "Open WhatsApp setup",
     "officialLabel": "Open WhatsApp help",
-    "tryIt": "After linking finishes, send a WhatsApp DM to the connected account.",
-    "summary": "WhatsApp is connected by scanning a QR code from the account that should run the bot.",
-    "steps": [
-      "Choose Connect WhatsApp to show a QR code in the browser.",
-      "In WhatsApp on your phone, open Linked devices and scan the code.",
-      "After linking, enable WhatsApp and send a direct test message."
-    ],
     "fields": {
       "allowFrom": {
         "label": "Allowed contacts",

@@ -336,7 +336,7 @@ function weixinSetupFields(
 
 function weixinConfigField(
   field: ChannelSetupContractField,
-  copy: { label: string; placeholder?: string; help?: string; choices?: Record<string, string> }
+  copy: { label: string; placeholder?: string; choices?: Record<string, string> }
     | undefined,
 ): ChannelConfigField {
   const choices = field.kind === "bool" ? ["true", "false"] : field.choices;
@@ -344,7 +344,6 @@ function weixinConfigField(
     key: field.key,
     label: copy?.label ?? fieldLabel(field.field),
     placeholder: copy?.placeholder,
-    help: copy?.help,
     secret: field.kind === "secret",
     optional: !field.required,
     inputType: field.kind === "int" ? "number" : undefined,

@@ -1,21 +1,11 @@
 {
-  "description": "Mengobrol dengan nanobot dari Telegram.",
-  "requirements": "Token bot, pengguna yang diizinkan, dan gateway",
   "setup": {
     "docsLabel": "Buka panduan Telegram",
     "officialLabel": "Buka BotFather",
-    "tryIt": "Kirim /start atau DM singkat ke bot Telegram Anda.",
-    "summary": "Tambahkan token bot dari BotFather untuk mengirim dan menerima pesan Telegram.",
-    "steps": [
-      "Buat bot dengan BotFather dan salin tokennya.",
-      "Tambahkan token dan pilih siapa yang boleh mengirim pesan ke bot.",
-      "Simpan dan aktifkan Telegram, lalu kirim DM atau sebut bot di grup."
-    ],
     "fields": {
       "token": {
         "label": "Token bot",
-        "placeholder": "123456:ABC...",
-        "help": "Buat dengan BotFather."
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "Proxy jaringan",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
-        "placeholder": "* atau ID pengguna Telegram",
-        "help": "Kosongkan untuk memakai kode pairing."
+        "placeholder": "* atau ID pengguna Telegram"
       },
       "groupPolicy": {
         "label": "Perilaku grup",

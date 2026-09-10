@@ -1,17 +1,8 @@
 {
   "displayName": "メール",
-  "description": "nanobot でメールを受信し、返信します。",
-  "requirements": "IMAP 受信箱、SMTP 送信、アプリパスワード、明示的な同意",
   "setup": {
     "docsLabel": "メール設定ガイドを開く",
     "officialLabel": "アプリパスワードガイドを開く",
-    "tryIt": "接続したメールボックスにテストメールを送信します。",
-    "summary": "メールは IMAP で受信し SMTP で返信します。専用メールボックスを使い、有効化前に同意してください。",
-    "steps": [
-      "専用メールボックスを作成し、必要ならアプリパスワードを発行します。",
-      "プロバイダープリセットを選ぶか、IMAP と SMTP を手動入力します。",
-      "同意して保存し、メールを有効にしてテストメールを送信します。"
-    ],
     "sections": {
       "receiving": "メール受信",
       "sending": "メール送信"
@@ -25,7 +16,6 @@
     "fields": {
       "consentGranted": {
         "label": "nanobot にメールの読み取りと送信を許可",
-        "help": "オンにすると nanobot がこのメールボックスにアクセスできます。ボット用の専用メールボックスであることを確認してください。",
         "choices": {
           "true": "同意済み",
           "false": "未同意"
@@ -41,8 +31,7 @@
       },
       "imapPassword": {
         "label": "IMAP パスワード",
-        "placeholder": "アプリパスワード",
-        "help": "プロバイダーが求める場合はアプリパスワードを使います。"
+        "placeholder": "アプリパスワード"
       },
       "smtpHost": {
         "label": "SMTP ホスト",
@@ -54,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "SMTP パスワード",
-        "placeholder": "アプリパスワード",
-        "help": "通常は IMAP と同じアプリパスワードです。"
+        "placeholder": "アプリパスワード"
       },
       "imapPort": {
         "label": "IMAP ポート",
@@ -75,8 +63,7 @@
       },
       "allowFrom": {
         "label": "許可する送信者",
-        "placeholder": "メールアドレス（カンマ区切り）",
-        "help": "空欄の場合、送信者は先にペアリングが必要です。"
+        "placeholder": "メールアドレス（カンマ区切り）"
       },
       "verifyDkim": {
         "label": "DKIM を検証",

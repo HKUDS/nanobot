@@ -1,26 +1,15 @@
 {
-  "description": "WeCom の業務チャットから nanobot を利用します。",
-  "requirements": "WeCom AI ボットの Bot ID と Secret",
   "setup": {
     "docsLabel": "WeCom 設定ガイドを開く",
     "officialLabel": "WeCom コンソールを開く",
-    "tryIt": "WeCom ボットにテストメッセージを送信します。",
-    "summary": "WeCom 管理コンソールの AI ボット ID とシークレットが必要です。",
-    "steps": [
-      "WeCom で AI ボットを作成し、API モードを選択します。",
-      "Bot ID と Secret を nanobot にコピーします。",
-      "保存して WeCom を有効にし、テストメッセージを送信します。"
-    ],
     "fields": {
       "botId": {
         "label": "Bot ID",
-        "placeholder": "WeCom Bot ID",
-        "help": "WeCom AI ボットの API モードページからコピーします。"
+        "placeholder": "WeCom Bot ID"
       },
       "secret": {
         "label": "Secret",
-        "placeholder": "••••••",
-        "help": "WeCom ボットのシークレットは安全に保管してください。"
+        "placeholder": "••••••"
       },
       "allowFrom": {
         "label": "許可するユーザー",

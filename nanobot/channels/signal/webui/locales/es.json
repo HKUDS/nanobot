@@ -1,21 +1,11 @@
 {
-  "description": "Usa nanobot desde mensajes de Signal.",
-  "requirements": "Daemon HTTP signal-cli, número de teléfono y lista de permitidos",
   "setup": {
     "docsLabel": "Abrir guía de Signal",
     "officialLabel": "Abrir guía de signal-cli",
-    "tryIt": "Envía un DM de Signal al número vinculado.",
-    "summary": "Signal se conecta mediante un daemon HTTP signal-cli ya vinculado a un número de Signal.",
-    "steps": [
-      "Instala signal-cli-rest-api y vincula o registra un número de Signal.",
-      "Introduce el host, puerto y número vinculado.",
-      "Guarda y activa Signal; después envía un mensaje directo de prueba."
-    ],
     "fields": {
       "phoneNumber": {
         "label": "Número de teléfono",
-        "placeholder": "+1234567890",
-        "help": "Usa el número de Signal registrado con signal-cli."
+        "placeholder": "+1234567890"
       },
       "daemonHost": {
         "label": "Host del daemon",
