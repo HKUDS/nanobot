@@ -38,10 +38,20 @@ describe("channel UI contributions", () => {
       resolve(process.cwd(), "src/components/settings/channels/ChannelSetupPanel.tsx"),
       "utf8",
     );
+    const catalog = readFileSync(
+      resolve(process.cwd(), "src/components/settings/channels/catalog.ts"),
+      "utf8",
+    );
 
     expect(source).not.toMatch(/feature\.name\s*===\s*["'](?:feishu|weixin)["']/);
     expect(source).not.toMatch(/channel-plugins\/(?:feishu|weixin)/);
     expect(source).not.toMatch(/(?:Feishu|Weixin)(?:AssistantsPanel|ConnectFlow)/);
+    for (const coreSource of [source, catalog]) {
+      expect(coreSource).not.toContain("Receiving mail");
+      expect(coreSource).not.toContain("Sending mail");
+      expect(coreSource).not.toContain('"receiving"');
+      expect(coreSource).not.toContain('"sending"');
+    }
   });
 
   it("discovers UI contributions only from channel-owned packages", () => {

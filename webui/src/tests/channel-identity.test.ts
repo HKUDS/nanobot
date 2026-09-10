@@ -127,6 +127,19 @@ describe("channelSetup", () => {
       label: "允许的用户",
     }));
   });
+
+  it("loads custom setup section labels from the channel-owned locale", () => {
+    const setup = channelSetup(feature({
+      name: "email",
+      display_name: "Email",
+      webui: "webui/index.ts",
+    }));
+
+    expect(setup.sectionLabels).toEqual({
+      receiving: "Receiving mail",
+      sending: "Sending mail",
+    });
+  });
 });
 
 describe("channel runtime state", () => {

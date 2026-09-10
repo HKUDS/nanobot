@@ -844,8 +844,6 @@
         "account": "계정",
         "credentials": "인증 정보",
         "connection": "연결",
-        "receiving": "메일 수신",
-        "sending": "메일 발신",
         "access": "접근",
         "behavior": "동작",
         "security": "보안"

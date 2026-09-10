@@ -1042,8 +1042,6 @@
         "account": "Account",
         "credentials": "Credentials",
         "connection": "Connection",
-        "receiving": "Receiving mail",
-        "sending": "Sending mail",
         "access": "Access",
         "behavior": "Behavior",
         "security": "Security"

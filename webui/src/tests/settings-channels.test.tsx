@@ -1345,6 +1345,8 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
+    expect(screen.getByText("Receiving mail")).toBeInTheDocument();
+    expect(screen.getByText("Sending mail")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("IMAP host"), { target: { value: "imap.example.com" } });
     fireEvent.change(screen.getByLabelText("IMAP username"), { target: { value: "bot@example.com" } });
     fireEvent.change(screen.getByLabelText("IMAP password"), { target: { value: "imap-secret" } });

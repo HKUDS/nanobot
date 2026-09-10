@@ -12,6 +12,10 @@
       "Elige un proveedor o introduce manualmente IMAP y SMTP.",
       "Da tu consentimiento, guarda y activa Email; después envía un mensaje de prueba."
     ],
+    "sections": {
+      "receiving": "Recepción de correo",
+      "sending": "Envío de correo"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

@@ -11,6 +11,10 @@
       "选择服务商预设，或手动填写 IMAP 和 SMTP 设置。",
       "授予授权，保存并启用邮件渠道，然后向邮箱发送一封测试邮件。"
     ],
+    "sections": {
+      "receiving": "接收邮件",
+      "sending": "发送邮件"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

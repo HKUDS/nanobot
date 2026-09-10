@@ -12,6 +12,10 @@
       "Chọn nhà cung cấp hoặc nhập thủ công cài đặt IMAP và SMTP.",
       "Cấp quyền, lưu và bật Email, sau đó gửi tin nhắn thử."
     ],
+    "sections": {
+      "receiving": "Nhận thư",
+      "sending": "Gửi thư"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

@@ -12,6 +12,10 @@
       "プロバイダープリセットを選ぶか、IMAP と SMTP を手動入力します。",
       "同意して保存し、メールを有効にしてテストメールを送信します。"
     ],
+    "sections": {
+      "receiving": "メール受信",
+      "sending": "メール送信"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

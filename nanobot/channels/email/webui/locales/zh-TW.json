@@ -12,6 +12,10 @@
       "選擇服務商預設，或手動填入 IMAP 和 SMTP 設定。",
       "授予權限，儲存並啟用郵件管道，然後向信箱傳送一封測試郵件。"
     ],
+    "sections": {
+      "receiving": "接收郵件",
+      "sending": "傳送郵件"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

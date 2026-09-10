@@ -12,6 +12,10 @@
       "Escolha um provedor ou informe IMAP e SMTP manualmente.",
       "Autorize o acesso, salve e ative o canal de e-mail. Depois, envie uma mensagem de teste."
     ],
+    "sections": {
+      "receiving": "Recebimento de e-mail",
+      "sending": "Envio de e-mail"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

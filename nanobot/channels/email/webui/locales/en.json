@@ -11,6 +11,10 @@
       "Choose a provider preset or enter the IMAP and SMTP settings manually.",
       "Grant consent, save and enable Email, then send a test message to the mailbox."
     ],
+    "sections": {
+      "receiving": "Receiving mail",
+      "sending": "Sending mail"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

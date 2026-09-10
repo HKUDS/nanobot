@@ -845,8 +845,6 @@
         "account": "Cuenta",
         "credentials": "Credenciales",
         "connection": "Conexión",
-        "receiving": "Recepción de correo",
-        "sending": "Envío de correo",
         "access": "Acceso",
         "behavior": "Comportamiento",
         "security": "Seguridad"

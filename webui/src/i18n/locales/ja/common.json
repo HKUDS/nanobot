@@ -844,8 +844,6 @@
         "account": "アカウント",
         "credentials": "認証情報",
         "connection": "接続",
-        "receiving": "メール受信",
-        "sending": "メール送信",
         "access": "アクセス",
         "behavior": "動作",
         "security": "セキュリティ"

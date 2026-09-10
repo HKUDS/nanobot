@@ -1044,8 +1044,6 @@
         "account": "账户",
         "credentials": "凭据",
         "connection": "连接",
-        "receiving": "接收邮件",
-        "sending": "发送邮件",
         "access": "访问权限",
         "behavior": "行为",
         "security": "安全"

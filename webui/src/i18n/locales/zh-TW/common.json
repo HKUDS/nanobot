@@ -844,8 +844,6 @@
         "account": "帳戶",
         "credentials": "憑證",
         "connection": "連線",
-        "receiving": "接收郵件",
-        "sending": "傳送郵件",
         "access": "存取權限",
         "behavior": "行為",
         "security": "安全性"

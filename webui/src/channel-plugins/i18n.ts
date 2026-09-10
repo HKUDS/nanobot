@@ -18,6 +18,7 @@ export type ChannelMessages = {
     summary?: string;
     tryIt?: string;
     steps: string[];
+    sections?: Record<string, string>;
     fields?: Record<string, ChannelFieldMessages>;
     actions?: Record<string, string>;
     presets?: Record<string, string>;

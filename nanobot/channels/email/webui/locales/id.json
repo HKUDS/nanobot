@@ -12,6 +12,10 @@
       "Pilih prasetel penyedia atau masukkan pengaturan IMAP dan SMTP secara manual.",
       "Berikan persetujuan, simpan dan aktifkan Email, lalu kirim pesan uji."
     ],
+    "sections": {
+      "receiving": "Penerimaan email",
+      "sending": "Pengiriman email"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

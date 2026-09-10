@@ -596,6 +596,7 @@ function ChannelSetupSurface({
                 clearedSecrets={clearedSecrets}
                 onClearSecret={setSecretCleared}
                 requirements={setup.requirements ?? []}
+                sectionLabels={setup.sectionLabels}
               />
             ) : null}
           </>
@@ -684,8 +685,6 @@ const CHANNEL_FIELD_SECTION_ORDER: ChannelFieldSection[] = [
   "account",
   "credentials",
   "connection",
-  "receiving",
-  "sending",
   "access",
   "behavior",
   "security",
@@ -694,10 +693,12 @@ const CHANNEL_FIELD_SECTION_ORDER: ChannelFieldSection[] = [
 function ChannelFieldGroups({
   fields,
   requirements,
+  sectionLabels,
   ...formProps
 }: {
   fields: ChannelConfigField[];
   requirements: ChannelSetupRequirement[];
+  sectionLabels?: Record<string, string>;
   values: Record<string, string>;
   configuredFields: Set<string>;
   visibleSecrets: Record<string, boolean>;
@@ -713,13 +714,19 @@ function ChannelFieldGroups({
   const compositeRequirements = requirements.filter(
     (requirement) => requirement.alternatives.length > 1,
   );
-  const groups = new Map<ChannelFieldSection, ChannelConfigField[]>();
+  const groups = new Map<string, ChannelConfigField[]>();
   for (const field of fields) {
     const section = field.section ?? "credentials";
     const current = groups.get(section) ?? [];
     current.push(field);
     groups.set(section, current);
   }
+  const orderedSections = [
+    ...CHANNEL_FIELD_SECTION_ORDER,
+    ...[...groups.keys()].filter(
+      (section) => !CHANNEL_FIELD_SECTION_ORDER.includes(section as ChannelFieldSection),
+    ),
+  ];
 
   return (
     <div className="space-y-5">
@@ -743,13 +750,13 @@ function ChannelFieldGroups({
           </div>
         </div>
       ))}
-      {CHANNEL_FIELD_SECTION_ORDER.map((section) => {
+      {orderedSections.map((section) => {
         const sectionFields = groups.get(section);
         if (!sectionFields?.length) return null;
         return (
           <fieldset key={section} className="min-w-0 space-y-2">
             <legend className={groups.size === 1 ? "sr-only" : "mb-2 text-[12px] font-medium text-muted-foreground"}>
-              {channelFieldSectionLabel(section, tx)}
+              {channelFieldSectionLabel(section, tx, sectionLabels)}
             </legend>
             <div className="rounded-control bg-settings-surface px-4 py-2">
               <CredentialForm fields={sectionFields} {...formProps} compact />
@@ -762,21 +769,28 @@ function ChannelFieldGroups({
 }
 
 function channelFieldSectionLabel(
-  section: ChannelFieldSection,
+  section: string,
   tx: (key: string, fallback: string) => string,
+  sectionLabels?: Record<string, string>,
 ): string {
+  const customLabel = sectionLabels?.[section];
+  if (customLabel) return customLabel;
+
   const fallbacks: Record<ChannelFieldSection, string> = {
     account: "Account",
     credentials: "Credentials",
     connection: "Connection",
-    receiving: "Receiving mail",
-    sending: "Sending mail",
     access: "Access",
     behavior: "Behavior",
     security: "Security",
     advanced: "Advanced",
   };
-  return tx(`settings.channels.sections.${section}`, fallbacks[section]);
+  const fallback = fallbacks[section as ChannelFieldSection];
+  if (fallback) return tx(`settings.channels.sections.${section}`, fallback);
+  return section
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function channelRequirementErrors(

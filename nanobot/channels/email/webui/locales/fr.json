@@ -12,6 +12,10 @@
       "Choisissez un fournisseur ou saisissez les paramètres IMAP et SMTP.",
       "Accordez le consentement, enregistrez et activez Email, puis envoyez un message test."
     ],
+    "sections": {
+      "receiving": "Réception des e-mails",
+      "sending": "Envoi des e-mails"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

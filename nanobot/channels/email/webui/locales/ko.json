@@ -12,6 +12,10 @@
       "제공업체 프리셋을 선택하거나 IMAP 및 SMTP 설정을 직접 입력하세요.",
       "동의하고 저장한 뒤 이메일을 활성화하고 테스트 메시지를 보내세요."
     ],
+    "sections": {
+      "receiving": "메일 수신",
+      "sending": "메일 발신"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",

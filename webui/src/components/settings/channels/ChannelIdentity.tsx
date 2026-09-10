@@ -60,6 +60,7 @@ export function channelSetup(
       "Add the credentials required by that platform, using the channel documentation as the source of truth.",
       "Restart nanobot, then send a small test message from that platform.",
     ],
+    sectionLabels: setupMessages?.sections,
     fields: definition?.fields?.map(localizePresentedField),
     manualFields: definition?.manualFields?.map(localizePresentedField),
     actions: definition?.actions?.map((action) => ({
