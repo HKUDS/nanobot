@@ -1819,6 +1819,39 @@ describe("ThreadViewport", () => {
     expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
   });
 
+  it.each([2, 3, 100])("keeps %i prompts navigable before a very long answer", async (count) => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockReturnValue("started");
+    const { promptEls, scroller } = await renderPromptRailViewport({
+      messages: makeLongMessages(count),
+    });
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1_000_000,
+    });
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", { configurable: true, value: index * 40 });
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    const markers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    if (count < 30) {
+      expect(markers).toHaveLength(count);
+      markers.forEach((marker, index) => {
+        fireEvent.click(marker);
+        expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, index * 40 - 16));
+      });
+    } else {
+      expect(markers.length).toBeGreaterThan(1);
+      expect(markers.length).toBeLessThan(count);
+    }
+    fireEvent.click(markers[markers.length - 1]);
+    expect(navigateTo).toHaveBeenLastCalledWith((count - 1) * 40 - 16);
+  });
+
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
       .mockReturnValue("started");

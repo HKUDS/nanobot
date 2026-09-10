@@ -40,13 +40,12 @@ interface PromptMarker {
   topPercent: number;
 }
 
-const MIN_PROMPTS_FOR_RAIL = 3;
+const MIN_PROMPTS_FOR_RAIL = 2;
 const RAIL_MIN_SCROLL_RANGE_PX = 80;
 const DENSE_PROMPT_THRESHOLD = 30;
 const DENSE_BUCKET_HEIGHT_PX = 12;
 const DENSE_BUCKET_FALLBACK_COUNT = 32;
 const DENSE_BUCKET_MAX_COUNT = 42;
-const MARKER_MIN_GAP_PX = 9;
 const MARKER_BASE_WIDTH_PX = 9;
 const MARKER_STACK_GAP_PX = 16;
 const RAIL_FALLBACK_HEIGHT_PX = 300;
@@ -263,32 +262,14 @@ function groupPromptMarkers(
     return bucketPromptMarkers(measured, railHeight);
   }
 
-  const minGapPercent = railHeight > 0
-    ? (MARKER_MIN_GAP_PX / railHeight) * 100
-    : 2;
-  const groups: PromptMarker[] = [];
-
-  for (const prompt of measured) {
-    const last = groups[groups.length - 1];
-    if (last && prompt.topPercent - last.topPercent < minGapPercent) {
-      last.count += 1;
-      last.ids.push(prompt.id);
-      last.label = groupedPromptLabel(last.count, prompt.label);
-      last.answerPreview = prompt.answerPreview;
-      last.preview = prompt.preview;
-      continue;
-    }
-    groups.push({
-      answerPreview: prompt.answerPreview,
-      count: 1,
-      ids: [prompt.id],
-      label: prompt.label,
-      preview: prompt.preview,
-      topPercent: prompt.topPercent,
-    });
-  }
-
-  return groups;
+  return measured.map((prompt) => ({
+    answerPreview: prompt.answerPreview,
+    count: 1,
+    ids: [prompt.id],
+    label: prompt.label,
+    preview: prompt.preview,
+    topPercent: prompt.topPercent,
+  }));
 }
 
 function bucketPromptMarkers(
@@ -304,12 +285,8 @@ function bucketPromptMarkers(
     : DENSE_BUCKET_FALLBACK_COUNT;
   const buckets = Array.from({ length: bucketCount }, () => [] as MeasuredPrompt[]);
 
-  for (const prompt of measured) {
-    const bucketIndex = clamp(
-      Math.floor((prompt.topPercent / 100) * bucketCount),
-      0,
-      bucketCount - 1,
-    );
+  for (const [index, prompt] of measured.entries()) {
+    const bucketIndex = Math.floor((index / measured.length) * bucketCount);
     buckets[bucketIndex].push(prompt);
   }
 
