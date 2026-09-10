@@ -16,7 +16,7 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   skills?: SkillSummary[];
-  onSectionChange?: (section: SettingsSectionKey) => void;
+  onSectionChange?: (section: SettingsSectionKey, options?: { replace?: boolean }) => void;
   onLogout?: () => void;
   onRestart?: () => void;
   onNativeEngineRestart?: () => Promise<string>;

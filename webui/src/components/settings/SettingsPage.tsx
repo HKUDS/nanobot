@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
+import { useSettingsScroll } from "@/components/settings/useSettingsScroll";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -21,7 +22,7 @@ import {
   providerFormFromRow,
 } from "@/components/settings/models/ProviderSettings";
 import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
-import { SettingsSidebar, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
+import { SettingsSidebar, SETTINGS_NAV_ITEMS, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
 import {
   NanobotFeatureInstallDialog,
   SettingsGroup,
@@ -177,7 +178,7 @@ export function SettingsPage({
     saveTranscriptionSettings,
     saveWebSearch,
     saving,
-    selectSection,
+    selectSection: selectControllerSection,
     setAppsKindFilter,
     setAppsQuery,
     setAutomationPendingDelete,
@@ -240,6 +241,12 @@ export function SettingsPage({
   const pendingRestartSections = showSidebar
     ? { runtime: false, image: false, browser: false }
     : controllerPendingRestartSections;
+
+  const continuous = showSidebar && SETTINGS_NAV_ITEMS.some(({ key }) =>
+    key === (isCapabilitySection(activeSection) ? "capabilities" : activeSection));
+  const { container: scrollContainer, onScroll, selectSection } = useSettingsScroll(
+    activeSection, continuous, selectControllerSection, Boolean(settings) && !loading,
+  );
 
   const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
     <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
@@ -707,19 +714,24 @@ export function SettingsPage({
       />
 
       <div
+        ref={scrollContainer}
+        onScroll={onScroll}
+        data-settings-scroll
         className={cn(
+          continuous && "snap-y snap-proximity",
           "min-w-0 flex-1 bg-settings-canvas [scrollbar-gutter:stable]",
           "overflow-y-auto",
         )}
       >
         <div
-          key={activeSection}
+          key={continuous ? "settings" : activeSection}
           data-testid="settings-section-transition"
           ref={setDialogLayoutAnchor}
           data-settings-section={activeSection}
           className={cn(
-            "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
-            "motion-reduce:animate-none sm:py-8 lg:py-12",
+            "mx-auto w-full",
+            !continuous && "animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
+            !continuous && "motion-reduce:animate-none sm:py-8 lg:py-12",
             "settings-grid",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
@@ -766,7 +778,13 @@ export function SettingsPage({
                   {error}
                 </div>
               ) : null}
-              {renderSection(isCapabilitySection(activeSection) ? "capabilities" : activeSection)}
+              {continuous ? SETTINGS_NAV_ITEMS.map(({ key, fallback }) => (
+                <section key={key} data-settings-anchor={key} aria-label={t(`settings.nav.${key}`, { defaultValue: fallback })}
+                  className="snap-start py-6 sm:py-8 lg:py-12" style={{ minHeight: "100dvh" }}>
+                  <h2 className="settings-list-inset mb-6 text-lg font-medium">{t(`settings.nav.${key}`, { defaultValue: fallback })}</h2>
+                  {renderSection(key)}
+                </section>
+              )) : renderSection(isCapabilitySection(activeSection) ? "capabilities" : activeSection)}
             </div>
           ) : null}
         </div>

@@ -1990,12 +1990,12 @@ function Shell({
   }, [onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenChannels, onOpenSettings]);
 
   const onSettingsSectionChange = useCallback(
-    (section: SettingsSectionKey) => {
+    (section: SettingsSectionKey, options?: { replace?: boolean }) => {
       navigate({
         view: shellViewForSettingsSection(section),
         activeKey,
         settingsSection: section,
-      });
+      }, options);
     },
     [activeKey, navigate],
   );

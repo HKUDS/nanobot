@@ -48,7 +48,7 @@ interface SettingsControllerOptions {
   initialSettings: SettingsPayload | null;
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
-  onSectionChange?: (section: SettingsSectionKey) => void;
+  onSectionChange?: (section: SettingsSectionKey, options?: { replace?: boolean }) => void;
   onRestart?: () => void;
   onNativeEngineRestart?: () => Promise<string>;
 }
@@ -138,9 +138,9 @@ export function useSettingsController({
   }, [initialSection]);
 
   const selectSection = useCallback(
-    (section: SettingsSectionKey) => {
+    (section: SettingsSectionKey, options?: { replace?: boolean }) => {
       setActiveSection(section);
-      onSectionChange?.(section);
+      onSectionChange?.(section, options);
     },
     [onSectionChange],
   );

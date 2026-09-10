@@ -68,7 +68,7 @@ describe("Runtime configuration settings", () => {
 
   it("explains unavailable memory settings instead of rendering a blank page", () => {
     renderSettingsView({ initialSection: "memory", initialSettings: settingsPayload() });
-    expect(screen.getByText("Update the gateway to edit these settings.")).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "Capabilities" })).getByText("Update the gateway to edit these settings.")).toBeVisible();
   });
 
   it.each(["bwrap", "seatbelt", ""])("saves the %s sandbox and reveals its path settings", async (backend) => {

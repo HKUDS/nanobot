@@ -82,7 +82,7 @@ describe("Settings capabilities", () => {
     payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
     payload.runtime_config = { "tools.web.enable": true, "agents.defaults.dream.enabled": true };
     renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
-    expect(screen.getAllByRole("switch")).toHaveLength(4);
+    expect(within(screen.getByRole("region", { name: "Capabilities" })).getAllByRole("switch")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "Capabilities", exact: true })).toHaveAttribute("aria-current", "page");
     const editor = screen.getByRole("button", { name: "Image generation", exact: true });
     expect(editor).toHaveAttribute("aria-expanded", "false");
