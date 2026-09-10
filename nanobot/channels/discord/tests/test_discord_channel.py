@@ -12,7 +12,7 @@ pytest.importorskip("discord")
 import discord
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.discord.runtime import (
     MAX_MESSAGE_LEN,
@@ -1416,3 +1416,69 @@ async def test_send_succeeds_normally() -> None:
     assert len(sent_messages) == 1
     assert sent_messages[0].content == "hello world"
     assert sent_messages[0].chat_id == "123"
+
+
+def _compaction_message(content: str, phase: str, compaction_id: str = "c1") -> OutboundMessage:
+    return OutboundMessage(
+        channel="discord",
+        chat_id="123",
+        content=content,
+        event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase),  # type: ignore[arg-type]
+    )
+
+
+def _client_with_channel(target: _FakeChannel) -> tuple[DiscordChannel, "DiscordBotClient"]:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+
+    async def fetch_channel(channel_id: int):
+        return target if channel_id == target.id else None
+
+    client.fetch_channel = fetch_channel  # type: ignore[method-assign]
+    return owner, client
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_edits_the_start_notice_in_place() -> None:
+    # One message per compaction: the outcome replaces the "Compressing…" text
+    # instead of arriving as a second notice (#5719).
+    target = _FakeChannel(channel_id=123)
+    owner, client = _client_with_channel(target)
+
+    await client.send_outbound(_compaction_message("Compressing context…", "started"))
+    await client.send_outbound(_compaction_message("Context compacted.", "succeeded"))
+
+    assert [payload["content"] for payload in target.sent_payloads] == ["Compressing context…"]
+    assert target.sent_messages[0].content == "Context compacted."
+    assert owner._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_without_a_start_notice_is_sent() -> None:
+    # After a restart (or when the edit is refused) the outcome still arrives.
+    target = _FakeChannel(channel_id=123)
+    owner, client = _client_with_channel(target)
+
+    await client.send_outbound(_compaction_message("Unable to compact context.", "failed"))
+
+    assert [payload["content"] for payload in target.sent_payloads] == ["Unable to compact context."]
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_falls_back_to_send_when_edit_fails() -> None:
+    target = _FakeChannel(channel_id=123)
+    owner, client = _client_with_channel(target)
+    await client.send_outbound(_compaction_message("Compressing context…", "started"))
+
+    async def refuse_edit(**_kwargs) -> None:
+        raise RuntimeError("message deleted")
+
+    target.sent_messages[0].edit = refuse_edit  # type: ignore[method-assign]
+    await client.send_outbound(_compaction_message("Context compacted.", "succeeded"))
+
+    assert [payload["content"] for payload in target.sent_payloads] == [
+        "Compressing context…",
+        "Context compacted.",
+    ]
+    assert owner._compaction_notices == {}
+

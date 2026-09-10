@@ -15,7 +15,6 @@ from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
-    ContextCompactionEvent,
     ProgressEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
@@ -810,18 +809,6 @@ class ChannelManager:
                         msg.channel, tool_hint=False,
                     ):
                         continue
-
-                # Compaction changes the context of every later turn, so its
-                # outcome (compacted / failed / cancelled) is always delivered.
-                # The "Compressing context…" start notice is transient progress
-                # text and follows the channel's progress setting, so a channel
-                # with progress off gets one notice per compaction, not two.
-                if (
-                    isinstance(event, ContextCompactionEvent)
-                    and event.phase == "started"
-                    and not self._should_send_progress(msg.channel)
-                ):
-                    continue
 
                 if isinstance(event, RetryWaitEvent):
                     continue

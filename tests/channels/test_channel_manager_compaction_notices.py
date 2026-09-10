@@ -1,11 +1,10 @@
-"""Context-compaction notices on channels with ``send_progress`` off.
+"""Context-compaction lifecycle notices are delivered regardless of ``send_progress``.
 
-A compaction emits ``ContextCompactionEvent`` start/finish notices. The
-outcome (compacted / failed / cancelled) is always delivered because it
-changes the context of every later turn; the "Compressing context…" start
-notice is transient progress text and follows the channel's progress
-setting, so such a channel receives one notice per compaction instead of
-two (#5719).
+Compaction changes the context of every later turn, so both the start and
+the outcome of a compaction are information for the user, not progress
+chatter: a channel with ``send_progress`` off still receives them. Reducing
+the noise (one message updated in place) is the adapter's job; see the
+Discord channel (#5719).
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ import pytest
 
 from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
+    ProgressEvent,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -66,49 +66,24 @@ async def _dispatch_until(manager: ChannelManager, expected: int) -> None:
             pass
 
 
-def _compaction(phase: str):
-    return outbound_message_for_event(
-        channel="mock",
-        chat_id="c1",
-        event=ContextCompactionEvent(compaction_id="cmp-1", phase=phase),
-    )
+def _sent_contents(manager: ChannelManager) -> list[str]:
+    return [call.args[0].content for call in manager.channels["mock"]._send_mock.await_args_list]
 
 
 @pytest.mark.asyncio
-async def test_only_the_outcome_is_delivered_when_progress_is_off(manager):
-    channel = manager.channels["mock"]
-    channel.send_progress = False
-    await manager.bus.publish_outbound(_compaction("started"))
-    await manager.bus.publish_outbound(_compaction("succeeded"))
+async def test_compaction_lifecycle_is_delivered_with_progress_off(manager: ChannelManager) -> None:
+    manager.channels["mock"].send_progress = False
+    for event in (
+        ProgressEvent(content="ordinary progress"),
+        ContextCompactionEvent(compaction_id="c1", phase="started"),
+        ContextCompactionEvent(compaction_id="c1", phase="succeeded"),
+    ):
+        await manager.bus.publish_outbound(
+            outbound_message_for_event(channel="mock", chat_id="chat", event=event)
+        )
 
-    await _dispatch_until(manager, expected=1)
+    await _dispatch_until(manager, 2)
 
-    contents = [call.args[0].content for call in channel._send_mock.await_args_list]
-    assert contents == ["Context compacted."]
-
-
-@pytest.mark.asyncio
-async def test_start_and_outcome_are_delivered_when_progress_is_on(manager):
-    channel = manager.channels["mock"]
-    channel.send_progress = True
-    await manager.bus.publish_outbound(_compaction("started"))
-    await manager.bus.publish_outbound(_compaction("succeeded"))
-
-    await _dispatch_until(manager, expected=2)
-
-    contents = [call.args[0].content for call in channel._send_mock.await_args_list]
-    assert contents == ["Compressing context…", "Context compacted."]
-
-
-@pytest.mark.asyncio
-async def test_failed_and_cancelled_outcomes_are_delivered_when_progress_is_off(manager):
-    channel = manager.channels["mock"]
-    channel.send_progress = False
-    await manager.bus.publish_outbound(_compaction("started"))
-    await manager.bus.publish_outbound(_compaction("failed"))
-    await manager.bus.publish_outbound(_compaction("cancelled"))
-
-    await _dispatch_until(manager, expected=2)
-
-    contents = [call.args[0].content for call in channel._send_mock.await_args_list]
-    assert contents == ["Unable to compact context.", "Context compaction cancelled."]
+    contents = _sent_contents(manager)
+    assert "ordinary progress" not in contents
+    assert len(contents) == 2
