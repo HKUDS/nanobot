@@ -51,7 +51,7 @@ export function TokenUsageModelTrend({ days, modelDays, models }: {
         {[peak, peak / 2, 0].map((value, index) => <div key={index} className="flex items-center gap-2"><span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{compact.format(value)}</span><span className="flex-1 border-t border-border/40" /></div>)}
       </div>
       <div role="group" aria-label={title} className="relative grid h-[clamp(144px,30vh,280px)] grid-cols-[repeat(30,minmax(0,1fr))] gap-px">
-        <TooltipProvider delayDuration={120}>
+        <TooltipProvider>
           {columns.map(column => column.total === 0 ? (
             <span key={column.date} role="img" aria-label={`${column.date}: ${number.format(0)} tokens`} />
           ) : <Tooltip key={column.date}>
@@ -77,7 +77,7 @@ export function TokenUsageModelTrend({ days, modelDays, models }: {
       </div>
       <div className="relative mt-2 flex justify-between text-[10px] tabular-nums text-muted-foreground"><span>{days[0].date.slice(5)}</span><span>{days[14].date.slice(5)}</span><span>{days[days.length - 1].date.slice(5)}</span></div>
     </div>
-    <TooltipProvider delayDuration={120}>
+    <TooltipProvider>
       <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] text-muted-foreground sm:grid-cols-3">
         {labels.map((label, index) => {
           if (index === series.length && !hasOther) return null;

@@ -2481,7 +2481,7 @@ export function ThreadComposer({
               />
             ) : null}
             {showVoiceButton ? (
-              <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+              <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button

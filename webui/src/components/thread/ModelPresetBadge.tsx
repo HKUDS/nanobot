@@ -454,7 +454,7 @@ export function ModelPresetBadge({
   );
 
   return (
-    <TooltipProvider delayDuration={300} skipDelayDuration={80}>
+    <TooltipProvider>
       <Tooltip open={tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
         {badge}
         <TooltipContent side="top">{tooltipLabel}</TooltipContent>

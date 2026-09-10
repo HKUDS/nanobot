@@ -148,7 +148,7 @@ export function Sidebar(props: SidebarProps) {
 
 
   return (
-    <TooltipProvider delayDuration={300}>
+    <TooltipProvider>
     <nav
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}

@@ -302,7 +302,7 @@ function IncomingSessionMessage({
         </div>
       </div>
       {createdAtLabel || showCopyAction ? (
-        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <TooltipProvider>
           <div
             className="mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
           >
@@ -422,7 +422,7 @@ export function MessageBubble({
           </p>
         ) : null}
         {showDeliveryStatus || showCreatedAt || (hasText && showCopyAction) ? (
-          <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+          <TooltipProvider>
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
               {showCreatedAt ? (
                 <MessageTimestamp
@@ -524,7 +524,7 @@ export function MessageBubble({
         </>
       )}
       {showAssistantFooterSlot ? (
-        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <TooltipProvider>
           <div
             data-assistant-footer
             data-state={showAssistantFooterRow ? "visible" : "reserved"}

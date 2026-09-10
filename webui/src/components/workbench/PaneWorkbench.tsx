@@ -687,7 +687,7 @@ export function PaneWorkbench({
       aria-label={t("workbench.aria", { defaultValue: "Conversation workbench" })}
       className="flex h-full min-h-0 flex-col overflow-hidden bg-background"
     >
-      <TooltipProvider delayDuration={500} skipDelayDuration={100}>
+      <TooltipProvider>
         {chrome ? (
           <header className="shrink-0 bg-background">
             <div

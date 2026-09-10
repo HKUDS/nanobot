@@ -5,7 +5,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 export function SettingsHint({ children, description }: { children: ReactNode; description: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <TooltipProvider delayDuration={120}>
+    <TooltipProvider>
       <Tooltip open={open} onOpenChange={setOpen}>
         <TooltipTrigger asChild>
           <button

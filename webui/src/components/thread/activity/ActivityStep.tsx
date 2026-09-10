@@ -86,7 +86,7 @@ export function ActivityStep({
       </span>
       <div className={cn("min-w-0", contentClassName)}>
         {typeof label === "string" ? (
-          <TooltipProvider delayDuration={300} skipDelayDuration={80}>
+          <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>{line}</TooltipTrigger>
               <TooltipContent side="top" className="max-w-[min(32rem,calc(100vw-2rem))] whitespace-pre-wrap break-words">

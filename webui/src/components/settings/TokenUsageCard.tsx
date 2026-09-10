@@ -115,7 +115,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
               {[0, 1, 2].map(line => <div key={line} className="border-t border-border/40" />)}
             </div>
             <div className="relative grid h-28 grid-cols-[repeat(30,minmax(0,1fr))] gap-1" role="group" aria-label={t("settings.usage.dailyTrend", { defaultValue: "Daily token usage" })}>
-              <TooltipProvider delayDuration={120}>
+              <TooltipProvider>
                 {days.map(day => {
                   const tokens = day.usage?.total_tokens ?? 0;
                   const segments = tokenSegments(day.usage);
