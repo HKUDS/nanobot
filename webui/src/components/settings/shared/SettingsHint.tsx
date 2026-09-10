@@ -11,7 +11,7 @@ export function SettingsHint({ children, description }: { children: ReactNode; d
           <button
             type="button"
             onClick={(event) => { event.preventDefault(); setOpen(true); }}
-            className="max-w-full cursor-help rounded-sm text-left underline decoration-dotted decoration-muted-foreground/40 underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="max-w-full cursor-help rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {children}
           </button>
