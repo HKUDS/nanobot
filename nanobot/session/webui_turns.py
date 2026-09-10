@@ -795,10 +795,14 @@ class WebuiTurnCoordinator:
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
         title_context = _validated_llm_runtime(event.runtime)
         session = self.sessions.get_or_create(event.context.session_key)
+        target_session = self.sessions.get_or_create(
+            f"{event.context.channel}:{event.context.chat_id}"
+        )
         if (
             (
                 event.context.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
                 and session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+                and target_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
             )
             or title_context is None
         ):

@@ -1,6 +1,7 @@
 """Tests for structured tool-event progress metadata emitted by AgentLoop."""
 
 import asyncio
+from collections.abc import Awaitable
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1241,6 +1242,62 @@ class TestToolEventProgress:
         assert generated is True
         provider.chat_with_retry.assert_awaited_once()
         assert session.metadata["title"] == "Greeting"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
+    @pytest.mark.parametrize("marked_session_key", ["websocket:chat1", "unified:default", None])
+    async def test_unified_webui_title_uses_reloaded_session_markers(
+        self,
+        tmp_path: Path,
+        metadata: dict[str, object],
+        marked_session_key: str | None,
+    ) -> None:
+        from nanobot.session.manager import SessionManager
+
+        sessions = SessionManager(tmp_path)
+        if marked_session_key is not None:
+            session = sessions.get_or_create(marked_session_key)
+            session.metadata["webui"] = True
+            sessions.save(session)
+        sessions = SessionManager(tmp_path)
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_with_retry = AsyncMock(side_effect=[
+            LLMResponse(content="Hello"),
+            LLMResponse(content="Greeting"),
+        ])
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            model="test-model",
+            session_manager=sessions,
+            unified_session=True,
+        )
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(sessions)
+        scheduled: list[Awaitable[None]] = []
+        coordinator = WebuiTurnCoordinator(
+            bus=bus, sessions=sessions, schedule_background=scheduled.append,
+        )
+        with coordinator.connected():
+            await loop._dispatch(InboundMessage(
+                channel="websocket",
+                sender_id="u1",
+                chat_id="chat1",
+                content="say hello",
+                metadata=metadata,
+            ))
+            for coro in scheduled:
+                await coro
+
+        expected_title = "Greeting" if marked_session_key is not None else None
+        reloaded = SessionManager(tmp_path)
+        assert reloaded.get_or_create("websocket:chat1").metadata.get("title") == expected_title
+        assert "title" not in reloaded.get_or_create("unified:default").metadata
+        assert provider.chat_with_retry.await_count == (2 if expected_title else 1)
+        assert len(scheduled) == (1 if expected_title else 0)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
