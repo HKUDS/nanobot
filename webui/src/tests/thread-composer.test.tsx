@@ -3057,4 +3057,64 @@ describe("ThreadComposer", () => {
     ).toBeNull();
   });
 
+  it("restores a per-session draft after switching sessions", async () => {
+    const sendA = vi.fn();
+    const view = render(
+      <ThreadComposer onSend={sendA} isStreaming={false} pendingQueueKey="chat-a" />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "draft for A" },
+    });
+    await waitFor(() => {
+      expect(window.localStorage.getItem("nanobot.webui.draft.chat-a")).toBe("draft for A");
+    });
+
+    view.rerender(
+      <ThreadComposer onSend={vi.fn()} isStreaming={false} pendingQueueKey="chat-b" />,
+    );
+    expect(screen.getByLabelText("Message input")).toHaveValue("");
+
+    view.rerender(
+      <ThreadComposer onSend={sendA} isStreaming={false} pendingQueueKey="chat-a" />,
+    );
+    expect(screen.getByLabelText("Message input")).toHaveValue("draft for A");
+  });
+
+  it("drops the draft once the message is sent", async () => {
+    const onSend = vi.fn();
+    const view = render(
+      <ThreadComposer onSend={onSend} isStreaming={false} pendingQueueKey="chat-a" />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "send me" },
+    });
+    await waitFor(() => {
+      expect(window.localStorage.getItem("nanobot.webui.draft.chat-a")).toBe("send me");
+    });
+
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("send me", undefined, undefined);
+    });
+    await waitFor(() => {
+      expect(window.localStorage.getItem("nanobot.webui.draft.chat-a")).toBeNull();
+    });
+
+    view.rerender(
+      <ThreadComposer onSend={onSend} isStreaming={false} pendingQueueKey="chat-a" />,
+    );
+    expect(screen.getByLabelText("Message input")).toHaveValue("");
+  });
+
+  it("restores a persisted draft on remount (reload equivalent)", () => {
+    window.localStorage.setItem("nanobot.webui.draft.chat-a", "persisted text");
+    const view = render(
+      <ThreadComposer onSend={vi.fn()} isStreaming={false} pendingQueueKey="chat-a" />,
+    );
+    expect(screen.getByLabelText("Message input")).toHaveValue("persisted text");
+    view.unmount();
+  });
+
 });

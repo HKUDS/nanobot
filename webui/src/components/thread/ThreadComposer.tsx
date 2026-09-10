@@ -354,6 +354,9 @@ const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
 const SESSION_MENTIONS_LIMIT = 8;
 
+const COMPOSER_DRAFT_STORAGE_PREFIX = "nanobot.webui.draft.";
+const COMPOSER_DRAFT_DEBOUNCE_MS = 120;
+
 function VoiceRecordingMeter({
   ariaLabel,
   className,
@@ -528,6 +531,23 @@ function storeSlashRecents(commands: string[]): void {
 function queuedPromptsStorageKey(key?: string | null): string | null {
   const clean = key?.trim();
   return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
+}
+
+function composerDraftStorageKey(pendingQueueKey?: string | null): string | null {
+  const clean = pendingQueueKey?.trim();
+  return clean ? `${COMPOSER_DRAFT_STORAGE_PREFIX}${clean}` : null;
+}
+
+function loadComposerDraft(pendingQueueKey?: string | null): string {
+  if (typeof window === "undefined") return "";
+  const key = composerDraftStorageKey(pendingQueueKey);
+  if (!key) return "";
+  try {
+    return window.localStorage.getItem(key) ?? "";
+  } catch {
+    // localStorage may be unavailable in private contexts.
+    return "";
+  }
 }
 
 function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
@@ -1027,7 +1047,7 @@ export function ThreadComposer({
   onQuotedContextChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(() => loadComposerDraft(pendingQueueKey));
   const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
   const [sessionDragPreview, setSessionDragPreview] = useState<{
     mention: SessionMention;
@@ -1047,6 +1067,9 @@ export function ThreadComposer({
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
+  // Wider than hasTouchPrimaryPointer on purpose: tablets with a physical
+  // keyboard still count as touch for the Enter key behavior below.
+  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1057,6 +1080,31 @@ export function ThreadComposer({
   const draggedQueuedPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const wasStreamingRef = useRef(isStreaming);
+
+  // Persist draft text per session so reloading or switching sessions restores
+  // what the user was typing. Keyed the same way as queued prompts; the value
+  // effect flushes the pending write on key change/unmount so a fast switch
+  // never loses the last keystroke. Sending or clearing removes the draft.
+  useEffect(() => {
+    const key = composerDraftStorageKey(pendingQueueKey);
+    if (!key) return;
+    const persist = () => {
+      try {
+        if (value) {
+          window.localStorage.setItem(key, value);
+        } else {
+          window.localStorage.removeItem(key);
+        }
+      } catch {
+        // localStorage may be unavailable in private contexts.
+      }
+    };
+    const timer = window.setTimeout(persist, COMPOSER_DRAFT_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      persist();
+    };
+  }, [pendingQueueKey, value]);
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
@@ -1585,7 +1633,7 @@ export function ThreadComposer({
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
     previousPendingQueueKeyRef.current = pendingQueueKey;
     secondEnterPromptIdRef.current = null;
-    setValue("");
+    setValue(loadComposerDraft(pendingQueueKey));
     setSelectedSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
@@ -1842,6 +1890,14 @@ export function ThreadComposer({
   }, [sessionDragPreview]);
 
   const clearComposerText = useCallback((restoreFocus = true) => {
+    const draftKey = composerDraftStorageKey(pendingQueueKey);
+    if (draftKey) {
+      try {
+        window.localStorage.removeItem(draftKey);
+      } catch {
+        // localStorage may be unavailable in private contexts.
+      }
+    }
     setValue("");
     setSelectedSessionMentions([]);
     setInlineError(null);
@@ -1849,7 +1905,7 @@ export function ThreadComposer({
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
     resizeTextarea(restoreFocus);
-  }, [resizeTextarea]);
+  }, [pendingQueueKey, resizeTextarea]);
 
   const queueGuidancePrompt = useCallback(() => {
     const text = value.trim();
@@ -2179,6 +2235,19 @@ export function ThreadComposer({
         return;
       }
     }
+    // Touch keyboards: a plain Enter inserts a newline; sending stays on the
+    // send button. The select-on-Enter menu branches above take precedence.
+    if (
+      e.key === "Enter"
+      && !e.shiftKey
+      && !e.altKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && !e.nativeEvent.isComposing
+      && hasCoarsePointer
+    ) {
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (canQueueGuidance) {
@@ -2448,6 +2517,7 @@ export function ThreadComposer({
             onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
             onPaste={onPaste}
             rows={1}
+            enterKeyHint={hasCoarsePointer ? "enter" : undefined}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={interactionDisabled}
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
