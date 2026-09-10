@@ -146,6 +146,22 @@ describe("Settings system domains", () => {
   });
 
 
+  it.each(["apps", "skills", "automations", "channels"] as const)(
+    "uses the conversation-width content frame for the standalone %s page",
+    (initialSection) => {
+      renderSettingsView({ initialSection, initialSettings: settingsPayload(), showSidebar: false });
+
+      expect(screen.getByTestId("settings-section-transition")).toHaveClass("settings-feature-page");
+    },
+  );
+
+  it("keeps the regular settings page at its existing width", () => {
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+
+    expect(screen.getByTestId("settings-section-transition")).toHaveClass("settings-grid");
+    expect(screen.getByTestId("settings-section-transition")).not.toHaveClass("settings-feature-page");
+  });
+
   it("does not show the Settings kicker on the standalone Automations surface", async () => {
     const onBackToChat = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {

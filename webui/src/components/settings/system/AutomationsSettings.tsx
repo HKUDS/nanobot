@@ -124,10 +124,10 @@ export function AutomationsSettings({
   }, [filtered, selectedJobId]);
 
   return (
-    <div className="space-y-5">
+    <div className="automations-page space-y-5">
       {jobs.length ? (
         <section className="shrink-0">
-          <div className="mx-auto flex w-full max-w-[56rem] flex-col gap-3">
+          <div className="flex w-full flex-col gap-3">
             <div className="-mx-1 overflow-x-auto px-1 pb-0.5">
               <div className="grid w-full min-w-[36rem] grid-cols-5 gap-1 rounded-floating bg-muted p-1">
                 {summaryOptions.map((option) => (
@@ -209,8 +209,8 @@ export function AutomationsSettings({
           {tx("settings.automations.loading", "Loading automations...")}
         </div>
       ) : filtered.length && selectedJob ? (
-        <section className="grid min-h-0 overflow-hidden rounded-panel bg-settings-surface xl:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)] xl:items-stretch">
-          <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/35 bg-settings-surface xl:border-b-0 xl:border-r">
+        <section className="automations-workspace grid min-h-0 overflow-hidden rounded-panel bg-settings-surface">
+          <aside className="automations-queue flex min-h-0 flex-col overflow-hidden border-b border-border/35 bg-settings-surface">
             <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3">
               <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
                 {tx("settings.automations.queue", "Queue")}
@@ -220,7 +220,7 @@ export function AutomationsSettings({
               </span>
             </div>
             <div
-              className="max-h-[28rem] space-y-1 overflow-y-auto overscroll-contain px-2 pb-2 xl:max-h-[calc(100vh-24rem)]"
+              className="automations-queue-list max-h-[28rem] space-y-1 overflow-y-auto overscroll-contain px-2 pb-2"
               role="list"
               aria-label={tx("settings.automations.queue", "Queue")}
             >
@@ -404,9 +404,9 @@ function AutomationDetailPanel({
   }, [job.id]);
 
   return (
-    <article className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-settings-surface">
+    <article className="automation-detail-panel flex min-h-0 min-w-0 flex-col overflow-hidden bg-settings-surface">
       <div className="shrink-0 border-b border-border/35 px-4 py-3.5 dark:border-white/10 sm:px-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h3 className="min-w-0 truncate text-[18px] font-medium leading-7 text-foreground">
@@ -431,7 +431,7 @@ function AutomationDetailPanel({
         </div>
       </div>
 
-      <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_14.5rem]">
+      <div className="automation-detail-body grid min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="min-h-0 min-w-0 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
           <section className="rounded-floating bg-background/55 px-4 py-3.5">
             <div className="flex items-center justify-between gap-3">
@@ -483,7 +483,7 @@ function AutomationDetailPanel({
             ) : null}
           </section>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-3">
             <AutomationDetail
               label={tx("settings.automations.labels.next", "Next")}
               title={formatAutomationNextTitle(job, locale, tx)}
@@ -512,7 +512,7 @@ function AutomationDetailPanel({
           ) : null}
         </div>
 
-        <aside className="min-h-0 overflow-y-auto overscroll-contain border-t border-border/35 bg-settings-surface p-4 text-[12px] text-muted-foreground lg:border-l lg:border-t-0">
+        <aside className="automation-detail-metadata min-h-0 overflow-y-auto overscroll-contain border-t border-border/35 bg-settings-surface p-4 text-[12px] text-muted-foreground">
           <div className="grid gap-3">
             <AutomationDetail
               label={tx("settings.automations.labels.schedule", "Schedule")}

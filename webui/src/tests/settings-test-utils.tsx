@@ -128,6 +128,7 @@ export function renderSettingsView(
       | "overview"
       | "appearance"
       | "apps"
+      | "skills"
       | "channels"
       | "automations"
       | "advanced"
