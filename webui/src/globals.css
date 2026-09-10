@@ -1034,8 +1034,8 @@
   .settings-row > *, .settings-footer > * { grid-column: 1 / -1; min-inline-size: 0; }
   .settings-control { display: flex; align-items: center; max-inline-size: 100%; }
   .settings-control > * { max-inline-size: 100%; }
-  .settings-control input, .settings-control textarea { max-inline-size: 100%; }
-  .settings-control input[type="number"] { text-align: end; font-variant-numeric: tabular-nums; }
+  .settings-control input, .settings-control textarea { max-inline-size: 100%; text-align: start; }
+  .settings-control input[type="number"] { font-variant-numeric: tabular-nums; }
   .settings-footer { min-block-size: 60px; }
   .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
   .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
