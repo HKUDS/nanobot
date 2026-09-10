@@ -538,6 +538,29 @@ describe("App layout", () => {
     ).toBeTruthy();
   });
 
+  it("opens Channels below Automations and supports its keyboard shortcut", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/nanobot-features": { features: [], enabled_count: 0 },
+    });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const channels = within(sidebar).getByRole("button", { name: "Channels" });
+    expect(within(sidebar).getByRole("button", { name: "Automations" })
+      .compareDocumentPosition(channels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(channels);
+    expect(await screen.findByRole("heading", { name: "Channels" })).toBeVisible();
+    expect(window.location.hash).toBe("#/channels");
+    expect(channels).toHaveAttribute("aria-current", "page");
+    expect(document.title).toBe("Channels · nanobot");
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/new"));
+    fireEvent.keyDown(window, { key: "$", code: "Digit4", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole("heading", { name: "Channels" })).toBeVisible();
+    expect(window.location.hash).toBe("#/channels");
+  });
+
   it("highlights the blank new-topic destination immediately", async () => {
     render(<App />);
 
@@ -896,7 +919,7 @@ describe("App layout", () => {
     consoleError.mockRestore();
   });
 
-  it("restores the Settings route after a restart fallback hash", async () => {
+  it("restores the standalone Channels page from a legacy restart route", async () => {
     localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
     localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");
     window.history.replaceState(null, "", "/#/new");
@@ -922,9 +945,9 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     expect(
-      await screen.findByRole("navigation", { name: "Settings sections" }),
+      await screen.findByRole("heading", { name: "Channels" }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Channels" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Channels" })).toHaveAttribute("aria-current", "page");
     expect(window.location.hash).toBe("#/settings?section=channels");
   });
 
@@ -2378,7 +2401,7 @@ describe("App layout", () => {
     fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
       .getByRole("button", { name: "Settings" }));
     const nav = await screen.findByRole("navigation", { name: "Settings sections" });
-    for (const name of ["Overview", "Appearance", "Models", "Capabilities", "Channels", "System", "Advanced", "About"]) {
+    for (const name of ["Overview", "Appearance", "Models", "Capabilities", "System", "Advanced", "About"]) {
       expect(within(nav).getByRole("button", { name, exact: true })).toBeInTheDocument();
     }
     fireEvent.click(within(nav).getByRole("button", { name: "Appearance", exact: true }));

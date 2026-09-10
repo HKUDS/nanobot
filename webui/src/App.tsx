@@ -120,7 +120,7 @@ const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const PAIRING_POLL_INTERVAL_MS = 5_000;
 const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -191,7 +191,7 @@ function defaultShellRoute(): ShellRoute {
 }
 
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "automations" || section === "skills") return section;
+  if (section === "apps" || section === "automations" || section === "skills" || section === "channels") return section;
   return "settings";
 }
 
@@ -258,6 +258,9 @@ function readShellRoute(): ShellRoute {
   }
   if (path === "/automations") {
     return { view: "automations", activeKey, settingsSection: "automations" };
+  }
+  if (path === "/channels") {
+    return { view: "channels", activeKey, settingsSection: "channels" };
   }
   if (path === "/skills") {
     return { view: "skills", activeKey, settingsSection: "skills" };
@@ -1937,7 +1940,7 @@ function Shell({
 
   const onOpenSettings = useCallback((section: SettingsSectionKey = "overview") => {
     setSessionSearchOpen(false);
-    navigate({ view: "settings", activeKey, settingsSection: section });
+    navigate({ view: shellViewForSettingsSection(section), activeKey, settingsSection: section });
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
@@ -1961,6 +1964,12 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenChannels = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "channels", activeKey, settingsSection: "channels" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onOpenSkills = useCallback(() => {
     setSessionSearchOpen(false);
     navigate({ view: "skills", activeKey, settingsSection: "skills" });
@@ -1969,7 +1978,7 @@ function Shell({
 
   useEffect(() => {
     const actions = { newChat: onNewChat, search: onOpenSessionSearch, apps: onOpenApps,
-      skills: onOpenSkills, automations: onOpenAutomations, settings: () => onOpenSettings() };
+      skills: onOpenSkills, automations: onOpenAutomations, channels: onOpenChannels, settings: () => onOpenSettings() };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       const action = matchSidebarShortcut(event);
       if (!action) return;
@@ -1978,7 +1987,7 @@ function Shell({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenSettings]);
+  }, [onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenChannels, onOpenSettings]);
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
@@ -2460,6 +2469,10 @@ function Shell({
       });
       return;
     }
+    if (view === "channels") {
+      document.title = t("app.documentTitle.chat", { title: t("settings.nav.channels") });
+      return;
+    }
     if (view === "skills") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.nav.skills", { defaultValue: "Skills" }),
@@ -2520,10 +2533,11 @@ function Shell({
     onOpenSettings,
     onOpenApps,
     onOpenAutomations,
+    onOpenChannels,
     onOpenSkills,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "automations" || view === "skills" ? view : null,
+    activeUtility: view === "apps" || view === "automations" || view === "skills" || view === "channels" ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,

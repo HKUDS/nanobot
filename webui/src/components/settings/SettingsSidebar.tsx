@@ -8,7 +8,6 @@ import {
   LogOut,
   Loader2,
   RotateCcw,
-  MessageCircle,
   Blocks,
   Palette,
   Server,
@@ -37,7 +36,6 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "appearance", icon: Palette, fallback: "Appearance" },
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "capabilities", icon: Blocks, fallback: "Capabilities" },
-  { key: "channels", icon: MessageCircle, fallback: "Channels" },
   { key: "runtime", icon: Server, fallback: "System" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
   { key: "about", icon: Info, fallback: "About" },
@@ -47,6 +45,7 @@ export function standaloneSectionTitle(section: SettingsSectionKey): string {
   if (section === "apps") return "Apps";
   if (section === "automations") return "Automations";
   if (section === "skills") return "Skills";
+  if (section === "channels") return "Channels";
   return SETTINGS_NAV_ITEMS.find((item) => item.key === section)?.fallback ?? "Settings";
 }
 

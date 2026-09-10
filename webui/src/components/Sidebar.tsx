@@ -8,6 +8,7 @@ import {
   Archive,
   Brain,
   CalendarClock,
+  MessageCircle,
   PanelLeftClose,
   Search,
   Settings,
@@ -66,9 +67,10 @@ interface SidebarProps {
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
+  onOpenChannels: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | null;
+  activeUtility?: "apps" | "skills" | "automations" | "channels" | null;
   onToggleArchived: () => void;
   onCollapse?: () => void;
   onExpand?: () => void;
@@ -239,6 +241,17 @@ export function Sidebar(props: SidebarProps) {
           active={props.activeUtility === "automations"}
           selectionRef={activeActionRef}
           icon={<CalendarClock className="h-4 w-4" />}
+        />
+        <SidebarActionButton
+          collapsed={collapsed}
+          label={t("settings.nav.channels")}
+          shortcut={sidebarShortcutLabel("channels", apple)}
+          ariaKeyShortcuts={sidebarShortcutAria("channels")}
+          onClick={props.onOpenChannels}
+          onIntent={props.onSettingsIntent}
+          active={props.activeUtility === "channels"}
+          selectionRef={activeActionRef}
+          icon={<MessageCircle className="h-4 w-4" />}
         />
         {props.archivedCount ? (
           <SidebarActionButton
