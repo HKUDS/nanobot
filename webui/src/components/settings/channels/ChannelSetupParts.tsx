@@ -1,3 +1,4 @@
+import { channelValidationMessage } from "./validationMessages";
 import { useMemo, useState, type ReactNode } from "react";
 import { Clipboard, ExternalLink, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -38,7 +39,8 @@ export function ChannelGuideLink({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const presentation = channelUiPresentation(feature.name, feature.webui);
+  const presentation = channelUiPresentation(feature.name, feature.webui)
+    ?? channelUiPresentation(feature.name);
   const logoUrls = useMemo(
     () => logoFallbackUrls(setup.docsLogoUrl ?? presentation?.logoUrl),
     [presentation?.logoUrl, setup.docsLogoUrl],
@@ -119,7 +121,8 @@ function ChannelOfficialLink({
   feature: NanobotFeatureInfo;
   setup: ChannelSetupPresentation;
 }) {
-  const presentation = channelUiPresentation(feature.name, feature.webui);
+  const presentation = channelUiPresentation(feature.name, feature.webui)
+    ?? channelUiPresentation(feature.name);
   const logoUrls = useMemo(
     () => logoFallbackUrls(setup.docsLogoUrl ?? presentation?.logoUrl),
     [presentation?.logoUrl, setup.docsLogoUrl],
@@ -287,7 +290,8 @@ export function ChannelValidationBadge({
 }
 
 export function ChannelValidationDetails({ validation }: { validation: ChannelValidationPayload | null }) {
-  const message = validation?.message;
+  const { t } = useTranslation();
+  const message = validation?.message ? channelValidationMessage(validation.message, t) : undefined;
   if (!validation?.identity?.name && !message) return null;
   return (
     <div className="mt-2 truncate text-[11.5px] text-muted-foreground">
@@ -302,22 +306,23 @@ export function ChannelValidationDetails({ validation }: { validation: ChannelVa
 
 export function ChannelValidationChecks({ validation }: { validation: ChannelValidationPayload }) {
   const { t } = useTranslation();
-  if (!validation.checks.length) return null;
+  const checks = validation.checks.filter((check) => check.id !== "manual_review" && !(check.id.startsWith("field:") && check.status === "pass"));
+  if (checks.length <= 1) return null;
   return (
     <div>
       <div className="mb-2 text-[12px] font-semibold text-foreground">
         {t("settings.channels.connectionChecks")}
       </div>
       <div className="space-y-2">
-        {validation.checks.slice(0, 6).map((check) => (
+        {checks.slice(0, 6).map((check) => (
           <div key={check.id} className="flex gap-2 text-[12px] leading-5">
             <span className={cn("mt-0.5", channelValidationCheckIconClass(check.status))}>
               {channelValidationCheckIcon(check.status)}
             </span>
             <div className="min-w-0 flex-1">
-              <div className="font-medium text-foreground/85">{check.label}</div>
+              <div className="font-medium text-foreground/85">{channelValidationMessage(check.label, t)}</div>
               {check.message ? (
-                <div className="text-muted-foreground">{check.message}</div>
+                <div className="text-muted-foreground">{channelValidationMessage(check.message, t)}</div>
               ) : null}
               {check.action_url ? (
                 <a

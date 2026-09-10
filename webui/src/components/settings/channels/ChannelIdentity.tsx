@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import type { useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 
 import {
   channelFieldMessageKey,
@@ -15,6 +15,7 @@ import type {
   ChannelFieldPresentation,
   ChannelSetupPresentation,
 } from "@/components/settings/channels/catalog";
+import { channelValidationMessage } from "@/components/settings/channels/validationMessages";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { normalizeLocale } from "@/i18n/config";
 import { logoFallbackUrls } from "@/lib/provider-brand";
@@ -147,7 +148,8 @@ export function ChannelLogo({
   feature: NanobotFeatureInfo;
   showBrandLogos: boolean;
 }) {
-  const presentation = channelUiPresentation(feature.name, feature.webui);
+  const presentation = channelUiPresentation(feature.name, feature.webui)
+    ?? channelUiPresentation(feature.name);
   const initials = presentation?.initials ?? feature.display_name.slice(0, 2).toUpperCase();
   const color = presentation?.color ?? "#6B7280";
   const Icon = presentation?.icon;
@@ -304,10 +306,11 @@ export function ChannelRuntimeError({
   message?: string;
   className?: string;
 }) {
+  const { t } = useTranslation();
   if (!message) return null;
   return (
     <div className={`${className} rounded-control border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive`}>
-      {message}
+      {channelValidationMessage(message, t)}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
-    displayName: "WebSocket",
+    displayName: "nanobot WebUI",
     initials: "WS",
     color: "#111827",
     icon: Network,

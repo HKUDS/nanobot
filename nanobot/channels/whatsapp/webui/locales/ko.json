@@ -24,6 +24,10 @@
           "open": "모든 메시지",
           "allowlist": "허용 목록"
         }
+      },
+      "proxy": {
+        "label": "프록시",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   },

@@ -162,6 +162,7 @@ class ChannelSetupSpec:
     required: tuple[SetupRequirement, ...] = ()
     official_url: str | None = None
     validator: SetupValidator | None = None
+    verifies_connection: bool = False
 
     @property
     def secrets(self) -> frozenset[str]:
@@ -223,6 +224,8 @@ class ChannelSetupSpec:
         }
         if self.official_url:
             payload["official_url"] = self.official_url
+        if self.verifies_connection:
+            payload["verifies_connection"] = True
         return payload
 
 

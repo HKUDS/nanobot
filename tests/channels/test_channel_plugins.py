@@ -637,6 +637,7 @@ def test_plugin_contract_error_is_isolated_in_feature_payload(monkeypatch):
         "enabled": False,
         "configured": False,
         "installed": True,
+        "requires_dependencies": False,
         "ready": False,
         "status": "invalid_config",
         "install_supported": True,
@@ -1883,6 +1884,47 @@ def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
     assert not config_path.exists()
 
 
+def test_install_only_adds_channel_support_without_enabling_it(monkeypatch, tmp_path):
+    from nanobot.optional_features import InstallResult
+    from nanobot.webui.nanobot_features_api import nanobot_features_action
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"fakeplugin": {"enabled": False, "marker": "keep"}}}),
+        encoding="utf-8",
+    )
+    before = config_path.read_bytes()
+    _stub_channel_registry(
+        monkeypatch,
+        _channel_plugin(_FakePlugin, dependencies=("fake-sdk>=1",)),
+    )
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    installed = False
+
+    def extra_installed(_name: str, _dependencies: list[str] | None) -> bool:
+        return installed
+
+    def install_extra(name: str, dependencies: list[str], *, runner) -> InstallResult:
+        nonlocal installed
+        installed = True
+        return InstallResult(True, f"{name} support", ["pip", *dependencies])
+
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", extra_installed)
+    monkeypatch.setattr("nanobot.optional_features.install_extra", install_extra)
+
+    payload = nanobot_features_action(
+        "enable",
+        {"name": ["fakeplugin"], "install_only": ["true"]},
+        config_path=config_path,
+    )
+
+    feature = payload["features"][0]
+    assert config_path.read_bytes() == before
+    assert feature["installed"] is True
+    assert feature["enabled"] is False
+    assert payload["requires_restart"] is False
+
+
 def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
     monkeypatch,
     tmp_path,
@@ -2025,6 +2067,7 @@ def test_optional_features_payload_counts_enabled_channel_with_missing_dependenc
     assert matrix["name"] == "matrix"
     assert matrix["enabled"] is True
     assert matrix["installed"] is False
+    assert matrix["requires_dependencies"] is True
     assert matrix["ready"] is False
     assert payload["enabled_count"] == 1
 

@@ -797,7 +797,8 @@
       "open": "開啟",
       "checkedAndEnabled": "已檢查並啟用。",
       "checking": "正在檢查...",
-      "checkOnly": "僅檢查",
+      "help": "說明",
+      "checkOnly": "檢測",
       "commandCopied": "指令已複製。",
       "commandCopyFailed": "無法複製指令。",
       "configuredInstances_one": "已設定 {{count}} 個執行個體",
@@ -851,11 +852,32 @@
       },
       "validation": {
         "connected": "已連線",
-        "configured": "手動設定",
+        "configured": "未驗證",
         "needs_setup": "需要設定",
-        "invalid": "無效",
+        "invalid": "連線失敗",
         "unsupported": "手動設定"
-      }
+      },
+      "validationMessages": {
+        "connected": "連線正常",
+        "unverified": "尚未驗證連線是否可用",
+        "missing": "請填寫必填欄位",
+        "invalid": "檢測失敗",
+        "unsupported": "此渠道暫不支援連線檢測",
+        "present": "已填寫",
+        "required": "必填",
+        "manual": "此渠道暫不支援連線檢測",
+        "qrTimeout": "QR 碼載入逾時，請檢查網路或代理後重試",
+        "napcatConnection": "NapCat 連線",
+        "napcatUnavailable": "無法連線 NapCat。請確認 NapCat 已啟動，並檢查 WebSocket 位址。",
+        "whatsappSessionBusy": "WhatsApp 工作階段仍被占用。請關閉其他正在使用 WhatsApp 的 nanobot 程序後重試。"
+      },
+      "search": "搜尋聊天平台",
+      "filterEnabled": "已啟用",
+      "noResults": "沒有符合的渠道",
+      "install": "安裝",
+      "installChannel": "安裝 {{name}}",
+      "noInstallNeeded": "無需安裝",
+      "installNeeded": "需要額外依賴"
     },
     "nanobotFeatures": {
       "enabled": "已啟用",
@@ -866,7 +888,9 @@
       "installSupport": "安裝支援套件",
       "installConfirmTitle": "安裝 {{name}} 的支援套件？",
       "installConfirmDescription": "nanobot 將安裝 {{name}} 所需的元件並啟用支援。要繼續嗎？",
+      "installOnlyConfirmDescription": "將安裝 {{name}} 所需的支援套件。安裝完成後即可連線。",
       "installConfirmAction": "安裝並啟用",
+      "installOnlyConfirmAction": "安裝支援套件",
       "websocketRequired": "WebUI 需要此功能",
       "channelDisabled": "通訊管道已停用",
       "notEnabled": "未啟用"
@@ -1204,7 +1228,7 @@
     "compaction": {
       "cancelled": "上下文壓縮已取消",
       "empty": "無需壓縮上下文",
-      "started": "正在壓縮上下文",
+      "started": "正在壓縮上下文…",
       "failed": "上下文壓縮失敗",
       "succeeded": "上下文已壓縮"
     },

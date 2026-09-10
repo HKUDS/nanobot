@@ -37,6 +37,7 @@ const EMAIL_PROVIDER_PRESETS: ChannelProviderPresetDefinition[] = [
 
 export default {
   presentation: {
+    logoUrl: "https://gmail.com/favicon.ico",
     displayName: "Email",
     initials: "EM",
     color: "#64748B",

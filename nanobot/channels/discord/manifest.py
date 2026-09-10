@@ -15,6 +15,7 @@ SETUP_SPEC = ChannelSetupSpec(
     required=(required("token"),),
     official_url="https://discord.com/developers/applications",
     validator=validate,
+    verifies_connection=True,
 )
 
 PLUGIN = ChannelPlugin(

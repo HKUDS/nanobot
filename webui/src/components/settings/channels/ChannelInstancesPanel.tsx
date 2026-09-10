@@ -15,14 +15,10 @@ import {
 import {
   ChannelLogo,
   ChannelRuntimeError,
-  ChannelStatusBadge,
   channelSetup,
-  channelStatusLabel,
   localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
 import {
-  ChannelGuideLink,
-  ChannelSetupSteps,
 } from "@/components/settings/channels/ChannelSetupParts";
 import { Button } from "@/components/ui/button";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -41,7 +37,6 @@ import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export type ChannelInstancesPanelCustomization = {
-  countLabel?: (runningCount: number) => string;
   toggleAriaLabel?: (instance: NanobotChannelInstanceInfo) => string;
   configuredLabel?: string;
   needsSetupLabel?: string;
@@ -53,7 +48,6 @@ export type ChannelInstancesPanelCustomization = {
 export function ChannelInstancesPanel({
   feature,
   showBrandLogos,
-  chatAppsDocsUrl,
   instances: providedInstances,
   onFeaturesUpdate,
   customization = {},
@@ -87,8 +81,6 @@ export function ChannelInstancesPanel({
   );
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [savingFields, setSavingFields] = useState(false);
-  const configuredCount = instances.filter((instance) => instance.configured).length;
-  const runningCount = instances.filter((instance) => instance.runtime_status === "running").length;
   const selectedValuesKey = JSON.stringify(selected?.config_values ?? {});
   const selectedConfiguredFields = useMemo(
     () => new Set(selected?.configured_fields ?? []),
@@ -145,26 +137,14 @@ export function ChannelInstancesPanel({
 
   return (
     <aside className="min-h-full rounded-panel bg-settings-surface p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
+      <div className="flex items-start justify-between gap-3 pr-16">
+        <div className="flex min-w-0 max-w-full items-center gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
+            <h3 className="sr-only">
               {displayName}
             </h3>
-            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-              {customization.countLabel?.(runningCount)
-                ?? t("settings.channels.configuredInstances", {
-                  count: configuredCount,
-                  defaultValue: `${configuredCount} instances configured`,
-                })}
-            </p>
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <ChannelStatusBadge status={feature.runtime_status}>
-            {channelStatusLabel(feature, tx)}
-          </ChannelStatusBadge>
         </div>
       </div>
 
@@ -173,6 +153,11 @@ export function ChannelInstancesPanel({
       <div className="mt-5 space-y-3">
         {instances.map((instance) => {
           const expanded = selected?.id === instance.id;
+          const instanceSummary = customization.renderInstanceSummary
+            ? customization.renderInstanceSummary(instance)
+            : instance.id;
+          const instanceAction = customization.renderInstanceAction?.(instance);
+          const hasInstanceOverview = Boolean(instanceSummary || instanceAction);
           return (
             <article
               key={instance.id}
@@ -190,6 +175,7 @@ export function ChannelInstancesPanel({
                   onClick={() =>
                     setSelectedId((current) => (current === instance.id ? null : instance.id))
                   }
+                  aria-label={channelInstanceDisplayName(instance)}
                   aria-expanded={expanded}
                 >
                   <ChannelInstanceAvatar
@@ -200,6 +186,11 @@ export function ChannelInstancesPanel({
                   <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
                     {channelInstanceDisplayName(instance)}
                   </span>
+                  <ChannelInstanceStatusBadge
+                    instance={instance}
+                    configuredLabel={customization.configuredLabel}
+                    needsSetupLabel={customization.needsSetupLabel}
+                  />
                   <ChevronDown
                     className={cn(
                       "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
@@ -230,33 +221,20 @@ export function ChannelInstancesPanel({
               </div>
 
               {expanded ? (
-                <div className="space-y-5 px-4 pb-4">
-                  <section className="pt-4">
-                    <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="space-y-3 px-4 pb-4 pt-1">
+                  {hasInstanceOverview ? <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    {instanceSummary ? (
                       <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
-                        {customization.renderInstanceSummary?.(instance) ?? instance.id}
+                        {instanceSummary}
                       </p>
-                      <ChannelInstanceStatusBadge
-                        instance={instance}
-                        configuredLabel={customization.configuredLabel}
-                        needsSetupLabel={customization.needsSetupLabel}
-                      />
-                    </div>
-                    {customization.renderInstanceAction?.(instance)}
-                  </section>
-                  <ChannelSetupSteps
-                    steps={setup.steps}
-                    action={
-                      <ChannelGuideLink
-                        feature={feature}
-                        setup={setup}
-                        chatAppsDocsUrl={chatAppsDocsUrl}
-                        compact
-                      />
-                    }
-                  />
+                    ) : <span className="flex-1" />}
+                    {instanceAction}
+                  </section> : null}
                   {instanceFields.length ? (
-                    <details className="group text-[12px] leading-5 text-muted-foreground">
+                    <details className={cn(
+                      "group text-[12px] leading-5 text-muted-foreground",
+                      hasInstanceOverview && "border-t border-border/50 pt-3",
+                    )}>
                       <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
                         <span className="inline-flex items-center gap-1.5">
                           {tx("settings.channels.advanced", "Advanced")}

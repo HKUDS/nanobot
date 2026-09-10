@@ -777,6 +777,7 @@
       "searchPlaceholder": "Tìm kênh",
       "backToChannels": "Tất cả kênh",
       "catalog": "Kênh",
+      "help": "Trợ giúp",
       "loading": "Đang tải kênh...",
       "empty": "Không có kênh nào phù hợp.",
       "restartRequired": "Khởi động lại nanobot để áp dụng hỗ trợ kênh đã cập nhật.",
@@ -853,9 +854,30 @@
         "connected": "Đã kết nối",
         "configured": "Đã cấu hình thủ công",
         "needs_setup": "Cần thiết lập",
-        "invalid": "Không hợp lệ",
+        "invalid": "Kết nối thất bại",
         "unsupported": "Thiết lập thủ công"
-      }
+      },
+      "validationMessages": {
+        "connected": "Đã xác minh kết nối.",
+        "unverified": "Chưa xác minh kết nối.",
+        "missing": "Hãy điền các trường bắt buộc.",
+        "invalid": "Không thể xác minh kết nối.",
+        "unsupported": "Kênh này chưa hỗ trợ kiểm tra kết nối.",
+        "present": "Đã điền",
+        "required": "Bắt buộc",
+        "manual": "Kênh này chưa hỗ trợ kiểm tra kết nối.",
+        "qrTimeout": "Không thể tải mã QR. Hãy kiểm tra mạng hoặc proxy rồi thử lại.",
+        "napcatConnection": "Kết nối NapCat",
+        "napcatUnavailable": "Không thể kết nối với NapCat. Hãy đảm bảo NapCat đang chạy và kiểm tra địa chỉ WebSocket.",
+        "whatsappSessionBusy": "Phiên WhatsApp đang được sử dụng. Hãy đóng mọi tiến trình nanobot khác đang dùng WhatsApp rồi thử lại."
+      },
+      "search": "Tìm kênh",
+      "filterEnabled": "Đã bật",
+      "noResults": "Không có kênh phù hợp",
+      "install": "Cài đặt",
+      "installChannel": "Cài đặt {{name}}",
+      "noInstallNeeded": "Không cần cài đặt",
+      "installNeeded": "Cần phần phụ thuộc"
     },
     "nanobotFeatures": {
       "enabled": "Đã bật",
@@ -866,7 +888,9 @@
       "installSupport": "Cài gói hỗ trợ",
       "installConfirmTitle": "Cài các gói cần thiết cho {{name}}?",
       "installConfirmDescription": "nanobot sẽ cài các gói cần thiết rồi bật {{name}}.",
+      "installOnlyConfirmDescription": "nanobot sẽ cài đặt gói hỗ trợ mà {{name}} cần. Bạn có thể kết nối sau khi cài đặt.",
       "installConfirmAction": "Cài và bật",
+      "installOnlyConfirmAction": "Cài gói hỗ trợ",
       "websocketRequired": "Bắt buộc cho WebUI",
       "channelDisabled": "Kênh đang tắt",
       "notEnabled": "Chưa bật"

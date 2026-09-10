@@ -997,7 +997,8 @@
       "open": "打开",
       "checkedAndEnabled": "已检查并启用。",
       "checking": "正在检查...",
-      "checkOnly": "仅检查",
+      "help": "帮助",
+      "checkOnly": "检测",
       "commandCopied": "命令已复制。",
       "commandCopyFailed": "无法复制命令。",
       "configuredInstances_one": "已配置 {{count}} 个实例",
@@ -1051,11 +1052,32 @@
       },
       "validation": {
         "connected": "已连接",
-        "configured": "手动配置",
+        "configured": "未验证",
         "needs_setup": "需要配置",
-        "invalid": "配置无效",
+        "invalid": "连接失败",
         "unsupported": "手动配置"
-      }
+      },
+      "validationMessages": {
+        "connected": "连接正常",
+        "unverified": "尚未验证连接是否可用",
+        "missing": "请填写必填项",
+        "invalid": "检测失败",
+        "unsupported": "此渠道暂不支持连接检测",
+        "present": "已填写",
+        "required": "必填",
+        "manual": "此渠道暂不支持连接检测",
+        "qrTimeout": "二维码加载超时，请检查网络或代理后重试",
+        "napcatConnection": "NapCat 连接",
+        "napcatUnavailable": "无法连接 NapCat。请确认 NapCat 已启动，并检查 WebSocket 地址。",
+        "whatsappSessionBusy": "WhatsApp 会话仍被占用。请关闭其他正在使用 WhatsApp 的 nanobot 进程后重试。"
+      },
+      "search": "搜索聊天平台",
+      "filterEnabled": "已启用",
+      "noResults": "没有匹配的渠道",
+      "install": "安装",
+      "installChannel": "安装 {{name}}",
+      "noInstallNeeded": "无需安装",
+      "installNeeded": "需要额外依赖"
     },
     "nanobotFeatures": {
       "enabled": "已启用",
@@ -1066,7 +1088,9 @@
       "installSupport": "安装支持包",
       "installConfirmTitle": "安装 {{name}} 所需的软件包？",
       "installConfirmDescription": "安装所需软件包后，将启用 {{name}}。",
+      "installOnlyConfirmDescription": "将安装 {{name}} 所需的支持包。安装完成后即可连接。",
       "installConfirmAction": "安装并启用",
+      "installOnlyConfirmAction": "安装支持包",
       "websocketRequired": "WebUI 必需",
       "channelDisabled": "此平台已停用",
       "notEnabled": "未启用"

@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, ExternalLink, Loader2, MessageCircle, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, Loader2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelFieldMessageKey, channelTranslator } from "@/channel-plugins/i18n";
 import { channelLocaleMessages } from "@/channel-plugins/locale-registry";
 import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
 import {
-  chatAppGuideUrl,
-  docsUrlWithBase,
   type ChannelConfigField,
 } from "@/components/settings/channels/catalog";
 import {
@@ -15,6 +13,7 @@ import {
   channelValuesForSave,
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
+import { ChannelLogo } from "@/components/settings/channels/ChannelIdentity";
 import { Button } from "@/components/ui/button";
 import { normalizeLocale } from "@/i18n/config";
 import { configureChannel } from "@/lib/api";
@@ -38,7 +37,7 @@ export function WeixinPanel({
   token,
   feature,
   actionKey,
-  chatAppsDocsUrl,
+  showBrandLogos,
   onAction,
   onFeaturesUpdate,
   connectRequestId = 0,
@@ -47,7 +46,10 @@ export function WeixinPanel({
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const channelTx = channelTranslator(t, "weixin");
-  const runtimeError = weixinRuntimeError(feature.runtime_error, channelTx);
+  const authExpired = feature.runtime_error === WEIXIN_AUTH_EXPIRED_MESSAGE;
+  const [authRecoveryActive, setAuthRecoveryActive] = useState(authExpired);
+  const runtimeError = weixinRuntimeError(feature.runtime_error, channelTx)
+    ?? (authRecoveryActive ? channelTx("custom.expired", WEIXIN_AUTH_EXPIRED_MESSAGE) : undefined);
   const displayName = channelTx("displayName", "WeChat");
   const enabledBusy = actionKey === `enable:${feature.name}`;
   const missingSupport = feature.enabled && !feature.installed;
@@ -73,8 +75,6 @@ export function WeixinPanel({
   const primaryFields = localizeBooleanFields(setupFields.primary, onLabel, offLabel);
   const advancedFields = localizeBooleanFields(setupFields.advanced, onLabel, offLabel);
   const editableFields = [...primaryFields, ...advancedFields];
-  const docsUrl = docsUrlWithBase(chatAppGuideUrl("wechat"), chatAppsDocsUrl)
-    ?? chatAppGuideUrl("wechat");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     defaultChannelFieldValues(editableFields, feature.config_values),
   );
@@ -92,6 +92,14 @@ export function WeixinPanel({
     enabled: feature.enabled,
     onFeaturesUpdate,
   };
+
+  useEffect(() => {
+    if (authExpired) {
+      setAuthRecoveryActive(true);
+    } else if (feature.runtime_status === "running") {
+      setAuthRecoveryActive(false);
+    }
+  }, [authExpired, feature.runtime_status]);
 
   useEffect(() => {
     const nextValues = defaultChannelFieldValues(editableFields, feature.config_values);
@@ -178,11 +186,11 @@ export function WeixinPanel({
 
   return (
     <aside className="settings-editor rounded-panel bg-settings-surface">
-      <div className="flex items-start justify-between gap-4 pr-8">
-        <div className="flex min-w-0 items-start gap-3">
-          <WeixinLogo />
+      <div className="flex items-start justify-between gap-4 pr-16">
+        <div className="flex min-w-0 max-w-full items-center gap-3">
+          <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate select-none text-[14px] font-semibold leading-5 text-foreground">
+            <h3 className="sr-only">
               {displayName}
             </h3>
             {missingSupport && feature.install_supported ? (
@@ -216,6 +224,7 @@ export function WeixinPanel({
         <WeixinConnectFlow
           token={token}
           feature={feature}
+          authRecoveryActive={authRecoveryActive}
           idleLabel={channelTx("setup.primaryAction", "Connect WeChat")}
           connectRequestId={connectRequestId}
           onFeaturesUpdate={onFeaturesUpdate}
@@ -293,12 +302,6 @@ export function WeixinPanel({
           </details>
         ) : null}
 
-        <div className="flex justify-end">
-          <WeixinGuideLink
-            url={docsUrl}
-            label={channelTx("setup.docsLabel", "Open WeChat setup")}
-          />
-        </div>
       </div>
     </aside>
   );
@@ -362,39 +365,6 @@ function fieldLabel(value: string): string {
     .replace(/[_-]+/g, " ")
     .trim();
   return spaced ? spaced[0].toUpperCase() + spaced.slice(1) : value;
-}
-
-function WeixinLogo() {
-  return (
-    <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-background text-[11px] font-bold"
-      style={{ color: "#07C160" }}
-      aria-hidden
-    >
-      <MessageCircle className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-function WeixinGuideLink({ url, label }: { url: string; label: string }) {
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="inline-flex max-w-full items-center gap-2 rounded-full bg-background/80 py-1 pl-1 pr-2.5 text-[11.5px] font-semibold text-foreground transition-colors hover:bg-background"
-    >
-      <span
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full bg-muted/70 text-[9px] font-bold"
-        style={{ color: "#07C160" }}
-        aria-hidden
-      >
-        WX
-      </span>
-      <span className="truncate">{label}</span>
-      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-    </a>
-  );
 }
 
 function weixinRuntimeError(

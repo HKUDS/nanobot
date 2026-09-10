@@ -777,6 +777,7 @@
       "searchPlaceholder": "チャンネルを検索",
       "backToChannels": "すべてのチャンネル",
       "catalog": "チャンネル",
+      "help": "ヘルプ",
       "loading": "チャンネルを読み込み中...",
       "empty": "一致するチャンネルはありません。",
       "restartRequired": "更新したチャンネルサポートを反映するには nanobot を再起動してください。",
@@ -853,9 +854,30 @@
         "connected": "接続済み",
         "configured": "手動設定済み",
         "needs_setup": "設定が必要",
-        "invalid": "無効",
+        "invalid": "接続失敗",
         "unsupported": "手動設定"
-      }
+      },
+      "validationMessages": {
+        "connected": "接続を確認しました。",
+        "unverified": "接続は未確認です。",
+        "missing": "必須項目を入力してください。",
+        "invalid": "接続確認に失敗しました。",
+        "unsupported": "このチャンネルでは、まだ接続を確認できません。",
+        "present": "入力済み",
+        "required": "必須",
+        "manual": "このチャンネルでは、まだ接続を確認できません。",
+        "qrTimeout": "QR コードを読み込めませんでした。ネットワークまたはプロキシを確認して、もう一度お試しください。",
+        "napcatConnection": "NapCat 接続",
+        "napcatUnavailable": "NapCat に接続できません。NapCat が起動していることと WebSocket アドレスを確認してください。",
+        "whatsappSessionBusy": "WhatsApp セッションは使用中です。WhatsApp を使用している他の nanobot プロセスを終了して、もう一度お試しください。"
+      },
+      "search": "チャンネルを検索",
+      "filterEnabled": "有効",
+      "noResults": "一致するチャンネルはありません",
+      "install": "インストール",
+      "installChannel": "{{name}} をインストール",
+      "noInstallNeeded": "インストール不要",
+      "installNeeded": "依存関係が必要"
     },
     "nanobotFeatures": {
       "enabled": "有効",
@@ -866,7 +888,9 @@
       "installSupport": "必要なパッケージをインストール",
       "installConfirmTitle": "{{name}} に必要なパッケージをインストールしますか？",
       "installConfirmDescription": "nanobot が必要なパッケージをインストールし、{{name}} を有効にします。",
+      "installOnlyConfirmDescription": "nanobot が {{name}} に必要なサポートをインストールします。インストール後に接続できます。",
       "installConfirmAction": "インストールして有効化",
+      "installOnlyConfirmAction": "サポートをインストール",
       "websocketRequired": "WebUI に必須",
       "channelDisabled": "チャンネルは無効",
       "notEnabled": "無効"

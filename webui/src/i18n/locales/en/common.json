@@ -997,7 +997,8 @@
       "open": "Open",
       "checkedAndEnabled": "Checked and enabled.",
       "checking": "Checking...",
-      "checkOnly": "Check only",
+      "help": "Help",
+      "checkOnly": "Check",
       "commandCopied": "Command copied.",
       "commandCopyFailed": "Could not copy command.",
       "configuredInstances": "{{count}} instances configured",
@@ -1049,13 +1050,34 @@
       },
       "validation": {
         "connected": "Connected",
-        "configured": "Configured manually",
+        "configured": "Not verified",
         "needs_setup": "Needs setup",
-        "invalid": "Invalid",
+        "invalid": "Connection failed",
         "unsupported": "Manual setup"
       },
       "configuredInstances_one": "{{count}} instance configured",
-      "configuredInstances_other": "{{count}} instances configured"
+      "configuredInstances_other": "{{count}} instances configured",
+      "validationMessages": {
+        "connected": "Connection verified.",
+        "unverified": "Connection not verified.",
+        "missing": "Complete the required fields.",
+        "invalid": "Connection check failed.",
+        "unsupported": "Connection testing is not supported for this channel yet.",
+        "present": "Filled in",
+        "required": "Required",
+        "manual": "Connection testing is not supported for this channel yet.",
+        "qrTimeout": "QR code could not be loaded. Check your network or proxy and retry.",
+        "napcatConnection": "NapCat connection",
+        "napcatUnavailable": "Could not connect to NapCat. Make sure NapCat is running and check the WebSocket address.",
+        "whatsappSessionBusy": "The WhatsApp session is still in use. Close any other nanobot process using WhatsApp, then try again."
+      },
+      "search": "Search channels",
+      "filterEnabled": "Enabled",
+      "noResults": "No matching channels",
+      "install": "Install",
+      "installChannel": "Install {{name}}",
+      "noInstallNeeded": "No installation needed",
+      "installNeeded": "Requires dependencies"
     },
     "nanobotFeatures": {
       "enabled": "Enabled",
@@ -1066,7 +1088,9 @@
       "installSupport": "Install support",
       "installConfirmTitle": "Install support for {{name}}?",
       "installConfirmDescription": "nanobot will add what {{name}} needs, then turn it on. Continue?",
+      "installOnlyConfirmDescription": "nanobot will install what {{name}} needs. You can connect it after installation.",
       "installConfirmAction": "Install and enable",
+      "installOnlyConfirmAction": "Install support",
       "websocketRequired": "Required for WebUI",
       "channelDisabled": "Channel is disabled",
       "notEnabled": "Not enabled"

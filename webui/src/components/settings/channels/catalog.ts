@@ -39,7 +39,7 @@ type ChannelCatalogSetupPresentation = {
   presets?: ChannelProviderPresetDefinition[];
 };
 
-type ChannelFieldPresentation = {
+export type ChannelFieldPresentation = {
   key: string;
   section?: ChannelFieldSection;
 };

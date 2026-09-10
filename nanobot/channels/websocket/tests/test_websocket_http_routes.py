@@ -1345,6 +1345,67 @@ async def test_nanobot_feature_channel_action_can_apply_without_restart(
 
 
 @pytest.mark.asyncio
+async def test_nanobot_feature_install_only_does_not_start_channel(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_calls: list[tuple[str, str, str | None]] = []
+
+    def feature_action(
+        action: str,
+        query: dict[str, list[str]],
+        *,
+        allow_install: bool,
+        config_path: Path,
+    ) -> dict[str, Any]:
+        assert action == "enable"
+        assert query == {"name": ["whatsapp"], "install_only": ["true"]}
+        assert allow_install is True
+        return {
+            "features": [{
+                "name": "whatsapp",
+                "type": "channel",
+                "enabled": False,
+                "installed": True,
+                "ready": False,
+                "status": "not_enabled",
+            }],
+            "enabled_count": 0,
+            "requires_restart": False,
+        }
+
+    async def channel_feature_action(
+        action: str,
+        name: str,
+        instance_id: str | None,
+    ) -> dict[str, Any]:
+        runtime_calls.append((action, name, instance_id))
+        return {"handled": True, "ok": True, "requires_restart": False}
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.nanobot_features_action",
+        feature_action,
+    )
+    channel = _ch(
+        bus,
+        session_manager=_seed_session(tmp_path),
+        port=_free_port(),
+        channel_feature_action=channel_feature_action,
+    )
+
+    response = await _webui_mutate(
+        channel,
+        "settings.feature.enable",
+        {"name": "whatsapp", "install_only": True},
+    )
+
+    assert response.status_code == 200
+    assert runtime_calls == []
+    assert response.json()["features"][0]["enabled"] is False
+
+
+@pytest.mark.asyncio
 async def test_channel_connect_runtime_import_error_is_not_reported_as_unsupported(
     bus: MagicMock,
     tmp_path: Path,

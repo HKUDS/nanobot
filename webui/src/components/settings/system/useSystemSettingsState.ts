@@ -20,6 +20,11 @@ import type {
   SessionAutomationJob,
 } from "@/lib/types";
 
+export type NanobotFeatureInstallRequest = {
+  feature: NanobotFeatureInfo;
+  installOnly: boolean;
+};
+
 export function useSystemSettingsState() {
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
@@ -31,7 +36,9 @@ export function useSystemSettingsState() {
   const [automationsLoading, setAutomationsLoading] = useState(false);
   const [cliAppsAction, setCliAppsAction] = useState<string | null>(null);
   const [nanobotFeatureAction, setNanobotFeatureAction] = useState<string | null>(null);
-  const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
+  const nanobotFeatureActionRef = useRef<string | null>(null);
+  const [nanobotFeatureConfirm, setNanobotFeatureConfirm] =
+    useState<NanobotFeatureInstallRequest | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [mcpOAuthFlow, setMcpOAuthFlow] = useState<McpOAuthFlowPayload | null>(null);
   const mcpOAuthFlowRef = useRef<McpOAuthFlowPayload | null>(null);
@@ -105,6 +112,7 @@ export function useSystemSettingsState() {
     mcpPresets,
     mcpPresetsLoading,
     nanobotFeatureAction,
+    nanobotFeatureActionRef,
     nanobotFeatureConfirm,
     nanobotFeatures,
     nanobotFeaturesError,

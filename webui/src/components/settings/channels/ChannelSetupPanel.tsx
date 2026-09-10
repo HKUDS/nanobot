@@ -1,7 +1,9 @@
+import { channelValidationMessage } from "./validationMessages";
 import {
   Suspense,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
 } from "react";
@@ -9,13 +11,17 @@ import {
   Check,
   ChevronDown,
   Clipboard,
+  Download,
   Loader2,
   Plus,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelUiContribution } from "@/channel-plugins/registry";
-import type { ChannelPluginConnectFlowProps } from "@/channel-plugins/types";
+import type {
+  ChannelFeatureAction,
+  ChannelPluginConnectFlowProps,
+} from "@/channel-plugins/types";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   type ChannelConfigField,
@@ -33,7 +39,6 @@ import {
   ChannelLogo,
   ChannelRuntimeError,
   ChannelStatusBadge,
-  channelRequirements,
   channelSetup,
   channelStatusLabel,
   channelToggleChecked,
@@ -42,8 +47,6 @@ import {
 import {
   ChannelProviderPresets,
   ChannelSetupActions,
-  ChannelSetupLinks,
-  ChannelSetupSteps,
   ChannelValidationBadge,
   ChannelValidationChecks,
   ChannelValidationDetails,
@@ -52,6 +55,7 @@ import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelIns
 import { Button } from "@/components/ui/button";
 import {
   configureChannel,
+  disableNanobotFeature,
   validateChannel,
 } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -74,50 +78,97 @@ export function ChannelCatalogRow({
   showBrandLogos: boolean;
   onSelect: (connect?: boolean) => void;
   actionKey: string | null;
-  onAction: (action: "enable" | "disable", name: string) => void;
+  onAction: ChannelFeatureAction;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
   const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
   const checked = alwaysEnabled || channelToggleChecked(feature);
-  const busy = actionKey === `enable:${feature.name}` || actionKey === `disable:${feature.name}`;
+  const ownActionBusy = actionKey === `enable:${feature.name}` || actionKey === `disable:${feature.name}`;
+  const anyActionBusy = Boolean(actionKey);
+  const installButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [installHint, setInstallHint] = useState(false);
 
-  return (
-    <div className="settings-list-row flex items-center gap-3 py-2.5 transition-colors settings-hover">
-    <button
-      type="button"
-      aria-label={t("settings.channels.selectChannel", {
-        name: displayName,
-        defaultValue: "View {{name}} settings",
-      })}
-      aria-haspopup="dialog"
-      onClick={() => onSelect()}
-      className={cn(
-        "group flex min-w-0 flex-1 select-none items-center gap-3 rounded-control text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80",
-      )}
-    >
+  useEffect(() => {
+    if (!installHint) return;
+    const timeout = window.setTimeout(() => setInstallHint(false), 1400);
+    return () => window.clearTimeout(timeout);
+  }, [installHint]);
+
+  const pointToInstall = () => {
+    setInstallHint(true);
+    installButtonRef.current?.focus();
+  };
+  const channelIdentity = (
+    <>
       <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
           {displayName}
         </h3>
       </div>
-    </button>
-      <div className="flex shrink-0 items-center gap-2">
-        {feature.runtime_status === "failed" ? (
+    </>
+  );
+
+  return (
+    <div className={cn(
+      "settings-list-row flex min-w-0 items-center gap-3 py-2.5 transition-colors",
+      !alwaysEnabled && "settings-hover",
+    )}>
+      {alwaysEnabled ? (
+        <div className="flex min-w-0 flex-1 select-none items-center gap-3">
+          {channelIdentity}
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-label={t("settings.channels.selectChannel", {
+            name: displayName,
+            defaultValue: "View {{name}} settings",
+          })}
+          aria-haspopup="dialog"
+          onClick={() => feature.installed ? onSelect() : pointToInstall()}
+          className="group flex min-w-0 flex-1 select-none items-center gap-3 rounded-control text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80"
+        >
+          {channelIdentity}
+        </button>
+      )}
+      {feature.runtime_status === "failed" ? (
+        <div className="min-w-0 shrink truncate">
         <ChannelStatusBadge status={feature.runtime_status}>
           {channelStatusLabel(feature, tx)}
         </ChannelStatusBadge>
-        ) : null}
-        <ToggleButton checked={checked}
-          label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-          disabled={alwaysEnabled || busy || (!feature.install_supported && !feature.installed && !feature.enabled)}
-          ariaLabel={t("settings.channels.toggleChannel", { name: displayName, defaultValue: "{{name}} channel" })}
-          onChange={(enabled) => {
-            if (enabled && feature.configured === false) onSelect(true);
-            else onAction(enabled ? "enable" : "disable", feature.name);
-          }} />
+        </div>
+      ) : null}
+      <div className="flex w-16 shrink-0 items-center justify-center">
+        {!feature.installed ? (
+          <Button ref={installButtonRef} type="button" variant="outline" size="icon"
+            className={cn(
+              "h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0 shadow-sm settings-hover active:scale-[0.96]",
+              installHint && "border-[#2997FF]/60 bg-[#2997FF]/10 text-[#087FE7] ring-2 ring-[#2997FF]/25 ring-offset-2",
+            )}
+            disabled={anyActionBusy || !feature.install_supported}
+            aria-label={t("settings.channels.installChannel", { name: displayName })}
+            onClick={() => {
+              setInstallHint(false);
+              onAction("enable", feature.name, { installOnly: true, confirmed: true });
+            }}>
+            {ownActionBusy
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              : <Download className="h-3.5 w-3.5" aria-hidden />}
+            <span className="sr-only">{tx("settings.channels.install", "Install")}</span>
+          </Button>
+        ) : (
+          <ToggleButton checked={checked}
+            label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            disabled={alwaysEnabled || anyActionBusy}
+            ariaLabel={t("settings.channels.toggleChannel", { name: displayName, defaultValue: "{{name}} channel" })}
+            onChange={(enabled) => {
+              if (enabled && feature.configured === false) onSelect(true);
+              else onAction(enabled ? "enable" : "disable", feature.name);
+            }} />
+        )}
       </div>
     </div>
   );
@@ -138,7 +189,7 @@ export function ChannelSetupPanel({
   actionKey: string | null;
   chatAppsDocsUrl?: string;
   showBrandLogos: boolean;
-  onAction: (action: "enable" | "disable", name: string) => void;
+  onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   connectRequestId?: number;
 }) {
@@ -147,7 +198,9 @@ export function ChannelSetupPanel({
   const displayName = localizedChannelDisplayName(feature, t);
   const uiContribution = channelUiContribution(feature.name, feature.webui);
   const PluginPanel = uiContribution?.Panel;
-  if (PluginPanel) {
+  const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
+  const missingSupport = !feature.installed;
+  if (PluginPanel && !missingSupport) {
     return (
       <Suspense fallback={<ChannelPluginLoading />}>
         <PluginPanel
@@ -163,7 +216,7 @@ export function ChannelSetupPanel({
       </Suspense>
     );
   }
-  if (feature.instances !== undefined) {
+  if (feature.instances !== undefined && !missingSupport) {
     return (
       <ChannelInstancesPanel
         feature={feature}
@@ -174,21 +227,16 @@ export function ChannelSetupPanel({
     );
   }
   const enableBusy = actionKey === `enable:${feature.name}`;
-  const missingSupport = feature.enabled && !feature.installed;
-  const setup = channelSetup(feature, i18n.resolvedLanguage ?? i18n.language);
-  const needsSetupBeforeEnable =
-    !channelToggleChecked(feature)
-    && feature.configured === false
-    && !(uiContribution?.canConnectBeforeConfigured && setup.mode === "connect");
-  const installSupportLabel = tx("settings.nanobotFeatures.installSupport", "Install support");
+  const anyActionBusy = Boolean(actionKey);
+  const installSupportLabel = tx("settings.channels.install", "Install");
 
   return (
-    <aside className="settings-editor rounded-panel bg-settings-surface">
-      <div className="flex items-start justify-between gap-4 pr-8">
-        <div className="flex min-w-0 items-start gap-3">
+    <aside className="rounded-panel bg-background p-6">
+      <div className="flex items-start justify-between gap-4 pr-16">
+        <div className="flex min-w-0 max-w-full items-center gap-3">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate select-none text-[14px] font-semibold leading-5 text-foreground">
+            <h3 className="sr-only">
               {displayName}
             </h3>
             {missingSupport && feature.install_supported ? (
@@ -196,8 +244,8 @@ export function ChannelSetupPanel({
                 type="button"
                 size="sm"
                 variant="secondary"
-                disabled={enableBusy}
-                onClick={() => onAction("enable", feature.name)}
+                disabled={anyActionBusy}
+                onClick={() => onAction("enable", feature.name, { installOnly: true, confirmed: true })}
                 className="mt-2 h-8 rounded-full px-3 text-[12px] font-semibold"
               >
                 {enableBusy ? (
@@ -214,24 +262,14 @@ export function ChannelSetupPanel({
 
       <ChannelRuntimeError message={feature.runtime_error} className="mt-4" />
 
-      {needsSetupBeforeEnable ? (
-        <p className="mt-3 text-[12px] leading-5 text-muted-foreground">
-          {tx(
-            "settings.channels.completeSetupToEnable",
-            "Complete the required setup below, then nanobot can enable this channel.",
-          )}
-        </p>
-      ) : null}
-
-      <ChannelSetupSurface
+      {!missingSupport ? <ChannelSetupSurface
         token={token}
         feature={feature}
         setup={setup}
-        chatAppsDocsUrl={chatAppsDocsUrl}
         connectRequestId={connectRequestId}
-        ConnectFlow={uiContribution?.ConnectFlow}
+        ConnectFlow={feature.installed ? uiContribution?.ConnectFlow : undefined}
         onFeaturesUpdate={onFeaturesUpdate}
-      />
+      /> : null}
     </aside>
   );
 }
@@ -240,7 +278,6 @@ function ChannelSetupSurface({
   token,
   feature,
   setup,
-  chatAppsDocsUrl,
   connectRequestId,
   ConnectFlow,
   onFeaturesUpdate,
@@ -275,20 +312,17 @@ function ChannelSetupSurface({
     (setup.requirements ?? []).flatMap((requirement) => requirement.alternatives.flat()),
   );
   const primaryFields = fields.filter(
-    (field) => field.section !== "advanced"
-      && (!field.optional || Boolean(field.section) || requirementKeys.has(field.key)),
+    (field) => !field.optional || requirementKeys.has(field.key),
   );
   const manualFields = setup.manualFields ?? [];
   const advancedFields = mode === "connect"
     ? manualFields
     : fields.filter((field) => !primaryFields.includes(field));
   const editableFields = mode === "credentials" ? fields : mode === "connect" ? manualFields : [];
-  const hasAdvanced = advancedFields.length > 0;
-  const requirements = channelRequirements(feature, t);
-  const summary = setup.summary ?? tx(
-    "settings.channels.setupSummary",
-    "Enable only turns on nanobot support. Add the platform credentials, then restart nanobot.",
+  const savedSecretFields = editableFields.filter(
+    (field) => field.secret && configuredFields.has(field.key),
   );
+  const hasAdvanced = advancedFields.length > 0 || savedSecretFields.length > 0;
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     defaultChannelFieldValues(editableFields, feature.config_values),
   );
@@ -324,6 +358,21 @@ function ChannelSetupSurface({
       delete next[key];
       return next;
     });
+  };
+
+  const saveConnectionSettings = async () => {
+    if (mode !== "connect" || saving || !touchedFields.size) return;
+    setSaving(true);
+    try {
+      const payload = await configureChannel(client, feature.name,
+        channelValuesForSubmit(editableFields, fieldValues, touchedFields, clearedSecrets));
+      setTouchedFields(new Set());
+      if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const setSecretCleared = (key: string, clear: boolean) => {
@@ -386,7 +435,7 @@ function ChannelSetupSurface({
         setFieldErrors(errors);
         focusFirstChannelFieldError(errors);
         setNotice(
-          validationPayload.message
+          (validationPayload.message ? channelValidationMessage(validationPayload.message, t) : undefined)
             ?? tx("settings.channels.validationFailed", "Check the required setup before enabling."),
         );
         return;
@@ -419,7 +468,13 @@ function ChannelSetupSurface({
         channelValuesForSubmit(fields, fieldValues, touchedFields, clearedSecrets),
       );
       setValidation(payload);
-      if (payload.message) setNotice(payload.message);
+      const failedCheck = payload.checks.find((check) => check.status === "fail");
+      const resultMessage = failedCheck?.message ?? payload.message;
+      const localizedResult = resultMessage ? channelValidationMessage(resultMessage, t) : null;
+      const localizedRuntimeError = feature.runtime_error
+        ? channelValidationMessage(feature.runtime_error, t)
+        : null;
+      setNotice(localizedResult && localizedResult !== localizedRuntimeError ? localizedResult : null);
     } catch (err) {
       setNotice((err as Error).message);
     } finally {
@@ -427,9 +482,22 @@ function ChannelSetupSurface({
     }
   };
 
-  const primaryActionLabel = channelToggleChecked(feature)
-    ? tx("settings.channels.checkConnection", "Check connection")
-    : tx("settings.channels.checkAndEnable", "Check and enable");
+  const enabled = channelToggleChecked(feature);
+  const toggleEnabled = async (next: boolean) => {
+    if (next) {
+      await saveCredentialSettings();
+      return;
+    }
+    setSaving(true);
+    setNotice(null);
+    try {
+      onFeaturesUpdate(await disableNanobotFeature(client, feature.name));
+    } catch (err) {
+      setNotice((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <form
@@ -441,11 +509,8 @@ function ChannelSetupSurface({
     >
       <section>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-[13px] font-semibold text-foreground">
-            {tx("settings.channels.requiredSetup", "Required setup")}
-          </div>
           <div className="flex max-w-full flex-wrap justify-end gap-2">
-            {mode !== "webui" ? (
+            {mode !== "webui" && (validation || validating) ? (
               <ChannelValidationBadge
                 validation={validation}
                 validating={validating}
@@ -460,14 +525,10 @@ function ChannelSetupSurface({
             ) : null}
           </div>
         </div>
-        <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">{requirements}</p>
-
-        <p className="mt-3 text-[12.5px] leading-5 text-muted-foreground">{summary}</p>
-        <ChannelValidationDetails validation={validation} />
-        <ChannelSetupLinks feature={feature} setup={setup} chatAppsDocsUrl={chatAppsDocsUrl} />
+        {validation?.identity?.name ? <ChannelValidationDetails validation={validation} /> : null}
         <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
-        {mode === "connect" && ConnectFlow ? (
+        {mode === "connect" && !feature.installed ? null : mode === "connect" && ConnectFlow ? (
           <Suspense fallback={<ChannelPluginLoading compact />}>
             <ConnectFlow
               token={token}
@@ -537,32 +598,6 @@ function ChannelSetupSurface({
                 requirements={setup.requirements ?? []}
               />
             ) : null}
-            <div className="mt-3 flex flex-wrap justify-end gap-2">
-              <Button
-                type="submit"
-                size="sm"
-                variant="secondary"
-                className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold settings-hover"
-                disabled={saving}
-              >
-                {saving || validating ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : null}
-                {primaryActionLabel}
-              </Button>
-              {feature.configured || validation ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 rounded-full px-3 text-[12px] font-semibold"
-                  onClick={() => void checkCurrentSettings()}
-                  disabled={saving || validating}
-                >
-                  {tx("settings.channels.checkOnly", "Check only")}
-                </Button>
-              ) : null}
-            </div>
           </>
         ) : null}
       </section>
@@ -578,22 +613,52 @@ function ChannelSetupSurface({
         {notice ?? ""}
       </div>
 
-      {setup.steps.length ? (
-        <ChannelSetupSteps steps={setup.steps} tryIt={setup.tryIt} />
-      ) : null}
-
       {validation?.checks.length ? <ChannelValidationChecks validation={validation} /> : null}
 
+      <div className="relative min-h-8">
+        {mode === "credentials" ? (
+            <div className="absolute end-0 top-0 flex h-8 items-center justify-end gap-3">
+              {enabled && (touchedFields.size > 0 || clearedSecrets.size > 0) ? (
+                <Button type="submit" size="sm" variant="secondary" disabled={saving || validating}>
+                  {tx("settings.actions.save", "Save")}
+                </Button>
+              ) : null}
+              {feature.setup?.verifies_connection ? (
+                <Button type="button" size="sm" variant="ghost"
+                  className="h-8 rounded-full px-3 text-[12px] font-semibold"
+                  onClick={() => void checkCurrentSettings()} disabled={saving || validating}>
+                  {validating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                  {tx("settings.channels.checkOnly", "Check")}
+                </Button>
+              ) : null}
+              <ToggleButton checked={enabled} disabled={saving || validating}
+                label={tx("settings.channels.enable", "Enable")}
+                onChange={(next) => void toggleEnabled(next)} />
+            </div>
+        ) : null}
       {hasAdvanced ? (
         <details className="group text-[12px] leading-5 text-muted-foreground">
-          <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
+          <summary className="flex h-8 w-fit cursor-pointer list-none items-center text-[12px] text-muted-foreground transition-colors hover:text-foreground">
             <span className="inline-flex items-center gap-1.5">
               {tx("settings.channels.advanced", "Advanced")}
               <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden />
             </span>
           </summary>
+          <div className="mt-3 space-y-2">
+            {savedSecretFields.filter((field) => !(fieldValues[field.key] ?? "").trim()).map((field) => (
+              <div key={field.key} className="flex min-h-9 items-center justify-between gap-4">
+                <span>{field.label}</span>
+                <button type="button" className="text-[12px] hover:text-foreground"
+                  onClick={() => setSecretCleared(field.key, !clearedSecrets.has(field.key))}>
+                  {clearedSecrets.has(field.key)
+                    ? tx("settings.channels.keepSavedSecret", "Keep saved credential")
+                    : tx("settings.channels.removeSavedSecret", "Remove saved credential")}
+                </button>
+              </div>
+            ))}
+          </div>
           {advancedFields.length ? (
-            <div className="mt-3">
+            <div className="mt-3" onBlur={() => void saveConnectionSettings()}>
               <CredentialForm
                 fields={advancedFields}
                 values={fieldValues}
@@ -610,6 +675,7 @@ function ChannelSetupSurface({
           ) : null}
         </details>
       ) : null}
+      </div>
     </form>
   );
 }
@@ -656,7 +722,7 @@ function ChannelFieldGroups({
   }
 
   return (
-    <div className="mt-4 space-y-5">
+    <div className="space-y-5">
       {compositeRequirements.map((requirement, index) => (
         <div
           key={index}
@@ -681,11 +747,13 @@ function ChannelFieldGroups({
         const sectionFields = groups.get(section);
         if (!sectionFields?.length) return null;
         return (
-          <fieldset key={section} className="space-y-3">
-            <legend className="text-[12px] font-semibold text-foreground">
+          <fieldset key={section} className="min-w-0 space-y-2">
+            <legend className={groups.size === 1 ? "sr-only" : "mb-2 text-[12px] font-medium text-muted-foreground"}>
               {channelFieldSectionLabel(section, tx)}
             </legend>
-            <CredentialForm fields={sectionFields} {...formProps} compact />
+            <div className="rounded-control bg-settings-surface px-4 py-2">
+              <CredentialForm fields={sectionFields} {...formProps} compact />
+            </div>
           </fieldset>
         );
       })}
@@ -723,7 +791,9 @@ function channelRequirementErrors(
   const present = (key: string) => {
     const field = fieldByKey.get(key);
     if (!field || clearedSecrets.has(key)) return false;
-    if ((values[key] ?? "").trim()) return true;
+    const value = (values[key] ?? "").trim();
+    if (field.kind === "bool") return value === "true";
+    if (value) return true;
     return Boolean(field.secret && configuredFields.has(key));
   };
   const errors: Record<string, string> = {};

@@ -791,6 +791,7 @@
       "searchPlaceholder": "Buscar canais",
       "backToChannels": "Todos os canais",
       "catalog": "Canais",
+      "help": "Ajuda",
       "loading": "Carregando canais...",
       "empty": "Nenhum canal corresponde a este filtro.",
       "restartRequired": "Reinicie o nanobot para aplicar o suporte de canais atualizado.",
@@ -867,9 +868,30 @@
         "connected": "Conectado",
         "configured": "Configurado manualmente",
         "needs_setup": "Requer configuração",
-        "invalid": "Inválido",
+        "invalid": "Falha na conexão",
         "unsupported": "Configuração manual"
-      }
+      },
+      "validationMessages": {
+        "connected": "Conexão verificada.",
+        "unverified": "Conexão não verificada.",
+        "missing": "Preencha os campos obrigatórios.",
+        "invalid": "Falha ao verificar a conexão.",
+        "unsupported": "Este canal ainda não permite verificar a conexão.",
+        "present": "Preenchido",
+        "required": "Obrigatório",
+        "manual": "Este canal ainda não permite verificar a conexão.",
+        "qrTimeout": "Não foi possível carregar o código QR. Verifique a rede ou o proxy e tente novamente.",
+        "napcatConnection": "Conexão do NapCat",
+        "napcatUnavailable": "Não foi possível conectar ao NapCat. Verifique se o NapCat está em execução e confira o endereço WebSocket.",
+        "whatsappSessionBusy": "A sessão do WhatsApp ainda está em uso. Feche qualquer outro processo do nanobot que esteja usando o WhatsApp e tente novamente."
+      },
+      "search": "Buscar canais",
+      "filterEnabled": "Ativados",
+      "noResults": "Nenhum canal correspondente",
+      "install": "Instalar",
+      "installChannel": "Instalar {{name}}",
+      "noInstallNeeded": "Não requer instalação",
+      "installNeeded": "Requer dependências"
     },
     "nanobotFeatures": {
       "enabled": "Habilitado",
@@ -880,7 +902,9 @@
       "installSupport": "Instalar dependências",
       "installConfirmTitle": "Instalar as dependências de {{name}}?",
       "installConfirmDescription": "O nanobot instalará as dependências necessárias e ativará {{name}}.",
+      "installOnlyConfirmDescription": "O nanobot instalará o que {{name}} precisa. Você poderá conectá-lo após a instalação.",
       "installConfirmAction": "Instalar e habilitar",
+      "installOnlyConfirmAction": "Instalar suporte",
       "websocketRequired": "Necessário para a WebUI",
       "channelDisabled": "Canal desabilitado",
       "notEnabled": "Não habilitado"

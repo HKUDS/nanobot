@@ -33,16 +33,6 @@ describe("channel UI contributions", () => {
     expect(channelUiOwner("wechat")).toBe("weixin");
   });
 
-  it("does not make channel setup depend on remote brand assets", () => {
-    expect(registeredChannelUiContributions()).not.toContainEqual(
-      expect.objectContaining({
-        contribution: expect.objectContaining({
-          presentation: expect.objectContaining({ logoUrl: expect.any(String) }),
-        }),
-      }),
-    );
-  });
-
   it("keeps the core setup panel independent of concrete channel plugins", () => {
     const source = readFileSync(
       resolve(process.cwd(), "src/components/settings/channels/ChannelSetupPanel.tsx"),

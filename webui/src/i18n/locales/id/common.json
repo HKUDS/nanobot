@@ -777,6 +777,7 @@
       "searchPlaceholder": "Cari kanal",
       "backToChannels": "Semua kanal",
       "catalog": "Kanal",
+      "help": "Bantuan",
       "loading": "Memuat kanal...",
       "empty": "Tidak ada kanal yang cocok dengan filter ini.",
       "restartRequired": "Mulai ulang nanobot untuk menerapkan dukungan kanal yang diperbarui.",
@@ -853,9 +854,30 @@
         "connected": "Terhubung",
         "configured": "Dikonfigurasi manual",
         "needs_setup": "Perlu penyiapan",
-        "invalid": "Tidak valid",
+        "invalid": "Koneksi gagal",
         "unsupported": "Penyiapan manual"
-      }
+      },
+      "validationMessages": {
+        "connected": "Koneksi terverifikasi.",
+        "unverified": "Koneksi belum terverifikasi.",
+        "missing": "Lengkapi kolom wajib.",
+        "invalid": "Pemeriksaan koneksi gagal.",
+        "unsupported": "Kanal ini belum mendukung pemeriksaan koneksi.",
+        "present": "Terisi",
+        "required": "Wajib",
+        "manual": "Kanal ini belum mendukung pemeriksaan koneksi.",
+        "qrTimeout": "Kode QR tidak dapat dimuat. Periksa jaringan atau proksi, lalu coba lagi.",
+        "napcatConnection": "Koneksi NapCat",
+        "napcatUnavailable": "Tidak dapat terhubung ke NapCat. Pastikan NapCat sedang berjalan dan periksa alamat WebSocket.",
+        "whatsappSessionBusy": "Sesi WhatsApp sedang digunakan. Tutup proses nanobot lain yang menggunakan WhatsApp, lalu coba lagi."
+      },
+      "search": "Cari kanal",
+      "filterEnabled": "Aktif",
+      "noResults": "Tidak ada kanal yang cocok",
+      "install": "Pasang",
+      "installChannel": "Pasang {{name}}",
+      "noInstallNeeded": "Tidak perlu dipasang",
+      "installNeeded": "Memerlukan dependensi"
     },
     "nanobotFeatures": {
       "enabled": "Aktif",
@@ -866,7 +888,9 @@
       "installSupport": "Pasang paket yang diperlukan",
       "installConfirmTitle": "Pasang paket yang diperlukan {{name}}?",
       "installConfirmDescription": "nanobot akan memasang paket yang diperlukan, lalu mengaktifkan {{name}}.",
+      "installOnlyConfirmDescription": "nanobot akan menginstal dukungan yang dibutuhkan {{name}}. Anda dapat menghubungkannya setelah instalasi.",
       "installConfirmAction": "Instal dan aktifkan",
+      "installOnlyConfirmAction": "Instal dukungan",
       "websocketRequired": "Wajib untuk WebUI",
       "channelDisabled": "Kanal dinonaktifkan",
       "notEnabled": "Belum aktif"

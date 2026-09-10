@@ -810,6 +810,13 @@ describe("webui API helpers", () => {
       150_000,
     );
 
+    await enableNanobotFeature(mutationTransport, "whatsapp", { installOnly: true });
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.feature.enable",
+      { name: "whatsapp", install_only: true },
+      150_000,
+    );
+
     await disableNanobotFeature(mutationTransport, "matrix");
     expect(requestMutation).toHaveBeenLastCalledWith(
       "settings.feature.disable",

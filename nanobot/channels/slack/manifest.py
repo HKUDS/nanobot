@@ -14,6 +14,7 @@ SETUP_SPEC = ChannelSetupSpec(
     required=required_fields("appToken", "botToken"),
     official_url="https://api.slack.com/apps",
     validator=validate,
+    verifies_connection=True,
 )
 
 PLUGIN = ChannelPlugin(

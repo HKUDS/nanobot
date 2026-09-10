@@ -24,6 +24,10 @@
           "open": "所有消息",
           "allowlist": "白名单"
         }
+      },
+      "proxy": {
+        "label": "代理",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   },

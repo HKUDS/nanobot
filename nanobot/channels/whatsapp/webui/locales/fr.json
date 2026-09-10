@@ -24,6 +24,10 @@
           "open": "Tous les messages",
           "allowlist": "Liste d’autorisation"
         }
+      },
+      "proxy": {
+        "label": "Proxy",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   },

@@ -24,6 +24,10 @@
           "open": "所有訊息",
           "allowlist": "允許清單"
         }
+      },
+      "proxy": {
+        "label": "代理",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   },

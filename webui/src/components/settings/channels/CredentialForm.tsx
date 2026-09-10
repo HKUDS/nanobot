@@ -10,6 +10,10 @@ function channelFieldValue(field: ChannelConfigField, values: Record<string, str
   return values[field.key] ?? field.defaultValue ?? field.options?.[0]?.value ?? "";
 }
 
+export function channelFieldInputId(key: string): string {
+  return `channel-field-${key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
 export function defaultChannelFieldValues(
   fields: ChannelConfigField[],
   configValues: Record<string, string> | undefined = undefined,
@@ -63,7 +67,7 @@ export function channelValidationStatusLabel(
 ): string {
   const labels: Record<string, string> = {
     connected: "Connected",
-    configured: "Configured manually",
+    configured: "Not verified",
     needs_setup: "Needs setup",
     invalid: "Invalid",
     unsupported: "Manual setup",
@@ -87,7 +91,7 @@ export function channelValidationStatusClass(status: string): string {
 }
 
 export function channelValidationStatusIcon(status: string): ReactNode {
-  if (status === "connected" || status === "configured") {
+  if (status === "connected") {
     return <Check className="h-3.5 w-3.5" aria-hidden />;
   }
   if (status === "invalid") {
@@ -121,6 +125,7 @@ export function CredentialForm({
   clearedSecrets = new Set(),
   onClearSecret,
   compact = false,
+  showSecretActions = false,
 }: {
   fields: ChannelConfigField[];
   values: Record<string, string>;
@@ -132,17 +137,17 @@ export function CredentialForm({
   clearedSecrets?: Set<string>;
   onClearSecret?: (key: string, clear: boolean) => void;
   compact?: boolean;
+  showSecretActions?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className={cn(compact ? "space-y-2.5" : "mt-3 space-y-2.5")}>
+    <div className={cn(compact ? "space-y-0" : "mt-3 space-y-2.5")}>
       {fields.map((field) => {
-        const inputId = `channel-field-${field.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-        const helpId = field.help ? `${inputId}-help` : undefined;
+        const inputId = channelFieldInputId(field.key);
         const error = errors[field.key];
         const errorId = error ? `${inputId}-error` : undefined;
-        const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
+        const describedBy = errorId;
         const visible = Boolean(visibleSecrets[field.key]);
         const value = values[field.key] ?? "";
         const clearSecret = clearedSecrets.has(field.key);
@@ -155,11 +160,7 @@ export function CredentialForm({
         const header = (
           <span className="flex items-center justify-between gap-2 text-[11px] font-medium text-foreground/85">
             <span>{field.label}</span>
-            {savedSecret ? (
-              <span className="font-normal text-muted-foreground">
-                {tx("settings.channels.savedSecret", "Saved")}
-              </span>
-            ) : clearSecret ? (
+            {clearSecret ? (
               <span className="font-normal text-destructive">
                 {tx("settings.channels.secretWillBeRemoved", "Will be removed")}
               </span>
@@ -170,11 +171,6 @@ export function CredentialForm({
             ) : null}
           </span>
         );
-        const help = field.help ? (
-          <span id={helpId} className="mt-1 block text-[11px] leading-4 text-muted-foreground">
-            {field.help}
-          </span>
-        ) : null;
         const errorMessage = error ? (
           <span id={errorId} className="mt-1 block text-[11px] leading-4 text-destructive">
             {error}
@@ -182,19 +178,31 @@ export function CredentialForm({
         ) : null;
         if (field.options?.length) {
           return (
-            <fieldset key={field.key} className="block">
-              <legend className="w-full">{header}</legend>
+            <fieldset
+              key={field.key}
+              id={`${inputId}-group`}
+              aria-labelledby={`${inputId}-label`}
+              aria-invalid={Boolean(error)}
+              aria-describedby={describedBy}
+              className="block"
+            >
+              <div className="grid min-h-[52px] grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-4">
+              <span id={`${inputId}-label`} className="flex min-h-12 items-center sm:min-h-10">{header}</span>
+              <div className="min-w-0">
               <span
-                className="mt-1 grid rounded-control bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
+                className="grid rounded-control bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
                 style={{ gridTemplateColumns: `repeat(${field.options.length}, minmax(0, 1fr))` }}
               >
-                {field.options.map((option) => (
+                {field.options.map((option, index) => (
                   <label key={option.value} className="relative block">
                     <input
+                      id={index === 0 ? inputId : `${inputId}-${index}`}
                       type="radio"
                       name={inputId}
                       value={option.value}
                       checked={selectedOption === option.value}
+                      aria-invalid={Boolean(error)}
+                      aria-describedby={describedBy}
                       onChange={() => onChange(field.key, option.value)}
                       className="peer sr-only"
                     />
@@ -204,15 +212,17 @@ export function CredentialForm({
                   </label>
                 ))}
               </span>
-              {help}
               {errorMessage}
+              </div>
+              </div>
             </fieldset>
           );
         }
         return (
-          <div key={field.key} className="block">
-            <label htmlFor={inputId} className="block">{header}</label>
-            <span className="relative mt-1 block">
+          <div key={field.key} className="grid min-h-[52px] grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-4">
+            <label htmlFor={inputId} className="flex min-h-10 min-w-0 items-center self-start sm:min-h-9">{header}</label>
+            <div className="min-w-0">
+            <span className="relative block">
               <Input
                 id={inputId}
                 aria-label={field.label}
@@ -229,7 +239,7 @@ export function CredentialForm({
                 value={values[field.key] ?? ""}
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={cn(
-                  "h-10 rounded-full border-border/60 bg-muted/35 text-base sm:h-9 sm:text-[13px]",
+                  "h-10 rounded-full border-border/40 bg-background text-base sm:h-9 sm:text-[13px]",
                   error && "border-destructive focus-visible:ring-destructive/30",
                   showSecretToggle && "pr-9",
                 )}
@@ -253,9 +263,8 @@ export function CredentialForm({
                 </button>
               ) : null}
               </span>
-            {help}
             {errorMessage}
-            {field.secret && configuredFields?.has(field.key) && !value.trim() && onClearSecret ? (
+            {showSecretActions && field.secret && configuredFields?.has(field.key) && !value.trim() && onClearSecret ? (
               <button
                 type="button"
                 className="mt-1 min-h-8 text-[11px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
@@ -266,6 +275,7 @@ export function CredentialForm({
                   : tx("settings.channels.removeSavedSecret", "Remove saved credential")}
               </button>
             ) : null}
+            </div>
           </div>
         );
       })}

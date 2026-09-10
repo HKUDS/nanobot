@@ -24,6 +24,10 @@
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
+      },
+      "proxy": {
+        "label": "Proksi",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   },

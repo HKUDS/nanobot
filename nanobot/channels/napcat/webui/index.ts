@@ -3,6 +3,7 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://napneko.github.io/assets/newnewlogo.png",
     displayName: "NapCat",
     initials: "NC",
     color: "#F97316",

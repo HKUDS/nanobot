@@ -526,6 +526,11 @@ class SystemSettingsHandler:
         action: str,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
+        install_only = (
+            action == "enable"
+            and (query_first(request.query, "install_only") or "").strip().lower()
+            in {"1", "true", "yes"}
+        )
         try:
             payload = await asyncio.to_thread(
                 self._nanobot_features_action,
@@ -548,12 +553,13 @@ class SystemSettingsHandler:
                     action,
                 )
             return SettingsRouteResult.failure(status, message)
-        payload = await self._apply_feature_runtime_change(
-            action,
-            request.query,
-            payload,
-            operations,
-        )
+        if not install_only:
+            payload = await self._apply_feature_runtime_change(
+                action,
+                request.query,
+                payload,
+                operations,
+            )
         payload = self._with_channel_runtime_status(payload, operations)
         return SettingsRouteResult.success(
             payload,

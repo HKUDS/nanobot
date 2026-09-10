@@ -3,6 +3,7 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://im.qq.com/favicon.ico",
     displayName: "QQ",
     initials: "QQ",
     color: "#12B7F5",

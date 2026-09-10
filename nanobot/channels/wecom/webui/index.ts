@@ -3,6 +3,7 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://work.weixin.qq.com/favicon.ico",
     displayName: "WeCom",
     initials: "WC",
     color: "#2F7DFF",

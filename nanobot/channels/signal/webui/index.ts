@@ -3,6 +3,7 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://signal.org/favicon.ico",
     displayName: "Signal",
     initials: "SG",
     color: "#3A76F0",

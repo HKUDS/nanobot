@@ -24,6 +24,10 @@
           "open": "Mọi tin nhắn",
           "allowlist": "Danh sách cho phép"
         }
+      },
+      "proxy": {
+        "label": "Proxy",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   },

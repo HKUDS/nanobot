@@ -40,6 +40,7 @@ settings:
 
 export default {
   presentation: {
+    logoUrl: "https://slack.com/favicon.ico",
     displayName: "Slack",
     initials: "SL",
     color: "#4A154B",

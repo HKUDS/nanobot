@@ -3,6 +3,7 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://matrix.org/favicon.ico",
     displayName: "Matrix",
     initials: "MX",
     color: "#0DBD8B",

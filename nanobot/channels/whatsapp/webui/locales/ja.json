@@ -24,6 +24,10 @@
           "open": "すべてのメッセージ",
           "allowlist": "許可リスト"
         }
+      },
+      "proxy": {
+        "label": "プロキシ",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   },
