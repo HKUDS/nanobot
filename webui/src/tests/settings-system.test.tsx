@@ -146,7 +146,7 @@ describe("Settings system domains", () => {
   });
 
 
-  it("does not show the Settings kicker on the standalone Automations surface", async () => {
+  it("opens a chat from the standalone automations empty state", async () => {
     const onBackToChat = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

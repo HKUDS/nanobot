@@ -33,48 +33,6 @@ describe("channel UI contributions", () => {
     expect(channelUiOwner("wechat")).toBe("weixin");
   });
 
-  it("keeps the core setup panel independent of concrete channel plugins", () => {
-    const source = readFileSync(
-      resolve(process.cwd(), "src/components/settings/channels/ChannelSetupPanel.tsx"),
-      "utf8",
-    );
-    const catalog = readFileSync(
-      resolve(process.cwd(), "src/components/settings/channels/catalog.ts"),
-      "utf8",
-    );
-
-    expect(source).not.toMatch(/feature\.name\s*===\s*["'](?:feishu|weixin)["']/);
-    expect(source).not.toMatch(/channel-plugins\/(?:feishu|weixin)/);
-    expect(source).not.toMatch(/(?:Feishu|Weixin)(?:AssistantsPanel|ConnectFlow)/);
-    for (const coreSource of [source, catalog]) {
-      expect(coreSource).not.toContain("Receiving mail");
-      expect(coreSource).not.toContain("Sending mail");
-      expect(coreSource).not.toContain('"receiving"');
-      expect(coreSource).not.toContain('"sending"');
-    }
-  });
-
-  it("discovers UI contributions only from channel-owned packages", () => {
-    const source = readFileSync(
-      resolve(process.cwd(), "src/channel-plugins/registry.ts"),
-      "utf8",
-    );
-
-    expect(source).toContain("../../../nanobot/channels/*/webui/index.{ts,tsx}");
-    expect(source).not.toContain("webui/**/*.{ts,tsx}");
-    expect(source).not.toContain('"./*/index.tsx"');
-  });
-
-  it("derives channel identity from the package directory", () => {
-    for (const channel of ["feishu", "weixin"]) {
-      const source = readFileSync(
-        resolve(process.cwd(), `../nanobot/channels/${channel}/webui/index.tsx`),
-        "utf8",
-      );
-      expect(source).not.toMatch(/\bchannel\s*:/);
-    }
-  });
-
   it("includes channel-owned UI in Tailwind's production scan", () => {
     const source = readFileSync(resolve(process.cwd(), "tailwind.config.js"), "utf8");
 

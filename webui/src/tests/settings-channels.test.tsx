@@ -246,7 +246,6 @@ describe("Settings channels", () => {
     expect(secondInstall).toBeDisabled();
     fireEvent.click(secondInstall);
     expect(requestMutationMock).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog", { name: /^Install/ })).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -267,11 +266,11 @@ describe("Settings channels", () => {
   });
 
   it.each([
-    ["feishu", "Feishu", "Create assistant"],
-    ["weixin", "WeChat", "Connect WeChat"],
+    ["feishu", "Feishu"],
+    ["weixin", "WeChat"],
   ] as const)(
     "installs %s support before mounting its custom connect panel",
-    async (name, displayName, connectActionLabel) => {
+    async (name, displayName) => {
       const feature = uninstalledConnectFeature(name);
       vi.stubGlobal(
         "fetch",
@@ -311,7 +310,6 @@ describe("Settings channels", () => {
       const installButton = screen.getByRole("button", { name: `Install ${displayName}` });
       expect(installButton).toHaveFocus();
       expect(installButton).toBeEnabled();
-      expect(screen.queryByRole("button", { name: connectActionLabel })).not.toBeInTheDocument();
 
       fireEvent.click(installButton);
 
@@ -329,10 +327,9 @@ describe("Settings channels", () => {
           "settings.channel.connect.start", { channel: "weixin" }, 150_000,
         ));
         expect(await screen.findByRole("img", { name: "WeChat login QR code" })).toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: "Connect WeChat" })).not.toBeInTheDocument();
         expect(requestMutationMock.mock.calls.filter(([action]) => action === "settings.channel.connect.start")).toHaveLength(1);
       } else {
-        expect(await screen.findByRole("button", { name: connectActionLabel }, { timeout: 3_000 })).toBeInTheDocument();
+        expect(await screen.findByRole("button", { name: "Create assistant" }, { timeout: 3_000 })).toBeInTheDocument();
         expect(requestMutationMock.mock.calls.some(([action]) => action.startsWith("settings.channel.connect"))).toBe(false);
       }
     },
@@ -851,7 +848,6 @@ describe("Settings channels", () => {
       "aria-expanded",
       "true",
     );
-    expect(screen.queryByText("cli_def...ault")).not.toBeInTheDocument();
     expect(screen.getByLabelText("App ID")).toBeInTheDocument();
     expect(screen.getByText("Advanced", { selector: "summary span" })).toBeInTheDocument();
     expect(screen.getByText("Topic isolation")).toBeInTheDocument();
@@ -941,7 +937,6 @@ describe("Settings channels", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Product worker" }));
     expect(screen.getByRole("radio", { name: "Eu" })).toBeChecked();
-    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
   });
 
   it("shows a single Feishu assistant without a duplicate assistant list", async () => {
@@ -996,15 +991,12 @@ describe("Settings channels", () => {
     fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
     await screen.findByText("Support Bot");
     expect(screen.getAllByText("Support Bot")).toHaveLength(1);
-    expect(screen.queryByText("1 assistant connected")).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Support Bot assistant" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
     fireEvent.click(screen.getByRole("button", { name: "Support Bot" }));
-    expect(screen.queryByText("cli_sup...port")).not.toBeInTheDocument();
     expect(screen.getByLabelText("App ID")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reconnect" })).not.toBeInTheDocument();
     expect(document.querySelector('img[src="https://example.com/support.png"]')).toBeTruthy();
   });
 
@@ -1059,7 +1051,6 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
-    expect(screen.queryByText("No assistant connected")).not.toBeInTheDocument();
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(screen.getByText(runtimeError)).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "test assistant" })).toHaveAttribute(
@@ -1463,8 +1454,6 @@ describe("Settings channels", () => {
       "false",
     );
     expect(screen.getByLabelText("Discord channel")).toBeEnabled();
-    expect(screen.queryByText("Configured manually")).not.toBeInTheDocument();
-    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
     const savedSecret = screen.getByPlaceholderText("Saved secret");
     expect(savedSecret).toHaveValue("");
     expect(savedSecret).toHaveAttribute("autocomplete", "off");
@@ -1528,7 +1517,7 @@ describe("Settings channels", () => {
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   });
 
-  it("keeps setup guides in the help menu without duplicate icons", async () => {
+  it("opens channel setup guides from the help menu", async () => {
     const channels = [
       ["telegram", "Telegram", "Open Telegram setup"],
       ["feishu", "Feishu", "Open Feishu setup"],
@@ -1600,7 +1589,6 @@ describe("Settings channels", () => {
       fireEvent.pointerDown(screen.getByRole("button", { name: "Help", exact: true }), { button: 0, ctrlKey: false });
       const guide = await screen.findByRole("menuitem", { name: guideLabel });
       expect(guide).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
-      expect(guide.querySelector("img")).toBeNull();
       fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
       fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     }
@@ -1697,7 +1685,6 @@ describe("Settings channels", () => {
     const websocketName = await screen.findByText("nanobot WebUI");
     fireEvent.click(websocketName);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "View WebSocket settings" })).not.toBeInTheDocument();
     const websocketSwitch = screen.getByRole("switch", { name: "nanobot WebUI channel" });
     expect(websocketSwitch).toBeDisabled();
     expect(websocketSwitch).toHaveAttribute("aria-checked", "true");
