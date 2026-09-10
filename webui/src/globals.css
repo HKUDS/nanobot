@@ -1095,7 +1095,76 @@
 }
 
 .sidebar-scroll-fade {
-  scroll-padding-block: 1rem;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 1rem, #000 calc(100% - 1rem), transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 1rem, #000 calc(100% - 1rem), transparent);
+  --sidebar-fade-top: 0px;
+  --sidebar-fade-bottom: 0px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--sidebar-fade-top), #000 calc(100% - var(--sidebar-fade-bottom)), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--sidebar-fade-top), #000 calc(100% - var(--sidebar-fade-bottom)), transparent);
+}
+
+.sidebar-child-list {
+  position: relative;
+}
+
+.sidebar-child-list::before {
+  content: "";
+  position: absolute;
+  inset-block: 4px;
+  inset-inline-start: -5px;
+  width: 1px;
+  background: hsl(var(--sidebar-foreground) / 0.12);
+  pointer-events: none;
+}
+
+.sidebar-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.sidebar-scrollbar:is(:hover, :has(:focus-visible), [data-scrolling="true"]) {
+  scrollbar-color: hsl(var(--sidebar-foreground) / 0.2) transparent;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .sidebar-scrollbar,
+  .sidebar-scrollbar:is(:hover, :has(:focus-visible), [data-scrolling="true"]) {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb {
+    min-height: 32px;
+    border: 3.5px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    background-clip: padding-box;
+    transition: background-color 180ms ease-out;
+  }
+
+  .sidebar-scrollbar:is(:hover, :has(:focus-visible), [data-scrolling="true"])::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--sidebar-foreground) / 0.2);
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb:hover,
+  .sidebar-scrollbar::-webkit-scrollbar-thumb:active {
+    background-color: hsl(var(--sidebar-foreground) / 0.38);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-scrollbar::-webkit-scrollbar-thumb { transition: none; }
 }

@@ -204,7 +204,7 @@ export function Sidebar(props: SidebarProps) {
         activeId={activeActionId}
         scope="actions"
         className={cn(
-          "relative gap-0.5 pb-3",
+          "relative gap-0.5 pb-1",
           collapsed ? "flex w-14 flex-col items-center px-0" : "flex flex-col px-2",
         )}
       >
@@ -265,7 +265,6 @@ export function Sidebar(props: SidebarProps) {
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-opacity duration-200",
-          props.onExpand && !collapsed && "me-3",
           collapsed && "pointer-events-none opacity-0",
         )}
       >

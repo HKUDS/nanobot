@@ -2782,7 +2782,7 @@ function Shell({
                           hideSidebarToggleForHostChrome={context.active}
                           hideThemeButton={!context.active}
                           hideHeaderTitle
-                          inlineHandle={workbenchPaneSessions.length > 1}
+                          inlineHandle={!mobileWorkbench && workbenchPaneSessions.length > 1}
                           headerActions={context.headerActions}
                           headerPortalTarget={context.headerPortalTarget}
                           headerActive={context.active}

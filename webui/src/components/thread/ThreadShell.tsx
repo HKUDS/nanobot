@@ -1686,7 +1686,6 @@ export function ThreadShell({
   const threadHeader = !hideHeader ? (
     <ThreadHeader
       title={title}
-      handle={temporary || (hideHeaderTitle && inlineHandle) ? null : session?.handle}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}

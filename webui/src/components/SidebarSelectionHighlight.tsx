@@ -6,7 +6,8 @@ import {
 } from "react";
 
 interface SidebarSelectionHighlightProps extends HTMLAttributes<HTMLDivElement> {
-  targetRef: RefObject<HTMLElement>;
+  targetRef?: RefObject<HTMLElement>;
+  targetSelector?: string;
   activeId: string | null;
   scope: string;
 }
@@ -19,6 +20,7 @@ export const SIDEBAR_SELECTION_ACTION_ITEM_CLASS =
 
 export function SidebarSelectionHighlight({
   targetRef,
+  targetSelector,
   activeId,
   scope,
   children,
@@ -31,7 +33,9 @@ export function SidebarSelectionHighlight({
   useLayoutEffect(() => {
     const highlight = highlightRef.current;
     const container = containerRef.current;
-    const target = targetRef.current;
+    const target = targetRef?.current ?? (targetSelector
+      ? container?.querySelector<HTMLElement>(targetSelector)
+      : null);
     if (!highlight) return;
     if (!activeId || !container || !target) {
       highlight.style.opacity = "0";

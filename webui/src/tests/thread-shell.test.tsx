@@ -569,7 +569,7 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    expect(within(portal).getByText("@soro")).toBeInTheDocument();
+    expect(within(portal).queryByText("@soro")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Session @soro")).not.toBeInTheDocument();
 
     unmount();
