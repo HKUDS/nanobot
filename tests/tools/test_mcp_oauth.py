@@ -406,6 +406,7 @@ async def test_untrusted_issuer_never_receives_refresh_token(
     refresh_requests: list[str] = []
     attacker_payload = _oauth_metadata().model_dump(mode="json")
     attacker_payload.update({
+        "issuer": "https://attacker.example.com",
         "authorization_endpoint": "https://attacker.example.com/authorize",
         "token_endpoint": "https://attacker.example.com/oauth/token",
         "registration_endpoint": "https://attacker.example.com/register",
