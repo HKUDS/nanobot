@@ -96,7 +96,7 @@ export function SettingsSidebar({
         onClick={onBackToChat}
         aria-label={t("settings.backToChat")}
         className={cn(
-          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-[14px] leading-5 font-medium text-muted-foreground transition-colors settings-hover hover:text-foreground lg:mb-3",
+          "touch-target mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-[13px] leading-5 font-normal text-sidebar-content transition-colors settings-hover hover:text-foreground lg:mb-3",
           hostChromeInset && "-ml-1",
         )}
       >
@@ -112,11 +112,11 @@ export function SettingsSidebar({
             <button
               type="button"
               aria-label={`${t("settings.sidebar.title")}: ${activeLabel}`}
-              className="touch-target flex h-11 w-full items-center gap-2.5 rounded-control bg-sidebar-accent px-3 text-left text-[14px] leading-5 font-medium text-foreground transition-colors settings-hover lg:hidden"
+              className="touch-target flex h-11 w-full items-center gap-2.5 rounded-control bg-sidebar-accent px-3 text-left text-[13px] leading-5 font-normal text-foreground transition-colors settings-hover lg:hidden"
             >
               <ActiveIcon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
               <span className="min-w-0 flex-1 truncate">{activeLabel}</span>
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              <ChevronDown className="h-4 w-4 shrink-0 text-sidebar-content" aria-hidden />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -132,7 +132,7 @@ export function SettingsSidebar({
                   aria-current={active ? "page" : undefined}
                   onSelect={() => onSelectSection(key)}
                   className={cn(
-                    "flex h-10 cursor-default items-center gap-2.5 px-2.5 text-[14px] leading-5 font-medium",
+                    "flex h-10 cursor-default items-center gap-2.5 px-2.5 text-[13px] leading-5 font-normal",
                     active && "bg-sidebar-accent text-foreground focus:bg-sidebar-accent",
                   )}
                 >
@@ -163,11 +163,11 @@ export function SettingsSidebar({
                 aria-current={active ? "page" : undefined}
                 onClick={() => onSelectSection(key)}
                 className={cn(
-                  "touch-target flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-[14px] leading-5 font-medium",
+                  "touch-target flex h-9 w-full items-center gap-2 rounded-xl px-2.5 text-left text-[13px] leading-5 font-normal",
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "text-sidebar-accent-foreground"
-                    : "text-muted-foreground settings-hover hover:text-foreground",
+                    : "text-sidebar-content settings-hover hover:text-foreground",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
@@ -194,10 +194,10 @@ export function SettingsSidebar({
               onClick={onRestart}
               disabled={isRestarting}
               aria-describedby={restartPending ? "settings-restart-status" : undefined}
-              className={cn("h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[14px] leading-5 font-medium settings-hover",
+              className={cn("h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] leading-5 font-normal settings-hover",
                 restartPending && !isRestarting
                   ? "settings-restart-pending text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
-                  : "text-muted-foreground hover:text-foreground")}
+                  : "text-sidebar-content hover:text-foreground")}
             >
               {isRestarting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 : <RotateCcw className="h-4 w-4" aria-hidden />}
@@ -210,7 +210,7 @@ export function SettingsSidebar({
             type="button"
             variant="ghost"
             onClick={onLogout}
-            className="hidden h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[14px] leading-5 font-medium text-muted-foreground hover:bg-destructive/8 hover:text-destructive lg:flex"
+            className="hidden h-9 w-full justify-start gap-2 rounded-control px-2.5 text-[13px] leading-5 font-normal text-sidebar-content hover:bg-destructive/8 hover:text-destructive lg:flex"
           >
             <LogOut className="h-4 w-4" aria-hidden />
             <span>{t("app.account.logout")}</span>

@@ -151,7 +151,7 @@ export function Sidebar(props: SidebarProps) {
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}
       className={cn(
-        "flex h-full w-full min-w-0 flex-col text-sidebar-foreground",
+        "flex h-full w-full min-w-0 flex-col text-sidebar-content",
         props.hostChromeInset ? "bg-transparent" : "bg-sidebar",
       )}
     >
@@ -371,10 +371,10 @@ function SidebarActionButton({
         collapsed
           ? "w-8 justify-center gap-0 px-0"
           : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-xl px-0"
-          : "w-full justify-start gap-2 px-2 text-[14px] leading-5 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]",
+          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]",
         active
           ? "text-sidebar-accent-foreground"
-          : "text-sidebar-foreground/75 settings-hover hover:text-sidebar-foreground",
+          : "text-sidebar-content settings-hover hover:text-sidebar-accent-foreground",
         className,
       )}
     >

@@ -52,6 +52,8 @@
     --radius-pill: 9999px;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-content: 240 3% 30%;
+    --sidebar-muted-foreground: 240 2% 44%;
     --sidebar-selected: 40 1% 89.4%;
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
@@ -92,6 +94,8 @@
     --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
+    --sidebar-content: 240 3% 84%;
+    --sidebar-muted-foreground: 240 2% 70%;
     --sidebar-selected: 0 0% 29.8%;
     --sidebar-accent: var(--background);
     --sidebar-accent-foreground: 0 0% 98%;
