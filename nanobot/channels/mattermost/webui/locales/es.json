@@ -31,7 +31,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       },
       "groupPolicyInThread": {
@@ -39,7 +39,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes (sin mención)",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       },
       "allowFrom": {

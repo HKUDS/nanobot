@@ -166,7 +166,7 @@ export function AutomationsSettings({
                     "Search task, message, linked chat, or schedule",
                   )}
                   className={cn(
-                    "h-9 w-full rounded-control pl-9 text-[13px]",
+                    "h-9 w-full rounded-full pl-9 text-[13px]",
                     SETTINGS_SEARCH_INPUT_CLASS,
                   )}
                 />
@@ -175,7 +175,7 @@ export function AutomationsSettings({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-control border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto"
+                    className="inline-flex h-9 min-w-[8.5rem] items-center justify-center gap-1.5 whitespace-nowrap rounded-control border border-border/45 bg-settings-surface px-3 text-[12px] font-medium text-muted-foreground transition-colors settings-hover hover:text-foreground sm:w-auto"
                   >
                     <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                     <span>{sortLabel[sort]}</span>
@@ -316,7 +316,7 @@ function AutomationListItem({
           "group grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-floating px-3 py-3.5 text-left transition-colors",
           selected
             ? "bg-background/80 text-foreground"
-            : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
+            : "text-muted-foreground settings-hover hover:text-foreground",
         )}
       >
         <span className="min-w-0">
@@ -1070,27 +1070,27 @@ function automationEditDraftError(
   job: SessionAutomationJob | null,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string | null {
-  if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Name is required.");
+  if (!draft.name.trim()) return tx("settings.automations.validation.nameRequired", "Enter a task name.");
   if (isLocalTriggerAutomation(job)) return null;
   if (!draft.message.trim()) {
-    return tx("settings.automations.validation.messageRequired", "Message is required.");
+    return tx("settings.automations.validation.messageRequired", "Enter a task message.");
   }
   if (draft.scheduleKind === "every") {
     const value = Number(draft.everyValue);
     if (!Number.isInteger(value) || value <= 0) {
-      return tx("settings.automations.validation.intervalRequired", "Interval must be a positive number.");
+      return tx("settings.automations.validation.intervalRequired", "Enter a positive whole number for the interval.");
     }
   }
   if (draft.scheduleKind === "cron" && !draft.cronExpr.trim()) {
-    return tx("settings.automations.validation.cronRequired", "Cron expression is required.");
+    return tx("settings.automations.validation.cronRequired", "Enter a Cron expression.");
   }
   if (draft.scheduleKind === "at") {
     const atMs = new Date(draft.atLocal).getTime();
     if (!Number.isFinite(atMs)) {
-      return tx("settings.automations.validation.timeRequired", "Run time is required.");
+      return tx("settings.automations.validation.timeRequired", "Choose a run time.");
     }
     if (atMs <= Date.now() && automationScheduleChanged(draft, job)) {
-      return tx("settings.automations.validation.futureRequired", "Run time must be in the future.");
+      return tx("settings.automations.validation.futureRequired", "Choose a time in the future.");
     }
   }
   return null;

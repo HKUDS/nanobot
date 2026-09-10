@@ -20,7 +20,7 @@
       "appSecret": {
         "label": "App Secret",
         "placeholder": "Kosongkan untuk mempertahankan secret",
-        "help": "Tempel secret baru hanya saat rotasi kredensial."
+        "help": "Masukkan App Secret baru hanya untuk mengganti nilai yang tersimpan."
       },
       "domain": {
         "label": "Wilayah",
@@ -32,7 +32,7 @@
       "groupPolicy": {
         "label": "Perilaku grup",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
@@ -51,7 +51,7 @@
     }
   },
   "custom": {
-    "toggleAssistant": "Asisten {{name}}",
+    "toggleAssistant": "Aktifkan asisten {{name}}",
     "configured": "Terhubung",
     "needsSetup": "Perlu otorisasi",
     "noAppId": "Tidak ada App ID",
@@ -64,7 +64,7 @@
     "countMany": "{{count}} asisten terhubung",
     "qrAlt": "Kode QR koneksi Feishu",
     "scanTitle": "Pindai dengan Feishu",
-    "scanDescription": "Pindai dengan Feishu atau Lark di ponsel. nanobot akan menyelesaikan setup setelah otorisasi.",
+    "scanDescription": "Pindai kode ini dengan Feishu atau Lark di ponsel. nanobot akan menyelesaikan penyiapan setelah Anda menyetujui akses.",
     "waiting": "Menunggu otorisasi...",
     "connected": "Feishu sudah terhubung.",
     "stopped": "Koneksi dihentikan.",

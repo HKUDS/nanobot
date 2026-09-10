@@ -25,6 +25,7 @@ from nanobot.channels.telegram.runtime import (
     _markdown_to_telegram_html,
     _split_telegram_markdown,
     _StreamBuf,
+    _telegram_command_text,
 )
 
 
@@ -360,6 +361,8 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_restore" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_prompt" for cmd in app.bot.commands)
+    assert any(cmd.command == "evaluator_prompt" for cmd in app.bot.commands)
+    assert any(cmd.command == "compact" for cmd in app.bot.commands)
 
 
 @pytest.mark.asyncio
@@ -2444,7 +2447,7 @@ async def test_forward_command_preserves_dream_log_args_and_strips_bot_suffix() 
     await channel._forward_command(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"] == "/dream_log deadbeef"
+    assert handled[0]["content"] == "/dream-log deadbeef"
 
 
 @pytest.mark.asyncio
@@ -2465,7 +2468,7 @@ async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
     await channel._forward_command(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"] == "/dream_restore deadbeef"
+    assert handled[0]["content"] == "/dream-restore deadbeef"
 
     handled.clear()
     update = _make_telegram_update(text="/dream_prompt@nanobot_test init", reply_to_message=None)
@@ -2473,7 +2476,7 @@ async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
     await channel._forward_command(update, None)
 
     assert len(handled) == 1
-    assert handled[0]["content"] == "/dream_prompt init"
+    assert handled[0]["content"] == "/dream-prompt init"
 
 
 def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
@@ -2491,18 +2494,18 @@ def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
     assert pat.fullmatch("/new@nanobot_bot")
     assert pat.fullmatch("/goal@nanobot_bot refine objective")
     assert pat.fullmatch("/trigger@nanobot_bot CI summary")
-    # Underscore command names (Telegram-safe) route through the bus regex.
+    assert pat.fullmatch("/compact@nanobot_bot")
     assert pat.fullmatch("/dream_log deadbeef")
     assert pat.fullmatch("/dream_restore deadbeef")
     assert pat.fullmatch("/dream_prompt init")
-    assert pat.fullmatch("/evaluator_prompt")
-    assert pat.fullmatch("/evaluator_prompt init")
-    # Legacy hyphen spellings stay on the separate legacy handler.
-    assert pat.fullmatch("/dream_log@nanobot_bot deadbeef")
+    assert pat.fullmatch("/evaluator_prompt@nanobot_bot init")
+    assert pat.fullmatch("/unknown-command") is None
+    assert pat.fullmatch("/compact")
+    assert pat.fullmatch("/evaluator-prompt")
+    assert pat.fullmatch("/evaluator-prompt init")
     assert pat.fullmatch("/dream-log deadbeef") is None
     assert pat.fullmatch("/dream-restore deadbeef") is None
     assert pat.fullmatch("/dream-prompt init") is None
-    assert pat.fullmatch("/evaluator-prompt") is None
 
 
 @pytest.mark.asyncio
@@ -2524,11 +2527,87 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/dream" in help_text
     assert "/dream_log" in help_text
     assert "/dream_prompt" in help_text
+    assert "/evaluator_prompt" in help_text
+    assert "/compact" in help_text
     assert "/goal" in help_text
     assert "/trigger" in help_text
     assert "/pairing" in help_text
     assert "/model" in help_text
     assert "/dream_restore" in help_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["dream-log", "dream-restore", "dream-prompt", "evaluator-prompt"])
+@pytest.mark.parametrize("underscore", [False, True])
+async def test_telegram_command_handlers_preserve_core_names(monkeypatch, command, underscore):
+    bus = MessageBus()
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]), bus,
+    )
+    app = _FakeApp(lambda: None)
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=lambda: _FakeBuilder(app)),
+    )
+    await channel._start_app()
+    try:
+        spelling = command.replace("-", "_") if underscore else command
+        text = f"/{spelling}@nanobot_test argument"
+        update = telegram.Update.de_json({
+            "update_id": 1,
+            "message": {
+                "message_id": 1, "date": 1,
+                "chat": {"id": 123, "type": "private"},
+                "from": {"id": 123, "is_bot": False, "first_name": "Tester"},
+                "text": text,
+                "entities": [{
+                    "type": "bot_command", "offset": 0,
+                    "length": len(text.split()[0]) if underscore else len(command.split("-")[0]) + 1,
+                }],
+            },
+        }, None)
+        handler = next(handler for handler in app.handlers if handler.check_update(update))
+        assert handler.callback == channel._forward_command
+        await handler.callback(update, None)
+        message = await asyncio.wait_for(bus.consume_inbound(), timeout=1)
+        assert message.content == f"/{command} argument"
+    finally:
+        await channel._teardown_app()
+
+
+def test_telegram_command_text_preserves_arguments_paths_and_diffs():
+    text = (
+        "Use `/dream-log deadbeef` or `/evaluator-prompt init`.\n"
+        "Usage: /dream-prompt [init]\n"
+        "Keep /tmp/dream-log and /dream-log.md.\n"
+        "```diff\n- /dream-log\n+ /dream-prompt\n```\n"
+    )
+    assert _telegram_command_text(text) == (
+        "Use /dream_log deadbeef or /evaluator_prompt init.\n"
+        "Usage: /dream_prompt [init]\n"
+        "Keep /tmp/dream-log and /dream-log.md.\n"
+        "```diff\n- /dream-log\n+ /dream-prompt\n```\n"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("control_reply", [False, True])
+async def test_send_adapts_command_references_only_in_control_replies(control_reply):
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=False),
+        MessageBus(),
+    )
+    app = _install_ready_app(channel)
+    content = "Use `/dream-restore deadbeef`."
+    message = OutboundMessage(
+        channel="telegram", chat_id="123", content=content,
+        metadata={"render_as": "text"} if control_reply else {},
+    )
+    await channel.send(message)
+    expected = "Use /dream_restore deadbeef." if control_reply else _markdown_to_telegram_html(content)
+    assert app.bot.sent_messages[-1]["text"] == expected
+    assert message.content == content
 
 
 @pytest.mark.asyncio

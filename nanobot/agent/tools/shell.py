@@ -1156,7 +1156,7 @@ class ExecTool(Tool):
         self,
         workspace_root: Path | None = None,
     ) -> list[Path]:
-        if self.sandbox != "bwrap" or _IS_WINDOWS:
+        if self.sandbox not in ("bwrap", "seatbelt") or _IS_WINDOWS:
             return []
         roots = [*self.sandbox_ro_binds, *self.sandbox_rw_binds]
         if workspace_root is None:

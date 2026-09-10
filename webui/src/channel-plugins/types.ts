@@ -7,6 +7,7 @@ import type {
 } from "@/lib/types";
 
 export type ChannelPluginPanelProps = {
+  connectRequestId?: number;
   token: string;
   feature: NanobotFeatureInfo;
   actionKey: string | null;

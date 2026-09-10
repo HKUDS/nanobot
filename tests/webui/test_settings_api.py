@@ -736,7 +736,7 @@ def test_model_configuration_advanced_options_round_trip(
     assert row["reasoning_effort"] is None
 
 
-def test_delete_model_configuration_requires_removing_it_from_call_order(
+def test_delete_model_configuration_protects_primary_and_removes_fallback_references(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -747,6 +747,7 @@ def test_delete_model_configuration_requires_removing_it_from_call_order(
         "spare": ModelPresetConfig(model="openai/gpt-4.1-mini"),
     }
     config.agents.defaults.model_preset = "primary"
+    config.agents.defaults.fallback_models = ["spare", "primary", "spare"]
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -757,6 +758,7 @@ def test_delete_model_configuration_requires_removing_it_from_call_order(
     payload = delete_model_configuration({"name": ["spare"]})
     assert {row["name"] for row in payload["model_presets"]} == {"default", "primary"}
     assert "spare" not in load_config(config_path).model_presets
+    assert load_config(config_path).agents.defaults.fallback_models == ["primary"]
 
 
 def test_update_provider_settings_updates_dynamic_custom_provider(

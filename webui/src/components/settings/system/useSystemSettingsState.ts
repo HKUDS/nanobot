@@ -46,7 +46,6 @@ export function useSystemSettingsState() {
   const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
   const [apiServiceError, setApiServiceError] = useState<string | null>(null);
   const [appsQuery, setAppsQuery] = useState("");
-  const [channelsQuery, setChannelsQuery] = useState("");
   const [automationsQuery, setAutomationsQuery] = useState("");
   const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
   const [automationsSort, setAutomationsSort] = useState<AutomationSort>("next");
@@ -83,7 +82,6 @@ export function useSystemSettingsState() {
     automationsLoading,
     automationsQuery,
     automationsSort,
-    channelsQuery,
     cliApps,
     cliAppsAction,
     cliAppsError,
@@ -126,7 +124,6 @@ export function useSystemSettingsState() {
     setAutomationsLoading,
     setAutomationsQuery,
     setAutomationsSort,
-    setChannelsQuery,
     setCliApps,
     setCliAppsAction,
     setCliAppsError,

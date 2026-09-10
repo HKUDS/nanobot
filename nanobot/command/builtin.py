@@ -138,21 +138,21 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "sparkles",
     ),
     BuiltinCommandSpec(
-        "/dream_log",
+        "/dream-log",
         "Show Dream log",
         "Show what the last Dream consolidation changed.",
         "book-open",
         accepts_args=True,
     ),
     BuiltinCommandSpec(
-        "/dream_restore",
+        "/dream-restore",
         "Restore memory",
         "Revert memory to a previous Dream snapshot.",
         "undo-2",
         accepts_args=True,
     ),
     BuiltinCommandSpec(
-        "/dream_prompt",
+        "/dream-prompt",
         "Dream memory",
         "Tell Dream how to organize this workspace's memory.",
         "file-text",
@@ -160,7 +160,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         accepts_args=True,
     ),
     BuiltinCommandSpec(
-        "/evaluator_prompt",
+        "/evaluator-prompt",
         "Heartbeat evaluator",
         "Customize the heartbeat notification gate prompt for this workspace.",
         "file-text",
@@ -549,7 +549,7 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
                 "Delete or empty it to return to nanobot's default."
             )
     elif args:
-        content = "Usage: /dream_prompt [init]"
+        content = "Usage: /dream-prompt [init]"
     elif store.has_dream_prompt_override():
         content = (
             "Dream memory instructions: custom for this workspace\n\n"
@@ -560,7 +560,7 @@ async def cmd_dream_prompt(ctx: CommandContext) -> OutboundMessage:
         content = (
             "Dream memory instructions: nanobot default\n\n"
             f"- Editable file: `{display_path}`\n"
-            "- Run `/dream_prompt init` to create an editable copy."
+            "- Run `/dream-prompt init` to create an editable copy."
         )
 
     return OutboundMessage(
@@ -599,7 +599,7 @@ async def cmd_evaluator_prompt(ctx: CommandContext) -> OutboundMessage:
                 "Delete or empty it to return to nanobot's default."
             )
     elif args:
-        content = "Usage: /evaluator_prompt [init]"
+        content = "Usage: /evaluator-prompt [init]"
     elif has_evaluator_prompt_override(workspace):
         content = (
             "Heartbeat evaluator prompt: custom for this workspace\n\n"
@@ -610,7 +610,7 @@ async def cmd_evaluator_prompt(ctx: CommandContext) -> OutboundMessage:
         content = (
             "Heartbeat evaluator prompt: nanobot default\n\n"
             f"- Editable file: `{display_path}`\n"
-            "- Run `/evaluator_prompt init` to create an editable copy."
+            "- Run `/evaluator-prompt init` to create an editable copy."
         )
 
     return OutboundMessage(
@@ -635,7 +635,7 @@ def _format_dream_no_input_message() -> str:
         "- Enable `agents.defaults.idleCompactAfterMinutes` so completed chats become Dream input automatically.",
         "- Compact the current chat into memory once that manual action is available.",
         "- If you expected history to exist, check whether `memory/history.jsonl` has new entries after the Dream cursor.",
-        "- Use `/dream_prompt` to see or change how Dream organizes memory.",
+        "- Use `/dream-prompt` to see or change how Dream organizes memory.",
     ])
 
 
@@ -688,7 +688,7 @@ def _format_dream_log_content(
     if diff:
         lines.extend([
             "",
-            f"Use `/dream_restore {commit.sha}` to undo this change.",
+            f"Use `/dream-restore {commit.sha}` to undo this change.",
             "",
             "```diff",
             diff.rstrip(),
@@ -713,8 +713,8 @@ def _format_dream_restore_list(commits: list[CommitInfo]) -> str:
         lines.append(f"- `{c.sha}` {c.timestamp} - {c.subject()}")
     lines.extend([
         "",
-        "Preview a version with `/dream_log <sha>` before restoring it.",
-        "Restore a version with `/dream_restore <sha>`.",
+        "Preview a version with `/dream-log <sha>` before restoring it.",
+        "Restore a version with `/dream-restore <sha>`.",
     ])
     return "\n".join(lines)
 
@@ -723,7 +723,7 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
     """Show what the last Dream changed.
 
     Default: diff of the latest Dream commit versus its parent.
-    With /dream_log <sha>: diff of that specific commit.
+    With /dream-log <sha>: diff of that specific commit.
     """
     store = ctx.loop.consolidator.store
     git = store.git
@@ -732,7 +732,7 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
         if store.get_last_dream_cursor() == 0:
             msg = (
                 "Dream has not run yet. Run `/dream`, or wait for the next scheduled Dream cycle.\n\n"
-                "Use `/dream_prompt` to see or change how Dream organizes memory."
+                "Use `/dream-prompt` to see or change how Dream organizes memory."
             )
         else:
             msg = "Dream history is not available because memory versioning is not initialized."
@@ -750,8 +750,8 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
         if not result:
             content = (
                 f"Couldn't find Dream change `{sha}`.\n\n"
-                "Use `/dream_restore` to list recent versions, "
-                "or `/dream_log` to inspect the latest one."
+                "Use `/dream-restore` to list recent versions, "
+                "or `/dream-log` to inspect the latest one."
             )
         else:
             commit, diff = result
@@ -773,7 +773,7 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
         else:
             content = (
                 "Dream memory has no saved versions yet.\n\n"
-                "Use `/dream_prompt` to see or change how Dream organizes memory."
+                "Use `/dream-prompt` to see or change how Dream organizes memory."
             )
 
     return OutboundMessage(
@@ -786,8 +786,8 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
     """Restore memory files from a previous dream commit.
 
     Usage:
-        /dream_restore          — list recent commits
-        /dream_restore <sha>    — revert a specific commit
+        /dream-restore          — list recent commits
+        /dream-restore <sha>    — revert a specific commit
     """
     store = ctx.loop.consolidator.store
     git = store.git
@@ -812,7 +812,7 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
             content = (
                 f"Couldn't restore Dream change `{sha}`.\n\n"
                 "Only Dream memory versions can be restored. "
-                "Use `/dream_restore` to list recent versions."
+                "Use `/dream-restore` to list recent versions."
             )
         else:
             changed_files = _format_changed_files(result[1])
@@ -822,7 +822,7 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
                     f"Restored Dream memory to the state before `{sha}`.\n\n"
                     f"- New safety commit: `{new_sha}`\n"
                     f"- Restored files: {changed_files}\n\n"
-                    f"Use `/dream_log {new_sha}` to inspect the restore diff."
+                    f"Use `/dream-log {new_sha}` to inspect the restore diff."
                 )
             else:
                 content = (
@@ -1086,17 +1086,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/trigger", cmd_trigger)
     router.prefix("/trigger ", cmd_trigger)
     router.exact("/dream", cmd_dream)
-    router.exact("/dream_log", cmd_dream_log)
-    router.prefix("/dream_log ", cmd_dream_log)
-    router.exact("/dream_restore", cmd_dream_restore)
-    router.prefix("/dream_restore ", cmd_dream_restore)
-    router.exact("/dream_prompt", cmd_dream_prompt)
-    router.prefix("/dream_prompt ", cmd_dream_prompt)
-    router.exact("/evaluator_prompt", cmd_evaluator_prompt)
-    router.prefix("/evaluator_prompt ", cmd_evaluator_prompt)
-    # Legacy hyphenated aliases. Telegram only treats ``[a-z0-9_]`` names as
-    # commands, so the canonical spellings above use underscores; keep the old
-    # hyphen forms dispatching for existing notes, scripts and muscle memory.
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)

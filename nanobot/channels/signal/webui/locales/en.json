@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Allowed DMs",
+        "label": "Allowed direct message senders",
         "placeholder": "Phone numbers or UUIDs"
       },
       "group_allowFrom": {

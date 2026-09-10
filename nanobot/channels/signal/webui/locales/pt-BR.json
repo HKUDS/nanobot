@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "DMs permitidas",
+        "label": "Remetentes de mensagens diretas permitidos",
         "placeholder": "Números ou UUIDs"
       },
       "group_allowFrom": {

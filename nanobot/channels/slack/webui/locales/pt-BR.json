@@ -12,13 +12,13 @@
       "Salve e ative o Slack; depois, mencione o app ou envie uma DM."
     ],
     "actions": {
-      "slack-manifest": "Copiar manifesto"
+      "slack-manifest": "Copiar manifesto do aplicativo"
     },
     "fields": {
       "appToken": {
         "label": "Token do app",
         "placeholder": "xapp-...",
-        "help": "Crie-o no Socket Mode do Slack."
+        "help": "Crie o token nas configurações de Socket Mode do seu aplicativo Slack."
       },
       "botToken": {
         "label": "Token do bot",

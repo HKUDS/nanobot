@@ -51,6 +51,7 @@ import type {
   WorkspacesPayload,
 } from "@/lib/types";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { useClient } from "@/providers/ClientProvider";
 
 type MessageShape = Pick<UIMessage, "role" | "kind" | "content" | "isStreaming" | "turnId">;
@@ -789,8 +790,10 @@ export function ThreadShell({
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
-  const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   const knownTemporaryChatIdsRef = useRef(new Set<string>());
+  const messageCacheRef = useRef(new ThreadMessageCache(
+    (key) => knownTemporaryChatIdsRef.current.has(key),
+  ));
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */

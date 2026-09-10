@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ExternalLink, Loader2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelFieldMessageKey, channelTranslator } from "@/channel-plugins/i18n";
 import { channelLocaleMessages } from "@/channel-plugins/locale-registry";
 import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
-import { ToggleButton } from "@/components/settings/ToggleButton";
 import {
   chatAppGuideUrl,
   docsUrlWithBase,
@@ -22,7 +21,6 @@ import { normalizeLocale } from "@/i18n/config";
 import { configureChannel } from "@/lib/api";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import type {
-  ChannelRuntimeStatus,
   ChannelSetupContractField,
   NanobotFeatureInfo,
 } from "@/lib/types";
@@ -46,6 +44,7 @@ export function WeixinPanel({
   showBrandLogos,
   onAction,
   onFeaturesUpdate,
+  connectRequestId = 0,
 }: ChannelPluginPanelProps) {
   const { client } = useClient();
   const { t, i18n } = useTranslation();
@@ -54,18 +53,7 @@ export function WeixinPanel({
   const runtimeError = weixinRuntimeError(feature.runtime_error, channelTx);
   const displayName = channelTx("displayName", "WeChat");
   const enabledBusy = actionKey === `enable:${feature.name}`;
-  const disabledBusy = actionKey === `disable:${feature.name}`;
-  const channelBusy = enabledBusy || disabledBusy;
-  const channelChecked =
-    feature.runtime_status === "running" || feature.runtime_status === "starting";
   const missingSupport = feature.enabled && !feature.installed;
-  const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
-  const toggleChecked = alwaysEnabled || channelChecked;
-  const channelToggleDisabled =
-    alwaysEnabled
-    || channelBusy
-    || (!feature.install_supported && !feature.installed && !feature.enabled);
-  const [connectRequestId, setConnectRequestId] = useState(0);
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
   const [saving, setSaving] = useState(false);
@@ -191,23 +179,15 @@ export function WeixinPanel({
     setSaveRevision((current) => current + 1);
   };
 
-  const toggleAriaLabel = t("settings.channels.toggleChannel", {
-    name: displayName,
-    defaultValue: "{{name}} channel",
-  });
-
   return (
-    <aside className="min-h-full rounded-panel bg-settings-surface p-5">
-      <div className="flex items-start justify-between gap-4">
+    <aside className="settings-editor rounded-panel bg-settings-surface">
+      <div className="flex items-start justify-between gap-4 pr-8">
         <div className="flex min-w-0 items-start gap-3">
           <WeixinLogo showBrandLogos={showBrandLogos} />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
+            <h3 className="truncate select-none text-[14px] font-semibold leading-5 text-foreground">
               {displayName}
             </h3>
-            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-              {channelTx("description", "Use nanobot from WeChat conversations.")}
-            </p>
             {missingSupport && feature.install_supported ? (
               <Button
                 type="button"
@@ -226,27 +206,6 @@ export function WeixinPanel({
               </Button>
             ) : null}
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 pt-1">
-          <WeixinStatusBadge status={feature.runtime_status}>
-            {weixinStatusLabel(feature, tx)}
-          </WeixinStatusBadge>
-          {channelBusy ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
-          ) : null}
-          <ToggleButton
-            checked={toggleChecked}
-            disabled={channelToggleDisabled}
-            ariaLabel={toggleAriaLabel}
-            label={toggleChecked ? onLabel : offLabel}
-            onChange={(checked) => {
-              if (checked && !channelChecked && feature.configured === false) {
-                setConnectRequestId((current) => current + 1);
-                return;
-              }
-              onAction(checked ? "enable" : "disable", feature.name);
-            }}
-          />
         </div>
       </div>
 
@@ -470,42 +429,6 @@ function WeixinGuideLink({ url, label }: { url: string; label: string }) {
       <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
     </a>
   );
-}
-
-function WeixinStatusBadge({
-  children,
-  status,
-}: {
-  children: ReactNode;
-  status?: ChannelRuntimeStatus;
-}) {
-  return (
-    <span className={cn(
-      "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium leading-4",
-      status === "failed"
-        ? "bg-destructive/10 text-destructive"
-        : status === "running"
-          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
-          : "bg-muted/75 text-muted-foreground",
-    )}>
-      {children}
-    </span>
-  );
-}
-
-function weixinStatusLabel(
-  feature: NanobotFeatureInfo,
-  tx: (key: string, fallback: string) => string,
-): string {
-  if (feature.runtime_status === "failed") {
-    return tx("settings.channels.runtimeFailed", "Failed");
-  }
-  if (feature.runtime_status === "starting") {
-    return tx("settings.channels.runtimeStarting", "Starting");
-  }
-  if (feature.runtime_status === "running") return tx("settings.values.on", "On");
-  if (feature.enabled) return tx("settings.channels.runtimeStopped", "Not running");
-  return tx("settings.values.off", "Off");
 }
 
 function weixinRuntimeError(

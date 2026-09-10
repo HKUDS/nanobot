@@ -5,7 +5,7 @@
     "docsLabel": "Mở hướng dẫn Telegram",
     "officialLabel": "Mở BotFather",
     "tryIt": "Gửi /start hoặc tin nhắn riêng ngắn đến bot Telegram.",
-    "summary": "Bật sẽ kích hoạt hỗ trợ Telegram. Bạn vẫn cần token BotFather để trao đổi tin nhắn.",
+    "summary": "Thêm token bot lấy từ BotFather để gửi và nhận tin nhắn Telegram.",
     "steps": [
       "Tạo bot bằng BotFather và sao chép token.",
       "Thêm token và chọn người có thể nhắn cho bot.",

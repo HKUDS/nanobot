@@ -5,7 +5,7 @@
     "docsLabel": "Discord 설정 가이드 열기",
     "officialLabel": "Discord 포털 열기",
     "tryIt": "서버에서 봇을 멘션하거나 DM을 보내세요.",
-    "summary": "활성화하면 Discord 지원이 켜집니다. 봇 토큰과 서버 권한이 필요합니다.",
+    "summary": "Discord에 연결하려면 봇 토큰과 서버 내 접근 권한이 필요합니다.",
     "steps": [
       "Discord Developer Portal에서 봇을 만들고 토큰을 복사하세요.",
       "메시지 읽기/보내기 및 슬래시 명령 권한으로 서버에 초대하세요.",

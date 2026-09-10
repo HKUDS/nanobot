@@ -1,6 +1,6 @@
 {
   "description": "Usa nanobot desde grupos de DingTalk.",
-  "requirements": "Credenciales de la app de DingTalk y gateway",
+  "requirements": "Credenciales de la app de DingTalk y pasarela",
   "setup": {
     "docsLabel": "Abrir guía de DingTalk",
     "officialLabel": "Abrir consola de DingTalk",

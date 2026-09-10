@@ -1,6 +1,6 @@
 {
   "description": "Use o nanobot em conversas de trabalho do WeCom.",
-  "requirements": "Credenciais do app WeCom e configurações de callback",
+  "requirements": "Bot ID e Secret do bot de IA do WeCom",
   "setup": {
     "docsLabel": "Abrir guia do WeCom",
     "officialLabel": "Abrir console do WeCom",

@@ -2,15 +2,16 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   ArrowUpCircle,
   Bot,
+  BookOpen,
+  Github,
+  MessageCircle,
   Check,
   ChevronRight,
   ExternalLink,
   Globe2,
-  HardDrive,
   ImageIcon,
   Loader2,
   Mic,
-  Server,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -24,7 +25,7 @@ import {
   SettingsRow,
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
-import { TokenUsageHeatmap } from "@/components/settings/TokenUsageHeatmap";
+import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -33,23 +34,19 @@ import { checkVersion } from "@/lib/api";
 import type {
   FileEditDisplayMode,
   LocalActivityMode,
-  LocalDensity,
   LocalPreferences,
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
 import type { SettingsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { shortWorkspacePath } from "@/lib/workspace";
 import { useClient } from "@/providers/ClientProvider";
 
 export function OverviewSettings({
   settings,
-  requiresRestart,
   onSelectSection,
   showBrandLogos,
 }: {
   settings: SettingsPayload;
-  requiresRestart: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
 }) {
@@ -75,62 +72,17 @@ export function OverviewSettings({
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const webSearchProvider =
-    settings.web_search.providers.find((provider) => provider.name === settings.web_search.provider) ??
-    settings.web_search.providers[0];
-  const webSearchProviderLabel = providerDisplayLabel(
-    settings.web_search.providers,
-    settings.web_search.provider,
-  );
-  const webSearchCredentialStatus =
-    webSearchProvider?.credential === "none"
-      ? tx("settings.byok.webSearch.noCredentialRequired", "No key required")
-      : webSearchProvider?.credential === "optional_api_key"
-        ? settings.web_search.api_key_hint
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.byok.webSearch.noCredentialRequired", "No key required")
-      : webSearchProvider?.credential === "base_url"
-        ? settings.web_search.base_url
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.values.notConfigured", "Not configured")
-        : settings.web_search.api_key_hint
-          ? tx("settings.values.configured", "Configured")
-          : tx("settings.values.notConfigured", "Not configured");
-  const webCaption = `${webSearchProviderLabel} · ${webSearchCredentialStatus}`;
   const imageStatus = settings.image_generation.enabled
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const imageCaption = `${providerDisplayLabel(settings.image_generation.providers, settings.image_generation.provider)} · ${
-    settings.image_generation.provider_configured
-      ? tx("settings.values.configured", "Configured")
-      : tx("settings.values.notConfigured", "Not configured")
-  }`;
   const transcription = settings.transcription ?? DEFAULT_TRANSCRIPTION_SETTINGS;
   const voiceStatus = transcription.enabled
     ? tx("settings.values.enabled", "Enabled")
     : tx("settings.values.disabled", "Disabled");
-  const voiceCaption = `${providerDisplayLabel(transcription.providers, transcription.provider)} · ${
-    transcription.provider_configured
-      ? tx("settings.values.configured", "Configured")
-      : tx("settings.values.notConfigured", "Not configured")
-  }`;
-  const isNativeHost = (settings.surface ?? settings.runtime_surface) === "native";
-  const workspaceCaption = shortWorkspacePath(settings.runtime.workspace_path);
-  const runtimeTitle = isNativeHost
-    ? tx("settings.rows.engine", "Engine")
-    : tx("settings.rows.gateway", "Gateway");
-  const runtimeValue = isNativeHost
-    ? tx("settings.values.privateEngine", "Private engine")
-    : `${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`;
-  const runtimeCaption = isNativeHost
-    ? tx("settings.values.unixSocket", "Unix socket")
-    : requiresRestart
-      ? tx("settings.values.restartPending", "Restart pending")
-      : tx("settings.values.ready", "Ready");
   return (
-    <div className="space-y-7">
-      <section className="rounded-panel bg-settings-surface px-4 py-4 sm:px-5">
-        <TokenUsageHeatmap usage={settings.usage} timeZone={settings.agent.timezone} />
+    <div className="settings-stack">
+      <section className="rounded-panel bg-settings-surface p-6">
+        <TokenUsageCard usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
       <section>
@@ -156,7 +108,6 @@ export function OverviewSettings({
             valueLogoProvider={settings.web_search.provider}
             title={tx("settings.overview.webSearch", "Web search")}
             value={webStatus}
-            caption={webCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("browser")}
           />
@@ -165,7 +116,6 @@ export function OverviewSettings({
             valueLogoProvider={settings.image_generation.provider}
             title={tx("settings.overview.imageGeneration", "Image generation")}
             value={imageStatus}
-            caption={imageCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("image")}
           />
@@ -174,39 +124,40 @@ export function OverviewSettings({
             valueLogoProvider={transcription.provider}
             title={tx("settings.overview.voiceInput", "Voice input")}
             value={voiceStatus}
-            caption={voiceCaption}
             showBrandLogos={showBrandLogos}
             onClick={() => onSelectSection("voice")}
           />
         </SettingsGroup>
       </section>
 
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.system", "System")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <OverviewListRow
-            icon={Server}
-            title={runtimeTitle}
-            value={runtimeValue}
-            caption={runtimeCaption}
-            onClick={() => onSelectSection("runtime")}
-          />
-          <OverviewListRow
-            icon={HardDrive}
-            title={tx("settings.overview.workspace", "Workspace")}
-            value={tx("settings.values.defaultWorkspace", "Default workspace")}
-            caption={workspaceCaption}
-            onClick={() => onSelectSection("runtime")}
-          />
-        </SettingsGroup>
-      </section>
+    </div>
+  );
+}
 
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.about", "About")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <VersionCheckRow currentVersion={settings.version?.current} />
-        </SettingsGroup>
-      </section>
+export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
+  const { t } = useTranslation();
+  const links = [
+    { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
+    { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
+    { key: "reportIssue", icon: MessageCircle, href: "https://github.com/HKUDS/nanobot/issues" },
+  ];
+  return (
+    <div className="settings-stack">
+      <div className="flex flex-col items-center gap-4 py-6 text-center">
+        <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
+        <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
+        <VersionCheckRow currentVersion={currentVersion} />
+      </div>
+      <SettingsGroup>
+        {links.map(({ key, icon: Icon, href }) => (
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer"
+            className="settings-list-row flex select-none items-center gap-3 text-[14px] settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            <span className="flex-1">{t(`settings.about.${key}`)}</span>
+            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+          </a>
+        ))}
+      </SettingsGroup>
     </div>
   );
 }
@@ -245,16 +196,16 @@ function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
   };
 
   return (
-    <div className="flex min-h-[62px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className="flex flex-col items-center gap-4">
       <div className="min-w-0">
-        <div className="text-[14px] font-medium leading-5 text-foreground">
+        <div className="sr-only">
           {tx("settings.about.version", "Version")}
         </div>
         <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
           {currentVersion ? `v${currentVersion}` : "nanobot"}
         </div>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
+      <div className="flex shrink-0 flex-col items-center gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -319,7 +270,7 @@ export function AppearanceSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
         <SettingsGroup>
@@ -359,18 +310,6 @@ export function AppearanceSettings({
       <section>
         <SettingsSectionTitle>{tx("settings.sections.localPreferences", "Local preferences")}</SettingsSectionTitle>
         <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.density", "Density")}>
-            <SegmentedControl
-              value={localPrefs.density}
-              options={[
-                { value: "comfortable", label: tx("settings.values.comfortable", "Comfortable") },
-                { value: "compact", label: tx("settings.values.compact", "Compact") },
-              ]}
-              onChange={(density) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, density: density as LocalDensity }))
-              }
-            />
-          </SettingsRow>
           <SettingsRow title={tx("settings.rows.activityMode", "Activity detail")}>
             <SegmentedControl
               value={localPrefs.activityMode}
@@ -527,7 +466,7 @@ function OverviewListRow({
   valueLogoProvider?: string | null;
   title: string;
   value: string;
-  caption: string;
+  caption?: string;
   showBrandLogos?: boolean;
   onClick: () => void;
 }) {
@@ -535,12 +474,12 @@ function OverviewListRow({
     <button
       type="button"
       onClick={onClick}
-      className="group flex min-h-[68px] w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
+      className="group flex min-h-[68px] w-full select-none items-center gap-3 px-4 py-3.5 text-left transition-colors settings-hover sm:px-5"
     >
       <OverviewRowIcon icon={Icon} />
       <span className="min-w-0 flex-1">
         <span className="block text-[14px] font-medium leading-5 text-foreground">{title}</span>
-        <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">{caption}</span>
+        {caption ? <span className="sr-only">{caption}</span> : null}
       </span>
       <span className="ml-auto flex min-w-0 max-w-[48%] items-center gap-2">
         <OverviewValueLogo provider={valueLogoProvider} showBrandLogos={showBrandLogos} />

@@ -1,4 +1,5 @@
 {
+  "displayName": "Email",
   "description": "Cho phép nanobot nhận và trả lời email.",
   "requirements": "Hộp thư IMAP, gửi SMTP, mật khẩu ứng dụng và sự đồng ý rõ ràng",
   "setup": {
@@ -19,15 +20,15 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Đã đồng ý",
-        "help": "Công tắc an toàn bắt buộc. Chỉ bật sau khi chủ động kết nối hộp thư này với bot.",
+        "label": "Cho phép nanobot đọc và gửi email",
+        "help": "Bật để cho phép nanobot truy cập hộp thư này. Hãy kiểm tra đây là hộp thư dành riêng cho bot.",
         "choices": {
           "true": "Đã đồng ý",
           "false": "Chưa đồng ý"
         }
       },
       "imapHost": {
-        "label": "Host IMAP",
+        "label": "Máy chủ IMAP",
         "placeholder": "imap.gmail.com"
       },
       "imapUsername": {
@@ -40,7 +41,7 @@
         "help": "Dùng mật khẩu ứng dụng khi nhà cung cấp yêu cầu."
       },
       "smtpHost": {
-        "label": "Host SMTP",
+        "label": "Máy chủ SMTP",
         "placeholder": "smtp.gmail.com"
       },
       "smtpUsername": {
@@ -65,7 +66,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Chu kỳ kiểm tra",
+        "label": "Chu kỳ kiểm tra thư (giây)",
         "placeholder": "30"
       },
       "allowFrom": {

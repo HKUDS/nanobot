@@ -1,19 +1,19 @@
 {
   "description": "Use o nanobot em salas do Matrix.",
-  "requirements": "Homeserver, token da conta e acesso às salas",
+  "requirements": "Servidor da conta, credenciais e acesso às salas",
   "setup": {
     "docsLabel": "Abrir guia do Matrix",
     "officialLabel": "Abrir lista de clientes Matrix",
     "tryIt": "Convide a conta Matrix para uma sala e envie uma mensagem de teste.",
-    "summary": "O Matrix precisa de uma conta no homeserver e login por senha ou token de acesso.",
+    "summary": "Informe o servidor da sua conta Matrix e entre com uma senha ou um token de acesso.",
     "steps": [
       "Crie ou escolha uma conta Matrix para o nanobot.",
-      "Informe o homeserver, ID de usuário e senha ou token de acesso.",
+      "Informe o servidor da conta, o ID de usuário e a senha ou o token de acesso.",
       "Salve e ative o Matrix, convide a conta para uma sala e envie uma mensagem de teste."
     ],
     "fields": {
       "homeserver": {
-        "label": "Homeserver",
+        "label": "Servidor da conta",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -27,7 +27,7 @@
       },
       "accessToken": {
         "label": "Token de acesso",
-        "placeholder": "Login opcional por token",
+        "placeholder": "Informe um token de acesso",
         "help": "Preferível quando o cliente Matrix fornece um token."
       },
       "deviceId": {

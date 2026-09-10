@@ -1,18 +1,27 @@
 import type { SettingsPayload } from "@/lib/types";
 
+export type SettingsExitGuard = (leave: () => void) => void;
+
 export type SettingsSectionKey =
   | "overview"
+  | "about"
   | "appearance"
   | "models"
+  | "capabilities"
   | "image"
   | "voice"
   | "browser"
   | "channels"
   | "apps"
   | "automations"
+  | "memory"
   | "skills"
   | "runtime"
   | "advanced";
+
+export function isCapabilitySection(section: SettingsSectionKey): boolean {
+  return ["capabilities", "image", "voice", "browser", "memory"].includes(section);
+}
 
 type PendingRestartSection = "runtime" | "browser" | "image";
 export type PendingRestartSections = Record<PendingRestartSection, boolean>;
@@ -26,7 +35,7 @@ export type RestartAwarePayload = {
 
 export type ApplySettingsPayload = (
   payload: SettingsPayload,
-  options?: { preserveAgentForm?: boolean },
+  options?: { preserveAgentForm?: boolean; preserveCapabilityForms?: boolean },
 ) => void;
 
 export type MaybeRestartHostEngine = (payload: RestartAwarePayload) => Promise<void>;

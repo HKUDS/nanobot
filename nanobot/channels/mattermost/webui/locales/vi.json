@@ -35,7 +35,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "Hành vi trong thread",
+        "label": "Cách trả lời trong chuỗi thảo luận",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn (không cần nhắc)",

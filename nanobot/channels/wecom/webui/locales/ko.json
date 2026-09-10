@@ -1,6 +1,6 @@
 {
   "description": "WeCom 업무 채팅에서 nanobot을 사용합니다.",
-  "requirements": "WeCom 앱 자격 증명 및 콜백 설정",
+  "requirements": "WeCom AI 봇의 Bot ID와 Secret",
   "setup": {
     "docsLabel": "WeCom 설정 가이드 열기",
     "officialLabel": "WeCom 콘솔 열기",

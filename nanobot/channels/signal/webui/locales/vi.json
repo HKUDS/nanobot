@@ -8,7 +8,7 @@
     "summary": "Signal kết nối qua dịch vụ HTTP signal-cli đã liên kết với một số Signal.",
     "steps": [
       "Cài signal-cli-rest-api và liên kết hoặc đăng ký một số Signal.",
-      "Nhập host, cổng và số điện thoại đã liên kết.",
+      "Nhập địa chỉ máy chủ, cổng và số điện thoại đã liên kết.",
       "Lưu và bật Signal, sau đó gửi tin nhắn riêng thử."
     ],
     "fields": {
@@ -18,7 +18,7 @@
         "help": "Dùng số Signal đã đăng ký với signal-cli."
       },
       "daemonHost": {
-        "label": "Host dịch vụ",
+        "label": "Máy chủ dịch vụ",
         "placeholder": "localhost"
       },
       "daemonPort": {
@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Tin nhắn riêng được phép",
+        "label": "Người được phép gửi tin nhắn riêng",
         "placeholder": "Số điện thoại hoặc UUID"
       },
       "group_allowFrom": {

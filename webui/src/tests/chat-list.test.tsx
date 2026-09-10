@@ -90,7 +90,7 @@ describe("ChatList", () => {
     const handle = conversation.querySelector("[data-sidebar-session-handle]");
     expect(handle).toHaveClass("max-w-20", "shrink-0");
     const underline = handle?.querySelector("[data-sidebar-session-handle-underline]");
-    expect(underline).toHaveClass("border-b-2", "text-foreground");
+    expect(underline).toHaveClass("border-b-2", "text-sidebar-muted-foreground");
     expect(underline?.getAttribute("style"))
       .toContain(sessionHandleColor("handle_1234"));
 

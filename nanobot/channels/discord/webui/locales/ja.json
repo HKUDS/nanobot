@@ -5,7 +5,7 @@
     "docsLabel": "Discord 設定ガイドを開く",
     "officialLabel": "Discord ポータルを開く",
     "tryIt": "サーバーでボットをメンションするか、DM を送信します。",
-    "summary": "有効化すると Discord 対応がオンになります。ボットトークンとサーバー権限が必要です。",
+    "summary": "Discord への接続には、ボットトークンとサーバー上の適切な権限が必要です。",
     "steps": [
       "Discord Developer Portal でボットを作成し、トークンをコピーします。",
       "メッセージの読み書きとスラッシュコマンド権限を付けてサーバーに招待します。",

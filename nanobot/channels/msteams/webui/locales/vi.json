@@ -5,7 +5,7 @@
     "docsLabel": "Mở hướng dẫn Teams",
     "officialLabel": "Mở cổng nhà phát triển Teams",
     "tryIt": "Cài ứng dụng Teams và gửi tin nhắn thử.",
-    "summary": "Teams nhận tin nhắn qua URL callback của Bot Framework. Môi trường production cần endpoint HTTPS có thể truy cập.",
+    "summary": "Teams nhận tin nhắn qua URL callback của Bot Framework. Khi triển khai chính thức, cần một địa chỉ HTTPS có thể truy cập từ bên ngoài.",
     "steps": [
       "Tạo Azure Bot hoặc ứng dụng Teams và sao chép App ID cùng client secret.",
       "Công khai đường dẫn callback qua HTTPS và đặt làm endpoint nhắn tin của bot.",

@@ -7,7 +7,7 @@ This folder holds plain-language prompt overrides for this workspace.
 `dream.md` tells Dream how to organize memory in this workspace. Most users do not need to touch it. To create an editable copy, run:
 
 ```text
-/dream_prompt init
+/dream-prompt init
 ```
 
 That creates `prompts/dream.md`. Edit it in plain Markdown. Delete or empty it to return to nanobot's default memory behavior.
@@ -19,7 +19,7 @@ That creates `prompts/dream.md`. Edit it in plain Markdown. Delete or empty it t
 To create an editable copy, run:
 
 ```text
-/evaluator_prompt init
+/evaluator-prompt init
 ```
 
 That creates `prompts/evaluator.md`. It must still instruct the model to call the `evaluate_notification` tool; otherwise the gate fails closed and stays silent. Delete or empty the file to return to the built-in prompt.

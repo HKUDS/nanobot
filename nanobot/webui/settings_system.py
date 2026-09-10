@@ -32,6 +32,7 @@ from nanobot.webui.settings_contracts import (
     query_first,
     query_first_alias,
 )
+from nanobot.webui.settings_runtime import runtime_config_payload
 
 if TYPE_CHECKING:
     from nanobot.webui.settings_services import WebUISettingsServices
@@ -43,6 +44,7 @@ SettingsOperation = Callable[..., Any]
 
 @dataclass(frozen=True)
 class SystemSettingsOperations:
+    update_runtime_config: SettingsOperation
     cli_apps_payload: SettingsOperation
     cli_apps_action: SettingsOperation
     nanobot_features_payload: SettingsOperation
@@ -62,6 +64,7 @@ class SystemSettingsOperations:
 
 
 class SystemSettingsPayload(TypedDict):
+    runtime_config: dict[str, Any]
     runtime: dict[str, Any]
     usage: dict[str, Any]
     advanced: dict[str, Any]
@@ -106,6 +109,7 @@ def system_settings_payload(
         workspace=config.workspace_path,
     )
     return {
+        "runtime_config": runtime_config_payload(config),
         "runtime": {
             "config_path": str(config_path.expanduser()),
             "workspace_path": str(config.workspace_path),
@@ -371,6 +375,22 @@ class SystemSettingsHandler:
         channel_name: str | None = None,
         connect_action: str | None = None,
     ) -> SettingsRouteResult:
+        if action == "runtime-config-update":
+            values = (request.payload or {}).get("values")
+            if not isinstance(values, dict):
+                return SettingsRouteResult.failure(400, "Runtime settings must be an object")
+            try:
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
+                    operations.update_runtime_config,
+                    values,
+                    local_browser=request.local_browser,
+                )
+            except WebUISettingsError as exc:
+                return SettingsRouteResult.failure(exc.status, exc.message)
+            return SettingsRouteResult.success(
+                payload, decorate_restart=True, restart_section="runtime",
+            )
         if action == "cli-list":
             return await self._cli_apps(request, operations)
         if action.startswith("cli-"):

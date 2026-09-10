@@ -1,6 +1,6 @@
 {
   "description": "Usa nanobot desde chats de QQ.",
-  "requirements": "Credenciales del bot de QQ y gateway",
+  "requirements": "Credenciales del bot de QQ y pasarela",
   "setup": {
     "docsLabel": "Abrir guía de QQ",
     "officialLabel": "Abrir consola del bot de QQ",

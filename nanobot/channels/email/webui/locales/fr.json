@@ -1,11 +1,12 @@
 {
-  "description": "Permettez à nanobot de recevoir et répondre aux e-mails.",
+  "displayName": "E-mail",
+  "description": "Permettez à nanobot de recevoir des e-mails et d’y répondre.",
   "requirements": "Boîte IMAP, envoi SMTP, mot de passe d’application et consentement explicite",
   "setup": {
     "docsLabel": "Ouvrir le guide Email",
     "officialLabel": "Ouvrir le guide des mots de passe d’application",
     "tryIt": "Envoyez un e-mail test à la boîte connectée.",
-    "summary": "Email lit les messages via IMAP et répond via SMTP. Utilisez une boîte dédiée et accordez votre consentement avant l’activation.",
+    "summary": "nanobot lit les messages via IMAP et répond via SMTP. Utilisez une boîte dédiée et autorisez l’accès avant d’activer le canal.",
     "steps": [
       "Créez une boîte dédiée et, si nécessaire, un mot de passe d’application.",
       "Choisissez un fournisseur ou saisissez les paramètres IMAP et SMTP.",
@@ -19,8 +20,8 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Consentement accordé",
-        "help": "Sécurité obligatoire. N’activez qu’après avoir choisi de connecter cette boîte au bot.",
+        "label": "Autoriser nanobot à lire et envoyer des e-mails",
+        "help": "Activez cette option pour autoriser l’accès à cette boîte. Vérifiez qu’il s’agit bien de la boîte dédiée au bot.",
         "choices": {
           "true": "Accordé",
           "false": "Non accordé"
@@ -65,13 +66,13 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Intervalle de relève",
+        "label": "Intervalle de relève (secondes)",
         "placeholder": "30"
       },
       "allowFrom": {
         "label": "Expéditeurs autorisés",
         "placeholder": "Adresses séparées par des virgules",
-        "help": "Laissez vide pour imposer l’association avant utilisation."
+        "help": "Laissez vide pour que les expéditeurs doivent d’abord s’associer au bot."
       },
       "verifyDkim": {
         "label": "Vérifier DKIM",

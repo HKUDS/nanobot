@@ -1,7 +1,7 @@
 {
   "displayName": "企业微信",
   "description": "在企业微信工作会话中使用 nanobot。",
-  "requirements": "企业微信应用凭据和回调设置",
+  "requirements": "企业微信 AI 机器人的 Bot ID 和 Secret",
   "setup": {
     "docsLabel": "打开企业微信配置指南",
     "officialLabel": "打开企业微信管理后台",

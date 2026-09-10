@@ -19,8 +19,8 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Consent granted",
-        "help": "Required safety switch. Leave false until this bot mailbox is intentionally connected.",
+        "label": "Allow nanobot to read and send email",
+        "help": "Turn on to give nanobot access to this mailbox. Make sure this is the dedicated mailbox you want the bot to use.",
         "choices": {
           "true": "Granted",
           "false": "Not granted"
@@ -65,7 +65,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Poll interval",
+        "label": "Check for mail every (seconds)",
         "placeholder": "30"
       },
       "allowFrom": {

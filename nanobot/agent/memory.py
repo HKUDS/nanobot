@@ -705,7 +705,7 @@ class MemoryStore:
         *diff_body* is a structured, machine-derived summary of the actual file
         changes (see :meth:`dream_content_diff` /
         :meth:`GitStore.summarize_working_tree`). The LLM narrative is
-        deliberately excluded so the audit record (``/dream_log``) reflects the
+        deliberately excluded so the audit record (``/dream-log``) reflects the
         filesystem's truth, not the model's self-report.
 
         An empty *diff_body* yields the bare *prefix*, which ``auto_commit``

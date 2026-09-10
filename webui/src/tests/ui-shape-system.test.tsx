@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 describe("UI shape system", () => {
-  it("gives standard controls one shared radius", () => {
+  it("uses pill-shaped inputs and the shared radius for other controls", () => {
     render(
       <>
         <Button>Continue</Button>
@@ -34,7 +34,7 @@ describe("UI shape system", () => {
     );
 
     expect(screen.getByRole("button", { name: "Continue" })).toHaveClass("rounded-control");
-    expect(screen.getByRole("textbox", { name: "Name" })).toHaveClass("rounded-control");
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveClass("rounded-full");
     expect(screen.getByRole("textbox", { name: "Description" })).toHaveClass(
       "rounded-control",
     );

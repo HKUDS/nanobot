@@ -1,6 +1,6 @@
 {
   "description": "WeCom の業務チャットから nanobot を利用します。",
-  "requirements": "WeCom アプリの認証情報とコールバック設定",
+  "requirements": "WeCom AI ボットの Bot ID と Secret",
   "setup": {
     "docsLabel": "WeCom 設定ガイドを開く",
     "officialLabel": "WeCom コンソールを開く",

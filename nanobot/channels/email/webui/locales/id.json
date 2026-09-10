@@ -1,4 +1,5 @@
 {
+  "displayName": "Email",
   "description": "Izinkan nanobot menerima dan membalas email.",
   "requirements": "Kotak masuk IMAP, pengirim SMTP, kata sandi aplikasi, dan persetujuan eksplisit",
   "setup": {
@@ -8,7 +9,7 @@
     "summary": "Email membaca pesan melalui IMAP dan membalas melalui SMTP. Gunakan kotak surat khusus dan berikan persetujuan sebelum mengaktifkan.",
     "steps": [
       "Buat kotak surat khusus dan kata sandi aplikasi bila diperlukan.",
-      "Pilih preset penyedia atau masukkan IMAP dan SMTP secara manual.",
+      "Pilih prasetel penyedia atau masukkan pengaturan IMAP dan SMTP secara manual.",
       "Berikan persetujuan, simpan dan aktifkan Email, lalu kirim pesan uji."
     ],
     "presets": {
@@ -19,8 +20,8 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Persetujuan diberikan",
-        "help": "Sakelar keamanan wajib. Aktifkan hanya setelah sengaja menghubungkan kotak surat ini ke bot.",
+        "label": "Izinkan nanobot membaca dan mengirim email",
+        "help": "Aktifkan untuk memberi nanobot akses ke kotak surat ini. Pastikan kotak surat tersebut memang dikhususkan untuk bot.",
         "choices": {
           "true": "Diberikan",
           "false": "Belum diberikan"
@@ -65,7 +66,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Interval pemeriksaan",
+        "label": "Interval pemeriksaan email (detik)",
         "placeholder": "30"
       },
       "allowFrom": {

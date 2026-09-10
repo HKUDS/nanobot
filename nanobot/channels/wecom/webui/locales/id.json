@@ -1,6 +1,6 @@
 {
   "description": "Gunakan nanobot dari chat kerja WeCom.",
-  "requirements": "Kredensial aplikasi WeCom dan pengaturan callback",
+  "requirements": "Bot ID dan Secret bot AI WeCom",
   "setup": {
     "docsLabel": "Buka panduan WeCom",
     "officialLabel": "Buka konsol WeCom",

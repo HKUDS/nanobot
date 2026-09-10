@@ -1,15 +1,15 @@
 {
-  "description": "Sử dụng nanobot từ không gian làm việc trên trình duyệt cục bộ.",
+  "description": "Sử dụng nanobot trong trình duyệt.",
   "requirements": "Gateway cục bộ và token WebSocket",
   "setup": {
     "docsLabel": "Mở hướng dẫn WebSocket",
     "officialLabel": "Mở WebUI cục bộ",
     "tryIt": "Mở WebUI và gửi một tin nhắn ngắn.",
-    "summary": "Không gian làm việc trên trình duyệt cần WebSocket, được chuẩn bị bởi lệnh nanobot webui.",
+    "summary": "WebUI kết nối với nanobot qua WebSocket. Lệnh nanobot webui tự động thiết lập kết nối này.",
     "steps": [
       "Khởi động nanobot bằng lệnh webui.",
       "Mở URL cục bộ hiển thị trong terminal.",
-      "Giữ WebSocket bật khi sử dụng không gian làm việc trên trình duyệt."
+      "Giữ WebSocket bật khi sử dụng WebUI."
     ]
   }
 }

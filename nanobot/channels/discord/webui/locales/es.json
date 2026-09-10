@@ -1,11 +1,11 @@
 {
   "description": "Usa nanobot en servidores y mensajes directos de Discord.",
-  "requirements": "Token del bot de Discord, permisos y gateway",
+  "requirements": "Token del bot de Discord, permisos y pasarela",
   "setup": {
     "docsLabel": "Abrir guía de Discord",
     "officialLabel": "Abrir portal de Discord",
     "tryIt": "Menciona al bot en un servidor o envíale un mensaje directo.",
-    "summary": "Activar habilita Discord. Aún necesitas el token del bot y permisos del servidor.",
+    "summary": "Para conectar Discord necesitas un token de bot y los permisos adecuados en el servidor.",
     "steps": [
       "Crea un bot en Discord Developer Portal y copia su token.",
       "Invítalo al servidor con permisos para leer/enviar mensajes y usar comandos slash.",
@@ -27,7 +27,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       },
       "allowFrom": {

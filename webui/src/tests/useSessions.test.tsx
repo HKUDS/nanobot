@@ -60,6 +60,35 @@ function wrap(
 }
 
 describe("useSessions", () => {
+  it("coalesces a burst across tasks and preserves unchanged session identities", async () => {
+    const row = { key: "websocket:burst", channel: "websocket", chatId: "burst",
+      createdAt: "2026-09-08", updatedAt: "2026-09-08", preview: "Stable" };
+    vi.mocked(api.listSessions).mockImplementation(async () => [{ ...row }]);
+    const client = fakeClient();
+    const { result, unmount } = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+    const original = result.current.sessions;
+    vi.useFakeTimers();
+    try {
+      for (let index = 0; index < 20; index++) {
+        await act(async () => {
+          client.emitSessionUpdate("burst");
+          await vi.advanceTimersByTimeAsync(10);
+        });
+      }
+      expect(api.listSessions).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+      expect(api.listSessions).toHaveBeenCalledTimes(2);
+      expect(result.current.sessions).toBe(original);
+      client.emitSessionUpdate("burst");
+      unmount();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(api.listSessions).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   beforeEach(() => {
     vi.mocked(api.listSessions).mockReset();
     vi.mocked(api.deleteSession).mockReset();
@@ -266,8 +295,8 @@ describe("useSessions", () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(api.listSessions).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+    expect(result.current.loading).toBe(false);
   });
 
   it("runs one trailing refresh when an update arrives during a session request", async () => {

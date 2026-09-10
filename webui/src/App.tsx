@@ -12,9 +12,12 @@ import { Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
+import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
+import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
-import { ThreadShell } from "@/components/thread/ThreadShell";
+import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
+import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import {
   MAX_WORKBENCH_PANES,
@@ -109,6 +112,7 @@ const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
 const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
 const SIDEBAR_WIDTH = 272;
+const SIDEBAR_WIDTH_STORAGE_KEY = "nanobot-webui.sidebar.width";
 const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
@@ -116,13 +120,16 @@ const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const PAIRING_POLL_INTERVAL_MS = 5_000;
 const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
   temporary?: boolean;
 };
+const ThreadShell = lazy(() => import("@/components/thread/ThreadShell").then(
+  (module) => ({ default: module.ThreadShell }),
+));
 const loadSettingsView = () => import("@/components/settings/SettingsView");
 const SettingsView = lazy(async () => {
   const module = await loadSettingsView();
@@ -141,14 +148,14 @@ const RenameChatDialog = lazy(async () => {
   return { default: module.RenameChatDialog };
 });
 
-function SurfaceLoadingFallback() {
+function SurfaceLoadingFallback({ label }: { label?: string }) {
   const { t } = useTranslation();
   return (
     <div
       aria-busy="true"
       className="flex h-full w-full flex-col gap-5 px-5 py-8 sm:px-8 lg:px-12"
     >
-      <span className="sr-only">{t("settings.status.loading")}</span>
+      <span className="sr-only">{label ?? t("settings.status.loading")}</span>
       <div className="h-4 w-20 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
       <div className="h-9 w-48 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
       <div className="mt-4 h-12 w-full max-w-3xl animate-pulse rounded-md bg-muted/55 motion-reduce:animate-none" />
@@ -158,7 +165,9 @@ function SurfaceLoadingFallback() {
 }
 
 const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
+  "capabilities",
   "overview",
+  "about",
   "appearance",
   "models",
   "image",
@@ -167,6 +176,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "channels",
   "apps",
   "automations",
+  "memory",
   "skills",
   "runtime",
   "advanced",
@@ -181,7 +191,7 @@ function defaultShellRoute(): ShellRoute {
 }
 
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "automations" || section === "skills") return section;
+  if (section === "apps" || section === "automations" || section === "skills" || section === "channels") return section;
   return "settings";
 }
 
@@ -249,6 +259,9 @@ function readShellRoute(): ShellRoute {
   if (path === "/automations") {
     return { view: "automations", activeKey, settingsSection: "automations" };
   }
+  if (path === "/channels") {
+    return { view: "channels", activeKey, settingsSection: "channels" };
+  }
   if (path === "/skills") {
     return { view: "skills", activeKey, settingsSection: "skills" };
   }
@@ -313,7 +326,11 @@ function writeShellRoute(route: ShellRoute, replace = false): void {
     );
     return;
   }
-  window.location.hash = nextHash;
+  window.history.pushState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}${nextHash}`,
+  );
 }
 
 function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
@@ -421,6 +438,16 @@ function AuthForm({
       </form>
     </div>
   );
+}
+
+function readSidebarWidth(): number {
+  try {
+    const width = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    return Number.isFinite(width) && width >= SIDEBAR_MIN_WIDTH
+      ? Math.min(SIDEBAR_MAX_WIDTH, width) : SIDEBAR_WIDTH;
+  } catch {
+    return SIDEBAR_WIDTH;
+  }
 }
 
 function readSidebarOpen(): boolean {
@@ -1035,6 +1062,8 @@ function Shell({
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
   const [hostSidebarOpen, setHostSidebarOpen] =
     useState<boolean>(readSidebarOpen);
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const [sidebarDragging, setSidebarDragging] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
@@ -1082,6 +1111,12 @@ function Shell({
   const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const settingsExitGuardRef = useRef<SettingsExitGuard | null>(null);
+  const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
+  currentShellRouteRef.current = { view, activeKey, settingsSection: settingsInitialSection };
+  const registerSettingsExitGuard = useCallback((guard: SettingsExitGuard | null) => {
+    settingsExitGuardRef.current = guard;
+  }, []);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [draftWorkspaceScope, setDraftWorkspaceScope] =
     useState<WorkspaceScopePayload | null>(null);
@@ -1112,10 +1147,15 @@ function Shell({
 
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean }) => {
-      setActiveKey(route.activeKey);
-      setView(route.view);
-      setSettingsInitialSection(route.settingsSection);
-      writeShellRoute(route, options?.replace);
+      const leave = () => {
+        setActiveKey(route.activeKey);
+        setView(route.view);
+        setSettingsInitialSection(route.settingsSection);
+        writeShellRoute(route, options?.replace);
+      };
+      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
+        settingsExitGuardRef.current(leave);
+      } else leave();
     },
     [],
   );
@@ -1123,6 +1163,18 @@ function Shell({
   useEffect(() => {
     const applyRoute = () => {
       const route = readShellRoute();
+      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
+        writeShellRoute(currentShellRouteRef.current, true);
+        settingsExitGuardRef.current(() => {
+          setActiveKey(route.activeKey);
+          setView(route.view);
+          setSettingsInitialSection(route.settingsSection);
+          writeShellRoute(route, true);
+          setWorkspaceError(null);
+          if (route.view === "chat" && !route.activeKey) setDraftWorkspaceScope(null);
+        });
+        return;
+      }
       setActiveKey(route.activeKey);
       setView(route.view);
       setSettingsInitialSection(route.settingsSection);
@@ -1132,7 +1184,11 @@ function Shell({
       }
     };
     window.addEventListener("hashchange", applyRoute);
-    return () => window.removeEventListener("hashchange", applyRoute);
+    window.addEventListener("popstate", applyRoute);
+    return () => {
+      window.removeEventListener("hashchange", applyRoute);
+      window.removeEventListener("popstate", applyRoute);
+    };
   }, []);
 
   useEffect(() => {
@@ -1173,7 +1229,12 @@ function Shell({
     } catch {
       // ignore storage errors (private mode, etc.)
     }
-  }, [hostSidebarOpen]);
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    } catch {
+      // Storage can be unavailable in private browsing.
+    }
+  }, [hostSidebarOpen, sidebarWidth]);
 
   useEffect(() => {
     writeSessionUpdateChatIds(updatedChatIds);
@@ -1430,10 +1491,6 @@ function Shell({
       return changed ? next : current;
     });
   }, [client, loading, sessions]);
-
-  const closeHostSidebar = useCallback(() => {
-    setHostSidebarOpen(false);
-  }, []);
 
   const openHostSidebar = useCallback(() => {
     setHostSidebarOpen(true);
@@ -1873,28 +1930,6 @@ function Shell({
     updateWorkbenchState,
   ]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      const commandShiftO =
-        (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey;
-      if (commandShiftO && event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        onNewChat();
-        return;
-      }
-      const plainCommandK =
-        (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
-      if (!plainCommandK) return;
-      if (event.key.toLowerCase() !== "k") return;
-      event.preventDefault();
-      onOpenSessionSearch();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNewChat, onOpenSessionSearch]);
-
   const onSelectSearchResult = useCallback(
     (key: string) => {
       setSessionSearchOpen(false);
@@ -1905,7 +1940,7 @@ function Shell({
 
   const onOpenSettings = useCallback((section: SettingsSectionKey = "overview") => {
     setSessionSearchOpen(false);
-    navigate({ view: "settings", activeKey, settingsSection: section });
+    navigate({ view: shellViewForSettingsSection(section), activeKey, settingsSection: section });
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
@@ -1929,11 +1964,30 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
+  const onOpenChannels = useCallback(() => {
+    setSessionSearchOpen(false);
+    navigate({ view: "channels", activeKey, settingsSection: "channels" });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+
   const onOpenSkills = useCallback(() => {
     setSessionSearchOpen(false);
     navigate({ view: "skills", activeKey, settingsSection: "skills" });
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
+
+  useEffect(() => {
+    const actions = { newChat: onNewChat, search: onOpenSessionSearch, apps: onOpenApps,
+      skills: onOpenSkills, automations: onOpenAutomations, channels: onOpenChannels, settings: () => onOpenSettings() };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      const action = matchSidebarShortcut(event);
+      if (!action) return;
+      event.preventDefault();
+      actions[action]();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenChannels, onOpenSettings]);
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
@@ -2415,6 +2469,10 @@ function Shell({
       });
       return;
     }
+    if (view === "channels") {
+      document.title = t("app.documentTitle.chat", { title: t("settings.nav.channels") });
+      return;
+    }
     if (view === "skills") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.nav.skills", { defaultValue: "Skills" }),
@@ -2475,10 +2533,11 @@ function Shell({
     onOpenSettings,
     onOpenApps,
     onOpenAutomations,
+    onOpenChannels,
     onOpenSkills,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "automations" || view === "skills" ? view : null,
+    activeUtility: view === "apps" || view === "automations" || view === "skills" || view === "channels" ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
@@ -2496,7 +2555,7 @@ function Shell({
     archivedCount: sidebarArchivedTabKeys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
-  const hostSidebarFlowWidth = hostSidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_RAIL_WIDTH;
+  const hostSidebarFlowWidth = hostSidebarOpen ? sidebarWidth : SIDEBAR_RAIL_WIDTH;
 
   useEffect(() => {
     document.documentElement.classList.toggle("native-host", showHostChrome);
@@ -2544,9 +2603,10 @@ function Shell({
           {showMainSidebar ? (
             <aside
               data-testid="host-sidebar-flow"
+              id="main-sidebar"
               className={cn(
                 "relative z-20 hidden shrink-0 overflow-hidden lg:block",
-                "transition-[width] duration-300 ease-out",
+                sidebarDragging ? "select-none" : "transition-[width] duration-300 ease-out motion-reduce:transition-none",
               )}
               style={{
                 width: hostSidebarFlowWidth,
@@ -2564,10 +2624,18 @@ function Shell({
                   {...sidebarProps}
                   collapsed={!hostSidebarOpen}
                   hostChromeInset={showHostChrome}
-                  onCollapse={closeHostSidebar}
                   onExpand={openHostSidebar}
                 />
               </div>
+              <SidebarResizeHandle
+                width={sidebarWidth}
+                open={hostSidebarOpen}
+                onDraggingChange={setSidebarDragging}
+                onResize={(width, open) => {
+                  if (open) setSidebarWidth(width);
+                  setHostSidebarOpen(open);
+                }}
+              />
             </aside>
           ) : null}
 
@@ -2617,138 +2685,143 @@ function Shell({
                 view !== "chat" && "hidden",
               )}
             >
-              <PaneWorkbench
-                panes={renderedWorkbenchPanes}
-                activePaneKey={renderedActivePaneKey}
-                layout={renderedWorkbenchLayout}
-                splitRatios={renderedWorkbenchSplitRatios}
-                chrome={paneChromeEnabled}
-                showLayoutControl={activeTabVisible}
-                addPaneDisabled={creatingPane || activePaneLimitReached}
-                addPaneDisabledLabel={activePaneLimitReached
-                  ? t("workbench.paneLimit", {
-                      count: MAX_WORKBENCH_PANES,
-                    })
-                  : undefined}
-                onActivatePane={onActivateWorkbenchPane}
-                onAddPane={onAddPane}
-                onLayoutChange={(layout) => {
-                  if (!activeTabKey) return;
-                  updateWorkbenchState((current) => (
-                    setWorkbenchLayout(current, activeTabKey, layout)
-                  ));
-                }}
-                onPaneOrderChange={(paneKeys) => {
-                  if (!activeTabKey) return;
-                  updateWorkbenchState((current) => (
-                    setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
-                  ));
-                }}
-                onSplitRatiosChange={(splitRatios) => {
-                  if (!activeTabKey) return;
-                  updateWorkbenchState((current) => (
-                    setWorkbenchSplitRatios(current, activeTabKey, splitRatios)
-                  ));
-                }}
-                renderPane={(pane, context) => {
-                  if (!paneChromeEnabled) {
-                    return (
-                      <ThreadShell
-                        session={activeSession}
-                        sessions={sessions}
-                        title={headerTitle}
-                        temporary={temporaryChatRequested}
-                        temporaryChatIds={temporaryChatIds}
-                        temporaryChatEnabled={temporaryChatEnabled}
-                        onTemporaryChatEnabledChange={
-                          !activeKey ? onTemporaryChatEnabledChange : undefined
-                        }
-                        onToggleSidebar={toggleSidebar}
-                        onNewChat={onNewChat}
-                        onCreateChat={
-                          temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
-                        }
-                        onForkChat={temporaryChatActive ? undefined : onForkChat}
-                        onTurnEnd={onTurnEnd}
-                        theme={theme}
-                        onToggleTheme={toggle}
-                        hideSidebarToggleForHostChrome
-                        hideHeader={false}
-                        workspaceScope={activeWorkspaceScope}
-                        workspaceDefaultScope={workspaces?.default_scope ?? null}
-                        workspaceControls={workspaces?.controls ?? null}
-                        workspaceScopeDisabled={activeChatRunning}
-                        workspaceError={workspaceError}
-                        onWorkspaceScopeChange={applyWorkspaceScope}
-                        settingsSnapshot={settingsSnapshot}
-                        onOpenModelSettings={onOpenModelSettings}
-                        skills={skills}
-                      />
-                    );
-                  }
+              <ThreadVisibilityContext.Provider value={view === "chat"}>
+                <Suspense fallback={<SurfaceLoadingFallback label={t("chat.loading")} />}>
+                  <PaneWorkbench
+                    panes={renderedWorkbenchPanes}
+                    activePaneKey={renderedActivePaneKey}
+                    layout={renderedWorkbenchLayout}
+                    splitRatios={renderedWorkbenchSplitRatios}
+                    chrome={paneChromeEnabled}
+                    showLayoutControl={activeTabVisible}
+                    addPaneDisabled={creatingPane || activePaneLimitReached}
+                    addPaneDisabledLabel={activePaneLimitReached
+                      ? t("workbench.paneLimit", {
+                          count: MAX_WORKBENCH_PANES,
+                        })
+                      : undefined}
+                    onActivatePane={onActivateWorkbenchPane}
+                    onAddPane={onAddPane}
+                    onLayoutChange={(layout) => {
+                      if (!activeTabKey) return;
+                      updateWorkbenchState((current) => (
+                        setWorkbenchLayout(current, activeTabKey, layout)
+                      ));
+                    }}
+                    onPaneOrderChange={(paneKeys) => {
+                      if (!activeTabKey) return;
+                      updateWorkbenchState((current) => (
+                        setWorkbenchPaneLayoutOrder(current, activeTabKey, paneKeys)
+                      ));
+                    }}
+                    onSplitRatiosChange={(splitRatios) => {
+                      if (!activeTabKey) return;
+                      updateWorkbenchState((current) => (
+                        setWorkbenchSplitRatios(current, activeTabKey, splitRatios)
+                      ));
+                    }}
+                    renderPane={(pane, context) => {
+                      if (!paneChromeEnabled) {
+                        return (
+                          <ThreadShell
+                            session={activeSession}
+                            sessions={sessions}
+                            title={headerTitle}
+                            temporary={temporaryChatRequested}
+                            temporaryChatIds={temporaryChatIds}
+                            temporaryChatEnabled={temporaryChatEnabled}
+                            onTemporaryChatEnabledChange={
+                              !activeKey ? onTemporaryChatEnabledChange : undefined
+                            }
+                            onToggleSidebar={toggleSidebar}
+                            onNewChat={onNewChat}
+                            onCreateChat={
+                              temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
+                            }
+                            onForkChat={temporaryChatActive ? undefined : onForkChat}
+                            onTurnEnd={onTurnEnd}
+                            theme={theme}
+                            onToggleTheme={toggle}
+                            hideSidebarToggleForHostChrome
+                            hideHeader={false}
+                            workspaceScope={activeWorkspaceScope}
+                            workspaceDefaultScope={workspaces?.default_scope ?? null}
+                            workspaceControls={workspaces?.controls ?? null}
+                            workspaceScopeDisabled={activeChatRunning}
+                            workspaceError={workspaceError}
+                            onWorkspaceScopeChange={applyWorkspaceScope}
+                            settingsSnapshot={settingsSnapshot}
+                            onOpenModelSettings={onOpenModelSettings}
+                            skills={skills}
+                          />
+                        );
+                      }
 
-                  const paneSession = workbenchPaneSessions.find(
-                    (session) => session.key === pane.key,
-                  );
-                  if (!paneSession) return null;
-                  const paneScope = workspaceOverrides[paneSession.chatId]
-                    ?? paneSession.workspaceScope
-                    ?? workspaces?.default_scope
-                    ?? null;
-                  const paneRunning = runningChatIds.has(paneSession.chatId);
-                  return (
-                    <ThreadShell
-                      session={paneSession}
-                      sessions={sessions}
-                      title={pane.title}
-                      onToggleSidebar={toggleSidebar}
-                      onNewChat={onNewChat}
-                      onCreateChat={onCreateChat}
-                      onForkChat={onForkChat}
-                      onTurnEnd={context.active ? onTurnEnd : () => void refresh()}
-                      theme={theme}
-                      onToggleTheme={toggle}
-                      hideSidebarToggle={!context.active}
-                      hideSidebarToggleForHostChrome={context.active}
-                      hideThemeButton={!context.active}
-                      hideHeaderTitle
-                      inlineHandle={workbenchPaneSessions.length > 1}
-                      headerActions={context.headerActions}
-                      headerPortalTarget={context.headerPortalTarget}
-                      headerActive={context.active}
-                      composerPortalTarget={context.composerPortalTarget}
-                      composerActive={context.active}
-                      composerInputAriaLabel={t("workbench.composerAria", {
-                        title: pane.title,
-                      })}
-                      emptyComposerVariant="thread"
-                      workspaceScope={paneScope}
-                      workspaceDefaultScope={workspaces?.default_scope ?? null}
-                      workspaceControls={workspaces?.controls ?? null}
-                      workspaceScopeDisabled={paneRunning}
-                      workspaceError={context.active ? workspaceError : null}
-                      onWorkspaceScopeChange={(scope) => {
-                        if (paneRunning) return;
-                        const next = normalizeWorkspaceScope(scope);
-                        setWorkspaceError(null);
-                        setWorkspaceOverrides((current) => ({
-                          ...current,
-                          [paneSession.chatId]: next,
-                        }));
-                        client.setWorkspaceScope(paneSession.chatId, next);
-                      }}
-                      settingsSnapshot={settingsSnapshot}
-                      onOpenModelSettings={onOpenModelSettings}
-                      skills={skills}
-                    />
-                  );
-                }}
-              />
+                      const paneSession = workbenchPaneSessions.find(
+                        (session) => session.key === pane.key,
+                      );
+                      if (!paneSession) return null;
+                      const paneScope = workspaceOverrides[paneSession.chatId]
+                        ?? paneSession.workspaceScope
+                        ?? workspaces?.default_scope
+                        ?? null;
+                      const paneRunning = runningChatIds.has(paneSession.chatId);
+                      return (
+                        <ThreadShell
+                          session={paneSession}
+                          sessions={sessions}
+                          title={pane.title}
+                          onToggleSidebar={toggleSidebar}
+                          onNewChat={onNewChat}
+                          onCreateChat={onCreateChat}
+                          onForkChat={onForkChat}
+                          onTurnEnd={context.active ? onTurnEnd : () => void refresh()}
+                          theme={theme}
+                          onToggleTheme={toggle}
+                          hideSidebarToggle={!context.active}
+                          hideSidebarToggleForHostChrome={context.active}
+                          hideThemeButton={!context.active}
+                          hideHeaderTitle
+                          inlineHandle={workbenchPaneSessions.length > 1}
+                          headerActions={context.headerActions}
+                          headerPortalTarget={context.headerPortalTarget}
+                          headerActive={context.active}
+                          composerPortalTarget={context.composerPortalTarget}
+                          composerActive={context.active}
+                          composerInputAriaLabel={t("workbench.composerAria", {
+                            title: pane.title,
+                          })}
+                          emptyComposerVariant="thread"
+                          workspaceScope={paneScope}
+                          workspaceDefaultScope={workspaces?.default_scope ?? null}
+                          workspaceControls={workspaces?.controls ?? null}
+                          workspaceScopeDisabled={paneRunning}
+                          workspaceError={context.active ? workspaceError : null}
+                          onWorkspaceScopeChange={(scope) => {
+                            if (paneRunning) return;
+                            const next = normalizeWorkspaceScope(scope);
+                            setWorkspaceError(null);
+                            setWorkspaceOverrides((current) => ({
+                              ...current,
+                              [paneSession.chatId]: next,
+                            }));
+                            client.setWorkspaceScope(paneSession.chatId, next);
+                          }}
+                          settingsSnapshot={settingsSnapshot}
+                          onOpenModelSettings={onOpenModelSettings}
+                          skills={skills}
+                        />
+                      );
+                    }}
+                  />
+                </Suspense>
+              </ThreadVisibilityContext.Provider>
             </div>
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
                 <Suspense fallback={<SurfaceLoadingFallback />}>
                   <SettingsView
+                    registerExitGuard={registerSettingsExitGuard}
                     theme={theme}
                     initialSection={settingsInitialSection}
                     initialSettings={settingsSnapshot}

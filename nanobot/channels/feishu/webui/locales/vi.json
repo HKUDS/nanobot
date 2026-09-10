@@ -19,8 +19,8 @@
       },
       "appSecret": {
         "label": "App Secret",
-        "placeholder": "Để trống để giữ secret hiện tại",
-        "help": "Chỉ dán secret mới khi xoay vòng thông tin xác thực."
+        "placeholder": "Để trống để giữ khóa hiện tại",
+        "help": "Chỉ nhập App Secret mới khi muốn thay thế giá trị đã lưu."
       },
       "domain": {
         "label": "Khu vực",
@@ -51,7 +51,7 @@
     }
   },
   "custom": {
-    "toggleAssistant": "Trợ lý {{name}}",
+    "toggleAssistant": "Bật trợ lý {{name}}",
     "configured": "Đã kết nối",
     "needsSetup": "Cần cấp quyền",
     "noAppId": "Không có App ID",

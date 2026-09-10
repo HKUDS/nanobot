@@ -10,7 +10,6 @@ import {
   Loader2,
   Pencil,
   Plus,
-  RotateCcw,
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -30,6 +29,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -381,17 +382,14 @@ function ProviderRequestOptions({
 
   return (
     <div className="overflow-hidden rounded-floating border border-border/45 bg-background/75">
-      {options.map((option, index) => {
+      {options.map((option) => {
         const title = tx(option.titleKey, option.title);
         const Icon = option.kind === "priority" ? Zap : Globe2;
         const checked = providerRequestOptionEnabled(option, extraBody);
         return (
           <div
             key={option.titleKey}
-            className={cn(
-              "flex items-center justify-between gap-4 px-4 py-3",
-              index > 0 && "border-t border-border/45",
-            )}
+            className="flex items-center justify-between gap-4 rounded-xl px-4 py-3 transition-colors settings-hover focus-within:bg-sidebar-accent/60"
           >
             <div className="flex min-w-0 items-start gap-3">
               <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
@@ -444,7 +442,7 @@ function ProviderAdvancedOptions({
   ];
 
   return (
-    <div className="border-y border-border/45">
+    <div className="space-y-1">
       <button
         type="button"
         aria-expanded={open}
@@ -463,7 +461,7 @@ function ProviderAdvancedOptions({
         />
       </button>
       {open ? (
-        <div className="border-t border-border/45 py-3">
+        <div className="py-3">
           <div className="grid gap-3 md:grid-cols-2">
             {enabled.has("api_type") ? (
               <label className="block space-y-1.5">
@@ -504,7 +502,7 @@ function ProviderAdvancedOptions({
             {enabled.has("thinking_style") ? (
               <label className="block space-y-1.5">
                 <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.thinkingStyle", "Thinking style")}
+                  {tx("settings.providers.thinkingStyle", "Reasoning parameter format")}
                 </span>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -575,7 +573,7 @@ function ProviderAdvancedOptions({
             {enabled.has("profile") ? (
               <label className="block space-y-1.5">
                 <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.profile", "Profile")}
+                  {tx("settings.providers.profile", "AWS profile")}
                 </span>
                 <Input
                   value={form.profile}
@@ -594,40 +592,31 @@ function ProviderAdvancedOptions({
                 <span className="text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.extraHeaders", "Extra headers")}
                 </span>
-                <Textarea
-                  value={form.extraHeaders}
-                  onChange={(event) => onChange({ extraHeaders: event.target.value })}
+                <SettingsTextEditor title={tx("settings.providers.extraHeaders", "Extra headers")}
+                  value={form.extraHeaders} onSave={(value) => onChange({ extraHeaders: value })}
                   placeholder={'{"X-Header":"value"}'}
-                  spellCheck={false}
-                  className="min-h-[88px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
             {enabled.has("extra_query") ? (
               <label className="block min-w-0 space-y-1.5">
                 <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraQuery", "Extra query")}
+                  {tx("settings.providers.extraQuery", "Additional query parameters")}
                 </span>
-                <Textarea
-                  value={form.extraQuery}
-                  onChange={(event) => onChange({ extraQuery: event.target.value })}
+                <SettingsTextEditor title={tx("settings.providers.extraQuery", "Additional query parameters")}
+                  value={form.extraQuery} onSave={(value) => onChange({ extraQuery: value })}
                   placeholder={'{"api-version":"2024-02-01"}'}
-                  spellCheck={false}
-                  className="min-h-[88px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
             {enabled.has("extra_body") ? (
               <label className="block min-w-0 space-y-1.5 md:col-span-2">
                 <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraBody", "Extra body")}
+                  {tx("settings.providers.extraBody", "Additional body parameters")}
                 </span>
-                <Textarea
-                  value={form.extraBody}
-                  onChange={(event) => onChange({ extraBody: event.target.value })}
+                <SettingsTextEditor title={tx("settings.providers.extraBody", "Additional body parameters")}
+                  value={form.extraBody} onSave={(value) => onChange({ extraBody: value })}
                   placeholder={'{"service_tier":"priority"}'}
-                  spellCheck={false}
-                  className="min-h-[96px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
@@ -635,7 +624,7 @@ function ProviderAdvancedOptions({
         </div>
       ) : null}
       {footer ? (
-        <div className="flex items-center justify-end gap-2 border-t border-border/45 py-3">
+        <div className="flex items-center justify-end gap-2 py-3">
           {footer}
         </div>
       ) : null}
@@ -663,9 +652,6 @@ export function ProvidersSettings({
   onCreateCustomProvider,
   onProviderOAuthLogin,
   onProviderOAuthLogout,
-  imageProviderRestartPending,
-  onRestart,
-  isRestarting,
 }: {
   settings: SettingsPayload;
   nanobotFeatures: NanobotFeaturesPayload | null;
@@ -686,9 +672,6 @@ export function ProvidersSettings({
   onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
-  imageProviderRestartPending: boolean;
-  onRestart?: () => void;
-  isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -776,12 +759,14 @@ export function ProvidersSettings({
       ? (nanobotFeatures?.features ?? []).find((feature) => feature.name === supportName)
       : null;
     return (
-      <div key={provider.name} className="divide-y divide-border/45">
+      <Dialog key={provider.name} open={expanded} onOpenChange={(open) => {
+        if (open !== expanded) toggleProvider(provider.name);
+      }}>
+        <DialogTrigger asChild>
         <button
           type="button"
-          aria-expanded={expanded}
-          onClick={() => toggleProvider(provider.name)}
-          className="flex min-h-[70px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
+          aria-label={provider.label}
+          className="settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
         >
           <span className="flex min-w-0 items-center gap-3">
             <ProviderIcon
@@ -789,33 +774,26 @@ export function ProvidersSettings({
               showBrandLogos={showBrandLogos}
             />
             <span className="min-w-0">
-              <span className="block truncate text-[15px] font-semibold leading-5 text-foreground">
+              <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
                 {provider.label}
               </span>
-              {provider.api_base ? (
-                <span className="block truncate text-[12px] text-muted-foreground">
-                  {provider.api_base}
-                </span>
-              ) : null}
             </span>
           </span>
-          <ChevronDown
-            className={cn(
-              "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-              expanded && "rotate-180",
-            )}
-            aria-hidden
-          />
+          <span className="shrink-0 px-2 py-1 text-[13px] font-normal leading-5 text-muted-foreground">
+            {t("settings.configure")}
+          </span>
         </button>
+        </DialogTrigger>
 
         {expanded ? (
-          <div className="space-y-3 bg-muted/18 px-4 py-4 sm:px-5">
+          <DialogContent aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto">
+            <DialogHeader><DialogTitle>{provider.label}</DialogTitle></DialogHeader>
             {supportFeature && !supportFeature.installed ? (
               <CapabilityInstallNotice
-                title={tx("settings.capabilities.providerSupport", "Provider support")}
+                title={tx("settings.capabilities.providerSupport", "Provider dependencies")}
                 description={tx(
                   "settings.capabilities.providerInstallOnSave",
-                  "Required support will be installed automatically when you save this provider.",
+                  "Required packages will be installed automatically when you save this provider.",
                 )}
                 installing={featureAction === `enable:${supportName}`}
               />
@@ -976,7 +954,7 @@ export function ProvidersSettings({
                               ? t("settings.byok.hideApiKey")
                               : t("settings.byok.showApiKey")
                           }
-                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
                         >
                           {keyVisible ? (
                             <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -996,7 +974,7 @@ export function ProvidersSettings({
                           size="icon"
                           onClick={() => onToggleProviderKeyEditing(provider.name)}
                           aria-label={t("settings.actions.edit")}
-                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
                         >
                           <Pencil className="h-3.5 w-3.5" aria-hidden />
                         </Button>
@@ -1055,31 +1033,16 @@ export function ProvidersSettings({
                 </div>
               </>
             )}
-          </div>
+          </DialogContent>
         ) : null}
-      </div>
+      </Dialog>
     );
   };
   const customProviderForm = creatingCustomProvider ? (
-    <div className="divide-y divide-border/45">
-      <button
-        type="button"
-        aria-expanded
-        onClick={cancelCustomProviderCreation}
-        className="flex min-h-[70px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
-      >
-        <span className="flex min-w-0 items-center gap-3">
-          <ProviderIcon provider="custom" showBrandLogos={showBrandLogos} />
-          <span className="truncate text-[15px] font-semibold text-foreground">
-            {tx("settings.providers.customProvider", "Custom provider")}
-          </span>
-        </span>
-        <ChevronDown
-          className="h-4 w-4 shrink-0 rotate-180 text-muted-foreground"
-          aria-hidden
-        />
-      </button>
-      <div className="space-y-3 bg-muted/18 px-4 py-4 sm:px-5">
+    <Dialog open onOpenChange={(open) => { if (!open) cancelCustomProviderCreation(); }}>
+      <DialogContent aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto">
+        <DialogHeader><DialogTitle>{tx("settings.providers.customProvider", "Custom provider")}</DialogTitle></DialogHeader>
+      <div className="space-y-3">
         <label className="block space-y-1.5">
           <span className="text-[12px] font-medium text-muted-foreground">
             {tx("settings.providers.customProviderName", "Provider name")}
@@ -1151,7 +1114,7 @@ export function ProvidersSettings({
                   ? t("settings.byok.hideApiKey")
                   : t("settings.byok.showApiKey")
               }
-              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
             >
               {customProviderKeyVisible ? (
                 <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -1195,33 +1158,11 @@ export function ProvidersSettings({
           </Button>
         </div>
       </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   ) : null;
   return (
     <div className="space-y-6">
-      {imageProviderRestartPending && onRestart ? (
-        <div className="flex min-h-[48px] items-center justify-between gap-3 border-y border-border/55 py-3">
-          <p className="text-[13px] leading-5 text-muted-foreground">
-            {tx("settings.status.imageProviderRestart", "Provider support changed. Restart when ready.")}
-          </p>
-          <div className="shrink-0">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={onRestart}
-              disabled={isRestarting}
-              className="rounded-full"
-            >
-              {isRestarting ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-              )}
-              {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
-            </Button>
-          </div>
-        </div>
-      ) : null}
       <section>
         <SettingsSectionTitle>
           {tx("settings.providers.title", "Model providers")}
@@ -1237,13 +1178,13 @@ export function ProvidersSettings({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="group flex min-h-[70px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/35 sm:px-5"
+                  className="group settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
                 >
                   <span className="flex min-w-0 items-center gap-3">
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
                       <Plus className="h-5 w-5" aria-hidden />
                     </span>
-                    <span className="truncate text-[15px] font-semibold text-foreground">
+                    <span className="truncate text-[14px] font-medium text-foreground">
                       {tx(
                         "settings.providers.addOwnProvider",
                         "Add your own model provider",
@@ -1319,7 +1260,7 @@ function providerVisibilityRank(provider: SettingsPayload["providers"][number]):
   return 200;
 }
 
-function ProviderIcon({
+export function ProviderIcon({
   provider,
   showBrandLogos,
 }: {
@@ -1334,7 +1275,7 @@ function ProviderIcon({
     return (
       <span
         data-testid={`provider-logo-${provider}`}
-        className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-control border border-border/45 bg-background"
+        className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-control border border-border/45 bg-background"
       >
         <img
           src={logoUrl}
@@ -1352,7 +1293,7 @@ function ProviderIcon({
     return (
       <span
         data-testid={`provider-logo-fallback-${provider}`}
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-control text-[11px] font-semibold text-white"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-control text-[11px] font-semibold text-white"
         style={{ backgroundColor: brand.color }}
         aria-hidden
       >
@@ -1361,7 +1302,7 @@ function ProviderIcon({
     );
   }
   return (
-    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-muted text-foreground/82 dark:bg-muted/70">
+    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 dark:bg-muted/70">
       <Icon className="h-5 w-5" strokeWidth={2} aria-hidden />
     </span>
   );

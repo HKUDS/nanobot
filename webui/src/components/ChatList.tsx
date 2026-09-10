@@ -132,11 +132,11 @@ function SidebarSessionHandle({ handle }: { handle: ChatSummary["handle"] }) {
   return (
     <span
       data-sidebar-session-handle
-      className="flex max-w-20 shrink-0 items-center overflow-hidden whitespace-nowrap text-[11px] font-medium leading-5"
+      className="flex max-w-20 shrink-0 items-center overflow-hidden whitespace-nowrap font-mono text-[11px] font-medium leading-5"
     >
       <span
         data-sidebar-session-handle-underline
-        className="inline border-b-2 text-foreground"
+        className="inline border-b-2 text-sidebar-muted-foreground"
         style={{
           "--sidebar-session-handle-color": sessionHandleColor(handle.id),
           borderBottomColor: "var(--sidebar-session-handle-color)",
@@ -545,7 +545,7 @@ export const ChatList = memo(function ChatList({
 
   if (loading && sessions.length === 0 && temporarySessions.length === 0) {
     return (
-      <div className="px-3 py-6 text-[12px] text-muted-foreground">
+      <div className="px-3 py-6 text-[12px] text-sidebar-muted-foreground">
         {t("chat.loading")}
       </div>
     );
@@ -553,7 +553,7 @@ export const ChatList = memo(function ChatList({
 
   if (sessions.length === 0 && temporarySessions.length === 0) {
     return (
-      <div className="px-3 py-6 text-[12px] leading-5 text-muted-foreground/80">
+      <div className="px-3 py-6 text-[12px] leading-5 text-sidebar-muted-foreground">
         {emptyLabel ?? t("chat.noSessions")}
       </div>
     );
@@ -627,8 +627,8 @@ export const ChatList = memo(function ChatList({
     closeDeleteSelection();
   };
   return (
-    <TooltipProvider delayDuration={650} skipDelayDuration={120}>
-    <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">
+    <TooltipProvider>
+    <div className="sidebar-scroll-fade h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain py-4 scrollbar-thin scrollbar-track-transparent">
       <div
         data-chat-list-content
         data-pane-detach-target={
@@ -713,7 +713,7 @@ export const ChatList = memo(function ChatList({
           return (
             <section key={group.id} aria-label={group.label} className="relative z-[1]">
               {index === firstProjectGroupIndex ? (
-                <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
+                <div className="px-2 pb-1 text-[12px] font-medium text-sidebar-muted-foreground">
                   {labels.projects}
                 </div>
               ) : null}
@@ -948,12 +948,12 @@ export const ChatList = memo(function ChatList({
                             actionMenus.openFromContextMenu(event, actionMenuId)
                           )}
                           className={cn(
-                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px]",
+                            "group flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px] font-normal leading-5",
                             SIDEBAR_SELECTION_ITEM_CLASS,
                             compact ? "min-h-7" : "min-h-8",
                             topicActive
                               ? "text-sidebar-foreground"
-                              : "text-sidebar-foreground/82 hover:text-sidebar-foreground",
+                              : "text-sidebar-content hover:text-sidebar-accent-foreground",
                             deleteSelectionMode && (tabSelected || tabPartiallySelected)
                               && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
                           )}
@@ -995,12 +995,12 @@ export const ChatList = memo(function ChatList({
                                   {projectMode ? (
                                     <span className="relative flex w-full min-w-0 items-center gap-2">
                                       <SidebarSessionHandle handle={s.handle} />
-                                      <span className="min-w-0 flex-1 truncate font-medium leading-5">
+                                      <span className="min-w-0 flex-1 truncate font-normal leading-5">
                                         {title}
                                       </span>
                                       {isPinned ? <PinnedChatIndicator /> : null}
                                     {timestamp ? (
-                                      <span className="shrink-0 text-[11.5px] font-medium text-muted-foreground/58">
+                                      <span className="shrink-0 text-[11.5px] font-medium text-sidebar-muted-foreground">
                                         {timestamp}
                                       </span>
                                     ) : null}
@@ -1009,7 +1009,7 @@ export const ChatList = memo(function ChatList({
                                 ) : (
                                   <span className="relative flex w-full min-w-0 items-center gap-1.5">
                                     <SidebarSessionHandle handle={s.handle} />
-                                    <span className="min-w-0 flex-1 truncate font-medium leading-5">
+                                    <span className="min-w-0 flex-1 truncate font-normal leading-5">
                                       {title}
                                     </span>
                                     {isPinned ? <PinnedChatIndicator /> : null}
@@ -1017,12 +1017,12 @@ export const ChatList = memo(function ChatList({
                                   </span>
                                 )}
                                 {showPreview ? (
-                                  <span className="block w-full truncate text-[11.5px] leading-4 text-muted-foreground/72">
+                                  <span className="block w-full truncate text-[11.5px] leading-4 text-sidebar-muted-foreground">
                                     {preview}
                                   </span>
                                 ) : null}
                                 {timestamp && !projectMode ? (
-                                  <span className="block w-full truncate text-[11px] leading-4 text-muted-foreground/58">
+                                  <span className="block w-full truncate text-[11px] leading-4 text-sidebar-muted-foreground">
                                     {timestamp}
                                   </span>
                                 ) : null}
@@ -1039,7 +1039,7 @@ export const ChatList = memo(function ChatList({
                             >
                             <DropdownMenuTrigger
                               className={cn(
-                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-0 transition-opacity",
+                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
                                 "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
                                 "focus-visible:opacity-100 data-[state=open]:opacity-100",
                               )}
@@ -1134,7 +1134,7 @@ export const ChatList = memo(function ChatList({
                   Math.min(totalSessionCount, limit + VISIBLE_SESSIONS_INCREMENT),
                 )
               }
-              className="h-8 w-full rounded-full text-[12px] font-medium text-muted-foreground/65 transition-colors hover:bg-sidebar-accent/65 hover:text-muted-foreground"
+              className="h-8 w-full rounded-full text-[12px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-accent/65 hover:text-sidebar-muted-foreground"
             >
               {t("chat.showMore", { count: hiddenSessionCount })}
             </button>
@@ -1151,7 +1151,7 @@ export const ChatList = memo(function ChatList({
               aria-label={t("chat.cancelSelection", {
                 defaultValue: "Cancel selection",
               })}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
             >
               <X className="h-4 w-4" aria-hidden />
             </button>
@@ -1220,7 +1220,7 @@ function WorkbenchTabHeader({
       data-workbench-tab
       onContextMenu={(event) => actionMenus.openFromContextMenu(event, actionMenuId)}
       className={cn(
-        "group/tab flex min-w-0 items-center gap-0.5 rounded-control px-1.5 text-sidebar-foreground/85",
+        "group/tab flex min-w-0 items-center gap-0.5 rounded-control px-1.5 text-sidebar-content",
         collapsed ? "min-h-6" : "min-h-7",
       )}
     >
@@ -1238,7 +1238,7 @@ function WorkbenchTabHeader({
           aria-pressed={deleteSelectionMode ? selected : undefined}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-0.5 py-1 text-left",
-            "text-[12.5px] font-normal leading-5",
+            "text-[13px] font-normal leading-5",
             deleteSelectionMode && "cursor-default",
           )}
         >
@@ -1246,7 +1246,7 @@ function WorkbenchTabHeader({
             <SelectionIndicator checked={selected} partial={partiallySelected} />
           ) : null}
           <FolderTree
-            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+            className="h-3.5 w-3.5 shrink-0 text-sidebar-muted-foreground"
             strokeWidth={1.75}
             aria-hidden
           />
@@ -1263,7 +1263,7 @@ function WorkbenchTabHeader({
             <DropdownMenuTrigger
               className={cn(
                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-                "text-muted-foreground/75 opacity-0 transition-opacity",
+                "text-sidebar-muted-foreground opacity-0 transition-opacity",
                 "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover/tab:opacity-100",
                 "focus-visible:opacity-100 data-[state=open]:opacity-100",
               )}
@@ -1308,7 +1308,7 @@ function WorkbenchTabHeader({
               onClick={onToggle}
               className={cn(
                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-                "text-muted-foreground/70 transition-[background-color,color,transform] duration-150 ease-out",
+                "text-sidebar-muted-foreground transition-[background-color,color,transform] duration-150 ease-out",
                 "hover:bg-sidebar-accent hover:text-sidebar-foreground active:scale-[0.96]",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                 "motion-reduce:transition-none motion-reduce:active:scale-100",
@@ -1426,12 +1426,12 @@ function ActivePaneRows({
                 actionMenus.openFromContextMenu(event, actionMenuId)
               )}
               className={cn(
-                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px]",
+                "group/pane flex min-w-0 max-w-full items-center gap-1 rounded-control px-2 text-[13px] font-normal leading-5",
                 SIDEBAR_SELECTION_ITEM_CLASS,
                 compact ? "min-h-7" : "min-h-8",
                 active
                   ? "text-sidebar-foreground"
-                  : "text-sidebar-foreground/82 hover:text-sidebar-foreground",
+                  : "text-sidebar-content hover:text-sidebar-accent-foreground",
                 deleteSelectionMode && selected
                   && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
               )}
@@ -1457,7 +1457,7 @@ function ActivePaneRows({
                   aria-current={active ? "true" : undefined}
                   aria-pressed={deleteSelectionMode ? selected : undefined}
                   className={cn(
-                    "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left font-medium leading-5",
+                    "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left font-normal leading-5",
                     canDragSession && "cursor-grab active:cursor-grabbing",
                     compact ? "py-1" : "py-1.5",
                     deleteSelectionMode && "cursor-default",
@@ -1481,7 +1481,7 @@ function ActivePaneRows({
               >
                 <DropdownMenuTrigger
                   className={cn(
-                    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity",
+                    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
                     "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover/pane:opacity-100",
                     "focus-visible:opacity-100 data-[state=open]:opacity-100",
                   )}
@@ -1576,7 +1576,7 @@ function SelectionIndicator({
       aria-hidden
       className={cn(
         "h-4 w-4 shrink-0",
-        checked || partial ? "text-primary" : "text-muted-foreground/55",
+        checked || partial ? "text-primary" : "text-sidebar-muted-foreground",
       )}
     />
   );
@@ -1605,7 +1605,7 @@ function MoveToGroupSubmenu({
             onSelect={() => onMove(target.key)}
           >
             <span className="min-w-0 max-w-56 flex-1 truncate">{target.title}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground/70">
+            <span className="shrink-0 tabular-nums text-sidebar-muted-foreground">
               · {target.paneCount}/{MAX_WORKBENCH_PANES}
             </span>
           </DropdownMenuItem>
@@ -1642,11 +1642,11 @@ function TemporaryChatSection({
               <div
                 data-temporary-chat-row={session.key}
                 className={cn(
-                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px]",
+                  "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px] font-normal leading-5",
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "bg-sidebar-selected text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/82 hover:bg-sidebar-foreground/[0.035] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
+                    : "text-sidebar-content settings-hover hover:text-sidebar-accent-foreground",
                 )}
               >
                 <button
@@ -1659,7 +1659,7 @@ function TemporaryChatSection({
                       className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--temporary-foreground))]"
                       aria-hidden
                     />
-                    <span className="min-w-0 flex-1 truncate font-medium leading-5">
+                    <span className="min-w-0 flex-1 truncate font-normal leading-5">
                       {title}
                     </span>
                 </button>
@@ -1669,7 +1669,7 @@ function TemporaryChatSection({
                     type="button"
                     aria-label={t("temporaryChat.closeAction", { title })}
                     onClick={() => onClose(session.key)}
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     <X className="h-3.5 w-3.5" aria-hidden />
                   </button>
@@ -1725,7 +1725,7 @@ function ProjectGroupHeader({
         onContextMenu={onRequestRename || onNewChat
           ? (event) => actionMenus.openFromContextMenu(event, actionMenuId)
           : undefined}
-        className="group flex min-w-0 items-center gap-1 px-1 pb-1 pt-1 text-[12px] font-medium text-muted-foreground/78"
+        className="group flex min-w-0 items-center gap-1 px-1 pb-1 pt-1 text-[13px] font-normal leading-5 text-sidebar-content"
       >
         {path ? (
           <Tooltip>
@@ -1736,7 +1736,7 @@ function ProjectGroupHeader({
           </Tooltip>
         ) : projectButton}
         {updatedAt ? (
-          <span className="shrink-0 text-[11px] text-muted-foreground/55">
+          <span className="shrink-0 text-[11px] text-sidebar-muted-foreground">
             {relativeTime(updatedAt)}
           </span>
         ) : null}
@@ -1748,7 +1748,7 @@ function ProjectGroupHeader({
           >
             <DropdownMenuTrigger
               className={cn(
-                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity",
+                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
                 "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100 focus-visible:opacity-100",
                 "data-[state=open]:opacity-100",
               )}
@@ -1786,7 +1786,7 @@ function ProjectGroupHeader({
             onClick={onToggle}
             className={cn(
               "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-              "text-muted-foreground/70 transition-[background-color,color,transform] duration-150 ease-out",
+              "text-sidebar-muted-foreground transition-[background-color,color,transform] duration-150 ease-out",
               "hover:bg-sidebar-accent hover:text-sidebar-foreground active:scale-[0.96]",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
               "motion-reduce:transition-none motion-reduce:active:scale-100",
@@ -1808,7 +1808,7 @@ function ProjectGroupHeader({
 
 function ChatsGroupHeader({ label }: { label: string }) {
   return (
-    <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
+    <div className="px-2 pb-1 text-[12px] font-medium text-sidebar-muted-foreground">
       {label}
     </div>
   );
@@ -1819,7 +1819,7 @@ function PinnedChatIndicator() {
     <span
       data-sidebar-pinned-indicator
       aria-hidden="true"
-      className="inline-flex shrink-0 items-center text-muted-foreground/65"
+      className="inline-flex shrink-0 items-center text-sidebar-muted-foreground"
     >
       <Pin className="h-3.5 w-3.5" aria-hidden="true" />
     </span>
@@ -1845,7 +1845,7 @@ function ChatsFoldFooter({
       <button
         type="button"
         onClick={onToggle}
-        className="h-7 w-full rounded-xl text-left text-[12px] font-medium text-muted-foreground/65 transition-colors hover:bg-sidebar-accent/50 hover:text-muted-foreground"
+        className="h-7 w-full rounded-xl text-left text-[12px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-muted-foreground"
       >
         <span className="px-2">
           {folded

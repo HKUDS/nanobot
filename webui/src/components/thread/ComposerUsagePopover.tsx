@@ -112,7 +112,7 @@ export function ComposerUsagePopover({
 
   return (
     <Popover>
-      <TooltipProvider delayDuration={300} skipDelayDuration={80}>
+      <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
             <PopoverTrigger asChild>

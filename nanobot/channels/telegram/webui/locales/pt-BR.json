@@ -5,7 +5,7 @@
     "docsLabel": "Abrir guia do Telegram",
     "officialLabel": "Abrir BotFather",
     "tryIt": "Envie /start ou uma DM curta ao seu bot do Telegram.",
-    "summary": "Ativar liga o suporte ao Telegram. Um token do BotFather ainda é necessário para trocar mensagens.",
+    "summary": "Adicione o token de bot obtido no BotFather para enviar e receber mensagens do Telegram.",
     "steps": [
       "Crie um bot com o BotFather e copie o token.",
       "Adicione o token e escolha quem pode enviar mensagens ao bot.",

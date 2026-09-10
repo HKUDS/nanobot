@@ -5,7 +5,7 @@
     "docsLabel": "Buka panduan Teams",
     "officialLabel": "Buka portal pengembang Teams",
     "tryIt": "Pasang aplikasi Teams dan kirim pesan uji.",
-    "summary": "Teams menerima pesan melalui URL callback Bot Framework. Produksi memerlukan endpoint HTTPS yang dapat dijangkau.",
+    "summary": "Teams menerima pesan melalui URL callback Bot Framework. Untuk penggunaan di lingkungan produksi, alamat HTTPS harus dapat diakses dari luar.",
     "steps": [
       "Buat Azure Bot atau aplikasi Teams dan salin App ID serta client secret.",
       "Paparkan jalur callback melalui HTTPS dan jadikan endpoint pesan bot.",

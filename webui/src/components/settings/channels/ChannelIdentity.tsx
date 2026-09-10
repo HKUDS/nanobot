@@ -133,6 +133,14 @@ export function ChannelLogo({
   const logoUrls = useMemo(() => logoFallbackUrls(presentation?.logoUrl), [presentation?.logoUrl]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
 
+  if (feature.name === "websocket") {
+    return (
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-background">
+        <img src="/brand/nanobot_mark.svg" alt="" className="h-6 w-6 object-contain" draggable={false} />
+      </span>
+    );
+  }
+
   if (showBrandLogos && logoUrl) {
     return (
       <span

@@ -316,7 +316,7 @@ export function ChannelQrConnectFlow({
           type="button"
           size="sm"
           variant="outline"
-          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold settings-hover"
           onClick={() => void start(forceOnRepeat && succeeded)}
           disabled={!canStart}
         >

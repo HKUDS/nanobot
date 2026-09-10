@@ -3,9 +3,9 @@
   "requirements": "Token bot Discord, quyền và gateway",
   "setup": {
     "docsLabel": "Mở hướng dẫn Discord",
-    "officialLabel": "Mở cổng Discord",
+    "officialLabel": "Mở cổng nhà phát triển Discord",
     "tryIt": "Nhắc bot trong máy chủ hoặc gửi tin nhắn riêng.",
-    "summary": "Bật sẽ kích hoạt hỗ trợ Discord. Bạn vẫn cần token bot và quyền trên máy chủ.",
+    "summary": "Để kết nối Discord, bạn cần token bot và các quyền phù hợp trên máy chủ.",
     "steps": [
       "Tạo bot trong Discord Developer Portal và sao chép token.",
       "Mời bot vào máy chủ với quyền đọc/gửi tin nhắn và lệnh slash.",

@@ -1,5 +1,5 @@
 {
-  "description": "Conecta nanobot mediante un gateway NapCat.",
+  "description": "Conecta nanobot mediante una pasarela NapCat.",
   "requirements": "Endpoint WebSocket de NapCat y token de acceso opcional",
   "setup": {
     "docsLabel": "Abrir guía de NapCat",
@@ -26,7 +26,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       },
       "allowFrom": {

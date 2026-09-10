@@ -96,7 +96,7 @@ export function ThreadHeader({
         {promptNavigatorAction}
         {actions}
         {onTemporaryChatEnabledChange ? (
-          <TooltipProvider delayDuration={700} skipDelayDuration={0}>
+          <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

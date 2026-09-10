@@ -5,7 +5,7 @@
     "docsLabel": "打开 Matrix 配置指南",
     "officialLabel": "打开 Matrix 客户端列表",
     "tryIt": "将 Matrix 账户邀请进房间并发送一条测试消息。",
-    "summary": "Matrix 需要主服务器账户，并使用密码或访问令牌登录。",
+    "summary": "填写 Matrix 账户所在的服务器，并使用密码或访问令牌登录。",
     "steps": [
       "为 nanobot 创建或选择一个 Matrix 账户。",
       "填写主服务器、用户 ID，以及密码或访问令牌凭据。",
@@ -13,7 +13,7 @@
     ],
     "fields": {
       "homeserver": {
-        "label": "主服务器",
+        "label": "账户服务器",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -27,7 +27,7 @@
       },
       "accessToken": {
         "label": "访问令牌",
-        "placeholder": "可选的令牌登录",
+        "placeholder": "输入访问令牌",
         "help": "如果 Matrix 客户端可以显示访问令牌，建议使用该方式。"
       },
       "deviceId": {

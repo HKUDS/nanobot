@@ -5,7 +5,7 @@
     "docsLabel": "Buka panduan Discord",
     "officialLabel": "Buka portal Discord",
     "tryIt": "Sebut bot di server atau kirim pesan langsung.",
-    "summary": "Mengaktifkan akan menyalakan dukungan Discord. Token bot dan izin server tetap diperlukan.",
+    "summary": "Untuk menghubungkan Discord, Anda memerlukan token bot dan izin yang sesuai di server.",
     "steps": [
       "Buat bot di Discord Developer Portal dan salin tokennya.",
       "Undang bot ke server dengan izin baca/kirim pesan dan perintah slash.",
@@ -18,14 +18,14 @@
         "help": "Buat dari halaman Bot di Discord Developer Portal."
       },
       "allowChannels": {
-        "label": "Channel yang diizinkan",
-        "placeholder": "ID channel, dipisahkan koma",
-        "help": "Kosongkan untuk mengizinkan semua channel yang dapat dibaca bot."
+        "label": "Kanal yang diizinkan",
+        "placeholder": "ID kanal, dipisahkan koma",
+        "help": "Kosongkan untuk mengizinkan semua kanal yang dapat dibaca bot."
       },
       "groupPolicy": {
         "label": "Perilaku grup",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }

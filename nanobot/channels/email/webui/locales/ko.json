@@ -1,4 +1,5 @@
 {
+  "displayName": "이메일",
   "description": "nanobot이 이메일을 받고 답장하도록 합니다.",
   "requirements": "IMAP 받은편지함, SMTP 발신, 앱 비밀번호 및 명시적 동의",
   "setup": {
@@ -8,7 +9,7 @@
     "summary": "이메일은 IMAP으로 읽고 SMTP로 답장합니다. 전용 사서함을 사용하고 활성화 전에 동의하세요.",
     "steps": [
       "전용 사서함을 만들고 필요하면 앱 비밀번호를 생성하세요.",
-      "제공자 프리셋을 선택하거나 IMAP 및 SMTP 설정을 직접 입력하세요.",
+      "제공업체 프리셋을 선택하거나 IMAP 및 SMTP 설정을 직접 입력하세요.",
       "동의하고 저장한 뒤 이메일을 활성화하고 테스트 메시지를 보내세요."
     ],
     "presets": {
@@ -19,8 +20,8 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "동의함",
-        "help": "필수 안전 스위치입니다. 이 봇 사서함을 연결하기로 결정하기 전에는 끄세요.",
+        "label": "nanobot의 이메일 읽기 및 보내기 허용",
+        "help": "켜면 nanobot이 이 사서함에 접근할 수 있습니다. 봇 전용 사서함이 맞는지 확인하세요.",
         "choices": {
           "true": "동의함",
           "false": "동의하지 않음"
@@ -37,7 +38,7 @@
       "imapPassword": {
         "label": "IMAP 비밀번호",
         "placeholder": "앱 비밀번호",
-        "help": "메일 제공자가 요구하면 앱 비밀번호를 사용하세요."
+        "help": "메일 제공업체가 요구하면 앱 비밀번호를 사용하세요."
       },
       "smtpHost": {
         "label": "SMTP 호스트",
@@ -65,7 +66,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "확인 간격",
+        "label": "이메일 확인 간격(초)",
         "placeholder": "30"
       },
       "allowFrom": {

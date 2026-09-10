@@ -1,9 +1,7 @@
-export type LocalDensity = "comfortable" | "compact";
 export type LocalActivityMode = "auto" | "expanded";
 export type FileEditDisplayMode = "summary" | "diff" | "collapsed_diff";
 
 export interface LocalPreferences {
-  density: LocalDensity;
   activityMode: LocalActivityMode;
   codeWrap: boolean;
   brandLogos: boolean;
@@ -20,7 +18,6 @@ type PersistedLocalPreferences = Partial<LocalPreferences> & {
 };
 
 export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
-  density: "comfortable",
   activityMode: "auto",
   codeWrap: true,
   brandLogos: true,
@@ -38,7 +35,6 @@ export function readLocalPreferences(): LocalPreferences {
     if (!raw) return DEFAULT_LOCAL_PREFS;
     const parsed = JSON.parse(raw) as PersistedLocalPreferences;
     return {
-      density: parsed.density === "compact" ? "compact" : "comfortable",
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
       codeWrap: parsed.codeWrap !== false,
       brandLogos: parsed.schemaVersion === LOCAL_PREFS_SCHEMA_VERSION

@@ -1,6 +1,6 @@
 {
   "description": "Sử dụng nanobot trong các cuộc trò chuyện công việc WeCom.",
-  "requirements": "Thông tin xác thực ứng dụng WeCom và cài đặt callback",
+  "requirements": "Bot ID và Secret của bot AI WeCom",
   "setup": {
     "docsLabel": "Mở hướng dẫn WeCom",
     "officialLabel": "Mở bảng điều khiển WeCom",
@@ -20,7 +20,7 @@
       "secret": {
         "label": "Secret",
         "placeholder": "••••••",
-        "help": "Giữ bí mật secret của bot WeCom."
+        "help": "Giữ kín khóa Secret của bot WeCom."
       },
       "allowFrom": {
         "label": "Người dùng được phép",

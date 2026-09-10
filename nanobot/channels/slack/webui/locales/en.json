@@ -12,13 +12,13 @@
       "Save and enable Slack, then mention the app or send it a direct message."
     ],
     "actions": {
-      "slack-manifest": "Copy manifest"
+      "slack-manifest": "Copy app manifest"
     },
     "fields": {
       "appToken": {
         "label": "App token",
         "placeholder": "xapp-...",
-        "help": "Create this from Slack Socket Mode."
+        "help": "Create this in your Slack app’s Socket Mode settings."
       },
       "botToken": {
         "label": "Bot token",

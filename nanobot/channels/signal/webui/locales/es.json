@@ -1,6 +1,6 @@
 {
   "description": "Usa nanobot desde mensajes de Signal.",
-  "requirements": "Daemon HTTP signal-cli, número de teléfono y lista permitida",
+  "requirements": "Daemon HTTP signal-cli, número de teléfono y lista de permitidos",
   "setup": {
     "docsLabel": "Abrir guía de Signal",
     "officialLabel": "Abrir guía de signal-cli",
@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "DM permitidos",
+        "label": "Remitentes de mensajes directos permitidos",
         "placeholder": "Números o UUID"
       },
       "group_allowFrom": {

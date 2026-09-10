@@ -35,7 +35,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "Comportement en fil",
+        "label": "Réponses dans les fils de discussion",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages (sans mention)",

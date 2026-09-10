@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "允许的私信",
+        "label": "允许私信的用户",
         "placeholder": "电话号码或 UUID"
       },
       "group_allowFrom": {

@@ -25,6 +25,7 @@
     "system": {
       "section": "System",
       "restartHint": "Restart nanobot to apply runtime changes.",
+      "restartAction": "Restart",
       "restart": "Restart nanobot",
       "restarting": "Restarting...",
       "restartEngine": "Restart engine",
@@ -60,6 +61,7 @@
     "closeAction": "Close temporary chat: {{title}}"
   },
   "sidebar": {
+    "resize": "Resize sidebar",
     "navigation": "Sidebar navigation",
     "collapse": "Collapse sidebar",
     "newChat": "New topic",
@@ -80,12 +82,278 @@
     }
   },
   "settings": {
+    "timezoneNoMatches": "No matching timezones.",
+    "configure": "Configure",
+    "exit": {
+      "title": "Restart before leaving?",
+      "description": "Your changes are saved. Restart to apply them.",
+      "later": "Restart later"
+    },
+    "runtimeConfig": {
+      "apiSaved": "Saved. Restart the API service to apply changes.",
+      "fields": {
+        "agents_defaults_timezone_mode": {
+          "label": "Use system timezone",
+          "help": "Turn off to choose a timezone manually."
+        },
+        "agents_defaults_timezone": {
+          "label": "Timezone",
+          "help": "Choose a timezone. UTC offsets reflect the current date."
+        },
+        "agents_defaults_dream_enabled": {
+          "label": "Memory consolidation",
+          "help": "Automatically organize useful information from conversations. Turning this off keeps existing memories available."
+        },
+        "gateway_heartbeat_enabled": {
+          "label": "Heartbeat",
+          "help": "Periodically check HEARTBEAT.md for tasks."
+        },
+        "gateway_heartbeat_interval_s": {
+          "label": "Check every (seconds)",
+          "help": "Schedule the built-in heartbeat when the gateway starts."
+        },
+        "agents_defaults_max_tool_iterations": {
+          "label": "Tool iterations per turn",
+          "help": "Maximum number of model and tool rounds for each reply."
+        },
+        "agents_defaults_max_concurrent_subagents": {
+          "label": "Concurrent subagents",
+          "help": "Maximum number of subagents running at the same time."
+        },
+        "agents_defaults_max_tool_result_chars": {
+          "label": "Tool result length (characters)",
+          "help": "Maximum number of characters from each tool result sent to the model."
+        },
+        "agents_defaults_provider_retry_mode": {
+          "label": "Keep retrying model requests",
+          "help": "Keep retrying requests after recoverable errors. Turn off to use standard retries."
+        },
+        "agents_defaults_tool_hint_max_length": {
+          "label": "Tool activity summary length (characters)",
+          "help": "Maximum number of characters shown in a tool activity summary."
+        },
+        "tools_max_session_messages_per_minute": {
+          "label": "Session message tool limit (per minute)",
+          "help": "Maximum number of messages tools can send to the same session each minute."
+        },
+        "agents_defaults_unified_session": {
+          "label": "Share sessions across channels",
+          "help": "Share conversation history across chat channels for a single user."
+        },
+        "tools_exec_enable": {
+          "label": "Shell tool",
+          "help": "Allow the agent to run shell commands."
+        },
+        "tools_file_enable": {
+          "label": "File tools",
+          "help": "Allow built-in file reading and editing tools."
+        },
+        "tools_web_enable": {
+          "label": "Web tools",
+          "help": "Allow web search and web fetch tools."
+        },
+        "tools_cli_apps_enable": {
+          "label": "CLI apps tool",
+          "help": "Allow the agent to manage and run CLI apps."
+        },
+        "tools_my_enable": {
+          "label": "Self-management tool",
+          "help": "Allow the agent to inspect its configuration."
+        },
+        "tools_my_allow_set": {
+          "label": "Allow configuration changes",
+          "help": "Allow the self-management tool to update configuration."
+        },
+        "tools_exec_timeout": {
+          "label": "Command timeout (seconds)",
+          "help": "Stop commands that exceed this duration. Set to 0 for no time limit."
+        },
+        "tools_exec_path_prepend": {
+          "label": "Prepend to PATH",
+          "help": "Directories added to the start of PATH. Separate entries with semicolons on Windows or colons on Linux and macOS."
+        },
+        "tools_exec_path_append": {
+          "label": "Append to PATH",
+          "help": "Directories added to the end of PATH. Separate entries with semicolons on Windows or colons on Linux and macOS."
+        },
+        "tools_exec_sandbox": {
+          "label": "Command sandbox",
+          "help": "Use bwrap on Linux or Seatbelt on macOS. Workspace checks alone do not isolate processes."
+        },
+        "tools_exec_sandbox_ro_binds": {
+          "label": "Read-only sandbox paths",
+          "help": "Additional paths mounted read-only. One path per line."
+        },
+        "tools_exec_sandbox_rw_binds": {
+          "label": "Writable sandbox paths",
+          "help": "Additional paths mounted with write access. One path per line."
+        },
+        "tools_exec_allowed_env_keys": {
+          "label": "Allowed environment variables",
+          "help": "Additional environment variables to pass from the host to commands, alongside required variables. One name per line."
+        },
+        "tools_exec_allow_patterns": {
+          "label": "Allowed command patterns",
+          "help": "One regular expression per line. When set, every command segment must fully match an allow rule. Matches override built-in and custom deny rules; workspace and network restrictions still apply."
+        },
+        "tools_exec_deny_patterns": {
+          "label": "Denied command patterns",
+          "help": "One regular expression per line, checked alongside built-in deny rules. Commands that fully match allow rules skip these checks."
+        },
+        "tools_web_proxy": {
+          "label": "Web proxy",
+          "help": "Proxy URL for web tools. Leave empty to use the default network configuration."
+        },
+        "tools_web_user_agent": {
+          "label": "User agent",
+          "help": "User-Agent header sent with web requests. Leave blank to use the default."
+        },
+        "tools_restrict_to_workspace": {
+          "label": "Restrict tools to the workspace",
+          "help": "Global tool access policy. Per-chat WebUI permissions are configured separately."
+        },
+        "tools_ssrf_whitelist": {
+          "label": "Allowed IP addresses and networks",
+          "help": "Allow outbound requests to these otherwise restricted addresses. Enter one IP address or CIDR range per line."
+        },
+        "tools_webui_allow_remote_package_install": {
+          "label": "Remote package installation",
+          "help": "Allow WebUI browsers on other devices to install optional packages and skills. This setting can only be changed on the gateway host."
+        },
+        "tools_cli_apps_install_timeout": {
+          "label": "Install timeout (seconds)",
+          "help": "Time allowed for CLI app installation."
+        },
+        "tools_cli_apps_run_timeout": {
+          "label": "Run timeout (seconds)",
+          "help": "Time allowed for a CLI app command."
+        },
+        "tools_cli_apps_catalog_ttl_seconds": {
+          "label": "Catalog cache duration (seconds)",
+          "help": "How long the CLI app catalog stays cached."
+        },
+        "gateway_host": {
+          "label": "Gateway bind address",
+          "help": "Address used by the gateway. Configure the WebUI listener separately under Channels → WebSocket."
+        },
+        "gateway_port": {
+          "label": "Gateway port",
+          "help": "Port used by the gateway. Command-line arguments override this setting."
+        },
+        "gateway_restart_mode": {
+          "label": "Restart mode",
+          "help": "Choose how the gateway restarts. Automatic selects a method for your environment."
+        },
+        "api_host": {
+          "label": "API bind address",
+          "help": "Set an API key in System before binding to a network address. Restart the API service to apply changes."
+        },
+        "api_timeout": {
+          "label": "API request timeout (seconds)",
+          "help": "How long each API request can take. Restart the API service to apply changes."
+        },
+        "tools_image_generation_save_dir": {
+          "label": "Generated image directory",
+          "help": "Subdirectory of nanobot’s media directory. Use a relative path; existing images are not moved."
+        }
+      },
+      "groups": {
+        "chat": {
+          "title": "WebUI chat permissions",
+          "help": "Local service access and default permissions for WebUI chats."
+        },
+        "identity": {
+          "title": "Timezone",
+          "help": "Choose the timezone for scheduled work."
+        },
+        "memory": {
+          "title": "Memory",
+          "help": "Enable or disable automatic memory consolidation."
+        },
+        "heartbeat": {
+          "title": "Heartbeat schedule",
+          "help": "Configure the built-in periodic task check."
+        },
+        "execution": {
+          "title": "Agent limits",
+          "help": "Tune tool execution and retry behavior."
+        },
+        "sessions": {
+          "title": "Sessions",
+          "help": "Share conversations across channels."
+        },
+        "tools": {
+          "title": "Built-in tools",
+          "help": "Choose which tools the agent can use."
+        },
+        "shell": {
+          "title": "Shell and sandbox",
+          "help": "Command timeouts, environment, mounts, and command filters."
+        },
+        "network": {
+          "title": "Web connections",
+          "help": "Set the proxy and User-Agent header for web requests."
+        },
+        "safety": {
+          "title": "Global access policies",
+          "help": "Workspace restrictions, private networks, and remote installs."
+        },
+        "cli": {
+          "title": "CLI app limits",
+          "help": "Set installation and command timeouts, and how long to cache the app catalog."
+        },
+        "gateway": {
+          "title": "Gateway process",
+          "help": "Deployment and process restart configuration."
+        },
+        "api": {
+          "title": "API server details",
+          "help": "Custom bind address and request timeout."
+        },
+        "storage": {
+          "title": "Image storage",
+          "help": "Choose where generated images are stored."
+        },
+        "maintenance": {
+          "title": "Memory scheduling",
+          "help": ""
+        },
+        "web": {
+          "title": "Web access",
+          "help": ""
+        },
+        "applications": {
+          "title": "Command-line apps",
+          "help": ""
+        }
+      },
+      "save": "Save changes",
+      "saving": "Saving…",
+      "discard": "Discard changes",
+      "saved": "Saved.",
+      "restart": "Restart nanobot",
+      "restartHelp": "Restart to apply changes. Command-line arguments and environment variables may override these settings.",
+      "search": "Find an advanced setting",
+      "noResults": "No matching settings.",
+      "pending": "Unsaved changes",
+      "numberError": "Enter a valid number within the allowed range.",
+      "activeModel": "Use active model",
+      "none": "None",
+      "auto": "Automatic",
+      "manual": "Manual",
+      "standard": "Standard",
+      "persistent": "Persistent",
+      "unavailable": "Update the gateway to edit these settings.",
+      "advancedOptions": "Advanced options"
+    },
     "backToChat": "Back to chat",
     "sidebar": {
       "title": "Settings",
       "ariaLabel": "Settings sections"
     },
     "nav": {
+      "about": "About",
+      "capabilities": "Capabilities",
       "general": "General",
       "byok": "BYOK",
       "overview": "Overview",
@@ -96,13 +364,14 @@
       "voice": "Voice",
       "browser": "Web",
       "channels": "Channels",
-      "cliApps": "CLI Apps",
+      "cliApps": "CLI apps",
       "mcp": "MCP",
       "runtime": "System",
-      "advanced": "Security",
+      "advanced": "Advanced",
       "apps": "Apps",
       "automations": "Automations",
-      "skills": "Skills"
+      "skills": "Skills",
+      "memory": "Memory"
     },
     "sections": {
       "interface": "Interface",
@@ -130,7 +399,7 @@
       "selectModel": "Select model",
       "addConfiguration": "Add configuration",
       "newConfiguration": "New model configuration",
-      "newConfigurationHelp": "Save a provider and model as a one-click option.",
+      "newConfigurationHelp": "Save a provider, model, and generation settings as a reusable preset.",
       "configurationName": "Configuration name",
       "configurationNameHelp": "Rename this saved model configuration.",
       "configurationNamePlaceholder": "Fast writing",
@@ -139,7 +408,7 @@
       "fallbackNumber": "Fallback {{number}}",
       "addToOrder": "Enable preset",
       "newPreset": "New model preset",
-      "newPresetHelp": "Save a reusable model and its generation settings.",
+      "newPresetHelp": "Save a model and its generation settings to use across tasks.",
       "presets": "Model presets",
       "editPreset": "Edit preset",
       "presetName": "Preset name",
@@ -163,21 +432,22 @@
       "disabled": "Disabled",
       "noPresets": "No model presets yet",
       "noPresetsHelp": "Create a preset, then add it to the call order.",
-      "removeBeforeDelete": "Remove this preset from the call order before deleting it.",
+      "removeBeforeDelete": "Choose another primary preset before deleting this one.",
       "providerSetupRequired": "Provider setup required",
       "configureProviderBeforeSaving": "Configure this provider before saving the preset.",
       "deletePresetTitle": "Delete model preset?",
-      "deletePresetHelp": "This removes the preset “{{name}}”. Provider credentials are not affected.",
+      "deletePresetHelp": "Delete “{{name}}” and remove it from the fallback list. Provider credentials will be kept.",
       "searchModels": "Search or type model ID",
       "useCustomModel": "Use",
       "loadingModels": "Loading models...",
-      "searchCatalog": "Search provider catalog to choose a model.",
+      "searchCatalog": "Search this provider’s model catalog.",
       "modelsAvailable": "available",
       "noModelResults": "No matching models.",
       "loadFailed": "Model list unavailable.",
       "unsupportedModelList": "Type a model ID manually.",
       "providerNotConfigured": "Configure this provider before loading models.",
-      "autoProviderCustomOnly": "Auto provider mode uses custom model IDs."
+      "autoProviderCustomOnly": "Enter a model ID manually when using automatic provider selection.",
+      "availableCount": "Models available: {{count}}"
     },
     "rows": {
       "theme": "Theme",
@@ -185,7 +455,7 @@
       "provider": "Provider",
       "model": "Model",
       "restart": "Restart nanobot",
-      "configPath": "Config path",
+      "configPath": "Configuration file",
       "activePreset": "Active preset",
       "gateway": "Gateway",
       "restartState": "Restart state",
@@ -193,7 +463,6 @@
       "currentModel": "Current configuration",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
-      "density": "Density",
       "activityMode": "Activity detail",
       "fileEditDisplay": "File edit display",
       "codeWrap": "Code wrapping",
@@ -205,11 +474,11 @@
       "imageGeneration": "Image generation",
       "imageProvider": "Image provider",
       "imageProviderStatus": "Provider status",
-      "imageProviderBase": "Provider base",
+      "imageProviderBase": "Provider URL",
       "imageModel": "Image model",
-      "defaultAspectRatio": "Default aspect",
+      "defaultAspectRatio": "Default aspect ratio",
       "defaultImageSize": "Default size",
-      "maxImagesPerTurn": "Max images per turn",
+      "maxImagesPerTurn": "Max images per request",
       "imageSaveDir": "Save directory",
       "timezone": "Timezone",
       "workspacePath": "Default workspace",
@@ -237,40 +506,39 @@
       "currentModel": "Used for new replies.",
       "selectedModelProvider": "Set by the selected model.",
       "selectedModelValue": "Set by the selected model.",
-      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
-      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
-      "density": "Stored only in this browser.",
-      "activityMode": "Choose how much agent activity chrome to show by default.",
-      "fileEditDisplay": "Choose whether file edit activity opens as line counts or a diff.",
+      "selectedPreset": "Edit named presets in Models.",
+      "presetModel": "Choose a preset in Models to edit its model and provider.",
+      "activityMode": "Choose how much detail to show about the agent’s activity.",
+      "fileEditDisplay": "Choose whether file edits show a line count or an expanded diff.",
       "codeWrap": "Keep long code lines readable on smaller screens.",
       "brandLogos": "Show third-party provider and CLI logos in Settings.",
       "browserNotifications": "Notify only when this page is in the background. Off by default.",
-      "maxResults": "Results returned by each web_search call.",
-      "timeout": "Seconds before a search provider request times out.",
-      "jinaReader": "Use Jina Reader for web_fetch when available.",
-      "imageGeneration": "Expose generate_image in chats when a configured image provider is available.",
-      "imageProvider": "Choose the registry provider used by generate_image.",
+      "maxResults": "Maximum number of results returned by each web search.",
+      "timeout": "How long to wait for a search request to finish.",
+      "jinaReader": "Use Jina Reader to read web pages when available.",
+      "imageGeneration": "Generate images in chat after setting up an image provider.",
+      "imageProvider": "Choose the provider used to generate images.",
       "imageProviderStatus": "Image generation reuses provider credentials from Providers.",
       "imageModel": "Choose a model supported by the selected image provider.",
-      "defaultAspectRatio": "Used when the prompt does not choose an aspect ratio.",
-      "defaultImageSize": "Size hint sent to providers that support it.",
-      "maxImagesPerTurn": "Upper bound for one generate_image request.",
-      "timezone": "Used for schedules and time-aware replies.",
-      "cliAppsCatalog": "Install only the app-specific CLI adapters nanobot can run locally; native apps stay untouched.",
+      "defaultAspectRatio": "Used when the request does not specify an aspect ratio.",
+      "defaultImageSize": "Requested image size. Only applies to providers that support this option.",
+      "maxImagesPerTurn": "Maximum number of images generated in a single request.",
+      "timezone": "Used for scheduled tasks and replies that refer to dates and times.",
+      "cliAppsCatalog": "Install command-line tools for nanobot to use. This does not install or change the corresponding desktop apps.",
       "cliAppsFilter": "Search by app, category, or capability.",
       "localServiceAccess": "Allow Full Access shell commands to reach localhost services.",
       "webuiDefaultAccess": "Used by web chats without a project-specific permission.",
-      "securityManagedControls": "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
+      "securityManagedControls": "Web requests block local, private, and metadata service addresses unless explicitly allowed. Channel security is configured separately.",
       "logs": "Open the native engine log folder.",
-      "diagnostics": "Export a small runtime report for support.",
+      "diagnostics": "Export a diagnostic report to help troubleshoot problems.",
       "localServiceAccessNative": "Allow Full Access shell commands to reach services on this Mac.",
       "webuiDefaultAccessNative": "Used by native chats without a project-specific permission.",
       "contextWindow": "Choose the default context budget for this model configuration.",
       "transcription": "Transcribe microphone input before sending it. Chat channel voice messages use the same settings.",
       "transcriptionProvider": "Uses the matching provider credentials from Providers.",
       "transcriptionProviderStatus": "API keys stay under providers, not in transcription settings.",
-      "transcriptionModel": "Leave as the resolved default unless your provider needs a custom model id.",
-      "transcriptionLanguage": "Optional ISO-639 hint such as en, zh, ja, or ko."
+      "transcriptionModel": "Keep the default model unless your provider requires a specific model ID.",
+      "transcriptionLanguage": "Optional language code, such as en for English, zh for Chinese, ja for Japanese, or ko for Korean."
     },
     "timezone": {
       "select": "Select timezone",
@@ -286,8 +554,8 @@
       "filterInstalled": "Installed CLIs",
       "filterNotInstalled": "Not installed",
       "searchPlaceholder": "Search CLIs",
-      "loading": "Loading CLI Apps...",
-      "empty": "No CLI Apps match this filter.",
+      "loading": "Loading CLI apps…",
+      "empty": "No CLI apps match this filter.",
       "statusInstalled": "App ready",
       "statusMissing": "Missing",
       "statusAvailable": "Available",
@@ -306,9 +574,16 @@
       "openChat": "Open chat",
       "unsupported": "Unsupported",
       "unavailable": "Unavailable",
-      "noDescription": "No description available."
+      "noDescription": "No description available.",
+      "availableCount_one": "{{count}} app",
+      "availableCount_other": "{{count}} apps",
+      "installedCount_one": "{{count}} CLI installed",
+      "installedCount_other": "{{count}} CLIs installed"
     },
     "about": {
+      "documentation": "Documentation",
+      "sourceCode": "Source code",
+      "reportIssue": "Report an issue",
       "version": "Version",
       "checking": "Checking...",
       "checkForUpdates": "Check for updates",
@@ -335,15 +610,15 @@
       "authNone": "None",
       "authHeaders": "Headers",
       "command": "Command",
-      "args": "Args JSON",
-      "headers": "Headers JSON",
+      "args": "Arguments (JSON)",
+      "headers": "Headers (JSON)",
       "oauthAfterSave": "Save the server, then select Connect to sign in.",
       "headersHelp": "Add the request headers used by this server.",
-      "env": "Env JSON",
-      "timeout": "Tool timeout",
+      "env": "Environment variables (JSON)",
+      "timeout": "Tool timeout (seconds)",
       "advancedOptions": "Advanced options",
-      "hideAdvanced": "Hide advanced",
-      "saveCustom": "Save MCP",
+      "hideAdvanced": "Hide advanced options",
+      "saveCustom": "Save MCP server",
       "configImport": "Import mcp.json",
       "importConfig": "Import",
       "restartRequired": "Restart nanobot to connect updated MCP tools.",
@@ -364,8 +639,8 @@
       "connectHint": "Add the key from your account settings.",
       "saveAndEnable": "Save and enable",
       "updateSetup": "Update setup",
-      "configured": "configured",
-      "keepExisting": "Leave blank to keep existing",
+      "configured": "Configured",
+      "keepExisting": "Leave blank to keep the current value",
       "statusConfigured": "Configured",
       "statusMissingCredentials": "Needs key",
       "connectingAccount": "Connecting {{name}}",
@@ -373,10 +648,10 @@
       "continueSignIn": "Continue sign-in",
       "preparingSignIn": "Preparing secure sign-in…",
       "openSignInToContinue": "Open the sign-in page to continue.",
-      "finishSignInInBrowser": "Finish signing in in the browser window.",
+      "finishSignInInBrowser": "Complete sign-in in the browser window.",
       "manualCallbackRequired": "Finish signing in, then paste the callback URL into nanobot.",
       "manualCallbackHelp": "After approving access, the localhost page will not load. Copy its full URL from the address bar and paste it here.",
-      "finishingConnection": "Finishing connection…",
+      "finishingConnection": "Completing connection…",
       "activatingTools": "Activating tools…",
       "connected": "Connected.",
       "connectionFailed": "Connection failed.",
@@ -429,7 +704,9 @@
         "linear": "Find and manage Linear issues, projects, and comments.",
         "github": "Manage GitHub repositories, issues, and pull requests.",
         "supabase": "Inspect and manage Supabase projects."
-      }
+      },
+      "toolsFound_one": "{{count}} tool",
+      "toolsFound_other": "{{count}} tools"
     },
     "values": {
       "light": "Light",
@@ -442,8 +719,6 @@
       "privateEngine": "Private engine",
       "unixSocket": "Unix socket",
       "defaultWorkspace": "Default workspace",
-      "comfortable": "Comfortable",
-      "compact": "Compact",
       "auto": "Auto",
       "default": "Default",
       "expanded": "Expanded",
@@ -468,12 +743,12 @@
       "unsaved": "Unsaved changes.",
       "upToDate": "Up to date.",
       "savedRestart": "Saved. Restart nanobot to apply.",
-      "restartAfterSaving": "Save changes, then restart when ready.",
-      "savedRestartApply": "Saved. Restart when ready.",
-      "imageProviderRestart": "Image provider changes saved. Restart when ready.",
+      "restartAfterSaving": "Save changes, then restart nanobot to apply them.",
+      "savedRestartApply": "Saved. Restart to apply changes.",
+      "imageProviderRestart": "Image settings saved. Restart to apply changes.",
       "hostRestartAfterSaving": "Save changes and nanobot will restart its engine.",
-      "hostRestartPending": "Saved. Restarting engine when ready.",
-      "hostApiUnavailable": "Host actions are only available inside the native app.",
+      "hostRestartPending": "Settings saved. Waiting for the engine to restart.",
+      "hostApiUnavailable": "These actions are only available in the desktop app.",
       "logsOpened": "Opened logs folder.",
       "logsOpenFailed": "Could not open logs folder.",
       "diagnosticsExported": "Diagnostics exported to {{path}}.",
@@ -495,7 +770,7 @@
       "exporting": "Exporting..."
     },
     "byok": {
-      "description": "Bring your own provider keys. Nanobot reads these values from the current config and only configured providers can be used in model presets.",
+      "description": "Add your own provider credentials to use them in model presets.",
       "configured": "Configured",
       "notConfigured": "Not configured",
       "configuredSection": "Configured",
@@ -503,7 +778,7 @@
       "showMore": "Show {{count}} more",
       "showLess": "Show fewer",
       "apiKey": "API key",
-      "apiBase": "API base",
+      "apiBase": "API base URL",
       "apiKeyPlaceholder": "Enter API key",
       "apiKeyConfiguredPlaceholder": "Leave blank to keep the current key",
       "configuredKeyHint": "Configured key",
@@ -512,21 +787,21 @@
       "showApiKey": "Show API key",
       "hideApiKey": "Hide API key",
       "noConfiguredProviders": "No configured providers",
-      "configureFirst": "Configure a provider in BYOK first.",
-      "openByok": "Open BYOK",
+      "configureFirst": "Set up a provider in Providers first.",
+      "openByok": "Configure providers",
       "tabs": {
-        "ariaLabel": "BYOK credential type",
+        "ariaLabel": "Credential type",
         "llm": "LLM",
-        "webSearch": "Web Search"
+        "webSearch": "Web search"
       },
       "webSearch": {
         "provider": "Search provider",
-        "providerHelp": "Choose the backend used by the web search tool.",
+        "providerHelp": "Choose the service used for web searches.",
         "selectProvider": "Select provider",
         "credentials": "Credentials",
         "noCredentialRequired": "No key required",
         "noCredentialHelp": "DuckDuckGo works without a saved API key.",
-        "apiKeyHelp": "Stored in config and masked after saving.",
+        "apiKeyHelp": "The key is hidden after saving.",
         "baseUrl": "Base URL",
         "baseUrlHelp": "SearXNG needs the URL of your own instance.",
         "baseUrlPlaceholder": "https://search.example.com",
@@ -547,8 +822,31 @@
       "workspace": "Workspace"
     },
     "usage": {
-      "title": "Token activity",
-      "shortTitle": "Token Usage",
+      "title": "Token usage",
+      "shortTitle": "Token usage",
+      "last30Days": "Last 30 days",
+      "viewDetails": "View details",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "dailyAverage": "Daily average",
+      "inputTokens": "Input tokens",
+      "cacheHitRate": "Cache hit rate",
+      "requestTrend": "Daily requests",
+      "cacheRateHelp": "Cache hit rate excludes input with unknown cache status.",
+      "dailyTrend": "Daily token usage",
+      "bySource": "Usage by source",
+      "byModel": "Usage by model",
+      "modelTrend": "Model usage over time",
+      "modelsUnavailable": "No model breakdown available.",
+      "otherModels": "Other / unattributed",
+      "unclassified": "Unclassified",
+      "unavailable": "Usage data is unavailable.",
+      "noActivity": "No token usage in the last 30 days.",
+      "cachedInput": "Cached input",
+      "cacheMiss": "Cache miss",
+      "cacheUnknown": "Cache status unknown",
+      "outputTokens": "Output",
+      "otherTokens": "Other tokens",
       "subtitle": "Provider-reported usage over the last 12 months.",
       "empty": "Token activity will appear after new model replies.",
       "totalTokens": "Total tokens",
@@ -568,8 +866,9 @@
         "api": "API",
         "cron": "Automations",
         "dream": "Memory",
-        "system": "System"
-      }
+        "system": "Auxiliary calls"
+      },
+      "systemHelp": "Auxiliary calls include chat title generation, other internal tasks, and calls without a recorded source."
     },
     "providers": {
       "title": "Model providers",
@@ -584,12 +883,12 @@
       "saveAdvancedBeforeSignIn": "Save advanced changes before signing in.",
       "apiType": "API type",
       "proxy": "Network proxy",
-      "thinkingStyle": "Thinking style",
+      "thinkingStyle": "Reasoning parameter format",
       "region": "Region",
-      "profile": "Profile",
+      "profile": "AWS profile",
       "extraHeaders": "Extra headers",
-      "extraBody": "Extra body",
-      "extraQuery": "Extra query",
+      "extraBody": "Additional body parameters",
+      "extraQuery": "Additional query parameters",
       "capabilityFastMode": "Fast mode",
       "capabilityFastModeHelp": "Use OpenAI's priority service tier for faster responses. This consumes credits faster.",
       "capabilityDeepSeekSearch": "DeepSeek web search",
@@ -613,16 +912,16 @@
       "missingCredential": "Configure this provider before enabling image generation."
     },
     "capabilities": {
-      "providerSupport": "Provider support",
-      "providerInstallOnSave": "Required support will be installed automatically when you save this provider.",
-      "searchSupport": "Search provider support",
-      "searchInstallOnSave": "Olostep support will be installed automatically when you save.",
-      "installing": "Installing support..."
+      "providerSupport": "Provider dependencies",
+      "providerInstallOnSave": "Required packages will be installed automatically when you save this provider.",
+      "searchSupport": "Search dependencies",
+      "searchInstallOnSave": "Required Olostep packages will be installed automatically when you save.",
+      "installing": "Installing required packages…"
     },
     "api": {
       "title": "API server",
       "openaiCompatible": "OpenAI-compatible API",
-      "description": "Connect SDKs and agents through a local /v1 endpoint.",
+      "description": "Connect SDKs and other agents to nanobot through its OpenAI-compatible API.",
       "start": "Start API server",
       "starting": "Starting...",
       "stop": "Stop",
@@ -638,7 +937,7 @@
       "apiKeyHelp": "Clients send this as a Bearer token.",
       "apiKeyRequired": "Required before exposing the API to your network.",
       "apiKeyPlaceholder": "Enter an API key",
-      "autoInstall": "API support will be installed automatically when you start it."
+      "autoInstall": "Required API server packages will be installed automatically when you start it."
     },
     "observability": {
       "title": "Observability",
@@ -647,7 +946,7 @@
       "enable": "Enable tracing support"
     },
     "apps": {
-      "description": "Add tools to nanobot, then @ them in chat.",
+      "description": "Add tools to nanobot, then mention them with @ in chat.",
       "cliLabel": "App",
       "mcpLabel": "MCP",
       "channelLabel": "Channel",
@@ -661,7 +960,7 @@
       "searchPlaceholder": "Search tools",
       "featured": "Tools",
       "mcpTools": "MCP tools",
-      "loading": "Loading Apps...",
+      "loading": "Loading apps…",
       "empty": "No tools match your search.",
       "emptyApps": "No apps available.",
       "emptyIntegrations": "No MCP tools available.",
@@ -678,7 +977,7 @@
       "searchPlaceholder": "Search channels",
       "backToChannels": "All channels",
       "catalog": "Channels",
-      "loading": "Loading Channels...",
+      "loading": "Loading channels…",
       "empty": "No channels match this filter.",
       "restartRequired": "Restart nanobot to apply updated channel support.",
       "requires": "Requires: {{requirements}}",
@@ -702,7 +1001,7 @@
       "commandCopied": "Command copied.",
       "commandCopyFailed": "Could not copy command.",
       "configuredInstances": "{{count}} instances configured",
-      "connectPreview": "The in-browser connect flow is next. For now, run the command below.",
+      "connectPreview": "Run the command below in your terminal to connect.",
       "copyCommand": "Copy command",
       "filterAll": "All",
       "filterOff": "Not running",
@@ -722,7 +1021,7 @@
       "requiredSetup": "Required setup",
       "savedSecret": "Saved",
       "savedSecretPlaceholder": "Saved secret",
-      "savedSettings": "Saved settings.",
+      "savedSettings": "Settings saved.",
       "saveSettings": "Save settings",
       "selectChannel": "View {{name}} settings",
       "setupSteps": "Next steps",
@@ -737,7 +1036,9 @@
         "needs_setup": "Needs setup",
         "invalid": "Invalid",
         "unsupported": "Manual setup"
-      }
+      },
+      "configuredInstances_one": "{{count}} instance configured",
+      "configuredInstances_other": "{{count}} instances configured"
     },
     "nanobotFeatures": {
       "enabled": "Enabled",
@@ -796,7 +1097,7 @@
       "commandCopied": "Copied",
       "copyCommand": "Copy",
       "deleteTitle": "Delete automation",
-      "deleteDescription": "This removes {{name}} from the cron store. Past chat messages stay in the session.",
+      "deleteDescription": "Delete the automation “{{name}}”. Existing chat messages will be kept.",
       "cancel": "Cancel",
       "status": {
         "system": "System",
@@ -874,12 +1175,12 @@
         "day": "Days"
       },
       "validation": {
-        "nameRequired": "Name is required.",
-        "messageRequired": "Message is required.",
-        "intervalRequired": "Interval must be a positive number.",
-        "cronRequired": "Cron expression is required.",
-        "timeRequired": "Run time is required.",
-        "futureRequired": "Run time must be in the future."
+        "nameRequired": "Enter a task name.",
+        "messageRequired": "Enter a task message.",
+        "intervalRequired": "Enter a positive whole number for the interval.",
+        "cronRequired": "Enter a Cron expression.",
+        "timeRequired": "Choose a run time.",
+        "futureRequired": "Choose a time in the future."
       }
     },
     "oauth": {
@@ -899,9 +1200,9 @@
       "proxyLabel": "Network proxy",
       "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
       "saveProxy": "Save proxy",
-      "localCodeHelp": "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, paste the authorization code below.",
+      "localCodeHelp": "Complete sign-in in your browser. If nanobot does not connect automatically, paste the authorization code below.",
       "remoteCodeHelp": "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
-      "localCallbackHelp": "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, copy the full localhost callback URL from the address bar and paste it below.",
+      "localCallbackHelp": "Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.",
       "remoteCallbackHelp": "Open ChatGPT in this browser and finish signing in. When the localhost page fails to load, copy the full URL from the address bar and paste it below.",
       "authorizationCode": "Authorization code",
       "callbackUrl": "Full callback URL",
@@ -912,7 +1213,7 @@
       "finishSignIn": "Finish sign-in"
     },
     "skills": {
-      "description": "Review the instruction skills this agent can load during a conversation.",
+      "description": "Manage the skills the agent can use in conversations.",
       "caption": "{{available}} available · {{total}} total",
       "views": "Skills views",
       "installedTab": "Installed",
@@ -931,7 +1232,7 @@
       "showLess": "Show less",
       "showMore": "Show more",
       "enabledControl": "Use this skill",
-      "enabledDescription": "Allow the agent to load this skill when its requirements are ready.",
+      "enabledDescription": "Allow the agent to use this skill when its requirements are met.",
       "enableSkill": "Enable {{name}}",
       "disableSkill": "Disable {{name}}",
       "updateFailed": "Could not update this skill.",
@@ -955,7 +1256,7 @@
       "marketplaceProviderFilter": "Skill source",
       "marketplaceProviderAll": "All",
       "marketplaceTrendingTitle": "Trending by marketplace",
-      "marketplaceTrendingDescription": "Each marketplace keeps its own ranking and install metrics.",
+      "marketplaceTrendingDescription": "Rankings and install counts are shown separately for each marketplace.",
       "marketplaceViewAll": "View all",
       "marketplaceTrendingUnavailable": "Trending skills are temporarily unavailable.",
       "marketplaceEmpty": "No skills found for “{{query}}”.",
@@ -986,14 +1287,14 @@
       "source": "Source",
       "status": "Status",
       "requirements": "Requirements",
-      "noRequirements": "No explicit requirements.",
+      "noRequirements": "No additional requirements declared.",
       "commands": "Commands",
       "environment": "Environment variables",
-      "missingCommands": "Missing CLI",
-      "missingEnvironment": "Missing ENV",
-      "unavailableReasonLabel": "Unavailable reason",
+      "missingCommands": "Missing command-line tools",
+      "missingEnvironment": "Missing environment variables",
+      "unavailableReasonLabel": "Why it is unavailable",
       "rawInstructions": "Raw SKILL.md",
-      "rawInstructionsEmpty": "No raw instructions.",
+      "rawInstructionsEmpty": "No skill file content available.",
       "detailDescription": "Details for {{name}}."
     },
     "voice": {

@@ -159,14 +159,21 @@ export function useSessions(): {
           try {
             const rows = await listSessions(tokenRef.current);
             const serverKeys = new Set(rows.map((row) => row.key));
-            setSessions((prev) => [
-              ...rows,
-              ...prev.filter(
-                (session) =>
-                  optimisticKeysRef.current.has(session.key)
-                  && !serverKeys.has(session.key),
-              ),
-            ]);
+            setSessions((prev) => {
+              const byKey = new Map(prev.map((row) => [row.key, row]));
+              const next = [
+                ...rows.map((row) => {
+                  const previous = byKey.get(row.key);
+                  return previous && JSON.stringify(previous) === JSON.stringify(row) ? previous : row;
+                }),
+                ...prev.filter(
+                  (session) =>
+                    optimisticKeysRef.current.has(session.key)
+                    && !serverKeys.has(session.key),
+                ),
+              ];
+              return next.length === prev.length && next.every((row, index) => row === prev[index]) ? prev : next;
+            });
             for (const key of Array.from(optimisticKeysRef.current)) {
               if (serverKeys.has(key)) optimisticKeysRef.current.delete(key);
             }
@@ -191,18 +198,16 @@ export function useSessions(): {
   }, [refresh]);
 
   useEffect(() => {
-    let disposed = false;
-    let refreshQueued = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribe = client.onSessionUpdate(() => {
-      if (refreshQueued) return;
-      refreshQueued = true;
-      queueMicrotask(() => {
-        refreshQueued = false;
-        if (!disposed) void refresh();
-      });
+      if (timer !== undefined) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        void refresh();
+      }, 250);
     });
     return () => {
-      disposed = true;
+      clearTimeout(timer);
       unsubscribe();
     };
   }, [client, refresh]);

@@ -12,13 +12,13 @@
       "保存并启用 Slack，然后提及应用或发送私信。"
     ],
     "actions": {
-      "slack-manifest": "复制 manifest"
+      "slack-manifest": "复制应用清单"
     },
     "fields": {
       "appToken": {
         "label": "应用令牌",
         "placeholder": "xapp-...",
-        "help": "从 Slack Socket Mode 创建。"
+        "help": "在 Slack 应用的 Socket Mode 设置中创建。"
       },
       "botToken": {
         "label": "机器人令牌",

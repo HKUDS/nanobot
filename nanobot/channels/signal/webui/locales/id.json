@@ -26,7 +26,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "DM yang diizinkan",
+        "label": "Pengirim pesan langsung yang diizinkan",
         "placeholder": "Nomor telepon atau UUID"
       },
       "group_allowFrom": {

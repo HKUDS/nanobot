@@ -9,6 +9,15 @@ import type { UIMessage } from "@/lib/types";
 
 const STARTED_AT = Date.UTC(2026, 6, 25, 12, 34, 0);
 
+it("reuses completed historical rows across streaming updates and recalculates changed start times", () => {
+  const prompt: UIMessage = { id: "u", role: "user", content: "hello", createdAt: 100 };
+  const answer: UIMessage = { id: "a", role: "assistant", content: "world", latencyMs: 50, createdAt: 120 };
+  const first = projectWebuiThreadMessages([prompt, answer]);
+  const second = projectWebuiThreadMessages([prompt, answer, { id: "next", role: "user", content: "next", createdAt: 200 }]);
+  expect(second[1]).toBe(first[1]);
+  expect(projectWebuiThreadMessages([{ ...prompt, createdAt: 200 }, answer])[1].completedAt).toBe(250);
+});
+
 function message(
   role: UIMessage["role"],
   overrides: Partial<Omit<UIMessage, "role">> = {},

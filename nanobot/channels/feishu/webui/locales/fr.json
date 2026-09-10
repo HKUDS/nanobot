@@ -20,7 +20,7 @@
       "appSecret": {
         "label": "App Secret",
         "placeholder": "Laisser vide pour conserver le secret",
-        "help": "Collez un nouveau secret uniquement lors d’une rotation."
+        "help": "Collez un nouveau secret uniquement pour remplacer celui qui est enregistré."
       },
       "domain": {
         "label": "Région",
@@ -51,12 +51,12 @@
     }
   },
   "custom": {
-    "toggleAssistant": "Assistant {{name}}",
+    "toggleAssistant": "Activer l’assistant {{name}}",
     "configured": "Connecté",
     "needsSetup": "Autorisation requise",
     "noAppId": "Aucun App ID",
     "createAnother": "Créer un autre assistant",
-    "createHint": "Créez un bot Feishu distinct pour une autre équipe ou un autre flux.",
+    "createHint": "Créez un bot Feishu distinct pour une autre équipe, un autre espace ou un autre usage.",
     "createAssistant": "Créer l’assistant",
     "reconnect": "Reconnecter",
     "countNone": "Aucun assistant connecté",

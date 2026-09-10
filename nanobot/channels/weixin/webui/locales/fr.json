@@ -22,11 +22,11 @@
         "placeholder": "Enregistré après la connexion QR"
       },
       "sendProgress": { "label": "Envoyer la progression" },
-      "sendToolHints": { "label": "Envoyer les indications d’outils" },
+      "sendToolHints": { "label": "Envoyer un résumé de l’activité des outils" },
       "streaming": { "label": "Utiliser l’API de streaming" },
       "replyProgressMessages": { "label": "Envoyer la progression structurée" },
       "replyProgressMaxMessages": { "label": "Limite de progression structurée" },
-      "contextMessageBudget": { "label": "Budget de messages du contexte" },
+      "contextMessageBudget": { "label": "Nombre maximal de messages de contexte" },
       "blockStreaming": { "label": "Envoyer la réponse par blocs" },
       "blockStreamingMinChars": { "label": "Taille minimale d’un bloc" },
       "blockStreamingMaxMessages": { "label": "Limite de messages par blocs" },
@@ -34,14 +34,14 @@
       "cdnBaseUrl": { "label": "URL du CDN" },
       "routeTag": { "label": "Étiquette de routage" },
       "stateDir": { "label": "Répertoire d’état" },
-      "pollTimeout": { "label": "Délai d’interrogation" }
+      "pollTimeout": { "label": "Délai d’interrogation (secondes)" }
     }
   },
   "custom": {
     "qrAlt": "QR code de connexion WeChat",
     "scanTitle": "Scanner avec WeChat",
     "scanDescription": "Scannez ce code avec WeChat. nanobot enregistre localement l’état du compte après la connexion.",
-    "waiting": "En attente du scan WeChat...",
+    "waiting": "En attente de lecture du QR code avec WeChat…",
     "connected": "WeChat est connecté.",
     "stopped": "Connexion WeChat arrêtée.",
     "connecting": "Connexion...",

@@ -1,15 +1,16 @@
 {
+  "displayName": "E-mail",
   "description": "Permita que o nanobot receba e responda e-mails.",
   "requirements": "Caixa IMAP, envio SMTP, senha de app e consentimento explícito",
   "setup": {
-    "docsLabel": "Abrir guia de Email",
+    "docsLabel": "Abrir guia de e-mail",
     "officialLabel": "Abrir guia de senhas de app",
     "tryIt": "Envie um e-mail de teste para a caixa conectada.",
-    "summary": "Email lê mensagens por IMAP e responde por SMTP. Use uma caixa dedicada e dê consentimento antes de ativar.",
+    "summary": "O nanobot lê e-mails por IMAP e responde por SMTP. Use uma caixa dedicada e autorize o acesso antes de ativar o canal.",
     "steps": [
       "Crie uma caixa dedicada e, quando necessário, uma senha de app.",
       "Escolha um provedor ou informe IMAP e SMTP manualmente.",
-      "Dê consentimento, salve e ative Email; depois, envie uma mensagem de teste."
+      "Autorize o acesso, salve e ative o canal de e-mail. Depois, envie uma mensagem de teste."
     ],
     "presets": {
       "gmail": "Gmail",
@@ -19,8 +20,8 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Consentimento concedido",
-        "help": "Controle de segurança obrigatório. Deixe desativado até decidir conectar esta caixa ao bot.",
+        "label": "Permitir que o nanobot leia e envie e-mails",
+        "help": "Ative para permitir o acesso a esta caixa de e-mail. Confirme que ela é dedicada ao bot.",
         "choices": {
           "true": "Concedido",
           "false": "Não concedido"
@@ -65,7 +66,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Intervalo de consulta",
+        "label": "Intervalo de verificação de e-mails (segundos)",
         "placeholder": "30"
       },
       "allowFrom": {

@@ -1,12 +1,12 @@
 {
   "description": "Feishu 채팅과 그룹에서 nanobot을 사용합니다.",
-  "requirements": "Feishu 앱 자격 증명, 이벤트 구독 및 게이트웨이",
+  "requirements": "Feishu 앱 인증 정보, 이벤트 구독 및 게이트웨이",
   "setup": {
     "primaryAction": "Feishu 연결",
     "docsLabel": "Feishu 설정 가이드 열기",
     "officialLabel": "Feishu 콘솔 열기",
     "tryIt": "DM을 보내거나 그룹에서 Feishu 어시스턴트를 멘션하세요.",
-    "summary": "QR 코드로 Feishu 앱을 만들거나 연결하고 자격 증명을 자동 저장합니다.",
+    "summary": "QR 코드로 Feishu 앱을 만들거나 연결하고 인증 정보을 자동 저장합니다.",
     "steps": [
       "연결을 클릭하고 휴대폰의 Feishu 또는 Lark로 QR 코드를 스캔하세요.",
       "앱 연결을 승인하면 nanobot이 App ID와 Secret을 자동 저장합니다.",
@@ -20,7 +20,7 @@
       "appSecret": {
         "label": "App Secret",
         "placeholder": "현재 Secret을 유지하려면 비워 두세요",
-        "help": "자격 증명을 교체할 때만 새 App Secret을 붙여 넣으세요."
+        "help": "인증 정보을 교체할 때만 새 App Secret을 붙여 넣으세요."
       },
       "domain": {
         "label": "지역",
@@ -42,7 +42,7 @@
         "placeholder": "사용자 ID, 쉼표로 구분"
       },
       "topicIsolation": {
-        "label": "주제 격리",
+        "label": "주제별 대화 분리",
         "choices": {
           "true": "주제별로 세션 분리",
           "false": "그룹에서 하나의 세션 공유"
@@ -51,7 +51,7 @@
     }
   },
   "custom": {
-    "toggleAssistant": "{{name}} 어시스턴트",
+    "toggleAssistant": "{{name}} 어시스턴트 활성화",
     "configured": "연결됨",
     "needsSetup": "인증 필요",
     "noAppId": "App ID 없음",
