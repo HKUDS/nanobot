@@ -48,6 +48,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
+import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { isGenericRepositoryLogoUrl, logoFallbackUrls } from "@/lib/provider-brand";
 import type {
@@ -1148,14 +1149,10 @@ function McpCustomServerPanel({
               >
                 {tx("settings.mcp.headers", "Headers (JSON)")}
               </label>
-              <Textarea
-                id={headersInputId}
-                aria-describedby={headersHelpId}
-                value={form.headers}
-                onChange={(event) => update("headers", event.target.value)}
-                placeholder={'{"Authorization":"Bearer ..."}'}
-                className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
-              />
+              <SettingsTextEditor id={headersInputId} title={tx("settings.mcp.headers", "Headers (JSON)")}
+                  value={form.headers} onSave={(value) => update("headers", value)}
+                  placeholder={'{"Authorization":"Bearer ..."}'}
+                />
               <p
                 id={headersHelpId}
                 className="mt-1 text-[11.5px] leading-5 text-muted-foreground"
@@ -1198,23 +1195,19 @@ function McpCustomServerPanel({
                   <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
                     {tx("settings.mcp.args", "Arguments (JSON)")}
                   </span>
-                  <Textarea
-                    value={form.args}
-                    onChange={(event) => update("args", event.target.value)}
-                    placeholder={'["-y", "docs-mcp"]'}
-                    className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
-                  />
+                  <SettingsTextEditor title={tx("settings.mcp.args", "Arguments (JSON)")}
+                  value={form.args} onSave={(value) => update("args", value)}
+                  placeholder={'["-y", "docs-mcp"]'}
+                />
                 </label>
               ) : null}
               <label className="min-w-0">
                 <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
                   {tx("settings.mcp.env", "Environment variables (JSON)")}
                 </span>
-                <Textarea
-                  value={form.env}
-                  onChange={(event) => update("env", event.target.value)}
+                <SettingsTextEditor title={tx("settings.mcp.env", "Environment variables (JSON)")}
+                  value={form.env} onSave={(value) => update("env", value)}
                   placeholder={'{"API_KEY":"..."}'}
-                  className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
                 />
               </label>
               <label className="min-w-0">
@@ -1253,11 +1246,9 @@ function McpCustomServerPanel({
               <span className="mb-1.5 block text-[11.5px] font-medium text-muted-foreground">
                 {tx("settings.mcp.configImport", "Import mcp.json")}
               </span>
-              <Textarea
-                value={configImport}
-                onChange={(event) => onConfigImportChange(event.target.value)}
+              <SettingsTextEditor title={tx("settings.mcp.configImport", "Import mcp.json")}
+                value={configImport} onSave={onConfigImportChange}
                 placeholder={'{"mcpServers":{"docs":{"command":"npx","args":["-y","docs-mcp"]}}}'}
-                className="min-h-[84px] resize-y bg-background/80 font-mono text-[12px]"
               />
             </label>
             <Button

@@ -83,6 +83,42 @@ describe("Runtime configuration settings", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "tools.exec.sandbox": backend } }, 20_000));
   });
 
+  it("edits lists in a dialog, cancels drafts, and retains failed saves for retry", async () => {
+    const payload = runtimeSettings();
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    const trigger = screen.getByRole("button", { name: "Allowed environment variables", expanded: false });
+    expect(screen.queryByRole("textbox", { name: "Allowed environment variables" })).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    let dialog = screen.getByRole("dialog", { name: "Allowed environment variables" });
+    let editor = within(dialog).getByRole("textbox");
+    expect(editor).toHaveValue("TERM");
+    await waitFor(() => expect(editor).toHaveFocus());
+    fireEvent.change(editor, { target: { value: "discarded" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(requestMutationMock).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    dialog = screen.getByRole("dialog", { name: "Allowed environment variables" });
+    editor = within(dialog).getByRole("textbox");
+    expect(editor).toHaveValue("TERM");
+    fireEvent.change(editor, { target: { value: " TERM \n\n COLORTERM " } });
+    requestMutationMock.mockRejectedValueOnce(new Error("Could not save list"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save", exact: true }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Could not save list");
+    expect(editor).toHaveValue(" TERM \n\n COLORTERM ");
+    expect(requestMutationMock).toHaveBeenLastCalledWith("settings.runtime_config.update", {
+      values: { "tools.exec.allowed_env_keys": ["TERM", "COLORTERM"] },
+    }, 20_000);
+    requestMutationMock.mockResolvedValueOnce({ ...payload, requires_restart: true,
+      runtime_config: { ...payload.runtime_config, "tools.exec.allowed_env_keys": ["TERM", "COLORTERM"] } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save", exact: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
+    fireEvent.click(trigger);
+    expect(within(screen.getByRole("dialog")).getByRole("textbox")).toHaveValue("TERM\nCOLORTERM");
+  });
+
   it("starts the API with newly saved advanced settings", async () => {
     const payload = runtimeSettings();
     payload.api = { ...payload.api, host: "192.168.1.7", timeout: 77.5, api_key_hint: "set" };

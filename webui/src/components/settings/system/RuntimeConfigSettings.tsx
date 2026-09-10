@@ -5,7 +5,7 @@ import { ToggleButton } from "@/components/settings/ToggleButton";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle, RestartRequiredNotice, RestartSettingsFooter } from "@/components/settings/shared/SettingsControls";
 import { ProviderPicker } from "@/components/settings/shared/ModelControls";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
-import { Textarea } from "@/components/ui/textarea";
+import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { Input } from "@/components/ui/input";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigField, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { updateRuntimeConfigSettings } from "@/lib/api";
@@ -117,7 +117,14 @@ export function useRuntimeConfigSettings(
     }, delay.current);
     return () => window.clearTimeout(timer);
   }, [drafts, saving]);
-  return { value, visible, dirty, discard, change, save, saving, errors, invalidField, saved };
+  const saveList = async (field: RuntimeConfigField, next: string) => {
+    const payload = await updateRuntimeConfigSettings(client, {
+      [field.path]: next.split("\n").map((line) => line.trim()).filter(Boolean),
+    });
+    applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+    setSaved((prev) => ({ ...prev, [field.group]: true }));
+  };
+  return { value, visible, dirty, discard, change, save, saveList, saving, errors, invalidField, saved };
 }
 
 export type RuntimeConfigController = ReturnType<typeof useRuntimeConfigSettings>;
@@ -189,9 +196,9 @@ export function RuntimeConfigSettings({
                             {field.path === "agents.defaults.timezone" ? (
                               <TimezonePicker {...common} value={String(current)} onChange={(next) => state.change(field, next)} />
                             ) : field.kind === "list" ? (
-                              <Textarea {...common} value={String(current)} rows={3} spellCheck={false}
-                                onChange={(event) => state.change(field, event.target.value)}
-                                className="resize-y rounded-xl text-[13px]" />
+                              <SettingsTextEditor id={id} title={text} description={help} value={String(current)}
+                                disabled={disabled || state.saving !== null || isRestarting}
+                                onSave={(next) => state.saveList(field, next)} />
                             ) : field.kind === "select" || field.kind === "preset" ? (
                               <ProviderPicker triggerProps={{ ...common, disabled: disabled || state.saving === group.id || isRestarting }}
                                 value={String(current) || "__none__"} emptyLabel={tr("none")}

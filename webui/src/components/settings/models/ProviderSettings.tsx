@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -591,12 +592,9 @@ function ProviderAdvancedOptions({
                 <span className="text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.extraHeaders", "Extra headers")}
                 </span>
-                <Textarea
-                  value={form.extraHeaders}
-                  onChange={(event) => onChange({ extraHeaders: event.target.value })}
+                <SettingsTextEditor title={tx("settings.providers.extraHeaders", "Extra headers")}
+                  value={form.extraHeaders} onSave={(value) => onChange({ extraHeaders: value })}
                   placeholder={'{"X-Header":"value"}'}
-                  spellCheck={false}
-                  className="min-h-[88px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
@@ -605,12 +603,9 @@ function ProviderAdvancedOptions({
                 <span className="text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.extraQuery", "Additional query parameters")}
                 </span>
-                <Textarea
-                  value={form.extraQuery}
-                  onChange={(event) => onChange({ extraQuery: event.target.value })}
+                <SettingsTextEditor title={tx("settings.providers.extraQuery", "Additional query parameters")}
+                  value={form.extraQuery} onSave={(value) => onChange({ extraQuery: value })}
                   placeholder={'{"api-version":"2024-02-01"}'}
-                  spellCheck={false}
-                  className="min-h-[88px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}
@@ -619,12 +614,9 @@ function ProviderAdvancedOptions({
                 <span className="text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.extraBody", "Additional body parameters")}
                 </span>
-                <Textarea
-                  value={form.extraBody}
-                  onChange={(event) => onChange({ extraBody: event.target.value })}
+                <SettingsTextEditor title={tx("settings.providers.extraBody", "Additional body parameters")}
+                  value={form.extraBody} onSave={(value) => onChange({ extraBody: value })}
                   placeholder={'{"service_tier":"priority"}'}
-                  spellCheck={false}
-                  className="min-h-[96px] resize-y bg-background font-mono text-[12px]"
                 />
               </label>
             ) : null}

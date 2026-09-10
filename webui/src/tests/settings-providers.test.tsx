@@ -794,15 +794,17 @@ describe("Settings providers", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    fireEvent.change(screen.getByLabelText("Extra headers"), {
-      target: { value: '{"X-Tenant":"engineering"}' },
-    });
-    fireEvent.change(screen.getByLabelText("Additional body parameters"), {
-      target: { value: '{"service_tier":"priority"}' },
-    });
-    fireEvent.change(screen.getByLabelText("Additional query parameters"), {
-      target: { value: '{"api-version":"2026-01-01"}' },
-    });
+    for (const [title, value] of [
+      ["Extra headers", '{"X-Tenant":"engineering"}'],
+      ["Additional body parameters", '{"service_tier":"priority"}'],
+      ["Additional query parameters", '{"api-version":"2026-01-01"}'],
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name: title }));
+      const editor = screen.getByRole("dialog", { name: title });
+      fireEvent.change(within(editor).getByRole("textbox", { name: title }), { target: { value } });
+      fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).not.toBeInTheDocument());
+    }
     fireEvent.change(screen.getByLabelText("Network proxy"), {
       target: { value: "http://127.0.0.1:7890" },
     });
