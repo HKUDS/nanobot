@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import type {
   ChannelSetupContract,
@@ -593,12 +594,7 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Feishu settings" }));
-    fireEvent.click(await screen.findByRole(
-      "button",
-      { name: "nanobot" },
-      { timeout: 3_000 },
-    ));
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -651,12 +647,7 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click(await screen.findByRole("button", { name: "View Feishu settings" }));
-    fireEvent.click(await screen.findByRole(
-      "button",
-      { name: "nanobot" },
-      { timeout: 3_000 },
-    ));
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -740,7 +731,6 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
 
     fireEvent.click((await screen.findAllByRole("button", { name: /^View .+ settings$/ }))[0]);
-    fireEvent.click(await screen.findByRole("button", { name: "nanobot" }));
     fireEvent.click(await screen.findByRole("switch", { name: "nanobot assistant" }));
 
     await waitFor(() =>
@@ -759,7 +749,7 @@ describe("Settings channels", () => {
     );
   });
 
-  it("shows Feishu assistant instances in the channel details", async () => {
+  it("opens and saves each Feishu assistant's settings directly from Advanced", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -834,33 +824,43 @@ describe("Settings channels", () => {
     expect(screen.getAllByText("Support Bot")).toHaveLength(1);
     expect(document.querySelector('img[src="https://example.com/support.png"]')).toBeTruthy();
 
-    expect(screen.getByRole("button", { name: /Support Bot/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    expect(screen.getByRole("button", { name: /Product Helper/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+    const support = within(screen.getByText("Support Bot").closest("article")!);
+    const product = within(screen.getByText("Product Helper").closest("article")!);
+    const supportAdvanced = support.getByRole("button", { name: "Advanced" });
+    const productAdvanced = product.getByRole("button", { name: "Advanced" });
+    expect(supportAdvanced).toBeVisible();
+    expect(productAdvanced).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: /Support Bot/ }));
-    expect(screen.getByRole("button", { name: /Support Bot/ })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
-    expect(screen.getByLabelText("App ID")).toBeInTheDocument();
-    expect(screen.getByText("Advanced", { selector: "summary span" })).toBeInTheDocument();
-    expect(screen.getByText("Topic isolation")).toBeInTheDocument();
+    supportAdvanced.focus();
+    await userEvent.setup().keyboard("[Enter]");
+    expect(supportAdvanced).toHaveAttribute("aria-expanded", "true");
+    expect(support.getByLabelText("App ID")).toBeVisible();
+    expect(support.getByLabelText("App ID")).toHaveValue("cli_default");
+    expect(support.getByRole("group", { name: "Topic isolation" })).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: /Product Helper/ }));
-    expect(screen.getByRole("button", { name: /Support Bot/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    expect(screen.getByRole("button", { name: /Product Helper/ })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    fireEvent.click(productAdvanced);
+    expect(supportAdvanced).toHaveAttribute("aria-expanded", "false");
+    expect(productAdvanced).toHaveAttribute("aria-expanded", "true");
+    expect(product.getByLabelText("App ID")).toHaveValue("cli_product");
+    fireEvent.change(product.getByLabelText("App ID"), { target: { value: "cli_updated" } });
+    fireEvent.click(product.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.channel.configure",
+      expect.objectContaining({
+        name: "feishu",
+        instance_id: "product",
+        enable: false,
+        values: expect.objectContaining({ "channels.feishu.appId": "cli_updated" }),
+      }),
+      150_000,
+    ));
+    expect(await screen.findByText("Settings saved.")).toBeVisible();
+
+    productAdvanced.focus();
+    await userEvent.setup().keyboard("[Space]");
+    expect(productAdvanced).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(supportAdvanced);
+    expect(support.getByLabelText("App ID")).toHaveValue("cli_default");
   });
 
   it("renders external multi-instance channels from the shared contract", async () => {
@@ -935,7 +935,8 @@ describe("Settings channels", () => {
       "aria-checked",
       "true",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Product worker" }));
+    fireEvent.click(within(screen.getByText("Product worker").closest("article")!)
+      .getByRole("button", { name: "Advanced" }));
     expect(screen.getByRole("radio", { name: "Eu" })).toBeChecked();
   });
 
@@ -995,7 +996,7 @@ describe("Settings channels", () => {
       "aria-checked",
       "true",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Support Bot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByLabelText("App ID")).toBeInTheDocument();
     expect(document.querySelector('img[src="https://example.com/support.png"]')).toBeTruthy();
   });
@@ -1579,13 +1580,6 @@ describe("Settings channels", () => {
 
     for (const [, displayName, guideLabel] of channels) {
       fireEvent.click(await screen.findByRole("button", { name: `View ${displayName} settings` }));
-      if (displayName === "Feishu") {
-        fireEvent.click(await screen.findByRole(
-          "button",
-          { name: "nanobot" },
-          { timeout: 3_000 },
-        ));
-      }
       fireEvent.pointerDown(screen.getByRole("button", { name: "Help", exact: true }), { button: 0, ctrlKey: false });
       const guide = await screen.findByRole("menuitem", { name: guideLabel });
       expect(guide).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
@@ -1633,7 +1627,7 @@ describe("Settings channels", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "View Feishu settings" }));
-    fireEvent.click(screen.getByRole("button", { name: "nanobot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     const region = screen.getByRole("group", { name: "Region" });
     expect(within(region).getByRole("radio", { name: "Feishu" })).toBeChecked();
     expect(within(region).getByRole("radio", { name: "Lark" })).toBeInTheDocument();

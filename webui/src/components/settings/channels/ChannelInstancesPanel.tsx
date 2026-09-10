@@ -165,19 +165,11 @@ export function ChannelInstancesPanel({
                 "overflow-hidden rounded-floating transition-colors",
                 expanded
                   ? "bg-background"
-                  : "bg-background/70 settings-hover",
+                  : "bg-background/70",
               )}
             >
               <div className="flex items-center gap-3 px-3 py-3">
-                <button
-                  type="button"
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                  onClick={() =>
-                    setSelectedId((current) => (current === instance.id ? null : instance.id))
-                  }
-                  aria-label={channelInstanceDisplayName(instance)}
-                  aria-expanded={expanded}
-                >
+                <div className="flex min-w-0 flex-1 items-center gap-3">
                   <ChannelInstanceAvatar
                     feature={feature}
                     instance={instance}
@@ -191,14 +183,7 @@ export function ChannelInstancesPanel({
                     configuredLabel={customization.configuredLabel}
                     needsSetupLabel={customization.needsSetupLabel}
                   />
-                  <ChevronDown
-                    className={cn(
-                      "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                      expanded && "rotate-180",
-                    )}
-                    aria-hidden
-                  />
-                </button>
+                </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {toggling ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
@@ -221,7 +206,7 @@ export function ChannelInstancesPanel({
                 </div>
               </div>
 
-              {expanded ? (
+              {hasInstanceOverview || instanceFields.length ? (
                 <div className="space-y-3 px-4 pb-4 pt-1">
                   {hasInstanceOverview ? <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     {instanceSummary ? (
@@ -232,20 +217,28 @@ export function ChannelInstancesPanel({
                     {instanceAction}
                   </section> : null}
                   {instanceFields.length ? (
-                    <details className={cn(
-                      "group text-[12px] leading-5 text-muted-foreground",
+                    <div className={cn(
+                      "text-[12px] leading-5 text-muted-foreground",
                       hasInstanceOverview && "border-t border-border/50 pt-3",
                     )}>
-                      <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
-                        <span className="inline-flex items-center gap-1.5">
-                          {tx("settings.channels.advanced", "Advanced")}
-                          <ChevronDown
-                            className="h-3.5 w-3.5 transition-transform group-open:rotate-180"
-                            aria-hidden
-                          />
-                        </span>
-                      </summary>
-                      <form
+                      <button
+                        type="button"
+                        className="-ms-1 inline-flex min-h-8 items-center gap-1.5 rounded px-1 text-[12px] font-semibold text-foreground focus-visible:outline-offset-2"
+                        onClick={() =>
+                          setSelectedId((current) => (current === instance.id ? null : instance.id))
+                        }
+                        aria-expanded={expanded}
+                      >
+                        {tx("settings.channels.advanced", "Advanced")}
+                        <ChevronDown
+                          className={cn(
+                            "h-3.5 w-3.5 transition-transform motion-reduce:transition-none",
+                            expanded && "rotate-180",
+                          )}
+                          aria-hidden
+                        />
+                      </button>
+                      {expanded ? <form
                         className="mt-3"
                         onSubmit={(event) => {
                           event.preventDefault();
@@ -279,8 +272,8 @@ export function ChannelInstancesPanel({
                             {tx("settings.channels.saveSettings", "Save settings")}
                           </Button>
                         </div>
-                      </form>
-                    </details>
+                      </form> : null}
+                    </div>
                   ) : null}
                 </div>
               ) : null}

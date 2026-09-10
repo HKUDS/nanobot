@@ -8,7 +8,6 @@ import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelIns
 import type {
   NanobotChannelInstanceInfo,
   NanobotFeatureInfo,
-  NanobotFeaturesPayload,
 } from "@/lib/types";
 import { FeishuConnectFlow } from "./FeishuConnectFlow";
 
@@ -37,11 +36,13 @@ export function FeishuAssistantsPanel({
         configuredLabel: tx("custom.configured", "Connected"),
         needsSetupLabel: tx("custom.needsSetup", "Needs authorization"),
         renderInstanceSummary: () => null,
-        renderInstanceAction: (instance) => (
-          <FeishuInstanceAction
+        renderInstanceAction: (instance) => instance.configured ? null : (
+          <FeishuConnectFlow
             key={instance.id}
             token={token}
-            instance={instance}
+            instanceId={instance.id}
+            mode="replace"
+            idleLabel={t("settings.channels.connect", { defaultValue: "Connect" })}
             onFeaturesUpdate={onFeaturesUpdate}
           />
         ),
@@ -70,28 +71,6 @@ export function FeishuAssistantsPanel({
           </div>
         ),
       }}
-    />
-  );
-}
-
-function FeishuInstanceAction({
-  token,
-  instance,
-  onFeaturesUpdate,
-}: {
-  token: string;
-  instance: NanobotChannelInstanceInfo;
-  onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
-}) {
-  const { t } = useTranslation();
-  if (instance.configured) return null;
-  return (
-    <FeishuConnectFlow
-      token={token}
-      instanceId={instance.id}
-      mode="replace"
-      idleLabel={t("settings.channels.connect", { defaultValue: "Connect" })}
-      onFeaturesUpdate={onFeaturesUpdate}
     />
   );
 }
