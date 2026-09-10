@@ -1596,7 +1596,18 @@ class AgentLoop:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._observe_background_task)
+
+    def _observe_background_task(self, task: asyncio.Task[Any]) -> None:
+        """Drop a finished background task; log unexpected failures with context."""
+        self._background_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            coro = task.get_coro()
+            name = getattr(coro, "__qualname__", type(coro).__name__)
+            logger.opt(exception=exc).error("background task {} failed", name)
 
     def stop(self) -> None:
         """Stop the agent loop."""
