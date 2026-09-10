@@ -113,7 +113,7 @@
         "tools_exec_timeout": {"label": "Tiempo límite de comandos (segundos)", "help": "Duración máxima de un comando de shell. 0 significa sin límite."},
         "tools_exec_path_prepend": {"label": "Rutas prioritarias", "help": "Directorios que se añaden al inicio de PATH. Sepáralos con punto y coma en Windows o con dos puntos en macOS y Linux."},
         "tools_exec_path_append": {"label": "Rutas adicionales", "help": "Directorios que se añaden al final de PATH. Sepáralos con punto y coma en Windows o con dos puntos en macOS y Linux."},
-        "tools_exec_sandbox": {"label": "Activar el entorno aislado Bubblewrap", "help": "Requiere bwrap en Linux. Comprobar las rutas del espacio de trabajo no aísla los procesos."},
+        "tools_exec_sandbox": {"label": "Sandbox de comandos", "help": "Usa bwrap en Linux o Seatbelt en macOS. Las comprobaciones del espacio de trabajo por sí solas no aíslan los procesos."},
         "tools_exec_sandbox_ro_binds": {"label": "Rutas de solo lectura del entorno aislado", "help": "Montajes adicionales de solo lectura, uno por línea."},
         "tools_exec_sandbox_rw_binds": {"label": "Rutas con escritura del entorno aislado", "help": "Montajes adicionales con permiso de escritura, uno por línea."},
         "tools_exec_allowed_env_keys": {"label": "Variables de entorno permitidas", "help": "Variables adicionales que se pasan a los comandos, una por línea. Las variables básicas necesarias siguen disponibles."},

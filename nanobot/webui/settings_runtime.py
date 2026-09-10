@@ -141,8 +141,8 @@ def update_runtime_config(
     if "api.host" in values and not is_loopback_host(validated.api.host):
         if not validated.api.api_key.strip():
             raise WebUISettingsError("Set an API key in System before using a network bind address.")
-    if "tools.exec.sandbox" in values and validated.tools.exec.sandbox not in {"", "bwrap"}:
-        raise WebUISettingsError("tools.exec.sandbox: choose no sandbox or bwrap")
+    if "tools.exec.sandbox" in values and validated.tools.exec.sandbox not in {"", "bwrap", "seatbelt"}:
+        raise WebUISettingsError("tools.exec.sandbox: choose no sandbox, bwrap, or seatbelt")
     if "tools.ssrf_whitelist" in values:
         for cidr in validated.tools.ssrf_whitelist:
             try:

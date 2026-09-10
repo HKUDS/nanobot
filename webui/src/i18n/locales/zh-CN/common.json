@@ -177,8 +177,8 @@
           "help": "添加到 PATH 末尾。多个目录在 Windows 上用分号分隔，在 Linux 和 macOS 上用冒号分隔。"
         },
         "tools_exec_sandbox": {
-          "label": "启用 Bubblewrap 沙箱",
-          "help": "在 Linux 上通过 bwrap 隔离命令进程，需要先安装 bwrap。工作区路径限制本身不提供进程隔离。"
+          "label": "命令沙箱",
+          "help": "Linux 使用 bwrap，macOS 使用 Seatbelt。工作区路径限制本身不提供进程隔离。"
         },
         "tools_exec_sandbox_ro_binds": {
           "label": "沙箱额外只读路径",

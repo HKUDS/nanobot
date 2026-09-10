@@ -177,8 +177,8 @@
           "help": "Directories added to the end of PATH. Separate entries with semicolons on Windows or colons on Linux and macOS."
         },
         "tools_exec_sandbox": {
-          "label": "Enable Bubblewrap sandbox",
-          "help": "Bubblewrap requires bwrap on Linux. Workspace checks alone do not isolate processes."
+          "label": "Command sandbox",
+          "help": "Use bwrap on Linux or Seatbelt on macOS. Workspace checks alone do not isolate processes."
         },
         "tools_exec_sandbox_ro_binds": {
           "label": "Read-only sandbox paths",

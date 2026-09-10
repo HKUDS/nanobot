@@ -132,3 +132,19 @@ def test_disabling_memory_consolidation_preserves_other_memory_settings():
     after = config.agents.defaults.model_dump()
     before["dream"]["enabled"] = False
     assert after == before
+
+
+@pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+def test_sandbox_backend_persists_with_path_permissions(tmp_path, backend):
+    path = tmp_path / "config.json"
+    payload = update_runtime_config_settings({
+        "tools.exec.sandbox": backend,
+        "tools.exec.sandbox_ro_binds": ["shared/read"],
+        "tools.exec.sandbox_rw_binds": ["shared/write"],
+    }, local_browser=True, config_path=path)
+    saved = load_config(path).tools.exec
+    assert saved.sandbox == backend
+    assert saved.sandbox_ro_binds == ["shared/read"]
+    assert saved.sandbox_rw_binds == ["shared/write"]
+    assert payload["runtime_config"]["tools.exec.sandbox"] == backend
+    assert payload["requires_restart"]

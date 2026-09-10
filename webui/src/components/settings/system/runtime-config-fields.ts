@@ -3,7 +3,7 @@ export interface RuntimeConfigField {
   path: string;
   kind: "toggle" | "text" | "nullable" | "number" | "boolean" | "select" | "list" | "preset";
   options?: string[];
-  when?: { path: string; value: string | boolean };
+  when?: { path: string; value: string | boolean | string[] };
   manual?: boolean;
   min?: number;
   max?: number;
@@ -47,9 +47,9 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "shell", path: "tools.exec.timeout", kind: "number", min: 0 },
   { group: "shell", path: "tools.exec.path_prepend", kind: "text" },
   { group: "shell", path: "tools.exec.path_append", kind: "text" },
-  { group: "shell", path: "tools.exec.sandbox", kind: "toggle", options: ["", "bwrap"] },
-  { group: "shell", path: "tools.exec.sandbox_ro_binds", kind: "list", when: { path: "tools.exec.sandbox", value: "bwrap" } },
-  { group: "shell", path: "tools.exec.sandbox_rw_binds", kind: "list", when: { path: "tools.exec.sandbox", value: "bwrap" } },
+  { group: "shell", path: "tools.exec.sandbox", kind: "select", options: ["", "bwrap", "seatbelt"] },
+  { group: "shell", path: "tools.exec.sandbox_ro_binds", kind: "list", when: { path: "tools.exec.sandbox", value: ["bwrap", "seatbelt"] } },
+  { group: "shell", path: "tools.exec.sandbox_rw_binds", kind: "list", when: { path: "tools.exec.sandbox", value: ["bwrap", "seatbelt"] } },
   { group: "shell", path: "tools.exec.allowed_env_keys", kind: "list" },
   { group: "shell", path: "tools.exec.allow_patterns", kind: "list" },
   { group: "shell", path: "tools.exec.deny_patterns", kind: "list" },

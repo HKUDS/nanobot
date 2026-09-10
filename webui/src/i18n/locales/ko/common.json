@@ -113,7 +113,7 @@
         "tools_exec_timeout": {"label": "명령 제한 시간(초)", "help": "셸 명령의 최대 실행 시간입니다. 0은 무제한입니다."},
         "tools_exec_path_prepend": {"label": "우선 검색 경로", "help": "PATH 앞에 추가할 디렉터리입니다. Windows에서는 세미콜론, macOS와 Linux에서는 콜론으로 구분하세요."},
         "tools_exec_path_append": {"label": "추가 검색 경로", "help": "PATH 뒤에 추가할 디렉터리입니다. Windows에서는 세미콜론, macOS와 Linux에서는 콜론으로 구분하세요."},
-        "tools_exec_sandbox": {"label": "Bubblewrap 샌드박스 사용", "help": "Linux에서 bwrap이 필요합니다. 작업 공간 경로 검사만으로는 프로세스가 격리되지 않습니다."},
+        "tools_exec_sandbox": {"label": "명령 샌드박스", "help": "Linux에서는 bwrap, macOS에서는 Seatbelt를 사용합니다. 작업 공간 검사만으로는 프로세스가 격리되지 않습니다."},
         "tools_exec_sandbox_ro_binds": {"label": "샌드박스 읽기 전용 경로", "help": "읽기 전용으로 추가 마운트할 경로를 한 줄에 하나씩 입력하세요."},
         "tools_exec_sandbox_rw_binds": {"label": "샌드박스 쓰기 가능 경로", "help": "쓰기를 허용하여 추가 마운트할 경로를 한 줄에 하나씩 입력하세요."},
         "tools_exec_allowed_env_keys": {"label": "허용할 환경 변수", "help": "명령에 전달할 환경 변수를 추가합니다. 한 줄에 하나씩 입력하세요. 실행에 필요한 기본 환경 변수는 계속 전달됩니다."},

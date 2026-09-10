@@ -71,13 +71,16 @@ describe("Runtime configuration settings", () => {
     expect(screen.getByText("Update the gateway to edit these settings.")).toBeVisible();
   });
 
-  it("uses switches for binary modes and reveals sandbox fields only when enabled", async () => {
+  it.each(["bwrap", "seatbelt", ""])("saves the %s sandbox and reveals its path settings", async (backend) => {
     const payload = runtimeSettings();
-    requestMutationMock.mockResolvedValue(payload);
+    payload.runtime_config!["tools.exec.sandbox"] = backend ? "" : "seatbelt";
+    requestMutationMock.mockResolvedValue({ ...payload, runtime_config: { ...payload.runtime_config, "tools.exec.sandbox": backend } });
     renderSettingsView({ initialSection: "advanced", initialSettings: payload });
-    fireEvent.click(screen.getByRole("switch", { name: "Enable Bubblewrap sandbox" }));
-    expect(document.getElementById("runtime-tools.exec.sandbox_ro_binds")).toBeVisible();
-    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "tools.exec.sandbox": "bwrap" } }, 20_000));
+    fireEvent.click(screen.getByRole("combobox", { name: "Command sandbox" }));
+    fireEvent.click(screen.getByRole("option", { name: backend || "None", exact: true }));
+    if (backend) expect(document.getElementById("runtime-tools.exec.sandbox_ro_binds")).toBeVisible();
+    else expect(document.getElementById("runtime-tools.exec.sandbox_ro_binds")).not.toBeInTheDocument();
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "tools.exec.sandbox": backend } }, 20_000));
   });
 
   it("starts the API with newly saved advanced settings", async () => {

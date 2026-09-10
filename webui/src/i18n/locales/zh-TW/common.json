@@ -113,7 +113,7 @@
         "tools_exec_timeout": {"label": "命令逾時（秒）", "help": "Shell 命令的執行時限，0 表示不限。"},
         "tools_exec_path_prepend": {"label": "優先搜尋路徑", "help": "加到 PATH 開頭的目錄。多個目錄在 Windows 上以分號分隔，在 Linux 和 macOS 上以冒號分隔。"},
         "tools_exec_path_append": {"label": "附加搜尋路徑", "help": "加到 PATH 結尾的目錄。多個目錄在 Windows 上以分號分隔，在 Linux 和 macOS 上以冒號分隔。"},
-        "tools_exec_sandbox": {"label": "啟用 Bubblewrap 沙箱", "help": "需在 Linux 安裝 bwrap。僅檢查工作區路徑不會隔離程序。"},
+        "tools_exec_sandbox": {"label": "命令沙箱", "help": "Linux 使用 bwrap，macOS 使用 Seatbelt。工作區路徑限制本身不提供程序隔離。"},
         "tools_exec_sandbox_ro_binds": {"label": "沙箱唯讀路徑", "help": "額外以唯讀方式掛載的路徑，每行一個。"},
         "tools_exec_sandbox_rw_binds": {"label": "沙箱可寫入路徑", "help": "額外允許寫入的掛載路徑，每行一個。"},
         "tools_exec_allowed_env_keys": {"label": "額外傳遞的環境變數", "help": "除必要變數外，還要從主機傳遞給指令的環境變數名稱，每行一個。"},

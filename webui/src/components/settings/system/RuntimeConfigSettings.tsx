@@ -40,7 +40,9 @@ export function useRuntimeConfigSettings(
     if (invalidField && saving === null) document.getElementById(`runtime-${invalidField}`)?.focus();
   }, [invalidField, saving]);
   const value = (path: string): Draft => drafts[path] ?? displayValue(settings?.runtime_config?.[path]);
-  const visible = (field: RuntimeConfigField) => !field.when || value(field.when.path) === field.when.value;
+  const visible = (field: RuntimeConfigField) => !field.when || (Array.isArray(field.when.value)
+    ? field.when.value.includes(String(value(field.when.path)))
+    : value(field.when.path) === field.when.value);
   const dirty = (field: RuntimeConfigField) =>
     drafts[field.path] !== undefined && drafts[field.path] !== displayValue(settings?.runtime_config?.[field.path]);
   const discard = (group: string) => {
@@ -192,12 +194,12 @@ export function RuntimeConfigSettings({
                                 className="resize-y rounded-xl text-[13px]" />
                             ) : field.kind === "select" || field.kind === "preset" ? (
                               <ProviderPicker triggerProps={{ ...common, disabled: disabled || state.saving === group.id || isRestarting }}
-                                value={String(current)} emptyLabel={tr("none")}
-                                providers={options.map((option) => ({ name: option, label:
+                                value={String(current) || "__none__"} emptyLabel={tr("none")}
+                                providers={options.map((option) => ({ name: option || "__none__", label:
                                   !option ? tr(field.kind === "preset" ? "activeModel" : "none")
                                     : ["auto", "manual", "standard", "persistent"].includes(option) ? tr(option) : option,
                                 }))}
-                                onChange={(next) => state.change(field, next)} />
+                                onChange={(next) => state.change(field, next === "__none__" ? "" : next)} />
                             ) : (
                               <Input {...common} type={field.kind === "number" ? "number" : "text"}
                                 min={field.min} max={field.max} step={field.path === "api.timeout" ? "any" : 1}
