@@ -1187,7 +1187,7 @@
     "compaction": {
       "cancelled": "Compression du contexte annulée",
       "empty": "Aucun contexte à compresser.",
-      "started": "Compression du contexte…",
+      "started": "Compression du contexte",
       "failed": "Échec de la compression du contexte",
       "succeeded": "Contexte compressé"
     },

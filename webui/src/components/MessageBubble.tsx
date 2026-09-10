@@ -304,7 +304,7 @@ function IncomingSessionMessage({
       {createdAtLabel || showCopyAction ? (
         <TooltipProvider>
           <div
-            className="mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
+            className="message-actions mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
           >
             {showCopyAction ? <MessageCopyButton content={message.content} /> : null}
             {createdAtLabel ? (
@@ -530,7 +530,7 @@ export function MessageBubble({
             data-state={showAssistantFooterRow ? "visible" : "reserved"}
             aria-hidden={showAssistantFooterRow ? undefined : true}
             className={cn(
-              "mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
+              "message-actions mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
               "transition-opacity duration-300 ease-out motion-reduce:transition-none",
               showAssistantFooterRow
                 ? "opacity-100"

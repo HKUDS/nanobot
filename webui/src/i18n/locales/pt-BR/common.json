@@ -1201,7 +1201,7 @@
     "compaction": {
       "cancelled": "Compactação do contexto cancelada",
       "empty": "Não há contexto para compactar.",
-      "started": "Compactando contexto…",
+      "started": "Compactando contexto",
       "failed": "Falha ao compactar o contexto",
       "succeeded": "Contexto compactado"
     },

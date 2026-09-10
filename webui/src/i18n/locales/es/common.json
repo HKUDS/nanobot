@@ -1188,7 +1188,7 @@
     "compaction": {
       "cancelled": "Compresión de contexto cancelada",
       "empty": "No hay contexto que comprimir.",
-      "started": "Comprimiendo el contexto…",
+      "started": "Comprimiendo el contexto",
       "failed": "La compresión del contexto falló",
       "succeeded": "Contexto comprimido"
     },

@@ -1187,7 +1187,7 @@
     "compaction": {
       "cancelled": "컨텍스트 압축이 취소되었습니다",
       "empty": "압축할 컨텍스트가 없습니다.",
-      "started": "컨텍스트 압축 중…",
+      "started": "컨텍스트 압축 중",
       "failed": "컨텍스트 압축 실패",
       "succeeded": "컨텍스트를 압축했습니다"
     },

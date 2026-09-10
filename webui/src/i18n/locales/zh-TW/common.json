@@ -1187,7 +1187,7 @@
     "compaction": {
       "cancelled": "上下文壓縮已取消",
       "empty": "無需壓縮上下文",
-      "started": "正在壓縮上下文…",
+      "started": "正在壓縮上下文",
       "failed": "上下文壓縮失敗",
       "succeeded": "上下文已壓縮"
     },

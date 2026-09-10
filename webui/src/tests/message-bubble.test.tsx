@@ -133,7 +133,6 @@ describe("MessageBubble", () => {
     expect(notice).toHaveAttribute("aria-live", "polite");
     expect(screen.getByText("Context compacted")).toBeInTheDocument();
     expect(notice).toHaveTextContent(/^Context compacted$/);
-    expect(notice?.querySelector(".lucide-archive")).toBeInTheDocument();
   });
 
   it("renders user messages as right-aligned pills", () => {

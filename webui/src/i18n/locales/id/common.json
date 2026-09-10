@@ -1187,7 +1187,7 @@
     "compaction": {
       "cancelled": "Pemadatan konteks dibatalkan",
       "empty": "Tidak ada konteks yang perlu dipadatkan.",
-      "started": "Memadatkan konteks…",
+      "started": "Memadatkan konteks",
       "failed": "Pemadatan konteks gagal",
       "succeeded": "Konteks dipadatkan"
     },

@@ -735,7 +735,15 @@
   }
 }
 
+.message-actions > button:first-child {
+  margin-inline-start: -0.5rem;
+}
+
 @media (pointer: coarse) {
+  .message-actions > button:first-child {
+    margin-inline-start: -0.875rem;
+  }
+
   .touch-target {
     min-width: 2.75rem;
     min-height: 2.75rem;

@@ -1187,7 +1187,7 @@
     "compaction": {
       "cancelled": "Đã hủy nén ngữ cảnh",
       "empty": "Không có ngữ cảnh cần nén.",
-      "started": "Đang nén ngữ cảnh…",
+      "started": "Đang nén ngữ cảnh",
       "failed": "Nén ngữ cảnh không thành công",
       "succeeded": "Đã nén ngữ cảnh"
     },
