@@ -256,7 +256,7 @@ async def maybe_generate_webui_title(
 
     try:
         with llm_usage_source("system"):
-            response = await provider.chat_with_retry(
+            response = await provider.chat_stream_with_retry(
                 [
                     {
                         "role": "system",

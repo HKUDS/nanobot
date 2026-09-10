@@ -56,8 +56,8 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
         second_calls += 1
         return LLMResponse(content="done")
 
-    first_provider.chat_with_retry = first_chat
-    second_provider.chat_with_retry = second_chat
+    first_provider.chat_stream_with_retry = first_chat
+    second_provider.chat_stream_with_retry = second_chat
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="contents")

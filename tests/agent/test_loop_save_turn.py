@@ -123,7 +123,7 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     WebuiTurnCoordinator(
         bus=loop.bus,
@@ -315,7 +315,7 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
 
     assert response is not None
     assert response.content == expected
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
     session = loop.sessions.get_or_create("websocket:chat-1")
     persisted = [
         (message["role"], message["content"], message.get("_command"))
@@ -335,7 +335,7 @@ def test_clean_generated_title_strips_reasoning_tags() -> None:
 @pytest.mark.asyncio
 async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content='"优化 WebUI 侧边栏。"', finish_reason="stop")
     )
     session = loop.sessions.get_or_create("websocket:chat-title")
@@ -353,10 +353,10 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
 
     assert generated is True
     assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
-    loop.provider.chat_with_retry.assert_awaited_once()
-    assert loop.provider.chat_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
+    assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
     assert (
-        loop.provider.chat_with_retry.await_args.kwargs["reasoning_effort"]
+        loop.provider.chat_stream_with_retry.await_args.kwargs["reasoning_effort"]
         == TITLE_GENERATION_REASONING_EFFORT
     )
 
@@ -364,7 +364,7 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
 @pytest.mark.asyncio
 async def test_generate_webui_title_skips_plain_websocket_sessions(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="Plain websocket title", finish_reason="stop")
     )
     session = loop.sessions.get_or_create("websocket:custom-client")
@@ -380,7 +380,7 @@ async def test_generate_webui_title_skips_plain_websocket_sessions(tmp_path: Pat
 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -405,7 +405,7 @@ async def test_generate_webui_title_ignores_command_only_sessions(tmp_path: Path
 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -430,7 +430,7 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -438,7 +438,7 @@ async def test_generate_webui_title_projects_onto_chat_session_under_unified_rou
     tmp_path: Path,
 ) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content='"查询临期 IP"', finish_reason="stop")
     )
     unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
@@ -464,7 +464,7 @@ async def test_generate_webui_title_projects_onto_chat_session_under_unified_rou
     chat = loop.sessions.get_or_create("websocket:chat-projection")
     assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "查询临期 IP"
     assert unified.metadata[WEBUI_TITLE_METADATA_KEY] == "开启私聊Topic功能"
-    prompt = loop.provider.chat_with_retry.await_args.args[0][1]["content"]
+    prompt = loop.provider.chat_stream_with_retry.await_args.args[0][1]["content"]
     assert "帮我查一下临期IP有哪些" in prompt
     assert "很早以前的问题" not in prompt
 
@@ -492,7 +492,7 @@ async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Pa
 
     assert generated is False
     assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "Existing title"
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
@@ -1030,7 +1030,7 @@ async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
         },
     )
     loop.provider.can_resume_conversation_state.return_value = True
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="done", provider_state=state)
     )
     session = loop.sessions.get_or_create("cli:private-checkpoint")
@@ -1803,7 +1803,7 @@ async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(return_value=MagicMock())  # unused because _run_agent_loop is stubbed
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=MagicMock())  # unused because _run_agent_loop is stubbed
 
     session = loop.sessions.get_or_create("feishu:c3")
     session.add_message("user", "old question")

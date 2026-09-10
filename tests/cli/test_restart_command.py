@@ -307,7 +307,7 @@ class TestRestartCommand:
             "nanobot.agent.runner.estimate_message_tokens",
             lambda _message: 7,
         )
-        loop.provider.chat_with_retry = AsyncMock(side_effect=[
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
             LLMResponse(content="first", usage=LLMUsage.reported(input_tokens=9, output_tokens=4)),
             LLMResponse(content="second", usage=None),
         ])

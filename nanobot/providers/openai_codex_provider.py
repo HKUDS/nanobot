@@ -568,7 +568,7 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
         error_kind = "connection"
         default_detail = "network protocol error while reading response"
         should_retry = True if should_retry is None else should_retry
-    elif isinstance(exc, (httpx.NetworkError, httpx.TransportError)):
+    elif isinstance(exc, (ConnectionError, httpx.NetworkError, httpx.TransportError)):
         error_kind = "connection"
         default_detail = "network connection failed"
         should_retry = True if should_retry is None else should_retry

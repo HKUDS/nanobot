@@ -873,7 +873,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               )}
             >
-              <div ref={messageContentRef} className="mx-auto w-full max-w-[49.5rem]">
+              <div ref={messageContentRef} className="mx-auto w-full max-w-[var(--content-column-width)]">
                 <ThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}

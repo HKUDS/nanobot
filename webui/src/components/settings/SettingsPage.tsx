@@ -725,6 +725,7 @@ export function SettingsPage({
             "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
             "motion-reduce:animate-none sm:py-8 lg:py-12",
             "settings-grid",
+            !showSidebar && "settings-feature-page",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >

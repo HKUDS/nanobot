@@ -92,6 +92,30 @@ def test_reasoning_options_omit_disabled_effort() -> None:
 
 
 @pytest.mark.asyncio
+async def test_provider_retries_stream_eof_before_returning_content(monkeypatch) -> None:
+    _mock_token(monkeypatch)
+    _mock_model_capabilities(monkeypatch, supports_backend_search=False)
+    calls = 0
+
+    async def fake_request(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ConnectionError("stream ended early")
+        return "complete answer", [], "stop", None, None
+
+    monkeypatch.setattr("nanobot.providers.xai_grok_provider._request_xai", fake_request)
+    provider = XAIGrokProvider()
+    provider._CHAT_RETRY_DELAYS = (0,)
+
+    response = await provider.chat_stream_with_retry([{"role": "user", "content": "hello"}])
+
+    assert response.content == "complete answer"
+    assert response.finish_reason == "stop"
+    assert calls == 2
+
+
+@pytest.mark.asyncio
 async def test_provider_injects_hosted_x_search_and_required_proxy_headers(monkeypatch) -> None:
     _mock_token(monkeypatch)
     _mock_model_capabilities(monkeypatch, supports_backend_search=True)

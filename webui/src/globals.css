@@ -50,6 +50,7 @@
     --radius-modal: 1.375rem;
     --radius-prominent: 1.75rem;
     --radius-pill: 9999px;
+    --content-column-width: 49.5rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-content: 240 3% 30%;
@@ -998,7 +999,7 @@
   }
 }
 
-/* Settings grid: 4px baseline; 920px frame; 12 columns / 24px gutter on
+/* Settings grid: 4px baseline; 720px frame; 12 columns / 24px gutter on
    desktop, 4 columns / 16px gutter on mobile. Rows share the same tracks. */
 @layer components {
   .settings-grid {
@@ -1011,6 +1012,36 @@
     container-type: inline-size;
     max-inline-size: 720px;
     padding-inline: var(--settings-margin);
+  }
+  .settings-grid.settings-feature-page {
+    --settings-margin: 0.75rem;
+    max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
+  }
+  /* Standalone feature pages have room for catalogs and multi-pane layouts.
+     Split automations only when each container can actually fit its columns. */
+  .automations-page {
+    container: automations / inline-size;
+  }
+  .automation-detail-panel {
+    container: automation-detail / inline-size;
+  }
+  @container automations (min-width: 48rem) {
+    .automations-workspace {
+      grid-template-columns: minmax(16rem, 18rem) minmax(0, 1fr);
+      align-items: stretch;
+    }
+    .automations-workspace > .automations-queue {
+      border-bottom-width: 0;
+      border-right-width: 1px;
+    }
+    .automations-queue > .automations-queue-list { max-height: calc(100vh - 24rem); }
+  }
+  @container automation-detail (min-width: 40rem) {
+    .automation-detail-body { grid-template-columns: minmax(0, 1fr) 14.5rem; }
+    .automation-detail-body > .automation-detail-metadata {
+      border-top-width: 0;
+      border-left-width: 1px;
+    }
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
     margin-block-start: var(--settings-module-gap, 20px);
@@ -1082,6 +1113,7 @@
   .settings-editor { padding: 16px var(--settings-inset, 16px); }
   @media (min-width: 640px) {
     .settings-grid { --settings-margin: 32px; }
+    .settings-grid.settings-feature-page { --settings-margin: 1rem; }
   }
   @container (min-width: 640px) {
     .settings-grid .settings-row, .settings-grid .settings-footer {

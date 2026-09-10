@@ -899,7 +899,7 @@ class MemoryArchiver:
 
         try:
             with llm_usage_source("dream"):
-                response = await runtime.provider.chat_with_retry(
+                response = await runtime.provider.chat_stream_with_retry(
                     model=runtime.model,
                     messages=request_messages,
                     tools=call_tools,
