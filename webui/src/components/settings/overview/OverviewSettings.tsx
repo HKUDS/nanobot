@@ -34,7 +34,6 @@ import { checkVersion } from "@/lib/api";
 import type {
   FileEditDisplayMode,
   LocalActivityMode,
-  LocalDensity,
   LocalPreferences,
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
@@ -311,18 +310,6 @@ export function AppearanceSettings({
       <section>
         <SettingsSectionTitle>{tx("settings.sections.localPreferences", "Local preferences")}</SettingsSectionTitle>
         <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.density", "Density")}>
-            <SegmentedControl
-              value={localPrefs.density}
-              options={[
-                { value: "comfortable", label: tx("settings.values.comfortable", "Comfortable") },
-                { value: "compact", label: tx("settings.values.compact", "Compact") },
-              ]}
-              onChange={(density) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, density: density as LocalDensity }))
-              }
-            />
-          </SettingsRow>
           <SettingsRow title={tx("settings.rows.activityMode", "Activity detail")}>
             <SegmentedControl
               value={localPrefs.activityMode}
