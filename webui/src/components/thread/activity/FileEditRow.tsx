@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertCircle,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  CircleDashed,
   ExternalLink,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -95,29 +92,11 @@ function FileEditRow({
   const action = fileEditAction(edit, editing, failed);
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
   const showDiff = canRenderDiff(edit, displayMode);
-  const statusIcon = failed ? (
-    <AlertCircle className="h-3 w-3" aria-hidden />
-  ) : editing ? (
-    <CircleDashed className="h-3 w-3 animate-spin" aria-hidden />
-  ) : (
-    <CheckCircle2 className="h-3 w-3" aria-hidden />
-  );
 
   return (
     <div className="min-w-0">
       <ActivityStep
-        marker={(
-          <span
-            className={cn(
-              "grid h-3.5 w-3.5 place-items-center rounded-full border bg-background transition-colors",
-              failed && "border-destructive/30 text-destructive/78",
-              editing && "border-muted-foreground/24 text-muted-foreground/65",
-              !failed && !editing && "border-emerald-500/28 text-emerald-500/78",
-            )}
-          >
-            {statusIcon}
-          </span>
-        )}
+        showMarker={false}
         active={editing}
         tone={failed ? "error" : editing ? "active" : "success"}
         className="text-xs"
@@ -126,7 +105,7 @@ function FileEditRow({
           ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
           : (
             <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
-              <span className="shrink-0">{action}</span>
+              <span className={cn("shrink-0", failed && "text-destructive/80")}>{action}</span>
               <FileReferenceChip
                 path={edit.path}
                 previewPath={edit.absolute_path || edit.path}
@@ -142,14 +121,12 @@ function FileEditRow({
           )}
       />
       {showDiff ? (
-        <div className="ml-[2.125rem] min-w-0">
-          <FileUnifiedDiff
-            diff={edit.diff!}
-            collapsed={displayMode === "collapsed_diff"}
-            previewPath={edit.absolute_path || edit.path}
-            onOpenFilePreview={onOpenFilePreview}
-          />
-        </div>
+        <FileUnifiedDiff
+          diff={edit.diff!}
+          collapsed={displayMode === "collapsed_diff"}
+          previewPath={edit.absolute_path || edit.path}
+          onOpenFilePreview={onOpenFilePreview}
+        />
       ) : null}
     </div>
   );
