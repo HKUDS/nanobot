@@ -682,7 +682,7 @@ export function SettingsPage({
       <NanobotFeatureInstallDialog
         feature={nanobotFeatureConfirm?.feature ?? null}
         installOnly={nanobotFeatureConfirm?.installOnly ?? false}
-        installing={nanobotFeatureAction === `enable:${nanobotFeatureConfirm?.feature.name ?? ""}`}
+        installing={nanobotFeatureAction === `${nanobotFeatureConfirm?.installOnly ? "install" : "enable"}:${nanobotFeatureConfirm?.feature.name ?? ""}`}
         onOpenChange={(open) => {
           if (!open) setNanobotFeatureConfirm(null);
         }}

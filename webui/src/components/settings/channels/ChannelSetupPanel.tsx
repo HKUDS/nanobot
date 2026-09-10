@@ -84,8 +84,10 @@ export function ChannelCatalogRow({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
   const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
-  const checked = alwaysEnabled || channelToggleChecked(feature);
-  const ownActionBusy = actionKey === `enable:${feature.name}` || actionKey === `disable:${feature.name}`;
+  const pendingChecked = actionKey === `enable:${feature.name}` ? true
+    : actionKey === `disable:${feature.name}` ? false : null;
+  const ownActionBusy = pendingChecked !== null || actionKey === `install:${feature.name}`;
+  const checked = alwaysEnabled || (pendingChecked ?? channelToggleChecked(feature));
   const anyActionBusy = Boolean(actionKey);
   const installButtonRef = useRef<HTMLButtonElement | null>(null);
   const [installHint, setInstallHint] = useState(false);
@@ -222,7 +224,7 @@ export function ChannelSetupPanel({
       />
     );
   }
-  const enableBusy = actionKey === `enable:${feature.name}`;
+  const enableBusy = actionKey === `enable:${feature.name}` || actionKey === `install:${feature.name}`;
   const anyActionBusy = Boolean(actionKey);
   const installSupportLabel = tx("settings.channels.install", "Install");
 
@@ -259,6 +261,7 @@ export function ChannelSetupPanel({
       <ChannelRuntimeError message={feature.runtime_error} className="mt-4" />
 
       {!missingSupport ? <ChannelSetupSurface
+        key={feature.name}
         token={token}
         feature={feature}
         setup={setup}
@@ -291,6 +294,8 @@ function ChannelSetupSurface({
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
+  const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null);
+  const actionPending = saving || validating || pendingEnabled !== null;
   const [validation, setValidation] = useState<ChannelValidationPayload | null>(null);
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
@@ -400,6 +405,7 @@ function ChannelSetupSurface({
   };
 
   const saveCredentialSettings = async () => {
+    if (actionPending) return;
     const errors = channelRequirementErrors(
       fields,
       setup.requirements ?? [],
@@ -414,6 +420,7 @@ function ChannelSetupSurface({
       focusFirstChannelFieldError(errors);
       return;
     }
+    setPendingEnabled(true);
     setSaving(true);
     setValidating(true);
     setNotice(null);
@@ -450,10 +457,12 @@ function ChannelSetupSurface({
     } finally {
       setSaving(false);
       setValidating(false);
+      setPendingEnabled(null);
     }
   };
 
   const checkCurrentSettings = async () => {
+    if (actionPending) return;
     setValidating(true);
     setNotice(null);
     try {
@@ -477,12 +486,14 @@ function ChannelSetupSurface({
     }
   };
 
-  const enabled = channelToggleChecked(feature);
+  const enabled = pendingEnabled ?? channelToggleChecked(feature);
   const toggleEnabled = async (next: boolean) => {
+    if (actionPending) return;
     if (next) {
       await saveCredentialSettings();
       return;
     }
+    setPendingEnabled(false);
     setSaving(true);
     setNotice(null);
     try {
@@ -491,6 +502,7 @@ function ChannelSetupSurface({
       setNotice((err as Error).message);
     } finally {
       setSaving(false);
+      setPendingEnabled(null);
     }
   };
 
@@ -615,19 +627,19 @@ function ChannelSetupSurface({
         {mode === "credentials" ? (
             <div className="absolute end-0 top-0 flex h-8 items-center justify-end gap-3">
               {enabled && (touchedFields.size > 0 || clearedSecrets.size > 0) ? (
-                <Button type="submit" size="sm" variant="secondary" disabled={saving || validating}>
+                <Button type="submit" size="sm" variant="secondary" disabled={actionPending}>
                   {tx("settings.actions.save", "Save")}
                 </Button>
               ) : null}
               {feature.setup?.verifies_connection ? (
                 <Button type="button" size="sm" variant="ghost"
                   className="h-8 rounded-full px-3 text-[12px] font-semibold"
-                  onClick={() => void checkCurrentSettings()} disabled={saving || validating}>
+                  onClick={() => void checkCurrentSettings()} disabled={actionPending}>
                   {validating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                   {tx("settings.channels.checkOnly", "Check")}
                 </Button>
               ) : null}
-              <ToggleButton checked={enabled} disabled={saving || validating}
+              <ToggleButton checked={enabled} disabled={actionPending}
                 label={tx("settings.channels.enable", "Enable")}
                 onChange={(next) => void toggleEnabled(next)} />
             </div>

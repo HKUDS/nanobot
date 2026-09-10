@@ -233,7 +233,7 @@ export function createSystemSettingsActions({
       setNanobotFeatureConfirm({ feature, installOnly: Boolean(options.installOnly) });
       return;
     }
-    const key = `${action}:${name}`;
+    const key = `${action === "enable" && options.installOnly ? "install" : action}:${name}`;
     if (!beginNanobotFeatureAction(key)) return;
     setNanobotFeatureConfirm(null);
     setNanobotFeaturesError(null);

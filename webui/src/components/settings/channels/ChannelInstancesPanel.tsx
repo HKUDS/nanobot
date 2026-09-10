@@ -62,7 +62,7 @@ export function ChannelInstancesPanel({
   const displayName = localizedChannelDisplayName(feature, t);
   const instances = providedInstances ?? feature.instances ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
+  const [pendingToggle, setPendingToggle] = useState<{ id: string; checked: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selected = selectedId ? instances.find((instance) => instance.id === selectedId) : undefined;
   const setup = useMemo(
@@ -96,7 +96,8 @@ export function ChannelInstancesPanel({
   }, [instanceFields, selected?.id, selectedValuesKey]);
 
   const toggleInstance = async (instance: NanobotChannelInstanceInfo, checked: boolean) => {
-    setBusyInstanceId(instance.id);
+    if (pendingToggle || savingFields) return;
+    setPendingToggle({ id: instance.id, checked });
     setNotice(null);
     try {
       const payload = checked
@@ -106,12 +107,12 @@ export function ChannelInstancesPanel({
     } catch (err) {
       setNotice((err as Error).message);
     } finally {
-      setBusyInstanceId(null);
+      setPendingToggle(null);
     }
   };
 
   const saveSelectedInstanceSettings = async () => {
-    if (!selected) return;
+    if (!selected || pendingToggle || savingFields) return;
     setSavingFields(true);
     setNotice(null);
     try {
@@ -150,6 +151,8 @@ export function ChannelInstancesPanel({
       <div className="mt-5 space-y-3">
         {instances.map((instance) => {
           const expanded = selected?.id === instance.id;
+          const toggling = pendingToggle?.id === instance.id;
+          const checked = toggling ? pendingToggle.checked : instanceToggleChecked(instance);
           const instanceSummary = customization.renderInstanceSummary
             ? customization.renderInstanceSummary(instance)
             : instance.id;
@@ -197,13 +200,14 @@ export function ChannelInstancesPanel({
                   />
                 </button>
                 <div className="flex shrink-0 items-center gap-2">
-                  {busyInstanceId === instance.id ? (
+                  {toggling ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
                   ) : null}
                   <ToggleButton
-                    checked={instanceToggleChecked(instance)}
+                    checked={checked}
                     disabled={
-                      busyInstanceId === instance.id
+                      Boolean(pendingToggle)
+                      || savingFields
                       || !instance.configured
                     }
                     ariaLabel={customization.toggleAriaLabel?.(instance)
@@ -211,7 +215,7 @@ export function ChannelInstancesPanel({
                         name: channelInstanceDisplayName(instance),
                         defaultValue: "{{name}} instance",
                       })}
-                    label={instanceToggleChecked(instance) ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+                    label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
                     onChange={(checked) => void toggleInstance(instance, checked)}
                   />
                 </div>
@@ -267,7 +271,7 @@ export function ChannelInstancesPanel({
                             size="sm"
                             variant="secondary"
                             className="h-8 rounded-full bg-muted/70 px-3 text-[12px] font-semibold settings-hover"
-                            disabled={savingFields}
+                            disabled={savingFields || Boolean(pendingToggle)}
                           >
                             {savingFields ? (
                               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
