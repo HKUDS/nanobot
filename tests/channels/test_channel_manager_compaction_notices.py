@@ -1,9 +1,11 @@
-"""Automatic context-compaction notices follow the channel's ``send_progress``.
+"""Context-compaction notices on channels with ``send_progress`` off.
 
-Idle auto-compaction emits ``ContextCompactionEvent`` start/finish notices.
-They are maintenance chatter, so a channel that has progress disabled must
-not receive them; a user-requested ``/compact`` and a failed compaction are
-still delivered (#5719).
+A compaction emits ``ContextCompactionEvent`` start/finish notices. The
+outcome (compacted / failed / cancelled) is always delivered because it
+changes the context of every later turn; the "Compressing context…" start
+notice is transient progress text and follows the channel's progress
+setting, so such a channel receives one notice per compaction instead of
+two (#5719).
 """
 
 from __future__ import annotations
@@ -64,16 +66,16 @@ async def _dispatch_until(manager: ChannelManager, expected: int) -> None:
             pass
 
 
-def _compaction(phase: str, *, manual: bool = False):
+def _compaction(phase: str):
     return outbound_message_for_event(
         channel="mock",
         chat_id="c1",
-        event=ContextCompactionEvent(compaction_id="cmp-1", phase=phase, manual=manual),
+        event=ContextCompactionEvent(compaction_id="cmp-1", phase=phase),
     )
 
 
 @pytest.mark.asyncio
-async def test_auto_compaction_notices_are_dropped_when_progress_is_off(manager):
+async def test_only_the_outcome_is_delivered_when_progress_is_off(manager):
     channel = manager.channels["mock"]
     channel.send_progress = False
     await manager.bus.publish_outbound(_compaction("started"))
@@ -81,11 +83,12 @@ async def test_auto_compaction_notices_are_dropped_when_progress_is_off(manager)
 
     await _dispatch_until(manager, expected=1)
 
-    channel._send_mock.assert_not_awaited()
+    contents = [call.args[0].content for call in channel._send_mock.await_args_list]
+    assert contents == ["Context compacted."]
 
 
 @pytest.mark.asyncio
-async def test_auto_compaction_notices_are_delivered_when_progress_is_on(manager):
+async def test_start_and_outcome_are_delivered_when_progress_is_on(manager):
     channel = manager.channels["mock"]
     channel.send_progress = True
     await manager.bus.publish_outbound(_compaction("started"))
@@ -98,13 +101,14 @@ async def test_auto_compaction_notices_are_delivered_when_progress_is_on(manager
 
 
 @pytest.mark.asyncio
-async def test_manual_and_failed_compaction_notices_bypass_the_progress_setting(manager):
+async def test_failed_and_cancelled_outcomes_are_delivered_when_progress_is_off(manager):
     channel = manager.channels["mock"]
     channel.send_progress = False
-    await manager.bus.publish_outbound(_compaction("started", manual=True))
+    await manager.bus.publish_outbound(_compaction("started"))
     await manager.bus.publish_outbound(_compaction("failed"))
+    await manager.bus.publish_outbound(_compaction("cancelled"))
 
     await _dispatch_until(manager, expected=2)
 
     contents = [call.args[0].content for call in channel._send_mock.await_args_list]
-    assert contents == ["Compressing context…", "Unable to compact context."]
+    assert contents == ["Unable to compact context.", "Context compaction cancelled."]

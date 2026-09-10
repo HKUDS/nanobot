@@ -811,14 +811,14 @@ class ChannelManager:
                     ):
                         continue
 
-                # Automatic compaction notices are maintenance chatter, so they
-                # follow the channel's progress setting like other progress
-                # text. A user-requested ``/compact`` and a failed compaction
-                # are still reported.
+                # Compaction changes the context of every later turn, so its
+                # outcome (compacted / failed / cancelled) is always delivered.
+                # The "Compressing context…" start notice is transient progress
+                # text and follows the channel's progress setting, so a channel
+                # with progress off gets one notice per compaction, not two.
                 if (
                     isinstance(event, ContextCompactionEvent)
-                    and not event.manual
-                    and event.phase != "failed"
+                    and event.phase == "started"
                     and not self._should_send_progress(msg.channel)
                 ):
                     continue
