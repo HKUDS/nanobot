@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import type { TFunction } from "i18next";
 import {
   ArrowUpDown,
   Check,
@@ -17,7 +18,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { channelUiPresentation } from "@/channel-plugins/registry";
+import { channelTranslator } from "@/channel-plugins/i18n";
+import { channelUiOwner, channelUiPresentation } from "@/channel-plugins/registry";
 import { SETTINGS_SEARCH_INPUT_CLASS } from "@/components/settings/shared/SettingsControls";
 import { AppsActionButton } from "@/components/settings/system/AppsSettings";
 import { Button } from "@/components/ui/button";
@@ -302,7 +304,7 @@ function AutomationListItem({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const status = automationStatus(job, tx);
-  const origin = automationOriginLabel(job, tx);
+  const origin = automationOriginLabel(job, t);
   const nextRun = formatAutomationNext(job, tx);
   const summary = automationSummary(job, tx);
 
@@ -381,7 +383,7 @@ function AutomationDetailPanel({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const status = automationStatus(job, tx);
-  const origin = automationOriginLabel(job, tx);
+  const origin = automationOriginLabel(job, t);
   const originHref = job.origin?.channel === "websocket" && job.origin.session_key
     ? `#/chat/${encodeURIComponent(job.origin.session_key)}`
     : null;
@@ -1358,23 +1360,27 @@ function automationStatus(
 
 function automationOriginLabel(
   job: SessionAutomationJob,
-  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+  t: TFunction,
 ): string {
-  if (job.protected) return tx("settings.automations.origin.system", "System");
+  if (job.protected) return t("settings.automations.origin.system", { defaultValue: "System" });
   const origin = job.origin;
-  if (!origin) return tx("settings.automations.origin.unknown", "No linked chat");
-  if (origin.channel !== "websocket") return automationChannelLabel(origin.channel, tx);
-  return origin.title || origin.preview || origin.session_key || automationChannelLabel(origin.channel, tx);
+  if (!origin) return t("settings.automations.origin.unknown", { defaultValue: "No linked chat" });
+  if (origin.channel !== "websocket") return automationChannelLabel(origin.channel, t);
+  return origin.title || origin.preview || origin.session_key || automationChannelLabel(origin.channel, t);
 }
 
 function automationChannelLabel(
   channel: string,
-  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
+  t: TFunction,
 ): string {
   const key = channel.trim().toLowerCase();
-  const displayName = automationChannelDisplayName(key);
+  const presentation = channelUiPresentation(key);
+  if (presentation) {
+    return channelTranslator(t, channelUiOwner(key))("displayName", presentation.displayName);
+  }
+  const displayName = HOST_AUTOMATION_CHANNEL_LABELS[key];
   return displayName
-    ? tx(`settings.automations.channels.${key}`, displayName)
+    ? t(`settings.automations.channels.${key}`, { defaultValue: displayName })
     : channel;
 }
 

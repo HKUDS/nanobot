@@ -259,6 +259,20 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("forwards channel-owned connect parameters without overriding the channel", async () => {
+    await startChannelConnect(mutationTransport, "plugin-chat", {
+      region: "eu",
+      interactive: false,
+      channel: "another-channel",
+    });
+
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.start",
+      { channel: "plugin-chat", region: "eu", interactive: false },
+      150_000,
+    );
+  });
+
   it("serializes workspace automation actions", async () => {
     await runAutomationAction(mutationTransport, "disable", "job 1/2");
 

@@ -1201,11 +1201,8 @@ export interface ChannelConnectPayload {
   status: ChannelConnectStatus;
   message?: string;
   qr_url?: string;
-  domain?: string;
   interval_ms?: number;
   expires_at_ms?: number;
-  app_id?: string;
-  account?: string;
   nanobot_features?: NanobotFeaturesPayload;
 }
 

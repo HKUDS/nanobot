@@ -945,20 +945,7 @@
       },
       "channels": {
         "api": "API",
-        "cli": "CLI",
-        "dingtalk": "釘釘",
-        "discord": "Discord",
-        "email": "電子郵件",
-        "feishu": "飛書",
-        "matrix": "Matrix",
-        "msteams": "Microsoft Teams",
-        "qq": "QQ",
-        "slack": "Slack",
-        "telegram": "Telegram",
-        "wechat": "微信",
-        "wecom": "企業微信",
-        "weixin": "微信",
-        "whatsapp": "WhatsApp"
+        "cli": "CLI"
       },
       "schedule": {
         "at": "於 {{time}}",

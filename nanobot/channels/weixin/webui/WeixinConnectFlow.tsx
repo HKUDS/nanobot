@@ -138,7 +138,7 @@ export function WeixinConnectFlow({
     <ChannelQrConnectFlow
       token={token}
       channelName="weixin"
-      startOptions={{ force: authExpired }}
+      startParams={authExpired ? { force: true } : {}}
       idleLabel={authExpired ? scanAgainLabel : idleLabel}
       connectRequestId={connectRequestId}
       autoStart={!feature.configured || authExpired}

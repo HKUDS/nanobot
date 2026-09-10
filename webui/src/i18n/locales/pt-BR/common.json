@@ -959,20 +959,7 @@
       },
       "channels": {
         "api": "API",
-        "cli": "CLI",
-        "dingtalk": "DingTalk",
-        "discord": "Discord",
-        "email": "E-mail",
-        "feishu": "Feishu",
-        "matrix": "Matrix",
-        "msteams": "Microsoft Teams",
-        "qq": "QQ",
-        "slack": "Slack",
-        "telegram": "Telegram",
-        "wechat": "WeChat",
-        "wecom": "WeCom",
-        "weixin": "WeChat",
-        "whatsapp": "WhatsApp"
+        "cli": "CLI"
       },
       "schedule": {
         "at": "Às {{time}}",

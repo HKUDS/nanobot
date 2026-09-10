@@ -29,13 +29,6 @@ export type ChannelQrConnectLabels = {
   connect: string;
 };
 
-export type ChannelConnectStartOptions = {
-  domain?: string;
-  instanceId?: string;
-  mode?: "replace" | "create";
-  force?: boolean;
-};
-
 export type ChannelQrConnectPendingContext = {
   connect: ChannelConnectPayload;
   busy: boolean;
@@ -46,7 +39,7 @@ export type ChannelQrConnectPendingContext = {
 
 export function ChannelQrConnectFlow({
   channelName,
-  startOptions = {},
+  startParams = {},
   idleLabel,
   connectRequestId,
   forceOnRepeat = false,
@@ -61,7 +54,7 @@ export function ChannelQrConnectFlow({
 }: {
   token: string;
   channelName: string;
-  startOptions?: ChannelConnectStartOptions;
+  startParams?: Readonly<Record<string, string | boolean>>;
   idleLabel?: string;
   connectRequestId?: number;
   forceOnRepeat?: boolean;
@@ -85,10 +78,6 @@ export function ChannelQrConnectFlow({
   const handledRequestId = useRef(0);
   const autoStarted = useRef(false);
   const pollInFlight = useRef(false);
-  const startDomain = startOptions.domain;
-  const startInstanceId = startOptions.instanceId;
-  const startMode = startOptions.mode;
-  const startForce = startOptions.force;
 
   const pending = connect?.status === "pending";
   const succeeded = connect?.status === "succeeded";
@@ -182,10 +171,8 @@ export function ChannelQrConnectFlow({
     setError(null);
     try {
       const payload = await startChannelConnect(client, channelName, {
-        domain: startDomain,
-        instanceId: startInstanceId,
-        mode: startMode,
-        force: force || startForce,
+        ...startParams,
+        ...(force ? { force: true } : {}),
       });
       setConnect(payload);
     } catch (err) {
@@ -193,7 +180,7 @@ export function ChannelQrConnectFlow({
     } finally {
       setBusy(false);
     }
-  }, [channelName, client, startDomain, startForce, startInstanceId, startMode]);
+  }, [channelName, client, startParams]);
 
   useEffect(() => {
     const requested = Boolean(connectRequestId && connectRequestId !== handledRequestId.current);

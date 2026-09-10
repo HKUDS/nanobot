@@ -373,7 +373,7 @@ describe("Settings system domains", () => {
     expect(screen.getByRole("button", { name: "MCP" })).toBeInTheDocument();
   });
 
-  it("shows nanobot optional features and enables one", async () => {
+  it("installs optional channel support before enabling and disabling it", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(settingsPayload());
@@ -387,6 +387,7 @@ describe("Settings system domains", () => {
             webui: "webui/index.ts",
             type: "channel",
             enabled: false,
+            configured: true,
             installed: false,
             ready: false,
             status: "missing_dependency",
@@ -399,25 +400,31 @@ describe("Settings system domains", () => {
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
-    requestMutationMock.mockImplementation(async (action: string) => {
+    requestMutationMock.mockImplementation(async (action: string, values: Record<string, unknown>) => {
       if (action === "settings.feature.enable") {
+        const enabled = values.install_only !== true;
         return {
           features: [{
             name: "matrix",
             display_name: "Matrix",
             webui: "webui/index.ts",
             type: "channel",
-            enabled: true,
-            running: true,
-            runtime_status: "running",
+            enabled,
+            running: enabled,
+            runtime_status: enabled ? "running" : "stopped",
+            configured: true,
             installed: true,
             ready: true,
-            status: "enabled",
+            status: enabled ? "enabled" : "not_enabled",
             install_supported: true,
             requires_restart: true,
           }],
-          enabled_count: 1,
-          last_action: { ok: true, message: "Enabled channel 'matrix'", enabled: true },
+          enabled_count: enabled ? 1 : 0,
+          last_action: {
+            ok: true,
+            message: enabled ? "Enabled channel 'matrix'" : "Installed support for channel 'matrix'",
+            enabled,
+          },
         };
       }
       if (action === "settings.feature.disable") {
@@ -447,13 +454,23 @@ describe("Settings system domains", () => {
     const matrixRow = await screen.findByRole("button", { name: "View Matrix settings" });
     expect(matrixRow).toHaveAttribute("aria-haspopup", "dialog");
     fireEvent.click(matrixRow);
-    expect(screen.getByRole("heading", { name: "Matrix", exact: true })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
-    fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
-    expect(screen.getByRole("dialog", { name: "Install support for Matrix?" })).toBeInTheDocument();
-    expect(screen.getByText("nanobot will add what Matrix needs, then turn it on. Continue?")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Matrix channel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install Matrix" })).toHaveFocus();
     expect(requestMutationMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Install and enable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install Matrix" }));
+
+    await waitFor(() =>
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.feature.enable",
+        { name: "matrix", install_only: true },
+        150_000,
+      ),
+    );
+    const matrixToggle = await screen.findByRole("switch", { name: "Matrix channel" });
+    expect(matrixToggle).toHaveAttribute("aria-checked", "false");
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(matrixToggle);
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(

@@ -615,22 +615,14 @@ export async function runPairingAction(
 export async function startChannelConnect(
   transport: WebUIMutationTransport,
   channel: string,
-  options: {
-    domain?: string;
-    instanceId?: string;
-    mode?: "replace" | "create";
-    force?: boolean;
-  } = {},
+  params: Readonly<Record<string, string | boolean>> = {},
 ): Promise<ChannelConnectPayload> {
   return mutation<ChannelConnectPayload>(
     transport,
     "settings.channel.connect.start",
     {
+      ...params,
       channel,
-      ...(options.domain ? { domain: options.domain } : {}),
-      ...(options.instanceId ? { instance_id: options.instanceId } : {}),
-      ...(options.mode ? { mode: options.mode } : {}),
-      ...(options.force ? { force: true } : {}),
     },
     PACKAGE_MUTATION_TIMEOUT_MS,
   );
