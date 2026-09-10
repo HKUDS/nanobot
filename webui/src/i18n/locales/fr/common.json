@@ -863,11 +863,7 @@
         "unsupported": "La vérification de la connexion n’est pas encore disponible pour ce canal.",
         "present": "Renseigné",
         "required": "Obligatoire",
-        "manual": "La vérification de la connexion n’est pas encore disponible pour ce canal.",
-        "qrTimeout": "Impossible de charger le code QR. Vérifiez votre réseau ou votre proxy, puis réessayez.",
-        "napcatConnection": "Connexion NapCat",
-        "napcatUnavailable": "Impossible de se connecter à NapCat. Vérifiez que NapCat est démarré et que l’adresse WebSocket est correcte.",
-        "whatsappSessionBusy": "La session WhatsApp est déjà utilisée. Fermez tout autre processus nanobot utilisant WhatsApp, puis réessayez."
+        "manual": "La vérification de la connexion n’est pas encore disponible pour ce canal."
       },
       "search": "Rechercher des canaux",
       "filterEnabled": "Activés",

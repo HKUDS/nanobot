@@ -863,11 +863,7 @@
         "unsupported": "此渠道暫不支援連線檢測",
         "present": "已填寫",
         "required": "必填",
-        "manual": "此渠道暫不支援連線檢測",
-        "qrTimeout": "QR 碼載入逾時，請檢查網路或代理後重試",
-        "napcatConnection": "NapCat 連線",
-        "napcatUnavailable": "無法連線 NapCat。請確認 NapCat 已啟動，並檢查 WebSocket 位址。",
-        "whatsappSessionBusy": "WhatsApp 工作階段仍被占用。請關閉其他正在使用 WhatsApp 的 nanobot 程序後重試。"
+        "manual": "此渠道暫不支援連線檢測"
       },
       "search": "搜尋聊天平台",
       "filterEnabled": "已啟用",

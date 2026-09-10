@@ -1,10 +1,10 @@
-import type { LucideIcon } from "lucide-react";
+import type { ComponentType } from "react";
 
 export type ChannelPresentation = {
   displayName: string;
   initials: string;
   color: string;
-  icon?: LucideIcon;
+  icon?: ComponentType<{ className?: string; strokeWidth?: string | number }>;
   logoUrl?: string;
   setup?: ChannelCatalogSetupPresentation;
 };

@@ -863,11 +863,7 @@
         "unsupported": "このチャンネルでは、まだ接続を確認できません。",
         "present": "入力済み",
         "required": "必須",
-        "manual": "このチャンネルでは、まだ接続を確認できません。",
-        "qrTimeout": "QR コードを読み込めませんでした。ネットワークまたはプロキシを確認して、もう一度お試しください。",
-        "napcatConnection": "NapCat 接続",
-        "napcatUnavailable": "NapCat に接続できません。NapCat が起動していることと WebSocket アドレスを確認してください。",
-        "whatsappSessionBusy": "WhatsApp セッションは使用中です。WhatsApp を使用している他の nanobot プロセスを終了して、もう一度お試しください。"
+        "manual": "このチャンネルでは、まだ接続を確認できません。"
       },
       "search": "チャンネルを検索",
       "filterEnabled": "有効",

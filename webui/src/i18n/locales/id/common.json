@@ -863,11 +863,7 @@
         "unsupported": "Kanal ini belum mendukung pemeriksaan koneksi.",
         "present": "Terisi",
         "required": "Wajib",
-        "manual": "Kanal ini belum mendukung pemeriksaan koneksi.",
-        "qrTimeout": "Kode QR tidak dapat dimuat. Periksa jaringan atau proksi, lalu coba lagi.",
-        "napcatConnection": "Koneksi NapCat",
-        "napcatUnavailable": "Tidak dapat terhubung ke NapCat. Pastikan NapCat sedang berjalan dan periksa alamat WebSocket.",
-        "whatsappSessionBusy": "Sesi WhatsApp sedang digunakan. Tutup proses nanobot lain yang menggunakan WhatsApp, lalu coba lagi."
+        "manual": "Kanal ini belum mendukung pemeriksaan koneksi."
       },
       "search": "Cari kanal",
       "filterEnabled": "Aktif",

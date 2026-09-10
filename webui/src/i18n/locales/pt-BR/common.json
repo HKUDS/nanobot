@@ -877,11 +877,7 @@
         "unsupported": "Este canal ainda não permite verificar a conexão.",
         "present": "Preenchido",
         "required": "Obrigatório",
-        "manual": "Este canal ainda não permite verificar a conexão.",
-        "qrTimeout": "Não foi possível carregar o código QR. Verifique a rede ou o proxy e tente novamente.",
-        "napcatConnection": "Conexão do NapCat",
-        "napcatUnavailable": "Não foi possível conectar ao NapCat. Verifique se o NapCat está em execução e confira o endereço WebSocket.",
-        "whatsappSessionBusy": "A sessão do WhatsApp ainda está em uso. Feche qualquer outro processo do nanobot que esteja usando o WhatsApp e tente novamente."
+        "manual": "Este canal ainda não permite verificar a conexão."
       },
       "search": "Buscar canais",
       "filterEnabled": "Ativados",

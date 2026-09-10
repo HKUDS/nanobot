@@ -1063,11 +1063,7 @@
         "unsupported": "此渠道暂不支持连接检测",
         "present": "已填写",
         "required": "必填",
-        "manual": "此渠道暂不支持连接检测",
-        "qrTimeout": "二维码加载超时，请检查网络或代理后重试",
-        "napcatConnection": "NapCat 连接",
-        "napcatUnavailable": "无法连接 NapCat。请确认 NapCat 已启动，并检查 WebSocket 地址。",
-        "whatsappSessionBusy": "WhatsApp 会话仍被占用。请关闭其他正在使用 WhatsApp 的 nanobot 进程后重试。"
+        "manual": "此渠道暂不支持连接检测"
       },
       "search": "搜索聊天平台",
       "filterEnabled": "已启用",

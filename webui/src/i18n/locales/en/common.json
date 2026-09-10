@@ -1063,11 +1063,7 @@
         "unsupported": "Connection testing is not supported for this channel yet.",
         "present": "Filled in",
         "required": "Required",
-        "manual": "Connection testing is not supported for this channel yet.",
-        "qrTimeout": "QR code could not be loaded. Check your network or proxy and retry.",
-        "napcatConnection": "NapCat connection",
-        "napcatUnavailable": "Could not connect to NapCat. Make sure NapCat is running and check the WebSocket address.",
-        "whatsappSessionBusy": "The WhatsApp session is still in use. Close any other nanobot process using WhatsApp, then try again."
+        "manual": "Connection testing is not supported for this channel yet."
       },
       "search": "Search channels",
       "filterEnabled": "Enabled",

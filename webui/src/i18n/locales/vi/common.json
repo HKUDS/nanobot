@@ -863,11 +863,7 @@
         "unsupported": "Kênh này chưa hỗ trợ kiểm tra kết nối.",
         "present": "Đã điền",
         "required": "Bắt buộc",
-        "manual": "Kênh này chưa hỗ trợ kiểm tra kết nối.",
-        "qrTimeout": "Không thể tải mã QR. Hãy kiểm tra mạng hoặc proxy rồi thử lại.",
-        "napcatConnection": "Kết nối NapCat",
-        "napcatUnavailable": "Không thể kết nối với NapCat. Hãy đảm bảo NapCat đang chạy và kiểm tra địa chỉ WebSocket.",
-        "whatsappSessionBusy": "Phiên WhatsApp đang được sử dụng. Hãy đóng mọi tiến trình nanobot khác đang dùng WhatsApp rồi thử lại."
+        "manual": "Kênh này chưa hỗ trợ kiểm tra kết nối."
       },
       "search": "Tìm kênh",
       "filterEnabled": "Đã bật",
