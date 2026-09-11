@@ -37,7 +37,6 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
                 "Bot token",
                 "pass" if bot_token.startswith("xoxb-") else "fail",
                 "Bot tokens start with xoxb- after installing the Slack app.",
-                action_url=official_action("slack"),
             )
         )
         if bot_token.startswith("xoxb-"):

@@ -287,10 +287,13 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
     fireEvent.click(await screen.findByRole("button", { name: `View ${displayName} settings` }));
 
-    expect(screen.getByRole("button", { name: "Check connection" })).toBeInTheDocument();
+    const checkButton = screen.getByRole("button", { name: "Check connection" });
+    expect(checkButton.parentElement).toBe(
+      screen.getByRole("switch", { name: "Enable channel" }).parentElement,
+    );
     vi.useFakeTimers();
     try {
-      fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
+      fireEvent.click(checkButton);
       await act(async () => {});
 
       const progress = screen.getAllByRole("status").find(

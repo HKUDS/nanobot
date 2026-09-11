@@ -523,10 +523,28 @@ function ChannelSetupSurface({
   const inlineActions = mode === "credentials" && primaryFields.length === 1
     && !advancedOpen && !setup.presets?.length && !setup.actions?.length;
   const credentialActions = mode === "credentials" ? (
-    <div className="ms-auto flex min-h-8 flex-wrap items-center justify-end gap-x-3 gap-y-2">
+    <div className="ms-auto flex min-h-10 flex-wrap items-center justify-end gap-x-3 gap-y-2 sm:min-h-9">
       {enabled && (touchedFields.size > 0 || clearedSecrets.size > 0) ? (
-        <Button type="submit" size="sm" variant="secondary" disabled={actionPending}>
+        <Button
+          type="submit"
+          size="sm"
+          variant="secondary"
+          className="h-10 rounded-full px-3 text-[12px] font-semibold sm:h-9"
+          disabled={actionPending}
+        >
           {tx("settings.actions.save", "Save")}
+        </Button>
+      ) : null}
+      {feature.setup?.verifies_connection ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="h-10 rounded-full px-3 text-[12px] font-semibold sm:h-9"
+          onClick={() => void checkCurrentSettings()}
+          disabled={actionPending}
+        >
+          {tx("settings.channels.checkConnection", "Check connection")}
         </Button>
       ) : null}
       <ToggleButton checked={enabled} disabled={actionPending}
@@ -686,20 +704,9 @@ function ChannelSetupSurface({
         ) : null}
         {credentialActions}
       </div>
-      {mode === "credentials" && feature.setup?.verifies_connection ? (
-        <div className="space-y-3">
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="h-8 rounded-full px-3 text-[12px] font-semibold"
-              onClick={() => void checkCurrentSettings()}
-              disabled={actionPending}
-            >
-              {tx("settings.channels.checkConnection", "Check connection")}
-            </Button>
-          </div>
+      {mode === "credentials" && feature.setup?.verifies_connection
+        && (validation || validating) ? (
+        <div>
           <ChannelValidationProgress
             validation={validation}
             validating={validating}
