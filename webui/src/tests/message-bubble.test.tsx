@@ -852,7 +852,43 @@ describe("MessageBubble", () => {
     fireEvent.click(toggle);
     expect(content).toHaveAttribute("data-state", "closed");
     expect(content).toHaveAttribute("aria-hidden", "true");
-    expect(screen.getByText('weather("get")')).toBeInTheDocument();
+    expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
+  });
+
+  it("lazily mounts large trace groups and releases them only after an uninterrupted exit", async () => {
+    const traces = Array.from({ length: 1000 }, (_, index) => `tool call ${index}`);
+    render(<MessageBubble message={{
+      id: "large-trace", role: "tool", kind: "trace",
+      content: traces[0], traces, createdAt: Date.now(),
+    }} />);
+    const toggle = screen.getByRole("button", { name: /used 1000 tools/i });
+    const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    // Hidden content must not allocate a DOM node for every historical trace.
+    expect(content.querySelectorAll("li")).toHaveLength(0);
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+
+    let finishExit!: () => void;
+    const getAnimations = vi.fn(() => [{
+      finished: new Promise<void>((resolve) => { finishExit = resolve; }),
+    }]);
+    Object.defineProperty(content, "getAnimations", { value: getAnimations });
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+    expect(content).toHaveAttribute("inert");
+
+    // Reopening cancels cleanup of the previous exit, even if it finishes later.
+    fireEvent.click(toggle);
+    await act(async () => { finishExit(); });
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+    expect(content).not.toHaveAttribute("inert");
+
+    fireEvent.click(toggle);
+    expect(getAnimations).toHaveBeenCalledTimes(2);
+    await act(async () => { finishExit(); });
+    expect(content.querySelectorAll("li")).toHaveLength(0);
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
   });
 
   it("renders video media as an inline player", () => {

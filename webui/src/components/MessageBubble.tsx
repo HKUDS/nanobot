@@ -936,12 +936,17 @@ function TraceGroup({ message }: TraceGroupProps) {
   const lines = message.traces ?? [message.content];
   const count = lines.length;
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const releaseContent = useCallback(() => setHasOpened(false), []);
   const contentId = useId();
   return (
     <div className="w-full">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) setHasOpened(true);
+          setOpen((value) => !value);
+        }}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
           "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
@@ -963,8 +968,8 @@ function TraceGroup({ message }: TraceGroupProps) {
           )}
         />
       </button>
-      <DisclosureContent id={contentId} open={open}>
-        <ul
+      <DisclosureContent id={contentId} open={open} onExitComplete={releaseContent}>
+        {hasOpened && <ul
           className="mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3"
         >
           {lines.map((line, i) => (
@@ -975,7 +980,7 @@ function TraceGroup({ message }: TraceGroupProps) {
               {line}
             </li>
           ))}
-        </ul>
+        </ul>}
       </DisclosureContent>
     </div>
   );
