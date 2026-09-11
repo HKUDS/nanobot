@@ -214,6 +214,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="orcarouter",
         default_api_base="https://api.orcarouter.ai/v1",
     ),
+    # DaoXE: OpenAI-compatible multi-model gateway. The model catalog is
+    # account-specific, so it is always loaded dynamically from GET /v1/models.
+    ProviderSpec(
+        name="daoxe",
+        keywords=("daoxe",),
+        env_key="DAOXE_API_KEY",
+        display_name="DaoXE",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="daoxe.com",
+        default_api_base="https://api.daoxe.com/v1",
+    ),
     # Eden AI: OpenAI-compatible gateway. Models use the "provider/model"
     # naming scheme (e.g. "anthropic/claude-sonnet-4-5"); the full id is sent upstream.
     ProviderSpec(

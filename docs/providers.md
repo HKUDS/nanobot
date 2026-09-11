@@ -157,6 +157,40 @@ suitable upstream automatically; explicit IDs such as
 `sk-orca-`. The WebUI can load the account's model catalog after the API key is saved under
 **Settings → Models**.
 
+### DaoXE Gateway
+
+[DaoXE](https://daoxe.com) is an OpenAI-compatible multi-model gateway. Configure the built-in
+`daoxe` provider and use a model ID from the account's catalog:
+
+```json
+{
+  "providers": {
+    "daoxe": {
+      "apiKey": "${DAOXE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "daoxe",
+      "model": "YOUR-MODEL-ID",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Replace `YOUR-MODEL-ID` with a model ID from the account's catalog. The catalog is
+account-specific and can change, so nanobot loads it dynamically from the gateway's
+`/v1/models` endpoint: after the API key is saved under **Settings → Models**, the WebUI
+lists the IDs available to that account. There is no fixed cross-account model list, and
+no auto-routing catch-all ID is guaranteed — pick an explicit ID from the loaded catalog.
+
 ### Eden AI Gateway
 
 Eden AI exposes an OpenAI-compatible chat-completions endpoint at

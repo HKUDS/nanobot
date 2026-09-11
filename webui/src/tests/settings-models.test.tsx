@@ -1196,6 +1196,90 @@ describe("Settings models", () => {
     );
   });
 
+  it("defers the DaoXE catalog until the user searches", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      agent: {
+        ...base.agent,
+        model: "account-model-a",
+        provider: "daoxe",
+        resolved_provider: "daoxe",
+      },
+      model_presets: [
+        {
+          ...base.model_presets[0],
+          model: "account-model-a",
+          provider: "daoxe",
+          resolved_provider: "daoxe",
+        },
+      ],
+      providers: [
+        {
+          name: "daoxe",
+          label: "DaoXE",
+          configured: true,
+          auth_type: "api_key",
+          api_key_required: true,
+          api_key_hint: "da••••test",
+          api_base: null,
+          default_api_base: "https://api.daoxe.com/v1",
+          model_catalog: "catalog",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/provider-models?provider=daoxe") {
+        return jsonResponse({
+          provider: "daoxe",
+          label: "DaoXE",
+          status: "available",
+          catalog_kind: "catalog",
+          models: [
+            { id: "account-model-a", owned_by: "daoxe" },
+            { id: "account-model-b", owned_by: "daoxe" },
+          ],
+          model_count: 2,
+          fetched_at: 1,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models" });
+
+    await togglePresetEditor();
+    const modelButtons = await screen.findAllByRole("button", { name: /account-model-a/i });
+    await openPopover(modelButtons[modelButtons.length - 1]);
+    expect(await screen.findByText("Search this provider’s model catalog.")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).startsWith("/api/settings/provider-models"),
+      ),
+    ).toBe(false);
+
+    fireEvent.change(screen.getByPlaceholderText("Search or type model ID"), {
+      target: { value: "account" },
+    });
+
+    await screen.findByText("account-model-b");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider-models?provider=daoxe",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("loads curated models for configured OAuth providers", async () => {
     const base = settingsPayload();
     const payload: SettingsPayload = {

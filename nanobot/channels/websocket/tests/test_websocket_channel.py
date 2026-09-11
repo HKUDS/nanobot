@@ -4093,6 +4093,10 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert providers["orcarouter"]["configured"] is False
         assert providers["orcarouter"]["api_key_required"] is True
         assert providers["orcarouter"]["default_api_base"] == "https://api.orcarouter.ai/v1"
+        assert providers["daoxe"]["label"] == "DaoXE"
+        assert providers["daoxe"]["configured"] is False
+        assert providers["daoxe"]["api_key_required"] is True
+        assert providers["daoxe"]["default_api_base"] == "https://api.daoxe.com/v1"
         assert providers["skywork"]["label"] == "Skywork"
         assert providers["skywork"]["default_api_base"] == "https://api.apifree.ai/agent/v1"
         assert providers["ant_ling"]["label"] == "Ant Ling"

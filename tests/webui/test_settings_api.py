@@ -138,6 +138,26 @@ def test_settings_payload_exposes_orcarouter_provider(
     assert orcarouter["model_selectable"] is True
 
 
+def test_settings_payload_exposes_daoxe_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.daoxe.api_key = "daoxe-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    daoxe = next(row for row in payload["providers"] if row["name"] == "daoxe")
+
+    assert daoxe["label"] == "DaoXE"
+    assert daoxe["configured"] is True
+    assert daoxe["default_api_base"] == "https://api.daoxe.com/v1"
+    assert daoxe["model_catalog"] == "catalog"
+    assert daoxe["model_selectable"] is True
+
+
 def test_settings_payload_includes_relocated_capabilities(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2329,11 +2349,48 @@ def test_provider_models_payload_fetches_orcarouter_catalog(
     ]
 
 
+def test_provider_models_payload_fetches_daoxe_catalog(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.daoxe.api_key = "daoxe-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.daoxe.com/v1/models"
+        assert kwargs["headers"]["Authorization"] == "Bearer daoxe-test"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "account-model-a", "owned_by": "daoxe"},
+                    {"id": "account-model-b", "owned_by": "daoxe"},
+                ]
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+
+    payload = provider_models_payload({"provider": ["daoxe"]})
+
+    assert payload["status"] == "available"
+    assert payload["catalog_kind"] == "catalog"
+    assert [model["id"] for model in payload["models"]] == [
+        "account-model-a",
+        "account-model-b",
+    ]
+
+
 def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
     assert _model_catalog_kind(find_by_name("skywork")) == "official"
     assert _model_catalog_kind(find_by_name("anthropic")) == "unsupported"
     assert _model_catalog_kind(find_by_name("openrouter")) == "catalog"
     assert _model_catalog_kind(find_by_name("orcarouter")) == "catalog"
+    assert _model_catalog_kind(find_by_name("daoxe")) == "catalog"
     assert _model_catalog_kind(find_by_name("openai_codex")) == "hybrid"
     assert _model_catalog_kind(find_by_name("xai_grok")) == "hybrid"
     assert _model_catalog_kind(find_by_name("github_copilot")) == "hybrid"
