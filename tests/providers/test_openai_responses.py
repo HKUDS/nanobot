@@ -151,6 +151,7 @@ class TestConvertMessages:
         assert items[0]["role"] == "assistant"
         assert items[0]["content"][0]["type"] == "output_text"
         assert items[0]["content"][0]["text"] == "I'll help"
+        assert "id" not in items[0]
 
     def test_preserves_deepseek_reasoning_content(self):
         _, items = convert_messages([
@@ -167,7 +168,6 @@ class TestConvertMessages:
                 "role": "assistant",
                 "content": [{"type": "output_text", "text": "answer"}],
                 "status": "completed",
-                "id": "msg_0",
             },
         ]
 
@@ -212,26 +212,9 @@ class TestConvertMessages:
         }])
         assert items[0]["type"] == "function_call"
         assert items[0]["call_id"] == "call_abc"
-        assert items[0]["id"] == "fc_1"
+        assert "id" not in items[0]
         assert items[0]["name"] == "get_weather"
         assert items[0]["arguments"] == '{"city": "SF"}'
-
-    def test_can_omit_item_ids_without_changing_call_ids(self):
-        _, items = convert_messages([
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{
-                    "id": "call_1|fc_1",
-                    "function": {"name": "get_weather", "arguments": "{}"},
-                }],
-            },
-            {"role": "tool", "tool_call_id": "call_1|fc_1", "content": "ok"},
-        ], include_item_ids=False)
-
-        assert all("id" not in item for item in items)
-        assert items[0]["call_id"] == "call_1"
-        assert items[1]["call_id"] == "call_1"
 
     def test_assistant_tool_call_history_repairs_malformed_arguments(self):
         _, items = convert_messages([{
@@ -245,58 +228,32 @@ class TestConvertMessages:
 
         assert json.loads(items[0]["arguments"]) == {"path": "foo.txt"}
 
-    def test_duplicate_response_item_ids_are_made_unique(self):
-        """Codex rejects replayed Responses input items with duplicate ids."""
+    def test_discards_provider_item_ids_without_changing_call_ids(self):
         _, items = convert_messages([
             {
                 "role": "assistant",
                 "content": None,
                 "tool_calls": [{
-                    "id": "call_a|rs_same",
-                    "function": {"name": "first", "arguments": "{}"},
+                    "id": "call_1|fc_1",
+                    "function": {"name": "get_weather", "arguments": "{}"},
                 }],
             },
-            {"role": "tool", "tool_call_id": "call_a|rs_same", "content": "ok"},
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{
-                    "id": "call_b|rs_same",
-                    "function": {"name": "second", "arguments": "{}"},
-                }],
-            },
-            {"role": "tool", "tool_call_id": "call_b|rs_same", "content": "ok"},
+            {"role": "tool", "tool_call_id": "call_1|fc_1", "content": "ok"},
         ])
-        function_call_ids = [
-            item["id"] for item in items if item.get("type") == "function_call"
-        ]
-        assert function_call_ids == ["rs_same", "rs_same_2"]
-        assert len(function_call_ids) == len(set(function_call_ids))
 
-    def test_fallback_response_item_ids_are_unique_with_multiple_tool_calls(self):
-        _, items = convert_messages([{
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {"id": "call_a", "function": {"name": "first", "arguments": "{}"}},
-                {"id": "call_b", "function": {"name": "second", "arguments": "{}"}},
-            ],
-        }])
-        function_call_ids = [
-            item["id"] for item in items if item.get("type") == "function_call"
-        ]
-        assert function_call_ids == ["fc_0", "fc_0_2"]
-        assert len(function_call_ids) == len(set(function_call_ids))
+        assert all("id" not in item for item in items)
+        assert items[0]["call_id"] == "call_1"
+        assert items[1]["call_id"] == "call_1"
 
     def test_assistant_with_tool_calls_no_id(self):
-        """Fallback IDs when tool_call.id is missing."""
+        """Fallback call IDs still work when tool_call.id is missing."""
         _, items = convert_messages([{
             "role": "assistant",
             "content": None,
             "tool_calls": [{"function": {"name": "f1", "arguments": "{}"}}],
         }])
         assert items[0]["call_id"] == "call_0"
-        assert items[0]["id"].startswith("fc_")
+        assert "id" not in items[0]
 
     def test_tool_message(self):
         _, items = convert_messages([{

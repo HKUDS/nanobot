@@ -111,7 +111,7 @@ class XAIGrokProvider(LLMProvider):
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         wire_model = _strip_model_prefix(model or self.default_model)
-        system_prompt, input_items = convert_messages(messages, include_item_ids=False)
+        system_prompt, input_items = convert_messages(messages)
 
         stage = "oauth_token"
         try:

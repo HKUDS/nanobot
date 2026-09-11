@@ -54,7 +54,6 @@ def prepare_responses_input(
     instructions, fallback_items = convert_messages(
         messages,
         preserve_reasoning=preserve_reasoning,
-        include_item_ids=False,
     )
     if state is None or not responses_state_matches(
         state,
@@ -70,17 +69,13 @@ def prepare_responses_input(
     _, delta_items = convert_messages(
         state.pending_messages,
         preserve_reasoning=preserve_reasoning,
-        include_item_ids=False,
     )
     logger.debug(
         "Replaying Responses state: prior_items={} pending_messages={}",
         len(prior_items),
         len(state.pending_messages),
     )
-    replayed_items = deepcopy(prior_items)
-    for item in replayed_items:
-        if item.get("type") == "reasoning":
-            item.pop("status", None)
+    replayed_items = _prepare_replayed_items(prior_items)
     return instructions, [*replayed_items, *delta_items], True
 
 
@@ -200,3 +195,14 @@ def _state_items(
             return None
         items.append(cast(dict[str, Any], raw))
     return items
+
+
+def _prepare_replayed_items(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy provider state and remove output-only fields rejected on replay."""
+    replayed_items = deepcopy(items)
+    for item in replayed_items:
+        if item.get("type") == "reasoning":
+            item.pop("status", None)
+    return replayed_items
