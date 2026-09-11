@@ -137,6 +137,8 @@ class _FakeBuilder:
         self.token_value = None
         self.request_value = None
         self.get_updates_request_value = None
+        self.base_url_value = None
+        self.base_file_url_value = None
 
     def token(self, token: str):
         self.token_value = token
@@ -148,6 +150,14 @@ class _FakeBuilder:
 
     def get_updates_request(self, request):
         self.get_updates_request_value = request
+        return self
+
+    def base_url(self, base_url: str):
+        self.base_url_value = base_url
+        return self
+
+    def base_file_url(self, base_file_url: str):
+        self.base_file_url_value = base_file_url
         return self
 
     def proxy(self, _proxy):
@@ -3250,3 +3260,60 @@ async def test_send_delta_stream_end_rich_disabled_uses_legacy_html() -> None:
     channel._app.bot.do_api_request.assert_not_called()
     channel._app.bot.edit_message_text.assert_awaited_once()
     assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_start_forwards_custom_api_base_and_headers_to_both_pools(monkeypatch) -> None:
+    """A custom Bot API base URL and extra headers reach both HTTPXRequest pools.
+
+    Lets the Telegram channel target a self-hosted Bot API server or an
+    enterprise gateway (#4702). The endpoint is applied through the builder's
+    base/base-file URLs (PTB builds absolute URLs, so an httpx-level base_url
+    would be ignored), and the headers ride on both httpx clients so every
+    Bot API request carries them.
+    """
+    _FakeHTTPXRequest.clear()
+    headers = {"X-Gateway-Auth": "secret"}
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        api_base="https://my-bot-api.example.com",
+        extra_headers=headers,
+    )
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.runtime.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.runtime.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    assert len(_FakeHTTPXRequest.instances) == 2
+    api_req, poll_req = _FakeHTTPXRequest.instances
+    assert api_req.kwargs["httpx_kwargs"] == {"headers": headers}
+    assert poll_req.kwargs["httpx_kwargs"] == {"headers": headers}
+    assert builder.base_url_value == "https://my-bot-api.example.com/bot"
+    assert builder.base_file_url_value == "https://my-bot-api.example.com/file/bot"
+
+
+@pytest.mark.asyncio
+async def test_api_base_must_be_https_url() -> None:
+    """api_base rejects non-HTTPS / bare values and normalizes empties to None."""
+    from pydantic import ValidationError
+
+    # None / empty stay None (no error).
+    assert TelegramConfig(token="123:abc", api_base=None).api_base is None
+    assert TelegramConfig(token="123:abc", api_base="   ").api_base is None
+
+    valid = TelegramConfig(token="123:abc", api_base="https://my-bot-api.example.com")
+    assert valid.api_base == "https://my-bot-api.example.com"
+
+    for bad in ("http://insecure.example.com", "ftp://host", "not-a-url", "my-bot-api.example.com"):
+        with pytest.raises(ValidationError):
+            TelegramConfig(token="123:abc", api_base=bad)

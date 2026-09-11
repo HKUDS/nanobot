@@ -33,6 +33,11 @@
           "open": "모든 메시지",
           "allowlist": "허용 목록"
         }
+      },
+      "apiBase": {
+        "label": "Bot API 기본 URL",
+        "placeholder": "https://my-bot-api.example.com",
+        "help": "선택 사항. api.telegram.org 대신 자체 호스팅 Bot API 서버 또는 게이트웨이를 지정합니다."
       }
     }
   }

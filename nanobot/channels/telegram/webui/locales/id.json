@@ -33,6 +33,11 @@
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
+      },
+      "apiBase": {
+        "label": "URL dasar Bot API",
+        "placeholder": "https://my-bot-api.example.com",
+        "help": "Opsional. Arahkan ke server Bot API yang di-hosting sendiri atau gateway sebagai ganti api.telegram.org."
       }
     }
   }
