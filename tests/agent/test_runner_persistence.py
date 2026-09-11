@@ -38,7 +38,7 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     captured_second_call: list[dict] = []
     call_count = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -49,7 +49,7 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
         captured_second_call[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="x" * 20_000)
@@ -89,7 +89,7 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     assert persisted_tool["content"] == tool_message["content"]
 
     replay_provider = MagicMock()
-    replay_provider.chat_with_retry = AsyncMock(
+    replay_provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="replayed", tool_calls=[], usage=None)
     )
     replay_tools = MagicMock()
@@ -108,7 +108,7 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     ))
     replay_tool = next(
         message
-        for message in replay_provider.chat_with_retry.await_args.kwargs["messages"]
+        for message in replay_provider.chat_stream_with_retry.await_args.kwargs["messages"]
         if message.get("role") == "tool"
     )
     assert replay_result.final_content == "replayed"
@@ -196,7 +196,7 @@ async def test_read_file_result_is_not_offloaded(tmp_path):
     captured_second_call: list[dict] = []
     call_count = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -207,7 +207,7 @@ async def test_read_file_result_is_not_offloaded(tmp_path):
         captured_second_call[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="x" * 20_000)
@@ -246,7 +246,7 @@ async def test_processed_tool_result_is_stable_for_persistence_and_replay(tmp_pa
     first_tools.get_definitions.return_value = []
     first_tools.execute = AsyncMock(return_value=raw_result)
 
-    first_provider.chat_with_retry = AsyncMock(side_effect=[
+    first_provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="working",
             tool_calls=[ToolCallRequest(
@@ -268,7 +268,7 @@ async def test_processed_tool_result_is_stable_for_persistence_and_replay(tmp_pa
         max_tool_result_chars=2048,
     ))
     request_tool = next(
-        message for message in first_provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+        message for message in first_provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
         if message.get("role") == "tool"
     )
 
@@ -282,7 +282,7 @@ async def test_processed_tool_result_is_stable_for_persistence_and_replay(tmp_pa
     assert persisted_tool["content"] == request_tool["content"]
 
     replay_provider = MagicMock()
-    replay_provider.chat_with_retry = AsyncMock(
+    replay_provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="replayed", tool_calls=[], usage=None)
     )
     replay_tools = MagicMock()
@@ -300,7 +300,7 @@ async def test_processed_tool_result_is_stable_for_persistence_and_replay(tmp_pa
         max_tool_result_chars=2048,
     ))
     replay_request_tool = next(
-        message for message in replay_provider.chat_with_retry.await_args.kwargs["messages"]
+        message for message in replay_provider.chat_stream_with_retry.await_args.kwargs["messages"]
         if message.get("role") == "tool"
     )
 
@@ -315,7 +315,7 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
     captured_second_call: list[dict] = []
     call_count = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -326,7 +326,7 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
         captured_second_call[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")

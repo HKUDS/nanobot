@@ -22,7 +22,7 @@ def _make_loop(
 ) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok"))
     return AgentLoop(
         bus=MessageBus(),
         provider=provider,
@@ -126,14 +126,14 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
     captured_messages: list[list[dict]] = []
     call_count = 0
 
-    async def chat_with_retry(*, messages: list[dict], **kwargs: object) -> LLMResponse:
+    async def chat_stream_with_retry(*, messages: list[dict], **kwargs: object) -> LLMResponse:
         nonlocal call_count
         call_count += 1
         captured_messages.append([dict(message) for message in messages])
         return LLMResponse(content=f"answer-{call_count}", tool_calls=[], usage=None)
 
     loop = _make_loop(workspace)
-    loop.provider.chat_with_retry = chat_with_retry
+    loop.provider.chat_stream_with_retry = chat_stream_with_retry
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()

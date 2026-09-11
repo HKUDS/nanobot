@@ -75,6 +75,7 @@ class BedrockProvider(LLMProvider):
             os.environ["AWS_BEARER_TOKEN_BEDROCK"] = self.api_key
         try:
             import boto3
+            from botocore.config import Config
         except ImportError as exc:  # pragma: no cover - exercised only without boto3 installed
             raise RuntimeError(
                 "AWS Bedrock provider requires boto3. Run `nanobot plugins enable bedrock`."
@@ -86,7 +87,10 @@ class BedrockProvider(LLMProvider):
         boto3_module = cast(Any, boto3)
         session = boto3_module.Session(**session_kwargs)
 
-        client_kwargs: dict[str, Any] = {}
+        idle_timeout_s = resolve_stream_idle_timeout_s()
+        client_kwargs: dict[str, Any] = {
+            "config": Config(connect_timeout=idle_timeout_s, read_timeout=idle_timeout_s),
+        }
         if self.region:
             client_kwargs["region_name"] = self.region
         if self.api_base:
@@ -775,7 +779,10 @@ class BedrockProvider(LLMProvider):
             )
             response = cast(
                 dict[str, Any],
-                await asyncio.to_thread(self._client.converse_stream, **kwargs),
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._client.converse_stream, **kwargs),
+                    timeout=idle_timeout_s,
+                ),
             )
             stream = cast(Iterator[dict[str, Any]], iter(response.get("stream") or []))
             while True:

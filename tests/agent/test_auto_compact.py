@@ -27,7 +27,7 @@ def _make_loop(
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.estimate_prompt_tokens.return_value = (10_000, "test")
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
     provider.generation.max_tokens = 4096
     loop = AgentLoop(
         bus=bus,
@@ -565,7 +565,7 @@ class TestAutoCompactEdgeCases:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        loop.provider.chat_with_retry = AsyncMock(
+        loop.provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(content="(nothing)", tool_calls=[])
         )
 
@@ -587,7 +587,7 @@ class TestAutoCompactEdgeCases:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        loop.provider.chat_with_retry = AsyncMock(side_effect=Exception("API down"))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=Exception("API down"))
 
         # Should not raise
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
@@ -661,7 +661,7 @@ class TestAutoCompactIntegration:
         loop.sessions.save(session)
 
         # Phase 3: User returns with a new message
-        loop.provider.chat_with_retry = AsyncMock(
+        loop.provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(
                 content=overview,
                 tool_calls=[],
@@ -677,7 +677,7 @@ class TestAutoCompactIntegration:
 
         # Phase 4: Verify
         session_after = loop.sessions.get_or_create("cli:test")
-        resumed_system_prompt = loop.provider.chat_with_retry.await_args_list[-1].kwargs[
+        resumed_system_prompt = loop.provider.chat_stream_with_retry.await_args_list[-1].kwargs[
             "messages"
         ][0]["content"]
 

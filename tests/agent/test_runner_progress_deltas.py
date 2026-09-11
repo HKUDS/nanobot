@@ -186,7 +186,7 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -203,7 +203,7 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
             )
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -252,7 +252,7 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -273,7 +273,7 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
             )
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -318,7 +318,7 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -335,7 +335,7 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
             )
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -382,7 +382,7 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(
             content=None,
             tool_calls=[
@@ -395,7 +395,7 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
             usage=None,
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = Tools()
 
     runner = AgentRunner()

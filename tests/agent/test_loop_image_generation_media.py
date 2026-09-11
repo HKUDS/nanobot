@@ -42,7 +42,7 @@ async def test_outbound_no_longer_carries_generated_media(
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation.max_tokens = 4096
-    provider.chat_with_retry = AsyncMock(
+    provider.chat_stream_with_retry = AsyncMock(
         side_effect=[
             LLMResponse(
                 content="",
@@ -58,7 +58,6 @@ async def test_outbound_no_longer_carries_generated_media(
             LLMResponse(content="Done", finish_reason="stop"),
         ]
     )
-    provider.chat_stream_with_retry = AsyncMock()
     loop = AgentLoop(
         bus=MessageBus(),
         provider=provider,

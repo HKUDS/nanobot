@@ -218,7 +218,7 @@ async def test_next_model_request_clears_exhaustion_within_the_same_turn() -> No
     delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
     await delivery.events.emit(RetryStatusEvent("exhausted", 4, 4, "connection"))
     with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
-        response = await Provider(provider_name="test").chat_with_retry(
+        response = await Provider(provider_name="test").chat_stream_with_retry(
             [{"role": "user", "content": "continue"}],
             provider_context=ProviderCallContext(events=delivery.events),
         )

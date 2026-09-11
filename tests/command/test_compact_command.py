@@ -25,7 +25,7 @@ async def loop(tmp_path):
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = True
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="Portable checkpoint.",
         finish_reason="stop",
     ))
@@ -85,7 +85,7 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     response = await loop._process_message(msg, runtime=loop.llm_runtime())
     assert response is None
     assert bus.outbound_size == 0
-    loop.provider.chat_with_retry.assert_awaited_once()
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_checkpoint_continues_through_reloaded_session(loop, trigger, summ
     session.add_message("assistant", "Inspection started")
     loop.sessions.save(session)
     loop.provider.estimate_prompt_tokens.return_value = (100, "test")
-    loop.provider.chat_with_retry.return_value = LLMResponse(content=summary)
+    loop.provider.chat_stream_with_retry.return_value = LLMResponse(content=summary)
 
     if trigger == "manual":
         await loop._process_message(
@@ -116,12 +116,12 @@ async def test_checkpoint_continues_through_reloaded_session(loop, trigger, summ
     assert reloaded.last_archived == 2
     assert reloaded.get_history() == [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
 
-    loop.provider.chat_with_retry.reset_mock()
-    loop.provider.chat_with_retry.return_value = LLMResponse(content="Inspection complete.")
+    loop.provider.chat_stream_with_retry.reset_mock()
+    loop.provider.chat_stream_with_retry.return_value = LLMResponse(content="Inspection complete.")
     response = await loop.process_direct("Continue the inspection", session_key=key)
     assert response.content == "Inspection complete."
-    loop.provider.chat_with_retry.assert_awaited_once()
-    sent = loop.provider.chat_with_retry.call_args.kwargs["messages"]
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
+    sent = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
     expected_summary = reloaded.metadata["_last_summary"] if summary != "(nothing)" else None
     assert sent[0] == {
         "role": "system",
@@ -199,7 +199,7 @@ async def test_compact_during_active_turn_waits_for_the_session_lock(loop) -> No
     await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
     assert loop.bus.outbound_size == 2
     assert loop.sessions.get_or_create(key).last_archived == 2
-    loop.provider.chat_with_retry.assert_awaited_once()
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -234,7 +234,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
         entered.set()
         await asyncio.Event().wait()
 
-    loop.provider.chat_with_retry.side_effect = wait_for_cancel
+    loop.provider.chat_stream_with_retry.side_effect = wait_for_cancel
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
     msg = InboundMessage(
@@ -287,7 +287,7 @@ async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
         InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact"),
         runtime=runtime,
     )
-    loop.provider.chat_with_retry.assert_awaited_once()
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
     assert loop.bus.outbound_size == 0
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)

@@ -784,6 +784,7 @@ class AnthropicProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         idle_timeout_s = resolve_stream_idle_timeout_s()
+        kwargs["timeout"] = idle_timeout_s
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 # Idle timeout must track *any* SSE chunk (thinking_delta,
