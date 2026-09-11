@@ -2133,6 +2133,7 @@ class OpenAICompatProvider(LLMProvider):
                 await client.chat.completions.create(**kwargs),
             )
             chunks: list[Any] = []
+            completed = False
             stream_iter: AsyncIterator[Any] = chat_stream.__aiter__()
             while True:
                 try:
@@ -2144,6 +2145,7 @@ class OpenAICompatProvider(LLMProvider):
                     break
                 chunks.append(chunk)
                 if chunk.choices:
+                    completed |= bool(chunk.choices[0].finish_reason)
                     delta_obj = chunk.choices[0].delta
                     raw_delta_content = getattr(delta_obj, "content", None)
                     if on_content_delta:
@@ -2187,6 +2189,8 @@ class OpenAICompatProvider(LLMProvider):
                                 "name": str(_get(function_call, "name") or ""),
                                 "arguments_delta": str(_get(function_call, "arguments") or ""),
                             })
+            if not completed:
+                raise ConnectionError("Model stream ended before a finish reason was received")
             return self._parse_chunks(chunks)
         except asyncio.TimeoutError:
             return LLMResponse(

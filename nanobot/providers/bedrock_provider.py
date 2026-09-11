@@ -802,6 +802,8 @@ class BedrockProvider(LLMProvider):
                 )
                 if delta and on_content_delta:
                     await on_content_delta(delta)
+            if not state.get("stop_reason"):
+                raise ConnectionError("Model stream ended before a stop reason was received")
             return self._stream_result(
                 content_parts=content_parts,
                 reasoning_parts=reasoning_parts,

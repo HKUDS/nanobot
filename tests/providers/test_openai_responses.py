@@ -977,6 +977,14 @@ class _SseResponse:
 
 class TestConsumeSse:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
+    async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
+        response = _SseResponse([{"type": event_type, "delta": "partial"}])
+
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sse_with_reasoning(response)
+
+    @pytest.mark.asyncio
     async def test_legacy_consume_sse_returns_three_tuple(self):
         response = _SseResponse([
             {"type": "response.output_text.delta", "delta": "hi"},
@@ -1296,7 +1304,8 @@ class TestConsumeSse:
             },
         ])
 
-        await consume_sse_with_reasoning(response, capture=capture)
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sse_with_reasoning(response, capture=capture)
 
         assert capture.completed is False
 
@@ -1509,6 +1518,15 @@ class TestConsumeSse:
 
 
 class TestConsumeSdkStream:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
+    async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
+        async def stream():
+            yield SimpleNamespace(type=event_type, delta="partial")
+
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sdk_stream(stream())
+
     @pytest.mark.asyncio
     async def test_text_stream(self):
         ev1 = MagicMock(type="response.output_text.delta", delta="Hello")
@@ -1985,6 +2003,10 @@ class TestConsumeSdkStream:
             MagicMock(type="response.reasoning_text.delta", delta="step 1 "),
             MagicMock(type="response.reasoning_text.delta", delta="step 2"),
             MagicMock(type="response.reasoning_text.done", text="step 1 step 2"),
+            SimpleNamespace(
+                type="response.completed",
+                response=SimpleNamespace(status="completed", usage=None, output=[]),
+            ),
         ]
         emitted: list[str] = []
 

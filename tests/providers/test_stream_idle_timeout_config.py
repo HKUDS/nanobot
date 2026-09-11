@@ -127,7 +127,10 @@ async def test_codex_stream_ignores_invalid_idle_timeout_env(monkeypatch) -> Non
     seen: dict[str, float] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, request=request)
+        return httpx.Response(
+            200, request=request,
+            text='data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        )
 
     def fake_client(*, timeout: float, verify: bool) -> httpx.AsyncClient:
         seen["timeout"] = timeout
