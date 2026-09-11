@@ -222,10 +222,15 @@ class ContextBuilder:
 
     @staticmethod
     def _is_template_content(content: str, template_path: str) -> bool:
-        """Check if *content* is identical to the bundled template (user hasn't customized it)."""
-        tpl = load_bundled_template(template_path)
-        if tpl is not None:
-            return content.strip() == tpl.strip()
+        """Recognize current and legacy defaults, allowing trailing whitespace."""
+        lines = [line.rstrip() for line in content.strip().splitlines()]
+        candidates = [template_path]
+        if not template_path.startswith("legacy/"):
+            candidates.append(f"legacy/{template_path}")
+        for candidate in candidates:
+            tpl = load_bundled_template(candidate)
+            if tpl is not None and lines == [line.rstrip() for line in tpl.strip().splitlines()]:
+                return True
         return False
 
     def build_messages(

@@ -1,14 +1,12 @@
 # Heartbeat Tasks
 
 <!--
-This file is checked periodically by your nanobot agent. When nanobot gateway starts with gateway.heartbeat.enabled=true, it automatically registers a protected heartbeat cron job that reads this file.
+When nanobot gateway starts with gateway.heartbeat.enabled=true, it registers a protected heartbeat cron job that reads this file periodically.
 
 Use this file for recurring background checks that should stay quiet unless there is something useful to report. Regular cron jobs are different: they normally deliver each run's result back to the chat/session where they were created.
 
-If this file has no tasks (only headers and comments), the agent will skip it. Completed tasks should be deleted, not kept - heartbeat only reads "Active Tasks".
+Keep recurring checks under "Active Tasks" and remove completed tasks. A file containing only headings and comments is skipped.
 -->
 
 ## Active Tasks
-
-<!-- Add your periodic tasks below this line -->
 

@@ -242,6 +242,29 @@ def test_fresh_workspace_omits_default_prompt_scaffolding(tmp_path) -> None:
     assert prompt.count("Do not use the 'message' tool for normal replies") == 1
 
 
+@pytest.mark.parametrize("filename", ["AGENTS.md", "USER.md", "memory/MEMORY.md"])
+def test_legacy_workspace_defaults_keep_custom_content(tmp_path, filename) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    baseline = builder.build_system_prompt()
+    legacy = (pkg_files("nanobot") / "templates" / "legacy" / filename).read_text(
+        encoding="utf-8"
+    )
+    legacy = "\n".join(line + " " for line in legacy.splitlines()) + "\n"
+    target = workspace / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(legacy, encoding="utf-8")
+
+    assert builder.build_system_prompt() == baseline
+    assert target.read_text(encoding="utf-8") == legacy
+
+    customized = legacy + "\nProject Cobalt retains every audit record permanently.\n"
+    target.write_text(customized, encoding="utf-8")
+
+    assert customized.strip() in builder.build_system_prompt()
+    assert target.read_text(encoding="utf-8") == customized
+
+
 def test_template_memory_md_is_skipped(tmp_path) -> None:
     """MEMORY.md matching the bundled template should not inject the Memory section."""
     workspace = _make_workspace(tmp_path)

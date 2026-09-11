@@ -18,5 +18,3 @@ when nearby entries matter.
 
 Example (replace `<history-log-path>` with the path from the system prompt):
 `grep(pattern="project-name", path="<history-log-path>", output_mode="content", case_insensitive=true, head_limit=20)`
-
-Use `/dream-log` to view Dream's memory changes.
