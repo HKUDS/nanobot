@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event, Lock
 
 import pytest
 
@@ -10,6 +12,7 @@ import nanobot.webui.transcript as transcript_module
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
+    TranscriptReplayStats,
     append_fork_marker,
     append_transcript_object,
     build_webui_thread_response,
@@ -128,6 +131,60 @@ def test_segmented_transcript_paginates_latest_and_older_without_overlap(
     ]
 
 
+def test_missing_page_query_uses_bounded_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript._DEFAULT_TRANSCRIPT_PAGE_LIMIT", 4)
+    key = "websocket:bounded-default"
+    for idx in range(1, 5):
+        _append_numbered_turn(key, "bounded-default", idx)
+
+    latest = build_webui_thread_response(key)
+
+    assert latest is not None
+    assert _message_contents(latest) == _numbered_turn_texts(3, 4)
+    assert latest["page"]["has_more_before"] is True
+    assert latest["page"]["loaded_message_count"] == 4
+
+
+def test_single_oversized_turn_is_bounded_and_marked(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_RECORDS", 5)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_BYTES", 1_200)
+    key = "websocket:oversized-turn"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "oversized-turn", "text": "question"},
+    )
+    for idx in range(20):
+        append_transcript_object(
+            key,
+            {
+                "event": "message",
+                "chat_id": "oversized-turn",
+                "kind": "progress",
+                "text": f"progress {idx} " + ("x" * 160),
+            },
+        )
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "oversized-turn", "text": "final answer"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "oversized-turn"})
+    stats = TranscriptReplayStats()
+
+    latest = build_webui_thread_response(key, stats=stats)
+
+    assert latest is not None
+    assert stats.selected_records <= 5
+    assert stats.selected_bytes <= 1_200
+    assert stats.capped_by_records is True
+    assert stats.capped_by_bytes is True
+    assert stats.truncated_oversized_turn is True
+    assert latest["page"]["truncated_oversized_turn"] is True
+    assert latest["messages"][0]["content"] == "question"
+    assert latest["messages"][-1]["content"] == "final answer"
+
+
 def test_latest_page_reads_active_chunk_once(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:single-active-read"
@@ -200,6 +257,83 @@ def test_segment_manifest_can_be_rebuilt_when_missing_or_corrupt(tmp_path, monke
 
     assert len([line for line in lines if line.get("event") == "user"]) == 4
     assert manifest.read_text(encoding="utf-8").lstrip().startswith("{")
+
+
+def test_manifest_repair_is_single_flight(tmp_path, monkeypatch) -> None:
+    key = "websocket:manifest-single-flight"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "manifest-single-flight", 4)
+    manifest = webui_transcript_segments_dir(key) / "manifest.json"
+    manifest.write_text("{not json", encoding="utf-8")
+    original = transcript_module._rebuild_segment_manifest
+    rebuild_started = Event()
+    release_rebuild = Event()
+    calls = 0
+    calls_lock = Lock()
+
+    def slow_rebuild(*args, **kwargs):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        rebuild_started.set()
+        assert release_rebuild.wait(2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(transcript_module, "_rebuild_segment_manifest", slow_rebuild)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(transcript_module._read_segment_manifest_entries, key)
+        assert rebuild_started.wait(2)
+        second = executor.submit(transcript_module._read_segment_manifest_entries, key)
+        release_rebuild.set()
+        assert first.result(timeout=2) == second.result(timeout=2)
+
+    assert calls == 1
+
+
+def test_page_read_compacts_legacy_immutable_segment(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:compact-segment"
+    segment_id = "000001"
+    rows = [
+        {"event": "user", "chat_id": "compact-segment", "text": "q"},
+        {
+            "event": "delta",
+            "chat_id": "compact-segment",
+            "stream_id": "answer-1",
+            "text": "answer ",
+        },
+        {
+            "event": "delta",
+            "chat_id": "compact-segment",
+            "stream_id": "answer-1",
+            "text": "done",
+        },
+        {
+            "event": "stream_end",
+            "chat_id": "compact-segment",
+            "stream_id": "answer-1",
+        },
+        {"event": "turn_end", "chat_id": "compact-segment"},
+    ]
+    segment_path = transcript_module._segment_file_path(key, segment_id)
+    transcript_module._write_records_to_path(segment_path, rows)
+    transcript_module._write_segment_manifest(
+        key,
+        [transcript_module._segment_manifest_entry(key, segment_id)],
+    )
+    stats = TranscriptReplayStats()
+
+    latest = build_webui_thread_response(key, stats=stats)
+    persisted = transcript_module._read_transcript_file(segment_path)
+
+    assert latest is not None
+    assert _message_contents(latest) == ["q", "answer done"]
+    assert [record["event"] for record in persisted] == [
+        "user",
+        "stream_end",
+        "turn_end",
+    ]
+    assert stats.compacted_delta_records == 2
+    assert transcript_module._load_segment_manifest_entries(key) is not None
 
 
 def test_rotation_does_not_reread_existing_segments(tmp_path, monkeypatch) -> None:
@@ -395,6 +529,33 @@ def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:
     assert msgs[1]["content"] == "a"
     assert msgs[1]["reasoning"] == "think"
     assert msgs[1]["latencyMs"] == 42
+
+
+def test_completed_turn_persists_canonical_stream_end_text(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:compact-deltas"
+    for event in (
+        {"event": "user", "chat_id": "compact-deltas", "text": "q"},
+        {"event": "reasoning_delta", "chat_id": "compact-deltas", "text": "think "},
+        {"event": "reasoning_delta", "chat_id": "compact-deltas", "text": "more"},
+        {"event": "reasoning_end", "chat_id": "compact-deltas"},
+        {"event": "delta", "chat_id": "compact-deltas", "text": "answer "},
+        {"event": "delta", "chat_id": "compact-deltas", "text": "done"},
+        {"event": "stream_end", "chat_id": "compact-deltas"},
+        {"event": "turn_end", "chat_id": "compact-deltas"},
+    ):
+        append_transcript_object(key, event)
+
+    lines = read_transcript_lines(key)
+
+    assert [record["event"] for record in lines] == [
+        "user",
+        "reasoning_end",
+        "stream_end",
+        "turn_end",
+    ]
+    assert lines[1]["text"] == "think more"
+    assert lines[2]["text"] == "answer done"
 
 
 def test_replay_canonical_completed_stream_records() -> None:

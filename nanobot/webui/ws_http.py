@@ -10,11 +10,13 @@ Also houses shared HTTP utility functions used by both this module and
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import mimetypes
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
@@ -40,9 +42,8 @@ from nanobot.webui.file_preview import (
     file_preview_payload,
 )
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
-from nanobot.webui.http_utils import (
-    accepts_gzip as _accepts_gzip,
-)
+from nanobot.webui.http_utils import JSONResponseMetrics
+from nanobot.webui.http_utils import accepts_gzip as _accepts_gzip
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
@@ -128,13 +129,23 @@ from nanobot.webui.skills_marketplace import (
     trending_marketplace_skills,
 )
 from nanobot.webui.thread_disk import delete_webui_thread
-from nanobot.webui.transcript import build_webui_thread_response
+from nanobot.webui.transcript import TranscriptReplayStats, build_webui_thread_response
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _WEBUI_MUTATION_PAYLOAD_ATTR = "_nanobot_webui_mutation_payload"
 _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
 _NO_STORE_HEADERS = [("Cache-Control", "no-store")]
+
+
+@dataclass(slots=True)
+class _WebUIThreadDiagnostics:
+    transcript: TranscriptReplayStats = field(default_factory=TranscriptReplayStats)
+    response: JSONResponseMetrics = field(default_factory=JSONResponseMetrics)
+    session_hash: str = ""
+    build_ms: float = 0.0
+    total_ms: float = 0.0
+    event_loop_lag_ms: float = 0.0
 
 _WEBUI_MUTATION_PATHS = {
     "automation.enable": "/api/webui/automations/enable",
@@ -566,6 +577,8 @@ class GatewayHTTPHandler:
             return
         if not (path.startswith("/api/") or path == "/webui/bootstrap"):
             return
+        if path.endswith("/webui-thread"):
+            return
         status = getattr(response, "status_code", None)
         self._log.warning(
             "slow webui http route path={} status={} duration_ms={}",
@@ -706,7 +719,7 @@ class GatewayHTTPHandler:
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
         if m:
-            return self._handle_webui_thread_get(request, m.group(1))
+            return await self._handle_webui_thread_get_async(request, m.group(1))
 
         m = re.match(r"^/api/sessions/([^/]+)/context$", got)
         if m:
@@ -816,7 +829,88 @@ class GatewayHTTPHandler:
             cleaned.append(row)
         return {"sessions": cleaned}
 
-    def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
+    async def _handle_webui_thread_get_async(self, request: WsRequest, key: str) -> Response:
+        diagnostics = _WebUIThreadDiagnostics()
+        loop = asyncio.get_running_loop()
+        expected_sample_at = loop.time() + 0.05
+        max_lag_s = 0.0
+        active = True
+        timer: asyncio.TimerHandle
+
+        def sample_event_loop_lag() -> None:
+            nonlocal expected_sample_at, max_lag_s, timer
+            now = loop.time()
+            max_lag_s = max(max_lag_s, now - expected_sample_at)
+            expected_sample_at = now + 0.05
+            if active:
+                timer = loop.call_later(0.05, sample_event_loop_lag)
+
+        timer = loop.call_later(0.05, sample_event_loop_lag)
+        started = time.perf_counter()
+        try:
+            response = await asyncio.to_thread(
+                self._handle_webui_thread_get,
+                request,
+                key,
+                diagnostics=diagnostics,
+            )
+        finally:
+            active = False
+            timer.cancel()
+        diagnostics.total_ms = (time.perf_counter() - started) * 1000
+        diagnostics.event_loop_lag_ms = max_lag_s * 1000
+        self._log_webui_thread_diagnostics(response, diagnostics)
+        return response
+
+    def _log_webui_thread_diagnostics(
+        self,
+        response: Response,
+        diagnostics: _WebUIThreadDiagnostics,
+    ) -> None:
+        stats = diagnostics.transcript
+        if not (
+            diagnostics.total_ms >= _SLOW_WEBUI_HTTP_LOG_MS
+            or stats.manifest_rebuilt
+            or stats.capped_by_bytes
+            or stats.capped_by_records
+        ):
+            return
+        self._log.warning(
+            "webui thread replay session_hash={} status={} limit={} source_bytes={} "
+            "parsed_records={} selected_bytes={} selected_records={} compacted_deltas={} "
+            "manifest_rebuilt={} manifest_rebuild_ms={} capped_bytes={} capped_records={} "
+            "truncated_turn={} replay_ms={} build_ms={} json_ms={} gzip_ms={} gzip={} "
+            "response_bytes={} event_loop_lag_ms={} total_ms={}",
+            diagnostics.session_hash or "unknown",
+            response.status_code,
+            stats.effective_limit,
+            stats.source_bytes,
+            stats.parsed_records,
+            stats.selected_bytes,
+            stats.selected_records,
+            stats.compacted_delta_records,
+            stats.manifest_rebuilt,
+            stats.manifest_rebuild_ms,
+            stats.capped_by_bytes,
+            stats.capped_by_records,
+            stats.truncated_oversized_turn,
+            stats.replay_ms,
+            round(diagnostics.build_ms, 1),
+            round(diagnostics.response.json_encode_ms, 1),
+            round(diagnostics.response.gzip_ms, 1),
+            diagnostics.response.gzip_enabled,
+            diagnostics.response.response_bytes,
+            round(diagnostics.event_loop_lag_ms, 1),
+            round(diagnostics.total_ms, 1),
+        )
+
+    def _handle_webui_thread_get(
+        self,
+        request: WsRequest,
+        key: str,
+        *,
+        diagnostics: _WebUIThreadDiagnostics | None = None,
+    ) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         decoded_key = _decode_api_key(key)
@@ -824,6 +918,8 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
+        if diagnostics is not None:
+            diagnostics.session_hash = hashlib.sha256(decoded_key.encode("utf-8")).hexdigest()[:12]
         scope = self.workspaces.scope_for_session_key(decoded_key)
 
         def load_session_messages() -> list[dict[str, Any]] | None:
@@ -864,6 +960,7 @@ class GatewayHTTPHandler:
         active_turn_transcript_persistence_failed = (
             websocket_turn_transcript_persistence_failed(chat_id)
         )
+        build_started = time.perf_counter()
         data = build_webui_thread_response(
             decoded_key,
             augment_user_media=self.media.augment_transcript_media,
@@ -881,13 +978,17 @@ class GatewayHTTPHandler:
             limit=limit,
             direction=direction,
             before=before,
+            stats=diagnostics.transcript if diagnostics is not None else None,
         )
+        if diagnostics is not None:
+            diagnostics.build_ms = (time.perf_counter() - build_started) * 1000
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
         return _http_json_response(
             data,
             accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+            metrics=diagnostics.response if diagnostics is not None else None,
         )
 
     def _handle_file_preview(self, request: WsRequest, key: str) -> Response:

@@ -9,8 +9,10 @@ import json
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Sequence, cast
 from urllib.parse import unquote, urlparse
@@ -36,6 +38,10 @@ _TRANSCRIPT_ACTIVE_CHUNK_ID = "active"
 _TRANSCRIPT_SEGMENT_RE = re.compile(r"^\d{6}\.jsonl$")
 _DEFAULT_TRANSCRIPT_PAGE_LIMIT = 160
 _MAX_TRANSCRIPT_PAGE_LIMIT = 1000
+_MAX_TRANSCRIPT_PAGE_RECORDS = 4_000
+_MAX_TRANSCRIPT_PAGE_BYTES = 20 * 1024 * 1024
+_MANIFEST_REBUILD_LOCKS = tuple(threading.Lock() for _ in range(32))
+_ACTIVE_TRANSCRIPTS_WITH_DELTAS: set[str] = set()
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _WEBUI_REPLAY_IDENTITY_KEY = "_webui_replay_identity"
 _MARKDOWN_LOCAL_IMAGE_RE = re.compile(
@@ -179,6 +185,24 @@ class _SessionBackfillTurn(NamedTuple):
     assistant_records: tuple[dict[str, Any], ...]
 
 
+@dataclass(slots=True)
+class TranscriptReplayStats:
+    """Bounded, non-sensitive diagnostics for one history replay."""
+
+    effective_limit: int = 0
+    source_bytes: int = 0
+    parsed_records: int = 0
+    selected_bytes: int = 0
+    selected_records: int = 0
+    compacted_delta_records: int = 0
+    manifest_rebuilt: bool = False
+    manifest_rebuild_ms: int = 0
+    replay_ms: int = 0
+    capped_by_bytes: bool = False
+    capped_by_records: bool = False
+    truncated_oversized_turn: bool = False
+
+
 def _record_json_line(record: dict[str, Any]) -> str:
     return json.dumps(record, ensure_ascii=False, separators=(",", ":"))
 
@@ -209,6 +233,116 @@ def _records_bytes(records: list[dict[str, Any]]) -> int:
     for record in records:
         total += len(_record_json_line(record).encode("utf-8")) + 1
     return total
+
+
+def _stream_key(record: dict[str, Any], stream: str) -> tuple[str, str, str]:
+    raw_turn_id = record.get("turn_id")
+    turn_id = raw_turn_id if isinstance(raw_turn_id, str) else ""
+    raw_phase = record.get("turn_phase")
+    phase = raw_phase if isinstance(raw_phase, str) and raw_phase else stream
+    raw_stream_id = record.get("stream_id")
+    stream_id = raw_stream_id if isinstance(raw_stream_id, str) else ""
+    return turn_id, phase, stream_id
+
+
+def _compact_completed_stream_deltas(
+    turn: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Fold transport deltas into canonical end records for a completed turn."""
+    if not turn or turn[-1].get("event") != "turn_end":
+        return turn, 0
+
+    pending: dict[tuple[str, str, str], list[tuple[int, dict[str, Any]]]] = {}
+    dropped_indexes: set[int] = set()
+    replacements: dict[int, dict[str, Any]] = {}
+    for index, record in enumerate(turn):
+        event = record.get("event")
+        if event in {"delta", "reasoning_delta"}:
+            stream = "answer" if event == "delta" else "reasoning"
+            pending.setdefault(_stream_key(record, stream), []).append((index, record))
+            continue
+        if event not in {"stream_end", "reasoning_end"}:
+            continue
+        stream = "answer" if event == "stream_end" else "reasoning"
+        chunks = pending.pop(_stream_key(record, stream), [])
+        if not chunks:
+            continue
+        completed = dict(record)
+        text = completed.get("text")
+        if not isinstance(text, str) or not text:
+            completed["text"] = "".join(
+                str(chunk.get("text") or "") for _, chunk in chunks
+            )
+        replacements[index] = completed
+        dropped_indexes.update(chunk_index for chunk_index, _ in chunks)
+
+    if not dropped_indexes:
+        return turn, 0
+    return [
+        replacements.get(index, record)
+        for index, record in enumerate(turn)
+        if index not in dropped_indexes
+    ], len(dropped_indexes)
+
+
+def _compact_completed_turns(
+    turns: list[list[dict[str, Any]]],
+) -> tuple[list[list[dict[str, Any]]], int]:
+    compacted: list[list[dict[str, Any]]] = []
+    dropped = 0
+    for turn in turns:
+        next_turn, turn_dropped = _compact_completed_stream_deltas(turn)
+        compacted.append(next_turn)
+        dropped += turn_dropped
+    return compacted, dropped
+
+
+def _trim_oversized_turn(
+    turn: list[dict[str, Any]],
+    *,
+    max_records: int,
+    max_bytes: int,
+) -> list[dict[str, Any]]:
+    """Keep the useful tail of one pathological turn within a hard replay budget."""
+    if not turn or max_records <= 0 or max_bytes <= 0:
+        return []
+
+    user_index = next(
+        (index for index, record in enumerate(turn) if _is_user_transcript_row(record)),
+        None,
+    )
+    end_index = next(
+        (
+            index
+            for index in range(len(turn) - 1, -1, -1)
+            if turn[index].get("event") == "turn_end"
+        ),
+        None,
+    )
+    answer_index = next(
+        (
+            index
+            for index in range(len(turn) - 1, -1, -1)
+            if turn[index].get("event") in {"delta", "stream_end", "message"}
+        ),
+        None,
+    )
+    priority = [user_index, end_index, answer_index]
+    candidates = [
+        *[index for index in priority if index is not None],
+        *range(len(turn) - 1, -1, -1),
+    ]
+    selected: set[int] = set()
+    selected_bytes = 0
+    for index in candidates:
+        if index in selected or len(selected) >= max_records:
+            continue
+        record_bytes = _records_bytes([turn[index]])
+        if selected_bytes + record_bytes > max_bytes:
+            continue
+        selected.add(index)
+        selected_bytes += record_bytes
+    return [record for index, record in enumerate(turn) if index in selected]
 
 
 def _flatten_turns(turns: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -262,12 +396,21 @@ def _segment_ids_on_disk(session_key: str) -> list[str]:
     )
 
 
-def _segment_manifest_entry(session_key: str, segment_id: str) -> dict[str, Any]:
+def _segment_manifest_entry(
+    session_key: str,
+    segment_id: str,
+    *,
+    stats: TranscriptReplayStats | None = None,
+) -> dict[str, Any]:
     path = _segment_file_path(session_key, segment_id)
     lines = _read_transcript_file(path)
+    size = path.stat().st_size if path.exists() else 0
+    if stats is not None:
+        stats.source_bytes += size
+        stats.parsed_records += len(lines)
     return {
         "id": segment_id,
-        "bytes": path.stat().st_size if path.exists() else 0,
+        "bytes": size,
         "turn_count": len(_split_transcript_turns(lines)),
         "user_count": sum(1 for line in lines if _is_user_transcript_row(line)),
     }
@@ -311,7 +454,7 @@ def _write_segment_manifest(session_key: str, entries: list[dict[str, Any]]) -> 
         "segments": entries,
     }
     path = _webui_transcript_manifest_path(session_key)
-    tmp_path = path.with_suffix(".json.tmp")
+    tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp_path, path)
@@ -320,23 +463,34 @@ def _write_segment_manifest(session_key: str, entries: list[dict[str, Any]]) -> 
         raise
 
 
-def _rebuild_segment_manifest(session_key: str) -> list[dict[str, Any]]:
+def _rebuild_segment_manifest(
+    session_key: str,
+    *,
+    stats: TranscriptReplayStats | None = None,
+) -> list[dict[str, Any]]:
+    started = time.perf_counter()
     segment_ids = _segment_ids_on_disk(session_key)
-    entries = [_segment_manifest_entry(session_key, segment_id) for segment_id in segment_ids]
+    entries = [
+        _segment_manifest_entry(session_key, segment_id, stats=stats)
+        for segment_id in segment_ids
+    ]
     if entries:
         _write_segment_manifest(session_key, entries)
     else:
         _webui_transcript_manifest_path(session_key).unlink(missing_ok=True)
+    if stats is not None:
+        stats.manifest_rebuilt = True
+        stats.manifest_rebuild_ms += int((time.perf_counter() - started) * 1000)
     return entries
 
 
-def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
+def _load_segment_manifest_entries(session_key: str) -> list[dict[str, Any]] | None:
     directory = webui_transcript_segments_dir(session_key)
     if not directory.is_dir():
         return []
     path = _webui_transcript_manifest_path(session_key)
     if not path.is_file():
-        return _rebuild_segment_manifest(session_key)
+        return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         manifest = cast(dict[str, Any], data) if isinstance(data, dict) else None
@@ -346,18 +500,56 @@ def _read_segment_manifest_entries(session_key: str) -> list[dict[str, Any]]:
             or manifest.get("version") != _TRANSCRIPT_SEGMENT_MANIFEST_VERSION
             or not isinstance(raw_segments, list)
         ):
-            return _rebuild_segment_manifest(session_key)
+            return None
         entries: list[dict[str, Any]] = []
         for entry in cast(list[Any], raw_segments):
             normalized = _normalize_manifest_entry(session_key, entry)
             if normalized is None:
-                return _rebuild_segment_manifest(session_key)
+                return None
             entries.append(normalized)
         if [entry["id"] for entry in entries] != _segment_ids_on_disk(session_key):
-            return _rebuild_segment_manifest(session_key)
+            return None
         return entries
     except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-        return _rebuild_segment_manifest(session_key)
+        return None
+
+
+def _manifest_rebuild_lock(session_key: str) -> threading.Lock:
+    digest = hashlib.sha256(session_key.encode("utf-8")).digest()
+    lock_index = int.from_bytes(digest[:2], "big") % len(_MANIFEST_REBUILD_LOCKS)
+    return _MANIFEST_REBUILD_LOCKS[lock_index]
+
+
+def _read_segment_manifest_entries(
+    session_key: str,
+    *,
+    stats: TranscriptReplayStats | None = None,
+) -> list[dict[str, Any]]:
+    entries = _load_segment_manifest_entries(session_key)
+    if entries is not None:
+        return entries
+    with _manifest_rebuild_lock(session_key):
+        entries = _load_segment_manifest_entries(session_key)
+        if entries is not None:
+            return entries
+        return _rebuild_segment_manifest(session_key, stats=stats)
+
+
+def _repair_manifest_chunk_count(
+    session_key: str,
+    chunk_id: str,
+    actual_turn_count: int,
+    *,
+    stats: TranscriptReplayStats | None = None,
+) -> None:
+    with _manifest_rebuild_lock(session_key):
+        entries = _load_segment_manifest_entries(session_key)
+        if entries is not None and any(
+            entry["id"] == chunk_id and entry["turn_count"] == actual_turn_count
+            for entry in entries
+        ):
+            return
+        _rebuild_segment_manifest(session_key, stats=stats)
 
 
 def _read_segment_ids(session_key: str) -> list[str]:
@@ -367,40 +559,43 @@ def _read_segment_ids(session_key: str) -> list[str]:
 def _append_segment_turns(session_key: str, turns: list[list[dict[str, Any]]]) -> None:
     if not turns:
         return
-    entries = _read_segment_manifest_entries(session_key)
-    next_id = int(entries[-1]["id"]) + 1 if entries else 1
-    batch: list[list[dict[str, Any]]] = []
-    batch_bytes = 0
+    with _manifest_rebuild_lock(session_key):
+        entries = _load_segment_manifest_entries(session_key)
+        if entries is None:
+            entries = _rebuild_segment_manifest(session_key)
+        next_id = int(entries[-1]["id"]) + 1 if entries else 1
+        batch: list[list[dict[str, Any]]] = []
+        batch_bytes = 0
 
-    def write_batch() -> None:
-        nonlocal next_id
-        segment_id = f"{next_id:06d}"
-        path = _segment_file_path(session_key, segment_id)
-        _write_records_to_path(path, _flatten_turns(batch))
-        entries.append({
-            "id": segment_id,
-            "bytes": path.stat().st_size,
-            "turn_count": len(batch),
-            "user_count": sum(
-                1
-                for turn in batch
-                for row in turn
-                if _is_user_transcript_row(row)
-            ),
-        })
-        next_id += 1
+        def write_batch() -> None:
+            nonlocal next_id
+            segment_id = f"{next_id:06d}"
+            path = _segment_file_path(session_key, segment_id)
+            _write_records_to_path(path, _flatten_turns(batch))
+            entries.append({
+                "id": segment_id,
+                "bytes": path.stat().st_size,
+                "turn_count": len(batch),
+                "user_count": sum(
+                    1
+                    for turn in batch
+                    for row in turn
+                    if _is_user_transcript_row(row)
+                ),
+            })
+            next_id += 1
 
-    for turn in turns:
-        turn_bytes = _records_bytes(turn)
-        if batch and batch_bytes + turn_bytes > _MAX_TRANSCRIPT_FILE_BYTES:
+        for turn in turns:
+            turn_bytes = _records_bytes(turn)
+            if batch and batch_bytes + turn_bytes > _MAX_TRANSCRIPT_FILE_BYTES:
+                write_batch()
+                batch = []
+                batch_bytes = 0
+            batch.append(turn)
+            batch_bytes += turn_bytes
+        if batch:
             write_batch()
-            batch = []
-            batch_bytes = 0
-        batch.append(turn)
-        batch_bytes += turn_bytes
-    if batch:
-        write_batch()
-    _write_segment_manifest(session_key, entries)
+        _write_segment_manifest(session_key, entries)
 
 
 def _rotate_active_transcript_if_needed(session_key: str) -> None:
@@ -417,6 +612,14 @@ def _rotate_active_transcript_if_needed(session_key: str) -> None:
     if not lines:
         return
     turns = _split_transcript_turns(lines)
+    turns, compacted_delta_records = _compact_completed_turns(turns)
+    if compacted_delta_records:
+        _write_records_to_path(path, _flatten_turns(turns))
+        try:
+            if path.stat().st_size <= _ACTIVE_TRANSCRIPT_ROTATE_BYTES:
+                return
+        except OSError:
+            return
     if len(turns) <= 1:
         return
 
@@ -439,7 +642,6 @@ def _rotate_active_transcript_if_needed(session_key: str) -> None:
 
 
 def _chunk_ids(session_key: str) -> list[str]:
-    _rotate_active_transcript_if_needed(session_key)
     ids = _read_segment_ids(session_key)
     if webui_transcript_path(session_key).is_file():
         ids.append(_TRANSCRIPT_ACTIVE_CHUNK_ID)
@@ -456,13 +658,81 @@ def _read_chunk_turns(session_key: str, chunk_id: str) -> list[list[dict[str, An
     return _split_transcript_turns(_read_transcript_file(path))
 
 
+def _compact_segment_turns(
+    session_key: str,
+    chunk_id: str,
+    *,
+    stats: TranscriptReplayStats | None = None,
+) -> list[list[dict[str, Any]]]:
+    """Compact one immutable legacy segment and keep its manifest entry valid."""
+    with _manifest_rebuild_lock(session_key):
+        turns = _read_chunk_turns(session_key, chunk_id)
+        if stats is not None:
+            path = _segment_file_path(session_key, chunk_id)
+            try:
+                stats.source_bytes += path.stat().st_size
+            except OSError:
+                pass
+            stats.parsed_records += sum(len(turn) for turn in turns)
+        compacted, dropped = _compact_completed_turns(turns)
+        if not dropped:
+            return turns
+
+        entries = _load_segment_manifest_entries(session_key)
+        path = _segment_file_path(session_key, chunk_id)
+        _write_records_to_path(path, _flatten_turns(compacted))
+        if entries is None:
+            _rebuild_segment_manifest(session_key, stats=stats)
+        else:
+            for entry in entries:
+                if entry["id"] != chunk_id:
+                    continue
+                entry["bytes"] = path.stat().st_size
+                entry["turn_count"] = len(compacted)
+                entry["user_count"] = sum(
+                    1
+                    for turn in compacted
+                    for record in turn
+                    if _is_user_transcript_row(record)
+                )
+                break
+            _write_segment_manifest(session_key, entries)
+        if stats is not None:
+            stats.compacted_delta_records += dropped
+        return compacted
+
+
 def _cached_chunk_turns(
     session_key: str,
     chunk_id: str,
     turn_cache: dict[str, list[list[dict[str, Any]]]],
+    *,
+    stats: TranscriptReplayStats | None = None,
 ) -> list[list[dict[str, Any]]]:
     if chunk_id not in turn_cache:
-        turn_cache[chunk_id] = _read_chunk_turns(session_key, chunk_id)
+        if chunk_id == _TRANSCRIPT_ACTIVE_CHUNK_ID:
+            path = webui_transcript_path(session_key)
+        else:
+            path = _segment_file_path(session_key, chunk_id)
+        turns = _read_chunk_turns(session_key, chunk_id)
+        needs_compaction = chunk_id != _TRANSCRIPT_ACTIVE_CHUNK_ID and any(
+            record.get("event") in {"delta", "reasoning_delta"}
+            for turn in turns
+            for record in turn
+        )
+        if needs_compaction:
+            turns = _compact_segment_turns(
+                session_key,
+                chunk_id,
+                stats=stats,
+            )
+        elif stats is not None:
+            try:
+                stats.source_bytes += path.stat().st_size
+            except OSError:
+                pass
+            stats.parsed_records += sum(len(turn) for turn in turns)
+        turn_cache[chunk_id] = turns
     return turn_cache[chunk_id]
 
 
@@ -505,11 +775,12 @@ def _coerce_page_limit(limit: int | None) -> int:
 def _chunk_turn_refs(
     session_key: str,
     turn_cache: dict[str, list[list[dict[str, Any]]]],
+    *,
+    stats: TranscriptReplayStats | None = None,
 ) -> list[_TranscriptChunkRef]:
-    _rotate_active_transcript_if_needed(session_key)
     refs: list[_TranscriptChunkRef] = []
     ordinal = 0
-    for entry in _read_segment_manifest_entries(session_key):
+    for entry in _read_segment_manifest_entries(session_key, stats=stats):
         chunk_id = str(entry["id"])
         turn_count = int(entry["turn_count"])
         if turn_count <= 0:
@@ -521,6 +792,7 @@ def _chunk_turn_refs(
             session_key,
             _TRANSCRIPT_ACTIVE_CHUNK_ID,
             turn_cache,
+            stats=stats,
         )
         active_turn_count = len(active_turns)
         if active_turn_count > 0:
@@ -540,6 +812,8 @@ def _count_user_messages_before_ordinal(
     chunks: list[_TranscriptChunkRef],
     before_ordinal: int,
     turn_cache: dict[str, list[list[dict[str, Any]]]],
+    *,
+    stats: TranscriptReplayStats | None = None,
 ) -> int:
     total = 0
     for chunk in chunks:
@@ -551,7 +825,12 @@ def _count_user_messages_before_ordinal(
         if local_end >= chunk.turn_count:
             total += chunk.user_count
             continue
-        turns = _cached_chunk_turns(session_key, chunk.chunk_id, turn_cache)
+        turns = _cached_chunk_turns(
+            session_key,
+            chunk.chunk_id,
+            turn_cache,
+            stats=stats,
+        )
         total += sum(
             1
             for turn in turns[:local_end]
@@ -566,16 +845,22 @@ def _select_transcript_page(
     *,
     limit: int | None,
     before: str | None,
+    stats: TranscriptReplayStats | None = None,
     _manifest_rebuilt: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    stats = stats or TranscriptReplayStats()
     page_limit = _coerce_page_limit(limit)
+    stats.effective_limit = page_limit
     turn_cache: dict[str, list[list[dict[str, Any]]]] = {}
-    chunks = _chunk_turn_refs(session_key, turn_cache)
+    chunks = _chunk_turn_refs(session_key, turn_cache, stats=stats)
     total_turns = sum(chunk.turn_count for chunk in chunks)
     before_ordinal = _decode_page_cursor(before)
     upper_ordinal = total_turns if before_ordinal is None else min(before_ordinal, total_turns)
     selected: list[_TranscriptTurnRef] = []
     selected_message_count = 0
+    selected_record_count = 0
+    selected_bytes = 0
+    budget_reached = False
 
     for chunk in reversed(chunks):
         if chunk.start_ordinal >= upper_ordinal:
@@ -583,28 +868,68 @@ def _select_transcript_page(
         local_upper = min(chunk.turn_count, upper_ordinal - chunk.start_ordinal)
         if local_upper <= 0:
             continue
-        turns = _cached_chunk_turns(session_key, chunk.chunk_id, turn_cache)
+        turns = _cached_chunk_turns(
+            session_key,
+            chunk.chunk_id,
+            turn_cache,
+            stats=stats,
+        )
         if (
             chunk.chunk_id != _TRANSCRIPT_ACTIVE_CHUNK_ID
             and len(turns) != chunk.turn_count
             and not _manifest_rebuilt
         ):
-            _rebuild_segment_manifest(session_key)
+            _repair_manifest_chunk_count(
+                session_key,
+                chunk.chunk_id,
+                len(turns),
+                stats=stats,
+            )
             return _select_transcript_page(
                 session_key,
                 limit=limit,
                 before=before,
+                stats=stats,
                 _manifest_rebuilt=True,
             )
         local_upper = min(local_upper, len(turns))
         for turn_index in range(local_upper - 1, -1, -1):
             ordinal = chunk.start_ordinal + turn_index
-            turn = turns[turn_index]
+            turn, compacted_delta_records = _compact_completed_stream_deltas(
+                turns[turn_index]
+            )
+            stats.compacted_delta_records += compacted_delta_records
+            turn_record_count = len(turn)
+            turn_bytes = _records_bytes(turn)
+            exceeds_records = (
+                selected_record_count + turn_record_count > _MAX_TRANSCRIPT_PAGE_RECORDS
+            )
+            exceeds_bytes = selected_bytes + turn_bytes > _MAX_TRANSCRIPT_PAGE_BYTES
+            if exceeds_records:
+                stats.capped_by_records = True
+            if exceeds_bytes:
+                stats.capped_by_bytes = True
+            if selected and (exceeds_records or exceeds_bytes):
+                budget_reached = True
+                break
+            if exceeds_records or exceeds_bytes:
+                turn = _trim_oversized_turn(
+                    turn,
+                    max_records=_MAX_TRANSCRIPT_PAGE_RECORDS,
+                    max_bytes=_MAX_TRANSCRIPT_PAGE_BYTES,
+                )
+                turn_record_count = len(turn)
+                turn_bytes = _records_bytes(turn)
+                stats.truncated_oversized_turn = True
             selected.append(_TranscriptTurnRef(ordinal, turn))
+            selected_record_count += turn_record_count
+            selected_bytes += turn_bytes
+            replay_started = time.perf_counter()
             selected_message_count += len(replay_transcript_to_ui_messages(turn))
+            stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
             if selected_message_count >= page_limit:
                 break
-        if selected_message_count >= page_limit:
+        if selected_message_count >= page_limit or budget_reached:
             break
 
     selected_chronological = list(reversed(selected))
@@ -616,6 +941,8 @@ def _select_transcript_page(
             turn_ordinal=ref.ordinal,
         )
     ]
+    stats.selected_records = len(lines)
+    stats.selected_bytes = selected_bytes
     if not selected_chronological:
         return [], {
             "before_cursor": None,
@@ -635,8 +962,11 @@ def _select_transcript_page(
             chunks,
             first_ref.ordinal,
             turn_cache,
+            stats=stats,
         ),
     }
+    if stats.truncated_oversized_turn:
+        page["truncated_oversized_turn"] = True
     return lines, page
 
 
@@ -691,10 +1021,24 @@ def _record_for_append(obj: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def _compact_active_completed_streams(session_key: str) -> None:
+    path = webui_transcript_path(session_key)
+    turns, compacted_delta_records = _compact_completed_turns(
+        _split_transcript_turns(_read_transcript_file(path))
+    )
+    if compacted_delta_records:
+        _write_records_to_path(path, _flatten_turns(turns))
+
+
 def append_transcript_object(session_key: str, obj: dict[str, Any]) -> None:
     record = _record_for_append(obj)
     _append_to_active_transcript(session_key, record)
+    if record.get("event") in {"delta", "reasoning_delta"}:
+        _ACTIVE_TRANSCRIPTS_WITH_DELTAS.add(session_key)
     if record.get("event") == "turn_end":
+        if session_key in _ACTIVE_TRANSCRIPTS_WITH_DELTAS:
+            _compact_active_completed_streams(session_key)
+            _ACTIVE_TRANSCRIPTS_WITH_DELTAS.discard(session_key)
         _rotate_active_transcript_if_needed(session_key)
 
 
@@ -977,6 +1321,7 @@ def write_session_messages_as_transcript(
 
 
 def delete_webui_transcript(session_key: str) -> bool:
+    _ACTIVE_TRANSCRIPTS_WITH_DELTAS.discard(session_key)
     removed = False
     for path in (webui_transcript_path(session_key), _legacy_webui_thread_path(session_key)):
         if not path.is_file():
@@ -1223,17 +1568,6 @@ def _split_transcript_turns(lines: list[dict[str, Any]]) -> list[list[dict[str, 
     if current:
         turns.append(current)
     return turns
-
-
-def _annotate_replay_identities(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        record
-        for turn_ordinal, turn in enumerate(_split_transcript_turns(lines))
-        for record in _records_with_replay_identity(
-            turn,
-            turn_ordinal=turn_ordinal,
-        )
-    ]
 
 
 def _stable_record_digest(record: dict[str, Any]) -> str:
@@ -2670,14 +3004,16 @@ def build_webui_thread_response(
     limit: int | None = None,
     direction: str | None = None,
     before: str | None = None,
+    stats: TranscriptReplayStats | None = None,
 ) -> dict[str, Any] | None:
     """Return a payload compatible with ``WebuiThreadPersistedPayload``."""
-    paginated = limit is not None or direction is not None or before is not None
-    page: dict[str, Any] | None = None
-    if paginated:
-        lines, page = _select_transcript_page(session_key, limit=limit, before=before)
-    else:
-        lines = _annotate_replay_identities(read_transcript_lines(session_key))
+    replay_stats = stats or TranscriptReplayStats()
+    lines, page = _select_transcript_page(
+        session_key,
+        limit=limit,
+        before=before,
+        stats=replay_stats,
+    )
     if not lines and active_turn_started_at is None:
         return None
     needs_user_backfill = _needs_user_event_backfill(lines)
@@ -2696,12 +3032,14 @@ def build_webui_thread_response(
             lines = _recover_incomplete_turns(lines, session_turns)
     lines = _ensure_replay_identities(lines)
     fork_boundary = fork_boundary_message_count(lines)
+    replay_started = time.perf_counter()
     msgs = replay_transcript_to_ui_messages(
         lines,
         augment_user_media=augment_user_media,
         augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
     )
+    replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
     payload: dict[str, Any] = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
@@ -2717,9 +3055,8 @@ def build_webui_thread_response(
         ),
         "active_turn_id": active_turn_id,
     }
-    if page is not None:
-        page["loaded_message_count"] = len(msgs)
-        payload["page"] = page
+    page["loaded_message_count"] = len(msgs)
+    payload["page"] = page
     if fork_boundary is not None:
         payload["fork_boundary_message_count"] = fork_boundary
     return payload
