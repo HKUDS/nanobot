@@ -1,6 +1,8 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
+import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
+import { ClientProvider } from "@/providers/ClientProvider";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
@@ -160,6 +162,50 @@ describe("Settings system domains", () => {
 
     expect(screen.getByTestId("settings-section-transition")).toHaveClass("settings-grid");
     expect(screen.getByTestId("settings-section-transition")).not.toHaveClass("settings-feature-page");
+  });
+
+  it("uses the inline section heading layout to align Apps titles and counts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [installedAnyGen], installed_count: 1 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+      return jsonResponse({});
+    }));
+    renderSettingsView({ initialSection: "apps", initialSettings: settingsPayload() });
+    await screen.findByText("AnyGen");
+    const title = screen.getByRole("heading", { name: "Tools" });
+    expect(title.parentElement).toHaveClass("settings-section-heading");
+    expect(title.nextElementSibling).toHaveTextContent("1");
+    expect(title.nextElementSibling).toHaveClass("tabular-nums");
+    expect(title.nextElementSibling).not.toHaveClass("rounded-full", "bg-muted");
+
+    fireEvent.click(screen.getByRole("button", { name: "MCP", exact: true }));
+    const mcpTitle = screen.getByRole("heading", { name: "MCP tools" });
+    expect(mcpTitle.parentElement).toHaveClass("settings-section-heading");
+    expect(mcpTitle.nextElementSibling).toHaveTextContent("0");
+  });
+
+  it("keeps skill group labels natural without changing grouping or filtering", () => {
+    render(<ClientProvider client={{} as never} token="tok">
+      <SkillsCatalogSettings skills={[
+        { name: "pr-review", description: "Review pull requests", source: "workspace", available: true },
+        { name: "cron", description: "Schedule reminders", source: "builtin", available: true },
+        { name: "team-guide", description: "Team conventions", source: "team", available: true },
+      ]} />
+    </ClientProvider>);
+    for (const name of ["Custom", "Built-in", "Other"]) {
+      const title = screen.getByRole("heading", { name, exact: true });
+      expect(title).toHaveClass("text-[13px]", "font-medium", "leading-5");
+      expect(title).not.toHaveClass("uppercase", "tracking-[0.08em]");
+      expect(title.nextElementSibling).toHaveTextContent("1");
+      expect(title.nextElementSibling).toHaveClass("leading-5");
+    }
+    fireEvent.change(screen.getByRole("textbox", { name: "Search installed skills" }), { target: { value: "cron" } });
+    expect(screen.queryByRole("heading", { name: "Custom" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Other" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Built-in" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open details for cron" })).toBeVisible();
   });
 
   it("opens a chat from the standalone automations empty state", async () => {

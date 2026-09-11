@@ -151,10 +151,10 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
               {groupedSkills.map((group) => (
                 <section key={group.key} className="space-y-1">
                   <div className="flex items-center gap-2 px-2 py-1.5">
-                    <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    <h2 className="text-[13px] font-medium leading-5 text-muted-foreground">
                       {group.label}
                     </h2>
-                    <span className="text-[11px] tabular-nums text-muted-foreground/60">
+                    <span className="text-[12px] leading-5 tabular-nums text-muted-foreground/60">
                       {group.skills.length}
                     </span>
                   </div>

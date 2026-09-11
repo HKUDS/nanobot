@@ -291,13 +291,13 @@ export function AppsCatalogSettings({
       ) : null}
 
       <section className="rounded-panel bg-settings-surface px-3 py-3 sm:px-4">
-        <div className="flex items-center justify-between border-b border-border/45 pb-3">
+        <div className="settings-section-heading border-b border-border/45 pb-2">
           <SettingsSectionTitle>
             {filter === "mcp"
               ? tx("settings.apps.mcpTools", "MCP tools")
               : tx("settings.apps.featured", "Tools")}
           </SettingsSectionTitle>
-          <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-medium text-muted-foreground">
+          <span className="text-[12px] tabular-nums text-muted-foreground">
             {items.length}
           </span>
         </div>
