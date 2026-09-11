@@ -18,6 +18,10 @@ if TYPE_CHECKING:
     from nanobot.channels.whatsapp.runtime import WhatsAppChannel
 
 
+_NATIVE_STOP_TIMEOUT_SECONDS = 10.0
+_DATABASE_REPLACE_TIMEOUT_SECONDS = 10.0
+
+
 @dataclass(slots=True)
 class WhatsAppConnectSession:
     id: str
@@ -155,7 +159,7 @@ class WhatsAppConnectStore:
         try:
             session.result.result()
             await self._close_session(session)
-            self._commit_database(session.pending_path, session.target_path)
+            await self._commit_database(session.pending_path, session.target_path)
         except BaseException:
             await self._close_session(session)
             self._remove_database(session.pending_path)
@@ -233,13 +237,24 @@ class WhatsAppConnectStore:
         if session.connect_task.done() and not session.connect_task.cancelled():
             with suppress(Exception, asyncio.CancelledError):
                 native_task = session.connect_task.result()
+        client_native_task = getattr(session.client, "connect_task", None)
+        if native_task is None and isinstance(client_native_task, asyncio.Task):
+            native_task = cast(asyncio.Task[Any], client_native_task)
         with suppress(Exception):
             await asyncio.wait_for(session.client.stop(), timeout=5)
-        if native_task is not None and not native_task.done():
-            native_task.cancel()
-            # Some neonize versions take time to unwind their native receive
-            # loop. Do not let that delay gateway shutdown indefinitely.
-            await asyncio.wait({native_task}, timeout=1)
+        if native_task is not None:
+            if not native_task.done():
+                try:
+                    # Stop only signals neonize's Go worker. Wait for that worker
+                    # to return so Windows releases its SQLite file handle before
+                    # the temporary login database is promoted.
+                    await asyncio.wait_for(
+                        asyncio.shield(native_task),
+                        timeout=_NATIVE_STOP_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    native_task.cancel()
+            await asyncio.gather(native_task, return_exceptions=True)
 
     @staticmethod
     def _build_channel() -> tuple[WhatsAppChannel, Path]:
@@ -264,15 +279,29 @@ class WhatsAppConnectStore:
             return False
 
     @classmethod
-    def _commit_database(cls, pending: Path, target: Path) -> None:
+    async def _commit_database(cls, pending: Path, target: Path) -> None:
         if not cls._local_state_present(pending):
             raise RuntimeError("WhatsApp connected but did not create a local session database")
         target.parent.mkdir(parents=True, exist_ok=True)
         for pending_file, target_file in cls._database_files(pending, target):
             if pending_file.exists():
-                os.replace(pending_file, target_file)
+                await cls._replace_database_file(pending_file, target_file)
             elif target_file != target and target_file.exists():
                 target_file.unlink()
+
+    @staticmethod
+    async def _replace_database_file(source: Path, target: Path) -> None:
+        deadline = time.monotonic() + _DATABASE_REPLACE_TIMEOUT_SECONDS
+        while True:
+            try:
+                os.replace(source, target)
+                return
+            except PermissionError as exc:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        "WhatsApp paired, but its local session database is still in use"
+                    ) from exc
+                await asyncio.sleep(0.1)
 
     @classmethod
     def _remove_database(cls, path: Path) -> None:
