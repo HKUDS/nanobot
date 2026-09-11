@@ -22,6 +22,7 @@ import type {
   ToolProgressEvent,
 } from "./protocol"
 import { renderLatexAsUnicode } from "./latex"
+import { StreamingMarkdownRenderable } from "./streaming-markdown"
 import { hideScrollbars } from "./scrollbox"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 
@@ -714,7 +715,7 @@ export class Transcript {
   }
 
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
-    const markdown = new MarkdownRenderable(this.renderer, {
+    const markdown = new StreamingMarkdownRenderable(this.renderer, {
       id: this.id(id),
       content: renderLatexAsUnicode(content),
       width: "auto",
