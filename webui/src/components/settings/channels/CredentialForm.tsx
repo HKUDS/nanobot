@@ -1,5 +1,4 @@
-import type { ReactNode } from "react";
-import { Check, CircleAlert, Eye, EyeOff, X } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
@@ -62,58 +61,21 @@ export function channelValuesForSubmit(
   return payload;
 }
 
-export function channelValidationStatusLabel(
-  status: string,
-  t: ReturnType<typeof useTranslation>["t"],
-): string {
-  const labels: Record<string, string> = {
-    connected: "Connected",
-    configured: "Not verified",
-    needs_setup: "Needs setup",
-    invalid: "Invalid",
-    unsupported: "Manual setup",
-  };
-  return t(`settings.channels.validation.${status}`, {
-    defaultValue: labels[status] ?? "Checked",
-  });
-}
-
-export function channelValidationStatusClass(status: string): string {
-  if (status === "connected") {
-    return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-200";
-  }
-  if (status === "configured") {
-    return "bg-blue-500/10 text-blue-700 dark:text-blue-200";
-  }
-  if (status === "invalid") {
-    return "bg-destructive/10 text-destructive";
-  }
-  return "bg-muted text-muted-foreground";
-}
-
-export function channelValidationStatusIcon(status: string): ReactNode {
-  if (status === "connected") {
-    return <Check className="h-3.5 w-3.5" aria-hidden />;
-  }
-  if (status === "invalid") {
-    return <X className="h-3.5 w-3.5" aria-hidden />;
-  }
-  return <CircleAlert className="h-3.5 w-3.5" aria-hidden />;
-}
-
-export function channelValidationCheckIcon(status: string): ReactNode {
-  if (status === "pass") return <Check className="h-3.5 w-3.5" aria-hidden />;
-  if (status === "fail") return <X className="h-3.5 w-3.5" aria-hidden />;
-  if (status === "warn") return <CircleAlert className="h-3.5 w-3.5" aria-hidden />;
-  return <CircleAlert className="h-3.5 w-3.5" aria-hidden />;
-}
-
-export function channelValidationCheckIconClass(status: string): string {
-  if (status === "pass") return "text-emerald-600";
-  if (status === "fail") return "text-destructive";
-  if (status === "warn") return "text-amber-600";
-  return "text-muted-foreground";
-}
+export type CredentialFormProps = {
+  fields: ChannelConfigField[];
+  values: Record<string, string>;
+  configuredFields?: Set<string>;
+  visibleSecrets: Record<string, boolean>;
+  onChange: (key: string, value: string) => void;
+  onFieldBlur?: (key: string) => void;
+  onToggleSecret: (key: string) => void;
+  errors?: Record<string, string>;
+  clearedSecrets?: Set<string>;
+  onClearSecret?: (key: string, clear: boolean) => void;
+  compact?: boolean;
+  showSecretActions?: boolean;
+  disabled?: boolean;
+};
 
 export function CredentialForm({
   fields,
@@ -129,21 +91,7 @@ export function CredentialForm({
   compact = false,
   showSecretActions = false,
   disabled = false,
-}: {
-  fields: ChannelConfigField[];
-  values: Record<string, string>;
-  configuredFields?: Set<string>;
-  visibleSecrets: Record<string, boolean>;
-  onChange: (key: string, value: string) => void;
-  onFieldBlur?: (key: string) => void;
-  onToggleSecret: (key: string) => void;
-  errors?: Record<string, string>;
-  clearedSecrets?: Set<string>;
-  onClearSecret?: (key: string, clear: boolean) => void;
-  compact?: boolean;
-  showSecretActions?: boolean;
-  disabled?: boolean;
-}) {
+}: CredentialFormProps) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (

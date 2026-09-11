@@ -7,11 +7,13 @@ import { ToggleButton } from "@/components/settings/ToggleButton";
 import type { ChannelConfigField } from "@/components/settings/channels/catalog";
 import {
   CredentialForm,
-  channelValidationStatusClass,
-  channelValidationStatusIcon,
   channelValuesForSave,
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
+import {
+  channelValidationStatusClass,
+  channelValidationStatusIcon,
+} from "@/components/settings/channels/ChannelValidationProgress";
 import {
   CHANNEL_SETUP_PANEL_CLASS_NAME,
   ChannelLogo,

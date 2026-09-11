@@ -14,7 +14,6 @@ import {
   Check,
   ChevronDown,
   Clipboard,
-  Download,
   Loader2,
   Plus,
 } from "lucide-react";
@@ -28,12 +27,15 @@ import type {
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import {
-  type ChannelConfigField,
-  type ChannelFieldSection,
   type ChannelProviderPreset,
   type ChannelSetupPresentation,
-  type ChannelSetupRequirement,
 } from "@/components/settings/channels/catalog";
+import {
+  ChannelFieldGroups,
+  channelRequirementErrors,
+  channelServerValidationErrors,
+  focusFirstChannelFieldError,
+} from "@/components/settings/channels/ChannelCredentialFields";
 import {
   CredentialForm,
   channelValuesForSubmit,
@@ -43,17 +45,15 @@ import {
   ChannelLogo,
   ChannelRuntimeError,
   CHANNEL_SETUP_PANEL_CLASS_NAME,
-  ChannelStatusBadge,
   channelSetup,
-  channelStatusLabel,
   channelToggleChecked,
   localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
 import {
   ChannelProviderPresets,
   ChannelSetupActions,
-  ChannelValidationProgress,
 } from "@/components/settings/channels/ChannelSetupParts";
+import { ChannelValidationProgress } from "@/components/settings/channels/ChannelValidationProgress";
 import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,118 +69,6 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
-
-export function ChannelCatalogRow({
-  feature,
-  showBrandLogos,
-  onSelect,
-  actionKey,
-  actionsDisabled = false,
-  onAction,
-}: {
-  feature: NanobotFeatureInfo;
-  showBrandLogos: boolean;
-  onSelect: (connect?: boolean) => void;
-  actionKey: string | null;
-  actionsDisabled?: boolean;
-  onAction: ChannelFeatureAction;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const displayName = localizedChannelDisplayName(feature, t);
-  const alwaysEnabled = feature.capabilities?.includes("always_enabled") ?? false;
-  const pendingChecked = actionKey === `enable:${feature.name}` ? true
-    : actionKey === `disable:${feature.name}` ? false : null;
-  const ownActionBusy = pendingChecked !== null || actionKey === `install:${feature.name}`;
-  const checked = alwaysEnabled || (pendingChecked ?? channelToggleChecked(feature));
-  const anyActionBusy = Boolean(actionKey);
-  const installButtonRef = useRef<HTMLButtonElement | null>(null);
-  const [installHint, setInstallHint] = useState(false);
-
-  useEffect(() => {
-    if (!installHint) return;
-    const timeout = window.setTimeout(() => setInstallHint(false), 1400);
-    return () => window.clearTimeout(timeout);
-  }, [installHint]);
-
-  const pointToInstall = () => {
-    setInstallHint(true);
-    installButtonRef.current?.focus();
-  };
-  const channelIdentity = (
-    <>
-      <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
-      <div className="min-w-0 flex-1">
-        <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">
-          {displayName}
-        </h3>
-      </div>
-    </>
-  );
-
-  return (
-    <div className={cn(
-      "settings-list-row flex min-w-0 items-center gap-3 py-2.5 transition-colors",
-      !alwaysEnabled && "settings-hover",
-    )}>
-      {alwaysEnabled ? (
-        <div className="flex min-w-0 flex-1 select-none items-center gap-3">
-          {channelIdentity}
-        </div>
-      ) : (
-        <button
-          type="button"
-          aria-label={t("settings.channels.selectChannel", {
-            name: displayName,
-            defaultValue: "View {{name}} settings",
-          })}
-          aria-haspopup="dialog"
-          disabled={actionsDisabled}
-          onClick={() => feature.installed ? onSelect() : pointToInstall()}
-          className="group flex min-w-0 flex-1 select-none items-center gap-3 rounded-control text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80"
-        >
-          {channelIdentity}
-        </button>
-      )}
-      {feature.runtime_status === "failed" ? (
-        <div className="min-w-0 shrink truncate">
-        <ChannelStatusBadge status={feature.runtime_status}>
-          {channelStatusLabel(feature, tx)}
-        </ChannelStatusBadge>
-        </div>
-      ) : null}
-      <div className="flex w-16 shrink-0 items-center justify-center">
-        {!feature.installed ? (
-          <Button ref={installButtonRef} type="button" variant="outline" size="icon"
-            className={cn(
-              "h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0 shadow-sm settings-hover active:scale-[0.96]",
-              installHint && "border-[#2997FF]/60 bg-[#2997FF]/10 text-[#087FE7] ring-2 ring-[#2997FF]/25 ring-offset-2",
-            )}
-            disabled={actionsDisabled || anyActionBusy || !feature.install_supported}
-            aria-label={t("settings.channels.installChannel", { name: displayName })}
-            onClick={() => {
-              setInstallHint(false);
-              onAction("enable", feature.name, { installOnly: true, confirmed: true });
-            }}>
-            {ownActionBusy
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              : <Download className="h-3.5 w-3.5" aria-hidden />}
-            <span className="sr-only">{tx("settings.channels.install", "Install")}</span>
-          </Button>
-        ) : (
-          <ToggleButton checked={checked}
-            label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            disabled={alwaysEnabled || actionsDisabled || anyActionBusy}
-            ariaLabel={t("settings.channels.toggleChannel", { name: displayName, defaultValue: "{{name}} channel" })}
-            onChange={(enabled) => {
-              if (enabled && feature.configured === false) onSelect(true);
-              else onAction(enabled ? "enable" : "disable", feature.name);
-            }} />
-        )}
-      </div>
-    </div>
-  );
-}
 
 export function ChannelSetupPanel({
   token,
@@ -272,7 +160,7 @@ export function ChannelSetupPanel({
         feature={feature}
         setup={setup}
         connectRequestId={connectRequestId}
-        ConnectFlow={feature.installed ? uiContribution?.ConnectFlow : undefined}
+        ConnectFlow={uiContribution?.ConnectFlow}
         onFeaturesUpdate={onFeaturesUpdate}
         onBeforeCloseChange={onBeforeCloseChange}
       />}
@@ -324,6 +212,10 @@ function ChannelSetupSurface({
   );
   const mode = setup.mode ?? "credentials";
   const fields = setup.fields ?? [];
+  const secretFieldKeys = useMemo(
+    () => new Set(fields.filter((field) => field.secret).map((field) => field.key)),
+    [fields],
+  );
   const requirementKeys = new Set(
     (setup.requirements ?? []).flatMap((requirement) => requirement.alternatives.flat()),
   );
@@ -466,6 +358,9 @@ function ChannelSetupSurface({
     touchedFields,
     validating,
   ]);
+  const saveSecretOnBlur = (key: string) => {
+    if (secretFieldKeys.has(key)) void saveCredentialDraft();
+  };
 
   useAutoSave(
     { fieldValues, touchedFields: [...touchedFields], clearedSecrets: [...clearedSecrets] },
@@ -694,7 +589,7 @@ function ChannelSetupSurface({
           </div>
           <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
-          {mode === "connect" && !feature.installed ? null : mode === "connect" && ConnectFlow ? (
+          {mode === "connect" && ConnectFlow ? (
             <Suspense fallback={<ChannelPluginLoading compact />}>
               <ConnectFlow
                 token={token}
@@ -751,11 +646,7 @@ function ChannelSetupSurface({
                   configuredFields={configuredFields}
                   visibleSecrets={visibleSecrets}
                   onChange={setFieldValue}
-                  onFieldBlur={(key) => {
-                    if (fields.some((field) => field.key === key && field.secret)) {
-                      void saveCredentialDraft();
-                    }
-                  }}
+                  onFieldBlur={saveSecretOnBlur}
                   onToggleSecret={toggleSecret}
                   errors={fieldErrors}
                   clearedSecrets={clearedSecrets}
@@ -800,11 +691,7 @@ function ChannelSetupSurface({
                   configuredFields={configuredFields}
                   visibleSecrets={visibleSecrets}
                   onChange={setFieldValue}
-                  onFieldBlur={(key) => {
-                    if (fields.some((field) => field.key === key && field.secret)) {
-                      void saveCredentialDraft();
-                    }
-                  }}
+                  onFieldBlur={saveSecretOnBlur}
                   onToggleSecret={toggleSecret}
                   errors={fieldErrors}
                   clearedSecrets={clearedSecrets}
@@ -840,171 +727,6 @@ function ChannelSetupSurface({
       </div>
     </form>
   );
-}
-
-const CHANNEL_FIELD_SECTION_ORDER: ChannelFieldSection[] = [
-  "account",
-  "credentials",
-  "connection",
-  "access",
-  "behavior",
-  "security",
-];
-
-function ChannelFieldGroups({
-  fields,
-  requirements,
-  sectionLabels,
-  ...formProps
-}: {
-  fields: ChannelConfigField[];
-  requirements: ChannelSetupRequirement[];
-  sectionLabels?: Record<string, string>;
-  values: Record<string, string>;
-  configuredFields: Set<string>;
-  visibleSecrets: Record<string, boolean>;
-  onChange: (key: string, value: string) => void;
-  onFieldBlur?: (key: string) => void;
-  onToggleSecret: (key: string) => void;
-  errors: Record<string, string>;
-  clearedSecrets: Set<string>;
-  onClearSecret: (key: string, clear: boolean) => void;
-  disabled?: boolean;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const labels = new Map(fields.map((field) => [field.key, field.label]));
-  const compositeRequirements = requirements.filter(
-    (requirement) => requirement.alternatives.length > 1,
-  );
-  const groups = new Map<string, ChannelConfigField[]>();
-  for (const field of fields) {
-    const section = field.section ?? "credentials";
-    const current = groups.get(section) ?? [];
-    current.push(field);
-    groups.set(section, current);
-  }
-  const orderedSections = [
-    ...CHANNEL_FIELD_SECTION_ORDER,
-    ...[...groups.keys()].filter(
-      (section) => !CHANNEL_FIELD_SECTION_ORDER.includes(section as ChannelFieldSection),
-    ),
-  ];
-
-  return (
-    <div className="space-y-5">
-      {compositeRequirements.map((requirement, index) => (
-        <div
-          key={index}
-          className="rounded-control border border-border/60 bg-background/55 px-3 py-2.5"
-        >
-          <div className="text-[11px] font-semibold text-foreground">
-            {tx("settings.channels.chooseCredentialMethod", "Choose one credential method")}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-            {requirement.alternatives.map((alternative, alternativeIndex) => (
-              <span key={alternative.join("|")} className="contents">
-                {alternativeIndex ? <span aria-hidden>{tx("settings.channels.or", "or")}</span> : null}
-                <span className="rounded-full bg-muted px-2 py-0.5 text-foreground/85">
-                  {alternative.map((key) => labels.get(key) ?? key.split(".").at(-1)).join(" + ")}
-                </span>
-              </span>
-            ))}
-          </div>
-        </div>
-      ))}
-      {orderedSections.map((section) => {
-        const sectionFields = groups.get(section);
-        if (!sectionFields?.length) return null;
-        return (
-          <fieldset key={section} className="min-w-0">
-            <legend className={groups.size === 1 ? "sr-only" : "mb-2 text-[12px] font-medium text-muted-foreground"}>
-              {channelFieldSectionLabel(section, tx, sectionLabels)}
-            </legend>
-            <div>
-              <CredentialForm fields={sectionFields} {...formProps} compact />
-            </div>
-          </fieldset>
-        );
-      })}
-    </div>
-  );
-}
-
-function channelFieldSectionLabel(
-  section: string,
-  tx: (key: string, fallback: string) => string,
-  sectionLabels?: Record<string, string>,
-): string {
-  const customLabel = sectionLabels?.[section];
-  if (customLabel) return customLabel;
-
-  const fallbacks: Record<ChannelFieldSection, string> = {
-    account: "Account",
-    credentials: "Credentials",
-    connection: "Connection",
-    access: "Access",
-    behavior: "Behavior",
-    security: "Security",
-    advanced: "Advanced",
-  };
-  const fallback = fallbacks[section as ChannelFieldSection];
-  if (fallback) return tx(`settings.channels.sections.${section}`, fallback);
-  return section
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function channelRequirementErrors(
-  fields: ChannelConfigField[],
-  requirements: ChannelSetupRequirement[],
-  values: Record<string, string>,
-  configuredFields: Set<string>,
-  clearedSecrets: Set<string>,
-  message: string,
-): Record<string, string> {
-  const fieldByKey = new Map(fields.map((field) => [field.key, field]));
-  const present = (key: string) => {
-    const field = fieldByKey.get(key);
-    if (!field || clearedSecrets.has(key)) return false;
-    const value = (values[key] ?? "").trim();
-    if (field.kind === "bool") return value === "true";
-    if (value) return true;
-    return Boolean(field.secret && configuredFields.has(key));
-  };
-  const errors: Record<string, string> = {};
-  for (const requirement of requirements) {
-    if (requirement.alternatives.some((alternative) => alternative.every(present))) continue;
-    const closest = [...requirement.alternatives].sort(
-      (left, right) => left.filter((key) => !present(key)).length - right.filter((key) => !present(key)).length,
-    )[0] ?? [];
-    for (const key of closest) {
-      if (!present(key) && fieldByKey.has(key)) errors[key] = message;
-    }
-  }
-  return errors;
-}
-
-function channelServerValidationErrors(
-  fields: ChannelConfigField[],
-  missingFields: string[],
-  message: string,
-): Record<string, string> {
-  const missing = new Set(missingFields);
-  return Object.fromEntries(
-    fields
-      .filter((field) => missing.has(field.key) || missing.has(field.key.split(".").at(-1) ?? ""))
-      .map((field) => [field.key, message]),
-  );
-}
-
-function focusFirstChannelFieldError(errors: Record<string, string>) {
-  const key = Object.keys(errors)[0];
-  if (!key) return;
-  window.requestAnimationFrame(() => {
-    document.getElementById(`channel-field-${key.replace(/[^a-zA-Z0-9_-]/g, "-")}`)?.focus();
-  });
 }
 
 function ChannelPluginLoading({ compact = false }: { compact?: boolean }) {
