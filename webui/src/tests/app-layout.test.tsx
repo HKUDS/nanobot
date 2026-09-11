@@ -1458,7 +1458,6 @@ describe("App layout", () => {
     );
     expect(document.title).toBe("Automations · nanobot");
 
-    fireEvent.click(screen.getByRole("button", { name: "Search and filter" }));
     const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
       "Search task, message, linked chat, or schedule",
     );

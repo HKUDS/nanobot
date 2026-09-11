@@ -133,8 +133,8 @@ describe("Automation task list and detail sheet", () => {
     const user = userEvent.setup();
     render(<Harness />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Active/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Active/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /heartbeat/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Create in chat" })).not.toBeInTheDocument();
     const row = screen.getByRole("button", { name: /PR watch/ });
@@ -162,7 +162,7 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.getByText("Tell nanobot in a chat what you'd like it to do on a schedule.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Create in chat" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open a chat" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Search and filter" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Search and filter" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /heartbeat/ }));
     const dialog = screen.getByRole("dialog", { name: "heartbeat" });
     expect(within(dialog).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
@@ -288,11 +288,13 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.getByRole("button", { name: /heartbeat/ })).toBe(row);
   });
 
-  it("keeps search, status filters and sorting available on demand", async () => {
+  it("keeps search, status filters and sorting immediately available", async () => {
     const user = userEvent.setup();
     render(<Harness payload={{ jobs: [task, { ...task, id: "paused", name: "Weekly review", enabled: false }, systemTask] }} />);
-    await user.click(screen.getByRole("button", { name: "Search and filter" }));
     const search = screen.getByRole("textbox");
+    expect(search).toBeVisible();
+    expect(search).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Search and filter" })).not.toBeInTheDocument();
     await user.type(search, "chat:nanobot");
     expect(screen.getByRole("button", { name: /PR watch/ })).toBeVisible();
     await user.clear(search);
@@ -303,9 +305,7 @@ describe("Automation task list and detail sheet", () => {
     await user.click(screen.getByRole("button", { name: "Paused 1" }));
     expect(screen.queryByRole("button", { name: /PR watch/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Weekly review/ })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Search and filter" }));
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Search and filter" }));
+    expect(search).toBeVisible();
     expect(screen.getByRole("button", { name: "Paused 1" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "All 2" }));
     await user.click(screen.getByRole("button", { name: "Next run" }));
@@ -334,7 +334,6 @@ describe("Automation task list and detail sheet", () => {
     }));
     expect(task.origin?.title).toBe("nanobot-development");
     await user.click(within(dialog).getByRole("button", { name: "Done" }));
-    await user.click(screen.getByRole("button", { name: "Search and filter" }));
     await user.type(screen.getByRole("textbox"), "chat:新会话名称");
     expect(screen.getByRole("button", { name: /PR watch/ })).toBeVisible();
     rerender(<Harness payload={payload} titleOverrides={{}} />);
@@ -358,42 +357,36 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("focuses search on expansion and restores the toggle on Escape without clearing filters", async () => {
+  it("keeps controls visible and preserves search when Escape dismisses sorting", async () => {
     const user = userEvent.setup();
     render(<Harness />);
-    const toggle = screen.getByRole("button", { name: "Search and filter" });
-    await user.click(toggle);
     const search = screen.getByRole("textbox");
+    expect(search).not.toHaveFocus();
+    await user.tab();
     expect(search).toHaveFocus();
-    await user.keyboard("PR");
+    await user.type(search, "PR");
     await user.keyboard("{Escape}");
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveFocus();
     expect(search).toHaveValue("PR");
-    expect(search).toBeDisabled();
-
-    await user.keyboard("{Enter}");
     expect(search).toHaveFocus();
-    expect(search).toHaveValue("PR");
+    expect(search).toBeEnabled();
     fireEvent.keyDown(search, { key: "Escape", isComposing: true });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(search).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Next run", exact: true }));
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Next run", exact: true })).toHaveFocus();
     await user.keyboard("{Escape}");
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveFocus();
+    expect(screen.getByRole("region", { name: "Search and filter" })).toBeVisible();
+    expect(search).toHaveValue("PR");
   });
 
-  it("returns focus to the filter or page heading when the inspected row is no longer present", async () => {
+  it("returns focus to search or the page heading when the inspected row is no longer present", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<Harness filter="active" />);
     await user.click(screen.getByRole("button", { name: /PR watch/ }));
     rerender(<Harness payload={{ jobs: [{ ...task, enabled: false }] }} filter="active" />);
     await user.click(screen.getByRole("button", { name: "Done" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Search and filter" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveFocus());
 
     rerender(<Harness payload={{ jobs: [task] }} filter="all" />);
     await user.click(screen.getByRole("button", { name: /PR watch/ }));
@@ -404,46 +397,28 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("keeps the filter drawer mounted for both transitions and disables hidden controls", async () => {
+  it("uses chevrons only for disclosures, while task rows open dialogs", async () => {
     const user = userEvent.setup();
     render(<Harness />);
-    const toggle = screen.getByRole("button", { name: "Search and filter" });
-    const drawer = document.getElementById(toggle.getAttribute("aria-controls")!)!;
-    const search = within(drawer).getByRole("textbox", { hidden: true });
-    expect(drawer).toHaveClass("inline-disclosure");
-    expect(drawer).toHaveAttribute("data-state", "closed");
-    expect(drawer).toHaveAttribute("aria-hidden", "true");
-    expect(drawer.firstElementChild).toHaveClass("inline-disclosure-clip");
-    expect(drawer.firstElementChild?.firstElementChild).toHaveClass("inline-disclosure-content");
-    for (const control of [search, ...within(drawer).getAllByRole("button", { hidden: true })]) {
-      expect(control).toBeDisabled();
+    const toggle = screen.getByRole("button", { name: "System tasks 1" });
+    const chevron = toggle.querySelector("svg");
+    expect(chevron).toHaveClass("lucide-chevron-down", "rotate-180");
+    await user.click(toggle);
+    expect(chevron).not.toHaveClass("rotate-180");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    for (const name of [/PR watch/, /heartbeat/]) {
+      const row = screen.getByRole("button", { name });
+      expect(row).toHaveAttribute("aria-haspopup", "dialog");
+      expect(row.querySelector(".lucide-chevron-right, .lucide-chevron-down")).toBeNull();
+      await user.click(row);
+      const details = screen.getByRole("button", { name: "More details" });
+      expect(details.querySelector("svg")).toHaveClass("lucide-chevron-down");
+      await user.click(details);
+      expect(details).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("dialog")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Done" }));
     }
-
-    await user.click(toggle);
-    expect(drawer).toHaveAttribute("data-state", "open");
-    expect(drawer).not.toHaveAttribute("aria-hidden");
-    expect(screen.getByRole("textbox")).toBe(search);
-    await user.type(search, "PR");
-    await user.click(toggle);
-    expect(document.getElementById("automation-view-options")).toBe(drawer);
-    expect(drawer).toHaveAttribute("data-state", "closed");
-    expect(search).toHaveValue("PR");
-    expect(search).toBeDisabled();
-    await user.tab();
-    expect(screen.getByRole("button", { name: /PR watch/ })).toHaveFocus();
-
-    await user.click(toggle);
-    await user.dblClick(toggle);
-    expect(drawer).toHaveAttribute("data-state", "open");
-    expect(screen.getByRole("textbox")).toBe(search);
-    expect(search).toHaveValue("PR");
-    await user.click(screen.getByRole("button", { name: "Next run", exact: true }));
-    expect(screen.getByRole("menu")).toBeVisible();
-    fireEvent.click(toggle);
-    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-    expect(drawer).toHaveAttribute("data-state", "closed");
-    await user.click(toggle);
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("hands off editing and deletion without leaving a second modal open", async () => {

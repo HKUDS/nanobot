@@ -1029,19 +1029,14 @@
     grid-column: 1;
     grid-row: 2;
   }
-  .automation-task-chevron {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-  }
   @container automations (min-width: 36rem) {
-    .automation-task-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+    .automation-task-row { grid-template-columns: minmax(0, 1fr) auto; }
     .automation-task-state {
       grid-column: 2;
       grid-row: 1;
       max-width: 18rem;
       justify-content: flex-end;
     }
-    .automation-task-chevron { grid-column: 3; grid-row: 1; }
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
     margin-block-start: var(--settings-module-gap, 20px);

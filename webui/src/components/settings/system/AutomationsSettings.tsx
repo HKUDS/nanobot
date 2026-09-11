@@ -11,7 +11,6 @@ import {
   Loader2,
   MoreHorizontal,
   Search,
-  SlidersHorizontal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -88,8 +87,6 @@ export function AutomationsSettings({
   const locale = i18n.resolvedLanguage || i18n.language;
   const [inspectedJob, setInspectedJob] = useState<SessionAutomationJob | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(Boolean(query) || filter !== "all" || sort !== "next");
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [systemOpen, setSystemOpen] = useState(() => {
     try {
       return window.localStorage.getItem(SYSTEM_TASKS_OPEN_STORAGE_KEY) !== "false";
@@ -98,11 +95,9 @@ export function AutomationsSettings({
     }
   });
   const searchInput = useRef<HTMLInputElement | null>(null);
-  const toolsToggle = useRef<HTMLButtonElement | null>(null);
   const pageTitle = useRef<HTMLHeadingElement | null>(null);
   const selectedTrigger = useRef<HTMLButtonElement | null>(null);
   const afterDetailClose = useRef<((job: SessionAutomationJob) => void) | null>(null);
-  const toolsActive = Boolean(query) || filter !== "all" || sort !== "next";
   const filtered = useMemo(() => {
     const searchTokens = parseAutomationSearchQuery(query);
     return sortAutomationJobs(jobs, sort)
@@ -141,10 +136,6 @@ export function AutomationsSettings({
     if (query) setSystemOpen(true);
   }, [query]);
 
-  useEffect(() => {
-    if (toolsOpen) searchInput.current?.focus({ preventScroll: true });
-  }, [toolsOpen]);
-
   const renderJob = (job: SessionAutomationJob) => (
     <AutomationListItem
       key={job.id}
@@ -171,89 +162,61 @@ export function AutomationsSettings({
         <h1 ref={pageTitle} tabIndex={-1} className="text-[26px] font-semibold leading-tight tracking-[-0.025em] text-foreground outline-none sm:text-[30px]">
           {tx("settings.nav.automations", "Automations")}
         </h1>
-        {jobs.length ? (
-          <Button
-            ref={toolsToggle}
-            variant="ghost"
-            size="icon"
-            aria-label={tx("settings.automations.viewOptions", "Search and filter")}
-            title={tx("settings.automations.viewOptions", "Search and filter")}
-            aria-expanded={toolsOpen}
-            aria-controls="automation-view-options"
-            className={cn("h-9 w-9 shrink-0 rounded-full text-muted-foreground", toolsActive && "bg-muted text-foreground")}
-            onClick={() => {
-              setSortMenuOpen(false);
-              setToolsOpen((value) => !value);
-            }}
-          >
-            <SlidersHorizontal className="h-4 w-4" aria-hidden />
-          </Button>
-        ) : null}
       </header>
 
       {jobs.length ? (
-        <DisclosureContent
-          id="automation-view-options"
-          open={toolsOpen}
+        <section
+          aria-label={tx("settings.automations.viewOptions", "Search and filter")}
           className="space-y-3 pb-5 pt-1"
-          onKeyDown={(event) => {
-            if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || sortMenuOpen) return;
-            event.preventDefault();
-            event.stopPropagation();
-            toolsToggle.current?.focus({ preventScroll: true });
-            setToolsOpen(false);
-          }}
         >
-              <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                <div className="relative min-w-0">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                  <Input
-                    ref={searchInput}
-                    disabled={!toolsOpen}
-                    value={query}
-                    onChange={(event) => onQueryChange(event.target.value)}
-                    aria-label={tx("settings.automations.search", "Search task, message, linked chat, or schedule")}
-                    placeholder={tx("settings.automations.search", "Search task, message, linked chat, or schedule")}
-                    className={cn("h-9 w-full rounded-full pl-9 text-[13px]", SETTINGS_SEARCH_INPUT_CLASS)}
-                  />
-                </div>
-                <DropdownMenu open={toolsOpen && sortMenuOpen} onOpenChange={setSortMenuOpen}>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" disabled={!toolsOpen} className="h-9 gap-2 rounded-full text-[12px] text-muted-foreground">
-                      <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
-                      {sortLabel[sort]}
-                      <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
-                      <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
-                        <span>{sortLabel[value]}</span>
-                        {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-              <div role="group" aria-label={tx("settings.nav.automations", "Automations")} className="flex flex-wrap gap-1">
-                {summaryOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    disabled={!toolsOpen}
-                    aria-pressed={filter === option.value}
-                    onClick={() => onFilterChange(option.value)}
-                    className={cn(
-                      "touch-target inline-flex min-h-8 max-w-full items-center gap-2 rounded-full px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground",
-                      filter === option.value && "bg-muted text-foreground",
-                    )}
-                  >
-                    <span className="min-w-0 [overflow-wrap:anywhere]">{option.label}</span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{option.count}</span>
-                  </button>
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="relative min-w-0">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input
+                ref={searchInput}
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                aria-label={tx("settings.automations.search", "Search task, message, linked chat, or schedule")}
+                placeholder={tx("settings.automations.search", "Search task, message, linked chat, or schedule")}
+                className={cn("h-9 w-full rounded-full pl-9 text-[13px]", SETTINGS_SEARCH_INPUT_CLASS)}
+              />
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="h-9 gap-2 rounded-full text-[12px] text-muted-foreground">
+                  <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+                  {sortLabel[sort]}
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
+                  <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
+                    <span>{sortLabel[value]}</span>
+                    {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
+                  </DropdownMenuItem>
                 ))}
-              </div>
-        </DisclosureContent>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <div role="group" aria-label={tx("settings.nav.automations", "Automations")} className="flex flex-wrap gap-1">
+            {summaryOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={filter === option.value}
+                onClick={() => onFilterChange(option.value)}
+                className={cn(
+                  "touch-target inline-flex min-h-8 max-w-full items-center gap-2 rounded-full px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground",
+                  filter === option.value && "bg-muted text-foreground",
+                )}
+              >
+                <span className="min-w-0 [overflow-wrap:anywhere]">{option.label}</span>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{option.count}</span>
+              </button>
+            ))}
+          </div>
+        </section>
       ) : null}
 
       {error ? <AutomationError message={error} /> : null}
@@ -314,7 +277,7 @@ export function AutomationsSettings({
                     {tx("settings.automations.filters.failed", "Needs attention")}
                   </span>
                 ) : null}
-                <ChevronRight className={cn("ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", systemOpen && "rotate-90")} aria-hidden />
+                <ChevronDown className={cn("ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", systemOpen && "rotate-180")} aria-hidden />
               </button>
               <DisclosureContent
                 id="automation-system-tasks"
@@ -347,7 +310,7 @@ export function AutomationsSettings({
               if (detailOpen) return;
               setInspectedJob(null);
               const target = selectedTrigger.current?.isConnected
-                ? selectedTrigger.current : toolsToggle.current ?? pageTitle.current;
+                ? selectedTrigger.current : searchInput.current ?? pageTitle.current;
               target?.focus({ preventScroll: true });
               const next = afterDetailClose.current;
               afterDetailClose.current = null;
@@ -393,7 +356,7 @@ function AutomationListItem({ job, locale, disabled, onSelect }: {
         aria-haspopup="dialog"
         onClick={(event) => onSelect(event.currentTarget)}
         className={cn(
-          "automation-task-row group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 text-left transition-colors",
+          "automation-task-row grid w-full grid-cols-1 items-center gap-x-4 gap-y-2 text-left transition-colors",
           compact ? "settings-list-row py-3 settings-hover" : "min-h-[92px] rounded-lg py-5 hover:bg-muted/35",
           formControlFocusClassName,
         )}
@@ -420,7 +383,6 @@ function AutomationListItem({ job, locale, disabled, onSelect }: {
             <span title={formatAutomationNextTitle(job, locale, tx)}>{formatAutomationNext(job, tx)}</span>
           )}
         </span>
-        <ChevronRight className="automation-task-chevron h-4 w-4 text-muted-foreground/70" aria-hidden />
       </button>
     </li>
   );
@@ -536,7 +498,7 @@ function AutomationDetailPanel({
           summaryClassName={cn("flex cursor-pointer items-center justify-between gap-3 rounded-lg py-4 text-[13px] text-muted-foreground", job.protected && "py-3", formControlFocusClassName)}
           summary={<>
             {tx("settings.automations.moreDetails", "More details")}
-            <ChevronRight className="h-3.5 w-3.5 transition-transform duration-200 group-data-[state=open]/disclosure:rotate-90 motion-reduce:transition-none" aria-hidden />
+            <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200 group-data-[state=open]/disclosure:rotate-180 motion-reduce:transition-none" aria-hidden />
           </>}
         >
           <dl className="divide-y divide-border/45">

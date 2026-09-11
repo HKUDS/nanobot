@@ -213,7 +213,6 @@ describe("Settings system domains", () => {
     });
 
     expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Search and filter" }));
     fireEvent.click(screen.getByRole("button", { name: "Paused 0" }));
     expect(await screen.findByText("No automations match this view.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
@@ -241,8 +240,7 @@ describe("Settings system domains", () => {
     }));
     renderSettingsView({ initialSection: "automations", initialSettings: settingsPayload(), showSidebar: false });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Search and filter" }));
-    const filters = screen.getByRole("group", { name: "Automations" });
+    const filters = await screen.findByRole("group", { name: "Automations" });
     expect(filters).toHaveClass("flex-wrap");
     expect(within(filters).getAllByRole("button")).toHaveLength(4);
     expect(within(filters).getByRole("button", { name: "All 1" })).toHaveAttribute("aria-pressed", "true");
