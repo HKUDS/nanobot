@@ -1,0 +1,29 @@
+# 1. 给这个自动化流程起个名字
+name: 自动测试流水线
+
+# 2. 设置触发条件：当代码推送到 main 分支时触发
+on:
+  push:
+    branches: [ "main" ]
+
+# 3. 定义要执行的任务（Jobs）
+jobs:
+  build-and-test:
+    # 指定运行环境：GitHub 会免费提供一台最新的 Linux 虚拟机
+    runs-on: ubuntu-latest
+
+    # 4. 定义具体的执行步骤（Steps）
+    steps:
+      # 步骤1：拉取你的代码到虚拟机上
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 步骤2：假装安装依赖（这里以 Node.js 为例）
+      - name: 安装环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 步骤3：运行测试命令
+      - name: 运行自动化测试
+        run: echo "🎉 恭喜！自动化测试正在运行，代码一切正常！"
