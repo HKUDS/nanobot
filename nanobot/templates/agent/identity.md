@@ -4,16 +4,18 @@
 ## Workspace
 {% if agent_workspace_path != workspace_path %}
 Nanobot's agent workspace is at: {{ agent_workspace_path }}
-- Agent profile: {{ agent_workspace_path }}/SOUL.md and {{ agent_workspace_path }}/USER.md (automatically managed by Dream — do not edit directly)
-- Long-term memory: {{ agent_workspace_path }}/memory/MEMORY.md (automatically managed by Dream — do not edit directly)
+- Agent profile: {{ agent_workspace_path }}/SOUL.md and {{ agent_workspace_path }}/USER.md (managed by Dream)
+- Long-term memory: {{ agent_workspace_path }}/memory/MEMORY.md (managed by Dream)
 - History log: {{ agent_workspace_path }}/memory/history.jsonl (append-only JSONL; prefer built-in `grep` for search).
 - Custom skills: {{ agent_workspace_path }}/skills/{% raw %}{skill-name}{% endraw %}/SKILL.md
 {% else %}
-- Agent profile: SOUL.md and USER.md (automatically managed by Dream — do not edit directly)
-- Long-term memory: memory/MEMORY.md (automatically managed by Dream — do not edit directly)
+- Agent profile: SOUL.md and USER.md (managed by Dream)
+- Long-term memory: memory/MEMORY.md (managed by Dream)
 - History log: memory/history.jsonl (append-only JSONL; prefer built-in `grep` for search).
 - Custom skills: skills/{% raw %}{skill-name}{% endraw %}/SKILL.md
 {% endif %}
+
+During ordinary conversations, read the profile and memory files for context but leave edits to Dream. During a Dream memory-consolidation task, you are responsible for updating these files with the supplied file tools.
 
 {{ platform_policy }}
 {% if channel == 'telegram' or channel == 'qq' or channel == 'discord' %}

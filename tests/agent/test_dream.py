@@ -84,7 +84,6 @@ class TestBuildDreamPrompt:
         assert result is not None
         prompt, _ = result
         assert prompt.startswith("Custom Dream prompt.")
-        assert "memory consolidation engine" not in prompt
         assert "## Conversation History" in prompt
         assert "keep this fact" in prompt
 
@@ -111,7 +110,7 @@ class TestBuildDreamPrompt:
 
         assert result is not None
         prompt, _ = result
-        assert "memory consolidation engine" in prompt
+        assert prompt.startswith(store.default_dream_prompt() + "\n\n## Conversation History\n")
 
     def test_truncates_long_entries_at_1000_chars(self, store):
         long_content = "x" * 2000

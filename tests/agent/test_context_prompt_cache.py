@@ -7,6 +7,8 @@ from datetime import datetime as real_datetime
 from importlib.resources import files as pkg_files
 from pathlib import Path
 
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.runtime_context import RuntimeContextBlock
 
@@ -71,15 +73,25 @@ def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
     assert prompt_a == builder.build_system_prompt(workspace=project_a)
 
 
-def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
+@pytest.mark.parametrize("selected_project", [False, True])
+def test_system_prompt_reflects_current_dream_memory_contract(tmp_path, selected_project) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
+    project = tmp_path / "project" if selected_project else workspace
+    project.mkdir(exist_ok=True)
 
-    prompt = builder.build_system_prompt()
+    prompt = builder.build_system_prompt(workspace=project)
 
     assert "memory/history.jsonl" in prompt
-    assert "automatically managed by Dream" in prompt
-    assert "do not edit directly" in prompt
+    assert "managed by Dream" in prompt
+    assert (
+        "During ordinary conversations, read the profile and memory files for context "
+        "but leave edits to Dream."
+    ) in prompt
+    assert (
+        "During a Dream memory-consolidation task, you are responsible for updating these files "
+        "with the supplied file tools."
+    ) in prompt
 
 
 def test_provider_context_appended_after_user_content(tmp_path) -> None:
