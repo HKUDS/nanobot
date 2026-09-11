@@ -57,6 +57,7 @@ export default {
         { key: "channels.email.smtpPort" },
         { key: "channels.email.fromAddress" },
         { key: "channels.email.pollIntervalSeconds" },
+        { key: "channels.email.aliasAddress" },
         { key: "channels.email.allowFrom" },
         { key: "channels.email.verifyDkim" },
         { key: "channels.email.verifySpf" },
