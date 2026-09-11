@@ -3,6 +3,7 @@
   "setup": {
     "docsLabel": "開啟郵件設定指南",
     "officialLabel": "開啟應用程式密碼指南",
+    "presetLabel": "快速填入",
     "sections": {
       "receiving": "接收郵件",
       "sending": "傳送郵件"
@@ -10,8 +11,7 @@
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "自訂"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {

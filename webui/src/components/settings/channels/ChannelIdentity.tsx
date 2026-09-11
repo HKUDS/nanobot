@@ -51,6 +51,7 @@ export function channelSetup(
     primaryActionLabel: setupMessages?.primaryAction,
     docsLabel: setupMessages?.docsLabel,
     officialLabel: setupMessages?.officialLabel,
+    presetLabel: setupMessages?.presetLabel,
     sectionLabels: setupMessages?.sections,
     fields: definition?.fields?.map(localizePresentedField),
     manualFields: definition?.manualFields?.map(localizePresentedField),

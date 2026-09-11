@@ -2,6 +2,7 @@
   "setup": {
     "docsLabel": "Open Email setup",
     "officialLabel": "Open app password guide",
+    "presetLabel": "Quick fill",
     "sections": {
       "receiving": "Receiving mail",
       "sending": "Sending mail"
@@ -9,8 +10,7 @@
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Custom"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {

@@ -3,6 +3,7 @@
   "setup": {
     "docsLabel": "Abrir guía de Email",
     "officialLabel": "Abrir guía de contraseñas de app",
+    "presetLabel": "Relleno rápido",
     "sections": {
       "receiving": "Recepción de correo",
       "sending": "Envío de correo"
@@ -10,8 +11,7 @@
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Personalizado"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {

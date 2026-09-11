@@ -3,6 +3,7 @@
   "setup": {
     "docsLabel": "Mở hướng dẫn Email",
     "officialLabel": "Mở hướng dẫn mật khẩu ứng dụng",
+    "presetLabel": "Điền nhanh",
     "sections": {
       "receiving": "Nhận thư",
       "sending": "Gửi thư"
@@ -10,8 +11,7 @@
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Tùy chỉnh"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {

@@ -2,6 +2,7 @@
   "setup": {
     "docsLabel": "打开邮件配置指南",
     "officialLabel": "打开应用专用密码指南",
+    "presetLabel": "快速填充",
     "sections": {
       "receiving": "接收邮件",
       "sending": "发送邮件"
@@ -9,8 +10,7 @@
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "自定义"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {

@@ -1596,6 +1596,15 @@ describe("Settings channels", () => {
     fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
     expect(screen.getByText("Receiving mail")).toBeInTheDocument();
     expect(screen.getByText("Sending mail")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Gmail" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByText("Quick fill")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("IMAP host"), { target: { value: "imap.custom.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gmail" }));
+    expect(screen.getByLabelText("IMAP host")).toHaveValue("imap.custom.test");
+    expect(screen.getByLabelText("SMTP host")).toHaveValue("smtp.gmail.com");
+    fireEvent.click(screen.getByRole("button", { name: "Outlook" }));
+    expect(screen.getByLabelText("SMTP host")).toHaveValue("smtp.gmail.com");
     fireEvent.change(screen.getByLabelText("IMAP host"), { target: { value: "imap.example.com" } });
     fireEvent.change(screen.getByLabelText("IMAP username"), { target: { value: "bot@example.com" } });
     fireEvent.change(screen.getByLabelText("IMAP password"), { target: { value: "imap-secret" } });
@@ -1710,6 +1719,8 @@ describe("Settings channels", () => {
     fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).queryByRole("button", { name: "Save", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Advanced" }));
+    expect(within(dialog).queryByRole("button", { name: "Gmail" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("IMAP host"), {
       target: { value: "imap.changed.example.com" },
     });

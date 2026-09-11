@@ -17,6 +17,7 @@ export type ChannelSetupPresentation = {
   docsLabel?: string;
   officialUrl?: string;
   officialLabel?: string;
+  presetLabel?: string;
   sectionLabels?: Record<string, string>;
   fields?: ChannelConfigField[];
   manualFields?: ChannelConfigField[];

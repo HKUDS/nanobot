@@ -3,6 +3,7 @@
   "setup": {
     "docsLabel": "Buka panduan Email",
     "officialLabel": "Buka panduan kata sandi aplikasi",
+    "presetLabel": "Isi cepat",
     "sections": {
       "receiving": "Penerimaan email",
       "sending": "Pengiriman email"
@@ -10,8 +11,7 @@
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Kustom"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {

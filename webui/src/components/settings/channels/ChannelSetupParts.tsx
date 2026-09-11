@@ -75,39 +75,34 @@ export function ChannelSetupActions({
 export function ChannelProviderPresets({
   presets,
   onApply,
+  label,
+  disabled = false,
 }: {
   presets: ChannelProviderPreset[];
   onApply: (preset: ChannelProviderPreset) => void;
+  label?: string;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const [selected, setSelected] = useState("");
   if (!presets.length) return null;
   return (
-    <fieldset className="mt-3">
+    <fieldset>
       <legend className="mb-1 text-[11px] font-medium text-foreground/85">
-        {t("settings.channels.providerPreset", { defaultValue: "Provider" })}
+        {label ?? t("settings.channels.providerPreset", { defaultValue: "Provider" })}
       </legend>
-      <div
-        className="grid rounded-control bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
-        style={{ gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }}
-      >
+      <div className="flex flex-wrap gap-2">
         {presets.map((preset) => (
-          <label key={preset.id} className="relative block">
-            <input
-              type="radio"
-              name="channel-provider-preset"
-              value={preset.id}
-              checked={selected === preset.id}
-              onChange={() => {
-                setSelected(preset.id);
-                onApply(preset);
-              }}
-              className="peer sr-only"
-            />
-            <span className="grid min-h-11 cursor-pointer place-items-center rounded-compact px-2 py-1.5 transition-colors hover:text-foreground peer-checked:bg-background peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring sm:min-h-9">
-              {preset.label}
-            </span>
-          </label>
+          <Button
+            key={preset.id}
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            className="h-8 rounded-full px-3 text-[12px] font-medium"
+            onClick={() => onApply(preset)}
+          >
+            {preset.label}
+          </Button>
         ))}
       </div>
     </fieldset>

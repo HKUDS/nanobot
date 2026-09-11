@@ -338,7 +338,10 @@ function ChannelSetupSurface({
   const savedSecretFields = editableFields.filter(
     (field) => field.secret && configuredFields.has(field.key),
   );
-  const hasAdvanced = advancedFields.length > 0 || savedSecretFields.length > 0;
+  const availablePresets = feature.configured ? [] : setup.presets ?? [];
+  const hasAdvanced = advancedFields.length > 0
+    || savedSecretFields.length > 0
+    || availablePresets.length > 0;
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     defaultChannelFieldValues(editableFields, feature.config_values),
   );
@@ -403,10 +406,14 @@ function ChannelSetupSurface({
   };
 
   const applyPreset = (preset: ChannelProviderPreset) => {
-    setFieldValues((current) => ({ ...current, ...preset.values }));
+    const values = Object.fromEntries(
+      Object.entries(preset.values).filter(([key]) => !(fieldValues[key] ?? "").trim()),
+    );
+    if (!Object.keys(values).length) return;
+    setFieldValues((current) => ({ ...current, ...values }));
     setTouchedFields((current) => {
       const next = new Set(current);
-      for (const key of Object.keys(preset.values)) next.add(key);
+      for (const key of Object.keys(values)) next.add(key);
       return next;
     });
     setAutoSaveState("idle");
@@ -737,12 +744,6 @@ function ChannelSetupSurface({
             </>
           ) : mode === "credentials" ? (
             <>
-              {setup.presets?.length ? (
-                <ChannelProviderPresets
-                  presets={setup.presets}
-                  onApply={applyPreset}
-                />
-              ) : null}
               {primaryFields.length ? (
                 <ChannelFieldGroups
                   fields={primaryFields}
@@ -770,6 +771,14 @@ function ChannelSetupSurface({
 
         {hasAdvanced ? (
           <div id={advancedPanelId} hidden={!advancedOpen} className="min-w-0 w-full space-y-3 text-[12px] leading-5 text-muted-foreground">
+            {availablePresets.length ? (
+              <ChannelProviderPresets
+                presets={availablePresets}
+                onApply={applyPreset}
+                label={setup.presetLabel}
+                disabled={actionPending}
+              />
+            ) : null}
             <div className="space-y-2">
               {savedSecretFields.filter((field) => !(fieldValues[field.key] ?? "").trim()).map((field) => (
                 <div key={field.key} className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-1">

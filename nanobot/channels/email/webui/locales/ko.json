@@ -3,6 +3,7 @@
   "setup": {
     "docsLabel": "이메일 설정 가이드 열기",
     "officialLabel": "앱 비밀번호 가이드 열기",
+    "presetLabel": "빠른 입력",
     "sections": {
       "receiving": "메일 수신",
       "sending": "메일 발신"
@@ -10,8 +11,7 @@
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "사용자 지정"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {

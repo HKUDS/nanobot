@@ -12,6 +12,7 @@ export type ChannelMessages = {
     primaryAction?: string;
     docsLabel?: string;
     officialLabel?: string;
+    presetLabel?: string;
     sections?: Record<string, string>;
     fields?: Record<string, ChannelFieldMessages>;
     actions?: Record<string, string>;

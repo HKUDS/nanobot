@@ -3,6 +3,7 @@
   "setup": {
     "docsLabel": "メール設定ガイドを開く",
     "officialLabel": "アプリパスワードガイドを開く",
+    "presetLabel": "クイック入力",
     "sections": {
       "receiving": "メール受信",
       "sending": "メール送信"
@@ -10,8 +11,7 @@
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "カスタム"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {

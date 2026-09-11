@@ -32,7 +32,6 @@ const EMAIL_PROVIDER_PRESETS: ChannelProviderPresetDefinition[] = [
       "channels.email.smtpPort": "587",
     },
   },
-  { id: "custom", values: {} },
 ];
 
 export default {
