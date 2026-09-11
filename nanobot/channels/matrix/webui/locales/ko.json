@@ -30,6 +30,53 @@
           "open": "모든 메시지",
           "allowlist": "허용 목록"
         }
+      },
+      "allowFrom": {
+        "label": "허용된 사용자"
+      },
+      "e2eeEnabled": {
+        "label": "엔드투엔드 암호화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 검증",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "동기화 중지 유예 기간"
+      },
+      "maxMediaBytes": {
+        "label": "최대 미디어 크기"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "동시 미디어 다운로드"
+      },
+      "groupAllowFrom": {
+        "label": "허용된 그룹"
+      },
+      "allowRoomMentions": {
+        "label": "회의실 언급 허용",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "proxy": {
+        "label": "네트워크 프록시",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

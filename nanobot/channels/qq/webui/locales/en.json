@@ -21,6 +21,18 @@
           "plain": "Plain text",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "Acknowledgement message"
+      },
+      "mediaDir": {
+        "label": "Media directory"
+      },
+      "downloadChunkSize": {
+        "label": "Download chunk size"
+      },
+      "downloadMaxBytes": {
+        "label": "Maximum download size"
       }
     }
   }

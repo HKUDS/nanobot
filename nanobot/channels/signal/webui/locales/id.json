@@ -22,6 +22,47 @@
       "group_allowFrom": {
         "label": "Grup yang diizinkan",
         "placeholder": "ID grup"
+      },
+      "groupMessageBufferSize": {
+        "label": "Pesan konteks grup"
+      },
+      "attachmentsDir": {
+        "label": "Direktori lampiran"
+      },
+      "dm_enabled": {
+        "label": "Aktifkan pesan langsung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_policy": {
+        "label": "Akses pesan langsung",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "group_enabled": {
+        "label": "Aktifkan grup",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "group_policy": {
+        "label": "Akses grup",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "group_requireMention": {
+        "label": "Perlu disebutkan dalam kelompok",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
       }
     }
   }

@@ -21,6 +21,18 @@
           "plain": "일반 텍스트",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "확인 메시지"
+      },
+      "mediaDir": {
+        "label": "미디어 디렉토리"
+      },
+      "downloadChunkSize": {
+        "label": "청크 크기 다운로드"
+      },
+      "downloadMaxBytes": {
+        "label": "최대 다운로드 크기"
       }
     }
   }

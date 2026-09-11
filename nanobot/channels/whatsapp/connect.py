@@ -24,12 +24,13 @@ class WhatsAppConnectSession:
     channel: WhatsAppChannel
     client: Any
     result: asyncio.Future[None]
-    connect_task: asyncio.Task[None]
+    connect_task: asyncio.Task[asyncio.Task[Any] | None]
     target_path: Path
     pending_path: Path
     created_wall: float
     deadline: float
     qr_url: str = ""
+    finalize_task: asyncio.Task[None] | None = None
 
 
 class WhatsAppConnectStore:
@@ -121,14 +122,24 @@ class WhatsAppConnectStore:
         if not session.result.done():
             return self._pending_payload(session)
 
+        if session.finalize_task is None:
+            session.finalize_task = asyncio.create_task(
+                self._finalize_session(session),
+                name=f"whatsapp-connect-finalize-{session.id}",
+            )
+            # Let fast clients finish in this request while keeping slow native
+            # shutdowns out of the polling response path.
+            await asyncio.sleep(0)
+        if not session.finalize_task.done():
+            payload = self._pending_payload(session)
+            payload["qr_url"] = ""
+            payload["message"] = "Finishing the WhatsApp connection."
+            return payload
+
         self._sessions.pop(session_id, None)
         try:
-            session.result.result()
-            await self._close_session(session)
-            self._commit_database(session.pending_path, session.target_path)
+            session.finalize_task.result()
         except Exception as exc:
-            await self._close_session(session)
-            self._remove_database(session.pending_path)
             return {
                 "session_id": session_id,
                 "status": "failed",
@@ -140,11 +151,20 @@ class WhatsAppConnectStore:
             "message": "WhatsApp is connected.",
         }
 
+    async def _finalize_session(self, session: WhatsAppConnectSession) -> None:
+        try:
+            session.result.result()
+            await self._close_session(session)
+            self._commit_database(session.pending_path, session.target_path)
+        except BaseException:
+            await self._close_session(session)
+            self._remove_database(session.pending_path)
+            raise
+
     async def cancel(self, session_id: str) -> dict[str, Any]:
         session = self._sessions.pop(session_id, None)
         if session is not None:
-            await self._close_session(session)
-            self._remove_database(session.pending_path)
+            await self._discard_session(session)
         return {
             "session_id": session_id,
             "status": "cancelled",
@@ -159,22 +179,42 @@ class WhatsAppConnectStore:
         ]
         for session_id in expired:
             session = self._sessions.pop(session_id)
+            await self._discard_session(session)
+
+    async def close(self) -> None:
+        """Stop every login client before the gateway event loop closes."""
+        sessions = tuple(self._sessions.values())
+        self._sessions.clear()
+        for session in sessions:
+            await self._discard_session(session)
+
+    async def _discard_session(self, session: WhatsAppConnectSession) -> None:
+        finalize_task = session.finalize_task
+        if (
+            finalize_task is not None
+            and finalize_task is not asyncio.current_task()
+        ):
+            if not finalize_task.done():
+                finalize_task.cancel()
+            await asyncio.gather(finalize_task, return_exceptions=True)
+        else:
             await self._close_session(session)
-            self._remove_database(session.pending_path)
+        self._remove_database(session.pending_path)
 
     @staticmethod
     async def _connect(
         channel: WhatsAppChannel,
         client: Any,
         result: asyncio.Future[None],
-    ) -> None:
+    ) -> asyncio.Task[Any] | None:
         try:
-            await channel.connect_start_client(client, result)
+            return await channel.connect_start_client(client, result)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             if not result.done():
                 result.set_exception(exc)
+            return None
 
     @staticmethod
     async def _wait_for_qr(session: WhatsAppConnectSession) -> None:
@@ -189,8 +229,17 @@ class WhatsAppConnectStore:
             session.connect_task.cancel()
         with suppress(Exception, asyncio.CancelledError):
             await session.connect_task
+        native_task: asyncio.Task[Any] | None = None
+        if session.connect_task.done() and not session.connect_task.cancelled():
+            with suppress(Exception, asyncio.CancelledError):
+                native_task = session.connect_task.result()
         with suppress(Exception):
-            await session.client.stop()
+            await asyncio.wait_for(session.client.stop(), timeout=5)
+        if native_task is not None and not native_task.done():
+            native_task.cancel()
+            # Some neonize versions take time to unwind their native receive
+            # loop. Do not let that delay gateway shutdown indefinitely.
+            await asyncio.wait({native_task}, timeout=1)
 
     @staticmethod
     def _build_channel() -> tuple[WhatsAppChannel, Path]:

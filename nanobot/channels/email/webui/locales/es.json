@@ -78,6 +78,83 @@
           "true": "Activado",
           "false": "Desactivado"
         }
+      },
+      "imapMailbox": {
+        "label": "buzón IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS SMTP",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL SMTP",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Respuestas automáticas",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "markSeen": {
+        "label": "Marcar como leído",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "postAction": {
+        "label": "Después del procesamiento",
+        "choices": {
+          "delete": "Eliminar",
+          "move": "Mover"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Mover al buzón"
+      },
+      "postActionExpunge": {
+        "label": "Aplicar permanentemente la acción",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignorar mensajes omitidos",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Longitud máxima del cuerpo"
+      },
+      "subjectPrefix": {
+        "label": "Prefijo del asunto de respuesta"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Tipos de archivos adjuntos permitidos"
+      },
+      "maxAttachmentSize": {
+        "label": "Tamaño máximo de archivo adjunto"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Archivos adjuntos máximos"
       }
     }
   }

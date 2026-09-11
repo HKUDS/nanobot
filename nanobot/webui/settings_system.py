@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -293,6 +294,25 @@ def coerce_channel_value(
         except (TypeError, ValueError) as exc:
             raise WebUISettingsError(f"'{raw_key}' must be a number") from exc
 
+    if kind == "float":
+        if raw_value in (None, ""):
+            return _SKIP_FIELD
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise WebUISettingsError(f"'{raw_key}' must be a number") from exc
+
+    if kind == "json":
+        if raw_value in (None, ""):
+            return _SKIP_FIELD
+        try:
+            value = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+        except (TypeError, ValueError) as exc:
+            raise WebUISettingsError(f"'{raw_key}' must be valid JSON") from exc
+        if not isinstance(value, dict):
+            raise WebUISettingsError(f"'{raw_key}' must be a JSON object")
+        return cast(dict[str, Any], value)
+
     if kind == "bool":
         if isinstance(raw_value, bool):
             return raw_value
@@ -367,6 +387,24 @@ class SystemSettingsHandler:
         self.settings = settings
         self.logger = logger
         self._channel_connectors: dict[str, Any] = {}
+
+    async def close(self) -> None:
+        """Release channel-owned setup sessions during gateway shutdown."""
+        connectors = tuple(self._channel_connectors.items())
+        self._channel_connectors.clear()
+        for channel_name, connector in connectors:
+            close = getattr(connector, "close", None)
+            if not callable(close):
+                continue
+            try:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                self.logger.exception(
+                    "failed to close {} WebUI connector",
+                    channel_name,
+                )
 
     async def handle(
         self,

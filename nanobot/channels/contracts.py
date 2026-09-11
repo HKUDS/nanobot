@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, TypeGuard, cast
 if TYPE_CHECKING:
     from nanobot.channels.plugin import ChannelPlugin
 
-FieldKind = Literal["string", "secret", "list", "bool", "int", "enum"]
+FieldKind = Literal["string", "secret", "list", "bool", "int", "float", "json", "enum"]
 RouteFieldType = str | tuple[str, set[str]]
 
 
@@ -584,6 +585,8 @@ def stringify_channel_value(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, list):
         return ", ".join(str(item) for item in cast(list[Any], value))
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, indent=2)
     return str(value)
 
 

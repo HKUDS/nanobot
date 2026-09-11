@@ -22,6 +22,19 @@
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
         "placeholder": "ID QQ, dipisahkan koma"
+      },
+      "groupPolicyOverrides": {
+        "label": "Penggantian perilaku grup (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "Selamat datang anggota baru",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "maxImageBytes": {
+        "label": "Ukuran gambar maksimum"
       }
     }
   }

@@ -22,6 +22,34 @@
       "allowFrom": {
         "label": "Allowed users",
         "placeholder": "User IDs, comma separated"
+      },
+      "proxy": {
+        "label": "Network proxy"
+      },
+      "proxyUsername": {
+        "label": "Proxy username"
+      },
+      "proxyPassword": {
+        "label": "Proxy password"
+      },
+      "intents": {
+        "label": "Gateway intents"
+      },
+      "readReceiptEmoji": {
+        "label": "Read emoji"
+      },
+      "workingEmoji": {
+        "label": "Working emoji"
+      },
+      "workingEmojiDelay": {
+        "label": "Working emoji delay"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
       }
     }
   }

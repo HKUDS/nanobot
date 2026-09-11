@@ -78,6 +78,83 @@
           "true": "Aktif",
           "false": "Nonaktif"
         }
+      },
+      "imapMailbox": {
+        "label": "kotak surat IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS SMTP",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL SMTP",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Balasan otomatis",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "markSeen": {
+        "label": "Tandai sebagai telah dibaca",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "postAction": {
+        "label": "Setelah diproses",
+        "choices": {
+          "delete": "Hapus",
+          "move": "Pindah"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Pindah ke kotak surat"
+      },
+      "postActionExpunge": {
+        "label": "Terapkan tindakan secara permanen",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Abaikan pesan yang dilewati",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Panjang tubuh maksimal"
+      },
+      "subjectPrefix": {
+        "label": "Awalan subjek balasan"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Jenis lampiran yang diizinkan"
+      },
+      "maxAttachmentSize": {
+        "label": "Ukuran lampiran maksimum"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Lampiran maksimum"
       }
     }
   }

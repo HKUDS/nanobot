@@ -22,6 +22,47 @@
       "group_allowFrom": {
         "label": "許可するグループ",
         "placeholder": "グループ ID"
+      },
+      "groupMessageBufferSize": {
+        "label": "グループコンテキストメッセージ"
+      },
+      "attachmentsDir": {
+        "label": "添付ファイルディレクトリ"
+      },
+      "dm_enabled": {
+        "label": "ダイレクトメッセージを有効にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "dm_policy": {
+        "label": "ダイレクトメッセージへのアクセス",
+        "choices": {
+          "allowlist": "ホワイトリスト",
+          "open": "開く"
+        }
+      },
+      "group_enabled": {
+        "label": "グループを有効にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "group_policy": {
+        "label": "グループアクセス",
+        "choices": {
+          "allowlist": "ホワイトリスト",
+          "open": "開く"
+        }
+      },
+      "group_requireMention": {
+        "label": "グループ内での言及が必要",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
       }
     }
   }

@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import type {
@@ -190,10 +190,75 @@ function uninstalledConnectFeature(
   };
 }
 
+function catalogFeature(
+  name: string,
+  enabled: boolean,
+  requiresDependencies = false,
+): NanobotFeatureInfo {
+  return {
+    name,
+    display_name: name,
+    type: "channel",
+    enabled,
+    configured: enabled,
+    installed: true,
+    requires_dependencies: requiresDependencies,
+    ready: enabled,
+    status: enabled ? "enabled" : "not_enabled",
+    install_supported: true,
+    requires_restart: false,
+  };
+}
+
 describe("Settings channels", () => {
   installSettingsViewTestHooks();
 
-  it("serializes dependency installs before exposing enable switches", async () => {
+  it("shows enabled channels by default when any are enabled", async () => {
+    const enabled = catalogFeature("Enabled channel", true);
+    const enabledWithDependencies = catalogFeature("Enabled dependency channel", true, true);
+    const disabled = catalogFeature("Disabled channel", false);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({ features: [enabled, enabledWithDependencies, disabled], enabled_count: 2 });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View Enabled channel settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View Enabled dependency channel settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View Disabled channel settings" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enabled" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("No installation needed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Requires dependencies")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByRole("button", { name: "View Disabled channel settings" })).toBeInTheDocument();
+  });
+
+  it("shows all channels by default when none are enabled", async () => {
+    const first = catalogFeature("First channel", false);
+    const second = catalogFeature("Second channel", false);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({ features: [first, second], enabled_count: 0 });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByRole("button", { name: "View First channel settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View Second channel settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("requires a restart before enabling newly installed channel support", async () => {
     const whatsappFeature = {
       name: "whatsapp",
       display_name: "WhatsApp",
@@ -229,7 +294,7 @@ describe("Settings channels", () => {
     const installedPayload = {
       features: [{ ...whatsappFeature, installed: true }, weixinFeature],
       enabled_count: 0,
-      requires_restart: false,
+      requires_restart: true,
       last_action: {
         ok: true,
         message: "Installed support for channel 'whatsapp'",
@@ -257,11 +322,11 @@ describe("Settings channels", () => {
     );
     finishInstall(installedPayload);
     expect(requestMutationMock).not.toHaveBeenCalledWith("settings.channel.connect.start", expect.anything(), expect.anything());
+    expect(await screen.findByText("Restart nanobot to apply updated channel support.")).toBeInTheDocument();
     const installedGroup = await screen.findByRole("region", { name: "Requires dependencies" });
-    fireEvent.click(within(installedGroup).getByRole("switch", { name: "WhatsApp channel" }));
-    expect(await screen.findByRole("button", { name: "Cancel", exact: true })).toBeInTheDocument();
-    expect(requestMutationMock.mock.calls.map(([action]) => action).slice(0, 2)).toEqual([
-      "settings.feature.enable", "settings.channel.connect.start",
+    expect(within(installedGroup).getByRole("switch", { name: "WhatsApp channel" })).toBeDisabled();
+    expect(requestMutationMock.mock.calls.map(([action]) => action)).toEqual([
+      "settings.feature.enable",
     ]);
 
   });
@@ -330,7 +395,8 @@ describe("Settings channels", () => {
         expect(await screen.findByRole("img", { name: "WeChat login QR code" })).toBeInTheDocument();
         expect(requestMutationMock.mock.calls.filter(([action]) => action === "settings.channel.connect.start")).toHaveLength(1);
       } else {
-        expect(await screen.findByRole("button", { name: "Create assistant" }, { timeout: 3_000 })).toBeInTheDocument();
+        expect(await screen.findByRole("button", { name: "Connect" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Create assistant" })).not.toBeInTheDocument();
         expect(requestMutationMock.mock.calls.some(([action]) => action.startsWith("settings.channel.connect"))).toBe(false);
       }
     },
@@ -843,6 +909,16 @@ describe("Settings channels", () => {
     expect(productAdvanced).toHaveAttribute("aria-expanded", "true");
     expect(product.getByLabelText("App ID")).toHaveValue("cli_product");
     fireEvent.change(product.getByLabelText("App ID"), { target: { value: "cli_updated" } });
+    const featureRequests = () => vi.mocked(fetch).mock.calls
+      .filter(([input]) => String(input) === "/api/settings/nanobot-features").length;
+    const beforeRefresh = featureRequests();
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    await waitFor(() => expect(featureRequests()).toBeGreaterThan(beforeRefresh));
+    expect(product.getByLabelText("App ID")).toHaveValue("cli_updated");
+    fireEvent.click(productAdvanced);
+    expect(productAdvanced).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(productAdvanced);
+    expect(product.getByLabelText("App ID")).toHaveValue("cli_updated");
     fireEvent.click(product.getByRole("button", { name: "Save settings" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.configure",
@@ -861,6 +937,61 @@ describe("Settings channels", () => {
     expect(productAdvanced).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(supportAdvanced);
     expect(support.getByLabelText("App ID")).toHaveValue("cli_default");
+  });
+
+  it("opens WeChat advanced settings from the header and preserves autosave", async () => {
+    const feature: NanobotFeatureInfo = {
+      name: "weixin",
+      display_name: "WeChat",
+      webui: "webui/index.tsx",
+      type: "channel",
+      installed: true,
+      enabled: false,
+      configured: true,
+      ready: true,
+      status: "not_enabled",
+      install_supported: true,
+      requires_restart: false,
+      setup: { fields: [
+        channelSetupField("weixin", "sendProgress", "bool"),
+        channelSetupField("weixin", "baseUrl"),
+        channelSetupField("weixin", "token", "secret"),
+      ] },
+      config_values: {
+        "channels.weixin.sendProgress": "true",
+        "channels.weixin.baseUrl": "https://api.example.com",
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/settings") return jsonResponse(settingsPayload());
+      if (String(input) === "/api/settings/nanobot-features") {
+        return jsonResponse({ features: [feature], enabled_count: 0 });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    }));
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View WeChat settings" }));
+
+    const advanced = await screen.findByRole("button", { name: "Advanced" });
+    advanced.focus();
+    await userEvent.setup().keyboard("[Enter]");
+    const apiUrl = screen.getByRole("textbox", { name: "API URL" });
+    expect(apiUrl).toBeVisible();
+    expect(screen.queryByLabelText("Token")).not.toBeInTheDocument();
+    fireEvent.change(apiUrl, { target: { value: "https://updated.example.com" } });
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.channel.configure",
+      expect.objectContaining({
+        name: "weixin",
+        enable: false,
+        values: expect.objectContaining({ "channels.weixin.baseUrl": "https://updated.example.com" }),
+      }),
+      150_000,
+    ));
+
+    fireEvent.click(advanced);
+    fireEvent.click(advanced);
+    expect(screen.getByRole("textbox", { name: "API URL" })).toHaveValue("https://updated.example.com");
   });
 
   it("renders external multi-instance channels from the shared contract", async () => {
@@ -1060,7 +1191,7 @@ describe("Settings channels", () => {
     );
   });
 
-  it("shows group behavior fields as options", async () => {
+  it("preserves advanced field edits when collapsed and reopened with the keyboard", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -1094,12 +1225,26 @@ describe("Settings channels", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "View Discord settings" }));
 
+    const advanced = screen.getByRole("button", { name: "Advanced" });
+    advanced.focus();
+    await userEvent.setup().keyboard("[Enter]");
+    expect(advanced).toHaveAttribute("aria-expanded", "true");
     const behavior = screen.getByRole("group", { name: "Group behavior" });
+    expect(behavior).toBeVisible();
     expect(within(behavior).getByRole("radio", { name: "Mention only" })).toBeChecked();
     expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeInTheDocument();
 
     fireEvent.click(within(behavior).getByRole("radio", { name: "All messages" }));
 
+    expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeChecked();
+
+    fireEvent.click(advanced);
+    expect(advanced).toHaveAttribute("aria-expanded", "false");
+    expect(behavior).not.toBeVisible();
+    advanced.focus();
+    await userEvent.setup().keyboard("[Space]");
+    expect(advanced).toHaveAttribute("aria-expanded", "true");
+    expect(behavior).toBeVisible();
     expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeChecked();
   });
 
@@ -1153,6 +1298,7 @@ describe("Settings channels", () => {
     fireEvent.click(emailRow);
 
     expect(screen.getByRole("dialog")).toHaveFocus();
+    expect(within(screen.getByRole("dialog")).getByRole("heading", { name: "Email" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
 
@@ -1239,6 +1385,7 @@ describe("Settings channels", () => {
     fireEvent.change(screen.getByPlaceholderText("Discord bot token"), {
       target: { value: "discord-token" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     fireEvent.change(screen.getByLabelText("Allowed channels"), {
       target: { value: "123, 456" },
     });
@@ -1461,6 +1608,7 @@ describe("Settings channels", () => {
     expect(savedSecret.closest("form")).not.toBeNull();
     expect(screen.queryByDisplayValue("discord-secret-token")).not.toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByLabelText("Allowed channels")).toHaveValue("123, 456");
     expect(within(screen.getByRole("group", { name: "Group behavior" })).getByRole(
       "radio",
@@ -1534,8 +1682,8 @@ describe("Settings channels", () => {
       ["signal", "Signal", "Open Signal setup"],
       ["msteams", "Microsoft Teams", "Open Teams setup"],
       ["napcat", "NapCat", "Open NapCat setup"],
+      ["mochat", "MoChat", "Open MoChat setup guide"],
     ] as const;
-    const hiddenChannels = [["mochat", "MoChat"]] as const;
 
     vi.stubGlobal(
       "fetch",
@@ -1557,18 +1705,7 @@ describe("Settings channels", () => {
               status: name === "websocket" ? "enabled" : "not_enabled",
               install_supported: true,
               requires_restart: true,
-            })).concat(hiddenChannels.map(([name, displayName]) => ({
-              name,
-              display_name: displayName,
-              settings_visible: false,
-              type: "channel",
-              enabled: false,
-              installed: true,
-              ready: false,
-              status: "not_enabled",
-              install_supported: true,
-              requires_restart: true,
-            }))),
+            })),
             enabled_count: 1,
           });
         }
@@ -1635,12 +1772,14 @@ describe("Settings channels", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
     expect(screen.getByText("Choose one credential method")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     const matrixBehavior = screen.getByRole("group", { name: "Group behavior" });
     expect(within(matrixBehavior).getByRole("radio", { name: "All messages" })).toBeChecked();
     expect(within(matrixBehavior).getByRole("radio", { name: "Allowlist" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     const format = screen.getByRole("group", { name: "Message format" });
     expect(within(format).getByRole("radio", { name: "Plain text" })).toBeChecked();
     expect(within(format).getByRole("radio", { name: "Markdown" })).toBeInTheDocument();

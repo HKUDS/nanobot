@@ -17,7 +17,7 @@
         }
       },
       "proxy": {
-        "label": "Proxy",
+        "label": "Proxy de red",
         "placeholder": "http://127.0.0.1:7890"
       }
     }

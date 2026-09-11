@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { Loader2, Search } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { Loader2, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,9 @@ import { ChannelHelpMenu } from "@/components/settings/channels/ChannelHelpMenu"
 import { ChannelCatalogRow, ChannelSetupPanel } from "@/components/settings/channels/ChannelSetupPanel";
 import { DismissibleStatusMessage, RestartRequiredNotice, SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import type { NanobotFeaturesPayload } from "@/lib/types";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
+
+type ChannelFilter = "all" | "enabled";
 
 export function ChannelsSettings({
   token, nanobotFeatures, loading, actionKey, chatAppsDocsUrl, showBrandLogos,
@@ -35,30 +37,40 @@ export function ChannelsSettings({
   const { t } = useTranslation();
   const [selectedChannelName, setSelectedChannelName] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState<ChannelFilter>("enabled");
   const [connectRequestId, setConnectRequestId] = useState(0);
+  const filterInitializedRef = useRef(false);
   const triggerRef = useRef<HTMLElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const channels = (nanobotFeatures?.features ?? [])
     .filter((feature) => feature.type === "channel" && feature.settings_visible !== false)
     .sort((left, right) => Number(!left.ready) - Number(!right.ready)
       || localizedChannelDisplayName(left, t).localeCompare(localizedChannelDisplayName(right, t)));
+  const hasEnabledChannels = channels.some((feature) => feature.enabled);
+  const restartRequired = requiresRestartPending || Boolean(nanobotFeatures?.requires_restart);
+  useLayoutEffect(() => {
+    if (!nanobotFeatures || filterInitializedRef.current) return;
+    filterInitializedRef.current = true;
+    setFilter(hasEnabledChannels ? "enabled" : "all");
+  }, [hasEnabledChannels, nanobotFeatures]);
   const visibleChannels = channels.filter((feature) =>
     (filter === "all" || feature.enabled)
     && `${feature.name} ${localizedChannelDisplayName(feature, t)}`.toLocaleLowerCase()
       .includes(query.trim().toLocaleLowerCase()));
-  const channelGroups = [
-    {
-      key: "builtin",
-      label: t("settings.channels.noInstallNeeded"),
-      channels: visibleChannels.filter((feature) => !feature.requires_dependencies),
-    },
-    {
-      key: "dependencies",
-      label: t("settings.channels.installNeeded"),
-      channels: visibleChannels.filter((feature) => feature.requires_dependencies),
-    },
-  ].filter((group) => group.channels.length);
+  const channelGroups = filter === "enabled"
+    ? [{ key: "enabled", label: null, channels: visibleChannels }]
+    : [
+        {
+          key: "builtin",
+          label: t("settings.channels.noInstallNeeded"),
+          channels: visibleChannels.filter((feature) => !feature.requires_dependencies),
+        },
+        {
+          key: "dependencies",
+          label: t("settings.channels.installNeeded"),
+          channels: visibleChannels.filter((feature) => feature.requires_dependencies),
+        },
+      ].filter((group) => group.channels.length);
   const selectedChannel = channels.find((feature) => feature.name === selectedChannelName);
 
   return (
@@ -71,13 +83,16 @@ export function ChannelsSettings({
             placeholder={t("settings.channels.search")}
             className={`h-12 ps-11 text-[15px] ${SETTINGS_SEARCH_INPUT_CLASS}`} />
         </div>
-        <SegmentedControl value={filter} onChange={setFilter} options={[
+        <SegmentedControl value={filter} onChange={(value) => {
+          filterInitializedRef.current = true;
+          setFilter(value);
+        }} options={[
           { value: "all", label: t("settings.channels.filterAll") },
           { value: "enabled", label: t("settings.channels.filterEnabled") },
         ]} />
       </div>
       {error && !selectedChannel ? <DismissibleStatusMessage message={error} isError onDismiss={onDismissStatus} /> : null}
-      {requiresRestartPending ? (
+      {restartRequired ? (
         <RestartRequiredNotice message={t("settings.channels.restartRequired")}
           onRestart={onRestart} isRestarting={isRestarting} />
       ) : null}
@@ -88,13 +103,20 @@ export function ChannelsSettings({
         </div>
       ) : visibleChannels.length ? (
         channelGroups.map((group) => (
-        <section key={group.key} aria-labelledby={`channel-group-${group.key}`} className="space-y-2">
-          <h2 id={`channel-group-${group.key}`} className="px-4 text-[12px] font-medium text-muted-foreground">{group.label}</h2>
+        <section
+          key={group.key}
+          aria-labelledby={group.label ? `channel-group-${group.key}` : undefined}
+          aria-label={group.label ? undefined : t("settings.channels.filterEnabled")}
+          className={group.label ? "space-y-2" : undefined}
+        >
+          {group.label ? (
+            <h2 id={`channel-group-${group.key}`} className="px-4 text-[12px] font-medium text-muted-foreground">{group.label}</h2>
+          ) : null}
           <SettingsGroup>
           <div className="grid grid-cols-1 gap-x-4 gap-y-1 min-[640px]:grid-cols-2">
           {group.channels.map((feature) => (
             <ChannelCatalogRow key={feature.name} feature={feature} showBrandLogos={showBrandLogos}
-              actionKey={actionKey} onAction={onAction}
+              actionKey={actionKey} actionsDisabled={restartRequired || Boolean(isRestarting)} onAction={onAction}
               onSelect={(connect = false) => {
                 triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
                 setConnectRequestId(connect ? 1 : 0);
@@ -111,19 +133,27 @@ export function ChannelsSettings({
         </div>
       )}
       <Dialog open={Boolean(selectedChannel)} onOpenChange={(open) => { if (!open) setSelectedChannelName(null); }}>
-        <DialogContent ref={dialogRef} aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-hidden p-0 outline-none"
+        <DialogContent ref={dialogRef} showCloseButton={false} aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-hidden p-0 outline-none"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             dialogRef.current?.focus({ preventScroll: true });
           }}
           onCloseAutoFocus={(event) => { event.preventDefault(); triggerRef.current?.focus(); }}>
           <DialogTitle className="sr-only">{t("settings.nav.channels")}</DialogTitle>
-          {selectedChannel ? <ChannelHelpMenu feature={selectedChannel} chatAppsDocsUrl={chatAppsDocsUrl} /> : null}
           <div className="max-h-[85dvh] min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {error ? <DismissibleStatusMessage message={error} isError onDismiss={onDismissStatus} /> : null}
-            {selectedChannel ? <ChannelSetupPanel token={token} feature={selectedChannel} actionKey={actionKey}
-              showBrandLogos={showBrandLogos}
-              onAction={onAction} onFeaturesUpdate={onFeaturesUpdate} connectRequestId={connectRequestId} /> : null}
+            <div className="relative">
+              <div className="absolute end-6 top-6 z-10 flex h-10 items-center gap-1">
+                {selectedChannel ? <ChannelHelpMenu feature={selectedChannel} chatAppsDocsUrl={chatAppsDocsUrl} /> : null}
+                <DialogClose className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                  <X className="h-4 w-4" aria-hidden />
+                  <span className="sr-only">{t("common.close")}</span>
+                </DialogClose>
+              </div>
+              {error ? <DismissibleStatusMessage message={error} isError onDismiss={onDismissStatus} /> : null}
+              {selectedChannel ? <ChannelSetupPanel token={token} feature={selectedChannel} actionKey={actionKey}
+                showBrandLogos={showBrandLogos}
+                onAction={onAction} onFeaturesUpdate={onFeaturesUpdate} connectRequestId={connectRequestId} /> : null}
+            </div>
           </div>
         </DialogContent>
       </Dialog>

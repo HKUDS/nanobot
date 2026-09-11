@@ -1508,6 +1508,15 @@ async def test_handle_notification_no_source_skipped() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_default_config_enables_private_dms_with_pairing() -> None:
+    config = SignalConfig(phone_number="+10000000000")
+
+    assert config.dm.enabled is True
+    assert config.dm.policy == "allowlist"
+    assert config.dm.allow_from == []
+    assert config.group.enabled is False
+
+
 def test_config_allow_from_aggregates_dm_and_group() -> None:
     config = SignalConfig(
         enabled=True,

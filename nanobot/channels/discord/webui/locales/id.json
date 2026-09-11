@@ -22,6 +22,34 @@
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
         "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "proxy": {
+        "label": "Proksi jaringan"
+      },
+      "proxyUsername": {
+        "label": "Nama pengguna proksi"
+      },
+      "proxyPassword": {
+        "label": "Kata sandi proksi"
+      },
+      "intents": {
+        "label": "Maksud gerbang"
+      },
+      "readReceiptEmoji": {
+        "label": "Baca emoji"
+      },
+      "workingEmoji": {
+        "label": "Emoji yang berfungsi"
+      },
+      "workingEmojiDelay": {
+        "label": "Penundaan emoji yang berfungsi"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
       }
     }
   }

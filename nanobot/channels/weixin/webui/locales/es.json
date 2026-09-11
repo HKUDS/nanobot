@@ -12,20 +12,48 @@
         "label": "Token",
         "placeholder": "Guardado al iniciar sesión por QR"
       },
-      "sendProgress": { "label": "Enviar progreso" },
-      "sendToolHints": { "label": "Enviar resúmenes de actividad de las herramientas" },
-      "streaming": { "label": "Usar API de streaming" },
-      "replyProgressMessages": { "label": "Enviar progreso estructurado" },
-      "replyProgressMaxMessages": { "label": "Límite de progreso estructurado" },
-      "contextMessageBudget": { "label": "Máximo de mensajes de contexto" },
-      "blockStreaming": { "label": "Enviar respuestas por bloques" },
-      "blockStreamingMinChars": { "label": "Mínimo de caracteres por bloque" },
-      "blockStreamingMaxMessages": { "label": "Límite de mensajes por bloques" },
-      "baseUrl": { "label": "URL de la API" },
-      "cdnBaseUrl": { "label": "URL de la CDN" },
-      "routeTag": { "label": "Etiqueta de ruta" },
-      "stateDir": { "label": "Directorio de estado" },
-      "pollTimeout": { "label": "Tiempo de espera de consulta (segundos)" }
+      "sendProgress": {
+        "label": "Enviar progreso"
+      },
+      "sendToolHints": {
+        "label": "Enviar resúmenes de actividad de las herramientas"
+      },
+      "streaming": {
+        "label": "Usar API de streaming"
+      },
+      "replyProgressMessages": {
+        "label": "Enviar progreso estructurado"
+      },
+      "replyProgressMaxMessages": {
+        "label": "Límite de progreso estructurado"
+      },
+      "contextMessageBudget": {
+        "label": "Máximo de mensajes de contexto"
+      },
+      "blockStreaming": {
+        "label": "Enviar respuestas por bloques"
+      },
+      "blockStreamingMinChars": {
+        "label": "Mínimo de caracteres por bloque"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "Límite de mensajes por bloques"
+      },
+      "baseUrl": {
+        "label": "URL de la API"
+      },
+      "cdnBaseUrl": {
+        "label": "URL de la CDN"
+      },
+      "routeTag": {
+        "label": "Etiqueta de ruta"
+      },
+      "stateDir": {
+        "label": "Directorio de estado"
+      },
+      "pollTimeout": {
+        "label": "Tiempo de espera de consulta (segundos)"
+      }
     }
   },
   "custom": {

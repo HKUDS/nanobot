@@ -13,6 +13,7 @@ import {
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
 import {
+  CHANNEL_SETUP_PANEL_CLASS_NAME,
   ChannelLogo,
   ChannelRuntimeError,
   channelSetup,
@@ -61,7 +62,8 @@ export function ChannelInstancesPanel({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
   const instances = providedInstances ?? feature.instances ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editor, setEditor] = useState<{ id: string; expanded: boolean } | null>(null);
+  const selectedId = editor?.id;
   const [pendingToggle, setPendingToggle] = useState<{ id: string; checked: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selected = selectedId ? instances.find((instance) => instance.id === selectedId) : undefined;
@@ -78,7 +80,9 @@ export function ChannelInstancesPanel({
   );
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [savingFields, setSavingFields] = useState(false);
-  const selectedValuesKey = JSON.stringify(selected?.config_values ?? {});
+  const selectedValuesKey = JSON.stringify(
+    defaultChannelFieldValues(instanceFields, selected?.config_values),
+  );
   const selectedConfiguredFields = useMemo(
     () => new Set(selected?.configured_fields ?? []),
     [selected?.configured_fields],
@@ -86,14 +90,14 @@ export function ChannelInstancesPanel({
 
   useEffect(() => {
     if (selectedId && !instances.some((instance) => instance.id === selectedId)) {
-      setSelectedId(null);
+      setEditor(null);
     }
   }, [instances, selectedId]);
 
   useEffect(() => {
     setFieldValues(defaultChannelFieldValues(instanceFields, selected?.config_values));
     setVisibleSecrets({});
-  }, [instanceFields, selected?.id, selectedValuesKey]);
+  }, [selected?.id, selectedValuesKey]);
 
   const toggleInstance = async (instance: NanobotChannelInstanceInfo, checked: boolean) => {
     if (pendingToggle || savingFields) return;
@@ -134,23 +138,17 @@ export function ChannelInstancesPanel({
   };
 
   return (
-    <aside className="min-h-full rounded-panel bg-settings-surface p-5">
-      <div className="flex items-start justify-between gap-3 pr-16">
-        <div className="flex min-w-0 max-w-full items-center gap-3">
-          <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
-          <div className="min-w-0 flex-1">
-            <h3 className="sr-only">
-              {displayName}
-            </h3>
-          </div>
-        </div>
+    <aside className={CHANNEL_SETUP_PANEL_CLASS_NAME}>
+      <div className="pe-20">
+        <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
+        <h3 className="sr-only">{displayName}</h3>
       </div>
 
       <ChannelRuntimeError message={feature.runtime_error} />
 
       <div className="mt-5 space-y-3">
         {instances.map((instance) => {
-          const expanded = selected?.id === instance.id;
+          const expanded = selected?.id === instance.id && editor?.expanded === true;
           const toggling = pendingToggle?.id === instance.id;
           const checked = toggling ? pendingToggle.checked : instanceToggleChecked(instance);
           const instanceSummary = customization.renderInstanceSummary
@@ -168,8 +166,8 @@ export function ChannelInstancesPanel({
                   : "bg-background/70",
               )}
             >
-              <div className="flex items-center gap-3 px-3 py-3">
-                <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-3">
+                <div className="flex min-w-0 flex-[1_1_12rem] items-center gap-3">
                   <ChannelInstanceAvatar
                     feature={feature}
                     instance={instance}
@@ -184,7 +182,29 @@ export function ChannelInstancesPanel({
                     needsSetupLabel={customization.needsSetupLabel}
                   />
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="ms-auto flex shrink-0 items-center gap-3">
+                  {instanceFields.length ? (
+                    <button
+                      type="button"
+                      className="inline-flex min-h-8 items-center gap-1.5 rounded px-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-offset-2"
+                      onClick={() =>
+                        setEditor((current) => ({
+                          id: instance.id,
+                          expanded: current?.id !== instance.id || !current.expanded,
+                        }))
+                      }
+                      aria-expanded={expanded}
+                    >
+                      {tx("settings.channels.advanced", "Advanced")}
+                      <ChevronDown
+                        className={cn(
+                          "h-3.5 w-3.5 transition-transform motion-reduce:transition-none",
+                          expanded && "rotate-180",
+                        )}
+                        aria-hidden
+                      />
+                    </button>
+                  ) : null}
                   {toggling ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
                   ) : null}
@@ -206,7 +226,7 @@ export function ChannelInstancesPanel({
                 </div>
               </div>
 
-              {hasInstanceOverview || instanceFields.length ? (
+              {hasInstanceOverview || (expanded && instanceFields.length > 0) ? (
                 <div className="space-y-3 px-4 pb-4 pt-1">
                   {hasInstanceOverview ? <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     {instanceSummary ? (
@@ -216,30 +236,12 @@ export function ChannelInstancesPanel({
                     ) : <span className="flex-1" />}
                     {instanceAction}
                   </section> : null}
-                  {instanceFields.length ? (
+                  {expanded && instanceFields.length > 0 ? (
                     <div className={cn(
                       "text-[12px] leading-5 text-muted-foreground",
                       hasInstanceOverview && "border-t border-border/50 pt-3",
                     )}>
-                      <button
-                        type="button"
-                        className="-ms-1 inline-flex min-h-8 items-center gap-1.5 rounded px-1 text-[12px] font-semibold text-foreground focus-visible:outline-offset-2"
-                        onClick={() =>
-                          setSelectedId((current) => (current === instance.id ? null : instance.id))
-                        }
-                        aria-expanded={expanded}
-                      >
-                        {tx("settings.channels.advanced", "Advanced")}
-                        <ChevronDown
-                          className={cn(
-                            "h-3.5 w-3.5 transition-transform motion-reduce:transition-none",
-                            expanded && "rotate-180",
-                          )}
-                          aria-hidden
-                        />
-                      </button>
-                      {expanded ? <form
-                        className="mt-3"
+                      <form
                         onSubmit={(event) => {
                           event.preventDefault();
                           void saveSelectedInstanceSettings();
@@ -272,7 +274,7 @@ export function ChannelInstancesPanel({
                             {tx("settings.channels.saveSettings", "Save settings")}
                           </Button>
                         </div>
-                      </form> : null}
+                      </form>
                     </div>
                   ) : null}
                 </div>

@@ -22,6 +22,47 @@
       "group_allowFrom": {
         "label": "Grupos permitidos",
         "placeholder": "IDs de grupo"
+      },
+      "groupMessageBufferSize": {
+        "label": "Mensagens de contexto de grupo"
+      },
+      "attachmentsDir": {
+        "label": "Diretório de anexos"
+      },
+      "dm_enabled": {
+        "label": "Habilitar mensagens diretas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_policy": {
+        "label": "Acesso direto a mensagens",
+        "choices": {
+          "allowlist": "Lista de permissões",
+          "open": "Abrir"
+        }
+      },
+      "group_enabled": {
+        "label": "Habilitar grupos",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "group_policy": {
+        "label": "Acesso ao grupo",
+        "choices": {
+          "allowlist": "Lista de permissões",
+          "open": "Abrir"
+        }
+      },
+      "group_requireMention": {
+        "label": "Exigir menção em grupos",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
       }
     }
   }

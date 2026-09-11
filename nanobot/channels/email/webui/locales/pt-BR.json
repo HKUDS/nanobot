@@ -78,6 +78,83 @@
           "true": "Ativado",
           "false": "Desativado"
         }
+      },
+      "imapMailbox": {
+        "label": "Caixa de correio IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS SMTP",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL SMTP",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Respostas automáticas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "markSeen": {
+        "label": "Marcar como lido",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "postAction": {
+        "label": "Após o processamento",
+        "choices": {
+          "delete": "Excluir",
+          "move": "Mover"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Mover para caixa de correio"
+      },
+      "postActionExpunge": {
+        "label": "Aplicar ação permanentemente",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignorar mensagens ignoradas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Comprimento máximo do corpo"
+      },
+      "subjectPrefix": {
+        "label": "Prefixo do assunto da resposta"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Tipos de anexos permitidos"
+      },
+      "maxAttachmentSize": {
+        "label": "Tamanho máximo do anexo"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Máximo de anexos"
       }
     }
   }

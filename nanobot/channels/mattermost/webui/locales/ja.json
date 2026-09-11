@@ -34,6 +34,78 @@
       "allowFrom": {
         "label": "許可するユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
+      },
+      "allowFromMatchMode": {
+        "label": "ユーザーマッチング",
+        "choices": {
+          "email": "電子メール",
+          "id": "ユーザーID",
+          "username": "ユーザー名"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "許可されたチャネル"
+      },
+      "replyInThread": {
+        "label": "スレッド内で返信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "includeThreadContext": {
+        "label": "スレッドコンテキストを含める",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "threadContextLimit": {
+        "label": "スレッドコンテキストの制限"
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "reactEmoji": {
+        "label": "絵文字を読む"
+      },
+      "doneEmoji": {
+        "label": "完了絵文字"
+      },
+      "sendProgress": {
+        "label": "進捗状況の送信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "sendToolHints": {
+        "label": "ツールヒントを送信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "dm_enabled": {
+        "label": "ダイレクトメッセージを有効にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "dm_policy": {
+        "label": "ダイレクトメッセージへのアクセス",
+        "choices": {
+          "allowlist": "ホワイトリスト",
+          "open": "開く"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "許可されたダイレクトメッセージユーザー"
       }
     }
   }

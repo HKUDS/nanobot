@@ -17,7 +17,7 @@
         }
       },
       "proxy": {
-        "label": "Proxy",
+        "label": "Proxy mạng",
         "placeholder": "http://127.0.0.1:7890"
       }
     }

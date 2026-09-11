@@ -78,6 +78,83 @@
           "true": "켜짐",
           "false": "꺼짐"
         }
+      },
+      "imapMailbox": {
+        "label": "IMAP 사서함"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "자동 답장",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "markSeen": {
+        "label": "읽음으로 표시",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "postAction": {
+        "label": "처리 후",
+        "choices": {
+          "delete": "삭제",
+          "move": "이동"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "사서함으로 이동"
+      },
+      "postActionExpunge": {
+        "label": "영구적으로 작업 적용",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "건너뛴 메시지 무시",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "maxBodyChars": {
+        "label": "최대 몸체 길이"
+      },
+      "subjectPrefix": {
+        "label": "답장 제목 접두어"
+      },
+      "allowedAttachmentTypes": {
+        "label": "허용되는 첨부 파일 유형"
+      },
+      "maxAttachmentSize": {
+        "label": "최대 첨부 파일 크기"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "최대 첨부 파일"
       }
     }
   }

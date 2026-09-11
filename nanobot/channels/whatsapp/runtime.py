@@ -33,6 +33,7 @@ class WhatsAppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention"] = "open"
     database_path: str = ""
+    proxy: str = ""
     lid_mappings: dict[str, str] = Field(default_factory=dict)
 
 
@@ -344,6 +345,16 @@ class WhatsAppChannel(BaseChannel):
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return api.NewAClient(str(db_path))
 
+    async def _connect_client(self, client: Any) -> Any:
+        proxy = self.config.proxy.strip()
+        if not proxy:
+            return await client.connect()
+        if "://" not in proxy:
+            proxy = f"http://{proxy}"
+        from neonize._binder import ProxySettings
+
+        return await client.connect(ProxySettings(proxy_address=proxy))
+
     def connect_open_client(
         self,
         qr_handler: Callable[[bytes], Awaitable[None]] | None = None,
@@ -363,10 +374,11 @@ class WhatsAppChannel(BaseChannel):
         self,
         client: Any,
         result: asyncio.Future[None],
-    ) -> None:
+    ) -> asyncio.Task[Any] | None:
         """Start a login client and watch neonize's optional background task."""
-        connect_task = await client.connect()
+        connect_task = await self._connect_client(client)
         self._fail_login_on_connect_task_done(connect_task, result)
+        return connect_task
 
     async def login(self, force: bool = False) -> bool:
         db_path = self._database_path()
@@ -375,9 +387,10 @@ class WhatsAppChannel(BaseChannel):
 
         client, login_result = self.connect_open_client()
 
+        connect_task: asyncio.Task[Any] | None = None
         try:
             self.logger.info("Starting WhatsApp login with neonize...")
-            await self.connect_start_client(client, login_result)
+            connect_task = await self.connect_start_client(client, login_result)
             await login_result
             self.logger.info("WhatsApp login complete")
             return True
@@ -385,6 +398,10 @@ class WhatsAppChannel(BaseChannel):
             self.logger.error("WhatsApp login failed: {}", exc)
             return False
         finally:
+            if connect_task is not None and not connect_task.done():
+                connect_task.cancel()
+                with suppress(Exception, asyncio.CancelledError):
+                    await connect_task
             with suppress(Exception):
                 await client.stop()
 
@@ -397,7 +414,7 @@ class WhatsAppChannel(BaseChannel):
 
         try:
             self.logger.info("Connecting WhatsApp channel with neonize...")
-            await client.connect()
+            await self._connect_client(client)
             await client.idle()
         except asyncio.CancelledError:
             raise

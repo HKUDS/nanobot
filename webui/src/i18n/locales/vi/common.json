@@ -42,8 +42,8 @@
       "description": "Giao diện web nanobot — trò chuyện với không gian làm việc nanobot của bạn."
     },
     "pairing": {
-      "title": "Liên kết người dùng chat",
-      "description": "Nhập mã liên kết hiển thị trong cuộc trò chuyện.",
+      "title": "Ghép nối tài khoản trò chuyện của bạn",
+      "description": "Nhập mã ghép nối bạn nhận được trong cuộc trò chuyện.",
       "code": "Mã liên kết",
       "matched": "Đã khớp với {{channel}}. Đang kết nối...",
       "expiresInline": "Mã hết hạn {{expires}}.",

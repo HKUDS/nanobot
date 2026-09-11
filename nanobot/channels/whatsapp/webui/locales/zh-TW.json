@@ -17,7 +17,7 @@
         }
       },
       "proxy": {
-        "label": "代理",
+        "label": "網路代理",
         "placeholder": "http://127.0.0.1:7890"
       }
     }

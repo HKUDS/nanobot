@@ -22,6 +22,47 @@
       "group_allowFrom": {
         "label": "Nhóm được phép",
         "placeholder": "ID nhóm"
+      },
+      "groupMessageBufferSize": {
+        "label": "Nhóm tin nhắn ngữ cảnh"
+      },
+      "attachmentsDir": {
+        "label": "Thư mục đính kèm"
+      },
+      "dm_enabled": {
+        "label": "Bật tin nhắn trực tiếp",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "dm_policy": {
+        "label": "Truy cập tin nhắn trực tiếp",
+        "choices": {
+          "allowlist": "Danh sách cho phép",
+          "open": "Mở"
+        }
+      },
+      "group_enabled": {
+        "label": "Bật nhóm",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "group_policy": {
+        "label": "Truy cập nhóm",
+        "choices": {
+          "allowlist": "Danh sách cho phép",
+          "open": "Mở"
+        }
+      },
+      "group_requireMention": {
+        "label": "Yêu cầu đề cập trong nhóm",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
       }
     }
   }

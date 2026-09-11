@@ -38,6 +38,38 @@
           "true": "每個主題使用獨立工作階段",
           "false": "群組共用一個工作階段"
         }
+      },
+      "name": {
+        "label": "帳戶名稱"
+      },
+      "encryptKey": {
+        "label": "加密金鑰"
+      },
+      "verificationToken": {
+        "label": "驗證令牌"
+      },
+      "reactEmoji": {
+        "label": "已讀表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "toolHintPrefix": {
+        "label": "工具提示前綴"
+      },
+      "replyToMessage": {
+        "label": "引用回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "streaming": {
+        "label": "串流輸出",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
       }
     }
   },
@@ -45,9 +77,6 @@
     "toggleAssistant": "{{name}} 助手",
     "configured": "已連接",
     "needsSetup": "需要授權",
-    "createAnother": "建立另一個助手",
-    "createHint": "為其他團隊、空間或工作流程建立獨立的飛書機器人。",
-    "createAssistant": "建立助手",
     "qrAlt": "飛書連線 QR Code",
     "scanTitle": "使用飛書掃描",
     "scanDescription": "請使用手機上的飛書或 Lark 掃描此 QR Code。完成授權後，nanobot 會自動完成設定。",

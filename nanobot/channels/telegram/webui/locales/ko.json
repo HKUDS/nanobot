@@ -22,6 +22,71 @@
           "open": "모든 메시지",
           "allowlist": "허용 목록"
         }
+      },
+      "mode": {
+        "label": "연결 모드",
+        "choices": {
+          "polling": "긴 폴링",
+          "webhook": "웹훅"
+        }
+      },
+      "replyToMessage": {
+        "label": "메시지에 답장하기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "reactEmoji": {
+        "label": "이모티콘 읽기"
+      },
+      "connectionPoolSize": {
+        "label": "연결 풀 크기"
+      },
+      "poolTimeout": {
+        "label": "연결 풀 시간 초과"
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "인라인 키보드",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "richMessages": {
+        "label": "리치 메시지",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "streamEditInterval": {
+        "label": "스트림 업데이트 간격"
+      },
+      "webhookUrl": {
+        "label": "웹훅 URL"
+      },
+      "webhookListenHost": {
+        "label": "웹훅 청취 호스트"
+      },
+      "webhookListenPort": {
+        "label": "웹훅 수신 포트"
+      },
+      "webhookPath": {
+        "label": "웹훅 경로"
+      },
+      "webhookSecretToken": {
+        "label": "웹훅 비밀 토큰"
+      },
+      "webhookMaxConnections": {
+        "label": "최대 웹훅 연결"
       }
     }
   }

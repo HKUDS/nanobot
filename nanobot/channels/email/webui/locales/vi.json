@@ -78,6 +78,83 @@
           "true": "Bật",
           "false": "Tắt"
         }
+      },
+      "imapMailbox": {
+        "label": "Hộp thư IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS SMTP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL SMTP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Trả lời tự động",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "markSeen": {
+        "label": "Đánh dấu là đã đọc",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "postAction": {
+        "label": "Sau khi xử lý",
+        "choices": {
+          "delete": "Xóa",
+          "move": "Di chuyển"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Di chuyển tới hộp thư"
+      },
+      "postActionExpunge": {
+        "label": "Áp dụng hành động vĩnh viễn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Bỏ qua tin nhắn bị bỏ qua",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Chiều dài cơ thể tối đa"
+      },
+      "subjectPrefix": {
+        "label": "Trả lời tiền tố chủ đề"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Các loại tệp đính kèm được phép"
+      },
+      "maxAttachmentSize": {
+        "label": "Kích thước tệp đính kèm tối đa"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Tệp đính kèm tối đa"
       }
     }
   }

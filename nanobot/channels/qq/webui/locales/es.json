@@ -21,6 +21,18 @@
           "plain": "Texto sin formato",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "Mensaje de reconocimiento"
+      },
+      "mediaDir": {
+        "label": "Directorio de medios"
+      },
+      "downloadChunkSize": {
+        "label": "Descargar tamaño de fragmento"
+      },
+      "downloadMaxBytes": {
+        "label": "Tamaño máximo de descarga"
       }
     }
   }

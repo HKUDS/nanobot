@@ -21,6 +21,72 @@
           "open": "所有訊息",
           "allowlist": "允許清單"
         }
+      },
+      "mode": {
+        "label": "連接方式",
+        "choices": {
+          "socket": "Socket 模式"
+        }
+      },
+      "webhookPath": {
+        "label": "Webhook 路徑"
+      },
+      "replyInThread": {
+        "label": "在話題中回复",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "reactEmoji": {
+        "label": "已讀表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "includeThreadContext": {
+        "label": "包含話題上下文",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "threadContextLimit": {
+        "label": "話題上下文上限"
+      },
+      "allowFrom": {
+        "label": "允許的用戶"
+      },
+      "groupAllowFrom": {
+        "label": "允許的頻道"
+      },
+      "groupRequireMention": {
+        "label": "頻道中需要提及",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_enabled": {
+        "label": "啟用私聊",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_policy": {
+        "label": "私聊權限",
+        "choices": {
+          "allowlist": "白名單",
+          "open": "全部"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "允許私聊的用戶"
+      },
+      "proxy": {
+        "label": "網路代理",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

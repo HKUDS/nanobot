@@ -19,6 +19,8 @@ export function WhatsAppConnectFlow({
       channelName="whatsapp"
       idleLabel={idleLabel}
       connectRequestId={connectRequestId}
+      autoStart
+      minimalPending
       forceOnRepeat
       labels={{
         qrAlt: tx("custom.qrAlt", "WhatsApp linking QR code"),

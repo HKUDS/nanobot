@@ -22,6 +22,19 @@
       "allowFrom": {
         "label": "許可するユーザー",
         "placeholder": "QQ ID（カンマ区切り）"
+      },
+      "groupPolicyOverrides": {
+        "label": "グループ動作のオーバーライド (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "新しいメンバーを歓迎します",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "maxImageBytes": {
+        "label": "最大画像サイズ"
       }
     }
   }

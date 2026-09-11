@@ -37,6 +37,38 @@
           "true": "Phiên riêng cho từng chủ đề",
           "false": "Dùng chung một phiên cho nhóm"
         }
+      },
+      "name": {
+        "label": "Tên tài khoản"
+      },
+      "encryptKey": {
+        "label": "Khóa mã hóa"
+      },
+      "verificationToken": {
+        "label": "Mã thông báo xác minh"
+      },
+      "reactEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "doneEmoji": {
+        "label": "biểu tượng cảm xúc xong"
+      },
+      "toolHintPrefix": {
+        "label": "Tiền tố gợi ý công cụ"
+      },
+      "replyToMessage": {
+        "label": "Trả lời tin nhắn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
       }
     }
   },
@@ -44,9 +76,6 @@
     "toggleAssistant": "Bật trợ lý {{name}}",
     "configured": "Đã kết nối",
     "needsSetup": "Cần cấp quyền",
-    "createAnother": "Tạo trợ lý khác",
-    "createHint": "Tạo bot Feishu riêng cho nhóm hoặc quy trình khác.",
-    "createAssistant": "Tạo trợ lý",
     "qrAlt": "Mã QR kết nối Feishu",
     "scanTitle": "Quét bằng Feishu",
     "scanDescription": "Quét bằng Feishu hoặc Lark trên điện thoại. nanobot sẽ hoàn tất cấu hình sau khi cấp quyền.",

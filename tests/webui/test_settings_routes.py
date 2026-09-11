@@ -60,6 +60,24 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
+async def test_close_releases_channel_connectors() -> None:
+    router = _router()
+    closed = False
+
+    class Connector:
+        async def close(self) -> None:
+            nonlocal closed
+            closed = True
+
+    router._system._channel_connectors["whatsapp"] = Connector()
+
+    await router.close()
+
+    assert closed is True
+    assert router._system._channel_connectors == {}
+
+
+@pytest.mark.asyncio
 async def test_mcp_list_serializes_local_runtime_failure_snapshot(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     custom_mcp_action(

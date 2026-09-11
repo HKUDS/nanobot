@@ -44,6 +44,10 @@ def test_system_domain_validates_channel_field_values() -> None:
     ]
     assert coerce_channel_value("enabled", "yes", "bool") is True
     assert coerce_channel_value("port", "8765", "int") == 8765
+    assert coerce_channel_value("delay", "0.6", "float") == 0.6
+    assert coerce_channel_value("overrides", '{"123": "open"}', "json") == {
+        "123": "open"
+    }
     assert coerce_channel_value("token", None, "secret") == ""
 
 

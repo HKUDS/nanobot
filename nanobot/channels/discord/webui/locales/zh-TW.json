@@ -22,6 +22,34 @@
       "allowFrom": {
         "label": "允許的使用者",
         "placeholder": "使用者 ID，以逗號分隔"
+      },
+      "proxy": {
+        "label": "網路代理"
+      },
+      "proxyUsername": {
+        "label": "代理用戶名"
+      },
+      "proxyPassword": {
+        "label": "代理密碼"
+      },
+      "intents": {
+        "label": "Gateway Intents"
+      },
+      "readReceiptEmoji": {
+        "label": "已讀表情"
+      },
+      "workingEmoji": {
+        "label": "處理中表情"
+      },
+      "workingEmojiDelay": {
+        "label": "處理中表情延遲"
+      },
+      "streaming": {
+        "label": "串流輸出",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
       }
     }
   }

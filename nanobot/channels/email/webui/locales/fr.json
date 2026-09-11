@@ -78,6 +78,83 @@
           "true": "Activé",
           "false": "Désactivé"
         }
+      },
+      "imapMailbox": {
+        "label": "Boîte aux lettres IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP-TLS",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP-SSL",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Réponses automatiques",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "markSeen": {
+        "label": "Marquer comme lu",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "postAction": {
+        "label": "Après traitement",
+        "choices": {
+          "delete": "Supprimer",
+          "move": "Déplacer"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Déplacer vers la boîte aux lettres"
+      },
+      "postActionExpunge": {
+        "label": "Appliquer l'action de manière permanente",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignorer les messages ignorés",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Longueur maximale du corps"
+      },
+      "subjectPrefix": {
+        "label": "Préfixe du sujet de la réponse"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Types de pièces jointes autorisés"
+      },
+      "maxAttachmentSize": {
+        "label": "Taille maximale des pièces jointes"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Nombre maximal de pièces jointes"
       }
     }
   }

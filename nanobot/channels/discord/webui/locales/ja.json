@@ -22,6 +22,34 @@
       "allowFrom": {
         "label": "許可するユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ"
+      },
+      "proxyUsername": {
+        "label": "プロキシのユーザー名"
+      },
+      "proxyPassword": {
+        "label": "プロキシパスワード"
+      },
+      "intents": {
+        "label": "ゲートウェイの意図"
+      },
+      "readReceiptEmoji": {
+        "label": "絵文字を読む"
+      },
+      "workingEmoji": {
+        "label": "働く絵文字"
+      },
+      "workingEmojiDelay": {
+        "label": "絵文字の動作遅延"
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
       }
     }
   }

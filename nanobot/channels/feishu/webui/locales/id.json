@@ -37,6 +37,38 @@
           "true": "Sesi terpisah untuk setiap topik",
           "false": "Satu sesi bersama untuk grup"
         }
+      },
+      "name": {
+        "label": "Nama akun"
+      },
+      "encryptKey": {
+        "label": "Kunci enkripsi"
+      },
+      "verificationToken": {
+        "label": "Token verifikasi"
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "doneEmoji": {
+        "label": "Selesai emoji"
+      },
+      "toolHintPrefix": {
+        "label": "Awalan petunjuk alat"
+      },
+      "replyToMessage": {
+        "label": "Membalas pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
       }
     }
   },
@@ -44,9 +76,6 @@
     "toggleAssistant": "Aktifkan asisten {{name}}",
     "configured": "Terhubung",
     "needsSetup": "Perlu otorisasi",
-    "createAnother": "Buat asisten lain",
-    "createHint": "Buat bot Feishu terpisah untuk tim atau alur kerja lain.",
-    "createAssistant": "Buat asisten",
     "qrAlt": "Kode QR koneksi Feishu",
     "scanTitle": "Pindai dengan Feishu",
     "scanDescription": "Pindai kode ini dengan Feishu atau Lark di ponsel. nanobot akan menyelesaikan penyiapan setelah Anda menyetujui akses.",

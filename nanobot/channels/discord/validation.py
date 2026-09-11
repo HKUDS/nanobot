@@ -18,11 +18,13 @@ from nanobot.channels.validation import (
 def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict[str, Any]:
     checks, missing = required_checks("discord", values)
     token = string_value(values.get("token"))
+    proxy = string_value(values.get("proxy"))
     if token:
         try:
             data = http_get(
                 "https://discord.com/api/v10/users/@me",
                 headers={"Authorization": f"Bot {token}"},
+                proxy=proxy or None,
             )
             bot_id = str(data.get("id") or "")
             checks.append(check("bot_token", "Bot token", "pass", "Discord accepted the bot token."))

@@ -21,6 +21,18 @@
           "plain": "纯文本",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "处理中提示"
+      },
+      "mediaDir": {
+        "label": "媒体目录"
+      },
+      "downloadChunkSize": {
+        "label": "下载分块大小"
+      },
+      "downloadMaxBytes": {
+        "label": "下载大小上限"
       }
     }
   }

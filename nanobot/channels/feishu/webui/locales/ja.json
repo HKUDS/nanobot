@@ -37,6 +37,38 @@
           "true": "トピックごとにセッションを分離",
           "false": "グループでセッションを共有"
         }
+      },
+      "name": {
+        "label": "アカウント名"
+      },
+      "encryptKey": {
+        "label": "暗号化キー"
+      },
+      "verificationToken": {
+        "label": "検証トークン"
+      },
+      "reactEmoji": {
+        "label": "絵文字を読む"
+      },
+      "doneEmoji": {
+        "label": "完了絵文字"
+      },
+      "toolHintPrefix": {
+        "label": "ツールヒントの接頭辞"
+      },
+      "replyToMessage": {
+        "label": "メッセージに返信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
       }
     }
   },
@@ -44,9 +76,6 @@
     "toggleAssistant": "アシスタント {{name}} を有効にする",
     "configured": "接続済み",
     "needsSetup": "認可が必要",
-    "createAnother": "別のアシスタントを作成",
-    "createHint": "別のチームやワークフロー用に独立した Feishu ボットを作成します。",
-    "createAssistant": "アシスタントを作成",
     "qrAlt": "Feishu 接続 QR コード",
     "scanTitle": "Feishu でスキャン",
     "scanDescription": "スマートフォンの Feishu または Lark でスキャンしてください。認可後に nanobot が設定を完了します。",

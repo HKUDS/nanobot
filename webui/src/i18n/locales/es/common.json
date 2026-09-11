@@ -42,8 +42,8 @@
       "description": "Interfaz web de nanobot: conversa con tu espacio de trabajo de nanobot."
     },
     "pairing": {
-      "title": "Vincular a un usuario del chat",
-      "description": "Introduce el código de vinculación que aparece en el chat.",
+      "title": "Vincular tu cuenta de chat",
+      "description": "Introduce el código de vinculación que recibiste en el chat.",
       "code": "Código de vinculación",
       "matched": "Coincidencia: {{channel}}. Conectando...",
       "expiresInline": "El código caduca {{expires}}.",

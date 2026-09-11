@@ -37,6 +37,38 @@
           "true": "주제별로 세션 분리",
           "false": "그룹에서 하나의 세션 공유"
         }
+      },
+      "name": {
+        "label": "계정 이름"
+      },
+      "encryptKey": {
+        "label": "암호화 키"
+      },
+      "verificationToken": {
+        "label": "인증 토큰"
+      },
+      "reactEmoji": {
+        "label": "이모티콘 읽기"
+      },
+      "doneEmoji": {
+        "label": "이모티콘 완료"
+      },
+      "toolHintPrefix": {
+        "label": "도구 힌트 접두사"
+      },
+      "replyToMessage": {
+        "label": "메시지에 답장하기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
       }
     }
   },
@@ -44,9 +76,6 @@
     "toggleAssistant": "{{name}} 어시스턴트 활성화",
     "configured": "연결됨",
     "needsSetup": "인증 필요",
-    "createAnother": "다른 어시스턴트 만들기",
-    "createHint": "다른 팀이나 워크플로를 위한 별도 Feishu 봇을 만드세요.",
-    "createAssistant": "어시스턴트 만들기",
     "qrAlt": "Feishu 연결 QR 코드",
     "scanTitle": "Feishu로 스캔",
     "scanDescription": "휴대폰의 Feishu 또는 Lark로 스캔하세요. 승인 후 nanobot이 설정을 완료합니다.",

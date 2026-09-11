@@ -1,7 +1,7 @@
 import { channelValidationMessage } from "./validationMessages";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { Check, Loader2, Network, RotateCcw } from "lucide-react";
+import { Check, Loader2, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -340,9 +340,7 @@ export function ChannelQrConnectFlow({
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
           ) : succeeded ? (
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          ) : (
-            <Network className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          )}
+          ) : null}
           {pending
             ? labels.connecting
             : succeeded

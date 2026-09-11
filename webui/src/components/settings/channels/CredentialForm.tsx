@@ -3,6 +3,7 @@ import { Check, CircleAlert, Eye, EyeOff, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { ChannelConfigField } from "@/components/settings/channels/catalog";
 import { cn } from "@/lib/utils";
 
@@ -142,7 +143,7 @@ export function CredentialForm({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className={cn(compact ? "space-y-0" : "mt-3 space-y-2.5")}>
+    <div className={cn("grid", compact ? "gap-y-4" : "mt-3 gap-y-2.5")}>
       {fields.map((field) => {
         const inputId = channelFieldInputId(field.key);
         const error = errors[field.key];
@@ -186,7 +187,7 @@ export function CredentialForm({
               aria-describedby={describedBy}
               className="block"
             >
-              <div className="grid min-h-[52px] grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-4">
+              <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-4">
               <span id={`${inputId}-label`} className="flex min-h-12 items-center sm:min-h-10">{header}</span>
               <div className="min-w-0">
               <span
@@ -218,8 +219,35 @@ export function CredentialForm({
             </fieldset>
           );
         }
+        if (field.kind === "json") {
+          return (
+            <div key={field.key} className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-4">
+              <label htmlFor={inputId} className="flex min-h-10 min-w-0 items-center self-start sm:min-h-9">
+                {header}
+              </label>
+              <div className="min-w-0">
+                <Textarea
+                  id={inputId}
+                  aria-label={field.label}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={describedBy}
+                  placeholder={field.placeholder}
+                  value={value}
+                  onChange={(event) => onChange(field.key, event.target.value)}
+                  rows={4}
+                  spellCheck={false}
+                  className={cn(
+                    "resize-y border-border/40 bg-background font-mono text-[12px]",
+                    error && "border-destructive focus-visible:ring-destructive/30",
+                  )}
+                />
+                {errorMessage}
+              </div>
+            </div>
+          );
+        }
         return (
-          <div key={field.key} className="grid min-h-[52px] grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-4">
+          <div key={field.key} className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-x-4">
             <label htmlFor={inputId} className="flex min-h-10 min-w-0 items-center self-start sm:min-h-9">{header}</label>
             <div className="min-w-0">
             <span className="relative block">

@@ -22,6 +22,47 @@
       "group_allowFrom": {
         "label": "Allowed groups",
         "placeholder": "Group IDs"
+      },
+      "groupMessageBufferSize": {
+        "label": "Group context messages"
+      },
+      "attachmentsDir": {
+        "label": "Attachment directory"
+      },
+      "dm_enabled": {
+        "label": "Enable direct messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "dm_policy": {
+        "label": "Direct message access",
+        "choices": {
+          "allowlist": "Allowlist",
+          "open": "Open"
+        }
+      },
+      "group_enabled": {
+        "label": "Enable groups",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "group_policy": {
+        "label": "Group access",
+        "choices": {
+          "allowlist": "Allowlist",
+          "open": "Open"
+        }
+      },
+      "group_requireMention": {
+        "label": "Require mention in groups",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
       }
     }
   }

@@ -42,8 +42,8 @@
       "description": "nanobot Web UI —— 与你的 nanobot 工作区对话。"
     },
     "pairing": {
-      "title": "配对聊天用户",
-      "description": "输入聊天中显示的配对码。",
+      "title": "配对你的聊天账号",
+      "description": "输入你在聊天平台中收到的配对码。",
       "code": "配对码",
       "matched": "已匹配 {{channel}}，正在连接…",
       "expiresInline": "配对码将于 {{expires}} 过期。",

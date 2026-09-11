@@ -22,6 +22,19 @@
       "allowFrom": {
         "label": "Người dùng được phép",
         "placeholder": "ID QQ, phân tách bằng dấu phẩy"
+      },
+      "groupPolicyOverrides": {
+        "label": "Ghi đè hành vi nhóm (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "Chào mừng thành viên mới",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "maxImageBytes": {
+        "label": "Kích thước hình ảnh tối đa"
       }
     }
   }

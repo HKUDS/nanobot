@@ -21,6 +21,18 @@
           "plain": "Văn bản thuần",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "Thông báo xác nhận"
+      },
+      "mediaDir": {
+        "label": "Thư mục phương tiện"
+      },
+      "downloadChunkSize": {
+        "label": "Kích thước khối tải xuống"
+      },
+      "downloadMaxBytes": {
+        "label": "Kích thước tải xuống tối đa"
       }
     }
   }

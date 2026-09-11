@@ -22,6 +22,71 @@
           "open": "Todos los mensajes",
           "allowlist": "Lista de permitidos"
         }
+      },
+      "mode": {
+        "label": "Modo de conexión",
+        "choices": {
+          "polling": "sondeo largo",
+          "webhook": "gancho web"
+        }
+      },
+      "replyToMessage": {
+        "label": "Responder al mensaje",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Leer emojis"
+      },
+      "connectionPoolSize": {
+        "label": "Tamaño del grupo de conexiones"
+      },
+      "poolTimeout": {
+        "label": "Tiempo de espera del grupo de conexiones"
+      },
+      "streaming": {
+        "label": "Transmisión",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "teclados en línea",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "richMessages": {
+        "label": "Mensajes ricos",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Intervalo de actualización de la transmisión"
+      },
+      "webhookUrl": {
+        "label": "URL de webhook"
+      },
+      "webhookListenHost": {
+        "label": "Anfitrión de escucha de webhook"
+      },
+      "webhookListenPort": {
+        "label": "Puerto de escucha de webhook"
+      },
+      "webhookPath": {
+        "label": "Ruta del webhook"
+      },
+      "webhookSecretToken": {
+        "label": "Token secreto de webhook"
+      },
+      "webhookMaxConnections": {
+        "label": "Conexiones máximas de webhooks"
       }
     }
   }

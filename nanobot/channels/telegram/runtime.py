@@ -655,6 +655,8 @@ class TelegramChannel(BaseChannel):
     async def _start_app(self) -> None:
         """Build, initialize and start the Telegram application."""
         proxy = self.config.proxy or None
+        if proxy and "://" not in proxy:
+            proxy = f"http://{proxy}"
 
         # Separate pools so long-polling (getUpdates) never starves outbound sends.
         api_request = HTTPXRequest(

@@ -21,6 +21,18 @@
           "plain": "Texto simples",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "Mensagem de confirmação"
+      },
+      "mediaDir": {
+        "label": "Diretório de mídia"
+      },
+      "downloadChunkSize": {
+        "label": "Baixar tamanho do pedaço"
+      },
+      "downloadMaxBytes": {
+        "label": "Tamanho máximo de download"
       }
     }
   }

@@ -11,12 +11,19 @@ from nanobot.channels.whatsapp.connect import WhatsAppConnectStore
 
 
 class _FakeClient:
-    def __init__(self, channel: "_FakeChannel", *, complete: bool) -> None:
+    def __init__(
+        self,
+        channel: "_FakeChannel",
+        *,
+        complete: bool,
+        stop_gate: asyncio.Event | None = None,
+    ) -> None:
         self.channel = channel
         self.complete = complete
         self.result: asyncio.Future[None] | None = None
         self.qr_handler: Any = None
         self.stopped = False
+        self.stop_gate = stop_gate
 
     async def connect(self) -> None:
         await self.qr_handler(b"whatsapp-qr-payload")
@@ -28,13 +35,20 @@ class _FakeClient:
         await asyncio.Event().wait()
 
     async def stop(self) -> None:
+        if self.stop_gate is not None:
+            await self.stop_gate.wait()
         self.stopped = True
 
 
 class _FakeChannel:
-    def __init__(self, *, complete: bool) -> None:
+    def __init__(
+        self,
+        *,
+        complete: bool,
+        stop_gate: asyncio.Event | None = None,
+    ) -> None:
         self.config = SimpleNamespace(database_path="")
-        self.client = _FakeClient(self, complete=complete)
+        self.client = _FakeClient(self, complete=complete, stop_gate=stop_gate)
 
     def connect_open_client(
         self,
@@ -92,5 +106,51 @@ async def test_whatsapp_connect_cancel_preserves_existing_session(
 
     assert cancelled["status"] == "cancelled"
     assert target.read_bytes() == b"working-session"
+    assert not pending_path.exists()
+    assert channel.client.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_connect_clears_qr_while_finishing_login(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "neonize.db"
+    stop_gate = asyncio.Event()
+    channel = _FakeChannel(complete=True, stop_gate=stop_gate)
+    store = WhatsAppConnectStore()
+    monkeypatch.setattr(store, "_build_channel", lambda: (channel, target))
+
+    started = await store.start(force=True)
+    finishing = await store.poll(started["session_id"])
+
+    assert finishing["status"] == "pending"
+    assert finishing["qr_url"] == ""
+
+    stop_gate.set()
+    await asyncio.sleep(0)
+    completed = await store.poll(started["session_id"])
+
+    assert completed["status"] == "succeeded"
+    assert target.read_bytes() == b"new-session"
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_connect_store_closes_pending_login(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "neonize.db"
+    channel = _FakeChannel(complete=False)
+    store = WhatsAppConnectStore()
+    monkeypatch.setattr(store, "_build_channel", lambda: (channel, target))
+
+    started = await store.start(force=True)
+    pending_path = Path(channel.config.database_path)
+    pending_path.write_bytes(b"partial-session")
+
+    await store.close()
+
+    assert started["status"] == "pending"
     assert not pending_path.exists()
     assert channel.client.stopped is True

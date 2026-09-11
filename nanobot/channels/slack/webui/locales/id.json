@@ -21,6 +21,72 @@
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
+      },
+      "mode": {
+        "label": "Modus koneksi",
+        "choices": {
+          "socket": "Mode Soket"
+        }
+      },
+      "webhookPath": {
+        "label": "Jalur webhook"
+      },
+      "replyInThread": {
+        "label": "Balas di thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "doneEmoji": {
+        "label": "Selesai emoji"
+      },
+      "includeThreadContext": {
+        "label": "Sertakan konteks thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Batas konteks thread"
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan"
+      },
+      "groupAllowFrom": {
+        "label": "Saluran yang diizinkan"
+      },
+      "groupRequireMention": {
+        "label": "Wajibkan penyebutan di saluran",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_enabled": {
+        "label": "Aktifkan pesan langsung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_policy": {
+        "label": "Akses pesan langsung",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Mengizinkan pengguna pesan langsung"
+      },
+      "proxy": {
+        "label": "Proxy jaringan",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

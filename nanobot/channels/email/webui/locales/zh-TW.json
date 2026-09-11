@@ -78,6 +78,83 @@
           "true": "開啟",
           "false": "關閉"
         }
+      },
+      "imapMailbox": {
+        "label": "IMAP 信箱"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "自動回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "markSeen": {
+        "label": "標為已讀",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "postAction": {
+        "label": "處理後",
+        "choices": {
+          "delete": "刪除",
+          "move": "移動"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "移至信箱"
+      },
+      "postActionExpunge": {
+        "label": "永久執行操作",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "忽略未處理郵件",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "maxBodyChars": {
+        "label": "正文長度上限"
+      },
+      "subjectPrefix": {
+        "label": "回覆主題前綴"
+      },
+      "allowedAttachmentTypes": {
+        "label": "允許的附件類型"
+      },
+      "maxAttachmentSize": {
+        "label": "附件大小上限"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "附件數量上限"
       }
     }
   }

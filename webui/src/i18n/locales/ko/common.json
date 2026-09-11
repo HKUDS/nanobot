@@ -42,8 +42,8 @@
       "description": "nanobot 웹 UI — nanobot 작업공간과 대화하세요."
     },
     "pairing": {
-      "title": "채팅 사용자 연결",
-      "description": "채팅에 표시된 연결 코드를 입력하세요.",
+      "title": "내 채팅 계정 페어링",
+      "description": "채팅에서 받은 페어링 코드를 입력하세요.",
       "code": "연결 코드",
       "matched": "{{channel}} 일치. 연결 중...",
       "expiresInline": "코드 만료: {{expires}}.",

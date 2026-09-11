@@ -34,6 +34,78 @@
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
         "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "allowFromMatchMode": {
+        "label": "Pencocokan pengguna",
+        "choices": {
+          "email": "Surel",
+          "id": "ID Pengguna",
+          "username": "Nama pengguna"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Saluran yang diizinkan"
+      },
+      "replyInThread": {
+        "label": "Balas di thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Sertakan konteks thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Batas konteks thread"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "doneEmoji": {
+        "label": "Selesai emoji"
+      },
+      "sendProgress": {
+        "label": "Kirim kemajuan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "sendToolHints": {
+        "label": "Kirim petunjuk alat",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_enabled": {
+        "label": "Aktifkan pesan langsung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_policy": {
+        "label": "Akses pesan langsung",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Mengizinkan pengguna pesan langsung"
       }
     }
   }

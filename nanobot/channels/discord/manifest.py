@@ -8,9 +8,17 @@ from nanobot.channels.plugin import ChannelPlugin
 SETUP_SPEC = ChannelSetupSpec(
     fields={
         "token": field("secret"),
+        "proxy": field(),
+        "proxyUsername": field(),
+        "proxyPassword": field("secret"),
         "allowFrom": field("list", snapshot=False),
         "allowChannels": field("list"),
         "groupPolicy": field("enum", choices=DIRECT_GROUP_POLICIES, default="mention"),
+        "intents": field("int", default=37377),
+        "readReceiptEmoji": field(default="👀"),
+        "workingEmoji": field(default="🔧"),
+        "workingEmojiDelay": field("float", default=2.0),
+        "streaming": field("bool", default=True),
     },
     required=(required("token"),),
     official_url="https://discord.com/developers/applications",

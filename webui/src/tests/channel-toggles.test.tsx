@@ -134,8 +134,12 @@ describe("optimistic channel switches", () => {
           mutation.reject(new Error("Channel update failed"));
         }
       });
-      await waitFor(() => expect(toggle).toBeEnabled());
-      expect(toggle).toHaveAttribute("aria-checked", String(succeeds ? !initial : initial));
+      if (surface === "catalog" && initial && succeeds) {
+        await waitFor(() => expect(toggle).not.toBeInTheDocument());
+      } else {
+        await waitFor(() => expect(toggle).toBeEnabled());
+        expect(toggle).toHaveAttribute("aria-checked", String(succeeds ? !initial : initial));
+      }
       if (!succeeds) expect(screen.getByText("Channel update failed")).toBeVisible();
       if (surface === "instance") {
         expect(screen.getByRole("switch", { name: "Second instance" })).toBeEnabled();

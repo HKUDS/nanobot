@@ -8,6 +8,7 @@ from nanobot.channels.whatsapp.validation import validate
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
+        "proxy": field(),
         "allowFrom": field("list", snapshot=False),
         "groupPolicy": field(
             "enum",
@@ -16,6 +17,7 @@ SETUP_SPEC = ChannelSetupSpec(
             snapshot=False,
         ),
         "databasePath": field(writable=False, snapshot=False),
+        "lidMappings": field("json", writable=False, snapshot=False),
     },
     official_url="https://faq.whatsapp.com/",
     validator=validate,
@@ -29,7 +31,7 @@ PLUGIN = ChannelPlugin(
     setup=SETUP_SPEC,
     management=ChannelManagementSpec(local_state_present=local_state_present),
     dependencies=(
-        "neonize>=0.3.18.post0,<0.4.0",
+        "neonize>=0.4.3.post0,<0.5.0",
         "segno>=1.6.1,<2.0.0",
     ),
     webui="webui/index.tsx",

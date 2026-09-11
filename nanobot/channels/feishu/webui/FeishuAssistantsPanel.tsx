@@ -46,30 +46,6 @@ export function FeishuAssistantsPanel({
             onFeaturesUpdate={onFeaturesUpdate}
           />
         ),
-        footer: (
-          <div className="mt-3 overflow-hidden rounded-floating border border-dashed border-border/70 bg-background/60 p-4 sm:flex sm:items-center sm:justify-between sm:gap-4">
-            <div className="min-w-0">
-              <div className="text-[13px] font-semibold text-foreground">
-                {tx("custom.createAnother", "Create another assistant")}
-              </div>
-              <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
-                {tx(
-                  "custom.createHint",
-                  "Create a separate Feishu bot for another team, space, or workflow.",
-                )}
-              </p>
-            </div>
-            <div className="shrink-0 [&>div]:mt-0">
-              <FeishuConnectFlow
-                token={token}
-                instanceId="default"
-                mode="create"
-                idleLabel={tx("custom.createAssistant", "Create assistant")}
-                onFeaturesUpdate={onFeaturesUpdate}
-              />
-            </div>
-          </div>
-        ),
       }}
     />
   );

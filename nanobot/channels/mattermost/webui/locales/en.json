@@ -34,6 +34,78 @@
       "allowFrom": {
         "label": "Allowed users",
         "placeholder": "User IDs, comma separated"
+      },
+      "allowFromMatchMode": {
+        "label": "User matching",
+        "choices": {
+          "email": "Email",
+          "id": "User ID",
+          "username": "Username"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Allowed channels"
+      },
+      "replyInThread": {
+        "label": "Reply in thread",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Include thread context",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Thread context limit"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "reactEmoji": {
+        "label": "Read emoji"
+      },
+      "doneEmoji": {
+        "label": "Done emoji"
+      },
+      "sendProgress": {
+        "label": "Send progress",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "sendToolHints": {
+        "label": "Send tool hints",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "dm_enabled": {
+        "label": "Enable direct messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "dm_policy": {
+        "label": "Direct message access",
+        "choices": {
+          "allowlist": "Allowlist",
+          "open": "Open"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Allowed direct-message users"
       }
     }
   }

@@ -14,6 +14,30 @@
       "allowFrom": {
         "label": "Người dùng được phép",
         "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "Cho phép chuyển hướng phương tiện",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "Máy chủ chuyển hướng phương tiện"
+      },
+      "groupUserIsolation": {
+        "label": "Các buổi nhóm riêng biệt",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "Tắt tin nhắn trực tiếp",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
       }
     }
   }

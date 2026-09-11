@@ -22,6 +22,71 @@
           "open": "所有訊息",
           "allowlist": "允許清單"
         }
+      },
+      "mode": {
+        "label": "連接方式",
+        "choices": {
+          "polling": "長輪詢",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "引用回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "reactEmoji": {
+        "label": "已讀表情"
+      },
+      "connectionPoolSize": {
+        "label": "連線池大小"
+      },
+      "poolTimeout": {
+        "label": "連接池逾時"
+      },
+      "streaming": {
+        "label": "串流輸出",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "內聯鍵盤",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "richMessages": {
+        "label": "富文本訊息",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "streamEditInterval": {
+        "label": "串流更新間隔"
+      },
+      "webhookUrl": {
+        "label": "Webhook 地址"
+      },
+      "webhookListenHost": {
+        "label": "Webhook 監聽地址"
+      },
+      "webhookListenPort": {
+        "label": "Webhook 監聽端口"
+      },
+      "webhookPath": {
+        "label": "Webhook 路徑"
+      },
+      "webhookSecretToken": {
+        "label": "Webhook 密鑰"
+      },
+      "webhookMaxConnections": {
+        "label": "Webhook 最大連線數"
       }
     }
   }

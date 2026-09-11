@@ -30,6 +30,53 @@
           "open": "Todos los mensajes",
           "allowlist": "Lista de permitidos"
         }
+      },
+      "allowFrom": {
+        "label": "Usuarios permitidos"
+      },
+      "e2eeEnabled": {
+        "label": "Cifrado de extremo a extremo",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "sasVerification": {
+        "label": "verificación SAS",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Período de gracia para detener la sincronización"
+      },
+      "maxMediaBytes": {
+        "label": "Tamaño máximo de medios"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Descargas multimedia simultáneas"
+      },
+      "groupAllowFrom": {
+        "label": "Grupos permitidos"
+      },
+      "allowRoomMentions": {
+        "label": "Permitir menciones de sala",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "streaming": {
+        "label": "Transmisión",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "proxy": {
+        "label": "Proxy de red",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

@@ -37,6 +37,38 @@
           "true": "Uma sessão separada por tópico",
           "false": "Uma sessão compartilhada para o grupo"
         }
+      },
+      "name": {
+        "label": "Nome da conta"
+      },
+      "encryptKey": {
+        "label": "Chave de criptografia"
+      },
+      "verificationToken": {
+        "label": "Token de verificação"
+      },
+      "reactEmoji": {
+        "label": "Ler emoticons"
+      },
+      "doneEmoji": {
+        "label": "Emoji pronto"
+      },
+      "toolHintPrefix": {
+        "label": "Prefixo de dica de ferramenta"
+      },
+      "replyToMessage": {
+        "label": "Responder à mensagem",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "streaming": {
+        "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
       }
     }
   },
@@ -44,9 +76,6 @@
     "toggleAssistant": "Ativar assistente {{name}}",
     "configured": "Conectado",
     "needsSetup": "Precisa de autorização",
-    "createAnother": "Criar outro assistente",
-    "createHint": "Crie um bot Feishu separado para outra equipe, espaço ou fluxo de trabalho.",
-    "createAssistant": "Criar assistente",
     "qrAlt": "QR code de conexão do Feishu",
     "scanTitle": "Escaneie com o Feishu",
     "scanDescription": "Escaneie com Feishu ou Lark no celular. O nanobot concluirá a configuração após a autorização.",

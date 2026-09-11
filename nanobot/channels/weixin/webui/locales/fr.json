@@ -12,20 +12,48 @@
         "label": "Jeton",
         "placeholder": "Enregistré après la connexion QR"
       },
-      "sendProgress": { "label": "Envoyer la progression" },
-      "sendToolHints": { "label": "Envoyer un résumé de l’activité des outils" },
-      "streaming": { "label": "Utiliser l’API de streaming" },
-      "replyProgressMessages": { "label": "Envoyer la progression structurée" },
-      "replyProgressMaxMessages": { "label": "Limite de progression structurée" },
-      "contextMessageBudget": { "label": "Nombre maximal de messages de contexte" },
-      "blockStreaming": { "label": "Envoyer la réponse par blocs" },
-      "blockStreamingMinChars": { "label": "Taille minimale d’un bloc" },
-      "blockStreamingMaxMessages": { "label": "Limite de messages par blocs" },
-      "baseUrl": { "label": "URL de l’API" },
-      "cdnBaseUrl": { "label": "URL du CDN" },
-      "routeTag": { "label": "Étiquette de routage" },
-      "stateDir": { "label": "Répertoire d’état" },
-      "pollTimeout": { "label": "Délai d’interrogation (secondes)" }
+      "sendProgress": {
+        "label": "Envoyer la progression"
+      },
+      "sendToolHints": {
+        "label": "Envoyer un résumé de l’activité des outils"
+      },
+      "streaming": {
+        "label": "Utiliser l’API de streaming"
+      },
+      "replyProgressMessages": {
+        "label": "Envoyer la progression structurée"
+      },
+      "replyProgressMaxMessages": {
+        "label": "Limite de progression structurée"
+      },
+      "contextMessageBudget": {
+        "label": "Nombre maximal de messages de contexte"
+      },
+      "blockStreaming": {
+        "label": "Envoyer la réponse par blocs"
+      },
+      "blockStreamingMinChars": {
+        "label": "Taille minimale d’un bloc"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "Limite de messages par blocs"
+      },
+      "baseUrl": {
+        "label": "URL de l’API"
+      },
+      "cdnBaseUrl": {
+        "label": "URL du CDN"
+      },
+      "routeTag": {
+        "label": "Étiquette de routage"
+      },
+      "stateDir": {
+        "label": "Répertoire d’état"
+      },
+      "pollTimeout": {
+        "label": "Délai d’interrogation (secondes)"
+      }
     }
   },
   "custom": {

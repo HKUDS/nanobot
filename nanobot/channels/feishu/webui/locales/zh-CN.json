@@ -38,6 +38,38 @@
           "true": "每个话题使用独立会话",
           "false": "群聊共用一个会话"
         }
+      },
+      "name": {
+        "label": "账户名称"
+      },
+      "encryptKey": {
+        "label": "加密密钥"
+      },
+      "verificationToken": {
+        "label": "验证令牌"
+      },
+      "reactEmoji": {
+        "label": "已读表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "toolHintPrefix": {
+        "label": "工具提示前缀"
+      },
+      "replyToMessage": {
+        "label": "引用回复",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "streaming": {
+        "label": "流式输出",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
       }
     }
   },
@@ -45,9 +77,6 @@
     "toggleAssistant": "{{name}} 助手",
     "configured": "已连接",
     "needsSetup": "需要授权",
-    "createAnother": "创建另一个助手",
-    "createHint": "为其他团队、空间或工作流创建独立的飞书机器人。",
-    "createAssistant": "创建助手",
     "qrAlt": "飞书连接二维码",
     "scanTitle": "使用飞书扫码",
     "scanDescription": "用手机上的飞书或 Lark 扫描二维码。授权完成后，nanobot 会自动完成配置。",

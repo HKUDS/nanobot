@@ -34,6 +34,78 @@
       "allowFrom": {
         "label": "Người dùng được phép",
         "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "allowFromMatchMode": {
+        "label": "So khớp người dùng",
+        "choices": {
+          "email": "Email",
+          "id": "ID người dùng",
+          "username": "Tên người dùng"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Các kênh được phép"
+      },
+      "replyInThread": {
+        "label": "Trả lời trong chủ đề",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Bao gồm bối cảnh chủ đề",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Giới hạn bối cảnh của chủ đề"
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "reactEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "doneEmoji": {
+        "label": "biểu tượng cảm xúc xong"
+      },
+      "sendProgress": {
+        "label": "Gửi tiến trình",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "sendToolHints": {
+        "label": "Gửi gợi ý công cụ",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "dm_enabled": {
+        "label": "Bật tin nhắn trực tiếp",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "dm_policy": {
+        "label": "Truy cập tin nhắn trực tiếp",
+        "choices": {
+          "allowlist": "Danh sách cho phép",
+          "open": "Mở"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Cho phép người dùng nhắn tin trực tiếp"
       }
     }
   }

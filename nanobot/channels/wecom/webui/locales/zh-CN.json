@@ -15,6 +15,9 @@
       "allowFrom": {
         "label": "允许的用户",
         "placeholder": "用户 ID，用逗号分隔"
+      },
+      "welcomeMessage": {
+        "label": "欢迎消息"
       }
     }
   }

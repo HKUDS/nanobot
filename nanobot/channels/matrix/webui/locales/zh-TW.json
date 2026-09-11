@@ -30,6 +30,53 @@
           "open": "所有訊息",
           "allowlist": "允許清單"
         }
+      },
+      "allowFrom": {
+        "label": "允許的用戶"
+      },
+      "e2eeEnabled": {
+        "label": "端對端加密",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 驗證",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "同步停止等待時間"
+      },
+      "maxMediaBytes": {
+        "label": "媒體大小上限"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "並發媒體下載數"
+      },
+      "groupAllowFrom": {
+        "label": "允許的群組"
+      },
+      "allowRoomMentions": {
+        "label": "響應房間提及",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "streaming": {
+        "label": "串流輸出",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "proxy": {
+        "label": "網路代理",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

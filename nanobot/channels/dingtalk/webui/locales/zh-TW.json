@@ -15,6 +15,30 @@
       "allowFrom": {
         "label": "允許的使用者",
         "placeholder": "使用者 ID，以逗號分隔"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "允許媒體重定向",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "允許重定向的媒體主機"
+      },
+      "groupUserIsolation": {
+        "label": "按群組成員隔離會話",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "停用私聊",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
       }
     }
   }

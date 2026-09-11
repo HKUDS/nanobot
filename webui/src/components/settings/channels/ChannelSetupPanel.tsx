@@ -2,10 +2,12 @@ import { channelValidationMessage } from "./validationMessages";
 import {
   Suspense,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   type ComponentType,
+  type ReactNode,
 } from "react";
 import {
   Check,
@@ -38,6 +40,7 @@ import {
 import {
   ChannelLogo,
   ChannelRuntimeError,
+  CHANNEL_SETUP_PANEL_CLASS_NAME,
   ChannelStatusBadge,
   channelSetup,
   channelStatusLabel,
@@ -72,12 +75,14 @@ export function ChannelCatalogRow({
   showBrandLogos,
   onSelect,
   actionKey,
+  actionsDisabled = false,
   onAction,
 }: {
   feature: NanobotFeatureInfo;
   showBrandLogos: boolean;
   onSelect: (connect?: boolean) => void;
   actionKey: string | null;
+  actionsDisabled?: boolean;
   onAction: ChannelFeatureAction;
 }) {
   const { t } = useTranslation();
@@ -130,6 +135,7 @@ export function ChannelCatalogRow({
             defaultValue: "View {{name}} settings",
           })}
           aria-haspopup="dialog"
+          disabled={actionsDisabled}
           onClick={() => feature.installed ? onSelect() : pointToInstall()}
           className="group flex min-w-0 flex-1 select-none items-center gap-3 rounded-control text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border/80"
         >
@@ -150,7 +156,7 @@ export function ChannelCatalogRow({
               "h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0 shadow-sm settings-hover active:scale-[0.96]",
               installHint && "border-[#2997FF]/60 bg-[#2997FF]/10 text-[#087FE7] ring-2 ring-[#2997FF]/25 ring-offset-2",
             )}
-            disabled={anyActionBusy || !feature.install_supported}
+            disabled={actionsDisabled || anyActionBusy || !feature.install_supported}
             aria-label={t("settings.channels.installChannel", { name: displayName })}
             onClick={() => {
               setInstallHint(false);
@@ -164,7 +170,7 @@ export function ChannelCatalogRow({
         ) : (
           <ToggleButton checked={checked}
             label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            disabled={alwaysEnabled || anyActionBusy}
+            disabled={alwaysEnabled || actionsDisabled || anyActionBusy}
             ariaLabel={t("settings.channels.toggleChannel", { name: displayName, defaultValue: "{{name}} channel" })}
             onChange={(enabled) => {
               if (enabled && feature.configured === false) onSelect(true);
@@ -228,52 +234,51 @@ export function ChannelSetupPanel({
   const anyActionBusy = Boolean(actionKey);
   const installSupportLabel = tx("settings.channels.install", "Install");
 
+  const header = (
+    <div className="flex min-w-0 items-center gap-3">
+      <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
+      <h3 className="sr-only">{displayName}</h3>
+      {missingSupport && feature.install_supported ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={anyActionBusy}
+          onClick={() => onAction("enable", feature.name, { installOnly: true, confirmed: true })}
+          className="h-8 rounded-full px-3 text-[12px] font-semibold"
+        >
+          {enableBusy ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+          )}
+          {installSupportLabel}
+        </Button>
+      ) : null}
+    </div>
+  );
+
   return (
-    <aside className="rounded-panel bg-background p-6">
-      <div className="flex items-start justify-between gap-4 pr-16">
-        <div className="flex min-w-0 max-w-full items-center gap-3">
-          <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
-          <div className="min-w-0 flex-1">
-            <h3 className="sr-only">
-              {displayName}
-            </h3>
-            {missingSupport && feature.install_supported ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={anyActionBusy}
-                onClick={() => onAction("enable", feature.name, { installOnly: true, confirmed: true })}
-                className="mt-2 h-8 rounded-full px-3 text-[12px] font-semibold"
-              >
-                {enableBusy ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : (
-                  <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                )}
-                {installSupportLabel}
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      <ChannelRuntimeError message={feature.runtime_error} className="mt-4" />
-
-      {!missingSupport ? <ChannelSetupSurface
+    <aside className={CHANNEL_SETUP_PANEL_CLASS_NAME}>
+      {missingSupport ? <>
+        <div className="pe-20">{header}</div>
+        <ChannelRuntimeError message={feature.runtime_error} className="mt-4" />
+      </> : <ChannelSetupSurface
         key={feature.name}
+        header={header}
         token={token}
         feature={feature}
         setup={setup}
         connectRequestId={connectRequestId}
         ConnectFlow={feature.installed ? uiContribution?.ConnectFlow : undefined}
         onFeaturesUpdate={onFeaturesUpdate}
-      /> : null}
+      />}
     </aside>
   );
 }
 
 function ChannelSetupSurface({
+  header,
   token,
   feature,
   setup,
@@ -281,6 +286,7 @@ function ChannelSetupSurface({
   ConnectFlow,
   onFeaturesUpdate,
 }: {
+  header: ReactNode;
   token: string;
   feature: NanobotFeatureInfo;
   setup: ChannelSetupPresentation;
@@ -301,6 +307,8 @@ function ChannelSetupSurface({
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
   const [clearedSecrets, setClearedSecrets] = useState<Set<string>>(() => new Set());
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedPanelId = useId();
   const configValuesKey = JSON.stringify(feature.config_values ?? {});
   const configuredFields = useMemo(
     () => new Set(feature.configured_fields ?? []),
@@ -435,6 +443,7 @@ function ChannelSetupSurface({
           tx("settings.channels.fieldRequired", "Required to complete setup."),
         );
         setFieldErrors(errors);
+        if (advancedFields.some((field) => errors[field.key])) setAdvancedOpen(true);
         focusFirstChannelFieldError(errors);
         setNotice(
           (validationPayload.message ? channelValidationMessage(validationPayload.message, t) : undefined)
@@ -506,110 +515,188 @@ function ChannelSetupSurface({
     }
   };
 
+  const inlineActions = mode === "credentials" && primaryFields.length === 1
+    && !advancedOpen && !setup.presets?.length && !setup.actions?.length;
+  const credentialActions = mode === "credentials" ? (
+    <div className="ms-auto flex min-h-8 flex-wrap items-center justify-end gap-x-3 gap-y-2">
+      {enabled && (touchedFields.size > 0 || clearedSecrets.size > 0) ? (
+        <Button type="submit" size="sm" variant="secondary" disabled={actionPending}>
+          {tx("settings.actions.save", "Save")}
+        </Button>
+      ) : null}
+      {feature.setup?.verifies_connection ? (
+        <Button type="button" size="sm" variant="ghost"
+          className="h-8 rounded-full px-3 text-[12px] font-semibold"
+          onClick={() => void checkCurrentSettings()} disabled={actionPending}>
+          {validating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+          {tx("settings.channels.checkOnly", "Check")}
+        </Button>
+      ) : null}
+      <ToggleButton checked={enabled} disabled={actionPending}
+        label={tx("settings.channels.enable", "Enable")}
+        onChange={(next) => void toggleEnabled(next)} />
+    </div>
+  ) : null;
+
   return (
     <form
-      className="mt-5 space-y-5"
+      className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault();
         if (mode === "credentials") void saveCredentialSettings();
       }}
     >
-      <section>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex max-w-full flex-wrap justify-end gap-2">
-            {mode !== "webui" && (validation || validating) ? (
-              <ChannelValidationBadge
-                validation={validation}
-                validating={validating}
-                feature={feature}
-              />
-            ) : null}
-            {mode === "webui" ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11.5px] font-medium text-emerald-700 dark:text-emerald-200">
-                <Check className="h-3.5 w-3.5" aria-hidden />
-                {tx("settings.channels.managedByWebui", "Managed by WebUI")}
-              </span>
-            ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pe-20">
+        {header}
+        {hasAdvanced ? (
+          <button
+            type="button"
+            className="inline-flex min-h-8 items-center gap-1.5 rounded px-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-offset-2"
+            aria-expanded={advancedOpen}
+            aria-controls={advancedPanelId}
+            onClick={() => setAdvancedOpen((current) => !current)}
+          >
+            {tx("settings.channels.advanced", "Advanced")}
+            <ChevronDown className={cn(
+              "h-3.5 w-3.5 transition-transform motion-reduce:transition-none",
+              advancedOpen && "rotate-180",
+            )} aria-hidden />
+          </button>
+        ) : null}
+      </div>
+      <ChannelRuntimeError message={feature.runtime_error} />
+      <div className="flex flex-wrap items-center gap-4">
+        <section className={cn("min-w-0", inlineActions ? "flex-[1_1_20rem]" : "w-full")}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex max-w-full flex-wrap justify-end gap-2">
+              {mode !== "webui" && (validation || validating) ? (
+                <ChannelValidationBadge
+                  validation={validation}
+                  validating={validating}
+                  feature={feature}
+                />
+              ) : null}
+              {mode === "webui" ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11.5px] font-medium text-emerald-700 dark:text-emerald-200">
+                  <Check className="h-3.5 w-3.5" aria-hidden />
+                  {tx("settings.channels.managedByWebui", "Managed by WebUI")}
+                </span>
+              ) : null}
+            </div>
           </div>
-        </div>
-        {validation?.identity?.name ? <ChannelValidationDetails validation={validation} /> : null}
-        <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
+          {validation?.identity?.name ? <ChannelValidationDetails validation={validation} /> : null}
+          <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
-        {mode === "connect" && !feature.installed ? null : mode === "connect" && ConnectFlow ? (
-          <Suspense fallback={<ChannelPluginLoading compact />}>
-            <ConnectFlow
-              token={token}
-              feature={feature}
-              idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-              connectRequestId={connectRequestId}
-              onFeaturesUpdate={onFeaturesUpdate}
-            />
-          </Suspense>
-        ) : mode === "connect" ? (
-          <>
-            <div className="mt-3 flex flex-wrap justify-end gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold settings-hover"
-                onClick={() =>
-                  setNotice(
-                    tx(
-                      "settings.channels.connectPreview",
-                      "Run the command below in your terminal to connect.",
-                    ),
-                  )
-                }
-              >
-                {setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-              </Button>
-              {setup.command ? (
+          {mode === "connect" && !feature.installed ? null : mode === "connect" && ConnectFlow ? (
+            <Suspense fallback={<ChannelPluginLoading compact />}>
+              <ConnectFlow
+                token={token}
+                feature={feature}
+                idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
+                connectRequestId={connectRequestId}
+                onFeaturesUpdate={onFeaturesUpdate}
+              />
+            </Suspense>
+          ) : mode === "connect" ? (
+            <>
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
-                  className="h-8 rounded-full px-3 text-[12px] font-semibold"
-                  onClick={copyCommand}
+                  className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold settings-hover"
+                  onClick={() =>
+                    setNotice(
+                      tx(
+                        "settings.channels.connectPreview",
+                        "Run the command below in your terminal to connect.",
+                      ),
+                    )
+                  }
                 >
-                  <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                  {tx("settings.channels.copyCommand", "Copy command")}
+                  {setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
                 </Button>
+                {setup.command ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 rounded-full px-3 text-[12px] font-semibold"
+                    onClick={copyCommand}
+                  >
+                    <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                    {tx("settings.channels.copyCommand", "Copy command")}
+                  </Button>
+                ) : null}
+              </div>
+              {setup.command ? (
+                <code className="mt-3 block rounded-control border border-border/50 bg-muted/45 px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground">
+                  {setup.command}
+                </code>
               ) : null}
-            </div>
-            {setup.command ? (
-              <code className="mt-3 block rounded-control border border-border/50 bg-muted/45 px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground">
-                {setup.command}
-              </code>
-            ) : null}
-          </>
-        ) : mode === "credentials" ? (
-          <>
-            {setup.presets?.length ? (
-              <ChannelProviderPresets
-                presets={setup.presets}
-                onApply={applyPreset}
-              />
-            ) : null}
-            {primaryFields.length ? (
-              <ChannelFieldGroups
-                fields={primaryFields}
-                values={fieldValues}
-                configuredFields={configuredFields}
-                visibleSecrets={visibleSecrets}
-                onChange={setFieldValue}
-                onToggleSecret={toggleSecret}
-                errors={fieldErrors}
-                clearedSecrets={clearedSecrets}
-                onClearSecret={setSecretCleared}
-                requirements={setup.requirements ?? []}
-                sectionLabels={setup.sectionLabels}
-              />
-            ) : null}
-          </>
-        ) : null}
-      </section>
+            </>
+          ) : mode === "credentials" ? (
+            <>
+              {setup.presets?.length ? (
+                <ChannelProviderPresets
+                  presets={setup.presets}
+                  onApply={applyPreset}
+                />
+              ) : null}
+              {primaryFields.length ? (
+                <ChannelFieldGroups
+                  fields={primaryFields}
+                  values={fieldValues}
+                  configuredFields={configuredFields}
+                  visibleSecrets={visibleSecrets}
+                  onChange={setFieldValue}
+                  onToggleSecret={toggleSecret}
+                  errors={fieldErrors}
+                  clearedSecrets={clearedSecrets}
+                  onClearSecret={setSecretCleared}
+                  requirements={setup.requirements ?? []}
+                  sectionLabels={setup.sectionLabels}
+                />
+              ) : null}
+            </>
+          ) : null}
+        </section>
 
+        {hasAdvanced ? (
+          <div id={advancedPanelId} hidden={!advancedOpen} className="min-w-0 w-full space-y-3 text-[12px] leading-5 text-muted-foreground">
+            <div className="space-y-2">
+              {savedSecretFields.filter((field) => !(fieldValues[field.key] ?? "").trim()).map((field) => (
+                <div key={field.key} className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                  <span>{field.label}</span>
+                  <button type="button" className="min-h-8 text-[12px] hover:text-foreground"
+                    onClick={() => setSecretCleared(field.key, !clearedSecrets.has(field.key))}>
+                    {clearedSecrets.has(field.key)
+                      ? tx("settings.channels.keepSavedSecret", "Keep saved credential")
+                      : tx("settings.channels.removeSavedSecret", "Remove saved credential")}
+                  </button>
+                </div>
+              ))}
+            </div>
+            {advancedFields.length ? (
+              <div onBlur={() => void saveConnectionSettings()}>
+                <CredentialForm
+                  fields={advancedFields}
+                  values={fieldValues}
+                  configuredFields={configuredFields}
+                  visibleSecrets={visibleSecrets}
+                  onChange={setFieldValue}
+                  onToggleSecret={toggleSecret}
+                  errors={fieldErrors}
+                  clearedSecrets={clearedSecrets}
+                  onClearSecret={setSecretCleared}
+                  compact
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {credentialActions}
+      </div>
       <div
         role="status"
         aria-live="polite"
@@ -620,70 +707,11 @@ function ChannelSetupSurface({
       >
         {notice ?? ""}
       </div>
-
-      {validation?.checks.length ? <ChannelValidationChecks validation={validation} /> : null}
-
-      <div className="relative min-h-8">
-        {mode === "credentials" ? (
-            <div className="absolute end-0 top-0 flex h-8 items-center justify-end gap-3">
-              {enabled && (touchedFields.size > 0 || clearedSecrets.size > 0) ? (
-                <Button type="submit" size="sm" variant="secondary" disabled={actionPending}>
-                  {tx("settings.actions.save", "Save")}
-                </Button>
-              ) : null}
-              {feature.setup?.verifies_connection ? (
-                <Button type="button" size="sm" variant="ghost"
-                  className="h-8 rounded-full px-3 text-[12px] font-semibold"
-                  onClick={() => void checkCurrentSettings()} disabled={actionPending}>
-                  {validating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-                  {tx("settings.channels.checkOnly", "Check")}
-                </Button>
-              ) : null}
-              <ToggleButton checked={enabled} disabled={actionPending}
-                label={tx("settings.channels.enable", "Enable")}
-                onChange={(next) => void toggleEnabled(next)} />
-            </div>
-        ) : null}
-      {hasAdvanced ? (
-        <details className="group text-[12px] leading-5 text-muted-foreground">
-          <summary className="flex h-8 w-fit cursor-pointer list-none items-center text-[12px] text-muted-foreground transition-colors hover:text-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              {tx("settings.channels.advanced", "Advanced")}
-              <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden />
-            </span>
-          </summary>
-          <div className="mt-3 space-y-2">
-            {savedSecretFields.filter((field) => !(fieldValues[field.key] ?? "").trim()).map((field) => (
-              <div key={field.key} className="flex min-h-9 items-center justify-between gap-4">
-                <span>{field.label}</span>
-                <button type="button" className="text-[12px] hover:text-foreground"
-                  onClick={() => setSecretCleared(field.key, !clearedSecrets.has(field.key))}>
-                  {clearedSecrets.has(field.key)
-                    ? tx("settings.channels.keepSavedSecret", "Keep saved credential")
-                    : tx("settings.channels.removeSavedSecret", "Remove saved credential")}
-                </button>
-              </div>
-            ))}
-          </div>
-          {advancedFields.length ? (
-            <div className="mt-3" onBlur={() => void saveConnectionSettings()}>
-              <CredentialForm
-                fields={advancedFields}
-                values={fieldValues}
-                configuredFields={configuredFields}
-                visibleSecrets={visibleSecrets}
-                onChange={setFieldValue}
-                onToggleSecret={toggleSecret}
-                errors={fieldErrors}
-                clearedSecrets={clearedSecrets}
-                onClearSecret={setSecretCleared}
-                compact
-              />
-            </div>
-          ) : null}
-        </details>
+      {validation?.checks.length ? (
+        <div className="min-w-0">
+          <ChannelValidationChecks validation={validation} />
+        </div>
       ) : null}
-      </div>
     </form>
   );
 }
@@ -765,7 +793,7 @@ function ChannelFieldGroups({
             <legend className={groups.size === 1 ? "sr-only" : "mb-2 text-[12px] font-medium text-muted-foreground"}>
               {channelFieldSectionLabel(section, tx, sectionLabels)}
             </legend>
-            <div className="rounded-control bg-settings-surface px-4 py-2">
+            <div>
               <CredentialForm fields={sectionFields} {...formProps} compact />
             </div>
           </fieldset>
@@ -858,7 +886,9 @@ function ChannelPluginLoading({ compact = false }: { compact?: boolean }) {
       role="status"
       className={cn(
         "flex items-center justify-center gap-2 text-sm text-muted-foreground",
-        compact ? "min-h-12" : "min-h-48",
+        compact
+          ? "min-h-12"
+          : `${CHANNEL_SETUP_PANEL_CLASS_NAME} min-h-48`,
       )}
     >
       <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />

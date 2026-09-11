@@ -14,6 +14,9 @@
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
         "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "welcomeMessage": {
+        "label": "Pesan selamat datang"
       }
     }
   }

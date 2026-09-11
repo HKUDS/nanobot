@@ -22,6 +22,19 @@
       "allowFrom": {
         "label": "허용된 사용자",
         "placeholder": "QQ ID, 쉼표로 구분"
+      },
+      "groupPolicyOverrides": {
+        "label": "그룹 동작 재정의(JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "새로운 회원을 환영합니다",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "maxImageBytes": {
+        "label": "최대 이미지 크기"
       }
     }
   }

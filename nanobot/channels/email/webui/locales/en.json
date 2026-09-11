@@ -77,6 +77,83 @@
           "true": "On",
           "false": "Off"
         }
+      },
+      "imapMailbox": {
+        "label": "IMAP mailbox"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Automatic replies",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "markSeen": {
+        "label": "Mark as read",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "postAction": {
+        "label": "After processing",
+        "choices": {
+          "delete": "Delete",
+          "move": "Move"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Move to mailbox"
+      },
+      "postActionExpunge": {
+        "label": "Permanently apply action",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignore skipped messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Maximum body length"
+      },
+      "subjectPrefix": {
+        "label": "Reply subject prefix"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Allowed attachment types"
+      },
+      "maxAttachmentSize": {
+        "label": "Maximum attachment size"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Maximum attachments"
       }
     }
   }

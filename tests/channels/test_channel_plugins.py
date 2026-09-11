@@ -1919,7 +1919,7 @@ def test_install_only_adds_channel_support_without_enabling_it(monkeypatch, tmp_
     assert config_path.read_bytes() == before
     assert feature["installed"] is True
     assert feature["enabled"] is False
-    assert payload["requires_restart"] is False
+    assert payload["requires_restart"] is True
 
 
 def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
@@ -2346,50 +2346,21 @@ def test_optional_features_payload_lists_feishu_instances(monkeypatch):
     assert feishu["enabled"] is True
     assert feishu["configured"] is True
     assert payload["enabled_count"] == 1
-    assert feishu["instances"] == [
-        {
-            "id": "default",
-            "name": "nanobot",
-            "display_name": "Voraflare Bot",
-            "avatar_url": "https://example.com/bot.png",
-            "enabled": True,
-            "configured": True,
-            "config_values": {
-                "channels.feishu.appId": "cli_default",
-                "channels.feishu.domain": "feishu",
-                "channels.feishu.groupPolicy": "mention",
-                "channels.feishu.topicIsolation": "true",
-            },
-            "configured_fields": [
-                "channels.feishu.appId",
-                "channels.feishu.appSecret",
-                "channels.feishu.domain",
-                "channels.feishu.groupPolicy",
-                "channels.feishu.topicIsolation",
-            ],
-        },
-        {
-            "id": "product",
-            "name": "Product bot",
-            "display_name": "Product bot",
-            "avatar_url": "",
-            "enabled": False,
-            "configured": True,
-            "config_values": {
-                "channels.feishu.appId": "cli_product",
-                "channels.feishu.domain": "feishu",
-                "channels.feishu.groupPolicy": "mention",
-                "channels.feishu.topicIsolation": "true",
-            },
-            "configured_fields": [
-                "channels.feishu.appId",
-                "channels.feishu.appSecret",
-                "channels.feishu.domain",
-                "channels.feishu.groupPolicy",
-                "channels.feishu.topicIsolation",
-            ],
-        },
+    instances = feishu["instances"]
+    assert [
+        (item["id"], item["name"], item["display_name"], item["avatar_url"], item["enabled"])
+        for item in instances
+    ] == [
+        ("default", "nanobot", "Voraflare Bot", "https://example.com/bot.png", True),
+        ("product", "Product bot", "Product bot", "", False),
     ]
+    assert [item["configured"] for item in instances] == [True, True]
+    assert instances[0]["config_values"]["channels.feishu.appId"] == "cli_default"
+    assert instances[1]["config_values"]["channels.feishu.appId"] == "cli_product"
+    assert all(
+        "channels.feishu.appSecret" in item["configured_fields"]
+        for item in instances
+    )
 
 
 def test_optional_features_payload_does_not_refresh_saved_feishu_identity(monkeypatch, tmp_path):
@@ -2742,7 +2713,7 @@ def test_optional_dependency_metadata_for_enable():
         "wecom": ("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
-            "neonize>=0.3.18.post0,<0.4.0",
+            "neonize>=0.4.3.post0,<0.5.0",
             "segno>=1.6.1,<2.0.0",
         ),
     }

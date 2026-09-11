@@ -19,6 +19,7 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
     checks, missing = required_checks("slack", values)
     app_token = string_value(values.get("appToken"))
     bot_token = string_value(values.get("botToken"))
+    proxy = string_value(values.get("proxy"))
     if app_token:
         checks.append(
             check(
@@ -44,6 +45,7 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
                 data = http_post(
                     "https://slack.com/api/auth.test",
                     headers={"Authorization": f"Bearer {bot_token}"},
+                    proxy=proxy or None,
                 )
                 if data.get("ok"):
                     identity = {

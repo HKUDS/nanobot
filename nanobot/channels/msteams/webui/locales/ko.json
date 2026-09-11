@@ -22,6 +22,52 @@
       "allowFrom": {
         "label": "허용된 사용자",
         "placeholder": "Teams 사용자 ID, 쉼표로 구분"
+      },
+      "host": {
+        "label": "호스트 듣기"
+      },
+      "port": {
+        "label": "청취 포트"
+      },
+      "replyInThread": {
+        "label": "스레드로 답장하기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "언급 전용 답변"
+      },
+      "validateInboundAuth": {
+        "label": "들어오는 요청의 유효성을 검사합니다.",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "refTtlDays": {
+        "label": "대화 수명"
+      },
+      "pruneWebChatRefs": {
+        "label": "웹 채팅 대화 제거",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "개인 대화가 아닌 대화 삭제",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "대화 새로 고침 간격"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "신뢰할 수 있는 서비스 호스트"
       }
     }
   }

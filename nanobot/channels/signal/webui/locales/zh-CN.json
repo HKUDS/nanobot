@@ -22,6 +22,47 @@
       "group_allowFrom": {
         "label": "允许的群组",
         "placeholder": "群组 ID"
+      },
+      "groupMessageBufferSize": {
+        "label": "群组上下文消息数"
+      },
+      "attachmentsDir": {
+        "label": "附件目录"
+      },
+      "dm_enabled": {
+        "label": "启用私聊",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "dm_policy": {
+        "label": "私聊权限",
+        "choices": {
+          "allowlist": "白名单",
+          "open": "全部"
+        }
+      },
+      "group_enabled": {
+        "label": "启用群组",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "group_policy": {
+        "label": "群组权限",
+        "choices": {
+          "allowlist": "白名单",
+          "open": "全部"
+        }
+      },
+      "group_requireMention": {
+        "label": "群组中需要提及",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
       }
     }
   }

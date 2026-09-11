@@ -731,7 +731,10 @@ def install_optional_feature_support(
         "enabled": bool(feature.get("enabled")),
         "installed": True,
     }
-    payload["requires_restart"] = False
+    # A dependency can replace a module that is already imported by the
+    # gateway (for example neonize during WhatsApp setup).  Keep the gateway
+    # running, but require a restart before the channel can use the new code.
+    payload["requires_restart"] = installed_now
     return payload
 
 

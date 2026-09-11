@@ -22,6 +22,34 @@
       "allowFrom": {
         "label": "允许的用户",
         "placeholder": "用户 ID，用逗号分隔"
+      },
+      "proxy": {
+        "label": "网络代理"
+      },
+      "proxyUsername": {
+        "label": "代理用户名"
+      },
+      "proxyPassword": {
+        "label": "代理密码"
+      },
+      "intents": {
+        "label": "Gateway Intents"
+      },
+      "readReceiptEmoji": {
+        "label": "已读表情"
+      },
+      "workingEmoji": {
+        "label": "处理中表情"
+      },
+      "workingEmojiDelay": {
+        "label": "处理中表情延迟"
+      },
+      "streaming": {
+        "label": "流式输出",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
       }
     }
   }

@@ -21,6 +21,72 @@
           "open": "Todas as mensagens",
           "allowlist": "Lista de permissão"
         }
+      },
+      "mode": {
+        "label": "Modo de conexão",
+        "choices": {
+          "socket": "Modo de soquete"
+        }
+      },
+      "webhookPath": {
+        "label": "Caminho do webhook"
+      },
+      "replyInThread": {
+        "label": "Responder no tópico",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Ler emoticons"
+      },
+      "doneEmoji": {
+        "label": "Emoji pronto"
+      },
+      "includeThreadContext": {
+        "label": "Incluir contexto do thread",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limite de contexto do thread"
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos"
+      },
+      "groupAllowFrom": {
+        "label": "Canais permitidos"
+      },
+      "groupRequireMention": {
+        "label": "Exigir menções nos canais",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_enabled": {
+        "label": "Habilitar mensagens diretas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_policy": {
+        "label": "Acesso direto a mensagens",
+        "choices": {
+          "allowlist": "Lista de permissões",
+          "open": "Abrir"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Usuários de mensagens diretas permitidos"
+      },
+      "proxy": {
+        "label": "Proxy de rede",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

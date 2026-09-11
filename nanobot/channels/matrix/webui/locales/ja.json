@@ -30,6 +30,53 @@
           "open": "すべてのメッセージ",
           "allowlist": "許可リスト"
         }
+      },
+      "allowFrom": {
+        "label": "許可されたユーザー"
+      },
+      "e2eeEnabled": {
+        "label": "エンドツーエンドの暗号化",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 検証",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "同期停止猶予期間"
+      },
+      "maxMediaBytes": {
+        "label": "最大メディアサイズ"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "メディアの同時ダウンロード"
+      },
+      "groupAllowFrom": {
+        "label": "許可されたグループ"
+      },
+      "allowRoomMentions": {
+        "label": "部屋のメンションを許可する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

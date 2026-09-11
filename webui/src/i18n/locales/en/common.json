@@ -42,8 +42,8 @@
       "description": "nanobot web UI — chat with your nanobot workspace."
     },
     "pairing": {
-      "title": "Pair a chat user",
-      "description": "Enter the pairing code shown in the chat.",
+      "title": "Pair your chat account",
+      "description": "Enter the pairing code you received in chat.",
       "code": "Pairing code",
       "matched": "Matched {{channel}}. Connecting...",
       "expiresInline": "Code expires {{expires}}.",

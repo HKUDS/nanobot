@@ -14,6 +14,30 @@
       "allowFrom": {
         "label": "Allowed users",
         "placeholder": "User IDs, comma separated"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "Allow media redirects",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "Media redirect hosts"
+      },
+      "groupUserIsolation": {
+        "label": "Separate group sessions",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "Disable direct messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
       }
     }
   }

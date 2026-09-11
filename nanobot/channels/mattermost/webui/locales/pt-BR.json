@@ -34,6 +34,78 @@
       "allowFrom": {
         "label": "Usuários permitidos",
         "placeholder": "IDs de usuário separados por vírgulas"
+      },
+      "allowFromMatchMode": {
+        "label": "Correspondência de usuário",
+        "choices": {
+          "email": "E-mail",
+          "id": "ID do usuário",
+          "username": "Nome de usuário"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Canais permitidos"
+      },
+      "replyInThread": {
+        "label": "Responder no tópico",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Incluir contexto do thread",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limite de contexto do thread"
+      },
+      "streaming": {
+        "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Ler emoticons"
+      },
+      "doneEmoji": {
+        "label": "Emoji pronto"
+      },
+      "sendProgress": {
+        "label": "Enviar progresso",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "sendToolHints": {
+        "label": "Envie dicas de ferramentas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_enabled": {
+        "label": "Habilitar mensagens diretas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_policy": {
+        "label": "Acesso direto a mensagens",
+        "choices": {
+          "allowlist": "Lista de permissões",
+          "open": "Abrir"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Usuários de mensagens diretas permitidos"
       }
     }
   }

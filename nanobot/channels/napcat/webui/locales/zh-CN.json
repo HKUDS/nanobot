@@ -22,6 +22,19 @@
       "allowFrom": {
         "label": "允许的用户",
         "placeholder": "QQ ID，用逗号分隔"
+      },
+      "groupPolicyOverrides": {
+        "label": "群组行为覆盖（JSON）"
+      },
+      "welcomeNewMembers": {
+        "label": "欢迎新成员",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "maxImageBytes": {
+        "label": "图片大小上限"
       }
     }
   }

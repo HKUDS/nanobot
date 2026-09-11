@@ -42,8 +42,8 @@
       "description": "Interface web nanobot — discutez avec votre espace de travail nanobot."
     },
     "pairing": {
-      "title": "Associer un utilisateur du chat",
-      "description": "Saisissez le code d’association affiché dans le chat.",
+      "title": "Associer votre compte de messagerie",
+      "description": "Saisissez le code d’association reçu dans la messagerie.",
       "code": "Code d’association",
       "matched": "Correspondance {{channel}}. Connexion...",
       "expiresInline": "Le code expire {{expires}}.",

@@ -21,6 +21,72 @@
           "open": "所有消息",
           "allowlist": "白名单"
         }
+      },
+      "mode": {
+        "label": "连接方式",
+        "choices": {
+          "socket": "Socket 模式"
+        }
+      },
+      "webhookPath": {
+        "label": "Webhook 路径"
+      },
+      "replyInThread": {
+        "label": "在话题中回复",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "reactEmoji": {
+        "label": "已读表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "includeThreadContext": {
+        "label": "包含话题上下文",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "threadContextLimit": {
+        "label": "话题上下文上限"
+      },
+      "allowFrom": {
+        "label": "允许的用户"
+      },
+      "groupAllowFrom": {
+        "label": "允许的频道"
+      },
+      "groupRequireMention": {
+        "label": "频道中需要提及",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "dm_enabled": {
+        "label": "启用私聊",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "dm_policy": {
+        "label": "私聊权限",
+        "choices": {
+          "allowlist": "白名单",
+          "open": "全部"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "允许私聊的用户"
+      },
+      "proxy": {
+        "label": "网络代理",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

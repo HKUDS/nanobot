@@ -15,6 +15,30 @@
       "allowFrom": {
         "label": "允许的用户",
         "placeholder": "用户 ID，用逗号分隔"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "允许媒体重定向",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "允许重定向的媒体主机"
+      },
+      "groupUserIsolation": {
+        "label": "按群成员隔离会话",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "禁用私聊",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
       }
     }
   }

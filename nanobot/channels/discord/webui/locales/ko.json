@@ -22,6 +22,34 @@
       "allowFrom": {
         "label": "허용된 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "proxy": {
+        "label": "네트워크 프록시"
+      },
+      "proxyUsername": {
+        "label": "프록시 사용자 이름"
+      },
+      "proxyPassword": {
+        "label": "프록시 비밀번호"
+      },
+      "intents": {
+        "label": "게이트웨이 인텐트"
+      },
+      "readReceiptEmoji": {
+        "label": "이모티콘 읽기"
+      },
+      "workingEmoji": {
+        "label": "일하는 이모티콘"
+      },
+      "workingEmojiDelay": {
+        "label": "작동하는 이모티콘 지연"
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
       }
     }
   }

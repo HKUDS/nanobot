@@ -21,6 +21,18 @@
           "plain": "Texte brut",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "Message d'accusé de réception"
+      },
+      "mediaDir": {
+        "label": "Répertoire des médias"
+      },
+      "downloadChunkSize": {
+        "label": "Taille du morceau de téléchargement"
+      },
+      "downloadMaxBytes": {
+        "label": "Taille maximale de téléchargement"
       }
     }
   }

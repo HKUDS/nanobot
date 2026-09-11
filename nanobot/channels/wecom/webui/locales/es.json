@@ -14,6 +14,9 @@
       "allowFrom": {
         "label": "Usuarios permitidos",
         "placeholder": "ID de usuario separados por comas"
+      },
+      "welcomeMessage": {
+        "label": "Mensaje de bienvenida"
       }
     }
   }

@@ -42,8 +42,8 @@
       "description": "UI web nanobot — ngobrol dengan ruang kerja nanobot Anda."
     },
     "pairing": {
-      "title": "Hubungkan pengguna chat",
-      "description": "Masukkan kode pairing yang ditampilkan di chat.",
+      "title": "Pasangkan akun chat Anda",
+      "description": "Masukkan kode pemasangan yang Anda terima di chat.",
       "code": "Kode pairing",
       "matched": "Cocok dengan {{channel}}. Menghubungkan...",
       "expiresInline": "Kode kedaluwarsa {{expires}}.",

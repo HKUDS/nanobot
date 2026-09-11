@@ -22,6 +22,47 @@
       "group_allowFrom": {
         "label": "허용된 그룹",
         "placeholder": "그룹 ID"
+      },
+      "groupMessageBufferSize": {
+        "label": "그룹 상황 메시지"
+      },
+      "attachmentsDir": {
+        "label": "첨부파일 디렉토리"
+      },
+      "dm_enabled": {
+        "label": "다이렉트 메시지 활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "dm_policy": {
+        "label": "다이렉트 메시지 액세스",
+        "choices": {
+          "allowlist": "허용 목록",
+          "open": "열기"
+        }
+      },
+      "group_enabled": {
+        "label": "그룹 활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "group_policy": {
+        "label": "그룹 액세스",
+        "choices": {
+          "allowlist": "허용 목록",
+          "open": "열기"
+        }
+      },
+      "group_requireMention": {
+        "label": "그룹에서 멘션 필요",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
       }
     }
   }

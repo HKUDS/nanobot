@@ -21,6 +21,18 @@
           "plain": "Teks biasa",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "Pesan pengakuan"
+      },
+      "mediaDir": {
+        "label": "Direktori media"
+      },
+      "downloadChunkSize": {
+        "label": "Unduh ukuran potongan"
+      },
+      "downloadMaxBytes": {
+        "label": "Ukuran unduhan maksimum"
       }
     }
   }

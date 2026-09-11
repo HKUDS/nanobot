@@ -30,6 +30,53 @@
           "open": "Tous les messages",
           "allowlist": "Liste d’autorisation"
         }
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés"
+      },
+      "e2eeEnabled": {
+        "label": "Chiffrement de bout en bout",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "sasVerification": {
+        "label": "Vérification SAS",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Délai de grâce pour l'arrêt de la synchronisation"
+      },
+      "maxMediaBytes": {
+        "label": "Taille maximale du support"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Téléchargements multimédias simultanés"
+      },
+      "groupAllowFrom": {
+        "label": "Groupes autorisés"
+      },
+      "allowRoomMentions": {
+        "label": "Autoriser les mentions de salles",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "streaming": {
+        "label": "Diffusion en continu",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "proxy": {
+        "label": "Proxy réseau",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

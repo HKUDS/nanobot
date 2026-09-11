@@ -22,6 +22,71 @@
           "open": "Mọi tin nhắn",
           "allowlist": "Danh sách cho phép"
         }
+      },
+      "mode": {
+        "label": "Chế độ kết nối",
+        "choices": {
+          "polling": "Bỏ phiếu dài",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "Trả lời tin nhắn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "reactEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "connectionPoolSize": {
+        "label": "Kích thước nhóm kết nối"
+      },
+      "poolTimeout": {
+        "label": "Hết thời gian chờ nhóm kết nối"
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "Bàn phím nội tuyến",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "richMessages": {
+        "label": "Tin nhắn phong phú",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Khoảng thời gian cập nhật luồng"
+      },
+      "webhookUrl": {
+        "label": "URL webhook"
+      },
+      "webhookListenHost": {
+        "label": "Máy chủ lắng nghe Webhook"
+      },
+      "webhookListenPort": {
+        "label": "Cổng nghe Webhook"
+      },
+      "webhookPath": {
+        "label": "Đường dẫn webhook"
+      },
+      "webhookSecretToken": {
+        "label": "Mã thông báo bí mật Webhook"
+      },
+      "webhookMaxConnections": {
+        "label": "Kết nối webhook tối đa"
       }
     }
   }

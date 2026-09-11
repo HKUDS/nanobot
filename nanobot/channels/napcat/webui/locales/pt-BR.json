@@ -22,6 +22,19 @@
       "allowFrom": {
         "label": "Usuários permitidos",
         "placeholder": "IDs do QQ separados por vírgulas"
+      },
+      "groupPolicyOverrides": {
+        "label": "Substituições de comportamento de grupo (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "Bem vindos novos membros",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "maxImageBytes": {
+        "label": "Tamanho máximo da imagem"
       }
     }
   }

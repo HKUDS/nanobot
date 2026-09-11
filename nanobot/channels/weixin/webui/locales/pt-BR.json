@@ -12,20 +12,48 @@
         "label": "Token",
         "placeholder": "Salvo pelo login via QR"
       },
-      "sendProgress": { "label": "Enviar progresso" },
-      "sendToolHints": { "label": "Enviar resumos da atividade das ferramentas" },
-      "streaming": { "label": "Usar API de streaming" },
-      "replyProgressMessages": { "label": "Enviar progresso estruturado" },
-      "replyProgressMaxMessages": { "label": "Limite de progresso estruturado" },
-      "contextMessageBudget": { "label": "Máximo de mensagens de contexto" },
-      "blockStreaming": { "label": "Enviar resposta em blocos" },
-      "blockStreamingMinChars": { "label": "Mínimo de caracteres por bloco" },
-      "blockStreamingMaxMessages": { "label": "Limite de mensagens em blocos" },
-      "baseUrl": { "label": "URL da API" },
-      "cdnBaseUrl": { "label": "URL da CDN" },
-      "routeTag": { "label": "Etiqueta de rota" },
-      "stateDir": { "label": "Diretório de estado" },
-      "pollTimeout": { "label": "Tempo limite da consulta (segundos)" }
+      "sendProgress": {
+        "label": "Enviar progresso"
+      },
+      "sendToolHints": {
+        "label": "Enviar resumos da atividade das ferramentas"
+      },
+      "streaming": {
+        "label": "Usar API de streaming"
+      },
+      "replyProgressMessages": {
+        "label": "Enviar progresso estruturado"
+      },
+      "replyProgressMaxMessages": {
+        "label": "Limite de progresso estruturado"
+      },
+      "contextMessageBudget": {
+        "label": "Máximo de mensagens de contexto"
+      },
+      "blockStreaming": {
+        "label": "Enviar resposta em blocos"
+      },
+      "blockStreamingMinChars": {
+        "label": "Mínimo de caracteres por bloco"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "Limite de mensagens em blocos"
+      },
+      "baseUrl": {
+        "label": "URL da API"
+      },
+      "cdnBaseUrl": {
+        "label": "URL da CDN"
+      },
+      "routeTag": {
+        "label": "Etiqueta de rota"
+      },
+      "stateDir": {
+        "label": "Diretório de estado"
+      },
+      "pollTimeout": {
+        "label": "Tempo limite da consulta (segundos)"
+      }
     }
   },
   "custom": {

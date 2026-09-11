@@ -22,6 +22,52 @@
       "allowFrom": {
         "label": "Usuários permitidos",
         "placeholder": "IDs de usuário do Teams separados por vírgulas"
+      },
+      "host": {
+        "label": "Ouça o apresentador"
+      },
+      "port": {
+        "label": "Porta de escuta"
+      },
+      "replyInThread": {
+        "label": "Responder no tópico",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Resposta apenas com menção"
+      },
+      "validateInboundAuth": {
+        "label": "Validar solicitações recebidas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "refTtlDays": {
+        "label": "Vida útil da conversa"
+      },
+      "pruneWebChatRefs": {
+        "label": "Remover conversas do Web Chat",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Remover conversas não pessoais",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Intervalo de atualização da conversa"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Hosts de serviço confiáveis"
       }
     }
   }

@@ -30,6 +30,53 @@
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan"
+      },
+      "e2eeEnabled": {
+        "label": "Enkripsi ujung ke ujung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "sasVerification": {
+        "label": "verifikasi SAS",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Sinkronisasi menghentikan masa tenggang"
+      },
+      "maxMediaBytes": {
+        "label": "Ukuran media maksimum"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Pengunduhan media secara bersamaan"
+      },
+      "groupAllowFrom": {
+        "label": "Grup yang diizinkan"
+      },
+      "allowRoomMentions": {
+        "label": "Izinkan penyebutan ruangan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "proxy": {
+        "label": "Proxy jaringan",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

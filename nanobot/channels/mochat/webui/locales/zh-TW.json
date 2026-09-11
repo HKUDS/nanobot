@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "開啟 MoChat 設定指南",
+    "officialLabel": "開啟 MoChat",
+    "fields": {
+      "clawToken": {
+        "label": "Claw 權杖",
+        "placeholder": "MoChat Claw 權杖"
+      },
+      "baseUrl": {
+        "label": "服務位址",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "Agent 使用者 ID",
+        "placeholder": "選填的 Agent 使用者 ID"
+      },
+      "sessions": {
+        "label": "工作階段",
+        "placeholder": "工作階段 ID，以逗號分隔"
+      },
+      "panels": {
+        "label": "面板",
+        "placeholder": "面板 ID，以逗號分隔"
+      },
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "使用者 ID，以逗號分隔"
+      },
+      "socketUrl": {
+        "label": "Socket 位址"
+      },
+      "socketPath": {
+        "label": "Socket 路徑"
+      },
+      "socketDisableMsgpack": {
+        "label": "禁用 MessagePack",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "重連延遲"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "最大重連延遲"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "連線逾時"
+      },
+      "refreshIntervalMs": {
+        "label": "刷新間隔"
+      },
+      "watchTimeoutMs": {
+        "label": "拉取超時"
+      },
+      "watchLimit": {
+        "label": "單次拉取數量"
+      },
+      "retryDelayMs": {
+        "label": "重試延遲"
+      },
+      "maxRetryAttempts": {
+        "label": "最大重試次數"
+      },
+      "mention_requireInGroups": {
+        "label": "群組需要提及",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "groups": {
+        "label": "群組規則（JSON）"
+      },
+      "replyDelayMode": {
+        "label": "回覆延遲方式"
+      },
+      "replyDelayMs": {
+        "label": "回覆延遲"
+      }
+    }
+  }
+}

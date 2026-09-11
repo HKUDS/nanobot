@@ -13,20 +13,48 @@
         "label": "權杖",
         "placeholder": "QR Code登入後自動儲存"
       },
-      "sendProgress": { "label": "傳送進度訊息" },
-      "sendToolHints": { "label": "傳送工具執行摘要" },
-      "streaming": { "label": "使用串流 API" },
-      "replyProgressMessages": { "label": "傳送結構化進度" },
-      "replyProgressMaxMessages": { "label": "結構化進度訊息上限" },
-      "contextMessageBudget": { "label": "上下文訊息數量上限" },
-      "blockStreaming": { "label": "分塊傳送回覆" },
-      "blockStreamingMinChars": { "label": "最小分塊字元數" },
-      "blockStreamingMaxMessages": { "label": "分塊訊息上限" },
-      "baseUrl": { "label": "API 位址" },
-      "cdnBaseUrl": { "label": "CDN 位址" },
-      "routeTag": { "label": "路由標籤" },
-      "stateDir": { "label": "狀態目錄" },
-      "pollTimeout": { "label": "輪詢逾時（秒）" }
+      "sendProgress": {
+        "label": "傳送進度訊息"
+      },
+      "sendToolHints": {
+        "label": "傳送工具執行摘要"
+      },
+      "streaming": {
+        "label": "使用串流 API"
+      },
+      "replyProgressMessages": {
+        "label": "傳送結構化進度"
+      },
+      "replyProgressMaxMessages": {
+        "label": "結構化進度訊息上限"
+      },
+      "contextMessageBudget": {
+        "label": "上下文訊息數量上限"
+      },
+      "blockStreaming": {
+        "label": "分塊傳送回覆"
+      },
+      "blockStreamingMinChars": {
+        "label": "最小分塊字元數"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "分塊訊息上限"
+      },
+      "baseUrl": {
+        "label": "API 位址"
+      },
+      "cdnBaseUrl": {
+        "label": "CDN 位址"
+      },
+      "routeTag": {
+        "label": "路由標籤"
+      },
+      "stateDir": {
+        "label": "狀態目錄"
+      },
+      "pollTimeout": {
+        "label": "輪詢逾時（秒）"
+      }
     }
   },
   "custom": {

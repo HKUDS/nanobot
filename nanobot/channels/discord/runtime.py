@@ -464,10 +464,13 @@ class DiscordChannel(BaseChannel):
                     "proxy_password must be set; ignoring partial credentials",
                 )
 
+            proxy = self.config.proxy
+            if proxy and "://" not in proxy:
+                proxy = f"http://{proxy}"
             self._client = DiscordBotClient(
                 self,
                 intents=intents,
-                proxy=self.config.proxy,
+                proxy=proxy,
                 proxy_auth=proxy_auth,
             )
         except Exception:

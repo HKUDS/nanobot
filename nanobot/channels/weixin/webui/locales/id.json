@@ -12,20 +12,48 @@
         "label": "Token",
         "placeholder": "Disimpan saat login QR"
       },
-      "sendProgress": { "label": "Kirim progres" },
-      "sendToolHints": { "label": "Kirim ringkasan aktivitas alat" },
-      "streaming": { "label": "Gunakan API streaming" },
-      "replyProgressMessages": { "label": "Kirim progres terstruktur" },
-      "replyProgressMaxMessages": { "label": "Batas progres terstruktur" },
-      "contextMessageBudget": { "label": "Jumlah maksimum pesan konteks" },
-      "blockStreaming": { "label": "Kirim respons per blok" },
-      "blockStreamingMinChars": { "label": "Jumlah minimum karakter per blok" },
-      "blockStreamingMaxMessages": { "label": "Batas pesan blok" },
-      "baseUrl": { "label": "URL API" },
-      "cdnBaseUrl": { "label": "URL CDN" },
-      "routeTag": { "label": "Tag rute" },
-      "stateDir": { "label": "Direktori status" },
-      "pollTimeout": { "label": "Batas waktu polling (detik)" }
+      "sendProgress": {
+        "label": "Kirim progres"
+      },
+      "sendToolHints": {
+        "label": "Kirim ringkasan aktivitas alat"
+      },
+      "streaming": {
+        "label": "Gunakan API streaming"
+      },
+      "replyProgressMessages": {
+        "label": "Kirim progres terstruktur"
+      },
+      "replyProgressMaxMessages": {
+        "label": "Batas progres terstruktur"
+      },
+      "contextMessageBudget": {
+        "label": "Jumlah maksimum pesan konteks"
+      },
+      "blockStreaming": {
+        "label": "Kirim respons per blok"
+      },
+      "blockStreamingMinChars": {
+        "label": "Jumlah minimum karakter per blok"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "Batas pesan blok"
+      },
+      "baseUrl": {
+        "label": "URL API"
+      },
+      "cdnBaseUrl": {
+        "label": "URL CDN"
+      },
+      "routeTag": {
+        "label": "Tag rute"
+      },
+      "stateDir": {
+        "label": "Direktori status"
+      },
+      "pollTimeout": {
+        "label": "Batas waktu polling (detik)"
+      }
     }
   },
   "custom": {

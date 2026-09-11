@@ -21,6 +21,9 @@ import { normalizeLocale } from "@/i18n/config";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { ChannelRuntimeStatus, NanobotFeatureInfo } from "@/lib/types";
 
+export const CHANNEL_SETUP_PANEL_CLASS_NAME =
+  "min-h-full rounded-panel bg-settings-surface p-6";
+
 export function channelSetup(
   feature: NanobotFeatureInfo,
   locale = "en",
@@ -80,6 +83,7 @@ export function channelSetup(
       ...copy,
       key: field.key,
       label: copy.label,
+      section: copy.section ?? (field.required ? "credentials" : "advanced"),
       secret: field.kind === "secret",
       optional: !field.required,
       kind: field.kind,
@@ -114,7 +118,7 @@ function channelFieldInputType(
   field: string,
   kind: string,
 ): ChannelConfigField["inputType"] {
-  if (kind === "int") return "number";
+  if (kind === "int" || kind === "float") return "number";
   const normalized = field.toLowerCase();
   if (normalized.includes("url")) return "url";
   if (normalized.includes("email") || normalized.includes("address")) return "email";

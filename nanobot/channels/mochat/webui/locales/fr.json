@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide de configuration MoChat",
+    "officialLabel": "Ouvrir MoChat",
+    "fields": {
+      "clawToken": {
+        "label": "Jeton Claw",
+        "placeholder": "Jeton Claw MoChat"
+      },
+      "baseUrl": {
+        "label": "URL du serveur",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "Identifiant utilisateur de l’agent",
+        "placeholder": "Identifiant utilisateur facultatif"
+      },
+      "sessions": {
+        "label": "Sessions",
+        "placeholder": "Identifiants de session, séparés par des virgules"
+      },
+      "panels": {
+        "label": "Panneaux",
+        "placeholder": "Identifiants de panneau, séparés par des virgules"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "Identifiants utilisateur, séparés par des virgules"
+      },
+      "socketUrl": {
+        "label": "URL de socket"
+      },
+      "socketPath": {
+        "label": "Chemin de prise"
+      },
+      "socketDisableMsgpack": {
+        "label": "Désactiver MessagePack",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "Délai de reconnexion"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "Délai de reconnexion maximum"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "Délai de connexion"
+      },
+      "refreshIntervalMs": {
+        "label": "Intervalle d'actualisation"
+      },
+      "watchTimeoutMs": {
+        "label": "Expiration du délai de visionnage"
+      },
+      "watchLimit": {
+        "label": "Surveiller la taille du lot"
+      },
+      "retryDelayMs": {
+        "label": "Délai de nouvelle tentative"
+      },
+      "maxRetryAttempts": {
+        "label": "Nombre maximal de tentatives"
+      },
+      "mention_requireInGroups": {
+        "label": "Exiger des mentions dans les groupes",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "groups": {
+        "label": "Règles de groupe (JSON)"
+      },
+      "replyDelayMode": {
+        "label": "Mode de délai de réponse"
+      },
+      "replyDelayMs": {
+        "label": "Délai de réponse"
+      }
+    }
+  }
+}

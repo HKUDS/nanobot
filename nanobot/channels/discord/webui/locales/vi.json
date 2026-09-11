@@ -22,6 +22,34 @@
       "allowFrom": {
         "label": "Người dùng được phép",
         "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "proxy": {
+        "label": "Proxy mạng"
+      },
+      "proxyUsername": {
+        "label": "Tên người dùng proxy"
+      },
+      "proxyPassword": {
+        "label": "Mật khẩu proxy"
+      },
+      "intents": {
+        "label": "Ý định của cổng"
+      },
+      "readReceiptEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "workingEmoji": {
+        "label": "Biểu tượng cảm xúc đang hoạt động"
+      },
+      "workingEmojiDelay": {
+        "label": "Độ trễ biểu tượng cảm xúc đang hoạt động"
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
       }
     }
   }
