@@ -15,8 +15,9 @@ interface SidebarSelectionHighlightProps extends HTMLAttributes<HTMLDivElement> 
 export const SIDEBAR_SELECTION_ITEM_CLASS =
   "relative z-[1] transition-[color] duration-150 ease-out motion-reduce:transition-none";
 
+// During a drag, animate only the shared highlight, not its measured target as well.
 export const SIDEBAR_SELECTION_ACTION_ITEM_CLASS =
-  "relative z-[1] transition-[width,padding,color] [transition-duration:300ms,300ms,150ms] ease-out motion-reduce:transition-none";
+  "relative z-[1] transition-[width,padding,color] [transition-duration:300ms,300ms,150ms] ease-out group-data-[resizing=true]/sidebar:transition-none motion-reduce:transition-none";
 
 export function SidebarSelectionHighlight({
   targetRef,
@@ -44,6 +45,7 @@ export function SidebarSelectionHighlight({
     }
 
     let restoreTransitionFrame: number | null = null;
+    let positionFrame: number | null = null;
 
     const position = () => {
       const containerRect = container.getBoundingClientRect();
@@ -73,20 +75,34 @@ export function SidebarSelectionHighlight({
       }
     };
 
-    position();
+    // Measure once per animation frame so React rerenders do not repeatedly
+    // retarget a transition before the browser has advanced its current frame.
+    const schedulePosition = () => {
+      if (positionFrame !== null) return;
+      positionFrame = window.requestAnimationFrame(() => {
+        positionFrame = null;
+        position();
+      });
+    };
+
+    if (!positionedRef.current) position();
+    else schedulePosition();
     const resizeObserver =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(position);
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedulePosition);
     resizeObserver?.observe(container);
     resizeObserver?.observe(target);
-    window.addEventListener("resize", position);
+    window.addEventListener("resize", schedulePosition);
 
     return () => {
       if (restoreTransitionFrame !== null) {
         window.cancelAnimationFrame(restoreTransitionFrame);
       }
+      if (positionFrame !== null) {
+        window.cancelAnimationFrame(positionFrame);
+      }
       highlight?.style.removeProperty("transition-property");
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", position);
+      window.removeEventListener("resize", schedulePosition);
     };
   });
 

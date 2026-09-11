@@ -1741,9 +1741,13 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const handle = screen.getByRole("separator", { name: "Resize sidebar" });
     const sidebar = screen.getByTestId("host-sidebar-flow");
+    expect(sidebar).toHaveClass("group/sidebar");
     fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
+    expect(sidebar).toHaveAttribute("data-resizing", "true");
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 360 });
+    expect(sidebar).toHaveStyle({ width: "360px" });
     fireEvent.pointerUp(handle, { pointerId: 1, clientX: 360 });
+    expect(sidebar).not.toHaveAttribute("data-resizing");
     expect(sidebar).toHaveStyle({ width: "360px" });
     expect(localStorage.getItem("nanobot-webui.sidebar.width")).toBe("360");
     fireEvent.pointerDown(handle, { button: 0, pointerId: 2, clientX: 360 });
@@ -1763,6 +1767,43 @@ describe("App layout", () => {
     expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "240px" });
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "ArrowRight" });
     expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "272px" });
+  });
+
+  it.each(["pointerUp", "pointerCancel", "lostPointerCapture"] as const)("keeps highlight easing while disabling navigation target lag until %s", async (finish) => {
+    mockSessions = [{
+      key: "websocket:resize-test", channel: "websocket", chatId: "resize-test",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+      title: "Resize test", preview: "",
+    }];
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByTestId("host-sidebar-flow");
+    await within(sidebar).findByTestId("chats-selection-highlight");
+    const handle = within(sidebar).getByRole("separator", { name: "Resize sidebar" });
+    for (const label of ["Apps", "Skills", "Automations", "Channels"]) {
+      expect(within(sidebar).getByRole("button", { name: label })).toHaveClass(
+        "group-data-[resizing=true]/sidebar:transition-none",
+      );
+    }
+    for (const scope of ["actions", "chats"]) {
+      const highlight = within(sidebar).getByTestId(`${scope}-selection-highlight`);
+      expect(highlight).not.toHaveClass(
+        "group-data-[resizing=true]/sidebar:transition-none",
+      );
+      expect(highlight).toHaveClass(
+        "transition-[transform,width,height]",
+        "duration-300",
+        "ease-out",
+        "motion-reduce:transition-none",
+      );
+    }
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 });
+    expect(sidebar).toHaveAttribute("data-resizing", "true");
+    expect(sidebar).toHaveStyle({ width: "400px" });
+    fireEvent[finish](handle, { pointerId: 1, clientX: 400 });
+    expect(sidebar).not.toHaveAttribute("data-resizing");
+    expect(sidebar).toHaveClass("transition-[width]");
   });
 
   it("uses the shared sidebar controls and rail on the native host", async () => {
