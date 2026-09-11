@@ -198,13 +198,7 @@ export function AutomationsSettings({
 
         <SettingsGroup>
           {jobs.length ? (
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 px-5 pb-2 pt-3 sm:px-6">
-              <div className="flex items-center gap-2 py-1.5">
-                <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  {tx("settings.automations.yourTasks", "Your automations")}
-                </h2>
-                <span className="text-[11px] tabular-nums text-muted-foreground/60">{personal.length}</span>
-              </div>
+            <div className="flex min-w-0 justify-end px-5 pb-2 pt-3 sm:px-6">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="h-8 gap-1.5 px-2 text-[11px] text-muted-foreground">
@@ -273,12 +267,12 @@ export function AutomationsSettings({
                         // Unavailable storage must not prevent expanding or collapsing.
                       }
                     }}
-                    className={cn("flex min-h-9 w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground settings-hover", formControlFocusClassName)}
+                    className={cn("flex min-h-9 w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-[13px] font-medium text-muted-foreground settings-hover", formControlFocusClassName)}
                   >
                     <span>{tx("settings.automations.systemTasks", "System tasks")}</span>
-                    <span className="font-normal tabular-nums tracking-normal text-muted-foreground/60">{system.length}</span>
+                    <span className="text-[12px] font-normal tabular-nums text-muted-foreground/60">{system.length}</span>
                     {system.some(automationNeedsAttention) ? (
-                      <span className="ml-auto inline-flex items-center gap-1.5 font-normal normal-case tracking-normal text-amber-700 dark:text-amber-400">
+                      <span className="ml-auto inline-flex items-center gap-1.5 text-[12px] font-normal text-amber-700 dark:text-amber-400">
                         <CircleAlert className="h-3.5 w-3.5" aria-hidden />
                         {tx("settings.automations.filters.failed", "Needs attention")}
                       </span>

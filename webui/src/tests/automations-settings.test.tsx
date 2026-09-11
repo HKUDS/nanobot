@@ -46,6 +46,15 @@ afterEach(() => {
 });
 
 describe("Automation task list and detail sheet", () => {
+  it("avoids redundant headings and decorative uppercase group labels", () => {
+    render(<Harness />);
+    expect(screen.queryByRole("heading", { name: "Your automations" })).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Your automations" })).toBeVisible();
+    const systemToggle = screen.getByRole("button", { name: "System tasks 1" });
+    expect(systemToggle).toHaveClass("text-[13px]", "font-medium");
+    expect(systemToggle).not.toHaveClass("uppercase", "tracking-[0.08em]");
+  });
+
   it("opens system tasks by default and remembers manual changes across visits", () => {
     const first = render(<Harness />);
     expect(screen.getByRole("button", { name: "System tasks 1" })).toHaveAttribute("aria-expanded", "true");
