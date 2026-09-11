@@ -48,6 +48,7 @@ SETUP_SPEC = ChannelSetupSpec(
     ),
     official_url="https://support.google.com/accounts/answer/185833",
     validator=validate,
+    verifies_connection=True,
 )
 
 PLUGIN = ChannelPlugin(

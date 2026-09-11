@@ -3,9 +3,14 @@ from __future__ import annotations
 import pytest
 
 from nanobot.channels.email import validation as email_validation
+from nanobot.channels.email.manifest import SETUP_SPEC
 from nanobot.channels.validation import validate_channel_config
 from nanobot.config.loader import save_config
 from nanobot.config.schema import Config
+
+
+def test_email_exposes_connection_checks_to_setup_clients() -> None:
+    assert SETUP_SPEC.verifies_connection is True
 
 
 def test_validate_email_presets_are_checked_without_saving(
