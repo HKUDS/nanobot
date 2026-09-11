@@ -12,6 +12,7 @@ import { FloatingPortalContext } from "@/components/ui/floating-portal";
 
 const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
+const DialogClose = DialogPrimitive.Close;
 const DialogPortal = DialogPrimitive.Portal;
 export const DialogLayoutContext = React.createContext<HTMLElement | null>(null);
 
@@ -165,6 +166,7 @@ DialogDescription.displayName = DialogPrimitive.Description.displayName;
 export {
   Dialog,
   DialogTrigger,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
