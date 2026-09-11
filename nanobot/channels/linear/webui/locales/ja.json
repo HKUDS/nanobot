@@ -1,0 +1,71 @@
+{
+  "description": "Linear の issue からネイティブ Agent Session を通じて nanobot を利用します。",
+  "requirements": "非公開の Linear OAuth アプリと、安定した公開 HTTPS コールバック URL",
+  "setup": {
+    "docsLabel": "Linear セットアップガイドを開く",
+    "officialLabel": "Linear OAuth アプリを作成",
+    "tryIt": "issue のコメントでアプリをメンションしてください。Agent Session 内の続きのメッセージでは、再度メンションする必要はありません。",
+    "summary": "非公開の Linear OAuth アプリを作成し、認証情報と公開 URL を保存してからワークスペースを認証します。新しいセッションの開始には明示的な @メンションが必要で、通常のコメントは無視されます。",
+    "steps": [
+      "この nanobot インスタンスを安定した HTTPS URL で公開します（トンネルも利用できます）。",
+      "Linear で read、write、app:mentionable スコープを持つ非公開 OAuth アプリを作成します。app:assignable は追加しないでください。",
+      "生成された URL を使い、アプリの webhook を AgentSessionEvent、PermissionChange、OAuthAuthorization に登録します。",
+      "設定を保存し、OAuth でワークスペースを接続してから、issue でアプリを @メンションします。"
+    ],
+    "fields": {
+      "clientId": {
+        "label": "OAuth クライアント ID",
+        "placeholder": "Linear OAuth クライアント ID",
+        "help": "Linear の非公開 OAuth アプリからコピーします。"
+      },
+      "clientSecret": {
+        "label": "OAuth クライアントシークレット",
+        "placeholder": "••••••",
+        "help": "この nanobot インスタンス内にのみ保存されます。"
+      },
+      "webhookSigningSecret": {
+        "label": "Webhook 署名シークレット",
+        "placeholder": "••••••",
+        "help": "Webhook の本文を解析する前に Linear-Signature を検証するために使います。"
+      },
+      "publicBaseUrl": {
+        "label": "公開 HTTPS URL",
+        "placeholder": "https://nanobot.example.com",
+        "help": "下のリスナーへ転送される安定した HTTPS オリジンを指定します。パスは含めないでください。"
+      },
+      "host": {
+        "label": "リッスンホスト",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "リッスンポート",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Webhook パス",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "OAuth コールバックパス",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "許可する Linear ユーザー",
+        "placeholder": "Linear ユーザー ID（カンマ区切り）",
+        "help": "nanobot のペアリングを使う場合は空欄にします。接続済みワークスペースの全ユーザーを許可する場合のみ * を指定してください。"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Linear 認証 QR コード",
+    "authorizeTitle": "Linear で認証",
+    "authorizeDescription": "このブラウザで Linear を開くか、QR コードを読み取ってください。認証後、nanobot がチャンネルを有効にします。",
+    "waiting": "Linear の認証を待っています...",
+    "connected": "Linear に接続しました。",
+    "stopped": "認証を中止しました。",
+    "connecting": "接続しています...",
+    "reconnect": "別のワークスペースを接続",
+    "connect": "Linear に接続",
+    "openLinear": "Linear で続行"
+  }
+}

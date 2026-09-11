@@ -13,6 +13,7 @@ const expectedChannels = [
   "discord",
   "email",
   "feishu",
+  "linear",
   "matrix",
   "mattermost",
   "msteams",
