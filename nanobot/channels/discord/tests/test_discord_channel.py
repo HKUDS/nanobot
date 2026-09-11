@@ -1418,10 +1418,15 @@ async def test_send_succeeds_normally() -> None:
     assert sent_messages[0].chat_id == "123"
 
 
-def _compaction_message(content: str, phase: str, compaction_id: str = "c1") -> OutboundMessage:
+def _compaction_message(
+    content: str,
+    phase: str,
+    compaction_id: str = "c1",
+    chat_id: str = "123",
+) -> OutboundMessage:
     return OutboundMessage(
         channel="discord",
-        chat_id="123",
+        chat_id=chat_id,
         content=content,
         event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase),  # type: ignore[arg-type]
     )
@@ -1446,6 +1451,11 @@ async def test_compaction_outcome_edits_the_start_notice_in_place() -> None:
     owner, client = _client_with_channel(target)
 
     await client.send_outbound(_compaction_message("Compressing context…", "started"))
+
+    async def reject_fetch(_channel_id: int):
+        raise AssertionError("an existing notice should be edited without resolving its channel")
+
+    client.fetch_channel = reject_fetch  # type: ignore[method-assign]
     await client.send_outbound(_compaction_message("Context compacted.", "succeeded"))
 
     assert [payload["content"] for payload in target.sent_payloads] == ["Compressing context…"]
@@ -1482,3 +1492,37 @@ async def test_compaction_outcome_falls_back_to_send_when_edit_fails() -> None:
     ]
     assert owner._compaction_notices == {}
 
+
+@pytest.mark.asyncio
+async def test_all_in_flight_compaction_notices_are_retained_until_outcomes() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    targets = {str(index): _FakeChannel(channel_id=index) for index in range(17)}
+    client.get_channel = lambda channel_id: targets.get(str(channel_id))  # type: ignore[method-assign]
+
+    for chat_id in targets:
+        await client.send_outbound(
+            _compaction_message("Compressing context…", "started", f"c-{chat_id}", chat_id)
+        )
+
+    assert len(owner._compaction_notices) == len(targets)
+
+    for chat_id in targets:
+        await client.send_outbound(
+            _compaction_message("Context compacted.", "succeeded", f"c-{chat_id}", chat_id)
+        )
+
+    assert all(len(target.sent_payloads) == 1 for target in targets.values())
+    assert all(target.sent_messages[0].content == "Context compacted." for target in targets.values())
+    assert owner._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_reset_discards_in_flight_compaction_notices() -> None:
+    target = _FakeChannel(channel_id=123)
+    owner, client = _client_with_channel(target)
+    await client.send_outbound(_compaction_message("Compressing context…", "started"))
+
+    await owner._reset_runtime_state(close_client=False)
+
+    assert owner._compaction_notices == {}
