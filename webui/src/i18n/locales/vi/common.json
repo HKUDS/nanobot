@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "Không thể kết nối tới nanobot",
-      "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
+      "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trình duyệt này có thể truy cập địa chỉ WebUI của gateway."
     },
     "auth": {
-      "label": "Mật khẩu",
+      "title": "Kết nối với nanobot",
+      "label": "Mật khẩu WebUI",
+      "help": "Tìm mật khẩu này tại channels.websocket.tokenIssueSecret trong cấu hình nanobot, thường là ~/.nanobot/config.json.",
       "showPassword": "Hiện mật khẩu",
       "hidePassword": "Ẩn mật khẩu",
       "submit": "Kết nối",
-      "required": "Nhập mật khẩu.",
-      "invalid": "Mật khẩu không đúng. Hãy thử lại."
+      "required": "Nhập mật khẩu WebUI.",
+      "invalid": "Mật khẩu WebUI đó không được chấp nhận. Hãy sao chép từ cấu hình nanobot rồi thử lại."
     },
     "account": {
       "section": "Tài khoản",

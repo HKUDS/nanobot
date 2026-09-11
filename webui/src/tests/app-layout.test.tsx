@@ -349,9 +349,11 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
       .toBeInTheDocument();
-    const password = screen.getByLabelText("Password");
+    const password = screen.getByLabelText("WebUI password");
+    expect(screen.getByText(/channels\.websocket\.tokenIssueSecret/))
+      .toBeInTheDocument();
     expect(password).toHaveAttribute(
       "autocomplete",
       "current-password",
@@ -359,7 +361,7 @@ describe("App layout", () => {
     expect(password).not.toHaveAttribute("placeholder");
     expect(screen.queryByText("Authentication required")).not.toBeInTheDocument();
     expect(
-      screen.queryByText("Incorrect password. Try again."),
+      screen.queryByText(/WebUI password wasn't accepted/),
     ).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
   });
@@ -372,7 +374,7 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     await user.type(password, "correct horse battery staple");
     expect(password).toHaveAttribute("type", "password");
 
@@ -397,16 +399,19 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     const connect = screen.getByRole("button", { name: "Connect" });
     expect(connect).toBeEnabled();
     fireEvent.click(connect);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Enter your password.",
+      "Enter the WebUI password.",
     );
     expect(password).toHaveAttribute("aria-invalid", "true");
-    expect(password).toHaveAttribute("aria-describedby", "webui-auth-error");
+    expect(password).toHaveAttribute(
+      "aria-describedby",
+      "webui-auth-help webui-auth-error",
+    );
     expect(password).toHaveFocus();
     expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
@@ -420,10 +425,10 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
       .toBeInTheDocument();
     expect(
-      screen.queryByText("Incorrect password. Try again."),
+      screen.queryByText(/WebUI password wasn't accepted/),
     ).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
   });
@@ -435,13 +440,13 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     fireEvent.change(password, { target: { value: "wrong-password" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    const retryPassword = await screen.findByLabelText("Password");
+    const retryPassword = await screen.findByLabelText("WebUI password");
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Incorrect password. Try again.",
+      "That WebUI password wasn't accepted. Copy it from the nanobot config and try again.",
     );
     expect(retryPassword).toHaveAttribute("aria-invalid", "true");
     expect(retryPassword).toHaveFocus();

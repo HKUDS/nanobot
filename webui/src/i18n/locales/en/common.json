@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "Couldn't reach nanobot",
-      "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
+      "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and this browser can reach its WebUI address."
     },
     "auth": {
-      "label": "Password",
+      "title": "Connect to nanobot",
+      "label": "WebUI password",
+      "help": "Find this password at channels.websocket.tokenIssueSecret in the nanobot config, usually ~/.nanobot/config.json.",
       "showPassword": "Show password",
       "hidePassword": "Hide password",
       "submit": "Connect",
-      "required": "Enter your password.",
-      "invalid": "Incorrect password. Try again."
+      "required": "Enter the WebUI password.",
+      "invalid": "That WebUI password wasn't accepted. Copy it from the nanobot config and try again."
     },
     "account": {
       "section": "Account",

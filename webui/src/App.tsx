@@ -382,9 +382,20 @@ function AuthForm({
         className="flex w-full max-w-sm flex-col gap-4"
       >
         <div className="space-y-2">
-          <h1 className="text-sm font-medium text-foreground">
-            <label htmlFor="webui-access-password">{t("app.auth.label")}</label>
+          <h1 className="text-lg font-semibold text-foreground">
+            {t("app.auth.title")}
           </h1>
+          <p id="webui-auth-help" className="text-sm text-muted-foreground">
+            {t("app.auth.help")}
+          </p>
+        </div>
+        <div className="space-y-2">
+          <label
+            htmlFor="webui-access-password"
+            className="text-sm font-medium text-foreground"
+          >
+            {t("app.auth.label")}
+          </label>
           <div className="relative">
             <Input
               ref={inputRef}
@@ -399,7 +410,11 @@ function AuthForm({
               }}
               disabled={submitting}
               aria-invalid={validationError ? true : undefined}
-              aria-describedby={validationError ? "webui-auth-error" : undefined}
+              aria-describedby={
+                validationError
+                  ? "webui-auth-help webui-auth-error"
+                  : "webui-auth-help"
+              }
               className="pr-10"
               autoFocus
             />

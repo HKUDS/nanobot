@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "Tidak dapat menjangkau nanobot",
-      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
+      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan browser ini dapat menjangkau alamat WebUI-nya."
     },
     "auth": {
-      "label": "Kata sandi",
+      "title": "Hubungkan ke nanobot",
+      "label": "Kata sandi WebUI",
+      "help": "Temukan kata sandi ini di channels.websocket.tokenIssueSecret dalam konfigurasi nanobot, biasanya ~/.nanobot/config.json.",
       "showPassword": "Tampilkan kata sandi",
       "hidePassword": "Sembunyikan kata sandi",
       "submit": "Hubungkan",
-      "required": "Masukkan kata sandi.",
-      "invalid": "Kata sandi salah. Coba lagi."
+      "required": "Masukkan kata sandi WebUI.",
+      "invalid": "Kata sandi WebUI tersebut tidak diterima. Salin dari konfigurasi nanobot lalu coba lagi."
     },
     "account": {
       "section": "Akun",

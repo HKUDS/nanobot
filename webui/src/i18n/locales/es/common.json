@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "No se pudo conectar con nanobot",
-      "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
+      "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que este navegador pueda acceder a la dirección de la WebUI."
     },
     "auth": {
-      "label": "Contraseña",
+      "title": "Conectar con nanobot",
+      "label": "Contraseña de WebUI",
+      "help": "Busca esta contraseña en channels.websocket.tokenIssueSecret dentro de la configuración de nanobot, normalmente ~/.nanobot/config.json.",
       "showPassword": "Mostrar contraseña",
       "hidePassword": "Ocultar contraseña",
       "submit": "Conectar",
-      "required": "Introduce la contraseña.",
-      "invalid": "Contraseña incorrecta. Inténtalo de nuevo."
+      "required": "Introduce la contraseña de WebUI.",
+      "invalid": "No se aceptó esa contraseña de WebUI. Cópiala de la configuración de nanobot e inténtalo de nuevo."
     },
     "account": {
       "section": "Cuenta",

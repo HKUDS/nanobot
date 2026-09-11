@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "nanobot に接続できませんでした",
-      "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
+      "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このブラウザーから WebUI のアドレスに到達できることを確認してください。"
     },
     "auth": {
-      "label": "パスワード",
+      "title": "nanobot に接続",
+      "label": "WebUI パスワード",
+      "help": "このパスワードは nanobot の設定内の channels.websocket.tokenIssueSecret にあります。通常は ~/.nanobot/config.json です。",
       "showPassword": "パスワードを表示",
       "hidePassword": "パスワードを隠す",
       "submit": "接続",
-      "required": "パスワードを入力してください。",
-      "invalid": "パスワードが正しくありません。もう一度お試しください。"
+      "required": "WebUI パスワードを入力してください。",
+      "invalid": "その WebUI パスワードは受け付けられませんでした。nanobot の設定からコピーして、もう一度お試しください。"
     },
     "account": {
       "section": "アカウント",

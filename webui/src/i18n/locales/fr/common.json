@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "Impossible de joindre nanobot",
-      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
+      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que ce navigateur peut atteindre son adresse WebUI."
     },
     "auth": {
-      "label": "Mot de passe",
+      "title": "Se connecter à nanobot",
+      "label": "Mot de passe de la WebUI",
+      "help": "Ce mot de passe se trouve dans channels.websocket.tokenIssueSecret dans la configuration de nanobot, généralement ~/.nanobot/config.json.",
       "showPassword": "Afficher le mot de passe",
       "hidePassword": "Masquer le mot de passe",
       "submit": "Se connecter",
-      "required": "Saisissez le mot de passe.",
-      "invalid": "Mot de passe incorrect. Réessayez."
+      "required": "Saisissez le mot de passe de la WebUI.",
+      "invalid": "Ce mot de passe de la WebUI n’a pas été accepté. Copiez-le depuis la configuration de nanobot et réessayez."
     },
     "account": {
       "section": "Compte",

@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "无法连接到 nanobot",
-      "gatewayHint": "请确认网关已启动（`nanobot gateway`），并且当前页面与网关运行在同一台机器上。"
+      "gatewayHint": "请确认网关已启动（`nanobot gateway`），并且当前浏览器可以访问它的 WebUI 地址。"
     },
     "auth": {
-      "label": "密码",
+      "title": "连接到 nanobot",
+      "label": "WebUI 密码",
+      "help": "请在 nanobot 配置中的 channels.websocket.tokenIssueSecret 查找此密码，配置文件通常位于 ~/.nanobot/config.json。",
       "showPassword": "显示密码",
       "hidePassword": "隐藏密码",
       "submit": "连接",
-      "required": "请输入密码。",
-      "invalid": "密码错误，请重试。"
+      "required": "请输入 WebUI 密码。",
+      "invalid": "该 WebUI 密码未通过验证。请从 nanobot 配置中复制密码后重试。"
     },
     "account": {
       "section": "账户",
