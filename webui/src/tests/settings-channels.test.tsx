@@ -1648,6 +1648,94 @@ describe("Settings channels", () => {
     );
   });
 
+  it("autosaves Email edits and waits for the save before closing", async () => {
+    let resolveConfigure: ((value: Record<string, unknown>) => void) | undefined;
+    const configureResult = new Promise<Record<string, unknown>>((resolve) => {
+      resolveConfigure = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+        if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+        if (url === "/api/settings/nanobot-features") {
+          return jsonResponse({
+            features: [{
+              name: "email",
+              display_name: "Email",
+              webui: "webui/index.ts",
+              type: "channel",
+              enabled: true,
+              configured: true,
+              installed: true,
+              ready: true,
+              running: true,
+              runtime_status: "running",
+              status: "enabled",
+              install_supported: true,
+              requires_restart: false,
+              config_values: {
+                "channels.email.consentGranted": "true",
+                "channels.email.imapHost": "imap.example.com",
+                "channels.email.imapUsername": "bot@example.com",
+                "channels.email.smtpHost": "smtp.example.com",
+                "channels.email.smtpUsername": "bot@example.com",
+              },
+              configured_fields: [
+                "channels.email.consentGranted",
+                "channels.email.imapHost",
+                "channels.email.imapUsername",
+                "channels.email.imapPassword",
+                "channels.email.smtpHost",
+                "channels.email.smtpUsername",
+                "channels.email.smtpPassword",
+              ],
+              setup: channelSetupContract("email"),
+            }],
+            enabled_count: 1,
+          });
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+    requestMutationMock.mockImplementation((action: string) => {
+      if (action === "settings.channel.configure") return configureResult;
+      return Promise.resolve(settingsPayload());
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "View Email settings" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("button", { name: "Save", exact: true })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("IMAP host"), {
+      target: { value: "imap.changed.example.com" },
+    });
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.channel.configure",
+      expect.objectContaining({
+        name: "email",
+        values: expect.objectContaining({
+          "channels.email.imapHost": "imap.changed.example.com",
+        }),
+      }),
+      150_000,
+    ));
+    expect(within(dialog).getByText("Saving")).toBeVisible();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveConfigure?.({ name: "email", saved: true, saved_keys: ["channels.email.imapHost"] });
+      await configureResult;
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("prefills saved channel config without exposing secrets", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

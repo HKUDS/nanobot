@@ -121,24 +121,28 @@ export function CredentialForm({
   configuredFields,
   visibleSecrets,
   onChange,
+  onFieldBlur,
   onToggleSecret,
   errors = {},
   clearedSecrets = new Set(),
   onClearSecret,
   compact = false,
   showSecretActions = false,
+  disabled = false,
 }: {
   fields: ChannelConfigField[];
   values: Record<string, string>;
   configuredFields?: Set<string>;
   visibleSecrets: Record<string, boolean>;
   onChange: (key: string, value: string) => void;
+  onFieldBlur?: (key: string) => void;
   onToggleSecret: (key: string) => void;
   errors?: Record<string, string>;
   clearedSecrets?: Set<string>;
   onClearSecret?: (key: string, clear: boolean) => void;
   compact?: boolean;
   showSecretActions?: boolean;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -202,9 +206,11 @@ export function CredentialForm({
                       name={inputId}
                       value={option.value}
                       checked={selectedOption === option.value}
+                      disabled={disabled}
                       aria-invalid={Boolean(error)}
                       aria-describedby={describedBy}
                       onChange={() => onChange(field.key, option.value)}
+                      onBlur={() => onFieldBlur?.(field.key)}
                       className="peer sr-only"
                     />
                     <span className="grid min-h-11 cursor-pointer place-items-center rounded-compact px-2 py-1.5 transition-colors hover:text-foreground peer-checked:bg-background peer-checked:text-foreground peer-checked:ring-1 peer-checked:ring-inset peer-checked:ring-border/45 peer-focus-visible:ring-2 peer-focus-visible:ring-ring sm:min-h-9">
@@ -233,7 +239,9 @@ export function CredentialForm({
                   aria-describedby={describedBy}
                   placeholder={field.placeholder}
                   value={value}
+                  disabled={disabled}
                   onChange={(event) => onChange(field.key, event.target.value)}
+                  onBlur={() => onFieldBlur?.(field.key)}
                   rows={4}
                   spellCheck={false}
                   className={cn(
@@ -265,7 +273,9 @@ export function CredentialForm({
                     : field.placeholder
                 }
                 value={values[field.key] ?? ""}
+                disabled={disabled}
                 onChange={(event) => onChange(field.key, event.target.value)}
+                onBlur={() => onFieldBlur?.(field.key)}
                 className={cn(
                   "h-10 rounded-full border-border/40 bg-background text-base sm:h-9 sm:text-[13px]",
                   error && "border-destructive focus-visible:ring-destructive/30",
@@ -281,6 +291,7 @@ export function CredentialForm({
                       : tx("settings.channels.showSecret", "Show secret")
                   }
                   onClick={() => onToggleSecret(field.key)}
+                  disabled={disabled}
                   className="absolute right-0 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground sm:right-1 sm:h-8 sm:w-8"
                 >
                   {visible ? (
@@ -297,6 +308,7 @@ export function CredentialForm({
                 type="button"
                 className="mt-1 min-h-8 text-[11px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                 onClick={() => onClearSecret(field.key, !clearSecret)}
+                disabled={disabled}
               >
                 {clearSecret
                   ? tx("settings.channels.keepSavedSecret", "Keep saved credential")

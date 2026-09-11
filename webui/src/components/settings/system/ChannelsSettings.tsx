@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Loader2, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -42,6 +42,8 @@ export function ChannelsSettings({
   const filterInitializedRef = useRef(false);
   const triggerRef = useRef<HTMLElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const beforeCloseRef = useRef<(() => Promise<boolean>) | null>(null);
+  const closePendingRef = useRef(false);
   const channels = (nanobotFeatures?.features ?? [])
     .filter((feature) => feature.type === "channel" && feature.settings_visible !== false)
     .sort((left, right) => Number(!left.ready) - Number(!right.ready)
@@ -72,6 +74,24 @@ export function ChannelsSettings({
         },
       ].filter((group) => group.channels.length);
   const selectedChannel = channels.find((feature) => feature.name === selectedChannelName);
+  const requestChannelClose = useCallback(() => {
+    if (closePendingRef.current) return;
+    const beforeClose = beforeCloseRef.current;
+    if (!beforeClose) {
+      setSelectedChannelName(null);
+      return;
+    }
+    closePendingRef.current = true;
+    void beforeClose().then((canClose) => {
+      if (canClose) setSelectedChannelName(null);
+    }).finally(() => {
+      closePendingRef.current = false;
+    });
+  }, []);
+  const setBeforeChannelClose = useCallback(
+    (handler: (() => Promise<boolean>) | null) => { beforeCloseRef.current = handler; },
+    [],
+  );
 
   return (
     <div className="settings-stack">
@@ -119,6 +139,7 @@ export function ChannelsSettings({
               actionKey={actionKey} actionsDisabled={restartRequired || Boolean(isRestarting)} onAction={onAction}
               onSelect={(connect = false) => {
                 triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                beforeCloseRef.current = null;
                 setConnectRequestId(connect ? 1 : 0);
                 setSelectedChannelName(feature.name);
               }} />
@@ -132,7 +153,7 @@ export function ChannelsSettings({
           {t(channels.length ? "settings.channels.noResults" : "settings.channels.empty")}
         </div>
       )}
-      <Dialog open={Boolean(selectedChannel)} onOpenChange={(open) => { if (!open) setSelectedChannelName(null); }}>
+      <Dialog open={Boolean(selectedChannel)} onOpenChange={(open) => { if (!open) requestChannelClose(); }}>
         <DialogContent ref={dialogRef} showCloseButton={false} aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-hidden p-0 outline-none"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
@@ -152,7 +173,8 @@ export function ChannelsSettings({
               {error ? <DismissibleStatusMessage message={error} isError onDismiss={onDismissStatus} /> : null}
               {selectedChannel ? <ChannelSetupPanel token={token} feature={selectedChannel} actionKey={actionKey}
                 showBrandLogos={showBrandLogos}
-                onAction={onAction} onFeaturesUpdate={onFeaturesUpdate} connectRequestId={connectRequestId} /> : null}
+                onAction={onAction} onFeaturesUpdate={onFeaturesUpdate} connectRequestId={connectRequestId}
+                onBeforeCloseChange={setBeforeChannelClose} /> : null}
             </div>
           </div>
         </DialogContent>

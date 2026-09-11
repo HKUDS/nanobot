@@ -1,6 +1,7 @@
 import { channelValidationMessage } from "./validationMessages";
 import {
   Suspense,
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -25,6 +26,7 @@ import type {
   ChannelPluginConnectFlowProps,
 } from "@/channel-plugins/types";
 import { ToggleButton } from "@/components/settings/ToggleButton";
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import {
   type ChannelConfigField,
   type ChannelFieldSection,
@@ -188,6 +190,7 @@ export function ChannelSetupPanel({
   onAction,
   onFeaturesUpdate,
   connectRequestId = 0,
+  onBeforeCloseChange,
 }: {
   token: string;
   feature: NanobotFeatureInfo;
@@ -196,6 +199,7 @@ export function ChannelSetupPanel({
   onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   connectRequestId?: number;
+  onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
 }) {
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -270,6 +274,7 @@ export function ChannelSetupPanel({
         connectRequestId={connectRequestId}
         ConnectFlow={feature.installed ? uiContribution?.ConnectFlow : undefined}
         onFeaturesUpdate={onFeaturesUpdate}
+        onBeforeCloseChange={onBeforeCloseChange}
       />}
     </aside>
   );
@@ -283,6 +288,7 @@ function ChannelSetupSurface({
   connectRequestId,
   ConnectFlow,
   onFeaturesUpdate,
+  onBeforeCloseChange,
 }: {
   header: ReactNode;
   token: string;
@@ -291,15 +297,19 @@ function ChannelSetupSurface({
   connectRequestId: number;
   ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
 }) {
   const { client } = useClient();
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoSaveState, setAutoSaveState] = useState<"idle" | "saved">("idle");
+  const autoSavePromiseRef = useRef<Promise<boolean> | null>(null);
   const [validating, setValidating] = useState(false);
   const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null);
-  const actionPending = saving || validating || pendingEnabled !== null;
+  const actionPending = saving || autoSaving || validating || pendingEnabled !== null;
   const [validation, setValidation] = useState<ChannelValidationPayload | null>(null);
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
@@ -364,6 +374,7 @@ function ChannelSetupSurface({
       delete next[key];
       return next;
     });
+    setAutoSaveState("idle");
   };
 
   const saveConnectionSettings = async () => {
@@ -388,6 +399,7 @@ function ChannelSetupSurface({
       else next.delete(key);
       return next;
     });
+    setAutoSaveState("idle");
   };
 
   const applyPreset = (preset: ChannelProviderPreset) => {
@@ -397,7 +409,76 @@ function ChannelSetupSurface({
       for (const key of Object.keys(preset.values)) next.add(key);
       return next;
     });
+    setAutoSaveState("idle");
   };
+
+  const credentialDirty = touchedFields.size > 0 || clearedSecrets.size > 0;
+  const touchedSecret = fields.some(
+    (field) => field.secret && touchedFields.has(field.key),
+  );
+  const saveCredentialDraft = useCallback(async (): Promise<boolean> => {
+    const activeSave = autoSavePromiseRef.current;
+    if (activeSave) return activeSave;
+    if (mode !== "credentials" || !credentialDirty) return true;
+    if (saving || validating || pendingEnabled !== null) return false;
+
+    const values = channelValuesForSubmit(fields, fieldValues, touchedFields, clearedSecrets);
+    const save = (async () => {
+      setAutoSaving(true);
+      setAutoSaveState("idle");
+      setNotice(null);
+      try {
+        const payload = await configureChannel(client, feature.name, values);
+        setTouchedFields(new Set());
+        setClearedSecrets(new Set());
+        setAutoSaveState("saved");
+        if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
+        return true;
+      } catch (err) {
+        setNotice((err as Error).message);
+        return false;
+      } finally {
+        setAutoSaving(false);
+      }
+    })();
+    autoSavePromiseRef.current = save;
+    const saved = await save;
+    if (autoSavePromiseRef.current === save) autoSavePromiseRef.current = null;
+    return saved;
+  }, [
+    clearedSecrets,
+    client,
+    credentialDirty,
+    feature.name,
+    fieldValues,
+    fields,
+    mode,
+    onFeaturesUpdate,
+    pendingEnabled,
+    saving,
+    touchedFields,
+    validating,
+  ]);
+
+  useAutoSave(
+    { fieldValues, touchedFields: [...touchedFields], clearedSecrets: [...clearedSecrets] },
+    mode === "credentials" && credentialDirty,
+    actionPending,
+    () => void saveCredentialDraft(),
+    !touchedSecret,
+  );
+
+  useEffect(() => {
+    if (autoSaveState !== "saved") return;
+    const timeout = window.setTimeout(() => setAutoSaveState("idle"), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [autoSaveState]);
+
+  useEffect(() => {
+    if (!onBeforeCloseChange) return;
+    onBeforeCloseChange(credentialDirty ? saveCredentialDraft : null);
+    return () => onBeforeCloseChange(null);
+  }, [credentialDirty, onBeforeCloseChange, saveCredentialDraft]);
 
   const copyCommand = () => {
     if (!setup.command) return;
@@ -524,17 +605,6 @@ function ChannelSetupSurface({
     && !advancedOpen && !setup.presets?.length && !setup.actions?.length;
   const credentialActions = mode === "credentials" ? (
     <div className="ms-auto flex min-h-10 flex-wrap items-center justify-end gap-x-3 gap-y-2 sm:min-h-9">
-      {enabled && (touchedFields.size > 0 || clearedSecrets.size > 0) ? (
-        <Button
-          type="submit"
-          size="sm"
-          variant="secondary"
-          className="h-10 rounded-full px-3 text-[12px] font-semibold sm:h-9"
-          disabled={actionPending}
-        >
-          {tx("settings.actions.save", "Save")}
-        </Button>
-      ) : null}
       {feature.setup?.verifies_connection ? (
         <Button
           type="button"
@@ -563,6 +633,28 @@ function ChannelSetupSurface({
     >
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pe-20">
         {header}
+        <div className="ms-auto flex min-h-8 items-center gap-2">
+          <span
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className={cn(
+              "inline-flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground",
+              !autoSaving && autoSaveState !== "saved" && "sr-only",
+            )}
+          >
+            {autoSaving ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                {tx("settings.actions.saving", "Saving")}
+              </>
+            ) : autoSaveState === "saved" ? (
+              <>
+                <Check className="h-3 w-3" aria-hidden />
+                {tx("settings.channels.savedSettings", "Settings saved.")}
+              </>
+            ) : null}
+          </span>
         {hasAdvanced ? (
           <button
             type="button"
@@ -578,6 +670,7 @@ function ChannelSetupSurface({
             )} aria-hidden />
           </button>
         ) : null}
+        </div>
       </div>
       <ChannelRuntimeError message={feature.runtime_error} />
       <div className="flex flex-wrap items-center gap-4">
@@ -657,12 +750,18 @@ function ChannelSetupSurface({
                   configuredFields={configuredFields}
                   visibleSecrets={visibleSecrets}
                   onChange={setFieldValue}
+                  onFieldBlur={(key) => {
+                    if (fields.some((field) => field.key === key && field.secret)) {
+                      void saveCredentialDraft();
+                    }
+                  }}
                   onToggleSecret={toggleSecret}
                   errors={fieldErrors}
                   clearedSecrets={clearedSecrets}
                   onClearSecret={setSecretCleared}
                   requirements={setup.requirements ?? []}
                   sectionLabels={setup.sectionLabels}
+                  disabled={actionPending}
                 />
               ) : null}
             </>
@@ -692,11 +791,17 @@ function ChannelSetupSurface({
                   configuredFields={configuredFields}
                   visibleSecrets={visibleSecrets}
                   onChange={setFieldValue}
+                  onFieldBlur={(key) => {
+                    if (fields.some((field) => field.key === key && field.secret)) {
+                      void saveCredentialDraft();
+                    }
+                  }}
                   onToggleSecret={toggleSecret}
                   errors={fieldErrors}
                   clearedSecrets={clearedSecrets}
                   onClearSecret={setSecretCleared}
                   compact
+                  disabled={actionPending}
                 />
               </div>
             ) : null}
@@ -750,10 +855,12 @@ function ChannelFieldGroups({
   configuredFields: Set<string>;
   visibleSecrets: Record<string, boolean>;
   onChange: (key: string, value: string) => void;
+  onFieldBlur?: (key: string) => void;
   onToggleSecret: (key: string) => void;
   errors: Record<string, string>;
   clearedSecrets: Set<string>;
   onClearSecret: (key: string, clear: boolean) => void;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
