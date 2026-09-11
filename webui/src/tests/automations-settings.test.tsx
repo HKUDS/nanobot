@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
-import { AutomationEditDialog, AutomationsSettings } from "@/components/settings/system/AutomationsSettings";
+import { AutomationDeleteDialog, AutomationEditDialog, AutomationsSettings } from "@/components/settings/system/AutomationsSettings";
 import type { AutomationFilter, AutomationSort } from "@/components/settings/system/AutomationsSettings";
 import type { SessionAutomationJob } from "@/lib/types";
 
@@ -460,6 +460,66 @@ describe("Automation task list and detail sheet", () => {
     await user.click(screen.getByRole("menuitem", { name: "Delete" }));
     await waitFor(() => expect(remove).toHaveBeenCalledWith(task));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it.each(["Cancel", "Delete"])("unlocks navigation after the real deletion flow ends with %s", async (operation) => {
+    const previousPointerEvents = document.body.style.pointerEvents;
+    onTestFinished(() => {
+      cleanup();
+      document.body.style.pointerEvents = previousPointerEvents;
+    });
+    // Exercise the real animated Radix presence lifecycle. The parent dialog
+    // may finish its exit before its nested menu; both must release modality.
+    const getStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((node) => {
+      const style = getStyle(node);
+      if (!["menu", "dialog"].includes(node.getAttribute("role") ?? "")) return style;
+      return new Proxy(style, {
+        get(target, property) {
+          if (property === "animationName") return node.getAttribute("data-state") === "closed" ? "exit" : "enter";
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    });
+    const finishExit = (node: HTMLElement) => {
+      const exit = new Event("animationend", { bubbles: true });
+      Object.defineProperty(exit, "animationName", { value: "exit" });
+      fireEvent(node, exit);
+    };
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    function DeletionHarness() {
+      const [jobs, setJobs] = useState([task, systemTask]);
+      const [pending, setPending] = useState<SessionAutomationJob | null>(null);
+      return <>
+        <button onClick={navigate}>Sidebar Apps</button>
+        <AutomationDeleteDialog job={pending} deleting={false}
+          onOpenChange={(open) => { if (!open) setPending(null); }}
+          onConfirm={(job) => {
+            setJobs((items) => items.filter((item) => item.id !== job.id));
+            setPending(null);
+          }} />
+        <Harness payload={{ jobs }} onRequestDelete={setPending} />
+      </>;
+    }
+    render(<DeletionHarness />);
+    await user.click(screen.getByRole("button", { name: /PR watch/ }));
+    const detail = screen.getByRole("dialog", { name: "PR watch" });
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    expect(document.body.style.pointerEvents).toBe("none");
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(detail).toHaveAttribute("data-state", "closed");
+    finishExit(detail);
+    const confirmation = await screen.findByRole("dialog", { name: "Delete automation" });
+    expect(document.body.style.pointerEvents).toBe("none");
+    await user.click(within(confirmation).getByRole("button", { name: operation, exact: true }));
+    finishExit(confirmation);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(document.body.style.pointerEvents).not.toBe("none");
+    await user.click(screen.getByRole("button", { name: "Sidebar Apps" }));
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: /PR watch/ }) !== null).toBe(operation === "Cancel");
   });
 
   it("returns keyboard focus to the task after cancelling or saving the real editor", async () => {

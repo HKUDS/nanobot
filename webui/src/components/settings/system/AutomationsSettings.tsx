@@ -553,7 +553,8 @@ function AutomationDetailPanel({
             {actionKey === `${job.enabled ? "disable" : "enable"}:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
             {job.enabled ? tx("settings.automations.pause", "Pause") : tx("settings.automations.resume", "Resume")}
           </Button>
-          <DropdownMenu>
+          {/* The detail dialog owns modality, including during the delete handoff. */}
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground" disabled={busy} aria-label={tx("settings.automations.moreActions", "More actions")}>
                 <MoreHorizontal className="h-4 w-4" aria-hidden />
