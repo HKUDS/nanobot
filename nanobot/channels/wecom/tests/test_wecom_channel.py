@@ -23,8 +23,10 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.wecom.runtime import (
+    WECOM_WEBSOCKET_HOST,
     WecomChannel,
     WecomConfig,
+    _bypass_system_proxy,
     _sanitize_filename,
 )
 
@@ -56,6 +58,20 @@ class _FakeWeComClient:
 def test_sdk_exposes_media_upload_api() -> None:
     """The declared SDK version provides the public API used by this channel."""
     assert callable(WSClient.upload_media)
+
+
+def test_wecom_websocket_bypasses_system_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+
+    _bypass_system_proxy(WECOM_WEBSOCKET_HOST)
+    _bypass_system_proxy(WECOM_WEBSOCKET_HOST)
+
+    assert os.environ["NO_PROXY"].split(",") == [
+        "localhost",
+        "127.0.0.1",
+        WECOM_WEBSOCKET_HOST,
+    ]
+    assert os.environ["no_proxy"].split(",").count(WECOM_WEBSOCKET_HOST) == 1
 
 
 def test_sanitize_filename_strips_path_traversal() -> None:

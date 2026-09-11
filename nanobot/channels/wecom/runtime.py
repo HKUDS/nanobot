@@ -20,12 +20,21 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
+WECOM_WEBSOCKET_HOST = "openws.work.weixin.qq.com"
 
 # Inbound media safety limit (matching QQ channel defaults)
 WECOM_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 200  # 200MB
 
 # Replace unsafe characters with "_", keep Chinese and common safe punctuation.
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
+
+
+def _bypass_system_proxy(host: str) -> None:
+    """Keep the WeCom SDK's WebSocket on its direct connection path."""
+    for key in ("NO_PROXY", "no_proxy"):
+        entries = [entry.strip() for entry in os.environ.get(key, "").split(",") if entry.strip()]
+        if host not in entries:
+            os.environ[key] = ",".join([*entries, host])
 
 
 def _sanitize_filename(name: str, fallback: str = "unnamed") -> str:
@@ -95,6 +104,10 @@ class WecomChannel(BaseChannel):
         if not self.config.bot_id or not self.config.secret:
             self.logger.error("bot_id and secret not configured")
             return
+
+        # websockets 15+ automatically uses the system proxy. The current WeCom SDK
+        # doesn't expose its proxy argument and expects this endpoint to connect directly.
+        _bypass_system_proxy(WECOM_WEBSOCKET_HOST)
 
         from wecom_aibot_sdk import WSClient, generate_req_id
 
