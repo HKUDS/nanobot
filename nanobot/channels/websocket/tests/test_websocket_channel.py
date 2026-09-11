@@ -2316,6 +2316,56 @@ async def test_send_progress_includes_structured_tool_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_progress_omits_binary_tool_results_from_wire_and_transcript() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-binary-tool-result")
+    data_url = f"data:image/png;base64,{'A' * (2 * 1024 * 1024)}"
+    tool_events = [
+        {
+            "version": 1,
+            "phase": "end",
+            "call_id": "call-image",
+            "name": "read_file",
+            "arguments": {"path": "/media/screenshot.png"},
+            "result": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                    "_meta": {"path": "/media/screenshot.png"},
+                },
+                {"type": "text", "text": "(Image file: /media/screenshot.png)"},
+            ],
+            "error": None,
+            "files": [],
+            "embeds": [],
+        }
+    ]
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-binary-tool-result",
+        content="read_file completed",
+        event=ProgressEvent(content="read_file completed", tool_events=tool_events),
+    ))
+
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    [wire_event] = payload["tool_events"]
+    assert wire_event["result"][0]["image_url"]["url"] == (
+        "[binary content omitted from WebUI]"
+    )
+    assert len(mock_ws.send.await_args.args[0].encode("utf-8")) < 4096
+
+    [persisted] = read_transcript_lines("websocket:chat-binary-tool-result")
+    assert persisted["tool_events"] == payload["tool_events"]
+    assert data_url not in json.dumps(persisted)
+
+    # WebUI projection must not alter the result that the runner sends back to the model.
+    assert tool_events[0]["result"][0]["image_url"]["url"] == data_url
+
+
+@pytest.mark.asyncio
 async def test_send_file_edit_progress_uses_file_edit_event() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
