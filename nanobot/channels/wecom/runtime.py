@@ -2,6 +2,7 @@
 """WeCom (Enterprise WeChat) channel implementation using wecom_aibot_sdk."""
 
 import asyncio
+import hashlib
 import importlib.util
 import os
 import re
@@ -383,7 +384,7 @@ class WecomChannel(BaseChannel):
                 return None
 
             media_dir = get_media_dir("wecom")
-            fallback_name = fname or f"{media_type}_{hash(file_url) % 100000}"
+            fallback_name = fname or f"{media_type}_{hashlib.sha1(file_url.encode()).hexdigest()[:10]}"
             filename = _sanitize_filename(cast(str, filename or fallback_name), fallback=fallback_name)
 
             file_path = media_dir / filename
