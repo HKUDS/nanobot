@@ -222,20 +222,25 @@ describe("Automation task list and detail sheet", () => {
     expect(dialog).not.toHaveAttribute("aria-describedby");
   });
 
-  it("reuses compact settings rows for system tasks without changing personal rows", async () => {
+  it("uses channel search controls and the skills catalog surface for both task groups", async () => {
     const user = userEvent.setup();
     render(<Harness payload={{ jobs: [task, systemTask, {
       ...systemTask, id: "dream", name: "dream",
       state: { last_status: "error", last_error: "Memory update failed" },
     }] }} />);
+    expect(screen.getByRole("heading", { name: "Automations" })).toHaveClass("font-normal", "text-[24px]");
     const personalRow = screen.getByRole("button", { name: /PR watch/ });
-    expect(personalRow).toHaveClass("min-h-[92px]");
-    expect(personalRow).not.toHaveClass("settings-list-row");
+    expect(personalRow).toHaveClass("rounded-control", "px-2", "py-3", "settings-hover");
     const list = screen.getByRole("list", { name: "System tasks" });
-    expect(list.parentElement).toHaveClass("rounded-panel", "bg-settings-surface");
+    const surface = personalRow.closest(".bg-settings-surface");
+    expect(surface).toHaveClass("rounded-panel");
+    expect(list.closest(".bg-settings-surface")).toBe(surface);
+    const search = screen.getByRole("textbox");
+    expect(search.closest(".rounded-panel")).toBeNull();
+    expect(search).toHaveClass("h-12", "bg-settings-surface", "focus-visible:bg-background");
+    expect(screen.getByRole("button", { name: "All 1" }).parentElement).toHaveClass("segmented-control", "flex-wrap");
     const heartbeat = within(list).getByRole("button", { name: /heartbeat/ });
-    expect(heartbeat).toHaveClass("settings-list-row", "settings-hover");
-    expect(heartbeat).not.toHaveClass("min-h-[92px]");
+    expect(heartbeat.className).toBe(personalRow.className);
     expect(within(list).queryByText("System-managed automation")).not.toBeInTheDocument();
     expect(within(list).getByText("Memory update failed")).toBeVisible();
     expect(within(list).getByText("Needs attention")).toBeVisible();

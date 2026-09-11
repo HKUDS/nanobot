@@ -158,141 +158,147 @@ export function AutomationsSettings({
 
   return (
     <div className="automations-page">
-      <header className="mb-6 flex items-center justify-between gap-4 sm:mb-8">
-        <h1 ref={pageTitle} tabIndex={-1} className="text-[26px] font-semibold leading-tight tracking-[-0.025em] text-foreground outline-none sm:text-[30px]">
+      <header className="mb-7">
+        <h1 ref={pageTitle} tabIndex={-1} className="text-[24px] font-normal leading-tight tracking-normal text-foreground outline-none sm:text-[28px]">
           {tx("settings.nav.automations", "Automations")}
         </h1>
       </header>
 
-      {jobs.length ? (
-        <section
-          aria-label={tx("settings.automations.viewOptions", "Search and filter")}
-          className="space-y-3 pb-5 pt-1"
-        >
-          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <div className="relative min-w-0">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      <div className="settings-stack">
+        {jobs.length ? (
+          <section
+            aria-label={tx("settings.automations.viewOptions", "Search and filter")}
+            className="flex min-w-0 flex-wrap items-center gap-3"
+          >
+            <div className="relative min-w-0 basis-full sm:flex-1 sm:basis-[240px]">
+              <Search className="pointer-events-none absolute start-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
               <Input
                 ref={searchInput}
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 aria-label={tx("settings.automations.search", "Search task, message, linked chat, or schedule")}
                 placeholder={tx("settings.automations.search", "Search task, message, linked chat, or schedule")}
-                className={cn("h-9 w-full rounded-full pl-9 text-[13px]", SETTINGS_SEARCH_INPUT_CLASS)}
+                className={cn("h-12 ps-11 text-[15px]", SETTINGS_SEARCH_INPUT_CLASS)}
               />
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-9 gap-2 rounded-full text-[12px] text-muted-foreground">
-                  <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
-                  {sortLabel[sort]}
-                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
-                  <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
-                    <span>{sortLabel[value]}</span>
-                    {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          <div role="group" aria-label={tx("settings.nav.automations", "Automations")} className="flex flex-wrap gap-1">
-            {summaryOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={filter === option.value}
-                onClick={() => onFilterChange(option.value)}
-                className={cn(
-                  "touch-target inline-flex min-h-8 max-w-full items-center gap-2 rounded-full px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground",
-                  filter === option.value && "bg-muted text-foreground",
-                )}
-              >
-                <span className="min-w-0 [overflow-wrap:anywhere]">{option.label}</span>
-                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{option.count}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      ) : null}
+            <div role="group" aria-label={tx("settings.nav.automations", "Automations")} className="min-w-0 max-w-full">
+              <SegmentedControl
+                value={filter}
+                className="flex-wrap justify-start"
+                itemClassName="px-2.5"
+                options={summaryOptions.map((option) => ({
+                  value: option.value,
+                  label: <>{option.label} <span className="ml-0.5 tabular-nums opacity-65">{option.count}</span></>,
+                }))}
+                onChange={onFilterChange}
+              />
+            </div>
+          </section>
+        ) : null}
 
-      {error ? <AutomationError message={error} /> : null}
-      {loading && !payload ? (
-        <div role="status" className="flex h-44 items-center justify-center text-[13px] text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-          {tx("settings.automations.loading", "Loading automations...")}
-        </div>
-      ) : (
-        <>
-          {personal.length ? (
-            <ul aria-label={tx("settings.automations.yourTasks", "Your automations")} className="divide-y divide-border/45">
-              {personal.map(renderJob)}
-            </ul>
-          ) : !personalJobs.length && !query && filter === "all" ? (
-            <div className="py-12 text-center sm:py-16">
-              <p className="text-[17px] font-medium text-foreground">
-                {tx("settings.automations.empty", "No automations yet.")}
-              </p>
-              <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-muted-foreground">
-                {tx("settings.automations.emptyHint", "Tell nanobot in a chat what you'd like it to do on a schedule.")}
-              </p>
-            </div>
-          ) : !filtered.length ? (
-            <div className="py-12 text-center text-[13px] text-muted-foreground">
-              <p>{tx("settings.automations.noMatches", "No automations match this view.")}</p>
-              <Button variant="outline" className="mt-4 rounded-full" onClick={() => {
-                onQueryChange("");
-                onFilterChange("all");
-              }}>
-                {tx("settings.automations.clearFilters", "Clear filters")}
-              </Button>
+        <SettingsGroup>
+          {jobs.length ? (
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 px-5 pb-2 pt-3 sm:px-6">
+              <div className="flex items-center gap-2 py-1.5">
+                <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  {tx("settings.automations.yourTasks", "Your automations")}
+                </h2>
+                <span className="text-[11px] tabular-nums text-muted-foreground/60">{personal.length}</span>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="h-8 gap-1.5 px-2 text-[11px] text-muted-foreground">
+                    <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+                    {sortLabel[sort]}
+                    <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
+                    <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
+                      <span>{sortLabel[value]}</span>
+                      {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           ) : null}
-          {system.length ? (
-            <section className="mt-8 border-t border-border/45 pt-2">
-              <button
-                type="button"
-                aria-expanded={systemOpen}
-                aria-controls="automation-system-tasks"
-                onClick={() => {
-                  const open = !systemOpen;
-                  setSystemOpen(open);
-                  try {
-                    // Persist only the user's choice, not automatic search expansion.
-                    window.localStorage.setItem(SYSTEM_TASKS_OPEN_STORAGE_KEY, String(open));
-                  } catch {
-                    // Unavailable storage must not prevent expanding or collapsing.
-                  }
-                }}
-                className={cn("flex min-h-16 w-full items-center gap-3 rounded-lg py-4 text-left text-[14px] font-medium", formControlFocusClassName)}
-              >
-                <span>{tx("settings.automations.systemTasks", "System tasks")}</span>
-                <span className="text-[12px] font-normal tabular-nums text-muted-foreground">{system.length}</span>
-                {system.some(automationNeedsAttention) ? (
-                  <span className="ml-auto inline-flex items-center gap-1.5 text-[12px] font-normal text-amber-700 dark:text-amber-400">
-                    <CircleAlert className="h-3.5 w-3.5" aria-hidden />
-                    {tx("settings.automations.filters.failed", "Needs attention")}
-                  </span>
-                ) : null}
-                <ChevronDown className={cn("ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", systemOpen && "rotate-180")} aria-hidden />
-              </button>
-              <DisclosureContent
-                id="automation-system-tasks"
-                open={systemOpen}
-              >
-                <SettingsGroup>
-                  <ul aria-label={tx("settings.automations.systemTasks", "System tasks")} className="divide-y divide-border/45">
-                    {system.map(renderJob)}
-                  </ul>
-                </SettingsGroup>
-              </DisclosureContent>
-            </section>
-          ) : null}
-        </>
-      )}
+
+          {error ? <AutomationError message={error} /> : null}
+          {loading && !payload ? (
+            <div role="status" className="flex h-44 items-center justify-center text-[13px] text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+              {tx("settings.automations.loading", "Loading automations...")}
+            </div>
+          ) : (
+            <div className="space-y-5 px-3 pb-3 sm:px-4">
+              {personal.length ? (
+                <ul aria-label={tx("settings.automations.yourTasks", "Your automations")} className="space-y-1">
+                  {personal.map(renderJob)}
+                </ul>
+              ) : !personalJobs.length && !query && filter === "all" ? (
+                <div className="px-2 py-12 text-center">
+                  <p className="text-[14px] font-medium text-foreground">
+                    {tx("settings.automations.empty", "No automations yet.")}
+                  </p>
+                  <p className="mx-auto mt-2 max-w-sm text-[13px] leading-6 text-muted-foreground">
+                    {tx("settings.automations.emptyHint", "Tell nanobot in a chat what you'd like it to do on a schedule.")}
+                  </p>
+                </div>
+              ) : !filtered.length ? (
+                <div className="py-12 text-center text-[13px] text-muted-foreground">
+                  <p>{tx("settings.automations.noMatches", "No automations match this view.")}</p>
+                  <Button variant="outline" className="mt-4 rounded-full" onClick={() => {
+                    onQueryChange("");
+                    onFilterChange("all");
+                  }}>
+                    {tx("settings.automations.clearFilters", "Clear filters")}
+                  </Button>
+                </div>
+              ) : null}
+              {system.length ? (
+                <section className="space-y-1">
+                  <button
+                    type="button"
+                    aria-expanded={systemOpen}
+                    aria-controls="automation-system-tasks"
+                    onClick={() => {
+                      const open = !systemOpen;
+                      setSystemOpen(open);
+                      try {
+                        // Persist only the user's choice, not automatic search expansion.
+                        window.localStorage.setItem(SYSTEM_TASKS_OPEN_STORAGE_KEY, String(open));
+                      } catch {
+                        // Unavailable storage must not prevent expanding or collapsing.
+                      }
+                    }}
+                    className={cn("flex min-h-9 w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground settings-hover", formControlFocusClassName)}
+                  >
+                    <span>{tx("settings.automations.systemTasks", "System tasks")}</span>
+                    <span className="font-normal tabular-nums tracking-normal text-muted-foreground/60">{system.length}</span>
+                    {system.some(automationNeedsAttention) ? (
+                      <span className="ml-auto inline-flex items-center gap-1.5 font-normal normal-case tracking-normal text-amber-700 dark:text-amber-400">
+                        <CircleAlert className="h-3.5 w-3.5" aria-hidden />
+                        {tx("settings.automations.filters.failed", "Needs attention")}
+                      </span>
+                    ) : null}
+                    <ChevronDown className={cn("ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", systemOpen && "rotate-180")} aria-hidden />
+                  </button>
+                  <DisclosureContent
+                    id="automation-system-tasks"
+                    open={systemOpen}
+                  >
+                    <ul aria-label={tx("settings.automations.systemTasks", "System tasks")} className="space-y-1">
+                      {system.map(renderJob)}
+                    </ul>
+                  </DisclosureContent>
+                </section>
+              ) : null}
+            </div>
+          )}
+        </SettingsGroup>
+      </div>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         {selectedJob ? (
@@ -356,22 +362,15 @@ function AutomationListItem({ job, locale, disabled, onSelect }: {
         aria-haspopup="dialog"
         onClick={(event) => onSelect(event.currentTarget)}
         className={cn(
-          "automation-task-row grid w-full grid-cols-1 items-center gap-x-4 gap-y-2 text-left transition-colors",
-          compact ? "settings-list-row py-3 settings-hover" : "min-h-[92px] rounded-lg py-5 hover:bg-muted/35",
+          "automation-task-row grid w-full grid-cols-1 items-center gap-x-4 gap-y-2 rounded-control px-2 py-3 text-left transition-colors duration-150 settings-hover",
           formControlFocusClassName,
         )}
       >
         <span className="min-w-0">
-          <span className={cn(
-            "block truncate font-medium text-foreground",
-            compact ? "text-[14px] leading-5" : "text-[16px] leading-6 tracking-[-0.015em] sm:text-[17px]",
-          )}>{job.name || job.id}</span>
-          {summary ? <span className="mt-1 block truncate text-[13px] leading-5 text-muted-foreground">{summary}</span> : null}
+          <span className="block truncate text-[14px] font-semibold leading-5 text-foreground">{job.name || job.id}</span>
+          {summary ? <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">{summary}</span> : null}
         </span>
-        <span className={cn(
-          "automation-task-state flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted-foreground",
-          !compact && "sm:text-[13px]",
-        )}>
+        <span className="automation-task-state flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
           {attention && !running ? (
             <>

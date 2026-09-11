@@ -241,7 +241,7 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "automations", initialSettings: settingsPayload(), showSidebar: false });
 
     const filters = await screen.findByRole("group", { name: "Automations" });
-    expect(filters).toHaveClass("flex-wrap");
+    expect(within(filters).getByRole("button", { name: "All 1" }).parentElement).toHaveClass("segmented-control", "flex-wrap");
     expect(within(filters).getAllByRole("button")).toHaveLength(4);
     expect(within(filters).getByRole("button", { name: "All 1" })).toHaveAttribute("aria-pressed", "true");
     expect(within(filters).queryByRole("button", { name: /System/ })).not.toBeInTheDocument();
