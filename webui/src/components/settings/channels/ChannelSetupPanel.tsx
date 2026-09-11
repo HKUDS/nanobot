@@ -801,7 +801,7 @@ function ChannelFieldGroups({
         const sectionFields = groups.get(section);
         if (!sectionFields?.length) return null;
         return (
-          <fieldset key={section} className="min-w-0 space-y-2">
+          <fieldset key={section} className="min-w-0">
             <legend className={groups.size === 1 ? "sr-only" : "mb-2 text-[12px] font-medium text-muted-foreground"}>
               {channelFieldSectionLabel(section, tx, sectionLabels)}
             </legend>
