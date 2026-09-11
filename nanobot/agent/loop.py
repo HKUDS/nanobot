@@ -1183,6 +1183,7 @@ class AgentLoop:
                 concurrent_tools=True,
                 workspace=effective_scope.project_path,
                 session_key=session.key if session else None,
+                mcp_schema_budget_bytes=self.tools_config.mcp_schema_budget_bytes,
                 provider_retry_mode=self.provider_retry_mode,
                 checkpoint_callback=_checkpoint,
                 consolidate_history=(

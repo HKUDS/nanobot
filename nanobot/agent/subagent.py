@@ -444,6 +444,7 @@ class SubagentManager:
                     checkpoint_callback=_on_checkpoint,
                     session_key=sess_key,
                     workspace=root,
+                    mcp_schema_budget_bytes=self.tools_config.mcp_schema_budget_bytes,
                     llm_timeout_s=llm_timeout,
                     llm_usage_source=origin.get(
                         "llm_usage_source",
