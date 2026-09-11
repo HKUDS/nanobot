@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -44,6 +44,7 @@ class _FakeServer:
 def _channel() -> WebSocketChannel:
     gateway = MagicMock()
     gateway.session_manager = None
+    gateway.http.settings_routes.close = AsyncMock()
     return WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         MessageBus(),

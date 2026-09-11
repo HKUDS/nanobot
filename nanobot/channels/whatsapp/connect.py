@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 _NATIVE_STOP_TIMEOUT_SECONDS = 10.0
 _DATABASE_REPLACE_TIMEOUT_SECONDS = 10.0
+_FINALIZE_POLL_WAIT_SECONDS = 0.05
 
 
 @dataclass(slots=True)
@@ -126,15 +127,18 @@ class WhatsAppConnectStore:
         if not session.result.done():
             return self._pending_payload(session)
 
-        if session.finalize_task is None:
-            session.finalize_task = asyncio.create_task(
+        finalize_task = session.finalize_task
+        if finalize_task is None:
+            finalize_task = asyncio.create_task(
                 self._finalize_session(session),
                 name=f"whatsapp-connect-finalize-{session.id}",
             )
-            # Let fast clients finish in this request while keeping slow native
-            # shutdowns out of the polling response path.
-            await asyncio.sleep(0)
-        if not session.finalize_task.done():
+            session.finalize_task = finalize_task
+        if not finalize_task.done():
+            # Finish fast clients in this request without letting native shutdown
+            # block the polling response path.
+            await asyncio.wait({finalize_task}, timeout=_FINALIZE_POLL_WAIT_SECONDS)
+        if not finalize_task.done():
             payload = self._pending_payload(session)
             payload["qr_url"] = ""
             payload["message"] = "Finishing the WhatsApp connection."
@@ -142,7 +146,7 @@ class WhatsAppConnectStore:
 
         self._sessions.pop(session_id, None)
         try:
-            session.finalize_task.result()
+            finalize_task.result()
         except Exception as exc:
             return {
                 "session_id": session_id,
