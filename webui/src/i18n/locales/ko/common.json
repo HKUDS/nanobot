@@ -886,6 +886,16 @@
       "notEnabled": "비활성화됨"
     },
     "automations": {
+      "viewOptions": "검색 및 필터",
+      "yourTasks": "내 자동화",
+      "systemTasks": "시스템 작업",
+      "instructions": "지침",
+      "done": "완료",
+      "moreDetails": "상세 정보",
+      "moreActions": "추가 작업",
+      "neverRun": "아직 실행되지 않음",
+      "skipped": "건너뜀",
+      "oneShotHint": "실행 후 삭제됨",
       "filters": {
         "all": "전체",
         "active": "활성",
@@ -904,7 +914,7 @@
       "loading": "자동화를 불러오는 중...",
       "noMatches": "이 보기와 일치하는 자동화가 없습니다.",
       "empty": "아직 자동화가 없습니다.",
-      "emptyHint": "채팅에서 자동화를 만들면 해당 대화의 맥락을 활용할 수 있습니다.",
+      "emptyHint": "예약 실행할 작업을 채팅에서 nanobot에게 알려 주세요.",
       "emptyAction": "채팅 열기",
       "clearFilters": "필터 지우기",
       "oneShot": "일회성",

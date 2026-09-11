@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AutomationsSettings } from "@/components/settings/system/AutomationsSettings";
@@ -6,8 +6,8 @@ import i18n from "@/i18n";
 
 afterEach(cleanup);
 
-function renderAutomations(channel: string) {
-  return render(
+function renderAutomationDetail(channel: string) {
+  render(
     <AutomationsSettings
       payload={{ jobs: [{
         id: "task-1",
@@ -30,15 +30,16 @@ function renderAutomations(channel: string) {
       onAction={vi.fn()}
       onRequestEdit={vi.fn()}
       onRequestDelete={vi.fn()}
-      onBackToChat={vi.fn()}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: /Scheduled task/ }));
+  return within(screen.getByRole("dialog", { name: "Scheduled task" }));
 }
 
 describe("automation channel identity", () => {
-  it("uses channel-owned names in the list and details when the language changes", async () => {
-    renderAutomations("email");
-    expect(screen.getAllByText("Email")).toHaveLength(2);
+  it("uses channel-owned names in the detail when the language changes", async () => {
+    const detail = renderAutomationDetail("email");
+    expect(detail.getByText("Email")).toBeVisible();
 
     for (const [locale, name] of [
       ["zh-CN", "电子邮件"],
@@ -46,15 +47,15 @@ describe("automation channel identity", () => {
       ["es", "Correo electrónico"],
     ]) {
       await act(() => i18n.changeLanguage(locale));
-      expect(screen.getAllByText(name)).toHaveLength(2);
-      expect(screen.queryByText("Email")).not.toBeInTheDocument();
+      expect(detail.getByText(name)).toBeVisible();
+      expect(detail.queryByText("Email")).not.toBeInTheDocument();
     }
   });
 
   it("resolves aliases through the owning channel namespace", async () => {
     await i18n.changeLanguage("zh-CN");
-    renderAutomations("wechat");
-    expect(screen.getAllByText("微信")).toHaveLength(2);
+    const detail = renderAutomationDetail("wechat");
+    expect(detail.getByText("微信")).toBeVisible();
   });
 
   it.each([
@@ -62,7 +63,7 @@ describe("automation channel identity", () => {
     ["cli", "CLI"],
     ["extension-chat", "extension-chat"],
   ])("preserves the label for %s", (channel, label) => {
-    renderAutomations(channel);
-    expect(screen.getAllByText(label)).toHaveLength(2);
+    const detail = renderAutomationDetail(channel);
+    expect(detail.getByText(label)).toBeVisible();
   });
 });

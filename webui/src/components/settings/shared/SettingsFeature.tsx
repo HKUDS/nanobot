@@ -4,17 +4,20 @@ import { useTranslation } from "react-i18next";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Disclosure } from "@/components/ui/disclosure";
 
 export function SettingsAdvancedOptions({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   return (
-    <details className="group/advanced [&>summary]:select-none">
-      <summary className="settings-list-inset flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded-xl text-[13px] leading-5 text-muted-foreground settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+    <Disclosure
+      summaryClassName="settings-list-inset flex min-h-12 cursor-pointer items-center justify-between gap-4 rounded-xl text-[13px] leading-5 text-muted-foreground settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      summary={<>
         {t("settings.runtimeConfig.advancedOptions")}
-        <ChevronDown aria-hidden className="h-3.5 w-3.5 shrink-0 group-open/advanced:rotate-180" />
-      </summary>
+        <ChevronDown aria-hidden className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]/disclosure:rotate-180 motion-reduce:transition-none" />
+      </>}
+    >
       <div className="space-y-1">{children}</div>
-    </details>
+    </Disclosure>
   );
 }
 

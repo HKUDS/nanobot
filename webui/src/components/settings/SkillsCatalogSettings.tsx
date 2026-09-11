@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
   Check,
@@ -25,6 +25,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
+import { ExpandableText } from "@/components/ui/expandable-text";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -279,6 +281,7 @@ function SkillDetailSheet({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const descriptionId = useId();
 
   useEffect(() => {
     if (!open || !skill) return;
@@ -407,18 +410,21 @@ function SkillDetailSheet({
                     {statusLabel}
                   </Pill>
                 </div>
-                <p
-                  className={cn(
-                    "mt-3 text-[13px] leading-5 text-muted-foreground",
-                    descriptionExpandable && !descriptionExpanded && "line-clamp-5",
-                  )}
-                >
-                  {activeSkill.description}
-                </p>
+                <div className="mt-3">
+                  <ExpandableText
+                    id={descriptionId}
+                    expanded={descriptionExpanded || !descriptionExpandable}
+                    lines={5}
+                    className="text-[13px] leading-5 text-muted-foreground"
+                  >
+                    {activeSkill.description}
+                  </ExpandableText>
+                </div>
                 {descriptionExpandable ? (
                   <button
                     type="button"
                     aria-expanded={descriptionExpanded}
+                    aria-controls={descriptionId}
                     onClick={() => setDescriptionExpanded((value) => !value)}
                     className="mt-1.5 min-h-8 rounded-full text-[12px] font-medium text-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
@@ -574,15 +580,18 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
     });
 
   return (
-    <details className="group rounded-floating border border-border/45 bg-muted/20 px-3 py-3">
-      <summary className="flex min-h-11 cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
+    <Disclosure
+      className="rounded-floating border border-border/45 bg-muted/20 px-3 py-3"
+      summaryClassName="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-sm text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      summary={<>
         <span>
           {t("settings.skills.instructionsTitle", { defaultValue: "Skill instructions" })}
         </span>
         <code className="font-mono text-[10px] font-normal text-muted-foreground">
           SKILL.md
         </code>
-      </summary>
+      </>}
+    >
       <div className="mt-3 overflow-hidden rounded-control border border-border/35 bg-background/70">
         <pre
           className={cn(
@@ -596,7 +605,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
           {content}
         </pre>
       </div>
-    </details>
+    </Disclosure>
   );
 }
 

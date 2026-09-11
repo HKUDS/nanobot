@@ -848,7 +848,7 @@ describe("AgentActivityCluster", () => {
     }
   });
 
-  it("keeps long file edit diffs collapsed until opened", () => {
+  it("keeps long file edit diffs lazy and releases them after closing", async () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "diff" }),
@@ -917,10 +917,20 @@ describe("AgentActivityCluster", () => {
         "Show 5 more lines",
       );
 
+      const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+      let finish!: () => void;
+      const finished = new Promise<void>((resolve) => { finish = resolve; });
+      Object.defineProperty(content, "getAnimations", { value: () => [{ finished }] });
       fireEvent.click(toggle);
-
       expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(content).toHaveAttribute("data-state", "closed");
+      expect(content).toHaveAttribute("inert");
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
+      await act(async () => { finish(); });
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(screen.getByText("line-160")).toBeInTheDocument();
+      expect(screen.queryByText("line-161")).not.toBeInTheDocument();
     } finally {
       localStorage.removeItem("nanobot-webui.settings-preferences");
     }

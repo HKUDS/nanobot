@@ -886,6 +886,16 @@
       "notEnabled": "Non activé"
     },
     "automations": {
+      "viewOptions": "Rechercher et filtrer",
+      "yourTasks": "Vos automatisations",
+      "systemTasks": "Tâches système",
+      "instructions": "Instructions",
+      "done": "Terminé",
+      "moreDetails": "Plus de détails",
+      "moreActions": "Plus d’actions",
+      "neverRun": "Pas encore exécuté",
+      "skipped": "Ignoré",
+      "oneShotHint": "Supprimée après exécution",
       "filters": {
         "all": "Toutes",
         "active": "Actives",
@@ -904,7 +914,7 @@
       "loading": "Chargement des automatisations...",
       "noMatches": "Aucune automatisation ne correspond à cette vue.",
       "empty": "Aucune automatisation pour le moment.",
-      "emptyHint": "Créez les automatisations dans un chat afin de conserver le bon contexte.",
+      "emptyHint": "Dites à nanobot dans une conversation ce que vous souhaitez planifier.",
       "emptyAction": "Ouvrir un chat",
       "clearFilters": "Effacer les filtres",
       "oneShot": "Ponctuelle",

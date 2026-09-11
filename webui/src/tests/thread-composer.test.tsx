@@ -1312,6 +1312,9 @@ describe("ThreadComposer", () => {
     const { container, rerender } = render(composer(false));
     const drawer = container.querySelector("[data-composer-workspace-drawer]");
 
+    expect(drawer).toHaveClass("inline-disclosure");
+    expect(drawer?.firstElementChild).toHaveClass("inline-disclosure-clip");
+    expect(drawer?.firstElementChild?.firstElementChild).toHaveClass("inline-disclosure-content");
     expect(drawer).toHaveAttribute("data-state", "open");
     expect(drawer).not.toHaveAttribute("aria-hidden");
     expect(container.querySelector("[data-composer-workspace-compact]")).not.toBeInTheDocument();

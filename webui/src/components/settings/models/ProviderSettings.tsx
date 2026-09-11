@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
+import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   ChevronDown,
   Clipboard,
@@ -431,6 +432,7 @@ function ProviderAdvancedOptions({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const enabled = new Set(fields);
+  const contentId = useId();
   if (enabled.size === 0) return null;
 
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -446,6 +448,7 @@ function ProviderAdvancedOptions({
       <button
         type="button"
         aria-expanded={open}
+        aria-controls={contentId}
         onClick={() => setOpen((value) => !value)}
         className="flex min-h-[48px] w-full items-center justify-between gap-4 px-1 py-2.5 text-left transition-colors hover:text-foreground"
       >
@@ -454,13 +457,13 @@ function ProviderAdvancedOptions({
         </span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
             open && "rotate-180",
           )}
           aria-hidden
         />
       </button>
-      {open ? (
+      <DisclosureContent id={contentId} open={open}>
         <div className="py-3">
           <div className="grid gap-3 md:grid-cols-2">
             {enabled.has("api_type") ? (
@@ -622,7 +625,7 @@ function ProviderAdvancedOptions({
             ) : null}
           </div>
         </div>
-      ) : null}
+      </DisclosureContent>
       {footer ? (
         <div className="flex items-center justify-end gap-2 py-3">
           {footer}

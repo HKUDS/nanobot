@@ -180,7 +180,10 @@ describe("Settings system domains", () => {
 
     expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
     expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open a chat" }));
+    expect(screen.getByText("Tell nanobot in a chat what you'd like it to do on a schedule.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create in chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open a chat" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(onBackToChat).toHaveBeenCalledTimes(1);
   });
 
@@ -209,11 +212,50 @@ describe("Settings system domains", () => {
       showSidebar: false,
     });
 
-    expect(await screen.findByRole("heading", { name: "Daily summary" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Search and filter" }));
     fireEvent.click(screen.getByRole("button", { name: "Paused 0" }));
     expect(await screen.findByText("No automations match this view.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(await screen.findByRole("heading", { name: "Daily summary" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
+  });
+
+  it("wraps automation filters and keeps every option selectable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/settings") return jsonResponse(settingsPayload());
+      if (String(input) === "/api/webui/automations") {
+        return jsonResponse({ jobs: [
+          {
+            id: "heartbeat", name: "heartbeat", enabled: true, protected: true,
+            schedule: { kind: "every", every_ms: 1_800_000 },
+            payload: { message: "System-managed automation" }, state: {},
+          },
+          {
+            id: "paused-job", name: "Paused reminder", enabled: false,
+            schedule: { kind: "every", every_ms: 86_400_000 },
+            payload: { message: "Check the repo" }, state: {},
+          },
+        ] });
+      }
+      return jsonResponse({});
+    }));
+    renderSettingsView({ initialSection: "automations", initialSettings: settingsPayload(), showSidebar: false });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Search and filter" }));
+    const filters = screen.getByRole("group", { name: "Automations" });
+    expect(filters).toHaveClass("flex-wrap");
+    expect(within(filters).getAllByRole("button")).toHaveLength(4);
+    expect(within(filters).getByRole("button", { name: "All 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(filters).queryByRole("button", { name: /System/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "System tasks 1" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /heartbeat/ })).toBeVisible();
+
+    fireEvent.click(within(filters).getByRole("button", { name: "Paused 1" }));
+    expect(within(filters).getByRole("button", { name: "Paused 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Paused reminder/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /heartbeat/ })).not.toBeInTheDocument();
+    expect(within(filters).getAllByRole("button", { pressed: true })).toHaveLength(1);
   });
 
   it("coalesces focus refreshes while automations are already loading", async () => {

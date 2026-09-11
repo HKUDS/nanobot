@@ -900,6 +900,16 @@
       "notEnabled": "Não habilitado"
     },
     "automations": {
+      "viewOptions": "Buscar e filtrar",
+      "yourTasks": "Suas automações",
+      "systemTasks": "Tarefas do sistema",
+      "instructions": "Instruções",
+      "done": "Concluído",
+      "moreDetails": "Mais detalhes",
+      "moreActions": "Mais ações",
+      "neverRun": "Ainda não executado",
+      "skipped": "Ignorado",
+      "oneShotHint": "Removida após a execução",
       "filters": {
         "all": "Todas",
         "active": "Ativas",
@@ -918,7 +928,7 @@
       "loading": "Carregando automações...",
       "noMatches": "Nenhuma automação corresponde a esta visualização.",
       "empty": "Nenhuma automação ainda.",
-      "emptyHint": "Crie automações em uma conversa para que mantenham o contexto correto.",
+      "emptyHint": "Diga ao nanobot em uma conversa o que você quer que ele faça e quando.",
       "emptyAction": "Abrir uma conversa",
       "clearFilters": "Limpar filtros",
       "oneShot": "Uma vez",

@@ -886,6 +886,16 @@
       "notEnabled": "Belum aktif"
     },
     "automations": {
+      "viewOptions": "Cari dan filter",
+      "yourTasks": "Otomatisasi Anda",
+      "systemTasks": "Tugas sistem",
+      "instructions": "Instruksi",
+      "done": "Selesai",
+      "moreDetails": "Detail lainnya",
+      "moreActions": "Tindakan lainnya",
+      "neverRun": "Belum dijalankan",
+      "skipped": "Dilewati",
+      "oneShotHint": "Dihapus setelah dijalankan",
       "filters": {
         "all": "Semua",
         "active": "Aktif",
@@ -904,7 +914,7 @@
       "loading": "Memuat otomasi...",
       "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
       "empty": "Belum ada otomasi.",
-      "emptyHint": "Buat otomatisasi di chat agar konteks yang tepat tetap tersimpan.",
+      "emptyHint": "Beri tahu nanobot di chat apa yang ingin Anda jalankan secara terjadwal.",
       "emptyAction": "Buka chat",
       "clearFilters": "Hapus filter",
       "oneShot": "Satu kali",

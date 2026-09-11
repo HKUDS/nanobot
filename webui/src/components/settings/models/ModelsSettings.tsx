@@ -1,6 +1,7 @@
 import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   ChevronDown,
   GripVertical,
@@ -237,6 +238,7 @@ export function ModelsSettings({
   const suggestedPresetNameRef = useRef<string | null>(null);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedId = useId();
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
   const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
   const [draggedRowHeight, setDraggedRowHeight] = useState(0);
@@ -499,6 +501,7 @@ export function ModelsSettings({
       <button
         type="button"
         aria-expanded={advancedOpen}
+        aria-controls={advancedId}
         onClick={() => setAdvancedOpen((value) => !value)}
         className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors settings-hover sm:px-5"
       >
@@ -519,13 +522,13 @@ export function ModelsSettings({
         </span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
             advancedOpen && "rotate-180",
           )}
           aria-hidden
         />
       </button>
-      {advancedOpen ? (
+      <DisclosureContent id={advancedId} open={advancedOpen}>
         <div className="bg-muted/12 px-4 py-4 sm:px-5">
           <ModelAdvancedFields
             maxTokens={form.maxTokens}
@@ -535,7 +538,7 @@ export function ModelsSettings({
             onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
           />
         </div>
-      ) : null}
+      </DisclosureContent>
       <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         {creating ? (
           <Button

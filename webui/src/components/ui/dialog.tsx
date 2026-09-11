@@ -24,6 +24,7 @@ const DialogOverlay = React.forwardRef<
     ref={ref}
     className={cn(
       modalOverlayClassName,
+      "motion-reduce:animate-none",
       className,
     )}
     {...props}
@@ -31,15 +32,30 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+// The portal's presence ref must reach the animated content, not the plain
+// positioning wrapper; otherwise the wrapper unmounts before the exit finishes.
+const DialogPositionedContent = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    positionerStyle?: React.CSSProperties;
+  }
+>(({ positionerStyle, ...props }, ref) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={positionerStyle}>
+    <DialogPrimitive.Content ref={ref} {...props} />
+  </div>
+));
+DialogPositionedContent.displayName = "DialogPositionedContent";
+
 interface DialogContentProps
   extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   showCloseButton?: boolean;
+  overlayClassName?: string;
 }
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, showCloseButton = true, onOpenAutoFocus, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, overlayClassName, onOpenAutoFocus, ...props }, ref) => {
   const { t } = useTranslation();
   const [container, setContainer] = React.useState<HTMLDivElement | null>(null);
   const contentNode = React.useRef<HTMLDivElement | null>(null);
@@ -74,9 +90,9 @@ const DialogContent = React.forwardRef<
   }, [ref]);
   return (
     <DialogPortal>
-      <DialogOverlay />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={layout}>
-        <DialogPrimitive.Content
+      <DialogOverlay className={overlayClassName} />
+        <DialogPositionedContent
+          positionerStyle={layout}
           ref={contentRef}
           onOpenAutoFocus={(event) => {
             if (onOpenAutoFocus) onOpenAutoFocus(event);
@@ -87,7 +103,7 @@ const DialogContent = React.forwardRef<
           }}
           className={cn(
             modalSurfaceClassName,
-            "relative grid w-full max-w-lg origin-center gap-4 rounded-modal p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+            "relative grid w-full max-w-lg origin-center gap-4 rounded-modal p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:animate-none",
             className,
           )}
           {...props}
@@ -101,8 +117,7 @@ const DialogContent = React.forwardRef<
               <span className="sr-only">{t("common.close")}</span>
             </DialogPrimitive.Close>
           ) : null}
-        </DialogPrimitive.Content>
-      </div>
+        </DialogPositionedContent>
     </DialogPortal>
   );
 });

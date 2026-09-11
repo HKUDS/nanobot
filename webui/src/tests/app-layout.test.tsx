@@ -1439,11 +1439,18 @@ describe("App layout", () => {
     expect(within(automationsMain as HTMLElement).queryByText("Settings")).not.toBeInTheDocument();
     expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Daily repo check/ }));
     expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /WeChat quiz/ }));
     expect(screen.getByText("WeChat")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
     expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
     expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /heartbeat/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "System tasks 1" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("heartbeat")).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
       "aria-current",
@@ -1451,6 +1458,7 @@ describe("App layout", () => {
     );
     expect(document.title).toBe("Automations · nanobot");
 
+    fireEvent.click(screen.getByRole("button", { name: "Search and filter" }));
     const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
       "Search task, message, linked chat, or schedule",
     );
@@ -1461,6 +1469,54 @@ describe("App layout", () => {
     fireEvent.change(searchInput, { target: { value: "09-23" } });
     await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
     expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps automation linked-chat titles in sync with live sidebar renames", async () => {
+    const key = "websocket:linked-chat";
+    mockSessions = [{
+      key, channel: "websocket", chatId: "linked-chat", createdAt: null, updatedAt: null,
+      title: "Stored title", preview: "Original preview",
+    }];
+    const sidebarState: SidebarStatePayload = {
+      schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [],
+      title_overrides: { [key]: "推特大战场" }, project_name_overrides: {},
+      tags_by_key: {}, collapsed_groups: {}, workbench: { version: 1, tabs: {} },
+      view: { density: "comfortable", show_previews: false, show_timestamps: false,
+        show_archived: false, sort: "updated_desc" },
+    };
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/sidebar-state": sidebarState,
+      "/api/webui/automations": { jobs: [{
+        id: "reminder", name: "Drink water", enabled: true,
+        schedule: { kind: "every", every_ms: 60_000 },
+        payload: { message: "Take a break" }, state: {},
+        origin: { session_key: key, channel: "websocket", chat_id: "linked-chat",
+          title: "Stored title", preview: "Original preview" },
+      }] },
+    });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    await within(sidebar).findByRole("button", { name: "推特大战场", exact: true });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Drink water/ }));
+    const dialog = screen.getByRole("dialog", { name: "Drink water" });
+    expect(within(dialog).getByRole("link", { name: "推特大战场" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Alinked-chat",
+    );
+    for (const title of ["新会话名称", ""]) {
+      act(() => {
+        sidebarStateUpdateHandlers.forEach((handler) => handler({
+          ...sidebarState, title_overrides: title ? { [key]: title } : {},
+        }));
+      });
+      const expected = title || "Stored title";
+      expect(within(sidebar).getByText(expected)).toBeInTheDocument();
+      expect(within(dialog).getByRole("link", { name: expected })).toHaveAttribute(
+        "href", "#/chat/websocket%3Alinked-chat",
+      );
+    }
+    expect(requestMutationSpy).not.toHaveBeenCalled();
   });
 
   it("edits a past one-time automation without resubmitting its old schedule", async () => {
@@ -1507,7 +1563,9 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
     expect((await screen.findAllByText("Past one-shot")).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("dialog", { name: "Edit automation" });
     expect(screen.queryByText("Run time must be in the future.")).not.toBeInTheDocument();
     expect(
       screen.queryByText("Update the prompt and schedule. The linked chat stays unchanged."),
@@ -1593,18 +1651,19 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
-    const detailHeading = await screen.findByRole("heading", { name: "Long detail automation" });
-    const detailPanel = detailHeading.closest("article") as HTMLElement;
-    expect(detailPanel).not.toBeNull();
-    const message = Array.from(detailPanel.querySelectorAll("section div")).find(
+    fireEvent.click(await screen.findByRole("button", { name: /Long detail automation/ }));
+    const detailPanel = await screen.findByRole("dialog", { name: "Long detail automation" });
+    const message = Array.from(detailPanel.querySelectorAll("section p")).find(
       (node) => node.textContent === longMessage,
     ) as HTMLElement | undefined;
     expect(message).toBeTruthy();
-    expect(message!).toHaveClass("line-clamp-6");
+    const preview = message!.closest(".expandable-text")!;
+    expect(preview).toHaveAttribute("data-state", "closed");
 
     fireEvent.click(within(detailPanel).getByRole("button", { name: "Show full message" }));
     expect(within(detailPanel).getByRole("button", { name: "Show less" })).toBeInTheDocument();
-    expect(message!).not.toHaveClass("line-clamp-6");
+    expect(preview).toHaveAttribute("data-state", "open");
+    expect(preview).toContainElement(message!);
 
     expect(within(detailPanel).queryByText("Recent health")).not.toBeInTheDocument();
     expect(within(detailPanel).queryByRole("button", { name: /Run history/ })).not.toBeInTheDocument();
@@ -1665,10 +1724,11 @@ describe("App layout", () => {
     const automationsMain = heading.closest("main");
     expect(automationsMain).not.toBeNull();
     expect(within(automationsMain as HTMLElement).queryByText("设置")).not.toBeInTheDocument();
-    expect(screen.getByText("任务队列")).toBeInTheDocument();
+    expect(screen.queryByText("任务队列")).not.toBeInTheDocument();
     expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("每 1天")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /每日检查/ }));
+    expect(within(screen.getByRole("dialog", { name: "每日检查" })).getByText(/每 1天/)).toBeInTheDocument();
     expect(screen.queryByText("最近健康状态")).not.toBeInTheDocument();
     expect(screen.queryByText("近期无问题")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();

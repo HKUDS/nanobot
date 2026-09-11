@@ -886,6 +886,16 @@
       "notEnabled": "Chưa bật"
     },
     "automations": {
+      "viewOptions": "Tìm kiếm và lọc",
+      "yourTasks": "Tác vụ tự động của bạn",
+      "systemTasks": "Tác vụ hệ thống",
+      "instructions": "Chỉ dẫn",
+      "done": "Xong",
+      "moreDetails": "Chi tiết khác",
+      "moreActions": "Thao tác khác",
+      "neverRun": "Chưa chạy",
+      "skipped": "Đã bỏ qua",
+      "oneShotHint": "Xóa sau khi chạy",
       "filters": {
         "all": "Tất cả",
         "active": "Đã bật",
@@ -904,7 +914,7 @@
       "loading": "Đang tải tự động hóa...",
       "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",
       "empty": "Chưa có tự động hóa.",
-      "emptyHint": "Tạo tác vụ tự động trong cuộc trò chuyện để giữ đúng ngữ cảnh.",
+      "emptyHint": "Cho nanobot biết trong cuộc trò chuyện việc bạn muốn thực hiện theo lịch.",
       "emptyAction": "Mở cuộc trò chuyện",
       "clearFilters": "Xóa bộ lọc",
       "oneShot": "Một lần",

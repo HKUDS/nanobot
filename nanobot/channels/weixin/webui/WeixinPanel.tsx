@@ -18,6 +18,7 @@ import {
   ChannelLogo,
 } from "@/components/settings/channels/ChannelIdentity";
 import { Button } from "@/components/ui/button";
+import { DisclosureContent } from "@/components/ui/disclosure";
 import { normalizeLocale } from "@/i18n/config";
 import { configureChannel } from "@/lib/api";
 import type {
@@ -293,7 +294,7 @@ export function WeixinPanel({
         ) : null}
 
         {advancedFields.length ? (
-          <div id={advancedPanelId} hidden={!advancedOpen} className="text-[12px] leading-5 text-muted-foreground">
+          <DisclosureContent id={advancedPanelId} open={advancedOpen} className="text-[12px] leading-5 text-muted-foreground">
             <CredentialForm
               fields={advancedFields}
               values={fieldValues}
@@ -305,7 +306,7 @@ export function WeixinPanel({
               }}
               compact
             />
-          </div>
+          </DisclosureContent>
         ) : null}
 
       </div>

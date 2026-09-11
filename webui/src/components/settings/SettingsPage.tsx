@@ -51,6 +51,7 @@ interface SettingsPageProps {
   onToggleTheme: () => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
+  titleOverrides?: Record<string, string>;
   onLogout?: () => void;
   isRestarting: boolean;
   hostChromeInset: boolean;
@@ -64,6 +65,7 @@ export function SettingsPage({
   onToggleTheme,
   onBackToChat,
   skills,
+  titleOverrides,
   onLogout,
   isRestarting,
   hostChromeInset,
@@ -562,6 +564,7 @@ export function SettingsPage({
           <div className="settings-stack">
             <AutomationsSettings
               payload={automations}
+              titleOverrides={titleOverrides}
               loading={automationsLoading}
               query={automationsQuery}
               filter={automationsFilter}
@@ -574,7 +577,6 @@ export function SettingsPage({
               onAction={handleAutomationAction}
               onRequestEdit={setAutomationPendingEdit}
               onRequestDelete={setAutomationPendingDelete}
-              onBackToChat={onBackToChat}
             />
           </div>
         );
@@ -730,7 +732,7 @@ export function SettingsPage({
           )}
         >
           {!showSidebar ? (
-            <div className="mb-7">
+            <div className={activeSection === "automations" ? "lg:hidden" : "mb-7"}>
               <button
                 type="button"
                 onClick={backToChat}
@@ -739,11 +741,11 @@ export function SettingsPage({
                 <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
                 {t("settings.backToChat")}
               </button>
-              <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">
+              {activeSection !== "automations" ? <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">
                 {t(`settings.nav.${activeSection}`, {
                   defaultValue: standaloneSectionTitle(activeSection),
                 })}
-              </h1>
+              </h1> : null}
             </div>
           ) : null}
 

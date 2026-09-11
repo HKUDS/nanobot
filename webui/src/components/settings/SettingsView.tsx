@@ -16,6 +16,7 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   skills?: SkillSummary[];
+  titleOverrides?: Record<string, string>;
   onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
   onRestart?: () => void;
@@ -35,6 +36,7 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   skills = [],
+  titleOverrides,
   onSectionChange,
   onLogout,
   onRestart,
@@ -61,6 +63,7 @@ export function SettingsView({
       onToggleTheme={onToggleTheme}
       onBackToChat={onBackToChat}
       skills={skills}
+      titleOverrides={titleOverrides}
       onLogout={onLogout}
       isRestarting={isRestarting}
       hostChromeInset={hostChromeInset}

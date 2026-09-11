@@ -886,6 +886,16 @@
       "notEnabled": "無効"
     },
     "automations": {
+      "viewOptions": "検索と絞り込み",
+      "yourTasks": "自分の自動化",
+      "systemTasks": "システムタスク",
+      "instructions": "指示",
+      "done": "完了",
+      "moreDetails": "詳細情報",
+      "moreActions": "その他の操作",
+      "neverRun": "未実行",
+      "skipped": "スキップ済み",
+      "oneShotHint": "実行後に削除",
       "filters": {
         "all": "すべて",
         "active": "有効",
@@ -904,7 +914,7 @@
       "loading": "自動タスクを読み込み中...",
       "noMatches": "この表示に一致する自動タスクはありません。",
       "empty": "自動タスクはまだありません。",
-      "emptyHint": "チャットで自動タスクを作成すると、その会話の内容を引き継いで実行できます。",
+      "emptyHint": "決まった時間に実行してほしいことを、チャットで nanobot に伝えてください。",
       "emptyAction": "チャットを開く",
       "clearFilters": "フィルターをクリア",
       "oneShot": "一回限り",

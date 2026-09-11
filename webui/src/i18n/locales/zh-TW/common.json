@@ -886,6 +886,16 @@
       "notEnabled": "未啟用"
     },
     "automations": {
+      "viewOptions": "搜尋與篩選",
+      "yourTasks": "你的自動任務",
+      "systemTasks": "系統任務",
+      "instructions": "任務指示",
+      "done": "完成",
+      "moreDetails": "更多詳細資訊",
+      "moreActions": "更多操作",
+      "neverRun": "尚未執行",
+      "skipped": "已略過",
+      "oneShotHint": "執行後移除",
       "filters": {
         "all": "全部",
         "active": "已啟用",
@@ -904,7 +914,7 @@
       "loading": "正在載入自動任務…",
       "noMatches": "目前沒有符合條件的自動任務。",
       "empty": "尚無自動任務。",
-      "emptyHint": "請在聊天中建立自動任務，以保留正確的對話脈絡。",
+      "emptyHint": "在聊天中告訴 nanobot 你想定期做什麼，即可建立自動任務。",
       "emptyAction": "開啟聊天",
       "clearFilters": "清除篩選",
       "oneShot": "單次",

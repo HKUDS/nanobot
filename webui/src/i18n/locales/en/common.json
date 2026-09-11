@@ -1086,6 +1086,16 @@
       "notEnabled": "Not enabled"
     },
     "automations": {
+      "viewOptions": "Search and filter",
+      "yourTasks": "Your automations",
+      "systemTasks": "System tasks",
+      "instructions": "Instructions",
+      "done": "Done",
+      "moreDetails": "More details",
+      "moreActions": "More actions",
+      "neverRun": "Not run yet",
+      "skipped": "Skipped",
+      "oneShotHint": "Removed after running",
       "filters": {
         "all": "All",
         "active": "Active",
@@ -1104,7 +1114,7 @@
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",
       "empty": "No automations yet.",
-      "emptyHint": "Create automations in a chat so they keep the right context.",
+      "emptyHint": "Tell nanobot in a chat what you'd like it to do on a schedule.",
       "emptyAction": "Open a chat",
       "clearFilters": "Clear filters",
       "oneShot": "One-time",

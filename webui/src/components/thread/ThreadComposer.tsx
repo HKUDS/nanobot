@@ -2562,13 +2562,13 @@ export function ThreadComposer({
         </div>
         {projectPickerAvailable ? (
           <div
-            className="composer-workspace-drawer"
+            className="inline-disclosure"
             data-composer-workspace-drawer=""
             data-state={showProjectPicker ? "open" : "closed"}
             aria-hidden={showProjectPicker ? undefined : true}
           >
-            <div className="composer-workspace-drawer-clip">
-              <div className="composer-workspace-drawer-content">
+            <div className="inline-disclosure-clip">
+              <div className="inline-disclosure-content">
                 <WorkspaceProjectPicker
                   isHero={isHero}
                   disabled={interactionDisabled || workspaceScopeDisabled || !showProjectPicker}

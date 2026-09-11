@@ -840,12 +840,19 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} />);
     const toggle = screen.getByRole("button", { name: /used 2 tools/i });
 
-    expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
-    expect(screen.queryByText('search "hk weather"')).not.toBeInTheDocument();
+    const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(content).toHaveAttribute("data-state", "closed");
+    expect(content).toHaveAttribute("inert");
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
 
     fireEvent.click(toggle);
     expect(screen.getByText('weather("get")')).toBeInTheDocument();
     expect(screen.getByText('search "hk weather"')).toBeInTheDocument();
+    expect(content).toHaveAttribute("data-state", "open");
+    fireEvent.click(toggle);
+    expect(content).toHaveAttribute("data-state", "closed");
+    expect(content).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByText('weather("get")')).toBeInTheDocument();
   });
 
   it("renders video media as an inline player", () => {

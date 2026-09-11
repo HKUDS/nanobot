@@ -528,38 +528,42 @@
     opacity: 1;
     transform: translateY(0);
   }
-  .composer-workspace-drawer {
-    --composer-workspace-drawer-duration: 220ms;
+  /* Shared in-flow disclosure: animate intrinsic height without measuring it. */
+  .inline-disclosure {
+    --inline-disclosure-duration: 220ms;
 
     display: grid;
     grid-template-rows: 0fr;
     opacity: 0;
     pointer-events: none;
   }
-  .composer-workspace-drawer[data-state="open"] {
-    --composer-workspace-drawer-duration: 240ms;
+  .inline-disclosure[data-state="open"] {
+    --inline-disclosure-duration: 240ms;
 
     grid-template-rows: 1fr;
     opacity: 1;
     pointer-events: auto;
   }
-  .composer-workspace-drawer-clip {
+  .inline-disclosure-clip {
     min-height: 0;
     overflow: hidden;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .composer-workspace-drawer {
-      transition:
-        grid-template-rows var(--composer-workspace-drawer-duration)
-          cubic-bezier(0.4, 0, 0.2, 1),
-        opacity var(--composer-workspace-drawer-duration) ease-in-out;
+    .expandable-text {
+      transition: height 240ms cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .composer-workspace-drawer-content {
+    .inline-disclosure {
+      transition:
+        grid-template-rows var(--inline-disclosure-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--inline-disclosure-duration) ease-in-out;
+    }
+    .inline-disclosure-content {
       transform: translateY(-6px);
-      transition: transform var(--composer-workspace-drawer-duration)
+      transition: transform var(--inline-disclosure-duration)
         cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
+    .inline-disclosure[data-state="open"] .inline-disclosure-content {
       transform: translateY(0);
     }
   }
@@ -1017,31 +1021,27 @@
     --settings-margin: 0.75rem;
     max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
   }
-  /* Standalone feature pages have room for catalogs and multi-pane layouts.
-     Split automations only when each container can actually fit its columns. */
+  /* Stack a task's status below its title when the content column is narrow. */
   .automations-page {
     container: automations / inline-size;
   }
-  .automation-detail-panel {
-    container: automation-detail / inline-size;
+  .automation-task-state {
+    grid-column: 1;
+    grid-row: 2;
   }
-  @container automations (min-width: 48rem) {
-    .automations-workspace {
-      grid-template-columns: minmax(16rem, 18rem) minmax(0, 1fr);
-      align-items: stretch;
-    }
-    .automations-workspace > .automations-queue {
-      border-bottom-width: 0;
-      border-right-width: 1px;
-    }
-    .automations-queue > .automations-queue-list { max-height: calc(100vh - 24rem); }
+  .automation-task-chevron {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
-  @container automation-detail (min-width: 40rem) {
-    .automation-detail-body { grid-template-columns: minmax(0, 1fr) 14.5rem; }
-    .automation-detail-body > .automation-detail-metadata {
-      border-top-width: 0;
-      border-left-width: 1px;
+  @container automations (min-width: 36rem) {
+    .automation-task-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+    .automation-task-state {
+      grid-column: 2;
+      grid-row: 1;
+      max-width: 18rem;
+      justify-content: flex-end;
     }
+    .automation-task-chevron { grid-column: 3; grid-row: 1; }
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
     margin-block-start: var(--settings-module-gap, 20px);
