@@ -50,9 +50,7 @@ import {
 import {
   ChannelProviderPresets,
   ChannelSetupActions,
-  ChannelValidationBadge,
-  ChannelValidationChecks,
-  ChannelValidationDetails,
+  ChannelValidationProgress,
 } from "@/components/settings/channels/ChannelSetupParts";
 import { ChannelInstancesPanel } from "@/components/settings/channels/ChannelInstancesPanel";
 import { Button } from "@/components/ui/button";
@@ -473,6 +471,7 @@ function ChannelSetupSurface({
   const checkCurrentSettings = async () => {
     if (actionPending) return;
     setValidating(true);
+    setValidation(null);
     setNotice(null);
     try {
       const payload = await validateChannel(
@@ -487,7 +486,13 @@ function ChannelSetupSurface({
       const localizedRuntimeError = feature.runtime_error
         ? channelValidationMessage(feature.runtime_error, t)
         : null;
-      setNotice(localizedResult && localizedResult !== localizedRuntimeError ? localizedResult : null);
+      setNotice(
+        payload.status !== "connected"
+          && localizedResult
+          && localizedResult !== localizedRuntimeError
+          ? localizedResult
+          : null,
+      );
     } catch (err) {
       setNotice((err as Error).message);
     } finally {
@@ -522,14 +527,6 @@ function ChannelSetupSurface({
       {enabled && (touchedFields.size > 0 || clearedSecrets.size > 0) ? (
         <Button type="submit" size="sm" variant="secondary" disabled={actionPending}>
           {tx("settings.actions.save", "Save")}
-        </Button>
-      ) : null}
-      {feature.setup?.verifies_connection ? (
-        <Button type="button" size="sm" variant="ghost"
-          className="h-8 rounded-full px-3 text-[12px] font-semibold"
-          onClick={() => void checkCurrentSettings()} disabled={actionPending}>
-          {validating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-          {tx("settings.channels.checkOnly", "Check")}
         </Button>
       ) : null}
       <ToggleButton checked={enabled} disabled={actionPending}
@@ -569,13 +566,6 @@ function ChannelSetupSurface({
         <section className={cn("min-w-0", inlineActions ? "flex-[1_1_20rem]" : "w-full")}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex max-w-full flex-wrap justify-end gap-2">
-              {mode !== "webui" && (validation || validating) ? (
-                <ChannelValidationBadge
-                  validation={validation}
-                  validating={validating}
-                  feature={feature}
-                />
-              ) : null}
               {mode === "webui" ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11.5px] font-medium text-emerald-700 dark:text-emerald-200">
                   <Check className="h-3.5 w-3.5" aria-hidden />
@@ -584,7 +574,6 @@ function ChannelSetupSurface({
               ) : null}
             </div>
           </div>
-          {validation?.identity?.name ? <ChannelValidationDetails validation={validation} /> : null}
           <ChannelSetupActions feature={feature} setup={setup} onNotice={setNotice} />
 
           {mode === "connect" && !feature.installed ? null : mode === "connect" && ConnectFlow ? (
@@ -697,6 +686,27 @@ function ChannelSetupSurface({
         ) : null}
         {credentialActions}
       </div>
+      {mode === "credentials" && feature.setup?.verifies_connection ? (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-8 rounded-full px-3 text-[12px] font-semibold"
+              onClick={() => void checkCurrentSettings()}
+              disabled={actionPending}
+            >
+              {tx("settings.channels.checkConnection", "Check connection")}
+            </Button>
+          </div>
+          <ChannelValidationProgress
+            validation={validation}
+            validating={validating}
+            feature={feature}
+          />
+        </div>
+      ) : null}
       <div
         role="status"
         aria-live="polite"
@@ -707,11 +717,6 @@ function ChannelSetupSurface({
       >
         {notice ?? ""}
       </div>
-      {validation?.checks.length ? (
-        <div className="min-w-0">
-          <ChannelValidationChecks validation={validation} />
-        </div>
-      ) : null}
     </form>
   );
 }

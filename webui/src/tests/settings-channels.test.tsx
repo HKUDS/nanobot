@@ -213,6 +213,113 @@ function catalogFeature(
 describe("Settings channels", () => {
   installSettingsViewTestHooks();
 
+  it.each([
+    {
+      name: "telegram",
+      displayName: "Telegram",
+      identity: "nano_test0001bot",
+      checks: [
+        { id: "token_format", label: "Token format", status: "pass" },
+        { id: "get_me", label: "Bot identity", status: "pass" },
+      ],
+    },
+    {
+      name: "discord",
+      displayName: "Discord",
+      identity: "nanobot-test",
+      checks: [
+        { id: "bot_token", label: "Bot token", status: "pass" },
+        {
+          id: "invite",
+          label: "Server invite",
+          status: "pass",
+          action_url: "https://discord.com/oauth2/authorize?client_id=123",
+        },
+      ],
+    },
+  ])("reveals $displayName connection checks before confirming the identity", async ({
+    name,
+    displayName,
+    identity,
+    checks,
+  }) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{
+            name,
+            display_name: displayName,
+            webui: "webui/index.ts",
+            type: "channel",
+            enabled: true,
+            running: true,
+            runtime_status: "running",
+            configured: true,
+            installed: true,
+            ready: true,
+            status: "enabled",
+            install_supported: true,
+            requires_restart: false,
+            setup: {
+              verifies_connection: true,
+              fields: [channelSetupField(name, "token", "secret", { required: true })],
+              requirements: [{ alternatives: [[`channels.${name}.token`]] }],
+            },
+            configured_fields: [`channels.${name}.token`],
+          }],
+          enabled_count: 1,
+        });
+      }
+      return jsonResponse({});
+    }));
+    requestMutationMock.mockResolvedValueOnce({
+      name,
+      status: "connected",
+      checks,
+      identity: { name: identity },
+      missing_fields: [],
+      can_enable: true,
+      requires_restart: false,
+    });
+
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: `View ${displayName} settings` }));
+
+    expect(screen.getByRole("button", { name: "Check connection" })).toBeInTheDocument();
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
+      await act(async () => {});
+
+      const progress = screen.getAllByRole("status").find(
+        (element) => element.textContent?.includes(checks[0].label),
+      );
+      expect(progress).toBeDefined();
+      expect(within(progress!).getByText(checks[0].label)).toBeVisible();
+      expect(within(progress!).queryByText(checks[1].label)).not.toBeInTheDocument();
+      expect(within(progress!).queryByText(identity)).not.toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(260));
+      expect(within(progress!).getByText(checks[1].label)).toBeVisible();
+      expect(within(progress!).queryByText(identity)).not.toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(260));
+      expect(within(progress!).getByText(identity)).toBeVisible();
+      expect(within(progress!).getByText("Connected")).toBeVisible();
+      if (name === "discord") {
+        const checkLabel = within(progress!).getByText("Server invite");
+        expect(checkLabel.parentElement).toContainElement(
+          within(progress!).getByRole("link", { name: "Open" }),
+        );
+      }
+      expect(screen.queryByText("Connection verified.")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows enabled channels by default when any are enabled", async () => {
     const enabled = catalogFeature("Enabled channel", true);
     const enabledWithDependencies = catalogFeature("Enabled dependency channel", true, true);

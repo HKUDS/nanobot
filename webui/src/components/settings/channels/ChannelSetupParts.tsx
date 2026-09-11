@@ -1,5 +1,5 @@
 import { channelValidationMessage } from "./validationMessages";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Clipboard, ExternalLink, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -114,7 +114,14 @@ export function ChannelProviderPresets({
   );
 }
 
-export function ChannelValidationBadge({
+function visibleValidationChecks(validation: ChannelValidationPayload | null) {
+  return (validation?.checks ?? []).filter(
+    (check) => check.id !== "manual_review"
+      && !(check.id.startsWith("field:") && check.status === "pass"),
+  ).slice(0, 6);
+}
+
+export function ChannelValidationProgress({
   validation,
   validating,
   feature,
@@ -124,76 +131,107 @@ export function ChannelValidationBadge({
   feature: NanobotFeatureInfo;
 }) {
   const { t } = useTranslation();
+  const checks = useMemo(() => visibleValidationChecks(validation), [validation]);
+  const [reveal, setReveal] = useState<{
+    validation: ChannelValidationPayload | null;
+    settledCheckCount: number;
+  }>({ validation: null, settledCheckCount: 0 });
+  const settledCheckCount = reveal.validation === validation ? reveal.settledCheckCount : 0;
+
+  useEffect(() => {
+    if (validating || !validation) {
+      setReveal({ validation: null, settledCheckCount: 0 });
+      return;
+    }
+    setReveal({ validation, settledCheckCount: 0 });
+    const timers = checks.map((_, index) => window.setTimeout(
+      () => setReveal((current) => (
+        current.validation === validation
+          ? { validation, settledCheckCount: index + 1 }
+          : current
+      )),
+      (index + 1) * 260,
+    ));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [checks, validating, validation]);
+
+  if (!validating && !validation) return null;
+
+  const finished = Boolean(validation) && !validating && settledCheckCount >= checks.length;
+  const shownChecks = finished ? checks : checks.slice(0, settledCheckCount + 1);
   const status = validation?.status ?? (feature.configured ? "configured" : "needs_setup");
-  const label = validating
-    ? t("settings.channels.checking", { defaultValue: "Checking..." })
-    : channelValidationStatusLabel(status, t);
+  const presentation = channelUiPresentation(feature.name, feature.webui);
+  const identity = validation?.identity?.name
+    ? validation.identity.workspace
+      ? `${validation.identity.name} · ${validation.identity.workspace}`
+      : validation.identity.name
+    : presentation?.displayName ?? feature.display_name;
+
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium",
-        channelValidationStatusClass(status),
-      )}
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="rounded-control border border-border/60 bg-muted/25 px-3 py-3"
     >
-      {validating ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-      ) : (
-        channelValidationStatusIcon(status)
-      )}
-      {label}
-    </span>
-  );
-}
-
-export function ChannelValidationDetails({ validation }: { validation: ChannelValidationPayload | null }) {
-  const { t } = useTranslation();
-  const message = validation?.message ? channelValidationMessage(validation.message, t) : undefined;
-  if (!validation?.identity?.name && !message) return null;
-  return (
-    <div className="mt-2 truncate text-[11.5px] text-muted-foreground">
-      {validation?.identity?.name
-        ? validation.identity.workspace
-          ? `${validation.identity.name} · ${validation.identity.workspace}`
-          : validation.identity.name
-        : message}
-    </div>
-  );
-}
-
-export function ChannelValidationChecks({ validation }: { validation: ChannelValidationPayload }) {
-  const { t } = useTranslation();
-  const checks = validation.checks.filter((check) => check.id !== "manual_review" && !(check.id.startsWith("field:") && check.status === "pass"));
-  if (checks.length <= 1) return null;
-  return (
-    <div>
-      <div className="mb-2 text-[12px] font-semibold text-foreground">
-        {t("settings.channels.connectionChecks")}
-      </div>
-      <div className="space-y-2">
-        {checks.slice(0, 6).map((check) => (
-          <div key={check.id} className="flex gap-2 text-[12px] leading-5">
-            <span className={cn("mt-0.5", channelValidationCheckIconClass(check.status))}>
-              {channelValidationCheckIcon(check.status)}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="font-medium text-foreground/85">{channelValidationMessage(check.label, t)}</div>
-              {check.message ? (
-                <div className="text-muted-foreground">{channelValidationMessage(check.message, t)}</div>
-              ) : null}
-              {check.action_url ? (
-                <a
-                  href={check.action_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-foreground underline decoration-border underline-offset-4"
-                >
-                  {t("settings.channels.open")}
-                  <ExternalLink className="h-3 w-3" aria-hidden />
-                </a>
-              ) : null}
-            </div>
+      <div className="space-y-2.5">
+        {validating ? (
+          <div className="flex items-center gap-2 px-2.5 text-[12px] font-medium text-foreground/85">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
+            {t("settings.channels.checking", { defaultValue: "Checking..." })}
           </div>
-        ))}
+        ) : null}
+        {!validating ? shownChecks.map((check, index) => {
+          const pending = !finished && index === settledCheckCount;
+          return (
+            <div
+              key={check.id}
+              className="flex animate-in gap-2 px-2.5 fade-in-0 slide-in-from-top-1 text-[12px] leading-5 duration-200 motion-reduce:animate-none"
+            >
+              <span className={cn(
+                "mt-0.5",
+                pending ? "text-muted-foreground" : channelValidationCheckIconClass(check.status),
+              )}>
+                {pending
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  : channelValidationCheckIcon(check.status)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-x-2 font-medium text-foreground/85">
+                  <span className="min-w-0 truncate">{channelValidationMessage(check.label, t)}</span>
+                  {!pending && check.action_url ? (
+                    <a
+                      href={check.action_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-foreground underline decoration-border underline-offset-4"
+                    >
+                      {t("settings.channels.open")}
+                      <ExternalLink className="h-3 w-3" aria-hidden />
+                    </a>
+                  ) : null}
+                </div>
+                {!pending && check.status !== "pass" && check.message ? (
+                  <div className="text-muted-foreground">
+                    {channelValidationMessage(check.message, t)}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          );
+        }) : null}
+        {finished ? (
+          <div
+            className={cn(
+              "flex animate-in items-center gap-2 rounded-control px-2.5 py-2 text-[12px] font-medium fade-in-0 duration-200 motion-reduce:animate-none",
+              channelValidationStatusClass(status),
+            )}
+          >
+            {channelValidationStatusIcon(status)}
+            <span className="min-w-0 truncate font-semibold">{identity}</span>
+            <span className="lowercase">{channelValidationStatusLabel(status, t)}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
