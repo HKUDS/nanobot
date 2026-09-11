@@ -140,6 +140,36 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  it("loads deferred trace details only after completed activity is expanded", async () => {
+    const onLoadTraceDetails = vi.fn();
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-deferred",
+          role: "tool",
+          kind: "trace",
+          content: "exec(…)",
+          traces: ["exec(…)"],
+          traceDetail: {
+            ref: "9.tr-deadbeefdeadbeef",
+            bytes: 40_000,
+            traceCount: 1,
+          },
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+        onLoadTraceDetails={onLoadTraceDetails}
+      />,
+    );
+
+    expect(onLoadTraceDetails).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Worked/ }));
+    await waitFor(() => {
+      expect(onLoadTraceDetails).toHaveBeenCalledWith(["9.tr-deadbeefdeadbeef"]);
+    });
+  });
+
   it("shows model retries in the existing live activity header", () => {
     render(
       <AgentActivityCluster

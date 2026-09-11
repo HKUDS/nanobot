@@ -1750,6 +1750,8 @@
     "activityWorkingFor": "Working for {{duration}}",
     "activityWorked": "Worked",
     "activityWorkedFor": "Worked for {{duration}}",
+    "traceDetailsLoadFailed": "Full activity details could not be loaded.",
+    "retryTraceDetails": "Retry",
     "retryConnection": "Connection failed",
     "retryTimeout": "Model timed out",
     "retryRateLimit": "Rate limited",

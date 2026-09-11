@@ -1577,6 +1577,8 @@
     "activityWorkingFor": "{{duration}} 동안 작업 중",
     "activityWorked": "작업함",
     "activityWorkedFor": "{{duration}} 동안 작업함",
+    "traceDetailsLoadFailed": "전체 활동 세부 정보를 불러올 수 없습니다.",
+    "retryTraceDetails": "다시 시도",
     "retryConnection": "연결 실패",
     "retryTimeout": "모델 응답 시간 초과",
     "retryRateLimit": "요청 한도 초과",

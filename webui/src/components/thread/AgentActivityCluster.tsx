@@ -127,6 +127,10 @@ function countActivity(
       continue;
     }
     if (m.kind === "trace") {
+      if (m.traceDetail) {
+        toolCalls += m.traceDetail.traceCount;
+        continue;
+      }
       const lines = traceLines(m);
       for (const line of lines) {
         if (!isCliRunTraceLine(line) && !isMcpRunTraceLine(line)) {
@@ -157,6 +161,8 @@ interface AgentActivityClusterProps {
   retryStatus?: RetryStatus | null;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  traceDetailScope?: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
 }
 
@@ -228,6 +234,8 @@ function FoldedAgentActivity({
   retryStatus = null,
   cliApps = EMPTY_CLI_APPS,
   mcpPresets = EMPTY_MCP_PRESETS,
+  traceDetailScope = null,
+  onLoadTraceDetails,
   onOpenFilePreview,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
@@ -265,6 +273,7 @@ function FoldedAgentActivity({
   const [userToggledOuter, setUserToggledOuter] = useState(false);
   const [outerOpenLocal, setOuterOpenLocal] = useState(false);
   const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
+  const [failedTraceDetailKey, setFailedTraceDetailKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [activityScrollFade, setActivityScrollFade] = useState({ top: false, bottom: false });
   const activityScrollRef = useRef<HTMLDivElement>(null);
@@ -277,6 +286,28 @@ function FoldedAgentActivity({
   const outerExpanded = userToggledOuter
     ? outerOpenLocal
     : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
+  const deferredTraceRefs = useMemo(
+    () => Array.from(new Set(
+      messages
+        .map((message) => message.traceDetail?.ref)
+        .filter((ref): ref is string => typeof ref === "string" && ref.length > 0),
+    )),
+    [messages],
+  );
+  const traceDetailKey = useMemo(
+    () => `${traceDetailScope ?? ""}\u0000${deferredTraceRefs.join("\u0000")}`,
+    [deferredTraceRefs, traceDetailScope],
+  );
+  const traceDetailLoadFailed = failedTraceDetailKey === traceDetailKey;
+  const requestTraceDetails = useCallback(async (refs: string[]) => {
+    if (!onLoadTraceDetails) return;
+    setFailedTraceDetailKey(null);
+    try {
+      await onLoadTraceDetails(refs);
+    } catch {
+      setFailedTraceDetailKey(`${traceDetailScope ?? ""}\u0000${refs.join("\u0000")}`);
+    }
+  }, [onLoadTraceDetails, traceDetailScope]);
 
   const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || modelSegments > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const hasOnlyFileActivity = fileCount > 0 && activityMessages.every(messageHasOnlyFileActivity);
@@ -398,6 +429,12 @@ function FoldedAgentActivity({
   useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
 
   useEffect(() => {
+    if (outerExpanded && deferredTraceRefs.length > 0) {
+      void requestTraceDetails(deferredTraceRefs);
+    }
+  }, [deferredTraceRefs, outerExpanded, requestTraceDetails]);
+
+  useEffect(() => {
     if (!isTurnStreaming || !pageVisible || !threadVisible) return undefined;
     setNow(Date.now());
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -453,6 +490,18 @@ function FoldedAgentActivity({
         onToggle={toggleOuter}
         onScroll={onActivityScroll}
       >
+        {traceDetailLoadFailed ? (
+          <div role="alert" className="flex items-center gap-2 py-1 text-[12px] text-destructive">
+            <span>{t("message.traceDetailsLoadFailed", { defaultValue: "Full activity details could not be loaded." })}</span>
+            <button
+              type="button"
+              className="shrink-0 rounded-sm font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => void requestTraceDetails(deferredTraceRefs)}
+            >
+              {t("message.retryTraceDetails", { defaultValue: "Retry" })}
+            </button>
+          </div>
+        ) : null}
         <ActivityMessageTimeline
           messages={activityMessages}
           active={isTurnStreaming}

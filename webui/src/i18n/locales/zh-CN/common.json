@@ -1750,6 +1750,8 @@
     "activityWorkingFor": "处理中 {{duration}}",
     "activityWorked": "已处理",
     "activityWorkedFor": "处理了 {{duration}}",
+    "traceDetailsLoadFailed": "无法加载完整活动详情。",
+    "retryTraceDetails": "重试",
     "retryConnection": "连接失败",
     "retryTimeout": "模型响应超时",
     "retryRateLimit": "请求频率受限",

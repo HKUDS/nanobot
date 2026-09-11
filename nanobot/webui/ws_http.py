@@ -129,13 +129,29 @@ from nanobot.webui.skills_marketplace import (
     trending_marketplace_skills,
 )
 from nanobot.webui.thread_disk import delete_webui_thread
-from nanobot.webui.transcript import TranscriptReplayStats, build_webui_thread_response
+from nanobot.webui.transcript import (
+    TranscriptReplayStats,
+    build_webui_thread_response,
+    build_webui_trace_detail_response,
+    webui_transcript_revision,
+)
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _SLOW_WEBUI_HTTP_LOG_MS = 1_000
 _WEBUI_MUTATION_PAYLOAD_ATTR = "_nanobot_webui_mutation_payload"
 _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
 _NO_STORE_HEADERS = [("Cache-Control", "no-store")]
+
+
+def _quoted_etag(revision: str) -> str:
+    return f'"{revision}"'
+
+
+def _etag_matches(value: str, etag: str) -> bool:
+    return any(
+        candidate.strip().removeprefix("W/") in {"*", etag}
+        for candidate in value.split(",")
+    )
 
 
 @dataclass(slots=True)
@@ -717,6 +733,14 @@ class GatewayHTTPHandler:
     # -- Session routes -----------------------------------------------------
 
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
+        m = re.match(r"^/api/sessions/([^/]+)/webui-thread/trace-detail$", got)
+        if m:
+            return await asyncio.to_thread(
+                self._handle_webui_trace_detail_get,
+                request,
+                m.group(1),
+            )
+
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
         if m:
             return await self._handle_webui_thread_get_async(request, m.group(1))
@@ -960,6 +984,37 @@ class GatewayHTTPHandler:
         active_turn_transcript_persistence_failed = (
             websocket_turn_transcript_persistence_failed(chat_id)
         )
+        session_metadata = (
+            self.session_manager.read_session_metadata(decoded_key)
+            if self.session_manager is not None
+            else None
+        )
+        revision_variant = {
+            "active_turn_id": active_turn_id,
+            "active_turn_started_at": active_turn_started_at,
+            "active_turn_transcript_persistence_failed": (
+                active_turn_transcript_persistence_failed
+            ),
+            "before": before,
+            "direction": direction,
+            "gateway_instance": self.tokens.instance_id,
+            "limit": limit,
+            "session_updated_at": (
+                session_metadata.get("updated_at") if session_metadata is not None else None
+            ),
+            "workspace_scope": scope.payload(),
+        }
+        initial_revision = webui_transcript_revision(decoded_key, variant=revision_variant)
+        etag = _quoted_etag(initial_revision) if initial_revision is not None else None
+        if etag is not None and _etag_matches(
+            _case_insensitive_header(request.headers, "If-None-Match"),
+            etag,
+        ):
+            return _http_response(
+                b"",
+                status=304,
+                extra_headers=[*_NO_STORE_HEADERS, ("ETag", etag)],
+            )
         build_started = time.perf_counter()
         data = build_webui_thread_response(
             decoded_key,
@@ -985,10 +1040,46 @@ class GatewayHTTPHandler:
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
+        latest_session_metadata = (
+            self.session_manager.read_session_metadata(decoded_key)
+            if self.session_manager is not None
+            else None
+        )
+        revision_variant["session_updated_at"] = (
+            latest_session_metadata.get("updated_at")
+            if latest_session_metadata is not None
+            else None
+        )
+        final_revision = webui_transcript_revision(decoded_key, variant=revision_variant)
+        response_headers = list(_NO_STORE_HEADERS)
+        if final_revision is not None and final_revision == initial_revision:
+            data["revision"] = final_revision
+            response_headers.append(("ETag", _quoted_etag(final_revision)))
         return _http_json_response(
             data,
             accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+            extra_headers=response_headers,
             metrics=diagnostics.response if diagnostics is not None else None,
+        )
+
+    def _handle_webui_trace_detail_get(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        detail_ref = _query_first(_parse_query(request.path), "ref")
+        if not detail_ref:
+            return _http_error(400, "missing trace detail ref")
+        data = build_webui_trace_detail_response(decoded_key, detail_ref)
+        if data is None:
+            return _http_error(404, "trace detail not found")
+        return _http_json_response(
+            data,
+            accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+            extra_headers=_NO_STORE_HEADERS,
         )
 
     def _handle_file_preview(self, request: WsRequest, key: str) -> Response:

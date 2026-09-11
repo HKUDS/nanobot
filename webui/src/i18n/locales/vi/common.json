@@ -1577,6 +1577,8 @@
     "activityWorkingFor": "Đang xử lý trong {{duration}}",
     "activityWorked": "Đã xử lý",
     "activityWorkedFor": "Đã xử lý trong {{duration}}",
+    "traceDetailsLoadFailed": "Không thể tải đầy đủ chi tiết hoạt động.",
+    "retryTraceDetails": "Thử lại",
     "retryConnection": "Kết nối thất bại",
     "retryTimeout": "Mô hình đã hết thời gian chờ",
     "retryRateLimit": "Đã đạt giới hạn yêu cầu",

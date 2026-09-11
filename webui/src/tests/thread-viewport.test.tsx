@@ -1461,6 +1461,7 @@ describe("ThreadViewport", () => {
 
   it("renders only the tail window for long history by default", () => {
     const longMessages = makeLongMessages(300);
+    const firstVisible = longMessages.length - INITIAL_HISTORY_WINDOW;
 
     render(
       <ThreadViewport
@@ -1470,8 +1471,8 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    expect(screen.queryByText("message 139")).not.toBeInTheDocument();
-    expect(screen.getByText("message 140")).toBeInTheDocument();
+    expect(screen.queryByText(`message ${firstVisible - 1}`)).not.toBeInTheDocument();
+    expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
     expect(screen.getByText("message 299")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
   });
@@ -1509,6 +1510,7 @@ describe("ThreadViewport", () => {
   });
 
   it("prefetches earlier history within half a viewport of the top", () => {
+    const expandedFirstVisible = 300 - INITIAL_HISTORY_WINDOW - HISTORY_WINDOW_INCREMENT;
     const { container } = render(
       <ThreadViewport
         messages={makeLongMessages(300)}
@@ -1527,14 +1529,16 @@ describe("ThreadViewport", () => {
     act(() => {
       dispatchUserScroll(scroller);
     });
-    expect(screen.queryByText("message 139")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(`message ${300 - INITIAL_HISTORY_WINDOW - 1}`),
+    ).not.toBeInTheDocument();
 
     scroller.scrollTop = 250;
     act(() => {
       dispatchUserScroll(scroller);
     });
-    expect(screen.getByText("message 20")).toBeInTheDocument();
-    expect(screen.queryByText("message 19")).not.toBeInTheDocument();
+    expect(screen.getByText(`message ${expandedFirstVisible}`)).toBeInTheDocument();
+    expect(screen.queryByText(`message ${expandedFirstVisible - 1}`)).not.toBeInTheDocument();
   });
 
   it("keeps the first visible history item fixed while deferred rows materialize", () => {
@@ -1562,7 +1566,8 @@ describe("ThreadViewport", () => {
         },
       });
 
-      const anchor = screen.getByText("message 140")
+      const firstVisible = 300 - INITIAL_HISTORY_WINDOW;
+      const anchor = screen.getByText(`message ${firstVisible}`)
         .closest<HTMLElement>("[data-thread-display-unit]");
       expect(anchor).not.toBeNull();
       hitTarget = anchor;
@@ -1913,15 +1918,16 @@ describe("ThreadViewport", () => {
 
   it("expands the window start to avoid cutting an agent activity cluster", () => {
     const clustered = makeLongMessages(200);
+    const boundary = clustered.length - INITIAL_HISTORY_WINDOW;
     clustered.splice(
-      38,
+      boundary - 2,
       3,
       {
         id: "r0",
         role: "assistant",
         content: "",
         reasoning: "first reasoning",
-        createdAt: 38,
+        createdAt: boundary - 2,
       },
       {
         id: "t0",
@@ -1929,14 +1935,14 @@ describe("ThreadViewport", () => {
         kind: "trace",
         content: "tool()",
         traces: ["tool()"],
-        createdAt: 39,
+        createdAt: boundary - 1,
       },
       {
         id: "r1",
         role: "assistant",
         content: "",
         reasoning: "second reasoning",
-        createdAt: 40,
+        createdAt: boundary,
       },
     );
 

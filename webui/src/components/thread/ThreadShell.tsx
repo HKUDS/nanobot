@@ -26,6 +26,7 @@ import {
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
+  fetchWebuiThreadTraceDetail,
   listSlashCommands,
 } from "@/lib/api";
 import {
@@ -806,6 +807,9 @@ export function ThreadShell({
   const completedCanonicalHydrateVersionRef = useRef<Map<string, number>>(new Map());
   const committedHistoryLineageRef = useRef<Map<string, number>>(new Map());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
+  const traceDetailRequestsRef = useRef<Map<string, Promise<void>>>(new Map());
+  const activeHistoryKeyRef = useRef(historyKey);
+  activeHistoryKeyRef.current = historyKey;
   const currentUiMessagesRef = useRef<UIMessage[] | null>(null);
   const uiRevisionRef = useRef(0);
   const showTemporaryChatControl =
@@ -839,6 +843,49 @@ export function ThreadShell({
     streamError,
     dismissStreamError,
   } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
+
+  const loadTraceDetails = useCallback(async (refs: string[]) => {
+    const requestKey = historyKey;
+    if (!requestKey) return;
+    const requests: Promise<void>[] = [];
+    for (const ref of refs) {
+      const requestId = `${requestKey}:${ref}`;
+      const existing = traceDetailRequestsRef.current.get(requestId);
+      if (existing) {
+        requests.push(existing);
+        continue;
+      }
+      const request = fetchWebuiThreadTraceDetail(getToken(), requestKey, ref)
+        .then((detail) => {
+          if (activeHistoryKeyRef.current !== requestKey) return;
+          setMessages((current) => current.map((message) => (
+            message.traceDetail?.ref === ref
+              ? {
+                  ...message,
+                  content: detail.content,
+                  traces: detail.traces,
+                  toolEvents: detail.toolEvents,
+                  traceDetail: undefined,
+                }
+              : message
+          )));
+        })
+        .catch((error: unknown) => {
+          if (activeHistoryKeyRef.current !== requestKey) return;
+          throw error;
+        })
+        .finally(() => {
+          traceDetailRequestsRef.current.delete(requestId);
+        });
+      traceDetailRequestsRef.current.set(requestId, request);
+      requests.push(request);
+    }
+    await Promise.all(requests);
+  }, [getToken, historyKey, setMessages]);
+
+  useEffect(() => () => {
+    activeHistoryKeyRef.current = null;
+  }, []);
 
   useLayoutEffect(() => {
     if (currentUiMessagesRef.current === messages) return;
@@ -1748,6 +1795,8 @@ export function ThreadShell({
             loadingOlder={loadingOlder}
             userMessageOffset={userMessageOffset}
             onLoadOlder={loadOlder}
+            traceDetailScope={historyKey}
+            onLoadTraceDetails={messagesReady ? loadTraceDetails : undefined}
             onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}

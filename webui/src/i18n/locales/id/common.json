@@ -1577,6 +1577,8 @@
     "activityWorkingFor": "Memproses selama {{duration}}",
     "activityWorked": "Selesai memproses",
     "activityWorkedFor": "Diproses selama {{duration}}",
+    "traceDetailsLoadFailed": "Detail aktivitas lengkap tidak dapat dimuat.",
+    "retryTraceDetails": "Coba lagi",
     "retryConnection": "Koneksi gagal",
     "retryTimeout": "Waktu respons model habis",
     "retryRateLimit": "Batas permintaan tercapai",

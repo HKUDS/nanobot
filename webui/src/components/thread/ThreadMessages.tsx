@@ -20,6 +20,8 @@ interface ThreadMessagesProps {
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
+  traceDetailScope?: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onQuoteSelection?: (text: string) => void;
@@ -70,6 +72,8 @@ export function ThreadMessages({
   mcpPresets = [],
   slashCommands = [],
   forkBoundaryMessageCount = null,
+  traceDetailScope = null,
+  onLoadTraceDetails,
   onOpenFilePreview,
   onForkFromMessage,
   onQuoteSelection,
@@ -175,6 +179,8 @@ export function ThreadMessages({
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
+            traceDetailScope={traceDetailScope}
+            onLoadTraceDetails={onLoadTraceDetails}
             onOpenFilePreview={onOpenFilePreview}
             onForkFromMessage={onForkFromMessage}
           />
@@ -258,6 +264,8 @@ interface ThreadDisplayUnitProps {
   cliApps: CliAppInfo[];
   mcpPresets: McpPresetInfo[];
   slashCommands: SlashCommand[];
+  traceDetailScope: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
@@ -278,6 +286,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   cliApps,
   mcpPresets,
   slashCommands,
+  traceDetailScope,
+  onLoadTraceDetails,
   onOpenFilePreview,
   onForkFromMessage,
 }: ThreadDisplayUnitProps) {
@@ -325,6 +335,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             startedAtMs={unit.startedAtMs}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
+            traceDetailScope={traceDetailScope}
+            onLoadTraceDetails={onLoadTraceDetails}
             onOpenFilePreview={onOpenFilePreview}
           />
         ) : (
@@ -364,6 +376,8 @@ function threadDisplayUnitPropsEqual(
     && previous.cliApps === next.cliApps
     && previous.mcpPresets === next.mcpPresets
     && previous.slashCommands === next.slashCommands
+    && previous.traceDetailScope === next.traceDetailScope
+    && previous.onLoadTraceDetails === next.onLoadTraceDetails
     && previous.onOpenFilePreview === next.onOpenFilePreview
     && previous.onForkFromMessage === next.onForkFromMessage
   );

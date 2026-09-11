@@ -81,6 +81,12 @@ export interface UIMessage {
   /** Structured tool events behind trace rows. Kept so activity cards can
    * distinguish running, completed, and failed tool phases. */
   toolEvents?: ToolProgressEvent[];
+  /** Oversized persisted trace content that can be fetched when activity is expanded. */
+  traceDetail?: {
+    ref: string;
+    bytes: number;
+    traceCount: number;
+  };
   /** Activity rows: explicit file edits emitted by edit tools. */
   fileEdits?: UIFileEdit[];
   /** Activity rows created during the same agent phase share one collapsible block. */
@@ -1542,6 +1548,8 @@ export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;
+  /** Cheap server revision used for application-managed conditional revalidation. */
+  revision?: string;
   messages: UIMessage[];
   fork_boundary_message_count?: number;
   /** Turn ids backed by an explicit persisted ``turn_end`` event. */
@@ -1551,6 +1559,13 @@ export interface WebuiThreadPersistedPayload {
   active_turn_id?: string | null;
   page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
+}
+
+export interface WebuiThreadTraceDetailPayload {
+  message_id: string;
+  content: string;
+  traces?: string[];
+  toolEvents?: ToolProgressEvent[];
 }
 
 export interface FilePreviewPayload {

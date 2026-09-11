@@ -1577,6 +1577,8 @@
     "activityWorkingFor": "Travail en cours depuis {{duration}}",
     "activityWorked": "Travail terminé",
     "activityWorkedFor": "Travail terminé en {{duration}}",
+    "traceDetailsLoadFailed": "Impossible de charger les détails complets de l’activité.",
+    "retryTraceDetails": "Réessayer",
     "retryConnection": "Échec de la connexion",
     "retryTimeout": "Délai d’attente du modèle dépassé",
     "retryRateLimit": "Limite de requêtes atteinte",

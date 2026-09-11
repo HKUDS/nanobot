@@ -1576,6 +1576,8 @@
     "activityWorkingFor": "處理中，已 {{duration}}",
     "activityWorked": "已處理",
     "activityWorkedFor": "已處理 {{duration}}",
+    "traceDetailsLoadFailed": "無法載入完整活動詳情。",
+    "retryTraceDetails": "重試",
     "retryConnection": "連線失敗",
     "retryTimeout": "模型回應逾時",
     "retryRateLimit": "請求頻率受限",

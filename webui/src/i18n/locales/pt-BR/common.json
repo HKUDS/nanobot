@@ -1564,6 +1564,8 @@
     "activityWorkingFor": "Trabalhando por {{duration}}",
     "activityWorked": "Trabalhou",
     "activityWorkedFor": "Trabalhou por {{duration}}",
+    "traceDetailsLoadFailed": "Não foi possível carregar os detalhes completos da atividade.",
+    "retryTraceDetails": "Tentar novamente",
     "retryConnection": "Falha na conexão",
     "retryTimeout": "O modelo excedeu o tempo limite",
     "retryRateLimit": "Limite de solicitações atingido",

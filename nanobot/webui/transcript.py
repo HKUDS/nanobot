@@ -40,10 +40,18 @@ _DEFAULT_TRANSCRIPT_PAGE_LIMIT = 160
 _MAX_TRANSCRIPT_PAGE_LIMIT = 1000
 _MAX_TRANSCRIPT_PAGE_RECORDS = 4_000
 _MAX_TRANSCRIPT_PAGE_BYTES = 20 * 1024 * 1024
+_MAX_INLINE_TRACE_DETAIL_BYTES = 32 * 1024
+_MAX_DEFERRED_TRACE_SUMMARY_ROWS = 16
+_MAX_DEFERRED_TOOL_EVENT_SUMMARY_ROWS = 8
 _MANIFEST_REBUILD_LOCKS = tuple(threading.Lock() for _ in range(32))
 _ACTIVE_TRANSCRIPTS_WITH_DELTAS: set[str] = set()
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _WEBUI_REPLAY_IDENTITY_KEY = "_webui_replay_identity"
+_WEBUI_TRACE_DETAIL_REF_KEY = "_webui_trace_detail_ref"
+_WEBUI_TRACE_DETAIL_UNSAFE_KEY = "_webui_trace_detail_unsafe"
+_WEBUI_TRACE_DETAIL_REF_RE = re.compile(
+    r"^(?P<turn>\d{1,12})\.(?P<message>tr-[0-9a-f]{16}(?:-\d+)?)$"
+)
 _MARKDOWN_LOCAL_IMAGE_RE = re.compile(
     r"!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(\s+(?:\"[^\"]*\"|'[^']*'))?\)"
 )
@@ -167,9 +175,58 @@ def _legacy_webui_thread_path(session_key: str) -> Path:
     return get_webui_dir() / f"{stem}.json"
 
 
+def webui_transcript_revision(
+    session_key: str,
+    *,
+    variant: Mapping[str, Any] | None = None,
+) -> str | None:
+    """Return a cheap revision from transcript artifact metadata and response inputs."""
+    active_path = webui_transcript_path(session_key)
+    segment_dir = webui_transcript_segments_dir(session_key)
+    snapshots: list[tuple[str, int, int]] = []
+    artifacts = (
+        ("active", active_path),
+        ("legacy", _legacy_webui_thread_path(session_key)),
+        ("manifest", segment_dir / "manifest.json"),
+        ("segments", segment_dir),
+    )
+    for label, path in artifacts:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if label != "segments" and not path.is_file():
+            continue
+        snapshots.append((label, stat.st_size, stat.st_mtime_ns))
+    if not snapshots:
+        return None
+
+    digest = hashlib.sha256()
+    digest.update(
+        json.dumps(
+            snapshots,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    if variant:
+        digest.update(b"\0")
+        digest.update(
+            json.dumps(
+                variant,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                default=str,
+            ).encode("utf-8")
+        )
+    return digest.hexdigest()[:32]
+
+
 class _TranscriptTurnRef(NamedTuple):
     ordinal: int
     records: list[dict[str, Any]]
+    trace_details_safe: bool = True
 
 
 class _TranscriptChunkRef(NamedTuple):
@@ -353,11 +410,13 @@ def _records_with_replay_identity(
     records: list[dict[str, Any]],
     *,
     turn_ordinal: int,
+    trace_details_safe: bool = True,
 ) -> list[dict[str, Any]]:
     return [
         {
             **record,
             _WEBUI_REPLAY_IDENTITY_KEY: f"turn:{turn_ordinal}:record:{record_index}",
+            **({_WEBUI_TRACE_DETAIL_UNSAFE_KEY: True} if not trace_details_safe else {}),
         }
         for record_index, record in enumerate(records)
     ]
@@ -807,6 +866,20 @@ def _chunk_turn_refs(
     return refs
 
 
+def _transcript_turn_at_ordinal(
+    session_key: str,
+    ordinal: int,
+) -> list[dict[str, Any]] | None:
+    turn_cache: dict[str, list[list[dict[str, Any]]]] = {}
+    for chunk in _chunk_turn_refs(session_key, turn_cache):
+        local_index = ordinal - chunk.start_ordinal
+        if local_index < 0 or local_index >= chunk.turn_count:
+            continue
+        turns = _cached_chunk_turns(session_key, chunk.chunk_id, turn_cache)
+        return turns[local_index] if local_index < len(turns) else None
+    return None
+
+
 def _count_user_messages_before_ordinal(
     session_key: str,
     chunks: list[_TranscriptChunkRef],
@@ -895,6 +968,7 @@ def _select_transcript_page(
         local_upper = min(local_upper, len(turns))
         for turn_index in range(local_upper - 1, -1, -1):
             ordinal = chunk.start_ordinal + turn_index
+            trace_details_safe = True
             turn, compacted_delta_records = _compact_completed_stream_deltas(
                 turns[turn_index]
             )
@@ -921,7 +995,8 @@ def _select_transcript_page(
                 turn_record_count = len(turn)
                 turn_bytes = _records_bytes(turn)
                 stats.truncated_oversized_turn = True
-            selected.append(_TranscriptTurnRef(ordinal, turn))
+                trace_details_safe = False
+            selected.append(_TranscriptTurnRef(ordinal, turn, trace_details_safe))
             selected_record_count += turn_record_count
             selected_bytes += turn_bytes
             replay_started = time.perf_counter()
@@ -939,6 +1014,7 @@ def _select_transcript_page(
         for record in _records_with_replay_identity(
             ref.records,
             turn_ordinal=ref.ordinal,
+            trace_details_safe=ref.trace_details_safe,
         )
     ]
     stats.selected_records = len(lines)
@@ -2036,12 +2112,85 @@ def _media_from_signed_urls(value: Any) -> list[dict[str, Any]]:
     return media
 
 
+def _trace_detail_ref(message_id: str, record: Mapping[str, Any]) -> str | None:
+    if record.get(_WEBUI_TRACE_DETAIL_UNSAFE_KEY) is True:
+        return None
+    identity = record.get(_WEBUI_REPLAY_IDENTITY_KEY)
+    if not isinstance(identity, str):
+        return None
+    match = re.match(r"^turn:(\d+):record:", identity)
+    return f"{match.group(1)}.{message_id}" if match else None
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[: max_bytes - 3].decode("utf-8", errors="ignore") + "…"
+
+
+def _trace_summary(line: str) -> str:
+    if len(line.encode("utf-8")) <= 512:
+        return line
+    match = re.match(r"^([A-Za-z0-9_.-]+)\(", line.strip())
+    return f"{_truncate_utf8(match.group(1), 240)}(…)" if match else _truncate_utf8(line, 240)
+
+
+def _defer_large_trace_details(messages: list[dict[str, Any]]) -> None:
+    for message in messages:
+        if message.get("kind") != "trace":
+            continue
+        detail = {
+            key: message[key]
+            for key in ("content", "traces", "toolEvents")
+            if key in message
+        }
+        detail_bytes = len(_record_json_line(detail).encode("utf-8"))
+        detail_ref = message.get(_WEBUI_TRACE_DETAIL_REF_KEY)
+        if detail_bytes <= _MAX_INLINE_TRACE_DETAIL_BYTES:
+            continue
+
+        content = message.get("content")
+        traces = message.get("traces")
+        if isinstance(content, str):
+            message["content"] = _trace_summary(content)
+        if isinstance(traces, list):
+            message["traces"] = [
+                _trace_summary(trace)
+                for trace in cast(list[Any], traces)[-_MAX_DEFERRED_TRACE_SUMMARY_ROWS:]
+                if isinstance(trace, str)
+            ]
+        events = message.get("toolEvents")
+        if isinstance(events, list):
+            summarized_events: list[dict[str, Any]] = []
+            for item in cast(list[Any], events)[-_MAX_DEFERRED_TOOL_EVENT_SUMMARY_ROWS:]:
+                if not isinstance(item, dict):
+                    continue
+                event = cast(dict[str, Any], item)
+                summarized_events.append(
+                    {
+                        key: _truncate_utf8(value, 512)
+                        for key in ("call_id", "name", "phase", "error")
+                        if isinstance((value := event.get(key)), str)
+                    }
+                )
+            message["toolEvents"] = summarized_events
+        trace_count = len(cast(list[Any], traces)) if isinstance(traces, list) else int(bool(content))
+        if isinstance(detail_ref, str):
+            message["traceDetail"] = {
+                "ref": detail_ref,
+                "bytes": detail_bytes,
+                "traceCount": trace_count,
+            }
+
+
 def replay_transcript_to_ui_messages(
     lines: list[dict[str, Any]],
     *,
     augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None = None,
     augment_assistant_text: Callable[[str], str] | None = None,
+    defer_trace_details: bool = False,
 ) -> list[dict[str, Any]]:
     """Fold JSONL records into ``UIMessage``-shaped dicts for the WebUI.
 
@@ -2445,14 +2594,16 @@ def replay_transcript_to_ui_messages(
             if not segment:
                 segment = _new_activity_segment(activate=False)
             active_file_edit_segment_id = segment
+            message_id = _new_id("tr", idx)
             messages.append(
                 {
-                    "id": _new_id("tr", idx),
+                    "id": message_id,
                     "role": "tool",
                     "kind": "trace",
                     "content": "",
                     "traces": [],
                     "fileEdits": [],
+                    _WEBUI_TRACE_DETAIL_REF_KEY: _trace_detail_ref(message_id, lines[idx]),
                     "activitySegmentId": segment,
                     **turn_fields,
                     "createdAt": created_at_ms if created_at_ms is not None else _ts_base + idx,
@@ -2804,14 +2955,16 @@ def replay_transcript_to_ui_messages(
                     }
                     messages[-1] = merged
                 else:
+                    message_id = _new_id("tr", idx)
                     messages.append(
                         {
-                            "id": _new_id("tr", idx),
+                            "id": message_id,
                             "role": "tool",
                             "kind": "trace",
                             "content": trace_lines[-1],
                             "traces": trace_lines,
                             **({"toolEvents": visible_structured_events} if visible_structured_events else {}),
+                            _WEBUI_TRACE_DETAIL_REF_KEY: _trace_detail_ref(message_id, rec),
                             "activitySegmentId": segment,
                             **_turn_fields(rec, "activity"),
                             "createdAt": _created_at_ms(rec, idx),
@@ -2886,6 +3039,8 @@ def replay_transcript_to_ui_messages(
             buffer_parts = []
             continue
 
+    if defer_trace_details:
+        _defer_large_trace_details(messages)
     for i, m in enumerate(messages):
         if (
             augment_assistant_text is not None
@@ -2894,8 +3049,10 @@ def replay_transcript_to_ui_messages(
             and isinstance(m.get("content"), str)
         ):
             messages[i] = {**m, "content": augment_assistant_text(m["content"])}
+            m = messages[i]
         m.pop("isStreaming", None)
         m.pop("reasoningStreaming", None)
+        m.pop(_WEBUI_TRACE_DETAIL_REF_KEY, None)
     return messages
 
 
@@ -2990,6 +3147,34 @@ def completed_turn_ids(lines: list[dict[str, Any]]) -> list[str]:
     return completed
 
 
+def build_webui_trace_detail_response(
+    session_key: str,
+    detail_ref: str,
+) -> dict[str, Any] | None:
+    """Resolve one deferred trace from its stable turn ordinal and replay id."""
+    match = _WEBUI_TRACE_DETAIL_REF_RE.fullmatch(detail_ref)
+    if match is None:
+        return None
+    ordinal = int(match.group("turn"))
+    message_id = match.group("message")
+    turn = _transcript_turn_at_ordinal(session_key, ordinal)
+    if turn is None:
+        return None
+    lines = _records_with_replay_identity(turn, turn_ordinal=ordinal)
+    for message in replay_transcript_to_ui_messages(lines):
+        if message.get("id") != message_id or message.get("kind") != "trace":
+            continue
+        return {
+            "message_id": message_id,
+            **{
+                key: message[key]
+                for key in ("content", "traces", "toolEvents")
+                if key in message
+            },
+        }
+    return None
+
+
 def build_webui_thread_response(
     session_key: str,
     *,
@@ -3038,6 +3223,7 @@ def build_webui_thread_response(
         augment_user_media=augment_user_media,
         augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
+        defer_trace_details=True,
     )
     replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
     payload: dict[str, Any] = {

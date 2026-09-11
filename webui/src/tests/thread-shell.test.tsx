@@ -8,8 +8,15 @@ import { ThreadShell } from "@/components/thread/ThreadShell";
 import i18n from "@/i18n";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
-import type { CliAppsPayload, ConnectionStatus, SettingsPayload, UIMessage } from "@/lib/types";
+import type {
+  CliAppsPayload,
+  ConnectionStatus,
+  SettingsPayload,
+  UIMessage,
+  WebuiThreadPersistedPayload,
+} from "@/lib/types";
 
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -262,6 +269,36 @@ function httpJson(body: unknown) {
   };
 }
 
+function traceDetailThread(
+  deferred: boolean,
+  answer: string,
+  revision?: string,
+): WebuiThreadPersistedPayload {
+  return {
+    schemaVersion: 3,
+    ...(revision ? { revision } : {}),
+    messages: [
+      {
+        id: "trace-shared",
+        role: "tool",
+        kind: "trace",
+        content: deferred ? "exec(…)" : 'exec({"command":"echo full"})',
+        traces: [deferred ? "exec(…)" : 'exec({"command":"echo full"})'],
+        ...(deferred
+          ? { traceDetail: { ref: "1.trace-shared", bytes: 40_000, traceCount: 1 } }
+          : {}),
+        createdAt: 1_000,
+      },
+      {
+        id: "answer-shared",
+        role: "assistant",
+        content: answer,
+        createdAt: 2_000,
+      },
+    ],
+  };
+}
+
 function setDocumentVisibility(value: DocumentVisibilityState): void {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -417,6 +454,7 @@ function settingsWithFastPreset(): SettingsPayload {
 
 describe("ThreadShell", () => {
   beforeEach(() => {
+    webuiThreadCache.clear();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -425,6 +463,153 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("surfaces and retries a deferred trace-detail request failure", async () => {
+    const client = makeClient();
+    let detailCalls = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailCalls += 1;
+        if (detailCalls === 1) {
+          return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+        }
+        return Promise.resolve(httpJson({
+          message_id: "trace-deferred",
+          content: 'exec({"command":"echo full"})',
+          traces: ['exec({"command":"echo full"})'],
+        }));
+      }
+      if (url.includes("websocket%3Atrace-detail-retry/webui-thread")) {
+        return Promise.resolve(httpJson({
+          schemaVersion: 3,
+          messages: [
+            {
+              id: "trace-deferred",
+              role: "tool",
+              kind: "trace",
+              content: "exec(…)",
+              traces: ["exec(…)"],
+              traceDetail: { ref: "1.trace-deferred", bytes: 40_000, traceCount: 1 },
+              createdAt: 1_000,
+            },
+            { id: "answer", role: "assistant", content: "done", createdAt: 2_000 },
+          ],
+        }));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("trace-detail-retry")}
+        title="Trace detail retry"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const activity = await screen.findByRole("button", { name: /Worked/ });
+    fireEvent.click(activity);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Full activity details could not be loaded.",
+    );
+    expect(detailCalls).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(detailCalls).toBe(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+
+    fireEvent.click(activity);
+    fireEvent.click(activity);
+    await act(async () => Promise.resolve());
+    expect(detailCalls).toBe(2);
+  });
+
+  it("ignores a deferred trace-detail failure after switching sessions", async () => {
+    const client = makeClient();
+    const detailUrls: string[] = [];
+    let rejectDetail!: (reason: Error) => void;
+    const pendingDetail = new Promise<Response>((_resolve, reject) => {
+      rejectDetail = reject;
+    });
+    const cachedB = traceDetailThread(false, "done-b", "rev-b");
+    webuiThreadCache.set("websocket:trace-failure-b", cachedB);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailUrls.push(url);
+        return pendingDetail;
+      }
+      if (url.includes("websocket%3Atrace-failure-a/webui-thread")) {
+        return Promise.resolve(httpJson(traceDetailThread(true, "done-a")));
+      }
+      if (url.includes("websocket%3Atrace-failure-b/webui-thread")) {
+        return Promise.resolve(httpJson(cachedB));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Trace ${chatId}`}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const { rerender } = render(view("trace-failure-a"));
+    fireEvent.click(await screen.findByRole("button", { name: /Worked/ }));
+
+    rerender(view("trace-failure-b"));
+    await screen.findByText("done-b");
+    await act(async () => rejectDetail(new Error("late failure")));
+
+    expect(detailUrls).toHaveLength(1);
+    expect(detailUrls[0]).toContain("websocket%3Atrace-failure-a");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not carry a visible trace-detail failure into a cached session", async () => {
+    const client = makeClient();
+    const detailUrls: string[] = [];
+    const cachedB = traceDetailThread(false, "cached-b", "rev-visible-b");
+    webuiThreadCache.set("websocket:visible-failure-b", cachedB);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailUrls.push(url);
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+      }
+      if (url.includes("websocket%3Avisible-failure-a/webui-thread")) {
+        return Promise.resolve(httpJson(traceDetailThread(true, "failed-a")));
+      }
+      if (url.includes("websocket%3Avisible-failure-b/webui-thread")) {
+        return Promise.resolve(httpJson(cachedB));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Trace ${chatId}`}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const { rerender } = render(view("visible-failure-a"));
+    fireEvent.click(await screen.findByRole("button", { name: /Worked/ }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    rerender(view("visible-failure-b"));
+    await screen.findByText("cached-b");
+
+    expect(detailUrls).toHaveLength(1);
+    expect(detailUrls[0]).toContain("websocket%3Avisible-failure-a");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders each logical round in a completed turn as its own usage bar", async () => {
