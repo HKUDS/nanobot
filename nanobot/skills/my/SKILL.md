@@ -66,7 +66,7 @@ description: Inspect and optionally adjust the agent's runtime state. Use to che
 | Need | Use | Persists? |
 |------|-----|-----------|
 | Per-session temp state | `my(action="set", key="...", value=...)` | No |
-| Search past conversations | Memory skill (`grep` on the history log) | Yes |
+| Long-term facts | Memory skill (`MEMORY.md`, `USER.md`) | Yes |
 | Permanent config change | Edit config file | Yes |
 
 **Rule of thumb:** Tomorrow? Memory. This turn only? My.
