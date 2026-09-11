@@ -300,9 +300,8 @@ export function AutomationsSettings({
             {...(selectedJob.protected ? { "aria-describedby": undefined } : {})}
             {...(!detailOpen ? { inert: "", "aria-hidden": true } : {})}
             showCloseButton={false}
-            overlayClassName="bg-black/15 backdrop-blur-none"
             className={cn(
-              "flex max-h-[calc(100dvh-2rem)] max-w-[520px] flex-col gap-0 overflow-hidden rounded-[20px] p-0",
+              "flex max-h-[calc(100dvh-2rem)] max-w-[520px] flex-col gap-0 overflow-hidden p-0",
               selectedJob.protected && "max-w-[440px]",
             )}
             onCloseAutoFocus={(event) => {
@@ -401,7 +400,7 @@ function AutomationDetailPanel({
     ? `#/chat/${encodeURIComponent(job.origin.session_key)}` : null;
   const localTrigger = isLocalTriggerAutomation(job);
   const command = automationTriggerCommand(job);
-  const message = automationDetailText(job, tx);
+  const message = localTrigger ? command : job.payload.message || "";
   const [messageExpanded, setMessageExpanded] = useState(false);
   const messageId = useId();
   const [commandCopied, setCommandCopied] = useState(false);
@@ -420,25 +419,25 @@ function AutomationDetailPanel({
 
   return (
     <>
-      <div className="shrink-0 px-6 pb-5 pt-6 sm:px-7 sm:pt-7">
-        <div className="flex items-start justify-between gap-4">
-          <DialogTitle className="min-w-0 break-words text-[22px] font-semibold leading-7 tracking-[-0.025em]">{job.name || job.id}</DialogTitle>
-          <Button variant="ghost" size="sm" className={cn("-mr-2 -mt-1 shrink-0 rounded-full text-[13px] text-muted-foreground", job.protected && "text-foreground")} onClick={onClose}>
+      <DialogHeader className="shrink-0 px-6 pb-3 pt-5 text-left">
+        <div className="flex items-center justify-between gap-3">
+          <DialogTitle className="min-w-0 break-words leading-6">{job.name || job.id}</DialogTitle>
+          <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={onClose}>
             {tx("settings.automations.done", "Done")}
           </Button>
         </div>
         {canManage ? (
-          <DialogDescription className="mt-2 text-[13px] leading-5">
+          <DialogDescription className="text-[13px] leading-5">
             {formatAutomationSchedule(job, locale, tx)} · {formatAutomationNext(job, tx)}
           </DialogDescription>
         ) : null}
-      </div>
-      <div className={cn("min-h-0 overflow-y-auto overscroll-contain px-6 pb-6 sm:px-7", job.protected && "pb-3")}>
-        {canManage ? <section className="pb-6 pt-2">
+      </DialogHeader>
+      <div className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-3">
+        {canManage && message.trim() ? <section className="pb-4">
           <div className="flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
             <span>{localTrigger ? tx("settings.automations.fields.command", "Command") : tx("settings.automations.instructions", "Instructions")}</span>
             {localTrigger && command ? (
-              <Button variant="ghost" size="sm" className="h-7 rounded-full px-2 text-[12px]" onClick={() => {
+              <Button variant="ghost" size="sm" onClick={() => {
                 void copyTextToClipboard(command).then((ok) => { if (ok) setCommandCopied(true); });
               }}>
                 {commandCopied ? <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden /> : <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
@@ -447,7 +446,7 @@ function AutomationDetailPanel({
             ) : null}
           </div>
           <div className="mt-2">
-            <ExpandableText id={messageId} expanded={messageExpanded || !messageNeedsExpansion} lines={6} className={cn("whitespace-pre-wrap break-words text-[14px] leading-6 text-foreground/90 [overflow-wrap:anywhere]", localTrigger && "font-mono text-[12px]")}>
+            <ExpandableText id={messageId} expanded={messageExpanded || !messageNeedsExpansion} lines={6} className={cn("whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground [overflow-wrap:anywhere]", localTrigger && "font-mono text-[12px]")}>
               {message}
             </ExpandableText>
           </div>
@@ -459,7 +458,7 @@ function AutomationDetailPanel({
         </section> : null}
         {job.state.last_error ? <AutomationError message={job.state.last_error} /> : null}
         {error ? <AutomationError message={error} /> : null}
-        <dl className="divide-y divide-border/45 border-y border-border/45">
+        <dl>
           {job.protected ? (
             <>
               <AutomationDetail label={tx("settings.automations.labels.schedule", "Schedule")}>
@@ -487,14 +486,14 @@ function AutomationDetailPanel({
           ) : null}
         </dl>
         <Disclosure
-          className={cn("mt-3", job.protected && "mt-1")}
-          summaryClassName={cn("flex cursor-pointer items-center justify-between gap-3 rounded-lg py-4 text-[13px] text-muted-foreground", job.protected && "py-3", formControlFocusClassName)}
+          className="mt-3 border-t border-border/45 pt-1"
+          summaryClassName={cn("flex min-h-10 cursor-pointer items-center justify-between gap-3 rounded-control py-2.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground", formControlFocusClassName)}
           summary={<>
             {tx("settings.automations.moreDetails", "More details")}
             <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200 group-data-[state=open]/disclosure:rotate-180 motion-reduce:transition-none" aria-hidden />
           </>}
         >
-          <dl className="divide-y divide-border/45">
+          <dl>
             {job.delete_after_run ? <AutomationDetail label={tx("settings.automations.oneShot", "One-time")}>{tx("settings.automations.oneShotHint", "Removed after running")}</AutomationDetail> : null}
             {job.created_at_ms ? <AutomationDetail label={tx("settings.automations.labels.created", "Created")}>{fmtDateTime(job.created_at_ms, locale)}</AutomationDetail> : null}
             {job.updated_at_ms ? <AutomationDetail label={tx("settings.automations.labels.updated", "Updated")}>{fmtDateTime(job.updated_at_ms, locale)}</AutomationDetail> : null}
@@ -503,27 +502,29 @@ function AutomationDetailPanel({
         </Disclosure>
       </div>
       {canManage ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border/45 px-5 py-4 sm:px-7">
-          <Button variant="ghost" size="sm" className="rounded-full px-2 text-[13px] text-muted-foreground" disabled={busy || !canToggle} onClick={() => void onAction(job.enabled ? "disable" : "enable", job)}>
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border/45 px-6 py-3">
+          <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={busy || !canToggle} onClick={() => void onAction(job.enabled ? "disable" : "enable", job)}>
             {actionKey === `${job.enabled ? "disable" : "enable"}:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
             {job.enabled ? tx("settings.automations.pause", "Pause") : tx("settings.automations.resume", "Resume")}
           </Button>
           {/* The detail dialog owns modality, including during the delete handoff. */}
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground" disabled={busy} aria-label={tx("settings.automations.moreActions", "More actions")}>
+              <Button variant="ghost" size="icon" className="text-muted-foreground" disabled={busy} aria-label={tx("settings.automations.moreActions", "More actions")}>
                 <MoreHorizontal className="h-4 w-4" aria-hidden />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {!localTrigger ? <DropdownMenuItem disabled={!canRun || busy} onClick={() => void onAction("run", job)}>{tx("settings.automations.runNow", "Run now")}</DropdownMenuItem> : null}
-              <DropdownMenuItem disabled={busy} onClick={() => onRequestDelete(job)} className="text-destructive focus:text-destructive">{tx("settings.automations.delete", "Delete")}</DropdownMenuItem>
+              <DropdownMenuItem disabled={busy} onClick={() => onRequestDelete(job)} tone="destructive">{tx("settings.automations.delete", "Delete")}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="outline" size="sm" className="ml-auto rounded-full px-4" disabled={busy} onClick={() => onRequestEdit(job)}>
-            {tx("settings.automations.edit", "Edit")}
-          </Button>
-          {originHref ? <Button asChild size="sm" className="rounded-full px-4"><a href={originHref}>{tx("settings.automations.emptyAction", "Open a chat")}</a></Button> : null}
+          <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => onRequestEdit(job)}>
+              {tx("settings.automations.edit", "Edit")}
+            </Button>
+            {originHref ? <Button asChild size="sm"><a href={originHref}>{tx("settings.automations.emptyAction", "Open a chat")}</a></Button> : null}
+          </div>
         </div>
       ) : null}
     </>
@@ -543,9 +544,9 @@ function automationMessageNeedsExpansion(message: string): boolean {
 
 function AutomationDetail({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] items-start gap-4 py-3.5 text-[13px] leading-5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] items-start gap-4 py-2.5 text-[13px] leading-5">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-right text-foreground/85 [overflow-wrap:anywhere]" title={title}>{children}</dd>
+      <dd className="min-w-0 break-words text-right text-foreground [overflow-wrap:anywhere]" title={title}>{children}</dd>
     </div>
   );
 }
@@ -867,13 +868,6 @@ function automationSummary(
     return automationTriggerCommand(job) || tx("settings.automations.localTrigger", "Local trigger");
   }
   return job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
-}
-
-function automationDetailText(
-  job: SessionAutomationJob,
-  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
-): string {
-  return automationSummary(job, tx);
 }
 
 function automationNeedsAttention(job: SessionAutomationJob): boolean {

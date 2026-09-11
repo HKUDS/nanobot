@@ -204,7 +204,7 @@ describe("Automation task list and detail sheet", () => {
     expect(within(dialog).getByText("Every 30 minutes")).toBeVisible();
     expect(within(dialog).getByText("Not run yet")).toBeVisible();
     expect(within(dialog).getAllByRole("button")).toHaveLength(2);
-    expect(within(dialog).getByRole("button", { name: "Done" })).toHaveClass("text-foreground");
+    expect(within(dialog).getByRole("button", { name: "Done" })).toHaveClass("rounded-control", "h-9");
     const toggle = within(dialog).getByRole("button", { name: "More details" });
     const metadata = document.getElementById(toggle.getAttribute("aria-controls")!)!;
     expect(metadata).toHaveAttribute("data-state", "closed");
@@ -229,6 +229,31 @@ describe("Automation task list and detail sheet", () => {
     expect(within(dialog).getByText("Failed")).toBeVisible();
     expect(within(dialog).getByText("No next run")).toBeVisible();
     expect(dialog).not.toHaveAttribute("aria-describedby");
+  });
+
+  it.each([task, systemTask])("uses shared dialog styling and quiet detail rows for $name", (job) => {
+    render(<Harness payload={{ jobs: [job] }} />);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(job.name) }));
+    const dialog = screen.getByRole("dialog", { name: job.name });
+    expect(dialog).toHaveClass("rounded-modal");
+    expect(dialog).not.toHaveClass("rounded-[20px]");
+    const title = within(dialog).getByRole("heading", { name: job.name });
+    expect(title).toHaveClass("text-lg", "leading-6");
+    expect(title).not.toHaveClass("text-[22px]");
+    const done = within(dialog).getByRole("button", { name: "Done" });
+    expect(done).toHaveClass("rounded-control", "h-9");
+    expect(done).not.toHaveClass("rounded-full");
+    const lastRun = within(dialog).getByText("Last run");
+    expect(lastRun.closest("dl")).not.toHaveClass("divide-y", "border-y");
+    expect(lastRun.parentElement).toHaveClass("py-2.5");
+    const details = within(dialog).getByRole("button", { name: "More details" });
+    expect(details.parentElement).toHaveClass("border-t");
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    if (!job.protected) {
+      const edit = within(dialog).getByRole("button", { name: "Edit" });
+      expect(edit.parentElement).toHaveClass("ml-auto", "flex-wrap", "justify-end");
+      expect(within(dialog).getByRole("link", { name: "Open a chat" }).parentElement).toBe(edit.parentElement);
+    }
   });
 
   it("uses channel search controls and the skills catalog surface for both task groups", async () => {
@@ -607,5 +632,15 @@ describe("Automation task list and detail sheet", () => {
     fireEvent.click(within(dialog).getByText("More details"));
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(within(dialog).getByText(task.id)).toBeVisible();
+  });
+
+  it.each(["", "  \n  "])("omits the instructions section when a task has no real message: %j", (message) => {
+    render(<Harness payload={{ jobs: [{ ...task, payload: { message } }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: /PR watch/ }));
+    const dialog = screen.getByRole("dialog", { name: "PR watch" });
+    expect(within(dialog).queryByText("Instructions")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("System-managed automation")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Last run")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Edit" })).toBeEnabled();
   });
 });
