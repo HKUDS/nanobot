@@ -2492,3 +2492,83 @@ def test_save_turn_drops_duplicate_tool_result_ids() -> None:
 
     assert [m["role"] for m in session.messages] == ["assistant", "tool"]
     assert session.messages[1]["content"] == "first"
+
+
+def test_early_persistence_excludes_transient_runtime_context(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:transient")
+    persisted = loop._persist_user_message_early(
+        InboundMessage(
+            channel="websocket",
+            sender_id="user",
+            chat_id="transient",
+            content="visible question",
+        ),
+        session,
+        runtime_context_blocks=[
+            RuntimeContextBlock(source="semantic_memory", content="recalled fact", persist=False),
+        ],
+    )
+    assert persisted is True
+    assert session.messages[-1]["content"] == "visible question"
+    assert RUNTIME_CONTEXT_HISTORY_META not in session.messages[-1]
+
+
+def test_save_turn_excludes_transient_runtime_context() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:transient")
+    block = RuntimeContextBlock(
+        source="semantic_memory",
+        content="recalled fact",
+        persist=False,
+    )
+    loop._save_turn(
+        session,
+        [_runtime_message("visible followup", [block])],
+        skip=0,
+    )
+    assert session.messages[0]["content"] == "visible followup"
+    assert RUNTIME_CONTEXT_HISTORY_META not in session.messages[0]
+
+
+def test_provider_state_persistence_strips_transient_runtime_context() -> None:
+    loop = _mk_loop()
+    state = _provider_state().with_pending_messages([
+        _runtime_message(
+            "visible question",
+            [
+                RuntimeContextBlock(source="goal", content="persistent goal"),
+                RuntimeContextBlock(
+                    source="semantic_memory",
+                    content="private recalled fact",
+                    persist=False,
+                ),
+            ],
+        )
+    ])
+
+    persisted = loop._provider_state_for_persistence(state)
+
+    assert persisted is not None
+    assert "private recalled fact" in state.pending_messages[0]["content"]
+    assert "private recalled fact" not in persisted.pending_messages[0]["content"]
+    assert "persistent goal" in persisted.pending_messages[0]["content"]
+    marker = persisted.pending_messages[0]["_meta"][RUNTIME_CONTEXT_MESSAGE_META]
+    assert marker["sources"] == ["goal"]
+
+
+def test_provider_state_persistence_drops_opaque_payload_when_context_is_transient() -> None:
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"items": [{"text": "private recalled fact"}]},
+    )
+
+    persisted = AgentLoop._provider_state_for_persistence(
+        state,
+        allow_payload=False,
+    )
+
+    assert persisted is None

@@ -16,6 +16,7 @@ from nanobot.runtime_context import (
     normalize_webui_quote,
     public_history_message,
     resolve_runtime_context,
+    retain_persistent_runtime_context,
     runtime_context_blocks_from_metadata,
     webui_quote_runtime_context,
 )
@@ -168,3 +169,31 @@ def test_webui_preview_title_and_backfill_hide_runtime_context() -> None:
     event = _session_user_event("websocket:chat", persisted)
     assert event is not None
     assert event["text"] == "visible user text"
+
+
+def test_transient_runtime_context_is_removed_before_persistence() -> None:
+    blocks = [
+        RuntimeContextBlock(source="goal", content="persistent goal"),
+        RuntimeContextBlock(source="semantic_memory", content="recalled data", persist=False),
+    ]
+    content, marker = append_runtime_context("visible", blocks)
+    assert marker is not None
+    assert "recalled data" in content
+
+    retained_content, retained_marker = retain_persistent_runtime_context(content, marker)
+
+    assert "persistent goal" in retained_content
+    assert "recalled data" not in retained_content
+    assert retained_marker is not None
+    assert retained_marker["sources"] == ["goal"]
+
+
+def test_only_transient_runtime_context_leaves_plain_user_content() -> None:
+    content, marker = append_runtime_context(
+        "visible",
+        [RuntimeContextBlock(source="semantic_memory", content="recall", persist=False)],
+    )
+    assert marker is not None
+    retained_content, retained_marker = retain_persistent_runtime_context(content, marker)
+    assert retained_content == "visible"
+    assert retained_marker is None

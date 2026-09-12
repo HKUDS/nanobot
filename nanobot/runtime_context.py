@@ -30,6 +30,8 @@ class RuntimeContextBlock:
 
     source: str
     content: str
+    # Transient blocks reach the model but must not be persisted or re-archived.
+    persist: bool = True
 
 
 def normalize_webui_quote(value: Any) -> str | None:
@@ -92,7 +94,11 @@ def normalize_runtime_context_blocks(result: RuntimeContextResult) -> list[Runti
         if not source:
             raise ValueError("runtime context block source must not be empty")
         if content:
-            blocks.append(RuntimeContextBlock(source=source, content=content))
+            blocks.append(RuntimeContextBlock(
+                source=source,
+                content=content,
+                persist=block.persist,
+            ))
     return blocks
 
 
@@ -127,11 +133,13 @@ def append_runtime_context(
 
     rendered = [block.content for block in blocks]
     sources = [block.source for block in blocks]
+    persists = [block.persist for block in blocks]
     if isinstance(content, list):
         context_blocks = [{"type": "text", "text": text} for text in rendered]
         return [*content, *context_blocks], {
             "version": 1,
             "sources": sources,
+            "persists": persists,
             "blocks": context_blocks,
         }
 
@@ -141,6 +149,8 @@ def append_runtime_context(
     return merged, {
         "version": 1,
         "sources": sources,
+        "persists": persists,
+        "rendered": rendered,
         "suffix": suffix,
     }
 
@@ -148,7 +158,7 @@ def append_runtime_context(
 def detach_runtime_context(
     content: Any,
     marker: Mapping[str, Any],
-) -> tuple[Any, list[str], list[dict[str, Any]]] | None:
+) -> tuple[Any, list[str], list[dict[str, Any]], list[bool]] | None:
     """Detach one validated runtime-context suffix for safe message merging."""
     marker_data = marker
     if marker_data.get("version") != 1:
@@ -160,6 +170,13 @@ def detach_runtime_context(
         if isinstance(source, str) and source
     ] if isinstance(raw_sources, list) else []
 
+    raw_persists = marker_data.get("persists")
+    persists = (
+        [bool(value) for value in cast(list[Any], raw_persists)]
+        if isinstance(raw_persists, list)
+        else [True] * len(sources)
+    )
+
     suffix = marker_data.get("suffix")
     if isinstance(content, str) and isinstance(suffix, str) and suffix:
         if content == suffix:
@@ -168,7 +185,16 @@ def detach_runtime_context(
             clean_content = content[: -(len(suffix) + 2)]
         else:
             return None
-        return clean_content, sources, [{"type": "text", "text": suffix}]
+        rendered = marker_data.get("rendered")
+        if isinstance(rendered, list) and all(isinstance(value, str) for value in rendered):
+            context_blocks = [
+                {"type": "text", "text": value}
+                for value in cast(list[str], rendered)
+            ]
+        else:
+            context_blocks = [{"type": "text", "text": suffix}]
+            persists = [all(persists)]
+        return clean_content, sources, context_blocks, persists
 
     expected = marker_data.get("blocks")
     if isinstance(content, list) and isinstance(expected, list) and expected:
@@ -177,7 +203,7 @@ def detach_runtime_context(
         count = len(expected_blocks)
         if content_blocks[-count:] != expected_blocks:
             return None
-        return content_blocks[:-count], sources, deepcopy(expected_blocks)
+        return content_blocks[:-count], sources, deepcopy(expected_blocks), persists
     return None
 
 
@@ -185,9 +211,11 @@ def reattach_runtime_context(
     content: Any,
     sources: Sequence[str],
     blocks: Sequence[Mapping[str, Any]],
+    persists: Sequence[bool] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Append detached runtime-context blocks after visible messages are merged."""
     context_blocks = [deepcopy(dict(block)) for block in blocks]
+    persist_values = list(persists) if persists is not None else [True] * len(context_blocks)
     if isinstance(content, str) and all(
         block.get("type") == "text" and isinstance(block.get("text"), str)
         for block in context_blocks
@@ -197,6 +225,8 @@ def reattach_runtime_context(
         return merged, {
             "version": 1,
             "sources": list(sources),
+            "persists": persist_values,
+            "rendered": [str(block["text"]) for block in context_blocks],
             "suffix": suffix,
         }
 
@@ -208,8 +238,37 @@ def reattach_runtime_context(
     return [*visible_blocks, *context_blocks], {
         "version": 1,
         "sources": list(sources),
+        "persists": persist_values,
         "blocks": context_blocks,
     }
+
+
+def retain_persistent_runtime_context(
+    content: Any,
+    marker: Mapping[str, Any],
+) -> tuple[Any, dict[str, Any] | None]:
+    """Remove transient provider blocks while retaining exact persistent blocks."""
+    detached = detach_runtime_context(content, marker)
+    if detached is None:
+        # Never delete content when a marker cannot be validated exactly.
+        return content, dict(marker)
+    clean_content, sources, blocks, persists = detached
+    kept = [
+        (source, block)
+        for source, block, persist in zip(sources, blocks, persists, strict=False)
+        if persist
+    ]
+    if not kept:
+        return clean_content, None
+    kept_sources = [source for source, _ in kept]
+    kept_blocks = [block for _, block in kept]
+    retained_content, retained_marker = reattach_runtime_context(
+        clean_content,
+        kept_sources,
+        kept_blocks,
+        [True] * len(kept_blocks),
+    )
+    return retained_content, retained_marker
 
 
 def public_history_message(message: Mapping[str, Any]) -> dict[str, Any]:

@@ -272,19 +272,20 @@ class ContextGovernor:
                 )
                 empty_sources: list[str] = []
                 empty_blocks: list[dict[str, Any]] = []
+                empty_persists: list[bool] = []
                 detached_left = (
                     detach_runtime_context(merged.get("content"), left_marker_dict)
                     if left_marker_dict is not None
-                    else (merged.get("content"), empty_sources, empty_blocks)
+                    else (merged.get("content"), empty_sources, empty_blocks, empty_persists)
                 )
                 detached_right = (
                     detach_runtime_context(injection.get("content"), right_marker_dict)
                     if right_marker_dict is not None
-                    else (injection.get("content"), empty_sources, empty_blocks)
+                    else (injection.get("content"), empty_sources, empty_blocks, empty_persists)
                 )
                 if detached_left is not None and detached_right is not None:
-                    left_content, left_sources, left_blocks = detached_left
-                    right_content, right_sources, right_blocks = detached_right
+                    left_content, left_sources, left_blocks, left_persists = detached_left
+                    right_content, right_sources, right_blocks, right_persists = detached_right
                     merged_content = cls._merge_message_content(left_content, right_content)
                     context_blocks = [*left_blocks, *right_blocks]
                     if context_blocks:
@@ -292,6 +293,7 @@ class ContextGovernor:
                             merged_content,
                             [*left_sources, *right_sources],
                             context_blocks,
+                            [*left_persists, *right_persists],
                         )
                         internal_meta = (
                             dict(left_meta_dict) if left_meta_dict is not None else {}

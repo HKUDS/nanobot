@@ -82,6 +82,10 @@ documents = [
 langfuse = [
     "langfuse>=3.0.0,<4.0.0",
 ]
+semantic-memory = [
+    "psycopg[binary,pool]>=3.2,<4.0",
+    "fastembed>=0.7,<1.0",
+]
 pdf = [
     # Compatibility extra: PDF reading is bundled since v0.2.3.
     "pypdf>=5.0.0,<6.0.0",
@@ -108,6 +112,8 @@ dev = [
 
 [project.scripts]
 nanobot = "nanobot.cli.entry:main"
+nanobot-memory = "nanobot.semantic_memory.cli:main"
+nanobot-evolution = "nanobot.evolution.cli:main"
 
 # Third-party tool plugins register here.  Built-in tools are discovered
 # automatically via pkgutil scanning in ToolLoader.discover().
@@ -130,6 +136,7 @@ include = [
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "nanobot/**/*.sql",
     "nanobot/channels/*/webui/**/*",
     "nanobot/web/dist/**/*",
 ]
