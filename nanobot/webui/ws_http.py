@@ -174,6 +174,7 @@ _WEBUI_MUTATION_PATHS = {
     "skill.delete": "/api/webui/skills/delete",
     "sidebar.update": "/api/webui/sidebar-state/update",
     "notifications.read": "/api/webui/notifications/read",
+    "development.control": "/api/webui/development/control",
     "workspace.pick_folder": "/api/workspaces/pick-folder",
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
@@ -506,6 +507,7 @@ class GatewayHTTPHandler:
             "/api/webui/skills/delete",
             "/api/webui/sidebar-state/update",
             "/api/webui/notifications/read",
+            "/api/webui/development/control",
             "/api/workspaces/pick-folder",
         }
 
@@ -1409,7 +1411,36 @@ class GatewayHTTPHandler:
             return self._handle_webui_sidebar_state_update(request)
         if got == "/api/webui/notifications/read":
             return await self._handle_notifications_read(request)
+        if got in {"/api/webui/development", "/api/webui/development/control"}:
+            return self._handle_development(request, mutate=got.endswith("/control"))
         return None
+
+    def _handle_development(self, request: WsRequest, *, mutate: bool) -> Response:
+        from filelock import Timeout
+
+        from nanobot.development.service import DevelopmentService
+
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        config = self.settings.config.load()
+        if not config.tools.development.enable:
+            return _http_json_response({"enabled": False, "project": None})
+        service = DevelopmentService(config.tools.development, config.workspace_path, self.settings.config.path)
+        try:
+            message = None
+            if mutate:
+                payload = _mutation_payload(request)
+                action = payload.get("action") if payload else None
+                job_id = payload.get("job_id") if payload else None
+                if not isinstance(action, str) or (job_id is not None and not isinstance(job_id, str)):
+                    return _http_error(400, "invalid development action")
+                message = service.control(action, job_id)
+            else:
+                service.reconcile()
+            return _http_json_response({"enabled": True, "project": service.store.read().model_dump(mode="json"),
+                                        "message": message})
+        except (ValueError, OSError, Timeout) as exc:
+            return _http_error(409, str(exc))
 
     async def _handle_notifications_read(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

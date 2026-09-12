@@ -12,6 +12,7 @@ from nanobot.config.integrations import PersonalIntegrationsConfig
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
+from nanobot.development.config import DevelopmentConfig
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.cli_apps import CliAppsToolConfig
@@ -528,6 +529,7 @@ class ToolsConfig(Base):
     tool implementations.
     """
 
+    development: DevelopmentConfig = Field(default_factory=DevelopmentConfig)
     web: WebToolsConfig = Field(
         default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig")
     )

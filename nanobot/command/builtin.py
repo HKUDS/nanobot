@@ -132,6 +132,10 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         accepts_args=True,
     ),
     BuiltinCommandSpec(
+        "/development", "Rozwój agenta", "Plan, postęp, wyniki, pauza i wznowienie rozwoju.",
+        "wrench", "[status|continue|pause|start|cancel] [ID]", accepts_args=True,
+    ),
+    BuiltinCommandSpec(
         "/dream",
         "Run Dream",
         "Manually trigger memory consolidation.",
@@ -1071,6 +1075,13 @@ def build_help_text() -> str:
 
 def register_builtin_commands(router: CommandRouter) -> None:
     """Register the default set of slash commands."""
+    from nanobot.command.development import cmd_development
+
+    for command in ("/development", "/rozwoj"):
+        router.exact(command, cmd_development)
+        router.prefix(command + " ", cmd_development)
+        for action in ("pause", "pauza", "wstrzymaj"):
+            router.priority(command + " " + action, cmd_development)
     router.priority("/stop", cmd_stop)
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
