@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import {
   isAbsoluteWorkspacePath,
   projectNameFromPath,
+  sameWorkspacePath,
   scopeWithAccessMode,
   selectedProjectScope,
   shortWorkspacePath,
@@ -81,7 +82,9 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
-  const pickFolder = getRuntimeHost().pickFolder ?? onPickFolder;
+  const pickFolder = controls?.can_pick_folder
+    ? getRuntimeHost().pickFolder ?? onPickFolder
+    : undefined;
   const nativeProjectPicker = !!pickFolder;
 
   useEffect(() => {
@@ -115,16 +118,22 @@ export function WorkspaceProjectPicker({
         setPathError(t("workspace.dialog.absolutePathRequired"));
         return;
       }
+      const accessMode =
+        controls?.can_use_full_access === false
+        && !sameWorkspacePath(trimmed, base.project_path)
+          ? "restricted"
+          : base.access_mode;
       onChange({
         ...base,
         project_path: trimmed,
         project_name: projectName || projectNameFromPath(trimmed),
-        restrict_to_workspace: base.access_mode === "restricted",
+        access_mode: accessMode,
+        restrict_to_workspace: accessMode === "restricted",
       });
       setPathError(null);
       setOpen(false);
     },
-    [defaultScope, onChange, scope, t],
+    [controls?.can_use_full_access, defaultScope, onChange, scope, t],
   );
 
   const pickNativeFolder = useCallback(async () => {

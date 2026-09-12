@@ -2417,6 +2417,75 @@ async def test_session_delete_removes_unpersisted_new_chat(
 
 
 @pytest.mark.asyncio
+async def test_remote_new_chat_accepts_server_project_path_but_rejects_remote_full_access(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    project = tmp_path / "remote-project"
+    other_project = tmp_path / "other-project"
+    project.mkdir()
+    other_project.mkdir()
+    channel = _ch(bus, workspace_path=tmp_path, port=_free_port())
+    connection = AsyncMock()
+    connection.remote_address = ("192.168.1.5", 50123)
+    connection.request = _FakeReq(
+        {
+            "Host": "nas.example",
+            "X-Forwarded-For": "203.0.113.42",
+        }
+    )
+
+    await channel._dispatch_envelope(
+        connection,
+        "remote-webui",
+        {
+            "type": "new_chat",
+            "workspace_scope": {
+                "project_path": str(project),
+                "access_mode": "restricted",
+            },
+        },
+    )
+
+    attached = next(
+        payload
+        for payload in (
+            json.loads(call.args[0]) for call in connection.send.await_args_list
+        )
+        if payload.get("event") == "attached"
+    )
+    key = f"websocket:{attached['chat_id']}"
+    scope = channel.gateway.workspaces.scope_for_session_key(key)
+    assert scope.project_path == project.resolve()
+    assert scope.access_mode == "restricted"
+
+    connection.send.reset_mock()
+    await channel._dispatch_envelope(
+        connection,
+        "remote-webui",
+        {
+            "type": "new_chat",
+            "workspace_scope": {
+                "project_path": str(other_project),
+                "access_mode": "full",
+            },
+        },
+    )
+
+    rejected = [
+        json.loads(call.args[0])
+        for call in connection.send.await_args_list
+        if json.loads(call.args[0]).get("event") == "error"
+    ]
+    assert rejected == [
+        {
+            "event": "error",
+            "detail": "workspace_scope_rejected",
+            "reason": "full workspace access is unavailable for this connection",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
     bus: MagicMock, tmp_path: Path
 ) -> None:
@@ -3482,6 +3551,54 @@ async def test_workspace_folder_picker_is_local_authenticated_mutation(
     assert response.status_code == 200
     assert response.json() == {"path": str(selected)}
     pick_folder.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize(
+    ("connection", "headers", "can_use_full_access", "can_pick_folder"),
+    [
+        (
+            _REMOTE,
+            {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"},
+            False,
+            False,
+        ),
+        (
+            _LOCAL,
+            {"Host": "nas.example", "X-Forwarded-For": "203.0.113.42"},
+            False,
+            False,
+        ),
+        (_LOCAL, {"Host": "127.0.0.1:8765"}, True, True),
+    ],
+)
+@pytest.mark.parametrize("native_picker_available", [True, False])
+def test_workspace_payload_separates_remote_project_selection_from_full_access(
+    bus: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    native_picker_available: bool,
+    connection: _FakeConn,
+    headers: dict[str, str],
+    can_use_full_access: bool,
+    can_pick_folder: bool,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.ws_http.native_folder_picker_available",
+        lambda: native_picker_available,
+    )
+    channel = _ch(bus)
+    token = channel.gateway.tokens.issue_api_token(300)
+    request = _FakeReq(
+        {"Authorization": f"Bearer {token}", **headers},
+        path="/api/workspaces",
+    )
+
+    response = channel.gateway.http._handle_workspaces(connection, request)
+
+    assert response.status_code == 200
+    controls = json.loads(response.body.decode())["controls"]
+    assert controls["can_change_project"] is True
+    assert controls["can_use_full_access"] is can_use_full_access
+    assert controls["can_pick_folder"] is (can_pick_folder and native_picker_available)
 
 
 @pytest.mark.asyncio

@@ -1983,7 +1983,10 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
 
 
 @pytest.mark.asyncio
-async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp_path) -> None:
+async def test_remote_webui_scope_rejects_full_access_for_custom_scope(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
     default_workspace = tmp_path / "default"
     project = tmp_path / "project"
     default_workspace.mkdir()
@@ -2013,7 +2016,7 @@ async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
     assert payload["detail"] == "workspace_scope_rejected"
-    assert payload["reason"] == "workspace controls are localhost-only"
+    assert payload["reason"] == "full workspace access is unavailable for this connection"
     assert payload["chat_id"] == "chat-remote"
     assert sessions.read_session_file("websocket:chat-remote") is None
 

@@ -406,8 +406,36 @@ class GatewayHTTPHandler:
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 
-    def workspace_controls_available(self, connection: Any) -> bool:
-        return self._runtime_surface == "native" or _is_localhost(connection)
+    def workspace_project_selection_available(self, connection: Any) -> bool:
+        """Return whether an authenticated WebUI may submit a server path.
+
+        Project paths are interpreted by the gateway, not by the browser. The
+        WebUI route and WebSocket handshake already authenticate the caller,
+        so remote clients can use the manual server-path picker as well.
+        """
+        return True
+
+    def workspace_full_access_available(
+        self,
+        connection: Any,
+        headers: Any | None = None,
+    ) -> bool:
+        """Return whether this request may opt into Full Access.
+
+        A reverse proxy can make a remote browser look like a localhost TCP
+        peer. Inspect the original browser headers before granting this
+        capability so proxy-local requests keep the remote restriction.
+        """
+        if self._runtime_surface == "native":
+            return True
+        if headers is None:
+            request = getattr(connection, "request", None)
+            headers = getattr(request, "headers", None)
+        if not isinstance(headers, Mapping):
+            # Lightweight in-process test connections do not carry a
+            # handshake request. Real WebSocket connections do.
+            return _is_localhost(connection)
+        return _is_local_browser_request(connection, headers)
 
     def workspace_folder_picker_available(
         self,
@@ -1394,7 +1422,11 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         return _http_json_response(
             self.workspaces.payload(
-                controls_available=self.workspace_controls_available(connection),
+                can_change_project=self.workspace_project_selection_available(connection),
+                can_use_full_access=self.workspace_full_access_available(
+                    connection,
+                    request.headers,
+                ),
                 folder_picker_available=self.workspace_folder_picker_available(
                     connection,
                     request,
