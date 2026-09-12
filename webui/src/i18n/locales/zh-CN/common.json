@@ -12,7 +12,7 @@
     "auth": {
       "title": "连接到 nanobot",
       "label": "WebUI 密码",
-      "help": "请在 nanobot 配置中的 channels.websocket.tokenIssueSecret 查找此密码，配置文件通常位于 ~/.nanobot/config.json。",
+      "help": "请在 nanobot 配置中的 channels.websocket.tokenIssueSecret 查找此密码，配置文件通常位于 ~/.nanobot/config.json。若该值为空，请使用 channels.websocket.token。",
       "showPassword": "显示密码",
       "hidePassword": "隐藏密码",
       "submit": "连接",

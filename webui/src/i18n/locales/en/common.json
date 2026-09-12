@@ -12,7 +12,7 @@
     "auth": {
       "title": "Connect to nanobot",
       "label": "WebUI password",
-      "help": "Find this password at channels.websocket.tokenIssueSecret in the nanobot config, usually ~/.nanobot/config.json.",
+      "help": "Find this password at channels.websocket.tokenIssueSecret in the nanobot config, usually ~/.nanobot/config.json. If that value is empty, use channels.websocket.token.",
       "showPassword": "Show password",
       "hidePassword": "Hide password",
       "submit": "Connect",

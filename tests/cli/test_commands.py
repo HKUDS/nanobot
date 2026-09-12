@@ -2598,21 +2598,36 @@ def test_text_only_browser_name_detects_links(monkeypatch) -> None:
     assert cli_webui_support._text_only_browser_name() == "links"
 
 
-def test_print_webui_manual_access_includes_password_source_and_ssh_tunnel(capsys) -> None:
-    config = Config(channels={"websocket": {"tokenIssueSecret": "do-not-print"}})
+@pytest.mark.parametrize(
+    ("host", "tunnel_host"),
+    [
+        ("127.0.0.1", "127.0.0.1"),
+        ("0.0.0.0", "127.0.0.1"),
+        ("::1", "[::1]"),
+        ("::", "[::1]"),
+        ("192.0.2.10", "192.0.2.10"),
+    ],
+)
+def test_print_webui_manual_access_includes_password_source_and_ssh_tunnel(
+    capsys, host: str, tunnel_host: str,
+) -> None:
+    config = Config(channels={"websocket": {
+        "host": host, "port": 8899, "tokenIssueSecret": "do-not-print",
+    }})
     config_path = Path("/srv/nanobot/config.json")
 
     cli_webui_support._print_webui_manual_access(
         config,
         config_path,
-        "http://127.0.0.1:8899/#/?bootstrapSecret=do-not-print",
+        cli_webui_support._webui_browser_url(config),
     )
 
     output = re.sub(r"\s+", " ", _strip_ansi(capsys.readouterr().out))
-    assert "WebUI: http://127.0.0.1:8899" in output
+    assert f"WebUI: http://{tunnel_host}:8899" in output
     assert "channels.websocket.tokenIssueSecret" in output
     assert str(config_path) in output
-    assert "ssh -N -L 8899:127.0.0.1:8899 <user>@<server>" in output
+    assert f"ssh -N -L 8899:{tunnel_host}:8899 <user>@<server>" in output
+    assert "Then open http://127.0.0.1:8899 on your computer." in output
     assert "do-not-print" not in output
 
 

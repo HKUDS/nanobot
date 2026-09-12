@@ -12,7 +12,7 @@
     "auth": {
       "title": "nanobot에 연결",
       "label": "WebUI 비밀번호",
-      "help": "이 비밀번호는 nanobot 설정의 channels.websocket.tokenIssueSecret에 있으며, 일반적으로 ~/.nanobot/config.json에 저장됩니다.",
+      "help": "이 비밀번호는 nanobot 설정의 channels.websocket.tokenIssueSecret에 있으며, 일반적으로 ~/.nanobot/config.json에 저장됩니다. 이 값이 비어 있으면 channels.websocket.token을 사용하세요.",
       "showPassword": "비밀번호 표시",
       "hidePassword": "비밀번호 숨기기",
       "submit": "연결",

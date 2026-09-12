@@ -529,6 +529,8 @@ def _print_webui_manual_access(config: Config, config_path: Path, url: str) -> N
     browser_url = url.split("/#/", 1)[0]
     parsed = urlparse(browser_url)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    tunnel_host = _host_for_local_browser(parsed.hostname or "127.0.0.1")
+    tunnel_url = f"{parsed.scheme}://127.0.0.1:{port}"
     ws_cfg = _webui_config_dict(config)
     password_key = (
         "tokenIssueSecret" if str(ws_cfg.get("tokenIssueSecret") or "").strip() else "token"
@@ -544,10 +546,10 @@ def _print_webui_manual_access(config: Config, config_path: Path, url: str) -> N
     console.print()
     console.print("If nanobot is running on another machine, create an SSH tunnel from yours:")
     console.print(
-        f"  [cyan]ssh -N -L {port}:127.0.0.1:{port} <user>@<server>[/cyan]"
+        f"  [cyan]ssh -N -L {port}:{tunnel_host}:{port} <user>@<server>[/cyan]"
     )
     console.print("Replace [cyan]<user>[/cyan] and [cyan]<server>[/cyan] and keep the tunnel open.")
-    console.print(f"Then open [cyan]{browser_url}[/cyan] on your computer.")
+    console.print(f"Then open [cyan]{tunnel_url}[/cyan] on your computer.")
 
 
 def _print_webui_foreground_lifecycle(*, attached: bool) -> None:

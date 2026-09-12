@@ -354,6 +354,9 @@ describe("App layout", () => {
     const password = screen.getByLabelText("WebUI password");
     expect(screen.getByText(/channels\.websocket\.tokenIssueSecret/))
       .toBeInTheDocument();
+    expect(password).toHaveAccessibleDescription(
+      /If that value is empty, use channels\.websocket\.token\./,
+    );
     expect(password).toHaveAttribute(
       "autocomplete",
       "current-password",

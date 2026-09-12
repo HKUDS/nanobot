@@ -12,7 +12,7 @@
     "auth": {
       "title": "Hubungkan ke nanobot",
       "label": "Kata sandi WebUI",
-      "help": "Temukan kata sandi ini di channels.websocket.tokenIssueSecret dalam konfigurasi nanobot, biasanya ~/.nanobot/config.json.",
+      "help": "Temukan kata sandi ini di channels.websocket.tokenIssueSecret dalam konfigurasi nanobot, biasanya ~/.nanobot/config.json. Jika nilainya kosong, gunakan channels.websocket.token.",
       "showPassword": "Tampilkan kata sandi",
       "hidePassword": "Sembunyikan kata sandi",
       "submit": "Hubungkan",
