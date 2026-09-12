@@ -85,6 +85,21 @@ async def test_disabled_never_queues(tmp_path):
     assert bus.inbound.empty()
 
 
+async def test_scan_publishes_current_process_heartbeat_for_external_supervisor(tmp_path):
+    import os
+
+    from nanobot.operations.state import read_state
+    from nanobot.operations.supervisor import HEARTBEAT_FILE
+
+    service, sessions, _, _ = setup(tmp_path)
+    await service.tick()
+    heartbeat = read_state(sessions.sessions_dir / HEARTBEAT_FILE)
+    assert heartbeat["pid"] == os.getpid()
+    assert heartbeat["phase"] == "scanned"
+    assert heartbeat["monotonic_at"] > 0
+    assert heartbeat["interval_seconds"] == 600
+
+
 async def test_restart_safe_checkpoint_then_watchdog_advances_once(tmp_path):
     _, sessions, _, now = setup(tmp_path)
     session = goal(sessions)

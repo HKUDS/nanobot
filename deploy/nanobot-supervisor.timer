@@ -1,0 +1,12 @@
+[Unit]
+Description=Check nanobot gateway and task continuation every ten minutes
+
+[Timer]
+OnCalendar=*:0/10
+OnBootSec=2min
+Persistent=true
+AccuracySec=1s
+Unit=nanobot-supervisor.service
+
+[Install]
+WantedBy=timers.target

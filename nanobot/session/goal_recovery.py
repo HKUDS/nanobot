@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import math
+import os
 import time
 from collections.abc import Callable
 from typing import Any, cast
@@ -139,6 +140,7 @@ class GoalRecoveryWatchdog:
         if not self.config.enabled:
             return
         logger.info("Goal recovery watchdog enabled; interval={}s", self.config.interval_seconds)
+        self._heartbeat("waiting")
         while True:
             await asyncio.sleep(self.config.interval_seconds)
             try:
@@ -186,6 +188,19 @@ class GoalRecoveryWatchdog:
                 except Exception:
                     # One corrupt session or failed delivery must not kill the timer.
                     logger.exception("Goal recovery failed for {}", key)
+            self._heartbeat("scanned")
+
+    def _heartbeat(self, phase: str) -> None:
+        from nanobot.operations.state import write_state
+        from nanobot.operations.supervisor import HEARTBEAT_FILE
+
+        try:
+            write_state(self.sessions.sessions_dir / HEARTBEAT_FILE, {
+                "pid": os.getpid(), "phase": phase, "at": self.clock(),
+                "monotonic_at": time.monotonic(), "interval_seconds": self.config.interval_seconds,
+            })
+        except OSError:
+            logger.exception("Could not persist goal recovery heartbeat")
 
     async def _inspect(self, key: str) -> None:
         payload = self.sessions.read_session_metadata(key)

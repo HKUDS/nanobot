@@ -1,0 +1,12 @@
+[Unit]
+Description=External nanobot gateway and goal recovery supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@PYTHON@ -m nanobot.operations.supervisor --config @CONFIG@ --unit @GATEWAY_UNIT@
+TimeoutStartSec=45
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
