@@ -22,12 +22,14 @@ class MailEvent:
 
     def __post_init__(self) -> None:
         account = self.account.strip()
-        mailbox = self.mailbox.strip()
+        # LIST returns opaque mailbox IDs: trimming can redirect a UID to a
+        # different folder. Only INBOX is case-insensitive in IMAP.
+        mailbox = "INBOX" if self.mailbox.casefold() == "inbox" else self.mailbox
         uid = self.uid.strip()
         uid_validity = self.uid_validity.strip().lower()
         if not account or len(account) > 128 or "\x00" in account:
             raise ValueError("account must be non-empty and at most 128 characters")
-        if not mailbox or len(mailbox) > 1024 or any(ch in mailbox for ch in "\r\n\x00"):
+        if not mailbox.strip() or len(mailbox) > 1024 or any(ch in mailbox for ch in "\r\n\x00"):
             raise ValueError("mailbox is empty or contains forbidden characters")
         if mailbox.startswith("-"):
             raise ValueError("mailbox names beginning with '-' are not supported")

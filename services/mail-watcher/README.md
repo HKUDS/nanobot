@@ -13,9 +13,9 @@ Implemented in v0.2:
 - recovery of work interrupted by a crash;
 - bounded exponential retries and permanent failure state;
 - deterministic, ordered header rules;
-- destination-folder allowlists;
-- `dry_run = true` by default;
-- shell-free Himalaya calls limited to `status`, `read`, and `move`;
+- all-folder discovery by default, with optional rules and legacy source/destination allowlists;
+- `dry_run = true` by default; all-folder mode is always read-only regardless of that switch;
+- shell-free Himalaya calls limited to `list`, `status`, `search`, `read`, and explicitly allowlisted `move`;
 - append-only, data-minimized audit rows for queue and routing transitions;
 - per-claim ownership tokens and lease renewal before external operations;
 - UIDVALIDITY checks before reads and immediately before moves;
@@ -104,11 +104,13 @@ nanobot-mail -c /PRIVATE/PATH/config.toml status
 nanobot-mail -c /PRIVATE/PATH/config.toml audit EVENT_ID
 ```
 
-The long-running worker performs the same reconciliation immediately after startup and then every `reconcile_interval_seconds` (120–300 seconds). It scans all configured `source_mailboxes`, isolates failures by mailbox, and idempotently enqueues only UID results whose UIDVALIDITY is unchanged across the listing. `reconcile_max_messages` and `reconcile_max_response_bytes` bound each listing; an oversized response fails that mailbox without affecting the others. A restart safely repeats the scan because known identities are unique in SQLite.
+The long-running worker performs the same reconciliation immediately after startup and then every `reconcile_interval_seconds` (120–300 seconds). With `folder_policy = "all"`, each pass discovers selectable folders using `himalaya --json imap list --all` (LIST, including unsubscribed/nested folders), skips `\\Noselect`/`\\NonExistent`, and then reconciles each folder. Carillon can keep its INBOX push hook; polling covers all other folders and newly created folders. Failed discovery is reported rather than silently falling back to INBOX. `folder_policy = "allowlist"` instead scans explicit `source_mailboxes`. Legacy configs with explicit sources/nonempty allowlists retain that policy unless changed explicitly.
+
+The worker isolates failures by account/mailbox and idempotently enqueues only UID results whose UIDVALIDITY is unchanged across the listing. `reconcile_max_folders` (default 1,000), `reconcile_max_messages`, and `reconcile_max_response_bytes` bound each listing. An oversized response fails that listing without affecting other accounts. A restart safely repeats the scan because known identities are unique in SQLite. Himalaya 2.1 IMAP LIST JSON must contain `{"mailboxes":[{"name":"INBOX","attributes":[],"delimiter":"/"}]}`; unknown/unsafe responses fail closed.
 
 Himalaya v2.1.0 serializes IMAP SEARCH JSON as an object with `uid_mode` and an `ids` array of `{\"id\": UID}` rows. The adapter requires `uid_mode = true`, never passes `--seq`, and rejects malformed, duplicate, or excessive IDs. Shared `message read` and `message move` commands are forced through `--backend=imap`, preventing an account's JMAP configuration from changing message identity.
 
-After reviewing audit results, set `dry_run = false` to allow only moves selected by configured rules and present in `allowed_folders`.
+No rules are required: messages without a match finish as `no_action`. If neither rules nor an explicit legacy fallback destination exists, their content is not downloaded. Reads omit `--seen` so flags remain unchanged. All-folder mode always keeps rule results as dry-run proposals and never grants MOVE permission. For existing explicitly reviewed `folder_policy = "allowlist"` deployments only, `dry_run = false` retains the legacy ability to move to destinations in `allowed_folders`; the WebUI never exports that setting.
 
 ## Rule semantics
 

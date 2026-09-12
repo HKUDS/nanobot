@@ -116,7 +116,7 @@ def _enqueue(
     policy = config.accounts.get(account)
     if policy is None:
         raise ValueError(f"unknown account: {account}")
-    if mailbox not in policy.source_mailboxes:
+    if policy.folder_policy == "allowlist" and mailbox not in policy.source_mailboxes:
         raise ValueError(f"mailbox {mailbox!r} is not approved for account {account!r}")
     event_id, created = store.enqueue(MailEvent(account, mailbox, uid, uid_validity))
     print(json.dumps({"event_id": event_id, "created": created}))
@@ -141,7 +141,8 @@ def _check(config: MailAutomationConfig) -> int:
     result["accounts"] = accounts_result
     for account, policy in config.accounts.items():
         mailbox_result: dict[str, str] = {}
-        for mailbox in policy.source_mailboxes:
+        sources = client.list_mailboxes(account) if policy.folder_policy == "all" else policy.source_mailboxes
+        for mailbox in sources:
             mailbox_result[mailbox] = client.uid_validity(account, mailbox)
         accounts_result[account] = mailbox_result
     print(json.dumps(result, ensure_ascii=False, indent=2))

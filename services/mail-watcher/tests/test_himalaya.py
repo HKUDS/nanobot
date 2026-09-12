@@ -138,3 +138,44 @@ print("x" * 2000)
 
     with pytest.raises(MessageTooLargeError, match="1024 bytes"):
         HimalayaClient(config).search_uids("work", "INBOX")
+
+
+def test_list_discovers_unsubscribed_nested_folders_and_skips_noselect(tmp_path: Path, monkeypatch) -> None:
+    client = HimalayaClient(_config(Path("/bin/himalaya"), tmp_path))
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return json.dumps({"mailboxes": [
+            {"name": "Inbox", "attributes": [], "delimiter": "/"},
+            {"name": "Parent", "attributes": ["\\Noselect"], "delimiter": "/"},
+            {"name": "Parent/Archive", "attributes": ["\\Archive"], "delimiter": "/"},
+            {"name": "Sent items", "attributes": [], "delimiter": "/"},
+            {"name": "Missing", "attributes": ["\\NonExistent"], "delimiter": "/"},
+        ]}).encode()
+
+    monkeypatch.setattr(client, "_run", run)
+    assert client.list_mailboxes("work") == ("INBOX", "Parent/Archive", "Sent items")
+    assert calls[0][0] == ["imap", "list", "--all"]
+    assert calls[0][1]["extra_global"] == ["--json"]
+    assert calls[0][1]["max_bytes"] == client.reconcile_max_response_bytes
+
+
+@pytest.mark.parametrize("response", [b"not-json", b"[]", b'{}', b'{"mailboxes":[{}]}',
+    b'{"mailboxes":[{"name":"-argument","attributes":[]}]}',
+    b'{"mailboxes":[{"name":"unsafe\\nname","attributes":[]}]}',
+    b'{"mailboxes":[{"name":"INBOX","attributes":"invalid"}]}',
+])
+def test_list_rejects_invalid_and_unsafe_responses(tmp_path: Path, monkeypatch, response) -> None:
+    client = HimalayaClient(_config(Path("/bin/himalaya"), tmp_path))
+    monkeypatch.setattr(client, "_run", lambda *args, **kwargs: response)
+    with pytest.raises(RuntimeError, match="Himalaya"):
+        client.list_mailboxes("work")
+
+
+def test_list_rejects_too_many_folders(tmp_path: Path, monkeypatch) -> None:
+    config = replace(_config(Path("/bin/himalaya"), tmp_path), reconcile_max_folders=1)
+    client = HimalayaClient(config)
+    monkeypatch.setattr(client, "_run", lambda *args, **kwargs: b'{"mailboxes":[{},{}]}')
+    with pytest.raises(RuntimeError, match="folder limit"):
+        client.list_mailboxes("work")

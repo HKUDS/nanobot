@@ -22,6 +22,9 @@ class FakeMailClient:
         self.validities = validities or ["123"]
         self.search_results = search_results or {}
 
+    def list_mailboxes(self, account: str) -> tuple[str, ...]:
+        return ("INBOX",)
+
     def uid_validity(self, account: str, mailbox: str) -> str:
         if len(self.validities) > 1:
             return self.validities.pop(0)
@@ -56,6 +59,7 @@ def _config(tmp_path: Path, *, dry_run: bool) -> MailAutomationConfig:
     )
     account = AccountConfig(
         source_mailboxes=("INBOX",),
+        folder_policy="allowlist",
         allowed_folders=frozenset({"Newsletters"}),
         unmatched_destination=None,
         rules=(
@@ -180,3 +184,99 @@ def test_reconcile_isolates_mailbox_failures_and_obeys_interval(tmp_path: Path) 
     assert first is not None and first["failed"] == 1 and first["created"] == 1
     assert skipped is None
     assert second is not None and second["failed"] == 1 and second["existing"] == 1
+
+
+def test_all_folders_rediscovered_each_pass_and_no_rules_needed(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    config = _config(tmp_path, dry_run=True)
+    config.accounts["work"] = replace(config.accounts["work"], folder_policy="all", rules=())
+    store = MailEventStore(config.worker.database)
+
+    class DiscoveredClient(FakeMailClient):
+        calls = 0
+
+        def list_mailboxes(self, account: str) -> tuple[str, ...]:
+            self.calls += 1
+            return ("INBOX", "Archive/Subfolder") if self.calls == 1 else ("INBOX", "New folder")
+
+    client = DiscoveredClient(search_results={
+        ("work", "INBOX"): ("1",), ("work", "Archive/Subfolder"): ("2",),
+        ("work", "New folder"): ("3",),
+    })
+    worker = MailWorker(config, store, client)
+    first = worker.reconcile()
+    second = worker.reconcile()
+    assert first["created"] == 2 and first["failed"] == 0
+    assert second["created"] == 1 and second["existing"] == 1
+    assert client.calls == 2
+    assert worker.run_batch() == 3
+    # No rules means no message content is needed, including during initial sync.
+    assert store.counts()["done"] == 3 and client.reads == 0 and not client.moves
+
+
+def test_all_folders_do_not_grant_move_even_when_dry_run_is_false(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    config = _config(tmp_path, dry_run=False)
+    config.accounts["work"] = replace(config.accounts["work"], folder_policy="all", allowed_folders=frozenset())
+    store = MailEventStore(config.worker.database)
+    event_id, _ = store.enqueue(MailEvent("work", "Other folder", "5"))
+    client = FakeMailClient()
+    assert MailWorker(config, store, client).run_batch() == 1
+    assert store.counts()["done"] == 1 and not client.moves
+    assert store.audit(event_id)[-1]["details"]["outcome"] == "dry_run"
+
+
+def test_discovery_failure_isolated_and_no_silent_inbox_fallback(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    config = _config(tmp_path, dry_run=True)
+    config.accounts["broken"] = replace(config.accounts["work"], folder_policy="all")
+    store = MailEventStore(config.worker.database)
+
+    class BrokenDiscovery(FakeMailClient):
+        def list_mailboxes(self, account: str) -> tuple[str, ...]:
+            raise RuntimeError("private-provider-response")
+
+    client = BrokenDiscovery(search_results={
+        ("work", "INBOX"): ("1",), ("broken", "INBOX"): ("2",),
+    })
+    report = MailWorker(config, store, client).reconcile()
+    assert report["created"] == 1 and report["failed"] == 1
+    assert "private-provider-response" not in str(report)
+
+
+def test_discovered_mailbox_identity_is_not_trimmed(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    config = _config(tmp_path, dry_run=True)
+    config.accounts["work"] = replace(config.accounts["work"], folder_policy="all")
+    store = MailEventStore(config.worker.database)
+    mailboxes = []
+
+    class SpaceMailbox(FakeMailClient):
+        def list_mailboxes(self, account: str) -> tuple[str, ...]:
+            return (" Archive ",)
+        def read_raw(self, account: str, mailbox: str, uid: str) -> bytes:
+            mailboxes.append(mailbox)
+            return super().read_raw(account, mailbox, uid)
+
+    client = SpaceMailbox(search_results={("work", " Archive "): ("1",)})
+    worker = MailWorker(config, store, client)
+    assert worker.reconcile()["created"] == 1
+    assert worker.run_batch() == 1
+    assert mailboxes == [" Archive "]
+
+
+def test_explicit_legacy_unmatched_destination_is_not_discarded(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    config = _config(tmp_path, dry_run=True)
+    config.accounts["work"] = replace(config.accounts["work"], rules=(), unmatched_destination="Newsletters")
+    store = MailEventStore(config.worker.database)
+    event_id, _ = store.enqueue(MailEvent("work", "INBOX", "1"))
+    client = FakeMailClient()
+    assert MailWorker(config, store, client).run_batch() == 1
+    assert client.reads == 1 and not client.moves
+    assert store.audit(event_id)[-1]["details"]["outcome"] == "dry_run"

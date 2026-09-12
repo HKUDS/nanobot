@@ -20,6 +20,8 @@ class AmbiguousMoveError(RuntimeError):
 
 
 class MailClient(Protocol):
+    def list_mailboxes(self, account: str) -> tuple[str, ...]: ...
+
     def uid_validity(self, account: str, mailbox: str) -> str: ...
 
     def search_uids(self, account: str, mailbox: str) -> tuple[str, ...]: ...
@@ -63,7 +65,16 @@ class MailWorker:
         mailboxes = listed = created_count = existing = failed = 0
         errors: list[dict[str, str]] = []
         for account, policy in self.config.accounts.items():
-            for mailbox in policy.source_mailboxes:
+            try:
+                sources = (self.client.list_mailboxes(account) if policy.folder_policy == "all"
+                           else policy.source_mailboxes)
+            except Exception:
+                # Do not fall back to INBOX and misreport all-folder coverage.
+                failed += 1
+                errors.append({"account": account, "mailbox": "", "error": "folder discovery failed"})
+                logger.warning("Folder discovery failed for %s", account)
+                continue
+            for mailbox in sources:
                 mailboxes += 1
                 try:
                     before = self.client.uid_validity(account, mailbox)
@@ -165,7 +176,7 @@ class MailWorker:
         account_config = self.config.accounts.get(event.account)
         if account_config is None:
             raise ValueError(f"unknown configured account: {event.account}")
-        if event.mailbox not in account_config.source_mailboxes:
+        if account_config.folder_policy == "allowlist" and event.mailbox not in account_config.source_mailboxes:
             raise ValueError(
                 f"mailbox {event.mailbox!r} is not an approved source for {event.account!r}"
             )
@@ -174,6 +185,13 @@ class MailWorker:
             raise AmbiguousMoveError(
                 "a previous MOVE was started but its result was not committed; manual review required"
             )
+
+        # With no policy there is nothing to classify. Do not download thousands
+        # of existing messages just to decide no_action during initial sync.
+        if not account_config.rules and account_config.unmatched_destination is None:
+            self.store.complete(queued.id, queued.claim_token,
+                                {"outcome": "no_action", "reason": "no_rules"})
+            return
 
         self.store.renew_lease(queued.id, queued.claim_token)
         current_uid_validity = self.client.uid_validity(event.account, event.mailbox)
@@ -207,9 +225,11 @@ class MailWorker:
                 {"decision": decision_data, "outcome": "no_action"},
             )
             return
-        if decision.destination not in account_config.allowed_folders:
+        if account_config.folder_policy == "allowlist" and decision.destination not in account_config.allowed_folders:
             raise ValueError("classifier selected a folder outside the account allowlist")
-        if self.config.worker.dry_run:
+        # All-folder access is read-only, not blanket permission to move mail.
+        # Legacy explicitly allowlisted deployments retain their reviewed policy.
+        if self.config.worker.dry_run or account_config.folder_policy == "all":
             self.store.complete(
                 queued.id,
                 queued.claim_token,

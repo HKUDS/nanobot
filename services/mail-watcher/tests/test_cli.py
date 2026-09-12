@@ -74,3 +74,11 @@ elif "search" in sys.argv:
     assert report["created"] == 1
     assert report["failed"] == 0
     assert MailEventStore(tmp_path / "events.sqlite3").counts()["pending"] == 1
+
+
+def test_all_folder_hook_accepts_non_inbox_without_rules(tmp_path: Path, capsys) -> None:
+    config = tmp_path / "mail.toml"
+    config.write_text('[worker]\ndatabase="events.sqlite3"\n[accounts.work]\nfolder_policy="all"\n')
+    assert run(["--config", str(config), "enqueue", "--account", "work",
+                "--mailbox", "Archive/Subfolder", "--uid", "3"]) == 0
+    assert '"created": true' in capsys.readouterr().out

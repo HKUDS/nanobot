@@ -101,3 +101,26 @@ allowed_folders = []
     )
     with pytest.raises(ValueError, match="between 120 and 300"):
         load_config(path)
+
+
+def test_all_folders_default_and_rules_optional(tmp_path: Path) -> None:
+    config = load_config(_write(tmp_path / "mail.toml", "[accounts.work]\n"))
+    assert config.accounts["work"].folder_policy == "all"
+    assert config.accounts["work"].rules == ()
+
+
+def test_all_folders_accepts_legacy_rule_proposals_without_allowlist(tmp_path: Path) -> None:
+    config = load_config(_write(tmp_path / "mail.toml", '''
+[accounts.work]
+folder_policy = "all"
+[[accounts.work.rules]]
+name = "review"
+destination = "Review"
+subject_contains = ["invoice"]
+'''))
+    assert config.accounts["work"].rules[0].destination == "Review"
+
+
+def test_explicit_legacy_sources_keep_restrictions(tmp_path: Path) -> None:
+    config = load_config(_write(tmp_path / "mail.toml", '[accounts.work]\nsource_mailboxes = ["INBOX"]\n'))
+    assert config.accounts["work"].folder_policy == "allowlist"

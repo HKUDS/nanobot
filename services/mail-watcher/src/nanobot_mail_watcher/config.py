@@ -6,7 +6,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +24,7 @@ class AccountConfig:
     allowed_folders: frozenset[str]
     unmatched_destination: str | None
     rules: tuple[RuleConfig, ...]
+    folder_policy: Literal["all", "allowlist"] = "all"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,7 @@ class WorkerConfig:
     reconcile_interval_seconds: float = 180.0
     reconcile_max_messages: int = 5_000
     reconcile_max_response_bytes: int = 2_000_000
+    reconcile_max_folders: int = 1_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +61,7 @@ def load_config(path: Path | None = None) -> MailAutomationConfig:
     config_path = (path or default_config_path()).expanduser().resolve()
     try:
         with config_path.open("rb") as handle:
-            document = cast(dict[str, Any], tomllib.load(handle))
+            document = tomllib.load(handle)
     except FileNotFoundError as exc:
         raise ValueError(f"mail config not found: {config_path}") from exc
     except tomllib.TOMLDecodeError as exc:
@@ -92,6 +94,7 @@ def _parse_worker(raw: dict[str, Any], base: Path) -> WorkerConfig:
         "reconcile_interval_seconds",
         "reconcile_max_messages",
         "reconcile_max_response_bytes",
+        "reconcile_max_folders",
     }
     _only_keys(raw, allowed, "worker")
     database = _path(raw.get("database", "mail/events.sqlite3"), "worker.database", base)
@@ -141,6 +144,9 @@ def _parse_worker(raw: dict[str, Any], base: Path) -> WorkerConfig:
             1,
             50_000,
         ),
+        reconcile_max_folders=_integer(
+            raw.get("reconcile_max_folders", 1_000), "reconcile_max_folders", 1, 10_000,
+        ),
         reconcile_max_response_bytes=_integer(
             raw.get("reconcile_max_response_bytes", 2_000_000),
             "reconcile_max_response_bytes",
@@ -153,9 +159,16 @@ def _parse_worker(raw: dict[str, Any], base: Path) -> WorkerConfig:
 def _parse_account(raw: dict[str, Any], account: str) -> AccountConfig:
     _only_keys(
         raw,
-        {"source_mailboxes", "allowed_folders", "unmatched_destination", "rules"},
+        {"source_mailboxes", "allowed_folders", "unmatched_destination", "rules", "folder_policy"},
         f"accounts.{account}",
     )
+    # Preserve hand-written legacy source/destination restrictions. New accounts
+    # without restrictions default to discovery; exports set this explicitly.
+    folder_policy = raw.get("folder_policy", "allowlist" if (
+        "source_mailboxes" in raw or raw.get("allowed_folders")
+    ) else "all")
+    if folder_policy not in ("all", "allowlist"):
+        raise ValueError(f"accounts.{account}.folder_policy must be all or allowlist")
     sources = tuple(
         _text(item, f"accounts.{account}.source_mailboxes[]", maximum=1024)
         for item in _list(raw.get("source_mailboxes", ["INBOX"]), "source_mailboxes")
@@ -184,12 +197,14 @@ def _parse_account(raw: dict[str, Any], account: str) -> AccountConfig:
     destinations = {rule.destination for rule in rules}
     if unmatched:
         destinations.add(unmatched)
+    for mailbox in destinations:
+        _safe_mailbox(mailbox)
     missing = sorted(destinations - allowed)
-    if missing:
+    if folder_policy == "allowlist" and missing:
         raise ValueError(
             f"accounts.{account} destinations are not in allowed_folders: {missing}"
         )
-    return AccountConfig(sources, allowed, unmatched, rules)
+    return AccountConfig(sources, allowed, unmatched, rules, folder_policy)
 
 
 def _parse_rule(raw: dict[str, Any], account: str, index: int) -> RuleConfig:
