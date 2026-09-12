@@ -18,7 +18,7 @@ from urllib.parse import quote, urlparse
 import httpx
 
 from nanobot.agent.skills import SkillsLoader
-from nanobot.security.network import PinnedDNSAsyncTransport
+from nanobot.security.network import PinnedDNSAsyncTransport, validate_url_target
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, require_path_within
 
 _PROVIDER_ALL = "all"
@@ -41,6 +41,11 @@ _TREND_VALUES_RE = re.compile(r'\\"values\\":\s*\[([0-9,\s]+)\]')
 _SOURCE_RE = re.compile(
     r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/"
     r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?$"
+)
+_WELL_KNOWN_SOURCE_RE = re.compile(
+    r"^(?=.{1,253}$)"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
 )
 _SKILL_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _VERSION_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,63})$")
@@ -351,7 +356,8 @@ async def _install_skills_sh_skill(
     skill_id: str,
     workspace_path: Path,
 ) -> dict[str, Any]:
-    if not _SOURCE_RE.fullmatch(source):
+    install_source = _skills_sh_install_source(source)
+    if install_source is None:
         raise SkillsMarketplaceError("invalid skill source")
     if not _valid_skill_id(skill_id):
         raise SkillsMarketplaceError("invalid skill name")
@@ -379,6 +385,14 @@ async def _install_skills_sh_skill(
             status=503,
         )
 
+    # GitHub shorthand is resolved by the CLI against a fixed public host. A
+    # well-known source is an arbitrary catalog-provided hostname, so reject
+    # private or otherwise unsafe DNS targets before delegating to the CLI.
+    if install_source.startswith("https://"):
+        allowed, _ = await asyncio.to_thread(validate_url_target, install_source)
+        if not allowed:
+            raise SkillsMarketplaceError("skill source is not publicly reachable")
+
     env = os.environ.copy()
     env["DISABLE_TELEMETRY"] = "1"
     command = (
@@ -386,7 +400,7 @@ async def _install_skills_sh_skill(
         "--yes",
         "skills@latest",
         "add",
-        source,
+        install_source,
         "--skill",
         skill_id,
         "--agent",
@@ -755,7 +769,7 @@ def _marketplace_skill(
 ) -> dict[str, Any] | None:
     source = row.get("source")
     skill_id = row.get("skillId")
-    if not isinstance(source, str) or not _SOURCE_RE.fullmatch(source):
+    if not isinstance(source, str) or _skills_sh_install_source(source) is None:
         return None
     if not isinstance(skill_id, str) or not _valid_skill_id(skill_id):
         return None
@@ -889,7 +903,11 @@ def _valid_skill_refs(skill_ids: list[str]) -> list[tuple[str, str]]:
             continue
         source, skill_id = value.rsplit("/", 1)
         ref = (source, skill_id)
-        if _SOURCE_RE.fullmatch(source) and _valid_skill_id(skill_id) and ref not in refs:
+        if (
+            _skills_sh_install_source(source) is not None
+            and _valid_skill_id(skill_id)
+            and ref not in refs
+        ):
             refs.append(ref)
     return refs
 
@@ -920,6 +938,14 @@ async def _load_skill_page_trends(
 
 def _valid_skill_id(value: str) -> bool:
     return len(value) <= 64 and _SKILL_RE.fullmatch(value) is not None
+
+
+def _skills_sh_install_source(value: str) -> str | None:
+    if _SOURCE_RE.fullmatch(value):
+        return value
+    if _WELL_KNOWN_SOURCE_RE.fullmatch(value):
+        return f"https://{value}"
+    return None
 
 
 def _valid_provider(value: str, *, allow_all: bool = True) -> str:
