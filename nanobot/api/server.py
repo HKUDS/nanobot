@@ -52,6 +52,11 @@ _REQUEST_TIMEOUT_KEY = web.AppKey[float]("request_timeout")
 _SESSION_LOCKS_KEY = web.AppKey[dict[str, asyncio.Lock]]("session_locks")
 _PREPARE_AGENT_KEY = web.AppKey[Callable[[], Awaitable[None]] | None]("prepare_agent")
 _MISSING = object()
+_TOOL_EVENT_STATUS = {
+    "start": "running",
+    "end": "completed",
+    "error": "failed",
+}
 
 
 class _UsageCaptureHook(AgentHook):
@@ -182,6 +187,43 @@ def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None 
     return f"data: {_json.dumps(payload)}\n\n".encode()
 
 
+def _include_tool_events(body: dict[str, Any]) -> bool:
+    """Return whether this request opted into nanobot tool progress events."""
+    options = body.get("stream_options")
+    if not isinstance(options, dict):
+        return False
+    typed_options = cast(dict[str, object], options)
+    include_tool_events = typed_options.get("include_tool_events")
+    return include_tool_events is True
+
+
+def _sse_tool_progress(event: dict[str, Any]) -> bytes | None:
+    """Format one structured agent tool event as a named SSE frame."""
+    phase = event.get("phase")
+    status = _TOOL_EVENT_STATUS.get(phase) if isinstance(phase, str) else None
+    name = event.get("name")
+    call_id = event.get("call_id")
+    if status is None or not isinstance(name, str) or not name or not call_id:
+        return None
+
+    arguments = event.get("arguments")
+    payload: dict[str, Any] = {
+        "version": 1,
+        "tool": name,
+        "toolCallId": str(call_id),
+        "status": status,
+        "arguments": arguments if isinstance(arguments, dict) else {},
+        "result": event.get("result"),
+        "error": event.get("error"),
+    }
+    try:
+        data = _json.dumps(payload, ensure_ascii=False, default=str)
+    except (TypeError, ValueError, OverflowError):
+        logger.warning("Skipping malformed tool progress event: {}", name)
+        return None
+    return f"event: nanobot.tool.progress\ndata: {data}\n\n".encode()
+
+
 _SSE_DONE = b"data: [DONE]\n\n"
 
 # ---------------------------------------------------------------------------
@@ -304,6 +346,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
     model_name: str = _app_value(request.app, _MODEL_NAME_KEY, "model_name", "nanobot")
 
     stream = False
+    include_tool_events = False
     try:
         if content_type.startswith("multipart/"):
             text, media_paths, session_id, requested_model = await _parse_multipart(request)
@@ -316,6 +359,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                 return _error_json(400, "Invalid JSON body")
             body = cast(dict[str, Any], body)
             stream = body.get("stream", False)
+            include_tool_events = _include_tool_events(body)
             requested_model = body.get("model")
             text, media_paths = _parse_json_content(body)
             session_id = body.get("session_id")
@@ -351,7 +395,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         await resp.prepare(request)
 
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        queue: asyncio.Queue[str | bytes | None] = asyncio.Queue()
         stream_failed = False
         emitted_content = False
 
@@ -360,6 +404,17 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
             if token:
                 emitted_content = True
             await queue.put(token)
+
+        async def _on_progress(
+            _text: str,
+            *,
+            tool_hint: bool = False,
+            tool_events: list[dict[str, Any]] | None = None,
+        ) -> None:
+            for event in tool_events or []:
+                frame = _sse_tool_progress(event)
+                if frame is not None:
+                    await queue.put(frame)
 
         async def _on_stream_end(*_a: Any, **_kw: Any) -> None:
             # Agent stream-end callbacks mark generation segment boundaries.
@@ -379,6 +434,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                             session_key=session_key,
                             channel="api",
                             chat_id=API_CHAT_ID,
+                            on_progress=_on_progress if include_tool_events else None,
                             on_stream=_on_stream,
                             on_stream_end=_on_stream_end,
                         )
@@ -395,10 +451,13 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         task = asyncio.create_task(_run())
         try:
             while True:
-                token = await queue.get()
-                if token is None:
+                item = await queue.get()
+                if item is None:
                     break
-                await resp.write(_sse_chunk(token, model_name, chunk_id))
+                if isinstance(item, bytes):
+                    await resp.write(item)
+                else:
+                    await resp.write(_sse_chunk(item, model_name, chunk_id))
         finally:
             if not task.done():
                 task.cancel()
