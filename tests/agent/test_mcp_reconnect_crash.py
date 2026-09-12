@@ -199,7 +199,16 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
     assert isinstance(tool, MCPToolWrapper)
 
     await asyncio.create_task(tool.execute(name="first"))
-    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + _IDLE_EXPIRY_GRACE_SECONDS)
+
+    # New MCP SDKs keep an SSE GET open, so wall-clock sleep does not reliably
+    # expire this real session. Inject only the transport failure; retain the
+    # real connection, reconnect and shutdown paths whose cleanup we exercise.
+    import anyio
+
+    async def broken_transport(*args, **kwargs):
+        raise anyio.BrokenResourceError("test transport disconnected")
+
+    monkeypatch.setattr(tool._session, "call_tool", broken_transport)
 
     reconnect_started = asyncio.Event()
     finish_reconnect = asyncio.Event()
@@ -224,7 +233,9 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
         if exc is not None:
             unhandled.append(exc)
 
-    asyncio.get_running_loop().set_exception_handler(capture_unhandled)
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(capture_unhandled)
 
     try:
         await asyncio.wait_for(asyncio.gather(call_task, close_task), timeout=15)
@@ -232,6 +243,9 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
         unhandled.append(asyncio.CancelledError("main task cancelled by leaked MCP cancel scope"))
     except Exception as exc:
         unhandled.append(exc)
+    finally:
+        loop.set_exception_handler(previous_handler)
+        await provider.aclose()
 
     assert not unhandled, f"Unhandled exception leaked during reconnect/shutdown: {unhandled[0]}"
     assert provider.connected_server_names == set()

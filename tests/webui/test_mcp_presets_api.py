@@ -428,6 +428,8 @@ def test_test_mcp_preset_connects_and_reports_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_config(tmp_path, monkeypatch)
+    # Connection itself is mocked; this unit test must not require Node on PATH.
+    monkeypatch.setattr("nanobot.webui.mcp_presets_api.shutil.which", lambda _command: "/test/npx")
     mcp_presets_action("enable", {"name": ["playwright"]})
 
     class FakeStack:
@@ -460,6 +462,7 @@ def test_test_mcp_preset_inspects_tools_outside_the_enabled_allowlist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("nanobot.webui.mcp_presets_api.shutil.which", lambda _command: "/test/npx")
     mcp_presets_action("enable", {"name": ["playwright"]})
     config = load_config()
     config.tools.mcp_servers["playwright"].enabled_tools = [
