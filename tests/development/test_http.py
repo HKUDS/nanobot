@@ -33,6 +33,7 @@ async def test_development_http_requires_auth_and_mutations_require_socket(tmp_p
     project = DevelopmentService(config.tools.development, config.workspace_path, tmp_path / "config.json")
     project.store.initialize("Required full scope", [Requirement(id="one", description="Acceptance")])
     assert services.http._handle_development(Request("/api/webui/development", Headers()), mutate=False).status_code == 401
+    assert (await services.http._handle_codex_limits(Request("/api/webui/codex-limits", Headers()))).status_code == 401
     connection = SimpleNamespace(request=Request("/", Headers()))
     response = await services.http.dispatch_webui_mutation(connection, "development.control", {"action": "pause"})
     assert response.status_code == 200

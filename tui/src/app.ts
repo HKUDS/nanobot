@@ -22,6 +22,7 @@ import {
   NanobotClient,
   connectionEndpoint,
   fetchAvailableSkills,
+  fetchCodexLimits,
   fetchGatewayHealth,
   fetchHistory,
   fetchGatewayConnection,
@@ -48,6 +49,7 @@ import {
   type TokenUsage,
   type WorkspaceScopePayload,
 } from "./protocol"
+import { quotaSummary, type CodexQuotaSnapshot } from "../../packages/client-events/operations"
 import {
   CommandMenu,
   resolveSlashCommandLifecycle,
@@ -563,6 +565,9 @@ export class NanobotTui {
   private sharedHistoryPending = false
   private sharedHistoryDirty = false
   private sessionRefreshTimer: ReturnType<typeof setInterval> | null = null
+  private quotaRefreshTimer: ReturnType<typeof setInterval> | null = null
+  private quotaRequest: AbortController | null = null
+  private quotaSnapshot: CodexQuotaSnapshot | null = null
   private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
   private readonly modelCommandTurns = new Set<string>()
   private readonly silentCommandTurns = new Set<string>()
@@ -909,6 +914,9 @@ export class NanobotTui {
     void this.loadMentions()
     void this.loadSkills()
     this.runtimeControls.preload()
+    void this.refreshQuotas()
+    this.quotaRefreshTimer = setInterval(() => { void this.refreshQuotas() }, 30_000)
+    this.quotaRefreshTimer.unref?.()
     this.renderer.start()
     // OpenTUI learns the real terminal background through OSC 10/11. Wait for
     // that bounded probe after first paint. The neutral terminal background is
@@ -2169,7 +2177,26 @@ export class NanobotTui {
         ? `/${formatTokenCount(this.contextWindowTokens)}`
         : ""} ctx`
     this.runtimeControls.updateModel(this.modelName, this.modelPreset)
-    this.runtimeControls.updateContext(context)
+    const quota = quotaSummary(this.quotaSnapshot)
+    this.runtimeControls.updateContext(context + (quota ? `     ${quota}` : ""))
+  }
+
+  private async refreshQuotas(): Promise<void> {
+    if (this.quotaRequest || this.quitting) return
+    const request = new AbortController()
+    this.quotaRequest = request
+    const timeout = setTimeout(() => request.abort(), 25_000)
+    try {
+      const snapshot = await fetchCodexLimits(this.options.apiUrl, this.options.apiToken,
+        (token) => this.refreshApiConnection(token), request.signal)
+      if (!request.signal.aborted && !this.quitting) this.quotaSnapshot = snapshot
+    } catch {
+      if (this.quotaSnapshot && !this.quitting) this.quotaSnapshot = { ...this.quotaSnapshot, state: "stale" }
+    } finally {
+      clearTimeout(timeout)
+      if (this.quotaRequest === request) this.quotaRequest = null
+      if (!this.quitting) this.updateTitle()
+    }
   }
 
   private resizeComposer(): void {
@@ -3028,6 +3055,8 @@ export class NanobotTui {
     this.submitGeneration += 1
     this.submitPending = false
     this.stopSessionRefresh()
+    this.quotaRequest?.abort()
+    if (this.quotaRefreshTimer) clearInterval(this.quotaRefreshTimer)
     this.host.release()
     this.client.close()
     this.renderer.destroy()
@@ -3039,6 +3068,8 @@ export class NanobotTui {
   private handleDestroy = (): void => {
     this.quitting = true
     this.usageRequest?.abort()
+    this.quotaRequest?.abort()
+    if (this.quotaRefreshTimer) clearInterval(this.quotaRefreshTimer)
     this.clipboardPasteGeneration += 1
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.stopSessionRefresh()

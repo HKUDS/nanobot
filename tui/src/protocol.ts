@@ -1,4 +1,5 @@
 import { decodeNotification, isCompactionPhase, isRecoveryState } from "../../packages/client-events/notifications"
+import { parseCodexQuota, type CodexQuotaSnapshot } from "../../packages/client-events/operations"
 import type { ContextCompaction, NotificationEvent, RecoveryState } from "../../packages/client-events/notifications"
 export type { ContextCompaction, RecoveryState, RecoveryStatus, RetryStatus } from "../../packages/client-events/notifications"
 
@@ -591,6 +592,16 @@ async function fetchApi(
   signal?.throwIfAborted()
   if (response.status !== 401 || !reauthenticate) return response
   return request(await reauthenticate(apiToken))
+}
+
+export async function fetchCodexLimits(
+  apiUrl: string, apiToken: string, reauthenticate?: ApiReauthenticator, signal?: AbortSignal,
+): Promise<CodexQuotaSnapshot | null> {
+  if (!apiUrl || !apiToken) return null
+  const response = await fetchApi(apiUrl, apiToken, "/api/webui/codex-limits", reauthenticate, signal)
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`Quota read failed (${response.status})`)
+  return parseCodexQuota(await response.json())
 }
 
 interface ThreadPage {

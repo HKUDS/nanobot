@@ -8,6 +8,7 @@ import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { IntegrationsSettings } from "@/components/settings/IntegrationsSettings";
+import { DevelopmentSettings } from "@/components/settings/DevelopmentSettings";
 import { ImageGenerationSettings } from "@/components/settings/capabilities/ImageGenerationSettings";
 import { AdvancedSettings } from "@/components/settings/capabilities/SecuritySettings";
 import { TranscriptionSettings } from "@/components/settings/capabilities/TranscriptionSettings";
@@ -750,7 +751,7 @@ export function SettingsPage({
             </div>
           ) : null}
 
-          {activeSection === "integrations" ? (
+          {activeSection === "development" ? <DevelopmentSettings /> : activeSection === "integrations" ? (
             <IntegrationsSettings />
           ) : loading ? (
             <div className="flex h-48 items-center justify-center rounded-panel bg-settings-surface text-sm text-muted-foreground">

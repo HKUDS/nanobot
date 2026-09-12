@@ -13,6 +13,7 @@ export type SettingsSectionKey =
   | "browser"
   | "channels"
   | "integrations"
+  | "development"
   | "apps"
   | "automations"
   | "memory"

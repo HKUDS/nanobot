@@ -29,6 +29,7 @@ from websockets.http11 import Response
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
+from nanobot.operations.codex_limits import CodexLimits
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import RecoveryActionError
@@ -371,6 +372,7 @@ class GatewayHTTPHandler:
         self.config = config
         self.session_manager = session_manager
         self.shared_inbox: Any = None
+        self._codex_limits: CodexLimits | None = None
         self.static_dist_path = static_dist_path
         self.runtime_model_name = runtime_model_name
         self.bus = bus
@@ -1413,6 +1415,8 @@ class GatewayHTTPHandler:
             return await self._handle_notifications_read(request)
         if got in {"/api/webui/development", "/api/webui/development/control"}:
             return self._handle_development(request, mutate=got.endswith("/control"))
+        if got == "/api/webui/codex-limits":
+            return await self._handle_codex_limits(request)
         return None
 
     def _handle_development(self, request: WsRequest, *, mutate: bool) -> Response:
@@ -1441,6 +1445,14 @@ class GatewayHTTPHandler:
                                         "message": message})
         except (ValueError, OSError, Timeout) as exc:
             return _http_error(409, str(exc))
+
+    async def _handle_codex_limits(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        config = self.settings.config.load().tools.codex_limits
+        if self._codex_limits is None or self._codex_limits.config != config:
+            self._codex_limits = CodexLimits(config, self.settings.config.path.parent / "operations" / "codex-limits.json")
+        return _http_json_response((await self._codex_limits.snapshot()).model_dump(mode="json"))
 
     async def _handle_notifications_read(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

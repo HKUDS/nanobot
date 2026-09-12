@@ -12,6 +12,7 @@ import { Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
+import { CodexLimits } from "@/components/CodexLimits";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
@@ -175,6 +176,7 @@ const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "browser",
   "channels",
   "integrations",
+  "development",
   "apps",
   "automations",
   "memory",
@@ -2624,6 +2626,7 @@ function Shell({
               >
                 <Sidebar
                   {...sidebarProps}
+                  footerExtra={<CodexLimits compact />}
                   collapsed={!hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onExpand={openHostSidebar}
@@ -2656,6 +2659,7 @@ function Shell({
                 <SheetTitle className="sr-only">{t("sidebar.navigation")}</SheetTitle>
                 <Sidebar
                   {...sidebarProps}
+                  footerExtra={<CodexLimits compact />}
                   onCollapse={closeMobileSidebar}
                   containActionMenus
                 />

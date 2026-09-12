@@ -38,6 +38,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "capabilities", icon: Blocks, fallback: "Capabilities" },
   { key: "integrations", icon: Plug, fallback: "Integracje" },
+  { key: "development", icon: Blocks, fallback: "Rozwój agenta" },
   { key: "runtime", icon: Server, fallback: "System" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
   { key: "about", icon: Info, fallback: "About" },

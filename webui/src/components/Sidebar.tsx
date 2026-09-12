@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils";
 import { sidebarShortcutAria, sidebarShortcutLabel } from "@/lib/sidebar-shortcuts";
 
 interface SidebarProps {
+  footerExtra?: ReactNode;
   sessions: ChatSummary[];
   temporarySessions?: ChatSummary[];
   activeKey: string | null;
@@ -315,6 +316,7 @@ export function Sidebar(props: SidebarProps) {
           />
         )}
       </div>
+      {!collapsed && props.footerExtra}
       <div
         className={cn(
           "flex items-center justify-between gap-1 bg-sidebar/55 px-2.5 py-3 text-xs",

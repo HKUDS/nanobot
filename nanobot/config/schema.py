@@ -13,6 +13,7 @@ from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
 from nanobot.development.config import DevelopmentConfig
+from nanobot.operations.codex_limits import CodexLimitsConfig
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.cli_apps import CliAppsToolConfig
@@ -530,6 +531,7 @@ class ToolsConfig(Base):
     """
 
     development: DevelopmentConfig = Field(default_factory=DevelopmentConfig)
+    codex_limits: CodexLimitsConfig = Field(default_factory=CodexLimitsConfig)
     web: WebToolsConfig = Field(
         default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig")
     )
