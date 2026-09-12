@@ -21,6 +21,8 @@ class DevelopmentConfig(Base):
     read_only_dependencies: list[str] = Field(default_factory=list)
     source_dependencies: list[str] = Field(default_factory=list)
     builder_protocol: Literal["auto", "tools", "json"] = "auto"
+    worker_backend: Literal["process", "systemd"] = "process"
+    resume_on_restart: bool = True
 
     @model_validator(mode="after")
     def validate_scope(self) -> DevelopmentConfig:

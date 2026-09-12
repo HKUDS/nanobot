@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +35,7 @@ class DevelopmentService:
                             item.checkpoint_stage = item.stage
                             item.stage = "held"
                             item.blocked_reason = "worker interrupted; candidate and evidence preserved; safe continuation available"
+                            item.hold_kind = "interrupted"
                             item.worker_pid = None
                             item.worker_start_ticks = None
                         self.store.update_job(job.id, interrupted)
@@ -56,16 +58,40 @@ class DevelopmentService:
         if job.stage not in {"queued", "held"}:
             raise ValueError("this job already has an outcome; inspect its evidence")
         log = self.store.root / "worker.log"
+        command = [sys.executable, "-m", "nanobot.development.worker", "--config", str(self.config_path), "--job", job.id]
+        if self.config.worker_backend == "systemd":
+            unit = self.worker_unit()
+            launch = [
+                "systemd-run", "--quiet", "--no-ask-password", "--collect", "--service-type=exec",
+                "--expand-environment=no", "--unit=" + unit,
+                "--working-directory=" + str(Path(self.config.repository).expanduser()),
+                "--property=UMask=0077", "--property=KillMode=control-group",
+                "--property=NoNewPrivileges=true", "--property=MemoryMax=4G", "--property=TasksMax=512",
+                "--property=StandardOutput=append:" + str(log),
+                "--property=StandardError=append:" + str(log), "--", *command,
+            ]
+            try:
+                result = subprocess.run(launch, capture_output=True, timeout=15, check=False)
+            except subprocess.TimeoutExpired as exc:
+                raise ValueError("development service launch is uncertain; inspect its systemd status") from exc
+            if result.returncode:
+                # Do not fall back into the gateway cgroup when service launch fails.
+                raise ValueError("development service could not start; inspect its systemd status")
+            return f"Zlecono rozpoczęcie {job.id}. Wyniki sprawdzisz przez /development."
         with log.open("ab") as output:
             log.chmod(0o600)
             process = subprocess.Popen(
-                [sys.executable, "-m", "nanobot.development.worker", "--config", str(self.config_path), "--job", job.id],
+                command,
                 stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True,
                 cwd=str(Path(self.config.repository).expanduser()),
             )
         # The worker takes the cross-process lease before claiming a job. Duplicate
         # start requests can create short-lived contenders, never two active changes.
         return f"Zlecono rozpoczęcie {job.id}. Proces {process.pid}; wyniki sprawdzisz przez /development."
+
+    def worker_unit(self) -> str:
+        identity = hashlib.sha256(str(self.store.root.resolve()).encode()).hexdigest()[:20]
+        return f"nanobot-development-{identity}.service"
 
     def control(self, action: str, job_id: str | None = None) -> str:
         if action == "pause":

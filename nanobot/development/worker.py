@@ -276,6 +276,12 @@ class DevelopmentWorker:
                 root = self.store.root / job.id
                 baseline, source = root / "baseline", root / "source"
                 if job.base_commit is None:
+                    # A crash before the preparation checkpoint has no verified
+                    # baseline. Retain partial files for inspection, then snapshot
+                    # the current clean repository without merging partial trees.
+                    for path in (baseline, source):
+                        if path.exists():
+                            path.rename(root / f"interrupted-{path.name}-{time.time_ns()}")
                     base = snapshot(Path(self.config.repository).expanduser().resolve(), baseline)
                     copy_source(baseline, source)
                     def prepared(item: DevelopmentJob) -> None:
@@ -295,14 +301,20 @@ class DevelopmentWorker:
                 if len(job.baseline) != len(job.checks) or any(result.exit_code for result in job.baseline):
                     raise ValueError("baseline checks failed; no candidate edits were started")
                 resume_verification = job.stage in {"checking", "review"}
-                while job.build_attempts <= self.config.max_repair_attempts or resume_verification:
+                while job.build_attempts <= self.config.max_repair_attempts or resume_verification or job.build_in_progress:
                     if not resume_verification:
                         job = self.stage(job_id, "building")
-                        def starting_build(item: DevelopmentJob) -> None:
-                            item.repair_attempts = item.build_attempts
-                            item.build_attempts += 1
-                        job = self.store.update_job(job_id, starting_build)
+                        if not job.build_in_progress:
+                            def starting_build(item: DevelopmentJob) -> None:
+                                item.repair_attempts = item.build_attempts
+                                item.build_attempts += 1
+                                item.build_in_progress = True
+                            job = self.store.update_job(job_id, starting_build)
                         await self.build(job, candidate, job.repair_attempts)
+                        def built(item: DevelopmentJob) -> None:
+                            item.build_in_progress = False
+                            item.stage = "checking"
+                        job = self.store.update_job(job_id, built)
                     resume_verification = False
                     job = self.stage(job_id, "checking")
                     results = await self.checks(job, candidate, f"verification-{job.repair_attempts}")
@@ -338,10 +350,12 @@ class DevelopmentWorker:
                 reason = f"{type(exc).__name__}: {exc}"[:2000]
                 held = (isinstance(exc, DevelopmentPausedError) or self.store.read().paused
                         or "daily token budget exhausted" in reason)
+                owner_paused = isinstance(exc, DevelopmentPausedError) or self.store.read().paused
                 def failed(item: DevelopmentJob) -> None:
                     item.checkpoint_stage = item.stage
                     item.stage = "held" if held else "failed"
                     item.blocked_reason = reason
+                    item.hold_kind = "paused" if owner_paused else "budget" if held else None
                 return self.store.update_job(job_id, failed)
             finally:
                 def finished(item: DevelopmentJob) -> None:

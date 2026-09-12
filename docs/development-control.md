@@ -56,6 +56,17 @@ the builder's notes. Interrupted work preserves its files and acceptance checks;
 continuation inspects the saved phase instead of assuming success. A paused job
 can resume verification without repeating completed edits.
 
+On a Linux gateway, set `workerBackend: "systemd"` to launch the worker in its
+own transient service, outside the gateway's process group. The external
+supervisor also checks interrupted development every ten minutes when
+`resumeOnRestart` is enabled (the default). It resumes only a previously started
+job, never an untouched queue entry or a failed/ready job. Owner pauses remain
+paused, budget holds wait until the next UTC day, and dispatch attempts are
+persisted before launch with a limit of three per hour. A failed systemd launch
+never falls back into the gateway process. Interrupted builder steps keep their
+repair attempt; completed edits proceed to verification. Incomplete source
+snapshots are retained separately before rebuilding a clean baseline.
+
 **Current boundary:** `ready` means verified source awaiting deployment. The
 production release/rollback adapter and autonomous backlog scheduler are still
 part of the unfinished rollout. A ready artifact is not reported as deployed.

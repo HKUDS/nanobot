@@ -161,11 +161,19 @@ def main() -> None:
         print(json.dumps({"paused": args.pause}))
         return
     sessions = SessionManager(config.workspace_path)
-    print(json.dumps(check(
+    result = check(
         unit=args.unit, state_path=state_path, heartbeat_path=sessions.sessions_dir / HEARTBEAT_FILE,
         port=config.gateway.port, recovery_enabled=config.gateway.goal_recovery.enabled,
         interval_seconds=config.gateway.goal_recovery.interval_seconds,
-    )))
+    )
+    if result.get("action") == "healthy" and config.tools.development.enable:
+        from nanobot.development.recovery import recover
+
+        try:
+            result["development"] = recover(config.tools.development, config.workspace_path, config_path).model_dump()
+        except (ValueError, OSError, TimeoutError):
+            result["development"] = {"action": "unavailable", "reason": "development_recovery_failed"}
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

@@ -306,6 +306,43 @@ async def test_dirty_repository_is_preserved_and_builder_never_started(tmp_path:
     assert provider.calls == []
 
 
+async def test_pause_during_build_does_not_consume_another_repair(tmp_path: Path):
+    require_sandbox()
+    store = project(tmp_path)
+    provider = ScriptedProvider([build_response(), review_response()])
+    runner = worker(tmp_path, store, provider, max_repair_attempts=0)
+    original_build = runner.build
+
+    async def pause_before_model(*args, **kwargs):
+        store.set_paused(True)
+        await original_build(*args, **kwargs)
+
+    runner.build = pause_before_model
+    job = proposal(store)
+    paused = await runner.run(job.id)
+    assert paused.stage == "held" and paused.hold_kind == "paused"
+    assert paused.build_attempts == 1 and paused.build_in_progress
+    runner.build = original_build
+    store.set_paused(False)
+    resumed = await runner.run(job.id)
+    assert resumed.stage == "ready", resumed.blocked_reason
+    assert resumed.build_attempts == 1 and not resumed.build_in_progress
+
+
+async def test_incomplete_preparation_is_preserved_and_safely_recreated(tmp_path: Path):
+    require_sandbox()
+    store = project(tmp_path)
+    runner = worker(tmp_path, store, ScriptedProvider([build_response(), review_response()]))
+    job = proposal(store)
+    incomplete = store.root / job.id / "baseline"
+    incomplete.mkdir(parents=True)
+    (incomplete / "partial").write_text("Interrupted snapshot")
+    resumed = await runner.run(job.id)
+    assert resumed.stage == "ready", resumed.blocked_reason
+    preserved = list((store.root / job.id).glob("interrupted-baseline-*/partial"))
+    assert len(preserved) == 1 and preserved[0].read_text() == "Interrupted snapshot"
+
+
 async def test_controls_are_owner_scoped_and_prompt_context_is_transient(tmp_path: Path):
     config = DevelopmentConfig(enable=True, owner_session_key="telegram:owner", repository=str(tmp_path))
     service = DevelopmentService(config, tmp_path)

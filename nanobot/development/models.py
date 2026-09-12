@@ -40,6 +40,7 @@ class DevelopmentJob(BaseModel):
     baseline_sha256: str | None = None
     checkpoint_stage: JobStage | None = None
     build_attempts: int = 0
+    build_in_progress: bool = False
     candidate_path: str | None = None
     candidate_sha256: str | None = None
     artifact_path: str | None = None
@@ -50,6 +51,7 @@ class DevelopmentJob(BaseModel):
     review_accepted: bool = False
     repair_attempts: int = 0
     blocked_reason: str | None = None
+    hold_kind: Literal["paused", "budget", "interrupted"] | None = None
     worker_pid: int | None = None
     worker_start_ticks: str | None = None
     token_usage: int = 0

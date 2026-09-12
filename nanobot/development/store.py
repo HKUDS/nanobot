@@ -128,6 +128,7 @@ class DevelopmentStore:
                     raise ValueError("another development change is still active")
             job.stage = job.checkpoint_stage or "baseline" if job.stage == "held" else "baseline"
             job.blocked_reason = None
+            job.hold_kind = None
             job.updated_at = self.clock()
             self._save(project)
             return job
