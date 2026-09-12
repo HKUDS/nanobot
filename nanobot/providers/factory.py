@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -97,7 +98,9 @@ def _resolve_provider_setup(
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
-    if p and p.proxy and backend not in {"openai_compat", "openai_codex", "xai_grok"}:
+    if p and p.proxy and backend not in {
+        "openai_compat", "openai_codex", "xai_grok", "dashscope_native",
+    }:
         raise ValueError(
             f"providers.{provider_name}.proxy is only supported for "
             "OpenAI-compatible providers, OpenAI Codex, and xAI Grok."
@@ -219,6 +222,18 @@ def _make_provider_core(
             profile=getattr(p, "profile", None) if p else None,
             extra_body=p.extra_body if p else None,
             provider_name=provider_name,
+        )
+    elif backend == "dashscope_native":
+        from nanobot.providers.dashscope_provider import DashScopeProvider
+
+        provider = DashScopeProvider(
+            api_key=(p.api_key if p and p.api_key else None)
+            or os.environ.get(spec.env_key if spec else "", ""),
+            api_base=config.get_api_base(model, preset=preset),
+            default_model=model or "qwen3.8-max",
+            extra_headers=_provider_extra_headers(spec, p),
+            extra_body=p.extra_body if p else None,
+            proxy=p.proxy if p else None,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider

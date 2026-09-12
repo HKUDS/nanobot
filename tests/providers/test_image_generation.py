@@ -1949,3 +1949,150 @@ def test_image_provider_http_client_kwargs_include_explicit_proxy() -> None:
         "proxy": proxy,
         "trust_env": False,
     }
+
+
+# ---------------------------------------------------------------------------
+# DashScope (Bailian) native image synthesis
+# ---------------------------------------------------------------------------
+
+
+from nanobot.providers.image_generation import DashScopeImageGenerationClient  # noqa: E402
+
+
+class DashScopeFakeClient:
+    """Fake httpx client returning one canned JSON response for POST."""
+
+    def __init__(self, response: FakeResponse) -> None:
+        self.response = response
+        self.calls: list[dict[str, Any]] = []
+
+    async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+        self.calls.append({"url": url, **kwargs})
+        return self.response
+
+
+def _dashscope_success_payload(image_url: str = "https://oss.example/img.png") -> dict[str, Any]:
+    return {
+        "output": {
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"image": image_url}],
+                },
+            }],
+            "rewrite_status": "success",
+        },
+        "usage": {"output_image_count": 1},
+        "request_id": "r1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_sync_call(
+    generated_image_downloads: list[tuple[str, str | None]],
+) -> None:
+    fake = DashScopeFakeClient(FakeResponse(_dashscope_success_payload()))
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(prompt="A golden cat", model="qwen-image-3.0-pro")
+
+    assert response.images[0].startswith("data:image/png;base64,")
+    assert generated_image_downloads == [("https://oss.example/img.png", None)]
+
+    call = fake.calls[0]
+    assert call["url"] == (
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+    )
+    assert call["headers"]["Authorization"] == "Bearer ds-token"
+    body = call["json"]
+    assert body["model"] == "qwen-image-3.0-pro"
+    assert body["input"]["messages"][0]["content"] == [{"text": "A golden cat"}]
+    assert body["parameters"]["prompt_extend"] is True
+    assert body["parameters"]["size"] == "1024*1024"
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_size_mapping() -> None:
+    fake = DashScopeFakeClient(FakeResponse(_dashscope_success_payload()))
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(prompt="test", model="wan2.7-image-pro", aspect_ratio="16:9")
+    assert fake.calls[-1]["json"]["parameters"]["size"] == "1280*720"
+
+    await client.generate(prompt="test", model="wan2.7-image-pro", image_size="1664x928")
+    assert fake.calls[-1]["json"]["parameters"]["size"] == "1664*928"
+
+    await client.generate(prompt="test", model="wan2.7-image-pro")
+    assert fake.calls[-1]["json"]["parameters"]["size"] == "1024*1024"
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_logical_error() -> None:
+    fake = DashScopeFakeClient(FakeResponse({
+        "code": "InvalidParameter",
+        "message": "url error",
+        "request_id": "r9",
+    }))
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="InvalidParameter"):
+        await client.generate(prompt="test", model="qwen-image-3.0-pro")
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_requires_api_key() -> None:
+    client = DashScopeImageGenerationClient(api_key=None)
+
+    with pytest.raises(ImageGenerationError, match="API key"):
+        await client.generate(prompt="draw", model="qwen-image-3.0-pro")
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_no_image_in_response() -> None:
+    fake = DashScopeFakeClient(FakeResponse({
+        "output": {"choices": [{"message": {"content": []}}]},
+    }))
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="no images"):
+        await client.generate(prompt="draw", model="qwen-image-3.0-pro")
+
+
+@pytest.mark.asyncio
+async def test_dashscope_image_generation_reference_image_content() -> None:
+    """Reference images ride along as image content parts before the text."""
+    fake = DashScopeFakeClient(FakeResponse(_dashscope_success_payload()))
+    client = DashScopeImageGenerationClient(
+        api_key="ds-token",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(PNG_BYTES)
+        ref_path = f.name
+
+    try:
+        await client.generate(
+            prompt="edit this",
+            model="qwen-image-3.0-pro",
+            reference_images=[ref_path],
+        )
+        content = fake.calls[0]["json"]["input"]["messages"][0]["content"]
+        assert content[0]["image"].startswith("data:image/png;base64,")
+        assert content[1] == {"text": "edit this"}
+    finally:
+        Path(ref_path).unlink(missing_ok=True)
