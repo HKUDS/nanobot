@@ -1,0 +1,36 @@
+[project]
+name = "nanobot-icloud-calendar"
+version = "0.1.0"
+description = "Durable read-only iCloud calendar monitor for Nanobot"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "caldav>=3,<4",
+    "icalendar>=6,<8",
+    "filelock>=3.16,<4",
+    "loguru>=0.7,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.8"]
+
+[project.scripts]
+nanobot-calendar = "time_manager.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["time_manager"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]

@@ -1,0 +1,18 @@
+timezone = "Europe/Warsaw"
+scan_interval_seconds = 300
+lookback_days = 7
+horizon_days = 400
+state_path = "data/state.sqlite3"
+trigger_id = ""
+workspace_path = "/root/.nanobot/workspace"
+management_calendar = "Nanobot"
+# Sleep/wake automation is a separate, explicitly activated stage.
+calendar_only = true
+auto_manage_sleep = false
+sleep_days_ahead = 14
+default_wake_time = "07:00"
+sleep_hours = 8.0
+briefing_minutes_after_wake = 20
+morning_preparation_minutes = 90
+quiet_mode = "sleep"
+initial_scan_notifications = false

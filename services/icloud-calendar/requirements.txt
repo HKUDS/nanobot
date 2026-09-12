@@ -1,0 +1,4 @@
+caldav>=3.0,<4
+icalendar>=6.0,<8
+filelock>=3.16,<4
+loguru>=0.7,<1

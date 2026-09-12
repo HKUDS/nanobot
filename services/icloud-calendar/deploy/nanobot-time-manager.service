@@ -1,0 +1,27 @@
+[Unit]
+Description=Nanobot iCloud Time Manager
+Wants=network-online.target
+After=network-online.target nanobot.service
+ConditionPathExists=/root/.nanobot/workspace/projects/icloud-time-manager/data/webui.toml
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/nanobot-integration/services/icloud-calendar
+Environment=HOME=/root
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+ExecStartPre=/root/.nanobot/venv/bin/python -m time_manager.preflight --config /root/.nanobot/workspace/projects/icloud-time-manager/data/webui.toml
+ExecStart=/root/.nanobot/venv/bin/python -m time_manager.cli --config /root/.nanobot/workspace/projects/icloud-time-manager/data/webui.toml run
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/root/.nanobot/workspace/projects/icloud-time-manager/data /root/.nanobot/workspace/triggers /root/.nanobot/workspace/.nanobot
+
+[Install]
+WantedBy=multi-user.target
