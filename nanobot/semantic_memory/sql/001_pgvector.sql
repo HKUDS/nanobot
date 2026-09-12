@@ -56,8 +56,24 @@ CREATE TABLE IF NOT EXISTS nanobot_memory.retrieval_log (
     query_hash text NOT NULL,
     hit_count integer NOT NULL,
     latency_ms integer NOT NULL,
+    rerank_mode text NOT NULL DEFAULT 'off',
+    candidate_count integer NOT NULL DEFAULT 0,
+    baseline_hit_count integer NOT NULL DEFAULT 0,
+    optimized_hit_count integer NOT NULL DEFAULT 0,
+    selection_overlap real NOT NULL DEFAULT 1.0,
+    baseline_chars integer NOT NULL DEFAULT 0,
+    optimized_chars integer NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE nanobot_memory.retrieval_log
+    ADD COLUMN IF NOT EXISTS rerank_mode text NOT NULL DEFAULT 'off',
+    ADD COLUMN IF NOT EXISTS candidate_count integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS baseline_hit_count integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS optimized_hit_count integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS selection_overlap real NOT NULL DEFAULT 1.0,
+    ADD COLUMN IF NOT EXISTS baseline_chars integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS optimized_chars integer NOT NULL DEFAULT 0;
 
 ALTER TABLE nanobot_memory.tombstones
     ADD COLUMN IF NOT EXISTS content_hash text;

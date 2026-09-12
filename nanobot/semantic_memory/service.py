@@ -273,28 +273,76 @@ class SemanticMemoryService:
             return False
         return True
 
-    async def retrieve(self, request: RequestContext) -> list[SemanticHit]:
+    async def _retrieve_with_metrics(
+        self, request: RequestContext
+    ) -> tuple[list[SemanticHit], dict[str, int | float | str]]:
+        """Retrieve prompt hits and compare the optimizer with the baseline.
+
+        In shadow mode the broad candidate search and deterministic reranker run,
+        but the prompt still receives the original hybrid-search ordering.  The
+        comparison contains hashes/counts only; source-memory content is neither
+        rewritten nor copied into telemetry.
+        """
         if not self._eligible_request(request):
-            return []
+            return [], {"mode": "ineligible"}
         query = str(request.original_user_text).strip()
         vector = await asyncio.to_thread(self.embedder.embed_query, query)
-        # Retrieve a broad hybrid candidate set, then perform a local, fully
-        # deterministic rerank. This improves recall without changing, pruning,
-        # or rewriting any source-memory record.
-        hits = await self.repository.hybrid_search(
+        broad_search = self.config.rerank_enabled
+        candidates = await self.repository.hybrid_search(
             self.namespace,
             query=query,
             embedding=vector,
             session_key=request.session_key,
             scope=self.config.scope,
             candidate_k=self.config.candidate_k,
-            top_k=self.config.candidate_k if self.config.rerank_enabled else self.config.top_k,
+            top_k=self.config.candidate_k if broad_search else self.config.top_k,
             min_score=self.config.min_score,
             min_vector_similarity=self.config.min_vector_similarity,
         )
+        baseline = candidates[: self.config.top_k]
         if not self.config.rerank_enabled:
-            return hits[: self.config.top_k]
-        return _rerank_hits(query, hits, top_k=self.config.top_k)
+            return baseline, {
+                "mode": "off",
+                "candidate_count": len(candidates),
+                "baseline_hit_count": len(baseline),
+                "optimized_hit_count": len(baseline),
+                "selection_overlap": 1.0,
+                "baseline_chars": _selection_chars(baseline, self.config.max_excerpt_chars),
+                "optimized_chars": _selection_chars(baseline, self.config.max_excerpt_chars),
+            }
+
+        try:
+            optimized = _rerank_hits(query, candidates, top_k=self.config.top_k)
+        except Exception as exc:
+            # A broken optional optimizer must not suppress otherwise valid recall.
+            logger.warning("Semantic reranker failed; retaining baseline ({})", type(exc).__name__)
+            return baseline, {
+                "mode": "fallback",
+                "candidate_count": len(candidates),
+                "baseline_hit_count": len(baseline),
+                "optimized_hit_count": len(baseline),
+                "selection_overlap": 1.0,
+                "baseline_chars": _selection_chars(baseline, self.config.max_excerpt_chars),
+                "optimized_chars": _selection_chars(baseline, self.config.max_excerpt_chars),
+            }
+        baseline_keys = {(hit.source_type, hit.source_key) for hit in baseline}
+        optimized_keys = {(hit.source_type, hit.source_key) for hit in optimized}
+        union = baseline_keys | optimized_keys
+        metrics: dict[str, int | float | str] = {
+            "mode": self.config.rerank_mode,
+            "candidate_count": len(candidates),
+            "baseline_hit_count": len(baseline),
+            "optimized_hit_count": len(optimized),
+            "selection_overlap": len(baseline_keys & optimized_keys) / max(1, len(union)),
+            "baseline_chars": _selection_chars(baseline, self.config.max_excerpt_chars),
+            "optimized_chars": _selection_chars(optimized, self.config.max_excerpt_chars),
+        }
+        selected = baseline if self.config.rerank_mode == "shadow" else optimized
+        return selected, metrics
+
+    async def retrieve(self, request: RequestContext) -> list[SemanticHit]:
+        hits, _ = await self._retrieve_with_metrics(request)
+        return hits
 
     def _render(self, hits: Iterable[SemanticHit]) -> str:
         lines = [
@@ -306,19 +354,14 @@ class SemanticMemoryService:
         ]
         used = len("\n".join(lines))
         seen: set[str] = set()
-        seen_terms: list[set[str]] = []
         for hit in hits:
             excerpt = sanitize_memory_text(hit.content, max_chars=self.config.max_excerpt_chars)
-            digest = hashlib.sha256(excerpt.encode()).hexdigest()
-            terms = set(re.findall(r"\w+", excerpt.casefold()))
-            near_duplicate = any(
-                terms and prior and len(terms & prior) / min(len(terms), len(prior)) >= 0.8
-                for prior in seen_terms
-            )
-            if not excerpt or digest in seen or near_duplicate:
+            # Preserve distinct facts all the way into the final prompt, including
+            # shadow/fallback. Never deduplicate by term overlap or truncated text.
+            identity = _dedup_identity(hit.content)
+            if not excerpt or identity in seen:
                 continue
-            seen.add(digest)
-            seen_terms.append(terms)
+            seen.add(identity)
             payload = json.dumps(
                 {
                     "source": hit.source_type,
@@ -352,7 +395,7 @@ class SemanticMemoryService:
             async with asyncio.timeout(self.config.query_timeout_s):
                 # Keep direct/SDK calls fresh even when no long-lived poller runs.
                 await self.reconcile()
-                hits = await self.retrieve(request)
+                hits, metrics = await self._retrieve_with_metrics(request)
                 content = self._render(hits)
                 latency = int((time.monotonic() - started) * 1000)
                 with suppress(Exception):
@@ -362,6 +405,13 @@ class SemanticMemoryService:
                         hashlib.sha256(str(request.original_user_text).encode()).hexdigest(),
                         len(hits),
                         latency,
+                        mode=str(metrics.get("mode", "off")),
+                        candidate_count=int(metrics.get("candidate_count", len(hits))),
+                        baseline_hit_count=int(metrics.get("baseline_hit_count", len(hits))),
+                        optimized_hit_count=int(metrics.get("optimized_hit_count", len(hits))),
+                        selection_overlap=float(metrics.get("selection_overlap", 1.0)),
+                        baseline_chars=int(metrics.get("baseline_chars", 0)),
+                        optimized_chars=int(metrics.get("optimized_chars", 0)),
                     )
                 if not content:
                     return None
@@ -452,12 +502,23 @@ def _terms(text: str) -> set[str]:
     return {term for term in re.findall(r"[a-z0-9_]{3,}", normalized) if term not in _STOP_TERMS}
 
 
+def _dedup_identity(content: str) -> str:
+    return " ".join(unicodedata.normalize("NFC", content).split())
+
+
+def _selection_chars(hits: Iterable[SemanticHit], max_excerpt_chars: int) -> int:
+    """Estimate transient prompt payload without retaining or changing source text."""
+    return sum(len(sanitize_memory_text(hit.content, max_chars=max_excerpt_chars)) for hit in hits)
+
+
 def _rerank_hits(query: str, hits: list[SemanticHit], *, top_k: int) -> list[SemanticHit]:
     """Rerank and diversify candidates without touching source memory.
 
     Hybrid-search order remains the strongest signal. Exact term overlap,
     confidence, importance and durable/correction classes act as bounded tie
-    breakers. Near duplicates are removed only from the transient prompt.
+    breakers. Only whitespace-equivalent copies are removed from the transient
+    prompt. Subset/term similarity is not safe for deduplication: it can erase
+    negation, changed dates, identifiers, or additional facts.
     """
     query_terms = _terms(query)
     ranked: list[tuple[float, SemanticHit, set[str]]] = []
@@ -485,16 +546,13 @@ def _rerank_hits(query: str, hits: list[SemanticHit], *, top_k: int) -> list[Sem
         ranked.append((score, hit, hit_terms))
 
     selected: list[SemanticHit] = []
-    selected_terms: list[set[str]] = []
-    for _, hit, hit_terms in sorted(ranked, key=lambda item: item[0], reverse=True):
-        duplicate = any(
-            hit_terms and prior and len(hit_terms & prior) / min(len(hit_terms), len(prior)) >= 0.8
-            for prior in selected_terms
-        )
-        if duplicate:
+    selected_texts: set[str] = set()
+    for _, hit, _ in sorted(ranked, key=lambda item: item[0], reverse=True):
+        identity = _dedup_identity(hit.content)
+        if identity and identity in selected_texts:
             continue
         selected.append(hit)
-        selected_terms.append(hit_terms)
+        selected_texts.add(identity)
         if len(selected) >= top_k:
             break
     return selected

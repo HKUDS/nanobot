@@ -8,7 +8,7 @@ from nanobot.config.schema import EvolutionConfig
 
 
 class TokenWasteDetector:
-    """Estimate conservative optimization opportunities from usage telemetry.
+    """Report a threshold-based scenario, not measured waste or cost savings.
 
     The detector is observation-only. It never edits prompts, memory, routing,
     configuration, or stored source records.
@@ -26,7 +26,7 @@ class TokenWasteDetector:
         value = usage.get(key, 0)
         return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
-    def summarize(self, rows: list[dict[str, Any]]) -> dict[str, int | float]:
+    def summarize(self, rows: list[dict[str, Any]]) -> dict[str, int | float | str | bool]:
         input_tokens = sum(self._usage_int(row, "input_tokens") for row in rows)
         output_tokens = sum(self._usage_int(row, "output_tokens") for row in rows)
         observed_tokens = sum(self._usage_int(row, "total_tokens") for row in rows)
@@ -43,14 +43,14 @@ class TokenWasteDetector:
         output_overage_turns = 0
         estimated_avoidable_tokens = 0
         for row in rows:
-            rounds = row.get("model_rounds", 0)
+            rounds = row.get("model_rounds")
             if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 0:
                 rounds = self._usage_int(row, "request_count")
             row_input = self._usage_int(row, "input_tokens")
             if rounds > self.config.target_model_rounds:
                 round_overage_turns += 1
-                # Average input per provider request is a deliberately
-                # conservative proxy for removable rounds.
+                # Hypothetical removal of above-target rounds. We have no
+                # evidence these rounds were unnecessary or safe to remove.
                 estimated_avoidable_tokens += (
                     row_input * (rounds - self.config.target_model_rounds) // rounds
                 )
@@ -65,6 +65,8 @@ class TokenWasteDetector:
             (estimated_avoidable_tokens / observed_tokens) * 100 if observed_tokens else 0.0
         )
         return {
+            "estimate_basis": "threshold_scenario_not_measured_savings",
+            "savings_verified": False,
             "observations": len(rows),
             "observed_tokens": observed_tokens,
             "input_tokens": input_tokens,

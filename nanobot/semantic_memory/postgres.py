@@ -295,6 +295,14 @@ class PostgresSemanticMemoryRepository:
         query_hash: str,
         hit_count: int,
         latency_ms: int,
+        *,
+        mode: str = "off",
+        candidate_count: int = 0,
+        baseline_hit_count: int = 0,
+        optimized_hit_count: int = 0,
+        selection_overlap: float = 1.0,
+        baseline_chars: int = 0,
+        optimized_chars: int = 0,
     ) -> None:
         if self._pool is None:
             return
@@ -302,9 +310,24 @@ class PostgresSemanticMemoryRepository:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "INSERT INTO nanobot_memory.retrieval_log "
-                    "(workspace_namespace, session_key, query_hash, hit_count, latency_ms) "
-                    "VALUES (%s, %s, %s, %s, %s)",
-                    (namespace, session_key, query_hash, hit_count, latency_ms),
+                    "(workspace_namespace, session_key, query_hash, hit_count, latency_ms, "
+                    "rerank_mode, candidate_count, baseline_hit_count, optimized_hit_count, "
+                    "selection_overlap, baseline_chars, optimized_chars) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        namespace,
+                        session_key,
+                        query_hash,
+                        hit_count,
+                        latency_ms,
+                        mode,
+                        candidate_count,
+                        baseline_hit_count,
+                        optimized_hit_count,
+                        selection_overlap,
+                        baseline_chars,
+                        optimized_chars,
+                    ),
                 )
 
     async def status(self, namespace: str) -> dict[str, Any]:

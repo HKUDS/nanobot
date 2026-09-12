@@ -51,9 +51,12 @@ usage, but no raw prompt or response. Evolution data is written beneath the
 workspace with directory mode `0700` and file mode `0600`.
 
 The report includes a deterministic token-optimization section. It identifies
-turns above the configured model-round and output-token targets and estimates a
-conservative optimization opportunity. This is observation only: it performs no
-LLM calls and never edits prompts, memory, routing, or runtime configuration.
+turns above the configured model-round and output-token targets and calculates a
+hypothetical threshold scenario. It is **not measured waste or a verified saving**:
+long tasks may need those rounds, and cached tokens have different costs. Actual
+savings require a quality-controlled before/after evaluation. This is observation
+only: it performs no LLM calls and never edits prompts, memory, routing, or runtime
+configuration.
 
 ## Risk model
 

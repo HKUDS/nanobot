@@ -10,10 +10,15 @@ PostgreSQL/pgvector index. It does **not** replace `SOUL.md`, `USER.md`,
 2. The semantic service indexes new or changed history records plus bounded chunks
    of `USER.md` and `MEMORY.md`.
 3. Before a user turn, hybrid pgvector and PostgreSQL full-text search retrieves
-   a broad candidate set. A local deterministic reranker then selects a small,
-   diverse set using relevance, source durability, importance and confidence.
-   Deduplication affects only transient prompt context and never deletes source
-   records or derived index entries.
+   a broad candidate set. A local deterministic reranker computes a candidate
+   selection using relevance, source durability, importance and confidence.
+   The default `rerankMode: "shadow"` keeps the baseline search order in the
+   prompt and records comparison metrics only. `"active"` requires an explicit
+   opt-in after representative recall evaluation. Optimizer errors fall back
+   to baseline rather than suppressing recall.
+   Deduplication removes only whitespace-equivalent copies from transient
+   context, preserving negation, identifiers, dates and additional facts.
+   It never deletes source records or derived index entries.
 4. Recall is injected as transient, explicitly untrusted runtime context. It is
    removed before session persistence so recalled text cannot recursively feed
    future archives. Because opaque provider continuation payloads cannot be
@@ -49,6 +54,7 @@ but does not need superuser or extension-creation privileges.
         "topK": 8,
         "candidateK": 40,
         "rerankEnabled": true,
+        "rerankMode": "shadow",
         "minVectorSimilarity": 0.15,
         "maxContextChars": 6000,
         "pollIntervalS": 60
@@ -91,3 +97,18 @@ chunks.
 - `history.jsonl` compaction does not implicitly delete older indexed episodes.
   Use `purge` and then `reconcile` for an explicit rebuild.
 - Back up PostgreSQL independently and test restoration regularly.
+
+## Shadow evaluation and rollback
+
+The additive `retrieval_log` migration records mode, candidate/hit counts,
+selection overlap and excerpt character counts without memory content. These are
+proxy metrics: overlap is not recall accuracy and shorter text is not necessarily
+better. Compare against labeled tasks covering preferences, decisions, corrections,
+negations and active goals before enabling active selection. Unit fixtures are
+regression checks, not proof of better real-world recall.
+
+No canary or automatic configuration promotion is enabled. Keep `rerankMode` at
+`shadow` until the evaluation gate passes. To undo active ranking, set the mode
+back to `shadow` and reload the gateway in a controlled maintenance window; the
+underlying memory and hybrid index remain intact. Optimizer exceptions already
+fall back to baseline within a request, without altering configuration.

@@ -93,7 +93,8 @@ def test_report_includes_zero_llm_optimization_metrics(tmp_path: Path) -> None:
     report = service.render_report()
     assert "Token optimization (observation only)" in report
     assert "Observed tokens: 300" in report
-    assert "Estimated avoidable tokens: 136" in report
+    assert "Above-target token scenario: 136" in report
+    assert "Measured savings: not established" in report
     assert "do not modify prompts, memory, routing" in report
 
 

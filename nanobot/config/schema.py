@@ -110,6 +110,7 @@ class SemanticMemoryConfig(Base):
     failure_log_interval_s: float = Field(default=300.0, ge=1, le=86_400)
     max_pool_size: int = Field(default=4, ge=1, le=32)
     rerank_enabled: bool = True
+    rerank_mode: Literal["shadow", "active"] = "shadow"
 
     @model_validator(mode="after")
     def validate_semantic_memory(self) -> SemanticMemoryConfig:

@@ -62,7 +62,7 @@ class FakeRepository:
         return self.hits
 
     async def log_retrieval(self, *args, **kwargs):
-        return None
+        self.last_retrieval_log = {"args": args, "kwargs": kwargs}
 
     async def status(self, namespace):
         return {"items": len(self.hashes), "last_updated": None, "last_accessed": None}
@@ -279,7 +279,7 @@ def test_rerank_prioritizes_relevant_durable_memory_and_removes_prompt_duplicate
         ),
         _hit(
             "memory:duplicate",
-            "Szymon mieszka w Bydgoszczy",
+            "Szymon  mieszka w Bydgoszczy.",
             source_type="memory",
             kind="durable",
             importance=0.95,
@@ -288,7 +288,8 @@ def test_rerank_prioritizes_relevant_durable_memory_and_removes_prompt_duplicate
     ]
     ranked = _rerank_hits("Gdzie mieszka Szymon?", hits, top_k=3)
     assert ranked[0].source_key == "memory:1"
-    assert len([hit for hit in ranked if "Bydgoszczy" in hit.content]) == 1
+    # The longer entry contains a separate timezone fact and must survive.
+    assert len([hit for hit in ranked if "Bydgoszczy" in hit.content]) == 2
 
 
 @pytest.mark.asyncio
@@ -309,7 +310,8 @@ async def test_retrieve_reranks_broad_candidates_without_mutating_repository(
         ),
     ]
     service = SemanticMemoryService(
-        config(top_k=1, candidate_k=10), store, tmp_path, repository=repo, embedder=FakeEmbedder()
+        config(top_k=1, candidate_k=10, rerank_mode="active"),
+        store, tmp_path, repository=repo, embedder=FakeEmbedder()
     )
     original = list(repo.hits)
     results = await service.retrieve(
@@ -323,3 +325,155 @@ async def test_retrieve_reranks_broad_candidates_without_mutating_repository(
     assert [hit.source_key for hit in results] == ["memory:city"]
     assert repo.hits == original
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_shadow_rerank_measures_optimizer_but_keeps_baseline_prompt(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path)
+    repo = FakeRepository()
+    repo.hits = [
+        _hit("history:noise", "Niepowiązana rozmowa."),
+        _hit(
+            "memory:city",
+            "Szymon mieszka w Bydgoszczy.",
+            source_type="memory",
+            kind="durable",
+            importance=0.95,
+            confidence=0.95,
+        ),
+    ]
+    service = SemanticMemoryService(
+        config(top_k=1, candidate_k=10, rerank_mode="shadow"),
+        store,
+        tmp_path,
+        repository=repo,
+        embedder=FakeEmbedder(),
+    )
+    request = RequestContext(
+        channel="websocket",
+        chat_id="one",
+        session_key="websocket:one",
+        original_user_text="Gdzie mieszka Szymon?",
+    )
+
+    selected, metrics = await service._retrieve_with_metrics(request)
+
+    assert [hit.source_key for hit in selected] == ["history:noise"]
+    assert metrics["mode"] == "shadow"
+    assert metrics["candidate_count"] == 2
+    assert metrics["selection_overlap"] == 0.0
+    assert metrics["optimized_chars"] > metrics["baseline_chars"]
+    assert repo.hits[0].source_key == "history:noise"
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_shadow_telemetry_contains_only_metrics_not_memory_content(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path)
+    repo = FakeRepository()
+    repo.hits = [_hit("memory:secret", "Poufny fakt źródłowy")]
+    service = SemanticMemoryService(
+        config(top_k=1, candidate_k=5, rerank_mode="shadow"),
+        store,
+        tmp_path,
+        repository=repo,
+        embedder=FakeEmbedder(),
+    )
+
+    await service.provide_context(
+        RequestContext(
+            channel="websocket",
+            chat_id="one",
+            session_key="websocket:one",
+            original_user_text="Jaki fakt pamiętasz?",
+        )
+    )
+
+    telemetry = repr(repo.last_retrieval_log)
+    assert "Poufny fakt źródłowy" not in telemetry
+    assert repo.last_retrieval_log["kwargs"]["mode"] == "shadow"
+    assert repo.last_retrieval_log["kwargs"]["candidate_count"] == 1
+    await service.close()
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("Wysyłaj wiadomości automatycznie.", "Nie wysyłaj wiadomości automatycznie."),
+        ("Szymon mieszka w Bydgoszczy.", "Szymon mieszka w Bydgoszczy i używa Europe/Warsaw."),
+        ("Briefing o 07:00.", "Briefing o 08:00."),
+        ("Preferuje model astra xhigh.", "Preferuje model astra high."),
+        ("Spotkanie jest 2026-09-12.", "Spotkanie jest 2026-09-13."),
+        ("ID konta: 12/34", "ID konta: 1234"),
+        ("Nie zmieniaj wydarzeń użytkownika.", "Zmieniaj wydarzenia użytkownika."),
+        ("API key jest w secret store A.", "API key jest w secret store B."),
+    ],
+)
+def test_rerank_never_deduplicates_distinct_facts(first: str, second: str) -> None:
+    hits = [_hit("one", first), _hit("two", second)]
+    before = [hit.content for hit in hits]
+    ranked = _rerank_hits(first, hits, top_k=8)
+    assert {hit.source_key for hit in ranked} == {"one", "two"}
+    assert [hit.content for hit in hits] == before
+
+
+def test_optimizer_defaults_to_shadow() -> None:
+    assert config().rerank_mode == "shadow"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["shadow", "active"])
+async def test_reranker_failure_keeps_baseline(tmp_path: Path, monkeypatch, mode: str) -> None:
+    repo = FakeRepository()
+    repo.hits = [_hit("baseline", "Ważny fakt pozostaje dostępny.")]
+    service = SemanticMemoryService(
+        config(rerank_mode=mode), MemoryStore(tmp_path), tmp_path,
+        repository=repo, embedder=FakeEmbedder(),
+    )
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("do not include raw exception text in telemetry")
+
+    monkeypatch.setattr("nanobot.semantic_memory.service._rerank_hits", fail)
+    try:
+        selected, metrics = await service._retrieve_with_metrics(RequestContext(
+            channel="websocket", chat_id="one", session_key="websocket:one",
+            original_user_text="Jaki jest ważny fakt?",
+        ))
+        assert selected == repo.hits
+        assert metrics["mode"] == "fallback"
+        assert "exception text" not in repr(metrics)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["shadow", "active", "fallback"])
+async def test_final_prompt_preserves_negation_and_additional_facts(tmp_path: Path, monkeypatch, mode: str) -> None:
+    repo = FakeRepository()
+    repo.hits = [
+        _hit("old", "Wysyłaj wiadomości automatycznie."),
+        _hit("correction", "Nie wysyłaj wiadomości automatycznie.", kind="correction"),
+        _hit("city", "Szymon mieszka w Bydgoszczy."),
+        _hit("zone", "Szymon mieszka w Bydgoszczy i używa strefy Europe/Warsaw."),
+    ]
+    service = SemanticMemoryService(
+        config(rerank_mode="active" if mode == "fallback" else mode),
+        MemoryStore(tmp_path), tmp_path, repository=repo, embedder=FakeEmbedder(),
+    )
+    if mode == "fallback":
+        def fail(*args, **kwargs):
+            raise RuntimeError("test-only failure")
+        monkeypatch.setattr("nanobot.semantic_memory.service._rerank_hits", fail)
+    try:
+        block = await service.provide_context(RequestContext(
+            channel="websocket", chat_id="one", session_key="websocket:one",
+            original_user_text="Jakie są aktualne ograniczenia i preferencje Szymona?",
+        ))
+        assert block is not None
+        for hit in repo.hits:
+            assert hit.content in block.content
+            assert f'"reference":"{hit.source_key}"' in block.content
+        assert block.persist is False
+    finally:
+        await service.close()
