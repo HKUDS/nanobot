@@ -184,6 +184,47 @@ def test_large_trace_details_are_deferred_and_resolved(tmp_path, monkeypatch) ->
     }
 
 
+@pytest.mark.parametrize(
+    ("delta_event", "end_event"),
+    [("reasoning_delta", "reasoning_end"), ("delta", "stream_end")],
+)
+def test_legacy_active_trace_details_match_compacted_page(
+    tmp_path, monkeypatch, delta_event: str, end_event: str,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:legacy-active-traces"
+    traces = [f'exec({json.dumps({"command": label * 40_000})})' for label in ("A", "B")]
+    rows = [
+        {"event": "user", "text": "run it"},
+        {"event": delta_event, "text": "first "},
+        {"event": delta_event, "text": "second"},
+        {"event": end_event},
+        {"event": "message", "kind": "progress", "text": traces[0]},
+        {"event": "message", "text": "between tools"},
+        {"event": "message", "kind": "progress", "text": traces[1]},
+        {"event": "message", "text": "done"},
+        {"event": "turn_end"},
+    ]
+    path = transcript_module.webui_transcript_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    original_bytes = path.read_bytes()
+
+    payload = build_webui_thread_response(key, limit=40, direction="latest")
+
+    assert payload is not None
+    messages = [message for message in payload["messages"] if message.get("kind") == "trace"]
+    assert len(messages) == 2
+    for message, trace in zip(messages, traces, strict=True):
+        detail = build_webui_trace_detail_response(key, message["traceDetail"]["ref"])
+        assert detail == {
+            "message_id": message["id"],
+            "content": trace,
+            "traces": [trace],
+        }
+    assert path.read_bytes() == original_bytes
+
+
 def test_large_structured_trace_error_is_bounded_and_resolved(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:deferred-trace-error"

@@ -3160,6 +3160,7 @@ def build_webui_trace_detail_response(
     turn = _transcript_turn_at_ordinal(session_key, ordinal)
     if turn is None:
         return None
+    turn, _ = _compact_completed_stream_deltas(turn)
     lines = _records_with_replay_identity(turn, turn_ordinal=ordinal)
     for message in replay_transcript_to_ui_messages(lines):
         if message.get("id") != message_id or message.get("kind") != "trace":
