@@ -1,4 +1,4 @@
-"""Optional, persistent context appended to the current user prompt."""
+"""Optional runtime context appended to the current user prompt."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ RUNTIME_CONTEXT_END = "[/Runtime Context]"
 WEBUI_QUOTE_METADATA = "_webui_quote"
 WEBUI_QUOTE_SOURCE = "webui_quote"
 MAX_WEBUI_QUOTE_CHARS = 4_000
+_RUNTIME_CONTEXT_EPHEMERAL_KEY = "_runtime_context_ephemeral"
 
 
 @dataclass(frozen=True)
@@ -26,10 +27,12 @@ class RuntimeContextBlock:
     """Provider-owned context appended verbatim to the current user content.
 
     Callers must bound and delimit content obtained from untrusted sources.
+    Ephemeral blocks are available to the current model request only.
     """
 
     source: str
     content: str
+    ephemeral: bool = False
 
 
 def normalize_webui_quote(value: Any) -> str | None:
@@ -92,8 +95,21 @@ def normalize_runtime_context_blocks(result: RuntimeContextResult) -> list[Runti
         if not source:
             raise ValueError("runtime context block source must not be empty")
         if content:
-            blocks.append(RuntimeContextBlock(source=source, content=content))
+            blocks.append(
+                RuntimeContextBlock(
+                    source=source,
+                    content=content,
+                    ephemeral=block.ephemeral,
+                )
+            )
     return blocks
+
+
+def persistent_runtime_context_blocks(
+    blocks: Sequence[RuntimeContextBlock],
+) -> list[RuntimeContextBlock]:
+    """Return only blocks that are allowed to enter durable session history."""
+    return [block for block in blocks if not block.ephemeral]
 
 
 def runtime_context_blocks_from_metadata(
@@ -121,28 +137,55 @@ def append_runtime_context(
     content: Any,
     blocks: Sequence[RuntimeContextBlock],
 ) -> tuple[Any, dict[str, Any] | None]:
-    """Append blocks and return a durable marker for exact display-time removal."""
+    """Append blocks and return a marker for removal and persistence projection."""
     if not blocks:
         return content, None
 
     rendered = [block.content for block in blocks]
     sources = [block.source for block in blocks]
-    if isinstance(content, list):
-        context_blocks = [{"type": "text", "text": text} for text in rendered]
-        return [*content, *context_blocks], {
+    ephemeral_flags = [block.ephemeral for block in blocks]
+
+    def marker_base() -> dict[str, Any]:
+        marker: dict[str, Any] = {
             "version": 1,
             "sources": sources,
-            "blocks": context_blocks,
         }
+        if any(ephemeral_flags):
+            # These fields are used only while the model transcript is in
+            # memory. The persistence projection removes them before saving.
+            marker["parts"] = rendered
+            marker["ephemeral_blocks"] = ephemeral_flags
+        return marker
+
+    if isinstance(content, list):
+        context_blocks = [{"type": "text", "text": text} for text in rendered]
+        marker = marker_base()
+        marker["blocks"] = context_blocks
+        return [*content, *context_blocks], marker
 
     text = "" if content is None else str(content)
     suffix = "\n\n".join(rendered)
     merged = f"{text}\n\n{suffix}" if text else suffix
-    return merged, {
-        "version": 1,
-        "sources": sources,
-        "suffix": suffix,
-    }
+    marker = marker_base()
+    marker["suffix"] = suffix
+    return merged, marker
+
+
+def _ephemeral_flags(marker: Mapping[str, Any], count: int) -> list[bool]:
+    """Read in-memory block lifecycle flags, defaulting old markers to durable."""
+    raw_flags_value = marker.get("ephemeral_blocks")
+    if not isinstance(raw_flags_value, list):
+        return [False] * count
+    raw_flags = cast(list[object], raw_flags_value)
+    if len(raw_flags) != count:
+        return [False] * count
+    return [value is True for value in raw_flags]
+
+
+def _with_ephemeral_flag(block: dict[str, Any], ephemeral: bool) -> dict[str, Any]:
+    if ephemeral:
+        block[_RUNTIME_CONTEXT_EPHEMERAL_KEY] = True
+    return block
 
 
 def detach_runtime_context(
@@ -168,7 +211,20 @@ def detach_runtime_context(
             clean_content = content[: -(len(suffix) + 2)]
         else:
             return None
-        return clean_content, sources, [{"type": "text", "text": suffix}]
+        raw_parts = marker_data.get("parts")
+        parts = (
+            [part for part in cast(list[Any], raw_parts) if isinstance(part, str)]
+            if isinstance(raw_parts, list)
+            else []
+        )
+        if not parts or "\n\n".join(parts) != suffix:
+            parts = [suffix]
+        flags = _ephemeral_flags(marker_data, len(parts))
+        blocks = [
+            _with_ephemeral_flag({"type": "text", "text": part}, ephemeral)
+            for part, ephemeral in zip(parts, flags)
+        ]
+        return clean_content, sources, blocks
 
     expected = marker_data.get("blocks")
     if isinstance(content, list) and isinstance(expected, list) and expected:
@@ -177,7 +233,12 @@ def detach_runtime_context(
         count = len(expected_blocks)
         if content_blocks[-count:] != expected_blocks:
             return None
-        return content_blocks[:-count], sources, deepcopy(expected_blocks)
+        flags = _ephemeral_flags(marker_data, count)
+        blocks = [
+            _with_ephemeral_flag(deepcopy(block), ephemeral)
+            for block, ephemeral in zip(expected_blocks, flags)
+        ]
+        return content_blocks[:-count], sources, blocks
     return None
 
 
@@ -187,29 +248,75 @@ def reattach_runtime_context(
     blocks: Sequence[Mapping[str, Any]],
 ) -> tuple[Any, dict[str, Any]]:
     """Append detached runtime-context blocks after visible messages are merged."""
-    context_blocks = [deepcopy(dict(block)) for block in blocks]
+    context_blocks: list[dict[str, Any]] = []
+    ephemeral_flags: list[bool] = []
+    for block in blocks:
+        block_copy = deepcopy(dict(block))
+        ephemeral = block_copy.pop(_RUNTIME_CONTEXT_EPHEMERAL_KEY, False) is True
+        context_blocks.append(block_copy)
+        ephemeral_flags.append(ephemeral)
+
+    def marker_base() -> dict[str, Any]:
+        marker: dict[str, Any] = {
+            "version": 1,
+            "sources": list(sources),
+        }
+        if any(ephemeral_flags):
+            marker["ephemeral_blocks"] = ephemeral_flags
+        return marker
+
     if isinstance(content, str) and all(
         block.get("type") == "text" and isinstance(block.get("text"), str)
         for block in context_blocks
     ):
         suffix = "\n\n".join(block["text"] for block in context_blocks)
         merged = f"{content}\n\n{suffix}" if content else suffix
-        return merged, {
-            "version": 1,
-            "sources": list(sources),
-            "suffix": suffix,
-        }
+        marker = marker_base()
+        marker["suffix"] = suffix
+        if any(ephemeral_flags):
+            marker["parts"] = [block["text"] for block in context_blocks]
+        return merged, marker
 
     visible_blocks: list[Any] = (
         [*cast(list[Any], content)]
         if isinstance(content, list)
         else ([] if content is None else [{"type": "text", "text": str(content)}])
     )
-    return [*visible_blocks, *context_blocks], {
-        "version": 1,
-        "sources": list(sources),
-        "blocks": context_blocks,
-    }
+    marker = marker_base()
+    marker["blocks"] = context_blocks
+    return [*visible_blocks, *context_blocks], marker
+
+
+def project_runtime_context_for_persistence(
+    content: Any,
+    marker: Mapping[str, Any],
+) -> tuple[Any, dict[str, Any] | None] | None:
+    """Remove ephemeral blocks before a model message enters session history."""
+    # Existing durable markers do not carry per-block lifecycle metadata and
+    # must pass through unchanged. This also preserves their source ordering.
+    if not isinstance(marker.get("ephemeral_blocks"), list):
+        return content, dict(marker)
+
+    detached = detach_runtime_context(content, marker)
+    if detached is None:
+        return None
+
+    visible_content, sources, blocks = detached
+    persistent_sources: list[str] = []
+    persistent_blocks: list[dict[str, Any]] = []
+    for source, block in zip(sources, blocks):
+        ephemeral = block.pop(_RUNTIME_CONTEXT_EPHEMERAL_KEY, False) is True
+        if not ephemeral:
+            persistent_sources.append(source)
+            persistent_blocks.append(block)
+
+    if not persistent_blocks:
+        return visible_content, None
+    return reattach_runtime_context(
+        visible_content,
+        persistent_sources,
+        persistent_blocks,
+    )
 
 
 def public_history_message(message: Mapping[str, Any]) -> dict[str, Any]:
