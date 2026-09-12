@@ -140,6 +140,7 @@ export function renderSettingsView(
     showSidebar?: boolean;
     onBackToChat?: () => void;
     onSettingsChange?: (payload: SettingsPayload) => void;
+    onStartAutomationChat?: React.ComponentProps<typeof SettingsView>["onStartAutomationChat"];
     onNativeEngineRestart?: () => Promise<string>;
     onRestart?: () => void;
   } = {},
@@ -155,6 +156,7 @@ export function renderSettingsView(
         onBackToChat={options.onBackToChat ?? (() => {})}
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}
+        onStartAutomationChat={options.onStartAutomationChat}
         onNativeEngineRestart={options.onNativeEngineRestart}
         onRestart={options.onRestart}
       />

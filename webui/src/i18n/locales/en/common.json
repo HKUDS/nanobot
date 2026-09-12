@@ -1087,6 +1087,23 @@
     },
     "automations": {
       "viewOptions": "Search and filter",
+      "create": "Create automation",
+      "createPrompt": "Describe an automation, for example: summarize project updates every weekday at 9:00",
+      "createInput": "Describe an automation",
+      "createRequest": "Create an automation for this request:\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "This older automation is missing its delivery destination. Recreate it from the linked chat to continue."
+      },
+      "calendar": {
+        "previousMonth": "Previous month",
+        "nextMonth": "Next month",
+        "today": "Today",
+        "planned": "Planned",
+        "recorded": "Recorded",
+        "more": "+{{count}} more",
+        "noEntries": "No runs in this month.",
+        "outsideMonth": "Without a date in this month"
+      },
       "yourTasks": "Your automations",
       "systemTasks": "System tasks",
       "instructions": "Instructions",
@@ -1161,8 +1178,8 @@
         "at": "At {{time}}",
         "every": "Every {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Daily at {{time}}",
         "weekdaysAt": "Weekdays at {{time}}",
         "hourlyAt": "Hourly at :{{minute}}",
@@ -1392,7 +1409,7 @@
       "at": "{{time}}",
       "every": "Every {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Local trigger",
       "unknown": "Custom schedule"
     },
@@ -1495,12 +1512,13 @@
       "loading": "Loading automations...",
       "loadFailed": "Could not load automations.",
       "empty": "No automations in this session yet.",
+      "openCalendar": "View all in calendar",
       "disabled": "Off",
       "schedule": {
         "at": "{{time}}",
         "every": "Every {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Local trigger",
         "unknown": "Custom schedule"
       },

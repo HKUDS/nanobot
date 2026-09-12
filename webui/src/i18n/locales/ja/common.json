@@ -887,6 +887,23 @@
     },
     "automations": {
       "viewOptions": "検索と絞り込み",
+      "create": "自動タスクを作成",
+      "createPrompt": "作成する自動タスクを説明してください。例：平日の9時にプロジェクトの進捗を要約",
+      "createInput": "自動タスクを説明",
+      "createRequest": "次の依頼に対する自動タスクを作成してください：\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "この旧形式の自動タスクには送信先がありません。続行するには、関連チャットから作り直してください。"
+      },
+      "calendar": {
+        "previousMonth": "前の月",
+        "nextMonth": "次の月",
+        "today": "今日",
+        "planned": "予定",
+        "recorded": "実績",
+        "more": "ほか{{count}}件",
+        "noEntries": "今月の実行はありません。",
+        "outsideMonth": "今月の日付なし"
+      },
       "yourTasks": "自分の自動化",
       "systemTasks": "システムタスク",
       "instructions": "指示",
@@ -961,8 +978,8 @@
         "at": "{{time}}",
         "every": "{{duration}} ごと",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
+        "withTz": "{{summary}}（{{tz}}）",
         "dailyAt": "毎日 {{time}}",
         "weekdaysAt": "月曜日〜金曜日 {{time}}",
         "hourlyAt": "毎時 {{minute}} 分",
@@ -1192,7 +1209,7 @@
       "at": "{{time}}",
       "every": "{{duration}} ごと",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}}（{{tz}}）",
       "local": "ローカルトリガー",
       "unknown": "カスタムスケジュール"
     },
@@ -1295,12 +1312,13 @@
       "loading": "自動タスクを読み込み中...",
       "loadFailed": "自動タスクを読み込めませんでした。",
       "empty": "このセッションにはまだ自動タスクがありません。",
+      "openCalendar": "カレンダーですべて表示",
       "disabled": "オフ",
       "schedule": {
         "at": "{{time}}",
         "every": "{{duration}}ごと",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
         "local": "ローカルトリガー",
         "unknown": "カスタムスケジュール"
       },

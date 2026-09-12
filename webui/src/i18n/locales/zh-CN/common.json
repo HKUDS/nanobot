@@ -1087,6 +1087,23 @@
     },
     "automations": {
       "viewOptions": "搜索与筛选",
+      "create": "创建自动任务",
+      "createPrompt": "描述要创建的自动任务，例如：每个工作日 9:00 汇总项目进展",
+      "createInput": "描述一个自动任务",
+      "createRequest": "请为以下需求创建自动任务：\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "这个旧版自动任务缺少发送目标，无法继续运行。请从关联会话中重新创建该任务。"
+      },
+      "calendar": {
+        "previousMonth": "上个月",
+        "nextMonth": "下个月",
+        "today": "今天",
+        "planned": "计划运行",
+        "recorded": "实际记录",
+        "more": "还有 {{count}} 项",
+        "noEntries": "本月没有运行记录。",
+        "outsideMonth": "本月没有日期的任务"
+      },
       "yourTasks": "你的自动任务",
       "systemTasks": "系统任务",
       "instructions": "任务指令",
@@ -1161,8 +1178,8 @@
         "at": "在 {{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
+        "withTz": "{{summary}}（{{tz}}）",
         "dailyAt": "每天 {{time}}",
         "weekdaysAt": "周一至周五 {{time}}",
         "hourlyAt": "每小时第 {{minute}} 分钟",
@@ -1392,7 +1409,7 @@
       "at": "{{time}}",
       "every": "每 {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}}（{{tz}}）",
       "local": "本地触发器",
       "unknown": "自定义计划"
     },
@@ -1495,12 +1512,13 @@
       "loading": "正在加载自动任务...",
       "loadFailed": "无法加载自动任务。",
       "empty": "这个会话暂时没有自动任务。",
+      "openCalendar": "在日历中查看全部",
       "disabled": "已关闭",
       "schedule": {
         "at": "{{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
         "local": "本地触发器",
         "unknown": "自定义计划"
       },

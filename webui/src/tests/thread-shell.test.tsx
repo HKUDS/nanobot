@@ -1416,6 +1416,40 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("consumes an automation-page first message through the normal thread stream", async () => {
+    const client = makeClient();
+    const consumed = vi.fn();
+    const pendingFirstMessage = {
+      id: "automation-first-message",
+      chatId: "chat-new",
+      content: "Every weekday at 9, summarize open pull requests",
+    };
+
+    render(
+      wrap(
+        client,
+        <StrictMode>
+          <ThreadShell
+            session={session("chat-new")}
+            title="New automation chat"
+            onToggleSidebar={() => {}}
+            pendingFirstMessage={pendingFirstMessage}
+            onPendingFirstMessageConsumed={consumed}
+          />
+        </StrictMode>,
+      ),
+    );
+
+    await waitFor(() => expectSendMessageWithTurn(
+      client,
+      "chat-new",
+      pendingFirstMessage.content,
+    ));
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(consumed).toHaveBeenCalledOnce();
+    expect(consumed).toHaveBeenCalledWith(pendingFirstMessage.id);
+  });
+
   it("keeps the first landing message when new chat history is still empty", async () => {
     const client = makeClient();
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");

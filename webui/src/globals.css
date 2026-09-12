@@ -1021,9 +1021,56 @@
     --settings-margin: 0.75rem;
     max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
   }
+  .settings-grid.settings-feature-page.settings-automations-grid {
+    max-inline-size: calc(60rem + 2 * var(--settings-margin));
+  }
   /* Stack a task's status below its title when the content column is narrow. */
   .automations-page {
     container: automations / inline-size;
+  }
+  .automation-create-composer .thread-composer-surface {
+    max-inline-size: none;
+  }
+  .automation-meta-row {
+    display: grid;
+    grid-template-columns: 1rem minmax(0, 1fr) auto;
+    column-gap: 0.5rem;
+    padding-inline: 1rem;
+  }
+  @media (min-width: 640px) {
+    .automation-meta-row {
+      padding-inline: 1.5rem;
+    }
+  }
+  .automation-calendar-grid { display: none; }
+  .automation-calendar-agenda { display: block; }
+  @container automations (min-width: 44rem) {
+    .automation-calendar-grid { display: block; }
+    .automation-calendar-agenda { display: none; }
+    .automation-calendar-weekdays {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      border-block-end: 1px solid hsl(var(--border) / 0.6);
+    }
+    .automation-calendar-weekdays > div {
+      padding: 8px 10px;
+      color: hsl(var(--muted-foreground));
+      font-size: 10px;
+      line-height: 16px;
+      text-align: end;
+    }
+    .automation-calendar-month {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+    .automation-calendar-day {
+      min-block-size: 112px;
+      min-inline-size: 0;
+      border-inline-end: 1px solid hsl(var(--border) / 0.55);
+      border-block-end: 1px solid hsl(var(--border) / 0.55);
+    }
+    .automation-calendar-day:nth-child(7n) { border-inline-end: 0; }
+    .automation-calendar-day:nth-last-child(-n + 7) { border-block-end: 0; }
   }
   .automation-task-state {
     grid-column: 1;

@@ -901,6 +901,23 @@
     },
     "automations": {
       "viewOptions": "Buscar e filtrar",
+      "create": "Criar automação",
+      "createPrompt": "Descreva uma automação, por exemplo: resumir o andamento do projeto todo dia útil às 9:00",
+      "createInput": "Descreva uma automação",
+      "createRequest": "Crie uma automação para esta solicitação:\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "Esta automação antiga não tem um destino de entrega. Recrie-a na conversa vinculada para continuar."
+      },
+      "calendar": {
+        "previousMonth": "Mês anterior",
+        "nextMonth": "Próximo mês",
+        "today": "Hoje",
+        "planned": "Planejado",
+        "recorded": "Registrado",
+        "more": "+{{count}} mais",
+        "noEntries": "Nenhuma execução neste mês.",
+        "outsideMonth": "Sem data neste mês"
+      },
       "yourTasks": "Suas automações",
       "systemTasks": "Tarefas do sistema",
       "instructions": "Instruções",
@@ -975,8 +992,8 @@
         "at": "Às {{time}}",
         "every": "A cada {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Diariamente às {{time}}",
         "weekdaysAt": "De segunda a sexta às {{time}}",
         "hourlyAt": "A cada hora, no minuto {{minute}}",
@@ -1206,7 +1223,7 @@
       "at": "{{time}}",
       "every": "A cada {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Gatilho local",
       "unknown": "Agendamento personalizado"
     },
@@ -1309,12 +1326,13 @@
       "loading": "Carregando automações...",
       "loadFailed": "Não foi possível carregar as automações.",
       "empty": "Ainda não há automações nesta sessão.",
+      "openCalendar": "Ver tudo no calendário",
       "disabled": "Desligado",
       "schedule": {
         "at": "{{time}}",
         "every": "A cada {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Gatilho local",
         "unknown": "Agendamento personalizado"
       },

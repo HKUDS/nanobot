@@ -1438,9 +1438,10 @@ describe("App layout", () => {
     expect(automationsMain).not.toBeNull();
     expect(within(automationsMain as HTMLElement).queryByText("Settings")).not.toBeInTheDocument();
     expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Check the repo status")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Daily repo check/ }));
+    expect(within(screen.getByRole("dialog", { name: "Daily repo check" })).getByText("Check the repo status")).toBeVisible();
     expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
     fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
@@ -1725,9 +1726,11 @@ describe("App layout", () => {
     expect(within(automationsMain as HTMLElement).queryByText("设置")).not.toBeInTheDocument();
     expect(screen.queryByText("任务队列")).not.toBeInTheDocument();
     expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("检查仓库状态")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /每日检查/ }));
-    expect(within(screen.getByRole("dialog", { name: "每日检查" })).getByText(/每 1天/)).toBeInTheDocument();
+    const detail = within(screen.getByRole("dialog", { name: "每日检查" }));
+    expect(detail.getByText("检查仓库状态")).toBeVisible();
+    expect(detail.getByText(/每 1天/)).toBeInTheDocument();
     expect(screen.queryByText("最近健康状态")).not.toBeInTheDocument();
     expect(screen.queryByText("近期无问题")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();

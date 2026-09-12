@@ -888,6 +888,23 @@
     },
     "automations": {
       "viewOptions": "Buscar y filtrar",
+      "create": "Crear automatización",
+      "createPrompt": "Describe una automatización, por ejemplo: resume las novedades del proyecto cada día laborable a las 9:00",
+      "createInput": "Describe una automatización",
+      "createRequest": "Crea una automatización para esta solicitud:\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "Esta automatización antigua no tiene un destino de entrega. Vuelve a crearla desde el chat vinculado para continuar."
+      },
+      "calendar": {
+        "previousMonth": "Mes anterior",
+        "nextMonth": "Mes siguiente",
+        "today": "Hoy",
+        "planned": "Planificado",
+        "recorded": "Registrado",
+        "more": "+{{count}} más",
+        "noEntries": "No hay ejecuciones este mes.",
+        "outsideMonth": "Sin fecha en este mes"
+      },
       "yourTasks": "Tus automatizaciones",
       "systemTasks": "Tareas del sistema",
       "instructions": "Instrucciones",
@@ -962,8 +979,8 @@
         "at": "A las {{time}}",
         "every": "Cada {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Todos los días a las {{time}}",
         "weekdaysAt": "De lunes a viernes a las {{time}}",
         "hourlyAt": "Cada hora, en el minuto {{minute}}",
@@ -1193,7 +1210,7 @@
       "at": "{{time}}",
       "every": "Cada {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Activador local",
       "unknown": "Programación personalizada"
     },
@@ -1296,12 +1313,13 @@
       "loading": "Cargando automatizaciones...",
       "loadFailed": "No se pudieron cargar las automatizaciones.",
       "empty": "Esta sesión aún no tiene automatizaciones.",
+      "openCalendar": "Ver todo en el calendario",
       "disabled": "Desactivado",
       "schedule": {
         "at": "A las {{time}}",
         "every": "Cada {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Activador local",
         "unknown": "Programación personalizada"
       },

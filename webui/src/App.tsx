@@ -46,6 +46,7 @@ import { useSkills } from "@/hooks/useSkills";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -1111,6 +1112,13 @@ function Shell({
   const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
+    id: string;
+    chatId: string;
+    content: string;
+    images?: SendAttachment[];
+    options?: SendOptions;
+  } | null>(null);
   const settingsExitGuardRef = useRef<SettingsExitGuard | null>(null);
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
   currentShellRouteRef.current = { view, activeKey, settingsSection: settingsInitialSection };
@@ -1565,6 +1573,32 @@ function Shell({
       return null;
     }
   }, [activeWorkspaceScope, createChat, navigate, t]);
+
+  const onStartAutomationChat = useCallback(async (
+    content: string,
+    images?: SendAttachment[],
+    options?: SendOptions,
+    modelPreset?: string | null,
+  ) => {
+    const chatId = await onCreateChat(
+      options?.workspaceScope ?? activeWorkspaceScope,
+      content,
+      modelPreset,
+    );
+    if (!chatId) return false;
+    setPendingAutomationMessage({
+      id: crypto.randomUUID(),
+      chatId,
+      content,
+      images,
+      options,
+    });
+    return true;
+  }, [activeWorkspaceScope, onCreateChat]);
+
+  const onPendingAutomationMessageConsumed = useCallback((id: string) => {
+    setPendingAutomationMessage((current) => current?.id === id ? null : current);
+  }, []);
 
   const onCreateTemporaryChat = useCallback(
     async (
@@ -2739,6 +2773,8 @@ function Shell({
                             onCreateChat={
                               temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
                             }
+                            pendingFirstMessage={pendingAutomationMessage}
+                            onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
                             onForkChat={temporaryChatActive ? undefined : onForkChat}
                             onTurnEnd={onTurnEnd}
                             theme={theme}
@@ -2775,6 +2811,8 @@ function Shell({
                           onToggleSidebar={toggleSidebar}
                           onNewChat={onNewChat}
                           onCreateChat={onCreateChat}
+                          pendingFirstMessage={pendingAutomationMessage}
+                          onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
                           onForkChat={onForkChat}
                           onTurnEnd={context.active ? onTurnEnd : () => void refresh()}
                           theme={theme}
@@ -2832,6 +2870,7 @@ function Shell({
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
                     skills={skills}
+                    onStartAutomationChat={onStartAutomationChat}
                     titleOverrides={sidebarState.title_overrides}
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}

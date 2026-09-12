@@ -40,7 +40,8 @@ import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/sett
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
-import type { SkillSummary } from "@/lib/types";
+import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
+import type { SessionAutomationJob, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
@@ -51,6 +52,12 @@ interface SettingsPageProps {
   onToggleTheme: () => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
+  onStartAutomationChat?: (
+    content: string,
+    images?: SendAttachment[],
+    options?: SendOptions,
+    modelPreset?: string | null,
+  ) => boolean | void | Promise<boolean | void>;
   titleOverrides?: Record<string, string>;
   onLogout?: () => void;
   isRestarting: boolean;
@@ -65,6 +72,7 @@ export function SettingsPage({
   onToggleTheme,
   onBackToChat,
   skills,
+  onStartAutomationChat,
   titleOverrides,
   onLogout,
   isRestarting,
@@ -72,6 +80,8 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
+  const [automationDetailReturn, setAutomationDetailReturn] =
+    useState<SessionAutomationJob | null>(null);
   const {
     activeSection,
     apiService,
@@ -565,6 +575,8 @@ export function SettingsPage({
             <AutomationsSettings
               payload={automations}
               titleOverrides={titleOverrides}
+              settingsSnapshot={controller.settings}
+              onStartChat={onStartAutomationChat}
               loading={automationsLoading}
               query={automationsQuery}
               filter={automationsFilter}
@@ -575,8 +587,14 @@ export function SettingsPage({
               onFilterChange={setAutomationsFilter}
               onSortChange={setAutomationsSort}
               onAction={handleAutomationAction}
-              onRequestEdit={setAutomationPendingEdit}
+              onRequestEdit={(job) => {
+                setAutomationDetailReturn(null);
+                setAutomationPendingEdit(job);
+              }}
               onRequestDelete={setAutomationPendingDelete}
+              onManageModels={() => selectSection("models")}
+              returnToDetailJob={automationDetailReturn}
+              onReturnToDetailHandled={() => setAutomationDetailReturn(null)}
             />
           </div>
         );
@@ -709,6 +727,7 @@ export function SettingsPage({
         onOpenChange={(open) => {
           if (!open) setAutomationPendingEdit(null);
         }}
+        onCancel={(job) => setAutomationDetailReturn(job)}
         onSave={handleAutomationEdit}
       />
 
@@ -728,6 +747,7 @@ export function SettingsPage({
             "motion-reduce:animate-none sm:py-8 lg:py-12",
             "settings-grid",
             !showSidebar && "settings-feature-page",
+            !showSidebar && activeSection === "automations" && "settings-automations-grid",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >

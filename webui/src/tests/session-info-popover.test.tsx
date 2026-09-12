@@ -1,9 +1,13 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { setAppLanguage } from "@/i18n";
+import type { WebUIMutationTransport } from "@/lib/api";
+
+const requestMutation = vi.fn();
+const client: WebUIMutationTransport = { requestMutation };
 
 function automationJob(
   nextRunAt = Date.now() + 3_600_000,
@@ -32,6 +36,7 @@ function automationsResponse(jobs: unknown[]) {
 describe("SessionInfoPopover", () => {
   beforeEach(async () => {
     await setAppLanguage("en");
+    requestMutation.mockReset();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(automationsResponse([automationJob()])),
@@ -48,6 +53,7 @@ describe("SessionInfoPopover", () => {
 
     render(
       <SessionInfoPopover
+        client={client}
         sessionKey="websocket:chat-1"
         token="tok"
         title="Release work"
@@ -66,8 +72,67 @@ describe("SessionInfoPopover", () => {
         }),
       );
     });
-    expect(await screen.findByText("Morning check")).toBeInTheDocument();
-    expect(screen.getByText("Check the project status")).toBeInTheDocument();
+    const row = await screen.findByRole("button", { name: /Morning check/ });
+    expect(row).toHaveAttribute("aria-haspopup", "dialog");
+    expect(screen.queryByText("Check the project status")).not.toBeInTheDocument();
+
+    await user.click(row);
+    const detail = screen.getByRole("dialog", { name: "Morning check" });
+    expect(detail).toHaveClass("max-w-[520px]", "rounded-modal");
+    expect(within(detail).getByText("Instructions")).toBeInTheDocument();
+    expect(within(detail).getByText("Check the project status")).toBeInTheDocument();
+    await user.click(within(detail).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Morning check" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Session details" })).toHaveFocus();
+  });
+
+  it("manages a session task through the shared detail dialog", async () => {
+    const pausedJob = { ...automationJob(), enabled: false };
+    requestMutation.mockResolvedValue({ jobs: [pausedJob] });
+    const user = userEvent.setup();
+
+    render(
+      <SessionInfoPopover
+        client={client}
+        sessionKey="websocket:chat-1"
+        token="tok"
+        title="Release work"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+    await user.click(await screen.findByRole("button", { name: /Morning check/ }));
+    const detail = screen.getByRole("dialog", { name: "Morning check" });
+    await user.click(within(detail).getByRole("button", { name: "Pause" }));
+
+    expect(requestMutation).toHaveBeenCalledWith(
+      "automation.disable",
+      { id: "job-1" },
+      20_000,
+    );
+    expect(await within(detail).findByRole("button", { name: "Resume" })).toBeInTheDocument();
+  });
+
+  it("returns from the shared editor to the same task detail", async () => {
+    const user = userEvent.setup();
+    render(
+      <SessionInfoPopover
+        client={client}
+        sessionKey="websocket:chat-1"
+        token="tok"
+        title="Release work"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+    await user.click(await screen.findByRole("button", { name: /Morning check/ }));
+    await user.click(screen.getByRole("button", { name: "Edit", exact: true }));
+    const editor = await screen.findByRole("dialog", { name: "Edit automation" });
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await user.click(within(editor).getByRole("button", { name: "Cancel", exact: true }));
+
+    expect(await screen.findByRole("dialog", { name: "Morning check" })).toBeVisible();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
   it("localizes the panel chrome in Simplified Chinese", async () => {
@@ -76,6 +141,7 @@ describe("SessionInfoPopover", () => {
 
     render(
       <SessionInfoPopover
+        client={client}
         sessionKey="websocket:chat-1"
         token="tok"
         title="@hyperframes 使用指南"
@@ -103,6 +169,7 @@ describe("SessionInfoPopover", () => {
 
     render(
       <SessionInfoPopover
+        client={client}
         sessionKey="websocket:chat-1"
         token="tok"
         title="Release work"
@@ -140,6 +207,7 @@ describe("SessionInfoPopover", () => {
 
     render(
       <SessionInfoPopover
+        client={client}
         sessionKey="websocket:chat-1"
         token="tok"
         title="Release work"
@@ -148,8 +216,12 @@ describe("SessionInfoPopover", () => {
 
     await user.click(screen.getByRole("button", { name: "Session details" }));
 
-    expect(await screen.findByText("Review PR #4591")).toBeInTheDocument();
-    expect(screen.queryByText('nanobot trigger trg_123 "message"')).not.toBeInTheDocument();
+    const row = await screen.findByRole("button", { name: /PR monitor/ });
+    expect(screen.queryByText("Review PR #4591")).not.toBeInTheDocument();
+    await user.click(row);
+    const detail = screen.getByRole("dialog", { name: "PR monitor" });
+    expect(within(detail).getByText("Command")).toBeInTheDocument();
+    expect(within(detail).getByText('nanobot trigger trg_123 "message"')).toBeInTheDocument();
   });
 
   it("refreshes while open so completed one-shot automations disappear", async () => {
@@ -163,6 +235,7 @@ describe("SessionInfoPopover", () => {
 
     render(
       <SessionInfoPopover
+        client={client}
         sessionKey="websocket:chat-1"
         token="tok"
         title="Release work"
@@ -192,6 +265,7 @@ describe("SessionInfoPopover", () => {
 
     render(
       <SessionInfoPopover
+        client={client}
         sessionKey="websocket:chat-1"
         token="tok"
         title="Release work"

@@ -887,6 +887,23 @@
     },
     "automations": {
       "viewOptions": "搜尋與篩選",
+      "create": "建立自動任務",
+      "createPrompt": "描述要建立的自動任務，例如：每個工作日 9:00 彙整專案進度",
+      "createInput": "描述自動任務",
+      "createRequest": "請為以下需求建立自動任務：\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "這個舊版自動任務缺少傳送目標，無法繼續執行。請從關聯對話中重新建立該任務。"
+      },
+      "calendar": {
+        "previousMonth": "上個月",
+        "nextMonth": "下個月",
+        "today": "今天",
+        "planned": "預定執行",
+        "recorded": "實際記錄",
+        "more": "另有 {{count}} 項",
+        "noEntries": "本月沒有執行記錄。",
+        "outsideMonth": "本月沒有日期的任務"
+      },
       "yourTasks": "你的自動任務",
       "systemTasks": "系統任務",
       "instructions": "任務指示",
@@ -961,8 +978,8 @@
         "at": "於 {{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
+        "withTz": "{{summary}}（{{tz}}）",
         "dailyAt": "每天 {{time}}",
         "weekdaysAt": "每週一至週五 {{time}}",
         "hourlyAt": "每小時第 {{minute}} 分鐘",
@@ -1192,7 +1209,7 @@
       "at": "{{time}}",
       "every": "每 {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}}（{{tz}}）",
       "local": "本機觸發器",
       "unknown": "自訂排程"
     },
@@ -1295,12 +1312,13 @@
       "loading": "正在載入自動任務…",
       "loadFailed": "無法載入自動任務。",
       "empty": "這個對話目前沒有自動任務。",
+      "openCalendar": "在日曆中查看全部",
       "disabled": "已關閉",
       "schedule": {
         "at": "{{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
         "local": "本機觸發器",
         "unknown": "自訂排程"
       },

@@ -14,7 +14,10 @@ import type {
   ComposerContextUsage,
   ComposerRoundUsage,
 } from "@/components/thread/ComposerUsagePopover";
-import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
+import {
+  modelPresetOptionsFromSettings,
+  toModelBadgeInfo,
+} from "@/components/thread/model-preset";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -39,7 +42,6 @@ import {
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
-import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
   RoundUsage,
@@ -398,6 +400,8 @@ interface ThreadShellProps {
     initialMessage?: string,
     modelPreset?: string | null,
   ) => Promise<string | null>;
+  pendingFirstMessage?: PendingFirstMessage & { id: string; chatId: string } | null;
+  onPendingFirstMessageConsumed?: (id: string) => void;
   onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
@@ -424,99 +428,6 @@ interface ThreadShellProps {
   settingsSnapshot?: SettingsPayload | null;
   onOpenModelSettings?: () => void;
   skills?: SkillSummary[];
-}
-
-function toModelBadgeLabel(modelName: string | null): string | null {
-  if (!modelName) return null;
-  const trimmed = modelName.trim();
-  if (!trimmed) return null;
-  const leaf = trimmed.split("/").pop() ?? trimmed;
-  return leaf || trimmed;
-}
-
-interface ModelBadgeInfo {
-  label: string | null;
-  model: string | null;
-  provider: string | null;
-  providerLabel: string | null;
-  needsSetup: boolean;
-}
-
-function modelPresetForBadge(
-  settings: SettingsPayload | null,
-  scopedPreset: string | null,
-): SettingsPayload["model_presets"][number] | null {
-  if (!settings) return null;
-  if (scopedPreset) {
-    return settings.model_presets.find((preset) => preset.name === scopedPreset) ?? null;
-  }
-  const configured = settings.agent.model_preset || "default";
-  return (
-    settings.model_presets.find((preset) => preset.name === configured)
-    ?? settings.model_presets.find((preset) => preset.active)
-    ?? null
-  );
-}
-
-function toModelBadgeInfo(
-  modelName: string | null,
-  settings: SettingsPayload | null,
-  modelPreset: string | null = null,
-): ModelBadgeInfo {
-  const scopedPreset = modelPreset?.trim() || null;
-  const preset = modelPresetForBadge(settings, scopedPreset);
-  const model = scopedPreset
-    ? preset?.model || null
-    : settings?.agent.model || modelName || null;
-  const label = preset
-    ? preset.is_default
-      ? preset.label?.trim() || "Default"
-      : preset.name.trim()
-    : scopedPreset || toModelBadgeLabel(model);
-  const rawProvider = preset?.provider
-    || (!scopedPreset ? settings?.agent.provider : null)
-    || null;
-  const provider = rawProvider === "auto"
-    ? preset?.resolved_provider
-      || (!scopedPreset ? settings?.agent.resolved_provider : null)
-      || null
-    : rawProvider || inferProviderFromModelName(model);
-  const providerRow = provider
-    ? settings?.providers.find((item) => item.name === provider)
-    : null;
-  const needsSetup = Boolean(
-    settings && (!model || !provider || !providerRow || !providerRow.configured),
-  );
-  return {
-    label,
-    model: toModelBadgeLabel(model),
-    provider,
-    providerLabel: provider ? providerDisplayLabel(settings?.providers ?? [], provider) : null,
-    needsSetup,
-  };
-}
-
-function modelPresetOptionsFromSettings(
-  settings: SettingsPayload | null,
-): ModelPresetOption[] {
-  if (!settings) return [];
-  const order = new Map(
-    (settings.model_call_order ?? []).map((name, index) => [name.trim(), index]),
-  );
-  return settings.model_presets
-    .filter((preset) => !preset.is_default && preset.name.trim())
-    .sort((a, b) => (
-      (order.get(a.name.trim()) ?? Number.POSITIVE_INFINITY)
-      - (order.get(b.name.trim()) ?? Number.POSITIVE_INFINITY)
-    ))
-    .map((preset) => {
-      const name = preset.name.trim();
-      return {
-        name,
-        model: preset.model,
-        provider: preset.resolved_provider || preset.provider,
-      };
-    });
 }
 
 const HERO_GREETING_KEYS = [
@@ -697,6 +608,8 @@ export function ThreadShell({
   onTemporaryChatEnabledChange,
   onToggleSidebar,
   onCreateChat,
+  pendingFirstMessage = null,
+  onPendingFirstMessageConsumed,
   onForkChat,
   onTurnEnd,
   theme = "light",
@@ -788,6 +701,7 @@ export function ThreadShell({
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
+  const consumedPendingFirstMessageIdRef = useRef<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const knownTemporaryChatIdsRef = useRef(new Set<string>());
@@ -1396,6 +1310,31 @@ export function ThreadShell({
   }, [chatId, pendingFirstTargetChatId, send]);
 
   useEffect(() => {
+    if (
+      !chatId
+      || pendingFirstMessage?.chatId !== chatId
+      || consumedPendingFirstMessageIdRef.current === pendingFirstMessage.id
+    ) return;
+    consumedPendingFirstMessageIdRef.current = pendingFirstMessage.id;
+    const submitted = send(
+      pendingFirstMessage.content,
+      pendingFirstMessage.images,
+      withWorkspaceScope(pendingFirstMessage.options),
+    );
+    if (submitted && !submitted.sideChannel) {
+      activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
+      setSubmittedViewportTurnId(submitted.turnId);
+    }
+    onPendingFirstMessageConsumed?.(pendingFirstMessage.id);
+  }, [
+    chatId,
+    onPendingFirstMessageConsumed,
+    pendingFirstMessage,
+    send,
+    withWorkspaceScope,
+  ]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -1674,7 +1613,7 @@ export function ThreadShell({
     </div>
   );
   const sessionInfoAction = historyKey ? (
-    <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
+    <SessionInfoPopover client={client} sessionKey={historyKey} token={token} title={title} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator

@@ -208,27 +208,45 @@ describe("Settings system domains", () => {
     expect(screen.getByRole("button", { name: "Open details for cron" })).toBeVisible();
   });
 
-  it("opens a chat from the standalone automations empty state", async () => {
+  it("creates an automation from the standalone empty state", async () => {
     const onBackToChat = vi.fn();
+    const onStartAutomationChat = vi.fn().mockResolvedValue(true);
+    const settings = settingsPayload();
+    settings.providers = [{
+      name: "openai",
+      label: "OpenAI",
+      configured: true,
+    }];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings") return jsonResponse(settings);
       if (url === "/api/webui/automations") return jsonResponse({ jobs: [] });
       return jsonResponse({});
     }));
 
     renderSettingsView({
       initialSection: "automations",
-      initialSettings: settingsPayload(),
+      initialSettings: settings,
       showSidebar: false,
       onBackToChat,
+      onStartAutomationChat,
     });
 
     expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
     expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
-    expect(screen.getByText("Tell nanobot in a chat what you'd like it to do on a schedule.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create in chat" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Open a chat" })).not.toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Describe an automation" });
+    expect(input).toHaveAttribute(
+      "placeholder",
+      "Describe an automation, for example: summarize project updates every weekday at 9:00",
+    );
+    fireEvent.change(input, { target: { value: "Summarize updates every weekday at 9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onStartAutomationChat).toHaveBeenCalledWith(
+      "Create an automation for this request:\n\nSummarize updates every weekday at 9",
+      undefined,
+      undefined,
+      "primary",
+    ));
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(onBackToChat).toHaveBeenCalledTimes(1);
   });

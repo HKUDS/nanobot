@@ -887,6 +887,23 @@
     },
     "automations": {
       "viewOptions": "검색 및 필터",
+      "create": "자동화 만들기",
+      "createPrompt": "만들 자동화를 설명하세요. 예: 평일 오전 9시에 프로젝트 진행 상황 요약",
+      "createInput": "자동화 설명",
+      "createRequest": "다음 요청에 맞는 자동화를 만들어 주세요:\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "이전 형식의 자동화에 전송 대상이 없습니다. 계속하려면 연결된 채팅에서 다시 만들어 주세요."
+      },
+      "calendar": {
+        "previousMonth": "이전 달",
+        "nextMonth": "다음 달",
+        "today": "오늘",
+        "planned": "예정",
+        "recorded": "기록",
+        "more": "+{{count}}개 더",
+        "noEntries": "이번 달 실행 기록이 없습니다.",
+        "outsideMonth": "이번 달 날짜 없음"
+      },
       "yourTasks": "내 자동화",
       "systemTasks": "시스템 작업",
       "instructions": "지침",
@@ -961,8 +978,8 @@
         "at": "{{time}}",
         "every": "{{duration}}마다",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "매일 {{time}}",
         "weekdaysAt": "월요일~금요일 {{time}}",
         "hourlyAt": "매시 {{minute}}분",
@@ -1192,7 +1209,7 @@
       "at": "{{time}}",
       "every": "{{duration}}마다",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "로컬 트리거",
       "unknown": "사용자 지정 일정"
     },
@@ -1295,12 +1312,13 @@
       "loading": "자동화를 불러오는 중...",
       "loadFailed": "자동화를 불러오지 못했습니다.",
       "empty": "이 세션에는 아직 자동화가 없습니다.",
+      "openCalendar": "캘린더에서 모두 보기",
       "disabled": "꺼짐",
       "schedule": {
         "at": "{{time}}",
         "every": "{{duration}}마다",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "로컬 트리거",
         "unknown": "사용자 지정 일정"
       },

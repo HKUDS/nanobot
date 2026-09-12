@@ -887,6 +887,23 @@
     },
     "automations": {
       "viewOptions": "Tìm kiếm và lọc",
+      "create": "Tạo tự động hóa",
+      "createPrompt": "Mô tả tác vụ tự động, ví dụ: tóm tắt tiến độ dự án lúc 9:00 mỗi ngày làm việc",
+      "createInput": "Mô tả tác vụ tự động",
+      "createRequest": "Tạo một tác vụ tự động cho yêu cầu này:\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "Tác vụ tự động cũ này thiếu nơi nhận. Hãy tạo lại từ cuộc trò chuyện liên kết để tiếp tục."
+      },
+      "calendar": {
+        "previousMonth": "Tháng trước",
+        "nextMonth": "Tháng sau",
+        "today": "Hôm nay",
+        "planned": "Đã lên lịch",
+        "recorded": "Đã ghi nhận",
+        "more": "+{{count}} mục khác",
+        "noEntries": "Không có lần chạy nào trong tháng này.",
+        "outsideMonth": "Không có ngày trong tháng này"
+      },
       "yourTasks": "Tác vụ tự động của bạn",
       "systemTasks": "Tác vụ hệ thống",
       "instructions": "Chỉ dẫn",
@@ -961,8 +978,8 @@
         "at": "Vào {{time}}",
         "every": "Mỗi {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Hằng ngày lúc {{time}}",
         "weekdaysAt": "Thứ Hai đến thứ Sáu lúc {{time}}",
         "hourlyAt": "Vào phút {{minute}} mỗi giờ",
@@ -1192,7 +1209,7 @@
       "at": "{{time}}",
       "every": "Mỗi {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Trình kích hoạt cục bộ",
       "unknown": "Lịch tùy chỉnh"
     },
@@ -1295,12 +1312,13 @@
       "loading": "Đang tải tự động hóa...",
       "loadFailed": "Không thể tải tự động hóa.",
       "empty": "Phiên này chưa có tự động hóa.",
+      "openCalendar": "Xem tất cả trong lịch",
       "disabled": "Tắt",
       "schedule": {
         "at": "Lúc {{time}}",
         "every": "Mỗi {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Trình kích hoạt cục bộ",
         "unknown": "Lịch tùy chỉnh"
       },

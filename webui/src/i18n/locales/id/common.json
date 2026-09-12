@@ -887,6 +887,23 @@
     },
     "automations": {
       "viewOptions": "Cari dan filter",
+      "create": "Buat otomatisasi",
+      "createPrompt": "Jelaskan otomatisasi, misalnya: rangkum perkembangan proyek setiap hari kerja pukul 09.00",
+      "createInput": "Jelaskan otomatisasi",
+      "createRequest": "Buat otomatisasi untuk permintaan ini:\n\n{{request}}",
+      "errors": {
+        "legacyMissingDestination": "Otomatisasi lama ini tidak memiliki tujuan pengiriman. Buat ulang dari chat terkait untuk melanjutkan."
+      },
+      "calendar": {
+        "previousMonth": "Bulan sebelumnya",
+        "nextMonth": "Bulan berikutnya",
+        "today": "Hari ini",
+        "planned": "Terjadwal",
+        "recorded": "Tercatat",
+        "more": "+{{count}} lainnya",
+        "noEntries": "Tidak ada eksekusi bulan ini.",
+        "outsideMonth": "Tanpa tanggal di bulan ini"
+      },
       "yourTasks": "Otomatisasi Anda",
       "systemTasks": "Tugas sistem",
       "instructions": "Instruksi",
@@ -961,8 +978,8 @@
         "at": "Pada {{time}}",
         "every": "Setiap {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Setiap hari pukul {{time}}",
         "weekdaysAt": "Senin–Jumat pukul {{time}}",
         "hourlyAt": "Setiap jam pada menit {{minute}}",
@@ -1192,7 +1209,7 @@
       "at": "{{time}}",
       "every": "Setiap {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Pemicu lokal",
       "unknown": "Jadwal khusus"
     },
@@ -1295,12 +1312,13 @@
       "loading": "Memuat otomasi...",
       "loadFailed": "Tidak dapat memuat otomasi.",
       "empty": "Belum ada otomasi dalam sesi ini.",
+      "openCalendar": "Lihat semua di kalender",
       "disabled": "Mati",
       "schedule": {
         "at": "Pada {{time}}",
         "every": "Setiap {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Pemicu lokal",
         "unknown": "Jadwal khusus"
       },

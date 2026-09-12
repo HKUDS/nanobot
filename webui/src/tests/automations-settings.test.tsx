@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { AutomationDeleteDialog, AutomationEditDialog, AutomationsSettings } from "@/components/settings/system/AutomationsSettings";
 import type { AutomationFilter, AutomationSort } from "@/components/settings/system/AutomationsSettings";
-import type { SessionAutomationJob } from "@/lib/types";
+import i18n from "@/i18n";
+import type { SessionAutomationJob, SettingsPayload } from "@/lib/types";
 
 const now = Date.now();
 const task: SessionAutomationJob = {
@@ -20,6 +21,20 @@ const systemTask: SessionAutomationJob = {
   ...task, id: "heartbeat", name: "heartbeat", protected: true, origin: null,
   payload: { message: "" },
 };
+const modelSettings = {
+  agent: {
+    model: "openai/gpt-5-mini",
+    provider: "openai",
+    resolved_provider: "openai",
+    model_preset: "fast",
+  },
+  model_presets: [
+    { name: "fast", model: "openai/gpt-5-mini", provider: "openai", active: true, is_default: false },
+    { name: "deep", model: "openai/gpt-5", provider: "openai", active: false, is_default: false },
+  ],
+  model_call_order: ["fast", "deep"],
+  providers: [{ name: "openai", label: "OpenAI", configured: true }],
+} as SettingsPayload;
 type Props = Partial<React.ComponentProps<typeof AutomationsSettings>>;
 const SYSTEM_TASKS_OPEN_STORAGE_KEY = "nanobot-webui.automation-system-tasks-open";
 
@@ -41,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   window.localStorage.removeItem(SYSTEM_TASKS_OPEN_STORAGE_KEY);
 });
@@ -49,7 +65,8 @@ describe("Automation task list and detail sheet", () => {
   it("avoids redundant headings and decorative uppercase group labels", () => {
     render(<Harness />);
     expect(screen.queryByRole("heading", { name: "Your automations" })).not.toBeInTheDocument();
-    expect(screen.getByRole("list", { name: "Your automations" })).toBeVisible();
+    const month = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date());
+    expect(screen.getByLabelText(month)).toBeVisible();
     const systemToggle = screen.getByRole("button", { name: "System tasks 1" });
     expect(systemToggle).toHaveClass("text-[13px]", "font-medium");
     expect(systemToggle).not.toHaveClass("uppercase", "tracking-[0.08em]");
@@ -165,10 +182,99 @@ describe("Automation task list and detail sheet", () => {
     expect(row).toHaveFocus();
   });
 
+  it("opens both planned and recorded calendar blocks in details before linking to chat", async () => {
+    const user = userEvent.setup();
+    const jobWithHistory: SessionAutomationJob = {
+      ...task,
+      state: {
+        ...task.state,
+        run_history: [{ run_at_ms: now - 60_000, status: "ok", duration_ms: 120_000 }],
+      },
+    };
+    render(<Harness payload={{ jobs: [jobWithHistory] }} />);
+
+    const planned = screen.getByRole("button", { name: /PR watch.*Planned/ });
+    const recorded = screen.getByRole("button", { name: /PR watch.*Recorded/ });
+    expect(planned).toHaveAttribute("aria-haspopup", "dialog");
+    expect(recorded).toHaveAttribute("aria-haspopup", "dialog");
+    expect(screen.queryByRole("link", { name: /PR watch/ })).not.toBeInTheDocument();
+
+    await user.click(recorded);
+    const dialog = screen.getByRole("dialog", { name: "PR watch" });
+    expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Ademo",
+    );
+  });
+
+  it("starts an automation conversation from the inline composer without opening a dialog", async () => {
+    const user = userEvent.setup();
+    const onStartChat = vi.fn().mockResolvedValue(true);
+    render(<Harness
+      payload={{ jobs: [] }}
+      onStartChat={onStartChat}
+      settingsSnapshot={modelSettings}
+    />);
+
+    const composer = screen.getByRole("textbox", { name: "Describe an automation" });
+    await user.type(composer, "Every weekday at 9, summarize my open pull requests");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onStartChat).toHaveBeenCalledWith(
+      "Create an automation for this request:\n\nEvery weekday at 9, summarize my open pull requests",
+      undefined,
+      undefined,
+      "fast",
+    );
+    await waitFor(() => expect(composer).toHaveValue(""));
+  });
+
+  it("uses the shared click picker and creates the chat with the selected model preset", async () => {
+    const user = userEvent.setup();
+    const onStartChat = vi.fn().mockResolvedValue(true);
+    render(<Harness payload={{ jobs: [] }} onStartChat={onStartChat} settingsSnapshot={modelSettings} />);
+
+    await user.click(screen.getByRole("button", { name: "fast" }));
+    const picker = screen.getByRole("dialog", { name: "Switch model for this chat" });
+    await user.click(within(picker).getByRole("option", { name: "deep" }));
+    expect(screen.getByRole("button", { name: "deep" })).toBeVisible();
+
+    const composer = screen.getByRole("textbox", { name: "Describe an automation" });
+    await user.type(composer, "Run a deep weekly review");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onStartChat).toHaveBeenCalledWith(
+      "Create an automation for this request:\n\nRun a deep weekly review",
+      undefined,
+      undefined,
+      "deep",
+    );
+  });
+
+  it("keeps the main chat model chip's long-press drag behavior", () => {
+    vi.useFakeTimers();
+    const onStartChat = vi.fn().mockResolvedValue(true);
+    render(<Harness payload={{ jobs: [] }} onStartChat={onStartChat} settingsSnapshot={modelSettings} />);
+
+    const badge = screen.getByRole("button", { name: "fast" });
+    fireEvent.pointerDown(badge, { pointerId: 1, pointerType: "touch", clientY: 100 });
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByTestId("composer-model-pill-viewport")).toBeInTheDocument();
+    fireEvent.pointerMove(badge, { pointerId: 1, pointerType: "touch", clientY: 56 });
+    fireEvent.pointerUp(badge, { pointerId: 1, pointerType: "touch", clientY: 56 });
+    expect(screen.getByRole("button", { name: "deep" })).toBeVisible();
+  });
+
+  it("uses an automation-specific placeholder", () => {
+    render(<Harness payload={{ jobs: [] }} onStartChat={() => {}} settingsSnapshot={modelSettings} />);
+    expect(screen.getByRole("textbox", { name: "Describe an automation" })).toHaveAttribute(
+      "placeholder",
+      "Describe an automation, for example: summarize project updates every weekday at 9:00",
+    );
+  });
+
   it("keeps a text-only empty state when only system tasks exist", () => {
     render(<Harness payload={{ jobs: [systemTask] }} />);
     expect(screen.getByText("No automations yet.")).toBeVisible();
-    expect(screen.getByText("Tell nanobot in a chat what you'd like it to do on a schedule.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Create in chat" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open a chat" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Search and filter" })).toBeVisible();
@@ -183,7 +289,7 @@ describe("Automation task list and detail sheet", () => {
   it("distinguishes a finished one-time task from a task with no scheduled run", () => {
     render(<Harness payload={{ jobs: [{ ...task, delete_after_run: true,
       state: { last_status: "ok", next_run_at_ms: null } }] }} />);
-    expect(screen.getByRole("button", { name: /PR watch/ })).toHaveTextContent("Completed");
+    expect(screen.getByRole("button", { name: /PR watch.*Completed/ })).toBeVisible();
     expect(screen.queryByText("No next run")).not.toBeInTheDocument();
   });
 
@@ -256,25 +362,25 @@ describe("Automation task list and detail sheet", () => {
     }
   });
 
-  it("uses channel search controls and the skills catalog surface for both task groups", async () => {
+  it("uses the existing settings surfaces for the calendar and system task group", async () => {
     const user = userEvent.setup();
     render(<Harness payload={{ jobs: [task, systemTask, {
       ...systemTask, id: "dream", name: "dream",
       state: { last_status: "error", last_error: "Memory update failed" },
     }] }} />);
     expect(screen.getByRole("heading", { name: "Automations" })).toHaveClass("font-normal", "text-[24px]");
-    const personalRow = screen.getByRole("button", { name: /PR watch/ });
-    expect(personalRow).toHaveClass("rounded-control", "px-2", "py-3", "settings-hover");
+    const taskBlock = screen.getByRole("button", { name: /PR watch.*Planned/ });
+    expect(taskBlock).toHaveAttribute("aria-haspopup", "dialog");
+    expect(screen.queryByRole("button", { name: "Manage PR watch" })).not.toBeInTheDocument();
     const list = screen.getByRole("list", { name: "System tasks" });
-    const surface = personalRow.closest(".bg-settings-surface");
-    expect(surface).toHaveClass("rounded-panel");
-    expect(list.closest(".bg-settings-surface")).toBe(surface);
+    expect(taskBlock.closest("section")).toHaveClass("rounded-panel", "bg-[hsl(var(--settings-surface))]");
+    expect(list.closest(".bg-settings-surface")).not.toBe(taskBlock.closest("section"));
     const search = screen.getByRole("textbox");
     expect(search.closest(".rounded-panel")).toBeNull();
-    expect(search).toHaveClass("h-12", "bg-settings-surface", "focus-visible:bg-background");
+    expect(search).toHaveClass("h-10", "bg-settings-surface", "focus-visible:bg-background");
     expect(screen.getByRole("button", { name: "All 1" }).parentElement).toHaveClass("segmented-control", "flex-wrap");
     const heartbeat = within(list).getByRole("button", { name: /heartbeat/ });
-    expect(heartbeat.className).toBe(personalRow.className);
+    expect(heartbeat).toHaveClass("rounded-control", "settings-hover");
     expect(within(list).queryByText("System-managed automation")).not.toBeInTheDocument();
     expect(within(list).getByText("Memory update failed")).toBeVisible();
     expect(within(list).getByText("Needs attention")).toBeVisible();
@@ -283,6 +389,38 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.getByRole("dialog", { name: "heartbeat" })).toBeVisible();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(heartbeat).toHaveFocus());
+  });
+
+  it("keeps separators inside the date grid and uses spacing for calendar metadata", () => {
+    const outsideTask: SessionAutomationJob = {
+      ...task,
+      id: "outside-month",
+      name: "Paused backlog review",
+      enabled: false,
+      state: {},
+    };
+    render(<Harness payload={{ jobs: [task, outsideTask] }} />);
+
+    const calendar = screen.getByRole("button", { name: /PR watch.*Planned/ }).closest("section")!;
+    expect(calendar.firstElementChild).not.toHaveClass("border-b");
+    expect(calendar.querySelector(".automation-meta-row")).not.toHaveClass("border-t");
+    const outside = within(calendar).getByText("Without a date in this month").closest("details")!;
+    expect(outside).not.toHaveClass("border-t");
+    expect(outside.querySelector("ul")).not.toHaveClass("border-t");
+    expect(calendar).not.toHaveTextContent("·");
+  });
+
+  it("renders schedule metadata as separate fields without dot separators", () => {
+    const cronTask: SessionAutomationJob = {
+      ...task,
+      schedule: { kind: "cron", expr: "0 9 * * 1-5", tz: "Asia/Shanghai" },
+    };
+    render(<Harness payload={{ jobs: [cronTask] }} />);
+    fireEvent.click(screen.getByRole("button", { name: /PR watch/ }));
+    const dialog = screen.getByRole("dialog", { name: "PR watch" });
+    expect(dialog).toHaveTextContent("Weekdays at 09:00");
+    expect(dialog).toHaveTextContent("Asia/Shanghai");
+    expect(dialog).not.toHaveTextContent("·");
   });
 
   it("keeps system tasks mounted for shared expand and collapse transitions without hidden tab stops", async () => {
@@ -349,8 +487,8 @@ describe("Automation task list and detail sheet", () => {
     await user.click(screen.getByRole("button", { name: "All 2" }));
     await user.click(screen.getByRole("button", { name: "Next run" }));
     await user.click(screen.getByRole("menuitem", { name: "Name" }));
-    const rows = within(screen.getByRole("list", { name: "Your automations" })).getAllByRole("button");
-    expect(rows[0]).toHaveTextContent("PR watch");
+    expect(screen.getByRole("button", { name: "Name", exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: /PR watch.*Planned/ })).toBeVisible();
   });
 
   it("uses live renamed chat titles in details and search without changing the bound task", async () => {
@@ -433,7 +571,7 @@ describe("Automation task list and detail sheet", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.getByRole("heading", { name: "Automations" })).toHaveFocus();
     expect(screen.getByText("No automations yet.")).toBeVisible();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /PR watch/ })).not.toBeInTheDocument();
   });
 
   it("uses chevrons only for disclosures, while task rows open dialogs", async () => {
@@ -470,8 +608,7 @@ describe("Automation task list and detail sheet", () => {
     await waitFor(() => expect(edit).toHaveBeenCalledWith(task));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /PR watch/ }));
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(remove).toHaveBeenCalledWith(task));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -487,7 +624,7 @@ describe("Automation task list and detail sheet", () => {
     const getStyle = window.getComputedStyle.bind(window);
     vi.spyOn(window, "getComputedStyle").mockImplementation((node) => {
       const style = getStyle(node);
-      if (!["menu", "dialog"].includes(node.getAttribute("role") ?? "")) return style;
+      if (node.getAttribute("role") !== "dialog") return style;
       return new Proxy(style, {
         get(target, property) {
           if (property === "animationName") return node.getAttribute("data-state") === "closed" ? "exit" : "enter";
@@ -520,9 +657,8 @@ describe("Automation task list and detail sheet", () => {
     render(<DeletionHarness />);
     await user.click(screen.getByRole("button", { name: /PR watch/ }));
     const detail = screen.getByRole("dialog", { name: "PR watch" });
-    await user.click(screen.getByRole("button", { name: "More actions" }));
     expect(document.body.style.pointerEvents).toBe("none");
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     expect(detail).toHaveAttribute("data-state", "closed");
     finishExit(detail);
     const confirmation = await screen.findByRole("dialog", { name: "Delete automation" });
@@ -536,33 +672,55 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.queryByRole("button", { name: /PR watch/ }) !== null).toBe(operation === "Cancel");
   });
 
-  it("returns keyboard focus to the task after cancelling or saving the real editor", async () => {
+  it("returns to the same detail after cancelling or closing the real editor", async () => {
     const user = userEvent.setup();
     const save = vi.fn();
     function EditorHarness() {
       const [editing, setEditing] = useState<SessionAutomationJob | null>(null);
+      const [returning, setReturning] = useState<SessionAutomationJob | null>(null);
       return <>
-        <Harness onRequestEdit={setEditing} />
+        <Harness
+          onRequestEdit={setEditing}
+          returnToDetailJob={returning}
+          onReturnToDetailHandled={() => setReturning(null)}
+        />
         <AutomationEditDialog job={editing} saving={false}
           onOpenChange={(open) => { if (!open) setEditing(null); }}
+          onCancel={setReturning}
           onSave={(job, values) => { save(job, values); setEditing(null); }} />
       </>;
     }
     render(<EditorHarness />);
     const row = screen.getByRole("button", { name: /PR watch/ });
-    for (const operation of ["Cancel", "Save"]) {
-      await user.click(row);
+    for (const operation of ["Cancel", "Close"]) {
+      if (!screen.queryByRole("dialog", { name: "PR watch" })) await user.click(row);
       await user.click(screen.getByRole("button", { name: "Edit", exact: true }));
       const editor = await screen.findByRole("dialog", { name: "Edit automation" });
       expect(screen.getAllByRole("dialog")).toHaveLength(1);
-      if (operation === "Save") {
-        await user.clear(within(editor).getByRole("textbox", { name: "Name", exact: true }));
-        await user.type(within(editor).getByRole("textbox", { name: "Name", exact: true }), "Updated watch");
-      }
       await user.click(within(editor).getByRole("button", { name: operation, exact: true }));
-      await waitFor(() => expect(row).toHaveFocus());
+      await waitFor(() => expect(screen.getByRole("dialog", { name: "PR watch" })).toBeVisible());
+      expect(screen.getAllByRole("dialog")).toHaveLength(1);
     }
-    expect(save).toHaveBeenCalledWith(task, expect.objectContaining({ name: "Updated watch" }));
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("localizes the legacy destination error with a recovery path", async () => {
+    await act(() => i18n.changeLanguage("zh-CN"));
+    render(<Harness payload={{ jobs: [{
+      ...task,
+      state: {
+        ...task.state,
+        last_status: "error",
+        last_error: "legacy cron payload is missing channel/to; recreate it from a chat session",
+      },
+    }] }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /PR watch/ }));
+    const detail = screen.getByRole("dialog", { name: "PR watch" });
+    expect(within(detail).getByRole("alert")).toHaveTextContent(
+      "这个旧版自动任务缺少发送目标，无法继续运行。请从关联会话中重新创建该任务。",
+    );
+    expect(detail).not.toHaveTextContent("legacy cron payload");
   });
 
   it("runs a linked task through the existing action and prevents duplicate actions while busy", async () => {
@@ -570,11 +728,10 @@ describe("Automation task list and detail sheet", () => {
     const action = vi.fn();
     const { rerender } = render(<Harness onAction={action} />);
     await user.click(screen.getByRole("button", { name: /PR watch/ }));
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Run now" }));
+    await user.click(screen.getByRole("button", { name: "Run now" }));
     expect(action).toHaveBeenCalledWith("run", task);
     rerender(<Harness actionKey="run:private-job-id" />);
-    for (const name of ["Edit", "Pause", "More actions"]) {
+    for (const name of ["Edit", "Pause", "Run now", "Delete"]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
     rerender(<Harness error="Unable to run task" />);
@@ -585,9 +742,7 @@ describe("Automation task list and detail sheet", () => {
     const user = userEvent.setup();
     const { rerender } = render(<Harness payload={{ jobs: [{ ...task, state: { pending: true } }] }} />);
     await user.click(screen.getByRole("button", { name: /PR watch/ }));
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    expect(screen.getByRole("menuitem", { name: "Run now" })).toHaveAttribute("aria-disabled", "true");
-    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Run now" })).toBeDisabled();
     rerender(<Harness payload={{ jobs: [{ ...task, enabled: false, origin: null }] }} />);
     expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: "Open a chat" })).not.toBeInTheDocument();
@@ -603,8 +758,8 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.getByText("Command")).toBeVisible();
     expect(within(screen.getByRole("dialog")).getByText("nanobot trigger run trigger-1")).toBeVisible();
     expect(screen.getByRole("button", { name: "Copy" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    expect(screen.queryByRole("menuitem", { name: "Run now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run now" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeVisible();
   });
 
   it("shows paused failures honestly and does not fabricate successful runs", () => {
