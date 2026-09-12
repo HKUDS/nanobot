@@ -266,9 +266,9 @@ describe("Settings system domains", () => {
     fireEvent.change(input, { target: { value: "Summarize updates every weekday at 9" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onStartAutomationChat).toHaveBeenCalledWith(
-      "Create an automation for this request:\n\nSummarize updates every weekday at 9",
+      "Summarize updates every weekday at 9",
       undefined,
-      undefined,
+      { intent: "create_automation" },
       "primary",
     ));
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));

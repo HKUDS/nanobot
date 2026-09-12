@@ -33,6 +33,7 @@ describe("Automation run response", () => {
     expect(screen.queryByText("This record doesn’t include the response text.")).not.toBeInTheDocument();
     expect(fetchResult).toHaveBeenCalledWith("test-token", "reminder", 1000, "cron", expect.any(AbortSignal));
     await act(async () => complete({ response: "**Drink water**" }));
+    await act(async () => { await vi.dynamicImportSettled(); });
     expect(await screen.findByText("Drink water")).toBeVisible();
     expect(screen.getByText("Drink water").tagName).toBe("STRONG");
     expect(screen.queryByText("Current instructions")).not.toBeInTheDocument();

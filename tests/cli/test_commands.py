@@ -28,7 +28,7 @@ from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.cron.service import CronJobSkippedError
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
-from nanobot.cron.types import CronJob, CronPayload
+from nanobot.cron.types import CronJob, CronPayload, CronRunResult
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
 from nanobot.providers.factory import ProviderSnapshot, make_provider, provider_signature
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -2192,6 +2192,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     workspace = tmp_path / "workspace"
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
+    _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.cli.webui.sync_workspace_templates",
         lambda path: seen.__setitem__("templates", path),
@@ -2216,7 +2217,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
         ],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     data = json.loads(config_file.read_text(encoding="utf-8"))
     websocket = data["channels"]["websocket"]
     assert websocket["enabled"] is True
@@ -3205,7 +3206,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     response = asyncio.run(cron.on_job(job))
 
-    assert response == "Checked the repo."
+    assert isinstance(response, CronRunResult)
+    assert response.response == "Checked the repo."
+    assert response.run_id == seen["run_records"][-1][0]
     msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "websocket"
@@ -3247,7 +3250,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     response = asyncio.run(cron.on_job(discord_job))
 
-    assert response == "Checked the repo."
+    assert isinstance(response, CronRunResult)
+    assert response.response == "Checked the repo."
+    assert response.run_id == seen["run_records"][-1][0]
     msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "discord"
@@ -3271,7 +3276,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     response = asyncio.run(cron.on_job(telegram_job))
 
-    assert response == "Checked the repo."
+    assert isinstance(response, CronRunResult)
+    assert response.response == "Checked the repo."
+    assert response.run_id == seen["run_records"][-1][0]
     msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "telegram"
@@ -3297,7 +3304,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     response = asyncio.run(cron.on_job(feishu_job))
 
-    assert response == "Checked the repo."
+    assert isinstance(response, CronRunResult)
+    assert response.response == "Checked the repo."
+    assert response.run_id == seen["run_records"][-1][0]
     msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "feishu"

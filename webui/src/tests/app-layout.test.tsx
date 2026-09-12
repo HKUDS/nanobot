@@ -1455,7 +1455,11 @@ describe("App layout", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Daily repo check/ }));
     expect(within(screen.getByRole("dialog", { name: "Daily repo check" })).getByText("Check the repo status")).toBeVisible();
-    expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
+    const detail = within(screen.getByRole("dialog", { name: "Daily repo check" }));
+    expect(detail.queryByText("Release prep")).not.toBeInTheDocument();
+    expect(detail.getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Achat-a",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /WeChat quiz/ }));
@@ -1463,9 +1467,9 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
     expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /heartbeat/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: "System tasks 1" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("heartbeat")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /heartbeat/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "System tasks 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText("heartbeat")).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -1474,7 +1478,7 @@ describe("App layout", () => {
 
   });
 
-  it("keeps automation linked-chat titles in sync with live sidebar renames", async () => {
+  it("keeps the automation chat link stable across live sidebar renames without duplicating titles", async () => {
     const key = "websocket:linked-chat";
     mockSessions = [{
       key, channel: "websocket", chatId: "linked-chat", createdAt: null, updatedAt: null,
@@ -1505,7 +1509,8 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
     fireEvent.click(await screen.findByRole("button", { name: /Drink water/ }));
     const dialog = screen.getByRole("dialog", { name: "Drink water" });
-    expect(within(dialog).getByText("推特大战场")).toBeVisible();
+    expect(within(dialog).queryByText("推特大战场")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Stored title")).not.toBeInTheDocument();
     expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
       "href", "#/chat/websocket%3Alinked-chat",
     );
@@ -1517,7 +1522,10 @@ describe("App layout", () => {
       });
       const expected = title || "Stored title";
       expect(within(sidebar).getByText(expected)).toBeInTheDocument();
-      expect(within(dialog).getByText(expected)).toBeVisible();
+      expect(within(dialog).queryByText(expected)).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+        "href", "#/chat/websocket%3Alinked-chat",
+      );
     }
     expect(requestMutationSpy).not.toHaveBeenCalled();
   });
@@ -1567,6 +1575,12 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
     expect((await screen.findAllByText("Past one-shot")).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
+    const runDetail = within(screen.getByRole("dialog", { name: "Past one-shot" }));
+    expect(runDetail.getByText("Completed")).toBeVisible();
+    expect(runDetail.queryByRole("button", { name: "Edit", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(runDetail.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Tasks", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByRole("dialog", { name: "Edit automation" });
@@ -1738,7 +1752,9 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: /每日检查.*计划运行/ }));
     const detail = within(screen.getByRole("dialog", { name: "每日检查" }));
     expect(detail.getByText("检查仓库状态")).toBeVisible();
-    expect(detail.getByText(/每 1天/)).toBeInTheDocument();
+    expect(detail.queryByText(/每 1天/)).not.toBeInTheDocument();
+    fireEvent.click(detail.getByRole("button", { name: "任务信息" }));
+    expect(within(screen.getByRole("dialog", { name: "任务信息" })).getByText(/每 1天/)).toBeVisible();
     expect(screen.queryByText("最近健康状态")).not.toBeInTheDocument();
     expect(screen.queryByText("近期无问题")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
