@@ -59,6 +59,7 @@ from nanobot.cli.gateway_runtime import _run_gateway  # noqa: E402
 from nanobot.cli.log_control import _set_nanobot_logs  # noqa: E402
 from nanobot.cli.process_identity import set_cli_process_identity  # noqa: E402
 from nanobot.cli.provider import provider_app  # noqa: E402
+from nanobot.cli.remote import remote  # noqa: E402
 from nanobot.cli.runtime_config import (  # noqa: E402
     _load_inspection_config,
     _load_runtime_config,
@@ -106,6 +107,7 @@ app = typer.Typer(
 )
 
 console = Console()
+app.command()(remote)
 
 def version_callback(value: bool):
     if value:
