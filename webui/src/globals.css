@@ -673,14 +673,27 @@
     min-width: 0;
     max-width: 100%;
     overflow-wrap: anywhere;
-    word-wrap: break-word;
   }
 
   /* Long links and inline code break rather than stretch the column. */
   .markdown-content a,
   .markdown-content code {
     overflow-wrap: anywhere;
-    word-wrap: break-word;
+  }
+
+  /* Display math is intrinsically non-wrapping. Give it its own scrollport;
+     clipping only the transcript hides the right half while the document's
+     scrollWidth still appears correct. A max-content inner box keeps the left
+     edge reachable for long centered equations, and short equations centered. */
+  .markdown-content .katex-display {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+  }
+  .markdown-content .katex-display > .katex {
+    width: max-content;
+    min-width: 100%;
   }
 
   /* Fenced / pre blocks scroll inside their own box, never the page. */

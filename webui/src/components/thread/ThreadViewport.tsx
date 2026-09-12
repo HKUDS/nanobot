@@ -855,7 +855,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           data-testid={!hasMessages ? "thread-welcome-layout" : undefined}
           data-layout={hasComposer ? (hasMessages ? "thread" : "hero") : "external"}
           className={cn(
-            "thread-layout mx-auto grid min-h-full w-full",
+            "thread-layout mx-auto grid min-h-full min-w-0 w-full grid-cols-1",
             hasMessages
               ? "h-full max-w-[64rem]"
               : "max-w-[72rem] px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-6 sm:px-4 sm:py-12",
@@ -873,7 +873,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               )}
             >
-              <div ref={messageContentRef} className="mx-auto w-full max-w-[49.5rem]">
+              <div ref={messageContentRef} className="mx-auto min-w-0 w-full max-w-[49.5rem] shrink-0">
                 <ThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}
@@ -931,7 +931,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 }
               }}
               className={cn(
-                "row-start-2 z-10 w-full",
+                "row-start-2 z-10 min-w-0 w-full",
                 hasMessages ? "thread-composer-dock relative" : "relative self-center",
               )}
             >

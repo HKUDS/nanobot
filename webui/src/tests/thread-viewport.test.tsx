@@ -303,7 +303,13 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    expect(screen.getByTestId("thread-message-region")).toHaveClass("min-w-0");
+    const region = screen.getByTestId("thread-message-region");
+    expect(region).toHaveClass("min-w-0");
+    // An implicit auto grid track can grow to a child's intrinsic width even
+    // when an overflow-hidden ancestor makes document.scrollWidth look safe.
+    expect(region.parentElement).toHaveClass("grid-cols-1", "min-w-0");
+    expect(region.firstElementChild).toHaveClass("min-w-0", "shrink-0");
+    expect(screen.getByTestId("thread-composer-dock")).toHaveClass("min-w-0");
   });
 
   it("top-aligns a short active turn while the agent is responding", () => {

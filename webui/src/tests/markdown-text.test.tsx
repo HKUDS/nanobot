@@ -52,7 +52,10 @@ describe("MarkdownText", () => {
         await Promise.resolve();
         await Promise.resolve();
       });
-      expect(container.querySelector(".streaming-text-fallback")?.textContent).toBe(source);
+      const fallback = container.querySelector(".streaming-text-fallback");
+      expect(fallback?.textContent).toBe(source);
+      expect(fallback).toHaveClass("min-w-0", "max-w-full", "[overflow-wrap:anywhere]");
+      expect(fallback).not.toHaveClass("break-words");
 
       rendererControl.failStreaming = false;
       rerender(<MarkdownText>{source}</MarkdownText>);
