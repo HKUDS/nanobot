@@ -675,6 +675,14 @@ class QQChannel(BaseChannel):
         if url.startswith("//"):
             url = f"https:{url}"
 
+        # Inbound attachment URLs are attacker-influenceable (a compromised or
+        # redirecting CDN can point at an internal address), so validate them
+        # like outbound media and refuse redirects — matching napcat/dingtalk.
+        ok, err = validate_url_target(url)
+        if not ok:
+            self.logger.warning("inbound media URL blocked url={} err={}", url, err)
+            return None
+
         if not self._http:
             self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
@@ -686,7 +694,7 @@ class QQChannel(BaseChannel):
             async with self._http.get(
                 url,
                 timeout=aiohttp.ClientTimeout(total=120),
-                allow_redirects=True,
+                allow_redirects=False,
             ) as resp:
                 if resp.status != 200:
                     self.logger.warning("download failed: status={} url={}", resp.status, url)
