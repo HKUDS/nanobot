@@ -25,6 +25,7 @@ from nanobot.webui import settings_system as system_domain
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
 from nanobot.webui.http_utils import http_response as _http_response
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
+from nanobot.webui.integrations_api import IntegrationsSettingsHandler
 from nanobot.webui.mcp_oauth_api import McpOAuthManager
 from nanobot.webui.mcp_presets_api import (
     ensure_mcp_oauth_server,
@@ -147,7 +148,17 @@ _SYSTEM_ROUTES = {
     },
 }
 
+_INTEGRATION_ROUTES = {
+    "/api/settings/integrations": "status",
+    "/api/settings/integrations/icloud": "icloud",
+    "/api/settings/integrations/mail": "mail",
+    "/api/settings/integrations/prepare": "prepare",
+}
+
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/integrations/icloud",
+    "/api/settings/integrations/mail",
+    "/api/settings/integrations/prepare",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
     "/api/settings/model-configurations/update",
@@ -251,6 +262,7 @@ class WebUISettingsRouter:
             logger,
         )
         self._system = system_domain.SystemSettingsHandler(settings, logger)
+        self._integrations = IntegrationsSettingsHandler(settings)
 
     async def dispatch(
         self,
@@ -289,6 +301,11 @@ class WebUISettingsRouter:
             return await asyncio.to_thread(self._handle_settings_usage)
 
         domain, action = route
+        if domain == "integrations":
+            result = await asyncio.to_thread(self._integrations.handle, action, _mutation_payload(request))
+            response = self._render_result(result)
+            response.headers["Cache-Control"] = "no-store"
+            return response
         domain_request = self._domain_request(
             connection,
             request,
@@ -330,6 +347,8 @@ class WebUISettingsRouter:
 
     @staticmethod
     def _route(path: str) -> tuple[str, str] | None:
+        if action := _INTEGRATION_ROUTES.get(path):
+            return "integrations", action
         if path == "/api/settings":
             return "root", "settings"
         if path == "/api/settings/usage":

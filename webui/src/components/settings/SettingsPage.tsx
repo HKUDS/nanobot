@@ -1,6 +1,7 @@
 import { ChevronLeft, Loader2 } from "lucide-react";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
+import { IntegrationsSettings } from "@/components/settings/IntegrationsSettings";
 import { ImageGenerationSettings } from "@/components/settings/capabilities/ImageGenerationSettings";
 import { AdvancedSettings } from "@/components/settings/capabilities/SecuritySettings";
 import { TranscriptionSettings } from "@/components/settings/capabilities/TranscriptionSettings";
@@ -629,7 +630,9 @@ export function SettingsPage({
             </div>
           ) : null}
 
-          {loading ? (
+          {activeSection === "integrations" ? (
+            <IntegrationsSettings />
+          ) : loading ? (
             <div className="flex h-48 items-center justify-center rounded-panel bg-settings-surface text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               {t("settings.status.loading")}

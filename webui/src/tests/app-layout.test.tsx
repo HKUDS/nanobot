@@ -466,6 +466,18 @@ describe("App layout", () => {
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
   });
 
+  it("accepts the integrations settings hash and preserves the active sidebar section", async () => {
+    window.history.replaceState(null, "", "/#/settings?section=integrations");
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Status integracji" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-transition")).toHaveAttribute("data-settings-section", "integrations");
+    expect(screen.getByRole("button", { name: "Integracje" })).toHaveAttribute("aria-current", "page");
+    expect(window.location.hash).toBe("#/settings?section=integrations");
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+  });
+
   it("uses one main landmark and a page heading in desktop settings", async () => {
     mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
     const { container } = render(<App />);

@@ -30,6 +30,7 @@ Pick the row that matches what you want to accomplish next:
 | Learn the browser workbench | [WebUI](./webui.md) |
 | Connect Telegram, Discord, Slack, Feishu, WeChat, Email, or another chat app | [Chat Apps](./chat-apps.md) |
 | Continuously classify and organize existing IMAP mailboxes | [Mail Watcher service](../services/mail-watcher/README.md) |
+| Configure personal IMAP/iCloud and inspect memory/Evolution services | [Personal integrations in WebUI](./personal-integrations.md) |
 | Choose a hosted, OAuth, company, or local model | [Provider Cookbook](./provider-cookbook.md) |
 | Add model fallbacks | [Configure Model Fallback](./guides/configure-model-fallback.md) |
 | Enable web search | [Configure Web Search](./guides/configure-web-search.md) |

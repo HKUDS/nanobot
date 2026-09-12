@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nanobot.config.integrations import PersonalIntegrationsConfig
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
@@ -567,6 +568,7 @@ class Config(BaseSettings):
     _source_path: Path | None = PrivateAttr(default=None)
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    personal_integrations: PersonalIntegrationsConfig = Field(default_factory=PersonalIntegrationsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
