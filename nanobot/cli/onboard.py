@@ -111,6 +111,9 @@ _QUICK_START_ENDPOINT_CHOICES: dict[str, tuple[_QuickStartEndpointChoice, ...]] 
         _QuickStartEndpointChoice("Standard API", "https://api.stepfun.com/v1"),
         _QuickStartEndpointChoice("Step Plan", "https://api.stepfun.ai/step_plan/v1"),
     ),
+    "sensenova": (
+        _QuickStartEndpointChoice("Standard API", "https://token.sensenova.cn/v1"),
+    ),
     "xiaomi_mimo": (
         _QuickStartEndpointChoice("Standard API", "https://api.xiaomimimo.com/v1"),
         _QuickStartEndpointChoice("Token Plan", "https://token-plan-sgp.xiaomimimo.com/v1"),
