@@ -272,6 +272,7 @@ class AgentLoop:
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
+        replay_reasoning: str | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -350,6 +351,10 @@ class AgentLoop:
         self.tool_hint_max_length = (
             tool_hint_max_length if tool_hint_max_length is not None
             else defaults.tool_hint_max_length
+        )
+        self.replay_reasoning = (
+            replay_reasoning if replay_reasoning is not None
+            else defaults.replay_reasoning
         )
         self.tools_config = _tc
         self.web_config = _tc.web
@@ -503,6 +508,7 @@ class AgentLoop:
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
             tool_hint_max_length=defaults.tool_hint_max_length,
+            replay_reasoning=defaults.replay_reasoning,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             channels_config=config.channels,
             timezone=defaults.timezone,
@@ -1884,7 +1890,10 @@ class AgentLoop:
             session = ctx.require_session()
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
-        ctx.history = session.get_history(extend_to_user=is_subagent)
+        ctx.history = session.get_history(
+            extend_to_user=is_subagent,
+            replay_reasoning=self.replay_reasoning,
+        )
         stored_state = session.provider_state
         subagent_followup_persisted = False
         if is_subagent:
