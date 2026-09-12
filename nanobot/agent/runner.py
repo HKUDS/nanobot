@@ -38,6 +38,7 @@ from nanobot.providers.base import (
     LLMResponse,
     LLMUsage,
     ProviderConversationState,
+    ToolCallRequest,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.summary import SessionSummaryCheckpoint
@@ -495,6 +496,12 @@ class AgentRunner:
                     response,
                 )
                 messages.append(assistant_message)
+                all_tool_calls = [
+                    tool_call.to_openai_tool_call()
+                    for tool_call in response.tool_calls
+                ]
+                completed_tool_results: list[dict[str, Any]] = []
+                completed_count = 0
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -503,11 +510,41 @@ class AgentRunner:
                         "model": spec.runtime.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+                        "pending_tool_calls": all_tool_calls,
                     },
                 )
 
                 await hook.before_execute_tools(context)
+
+                async def checkpoint_completed_batch(
+                    batch_calls: list[ToolCallRequest],
+                    batch_results: list[Any],
+                ) -> None:
+                    nonlocal completed_count
+                    completed_tool_results.extend(
+                        self._build_tool_result_message(
+                            governance_config,
+                            tool_call,
+                            result,
+                        )
+                        for tool_call, result in zip(
+                            batch_calls,
+                            batch_results,
+                            strict=True,
+                        )
+                    )
+                    completed_count += len(batch_calls)
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "awaiting_tools",
+                            "iteration": iteration,
+                            "model": spec.runtime.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": list(completed_tool_results),
+                            "pending_tool_calls": all_tool_calls[completed_count:],
+                        },
+                    )
 
                 results, new_events = await execute_tool_calls(
                     spec.tools,
@@ -517,6 +554,7 @@ class AgentRunner:
                     workspace_violation_counts=workspace_violation_counts,
                     hook=hook,
                     context=context,
+                    on_batch_completed=checkpoint_completed_batch,
                 )
                 tool_events.extend(new_events)
                 tools_used.extend(
@@ -526,21 +564,7 @@ class AgentRunner:
                 )
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
-                completed_tool_results: list[dict[str, Any]] = []
-                for tool_call, result in zip(response.tool_calls, results):
-                    tool_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_call.name,
-                        "content": self.context_governor.normalize_tool_result(
-                            governance_config,
-                            tool_call.id,
-                            tool_call.name,
-                            result,
-                        ),
-                    }
-                    messages.append(tool_message)
-                    completed_tool_results.append(tool_message)
+                messages.extend(completed_tool_results)
                 checkpoint_model_messages = (
                     self.context_governor.prepare_messages_for_model(
                         governance_config,
@@ -1349,6 +1373,24 @@ class AgentRunner:
         callback = spec.checkpoint_callback
         if callback is not None:
             await callback(payload)
+
+    def _build_tool_result_message(
+        self,
+        governance_config: ContextGovernanceConfig,
+        tool_call: ToolCallRequest,
+        result: Any,
+    ) -> dict[str, Any]:
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "name": tool_call.name,
+            "content": self.context_governor.normalize_tool_result(
+                governance_config,
+                tool_call.id,
+                tool_call.name,
+                result,
+            ),
+        }
 
     @staticmethod
     def _append_final_message(messages: list[dict[str, Any]], content: str | None) -> None:

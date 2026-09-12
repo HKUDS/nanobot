@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -244,6 +245,194 @@ async def test_tool_execution_batches_read_only_tools_before_exclusive_work():
     assert shared_events.index("end:read_a") < shared_events.index("start:write_a")
     assert shared_events.index("end:read_b") < shared_events.index("start:write_a")
     assert shared_events[-2:] == ["start:write_a", "end:write_a"]
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_reports_completed_batch_before_next_batch():
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "read_a",
+        delay=0.01,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+    tools.register(_DelayTool(
+        "read_b",
+        delay=0.01,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+    tools.register(_DelayTool(
+        "write_a",
+        delay=0,
+        read_only=False,
+        shared_events=shared_events,
+    ))
+    completed_batches: list[tuple[list[str], list[Any]]] = []
+
+    async def on_batch_completed(
+        batch_calls: list[ToolCallRequest],
+        batch_results: list[Any],
+    ) -> None:
+        call_ids = [call.id for call in batch_calls]
+        completed_batches.append((call_ids, list(batch_results)))
+        shared_events.append(f"checkpoint:{','.join(call_ids)}")
+
+    await execute_tool_calls(
+        tools,
+        [
+            ToolCallRequest(id="ro1", name="read_a", arguments={}),
+            ToolCallRequest(id="ro2", name="read_b", arguments={}),
+            ToolCallRequest(id="rw1", name="write_a", arguments={}),
+        ],
+        concurrent=True,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=AgentHook(),
+        context=AgentHookContext(iteration=0, messages=[]),
+        on_batch_completed=on_batch_completed,
+    )
+
+    assert completed_batches == [
+        (["ro1", "ro2"], ["read_a", "read_b"]),
+        (["rw1"], ["write_a"]),
+    ]
+    checkpoint_index = shared_events.index("checkpoint:ro1,ro2")
+    assert shared_events.index("end:read_a") < checkpoint_index
+    assert shared_events.index("end:read_b") < checkpoint_index
+    assert checkpoint_index < shared_events.index("start:write_a")
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_stops_before_next_batch_when_batch_callback_fails():
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "write_a",
+        delay=0,
+        read_only=False,
+        shared_events=shared_events,
+    ))
+    tools.register(_DelayTool(
+        "write_b",
+        delay=0,
+        read_only=False,
+        shared_events=shared_events,
+    ))
+    completed_batches: list[list[str]] = []
+
+    async def failing_checkpoint(
+        batch_calls: list[ToolCallRequest],
+        _batch_results: list[Any],
+    ) -> None:
+        completed_batches.append([call.id for call in batch_calls])
+        raise RuntimeError("checkpoint failed")
+
+    with pytest.raises(RuntimeError, match="checkpoint failed"):
+        await execute_tool_calls(
+            tools,
+            [
+                ToolCallRequest(id="w1", name="write_a", arguments={}),
+                ToolCallRequest(id="w2", name="write_b", arguments={}),
+            ],
+            concurrent=True,
+            external_lookup_counts={},
+            workspace_violation_counts={},
+            hook=AgentHook(),
+            context=AgentHookContext(iteration=0, messages=[]),
+            on_batch_completed=failing_checkpoint,
+        )
+
+    assert completed_batches == [["w1"]]
+    assert shared_events == ["start:write_a", "end:write_a"]
+
+
+@pytest.mark.asyncio
+async def test_runner_checkpoints_tool_progress_after_each_batch():
+    provider = MagicMock()
+    calls = 0
+
+    async def chat_stream_with_retry(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(id="ro1", name="read_a", arguments={}),
+                    ToolCallRequest(id="ro2", name="read_b", arguments={}),
+                    ToolCallRequest(id="rw1", name="write_a", arguments={}),
+                ],
+                finish_reason="tool_calls",
+                usage=None,
+            )
+        return LLMResponse(content="done", tool_calls=[], usage=None)
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "read_a",
+        delay=0,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+    tools.register(_DelayTool(
+        "read_b",
+        delay=0,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+    tools.register(_DelayTool(
+        "write_a",
+        delay=0,
+        read_only=False,
+        shared_events=shared_events,
+    ))
+    checkpoints: list[dict[str, Any]] = []
+
+    async def checkpoint(payload: dict[str, Any]) -> None:
+        checkpoints.append(deepcopy(payload))
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "do the work"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        concurrent_tools=True,
+        checkpoint_callback=checkpoint,
+    ))
+
+    assert result.final_content == "done"
+    awaiting = [row for row in checkpoints if row["phase"] == "awaiting_tools"]
+    assert [
+        [call["id"] for call in row["pending_tool_calls"]]
+        for row in awaiting
+    ] == [
+        ["ro1", "ro2", "rw1"],
+        ["rw1"],
+        [],
+    ]
+    assert [
+        [tool_result["tool_call_id"] for tool_result in row["completed_tool_results"]]
+        for row in awaiting
+    ] == [
+        [],
+        ["ro1", "ro2"],
+        ["ro1", "ro2", "rw1"],
+    ]
+    tools_completed = [
+        row for row in checkpoints
+        if row["phase"] == "tools_completed"
+    ]
+    assert len(tools_completed) == 1
+    assert [
+        row["tool_call_id"]
+        for row in tools_completed[0]["completed_tool_results"]
+    ] == ["ro1", "ro2", "rw1"]
 
 
 @pytest.mark.asyncio
