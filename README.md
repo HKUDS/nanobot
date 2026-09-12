@@ -18,9 +18,8 @@
   </p>
   <p>
     <a href="https://github.com/HKUDS/nanobot"><img src="https://img.shields.io/github/stars/HKUDS/nanobot?style=flat&logo=github" alt="GitHub stars"></a>
-    <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI version"></a>
-    <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="PyPI downloads"></a>
-    <a href="https://github.com/HKUDS/nanobot/actions/workflows/ci.yml"><img src="https://github.com/HKUDS/nanobot/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
+    <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai?label=upstream%20PyPI" alt="Upstream PyPI version"></a>
+    <a href="https://github.com/szymongalka/nanobot-extended/actions/workflows/ci.yml"><img src="https://github.com/szymongalka/nanobot-extended/actions/workflows/ci.yml/badge.svg?branch=codex%2Fintegrations-stability-upstream" alt="Fork test suite"></a>
     <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/badge/python-%3E%3D3.11-blue" alt="Python 3.11 or newer"></a>
     <a href="./LICENSE"><img src="https://img.shields.io/github/license/HKUDS/nanobot" alt="MIT License"></a>
     <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/docs-nanobot.wiki-blue" alt="nanobot documentation"></a>
@@ -32,14 +31,19 @@
   </p>
 </div>
 
-# nanobot
+# nanobot-extended
 
-🐈 **nanobot** is an ultra-lightweight, open-source, self-hosted personal AI agent framework written in Python. It runs in a WebUI, terminal, or chat apps and combines tools, long-term memory, MCP integrations, model routing, multi-agent delegation, scheduled automation, and an OpenAI-compatible API in a small, readable core.
+🐈 **nanobot-extended** is a self-hosted personal AI agent with a WebUI, terminal client, and chat integrations. It extends [HKUDS/nanobot](https://github.com/HKUDS/nanobot) with a shared Telegram conversation, a separate notification feed, linked iCloud calendar/mail settings, and gateway recovery controls. The Python core retains upstream tools, memory, MCP integrations, model routing, scheduled automation, and an OpenAI-compatible API.
+
+This is an independently maintained fork. Upstream authorship and the MIT license are preserved; the language links and community channels above belong to upstream. The `nanobot-ai` package on PyPI and upstream installers do **not** install this fork's additions. Use the source installation below.
+
+**Status:** integration work is in progress on `codex/integrations-stability-upstream`. Features described as available below exist in this checkout; unfinished autonomous development, remote-node support, and live account-limit displays are tracked in the [rollout checklist](./docs/autonomous-agent-rollout.md). The [previous integration verification report](./docs/rollout-20260912.md) records a specific tested revision, not a guarantee about later commits or another installation.
 
 ## Start Here
 
 | You want to... | Go to |
 |---|---|
+| Install this fork and understand what is available | [Install](#-install) and [Integrations and shared chats](#integrations-and-shared-chats) |
 | Install nanobot with no terminal/config background | [Start Without Technical Background](./docs/start-without-technical-background.md) |
 | Install quickly and get one CLI reply | [Install](#-install) and [Quick Start](#-quick-start) |
 | Open the bundled browser UI | [WebUI](#-webui) |
@@ -47,6 +51,7 @@
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
 | Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md) |
+| Contribute a change and run the checks | [Development and tests](#development-and-tests) and [Contributing](#-contribute) |
 
 ## What can nanobot do?
 
@@ -71,20 +76,47 @@ nanobot is a self-hosted personal AI agent runtime. It can:
 ## 📦 Install
 
 > [!IMPORTANT]
-> If you want the newest features and experiments, install from source.
->
-> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+> Install this fork from its source checkout. Installing or upgrading `nanobot-ai` from PyPI selects the upstream release instead.
 
-Pick **one** install method:
+Requirements:
 
-| Track | Install with | Update with | What runs |
-|---|---|---|---|
-| Stable | installer, `uv`, or pip | the same package tool | one released Python/WebUI/TUI version |
-| Current source | editable Git checkout | `git pull --ff-only` + editable dependency sync | Python, WebUI, and TUI from that checkout |
+- Python **3.11 or newer** and Git.
+- [Bun](https://bun.sh/) for the source WebUI and TUI; TUI CI uses Bun **1.3.13**.
+- A configured provider account, API endpoint, or local model server. Tool use, images, and other capabilities depend on the provider and model.
+- Linux with systemd for the optional external supervisor. Core CLI/WebUI also support macOS and Windows; Windows ARM64 currently lacks the native TUI runtime.
 
-Prerequisites: Python 3.11 or newer. Git and [Bun](https://bun.sh/) are only needed for a source install. Published packages include the WebUI and fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
+```bash
+git clone --branch codex/integrations-stability-upstream --single-branch https://github.com/szymongalka/nanobot-extended.git
+cd nanobot-extended
+python -m venv .venv
+```
 
-If terminals, API keys, or config files are new to you, use the guided zero-background walkthrough in [Start Without Technical Background](./docs/start-without-technical-background.md) instead of this compact README path.
+Activate the environment with `source .venv/bin/activate` on macOS/Linux or
+`.venv\Scripts\Activate.ps1` in Windows PowerShell. If your system only provides
+`python3`, use it for the virtual-environment command above.
+
+```bash
+python -m pip install -e .
+nanobot --version
+nanobot webui
+```
+
+Keep this checkout and Bun available: the editable install uses its matching TUI,
+and `nanobot webui` rebuilds stale frontend assets. Optional integrations have
+their own prerequisites; installing the gateway does not start a mail worker or
+calendar monitor. Follow their linked service guides below.
+
+To update a clean checkout on the same branch, run `git pull --ff-only`, then
+`python -m pip install -e .`. Restart the gateway using the process manager that
+owns it. Back up private configuration and state before changing versions.
+
+<details>
+<summary>Installing an upstream release instead</summary>
+
+The methods in this section install **HKUDS/nanobot**, without this fork's additional
+integrations. Published upstream packages bundle the WebUI and fetch a checksummed,
+version-matched TUI archive with its license and corresponding-source materials.
+The [guided setup](./docs/start-without-technical-background.md) provides more background.
 
 **One-command setup**
 
@@ -128,30 +160,6 @@ python -m pip install nanobot-ai
 
 If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or install inside a virtual environment.
 
-**Install from source**
-
-Clone the repository and install it in editable mode. Bun is required because the source
-checkout runs the matching TUI directly instead of downloading an older release binary.
-
-```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-python -m venv .venv
-```
-
-Activate it with `source .venv/bin/activate` on macOS/Linux or
-`.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
-
-```bash
-python -m pip install -e .
-```
-
-After that, the normal commands are identical to a stable install. `nanobot` runs the TUI
-from this checkout, and `nanobot webui` rebuilds stale frontend assets automatically. A later
-`git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun
-`python -m pip install -e .` when Python dependencies change. Contributors should also read
-[`CONTRIBUTING.md`](./CONTRIBUTING.md).
-
 Verify the install:
 
 ```bash
@@ -159,6 +167,8 @@ nanobot --version
 ```
 
 If `nanobot` is not on `PATH`, invoke it through the method that installed it: reuse the recommended installer's command, use `uv tool run --from nanobot-ai nanobot ...` or `pipx run --spec nanobot-ai nanobot ...`, or use the Python executable from the environment where pip installed the package.
+
+</details>
 
 ## 🚀 Quick Start
 
@@ -209,7 +219,7 @@ Use `nanobot gateway --background` for the same direct entry point without keepi
 nanobot
 ```
 
-This opens the native terminal client with the launch directory as its workspace. It shares saved conversations and the local gateway with the WebUI. The explicit `nanobot agent` form remains available for compatibility.
+This opens the native terminal client and shares saved conversations and the local gateway with the WebUI. When the owner-only shared Telegram inbox is configured, it opens **Main** using the gateway workspace. Otherwise, it starts a new session using the launch directory. The explicit `nanobot agent` form remains available for compatibility.
 
 - Type `/` to discover commands, `/sessions` to switch conversations, or `@` to mention an app, MCP server, or saved session.
 - Paste clipboard images with `Ctrl+V` or `Alt+V`, and use `$` to complete skill references.
@@ -217,7 +227,7 @@ This opens the native terminal client with the launch directory as its workspace
 - Press `Enter` to send. While nanobot is working, `Enter` sends now and `Tab` sends after the current response. Press `Shift+Enter` to add a newline (`Ctrl+J` works in terminals that cannot distinguish modified Enter keys).
 - Use `/detach` to leave the current task running, or start with `nanobot gateway --background` when nanobot should stay online after all local clients exit.
 
-Each launch starts a new session by default. Use `--session` to resume one and `--workspace` to choose another workspace. See the [CLI reference](./docs/cli-reference.md#agent-cli) for session branching, diffs, history, shortcuts, gateway lifecycle, and compatibility options.
+Use `--session SESSION_ID` to resume a particular conversation or `--session ""` to request a new ordinary session. `--workspace` selects the workspace for ordinary sessions; shared Main keeps the gateway workspace. See the [TUI guide](./tui/README.md) and [CLI reference](./docs/cli-reference.md#agent-cli) for session branching, diffs, history, shortcuts, gateway lifecycle, and compatibility options.
 
 For one request and an immediate exit, use:
 
@@ -228,6 +238,49 @@ nanobot -m "Hello!"
 The one-shot form is useful for a quick provider check, shell scripts, and local automation. If you have not configured a model yet, run `nanobot webui` and open **Settings → Models** first.
 
 Need manual JSON, another device on your LAN, or help with provider/model matching? Continue with [Install and Quick Start](./docs/quick-start.md), [WebUI](./docs/webui.md), or [Troubleshooting](./docs/troubleshooting.md).
+
+## Configuration and credentials
+
+Configuration lives in `~/.nanobot/config.json`; sessions and runtime data belong
+outside the checkout. Set up providers in **Settings → Models**, channels in their
+settings panels, and Apple/mail in **Settings → Integrations**. Saving settings and
+successfully testing a connection are separate steps.
+
+Provider secrets can use environment references such as
+`"apiKey": "${OPENROUTER_KEY}"`; the variable must be present in the gateway's
+environment. Keep credentials, OAuth state, session history, and exported service
+configuration out of Git. On POSIX, keep the configuration file private with
+`chmod 600 ~/.nanobot/config.json`.
+
+For Telegram, set `allowFrom` to the intended user IDs. The shared inbox requires
+exactly one numeric owner ID; an empty allowlist denies access. Leave the local
+WebUI on loopback unless you have configured authenticated remote access. See
+[Configuration](./docs/configuration.md) and [Security](./SECURITY.md) for access
+controls, secret handling, and optional shell sandboxing.
+
+## Integrations and shared chats
+
+| Component | Available behavior | Setup and limits |
+|---|---|---|
+| Telegram, WebUI, TUI | Owner **Main / Czat główny** reads the canonical Telegram conversation. **Notifications / Powiadomienia** appears above Main, with a read-only composer, shared unread state, and delivery status. | Enable the Telegram shared inbox with `technical.sharedInbox`, set `technical.mainChatId`, and use that same ID as the sole `allowFrom` entry. Restart the gateway after changing shared-inbox setup. |
+| Additional Telegram notification profile | Optional outbound technical notifications show event names and statuses. | Configure it separately in Telegram settings. Same-bot delivery requires a dedicated group/channel; technical direct messages require a separate bot. The shared inbox works without enabling this profile. |
+| Apple / iCloud | Email and an Apple app-specific password configure linked CalDAV and iCloud IMAP. Leaving the password field empty preserves the saved secret. | Use the Apple integration form. Sleep and wake-up planning remains disabled by default. Install and configure the [calendar monitor](./services/icloud-calendar/README.md) separately. |
+| Mail | All-folder discovery, durable event intake, dry-run routing, and connection checks. No initial rules or folder allowlist is required. | The [mail watcher](./services/mail-watcher/README.md) uses separately installed Himalaya and Carillon. All-folder mode does not move mail. Collaborative rule creation is still planned. |
+| Recovery | Persisted sustained goals can resume through the gateway watchdog. An external systemd supervisor can check the gateway and goal scanner every ten minutes with a bounded restart budget. | Goal recovery is opt-in through `gateway.goalRecovery.enabled`; see the [supervisor guide](./docs/external-supervisor.md). Paused work and uncertain tool outcomes remain held for review. |
+
+Upstream channel adapters include Discord, Slack, Matrix, Teams, email, and others;
+see [Chat Apps](./docs/chat-apps.md). MCP, skills, and model adapters remain available.
+Model support does not imply that every provider offers the same tools, context
+window, media support, or account-usage information.
+
+### Work in progress
+
+The [acceptance checklist](./docs/autonomous-agent-rollout.md) tracks proactive
+attention summaries, notification actions, full TUI/WebUI task controls, remote
+nodes over an existing WireGuard route plus SSH, installation automation, isolated
+self-development with verification and rollback, and live Codex account limits.
+These are not complete features of this checkout. Token counts shown in an
+existing conversation are not a subscription quota display.
 
 If nanobot worked for you, a star on GitHub is the simplest way to support the project.
 
@@ -242,9 +295,10 @@ If nanobot worked for you, a star on GitHub is the simplest way to support the p
 
 ## ☁️ Deploy
 
-**Render — one click**
+**Render — upstream Blueprint**
 
-Deploy nanobot's gateway and bundled WebUI from the repository's ready-to-use Blueprint:
+This deployment button installs **upstream HKUDS/nanobot**. It does not deploy this
+fork's integration branch or its companion services:
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
 
@@ -328,7 +382,11 @@ See the [WebUI guide](./docs/webui.md) for LAN access, background operation, wor
 
 ## Docs
 
-Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
+Browse the [repo docs](./docs/README.md) for the source documentation. Many guides
+are inherited from upstream; use the fork installation above and the
+[rollout checklist](./docs/autonomous-agent-rollout.md) for extension status.
+[nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview)
+documents upstream releases.
 
 - Use task-oriented guides: [Guides](./docs/guides/README.md)
 - Start with no technical background: [Start Without Technical Background](./docs/start-without-technical-background.md)
@@ -344,9 +402,49 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 - Integrate nanobot with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
 - Run nanobot with Docker or as a Linux service: [Deployment](./docs/deployment.md)
 
-## Releases
+## Development and tests
 
-**Latest release: [v0.3.0 - The Agency Release](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)**
+Work from the repository root. The Python checks below follow CI and install the
+manifest-declared channel dependencies into the same environment. Some optional
+channels require native libraries; see [Development](./docs/development.md) and
+the [CI workflow](./.github/workflows/ci.yml) for platform setup.
+
+```bash
+uv sync --all-extras --dev
+uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
+uv run --no-sync ruff check nanobot tests conftest.py
+uv run --no-sync basedpyright
+uv run --no-sync python -m pytest
+```
+
+Use `--no-sync` after installing channel dependencies so a subsequent command does
+not prune them. Run the frontend checks from their respective directories:
+
+```bash
+cd webui
+bun install --frozen-lockfile
+bun run lint
+bun run test
+bun run build
+```
+
+```bash
+cd ../tui
+bun install --frozen-lockfile
+bun run check
+bun run test
+bun run build
+```
+
+The [mail watcher](./services/mail-watcher/README.md#install-for-development) and
+[calendar monitor](./services/icloud-calendar/README.md#verification) have separate
+test suites. Keep test accounts and fixtures separate from real messages and
+calendar data. The CI badge above belongs to this fork; historical test counts in
+rollout reports apply only to their recorded revisions.
+
+## Upstream releases
+
+**Upstream release documented by this checkout: [v0.3.0 - The Agency Release](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)**
 
 The Agency Release turns nanobot from a durable workbench into an agent runtime that can coordinate helpers, switch models per session, and carry authorized work through to completion.
 
@@ -357,7 +455,7 @@ The Agency Release turns nanobot from a durable workbench into an agent runtime 
 
 [Read the v0.3.0 release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)
 
-## Recent Updates
+## Recent upstream updates
 
 - **2026-09-05** 🧠 Visible context-compaction progress in the WebUI, terminal, and chat channels.
 - **2026-09-04** 📊 WebUI context usage and cache reuse shown by conversation round.
@@ -368,7 +466,7 @@ The Agency Release turns nanobot from a durable workbench into an agent runtime 
 
 For older updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
 
-## Open Source Partners
+## Upstream open source partners
 
 <p align="center">
   <a href="https://platform.kimi.com?aff=nanobot"><picture><source media="(prefers-color-scheme: dark)" srcset="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/1/2026-06-05/1d8h69mt3v89kkekg24gg"><img alt="Kimi Open Source Friends" height="44" src="https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/1/2026-06-05/1d8h69fudcmosb3pipls0"></picture></a>
@@ -380,10 +478,18 @@ For older updates, see the [release archive](./docs/release-archive.md) or [GitH
 Use nanobot for a real task, report what broke, and then pick a focused improvement.
 
 - Read [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow.
-- Browse [open issues](https://github.com/HKUDS/nanobot/issues) for problems to investigate.
-- Open a [pull request](https://github.com/HKUDS/nanobot/pulls) for a focused fix or integration.
+- Use this fork's [issues](https://github.com/szymongalka/nanobot-extended/issues) and [pull requests](https://github.com/szymongalka/nanobot-extended/pulls) for its integrations. Include the commit, operating system, reproduction steps, and redacted logs with a bug report.
+- For an upstream-only change, use [HKUDS/nanobot](https://github.com/HKUDS/nanobot). The contribution guide and community links retain upstream's conventions and contacts.
+- Follow [SECURITY.md](./SECURITY.md) for private vulnerability reporting; do not include credentials or sensitive message content in a public issue.
 
-## Maintainers
+## License and attribution
+
+Released under the [MIT License](./LICENSE). Copyright belongs to Xubin Ren and
+the nanobot contributors, with upstream attribution preserved in this fork.
+[Third-party notices](./THIRD_PARTY_NOTICES.md) describe dependencies with their own
+license and redistribution requirements, including the TUI runtime.
+
+## Upstream maintainers
 
 <table>
   <tr>
@@ -392,7 +498,7 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
   </tr>
 </table>
 
-## Community Contributors
+## Upstream community contributors
 
 <!-- contributors:start -->
 <p>
