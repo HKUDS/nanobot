@@ -886,6 +886,16 @@
       "notEnabled": "Belum aktif"
     },
     "automations": {
+      "taskInfo": "Informasi tugas",
+      "runDetails": {
+        "loading": "Memuat respons…",
+        "loadError": "Respons tidak dapat dimuat.",
+        "retry": "Coba lagi",
+        "emptyOutput": "Tidak ada respons yang dihasilkan.",
+        "result": "Hasil",
+        "duration": "Durasi",
+        "noOutput": "Catatan ini tidak menyimpan teks respons."
+      },
       "create": "Buat otomatisasi",
       "createPrompt": "Apa yang ingin kamu otomatisasi dengan nanobot?",
       "createInput": "Jelaskan otomatisasi",

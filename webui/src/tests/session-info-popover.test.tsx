@@ -79,7 +79,7 @@ describe("SessionInfoPopover", () => {
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Morning check" });
     expect(detail).toHaveClass("max-w-[520px]", "rounded-modal");
-    expect(within(detail).getByText("Instructions")).toBeInTheDocument();
+    expect(within(detail).queryByText("Instructions")).not.toBeInTheDocument();
     expect(within(detail).getByText("Check the project status")).toBeInTheDocument();
     await user.click(within(detail).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Morning check" })).not.toBeInTheDocument());
@@ -110,7 +110,7 @@ describe("SessionInfoPopover", () => {
       { id: "job-1" },
       20_000,
     );
-    expect(await within(detail).findByRole("button", { name: "Enable" })).toBeInTheDocument();
+    await waitFor(() => expect(within(detail).getByRole("button", { name: "Enable" })).toBeVisible());
   });
 
   it("returns from the shared editor to the same task detail", async () => {

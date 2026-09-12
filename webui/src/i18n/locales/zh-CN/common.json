@@ -1086,6 +1086,16 @@
       "notEnabled": "未启用"
     },
     "automations": {
+      "taskInfo": "任务信息",
+      "runDetails": {
+        "loading": "正在加载回复…",
+        "loadError": "回复加载失败。",
+        "retry": "重试",
+        "emptyOutput": "本次运行未生成回复。",
+        "result": "运行结果",
+        "duration": "耗时",
+        "noOutput": "此记录未保存回复正文。"
+      },
       "create": "创建自动任务",
       "createPrompt": "想让 nanobot 自动帮你做什么？",
       "createInput": "描述一个自动任务",

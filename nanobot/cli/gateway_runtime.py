@@ -362,7 +362,7 @@ def _run_gateway(
     from nanobot.cron.bound_runner import run_bound_cron_job
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
-    from nanobot.cron.types import CronJob
+    from nanobot.cron.types import CronJob, CronRunResult
     from nanobot.llm_usage import record_llm_call
     from nanobot.llm_usage.context import llm_usage_source
     from nanobot.providers.factory import (
@@ -553,7 +553,7 @@ def _run_gateway(
         message_tool.set_send_callback(_deliver_to_channel)
 
     # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
+    async def on_cron_job(job: CronJob) -> str | CronRunResult | None:
         """Execute a cron job through the agent."""
         async def _silent(*_args: Any, **_kwargs: Any) -> None:
             pass

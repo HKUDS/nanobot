@@ -886,6 +886,16 @@
       "notEnabled": "無効"
     },
     "automations": {
+      "taskInfo": "タスク情報",
+      "runDetails": {
+        "loading": "応答を読み込み中…",
+        "loadError": "応答を読み込めませんでした。",
+        "retry": "再試行",
+        "emptyOutput": "応答は生成されませんでした。",
+        "result": "実行結果",
+        "duration": "所要時間",
+        "noOutput": "この記録に応答本文は保存されていません。"
+      },
       "create": "自動タスクを作成",
       "createPrompt": "nanobot に何を自動化してほしいですか？",
       "createInput": "自動タスクを説明",

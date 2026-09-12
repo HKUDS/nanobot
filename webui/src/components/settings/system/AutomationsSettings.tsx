@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
   Check,
-  ChevronDown,
+  Info,
   CircleAlert,
   Clipboard,
   ListFilter,
@@ -21,7 +21,8 @@ import {
 } from "@/components/thread/model-preset";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { Button } from "@/components/ui/button";
-import { Disclosure } from "@/components/ui/disclosure";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ExpandableText } from "@/components/ui/expandable-text";
 import {
@@ -54,6 +55,7 @@ export type AutomationAction = "enable" | "disable" | "delete" | "run";
 const EMPTY_TITLE_OVERRIDES: Record<string, string> = {};
 
 export function AutomationsSettings({
+  token = "",
   payload, loading, filter, actionKey, error,
   titleOverrides = EMPTY_TITLE_OVERRIDES,
   settingsSnapshot = null,
@@ -61,6 +63,7 @@ export function AutomationsSettings({
   onRequestEdit, onRequestDelete, onStartChat, onManageModels,
   returnToDetailJob = null, onReturnToDetailHandled,
 }: {
+  token?: string;
   payload: AutomationsPayload | null;
   titleOverrides?: Record<string, string>;
   settingsSnapshot?: SettingsPayload | null;
@@ -253,8 +256,8 @@ export function AutomationsSettings({
             <div className="automation-view-switch" role="group" aria-label={tx("settings.automations.views.label", "Automation view")}>
               <SegmentedControl
                 value={view}
-                className="bg-[var(--automation-view-track)]"
-                itemClassName="min-h-8"
+                className="rounded-[var(--radius-panel)] bg-[var(--automation-view-track)]"
+                itemClassName="min-h-8 rounded-[calc(var(--radius-panel)-0.25rem)]"
                 options={[
                   { value: "tasks", label: tx("settings.automations.views.tasks", "Tasks") },
                   { value: "calendar", label: tx("settings.automations.views.calendar", "Calendar") },
@@ -270,7 +273,7 @@ export function AutomationsSettings({
             {filters ? <div className="automation-panel-filters min-w-0">{filters}</div> : null}
             {view === "calendar" ? (
               <div className="automation-calendar-navigation flex shrink-0 items-center gap-1">
-                <Button type="button" variant="outline" size="sm" className="h-8 rounded-control px-3 text-[12px]"
+                <Button type="button" variant="ghost" size="sm" className="h-8 rounded-full bg-background/60 px-3 text-[12px] text-foreground"
                   onClick={() => { const today = new Date(); setMonth(new Date(today.getFullYear(), today.getMonth(), 1)); }}>
                   {tx("settings.automations.calendar.today", "Today")}
                 </Button>
@@ -334,6 +337,7 @@ export function AutomationsSettings({
             </section>
           ) : (
             <AutomationCalendar
+              token={token}
               jobs={filtered}
               month={month}
               locale={locale}
@@ -351,6 +355,7 @@ export function AutomationsSettings({
                     ? tx("settings.automations.noMatches", "No automations match this view.")
                     : tx("settings.automations.empty", "No automations yet."),
                 completed: tx("settings.automations.status.completed", "Completed"),
+                skipped: tx("settings.automations.skipped", "Skipped"),
               }}
               onInspect={inspectJob}
             />
@@ -412,10 +417,10 @@ export function AutomationDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       {job ? (
         <DialogContent
-          {...(job.protected ? { "aria-describedby": undefined } : {})}
+          aria-describedby={undefined}
           {...(!open ? { inert: "", "aria-hidden": true } : {})}
           className={cn(
-            "flex max-h-[calc(100dvh-2rem)] max-w-[520px] flex-col gap-0 overflow-hidden p-0",
+            "flex max-h-[calc(100dvh-2rem)] max-w-[520px] flex-col gap-0 p-0 text-sm font-normal leading-normal text-foreground",
             job.protected && "max-w-[440px]",
           )}
           onCloseAutoFocus={onCloseAutoFocus}
@@ -475,40 +480,75 @@ function AutomationDetailPanel({
 
   return (
     <>
-      <DialogHeader className="shrink-0 px-6 pb-3 pr-14 pt-5 text-left">
-        <DialogTitle className="min-w-0 break-words leading-6 text-balance">{job.name || job.id}</DialogTitle>
-        {canManage ? (
-          <DialogDescription className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] leading-5">
-            <span className="font-medium text-foreground/80">{formatAutomationSchedule(job, locale, tx)}</span>
-            {!localTrigger ? <span className="inline-flex min-w-0 items-center gap-1.5">
-              <span>{tx("settings.automations.labels.next", "Next")}</span>
-              <span className="text-foreground/80" title={formatAutomationNextTitle(job, locale, tx)}>
-                {formatAutomationNext(job, tx)}
-              </span>
-            </span> : null}
-          </DialogDescription>
-        ) : null}
+      <div className="absolute right-11 top-2.5">
+        <Popover>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 rounded-full text-muted-foreground"
+                    aria-label={tx("settings.automations.taskInfo", "Task information")}>
+                    <Info className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{tx("settings.automations.taskInfo", "Task information")}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <PopoverContent side="bottom" align="end" collisionPadding={16}
+            aria-label={tx("settings.automations.taskInfo", "Task information")}
+            className="w-80 max-w-[calc(100vw-2rem)] p-4 text-sm font-normal">
+            <dl>
+              <AutomationDetail label={tx("settings.automations.labels.schedule", "Schedule")}>
+                {formatAutomationSchedule(job, locale, tx)}
+              </AutomationDetail>
+              {!localTrigger ? (
+                <AutomationDetail label={tx("settings.automations.sort.next", "Next run")} title={formatAutomationNextTitle(job, locale, tx)}>
+                  {formatAutomationNext(job, tx)}
+                </AutomationDetail>
+              ) : null}
+              <AutomationDetail label={tx("settings.automations.sort.last", "Last run")} title={job.state.last_run_at_ms ? fmtDateTime(job.state.last_run_at_ms, locale) : undefined}>
+                {job.state.last_run_at_ms
+                  ? <span className="flex flex-wrap gap-x-3 gap-y-1">
+                      {lastStatus ? <span>{lastStatus}</span> : null}
+                      <span>{relativeTime(job.state.last_run_at_ms)}</span>
+                    </span>
+                  : lastStatus || tx("settings.automations.neverRun", "Not run yet")}
+              </AutomationDetail>
+              {timezone ? (
+                <AutomationDetail label={tx("settings.automations.fields.timezone", "Timezone")}>{timezone}</AutomationDetail>
+              ) : null}
+              {job.delete_after_run ? <AutomationDetail label={tx("settings.automations.oneShot", "One-time")}>{tx("settings.automations.oneShotHint", "Removed after running")}</AutomationDetail> : null}
+              {job.created_at_ms ? <AutomationDetail label={tx("settings.automations.labels.created", "Created")}>{fmtDateTime(job.created_at_ms, locale)}</AutomationDetail> : null}
+              {job.updated_at_ms ? <AutomationDetail label={tx("settings.automations.labels.updated", "Updated")}>{fmtDateTime(job.updated_at_ms, locale)}</AutomationDetail> : null}
+              <AutomationDetail label="ID"><span className="break-all font-mono">{job.id}</span></AutomationDetail>
+            </dl>
+          </PopoverContent>
+        </Popover>
+      </div>
+      <DialogHeader className="shrink-0 px-6 pb-3 pr-24 pt-5 text-left">
+        <DialogTitle className="min-w-0 break-words text-lg font-medium leading-snug tracking-normal text-balance">{job.name || job.id}</DialogTitle>
       </DialogHeader>
       <div className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-3">
         {canManage && message.trim() ? <section className="pb-4">
-          <div className="flex items-center justify-between gap-3 text-[12px] text-muted-foreground">
-            <span>{localTrigger ? tx("settings.automations.fields.command", "Command") : tx("settings.automations.instructions", "Instructions")}</span>
-            {localTrigger && command ? (
-              <Button variant="ghost" size="sm" onClick={() => {
+          {localTrigger && command ? (
+            <div className="mb-2 flex items-center justify-between gap-3 text-sm text-muted-foreground">
+              <span>{tx("settings.automations.fields.command", "Command")}</span>
+              <Button variant="ghost" size="sm" className="font-normal text-muted-foreground" onClick={() => {
                 void copyTextToClipboard(command).then((ok) => { if (ok) setCommandCopied(true); });
               }}>
                 {commandCopied ? <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden /> : <Clipboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
                 {commandCopied ? tx("settings.automations.commandCopied", "Copied") : tx("settings.automations.copyCommand", "Copy")}
               </Button>
-            ) : null}
-          </div>
-          <div className="mt-2">
-            <ExpandableText id={messageId} expanded={messageExpanded || !messageNeedsExpansion} lines={6} className={cn("whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground [overflow-wrap:anywhere]", localTrigger && "font-mono text-[12px]")}>
+            </div>
+          ) : null}
+          <div>
+            <ExpandableText id={messageId} expanded={messageExpanded || !messageNeedsExpansion} lines={6} className={cn("whitespace-pre-wrap break-words text-sm leading-normal text-foreground [overflow-wrap:anywhere]", localTrigger && "font-mono")}>
               {message}
             </ExpandableText>
           </div>
           {messageNeedsExpansion ? (
-            <button type="button" aria-expanded={messageExpanded} aria-controls={messageId} onClick={() => setMessageExpanded((value) => !value)} className="mt-2 rounded-sm text-[12px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <button type="button" aria-expanded={messageExpanded} aria-controls={messageId} onClick={() => setMessageExpanded((value) => !value)} className="mt-2 rounded-sm text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {messageExpanded ? tx("settings.automations.message.showLess", "Show less") : tx("settings.automations.message.showMore", "Show full message")}
             </button>
           ) : null}
@@ -516,65 +556,24 @@ function AutomationDetailPanel({
         {job.state.last_error ? <AutomationError message={job.state.last_error} /> : null}
         {error ? <AutomationError message={error} /> : null}
         <dl>
-          {job.protected ? (
-            <>
-              <AutomationDetail label={tx("settings.automations.labels.schedule", "Schedule")}>
-                {formatAutomationSchedule(job, locale, tx)}
-              </AutomationDetail>
-              {timezone ? (
-                <AutomationDetail label={tx("settings.automations.fields.timezone", "Timezone")}>
-                  {timezone}
-                </AutomationDetail>
-              ) : null}
-              <AutomationDetail label={tx("settings.automations.sort.next", "Next run")} title={formatAutomationNextTitle(job, locale, tx)}>
-                {formatAutomationNext(job, tx)}
-              </AutomationDetail>
-            </>
-          ) : null}
-          <AutomationDetail label={tx("settings.automations.sort.last", "Last run")} title={job.state.last_run_at_ms ? fmtDateTime(job.state.last_run_at_ms, locale) : undefined}>
-            {job.state.last_run_at_ms
-              ? <span className="flex flex-wrap justify-end gap-x-3 gap-y-1">
-                  {lastStatus ? <span>{lastStatus}</span> : null}
-                  <span>{relativeTime(job.state.last_run_at_ms)}</span>
-                </span>
-              : lastStatus || tx("settings.automations.neverRun", "Not run yet")}
-          </AutomationDetail>
           {!job.protected && job.origin?.channel && job.origin.channel !== "websocket" ? (
             <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")}>
               {automationChannelLabel(job.origin.channel, t)}
             </AutomationDetail>
           ) : null}
         </dl>
-        <Disclosure
-          className="mt-2"
-          summaryClassName={cn("flex min-h-10 cursor-pointer items-center justify-between gap-3 rounded-control py-2.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground", formControlFocusClassName)}
-          summary={<>
-            {tx("settings.automations.moreDetails", "More details")}
-            <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200 group-data-[state=open]/disclosure:rotate-180 motion-reduce:transition-none" aria-hidden />
-          </>}
-        >
-          <dl>
-            {timezone && canManage ? (
-              <AutomationDetail label={tx("settings.automations.fields.timezone", "Timezone")}>
-                {timezone}
-              </AutomationDetail>
-            ) : null}
-            {job.delete_after_run ? <AutomationDetail label={tx("settings.automations.oneShot", "One-time")}>{tx("settings.automations.oneShotHint", "Removed after running")}</AutomationDetail> : null}
-            {job.created_at_ms ? <AutomationDetail label={tx("settings.automations.labels.created", "Created")}>{fmtDateTime(job.created_at_ms, locale)}</AutomationDetail> : null}
-            {job.updated_at_ms ? <AutomationDetail label={tx("settings.automations.labels.updated", "Updated")}>{fmtDateTime(job.updated_at_ms, locale)}</AutomationDetail> : null}
-            <AutomationDetail label="ID"><span className="break-all font-mono text-[11px]">{job.id}</span></AutomationDetail>
-          </dl>
-        </Disclosure>
       </div>
       {canManage ? (
-        <div className="flex shrink-0 flex-col gap-2 border-t border-border/45 px-6 py-3 sm:flex-row sm:items-center">
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={busy || !canToggle} onClick={() => void onAction(job.enabled ? "disable" : "enable", job)}>
-              {actionKey === `${job.enabled ? "disable" : "enable"}:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+        <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-t border-border/45 px-6 py-3">
+          <div className="flex max-w-full flex-wrap gap-2">
+            <Button variant="ghost" size="sm" className="font-normal text-muted-foreground" disabled={busy || !canToggle}
+              onClick={() => void onAction(job.enabled ? "disable" : "enable", job)}>
+              {actionKey === `enable:${job.id}` || actionKey === `disable:${job.id}`
+                ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
               {job.enabled ? tx("settings.automations.pause", "Disable") : tx("settings.automations.resume", "Enable")}
             </Button>
             {!localTrigger ? (
-              <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!canRun || busy} onClick={() => void onAction("run", job)}>
+              <Button variant="ghost" size="sm" className="font-normal text-muted-foreground" disabled={!canRun || busy} onClick={() => void onAction("run", job)}>
                 {actionKey === `run:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
                 {tx("settings.automations.runNow", "Run now")}
               </Button>
@@ -582,18 +581,18 @@ function AutomationDetailPanel({
             <Button
               variant="ghost"
               size="sm"
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className="font-normal text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:text-destructive"
               disabled={busy}
               onClick={() => onRequestDelete(job)}
             >
               {tx("settings.automations.delete", "Delete")}
             </Button>
           </div>
-          <div className="flex max-w-full flex-wrap justify-end gap-2 sm:ml-auto">
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => onRequestEdit(job)}>
+          <div className="ms-auto flex max-w-full flex-wrap justify-end gap-2">
+            <Button variant="ghost" size="sm" className="font-normal text-muted-foreground" disabled={busy} onClick={() => onRequestEdit(job)}>
               {tx("settings.automations.edit", "Edit")}
             </Button>
-            {originHref ? <Button asChild size="sm"><a href={originHref}>{tx("settings.automations.emptyAction", "Open a chat")}</a></Button> : null}
+            {originHref ? <Button asChild variant="ghost" size="sm" className="font-normal text-muted-foreground"><a href={originHref}>{tx("settings.automations.emptyAction", "Open a chat")}</a></Button> : null}
           </div>
         </div>
       ) : null}
@@ -631,11 +630,11 @@ function automationMessageNeedsExpansion(message: string): boolean {
   return message.length > 360 || message.split(/\r?\n/).length > 6;
 }
 
-function AutomationDetail({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+function AutomationDetail({ label, title, children }: { label: ReactNode; title?: string; children: ReactNode }) {
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(6.5rem,0.75fr)_minmax(0,1.75fr)] items-start gap-4 py-2.5 text-[13px] leading-5">
+    <div className="grid min-w-0 grid-cols-[minmax(6.5rem,0.75fr)_minmax(0,1.75fr)] items-start gap-4 py-2.5 text-sm leading-normal">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-right text-foreground [overflow-wrap:anywhere]" title={title}>{children}</dd>
+      <dd className="min-w-0 break-words text-start text-foreground [overflow-wrap:anywhere]" title={title}>{children}</dd>
     </div>
   );
 }

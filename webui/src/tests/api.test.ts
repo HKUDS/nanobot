@@ -13,6 +13,7 @@ import {
   fetchFilePreview,
   fetchFilePreviewAvailability,
   fetchAutomations,
+  fetchAutomationRunResult,
   fetchApiService,
   fetchCliApps,
   fetchInstalledCliApps,
@@ -193,6 +194,15 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
+    );
+  });
+
+  it("fetches the selected run response with authentication and an encoded identity", async () => {
+    const controller = new AbortController();
+    await fetchAutomationRunResult("tok", "task/id", 1234, "cron", controller.signal);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/result?id=task%2Fid&run_at_ms=1234&kind=cron",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
     );
   });
 

@@ -313,6 +313,19 @@ export async function fetchAutomations(
   );
 }
 
+export async function fetchAutomationRunResult(
+  token: string,
+  id: string,
+  runAtMs: number,
+  kind: "cron" | "local_trigger",
+  signal?: AbortSignal,
+): Promise<{ response: string | null }> {
+  const query = new URLSearchParams({ id, run_at_ms: String(runAtMs), kind });
+  return request<{ response: string | null }>(
+    `/api/webui/automations/result?${query}`, token, { signal }, API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function runAutomationAction(
   transport: WebUIMutationTransport,
   action: "enable" | "disable" | "delete" | "run",

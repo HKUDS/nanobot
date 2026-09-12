@@ -1,6 +1,7 @@
 import { CircleAlert, Loader2, X } from "lucide-react";
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { AutomationRunDialog, type AutomationRunRecord } from "@/components/settings/system/AutomationRunDialog";
 import { Button } from "@/components/ui/button";
 import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -11,9 +12,8 @@ type CalendarEntry = {
   id: string;
   job: SessionAutomationJob;
   startMs: number;
-  endMs: number | null;
   kind: "planned" | "recorded";
-  status: string | null;
+  run: AutomationRunRecord | null;
 };
 
 type CalendarCopy = {
@@ -25,10 +25,12 @@ type CalendarCopy = {
   close: string;
   noEntries: string;
   completed: string;
+  skipped: string;
   system: string;
 };
 
 interface AutomationCalendarProps {
+  token?: string;
   jobs: SessionAutomationJob[];
   month: Date;
   locale: string;
@@ -61,17 +63,15 @@ function entriesForJobs(jobs: SessionAutomationJob[]): CalendarEntry[] {
       ? history
       : [{
           run_at_ms: job.state.last_run_at_ms,
-          status: job.state.last_status ?? "ok",
+          status: job.state.last_status ?? "unknown",
+          error: job.state.last_error,
         }];
     const recorded = recordedRuns.map((run, index) => ({
       id: `${job.id}:recorded:${run.run_at_ms}:${index}`,
       job,
       startMs: run.run_at_ms,
-      endMs: run.duration_ms != null && run.duration_ms > 0
-        ? run.run_at_ms + run.duration_ms
-        : null,
       kind: "recorded" as const,
-      status: run.status ?? null,
+      run,
     }));
     return nextRun == null ? recorded : [
       ...recorded,
@@ -79,9 +79,8 @@ function entriesForJobs(jobs: SessionAutomationJob[]): CalendarEntry[] {
         id: `${job.id}:planned:${nextRun}`,
         job,
         startMs: nextRun,
-        endMs: null,
         kind: "planned" as const,
-        status: null,
+        run: null,
       },
     ];
   });
@@ -89,9 +88,7 @@ function entriesForJobs(jobs: SessionAutomationJob[]): CalendarEntry[] {
 
 function entryTime(entry: CalendarEntry, locale: string): string {
   const formatter = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
-  const start = formatter.format(entry.startMs);
-  if (entry.endMs == null) return start;
-  return `${start}–${formatter.format(entry.endMs)}`;
+  return formatter.format(entry.startMs);
 }
 
 function isSameDay(left: Date, right: Date): boolean {
@@ -102,34 +99,33 @@ function CalendarEntryRow({ entry, locale, copy, onInspect, compact = false }: {
   entry: CalendarEntry;
   locale: string;
   copy: CalendarCopy;
-  onInspect: AutomationCalendarProps["onInspect"];
+  onInspect: (entry: CalendarEntry, trigger: HTMLElement) => void;
   compact?: boolean;
 }) {
   const name = entry.job.name || entry.job.id;
   const running = Boolean(entry.job.state.pending) && entry.kind === "planned";
-  const failed = entry.kind === "recorded" && entry.status === "error";
-  const completed = entry.kind === "recorded"
-    && Boolean(entry.job.delete_after_run)
-    && entry.job.state.next_run_at_ms == null
-    && entry.job.state.last_status === "ok";
+  const failed = entry.run?.status === "error";
+  const completed = entry.run?.status === "ok";
   const status = running
     ? copy.running
     : failed
       ? copy.failed
       : completed
         ? copy.completed
-        : entry.kind === "planned"
-          ? copy.planned
-          : copy.recorded;
+        : entry.run?.status === "skipped"
+          ? copy.skipped
+          : entry.kind === "planned"
+            ? copy.planned
+            : copy.recorded;
   const content = (
     <>
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium text-foreground">{name}</span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4 text-muted-foreground">
+        <span className={cn("block truncate", entry.kind === "recorded" && !failed ? "font-normal text-muted-foreground" : "font-medium text-foreground")}>{name}</span>
+        <span className={cn("mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4", failed ? "text-destructive" : "text-muted-foreground")}>
           {running ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
           {failed ? <CircleAlert className="h-3 w-3" aria-hidden /> : null}
           <span className="tabular-nums">{entryTime(entry, locale)}</span>
-          {compact ? <span>{status}</span> : null}
+          {compact || entry.kind === "recorded" ? <span>{status}</span> : null}
           {entry.job.protected ? <span>{copy.system}</span> : null}
         </span>
       </span>
@@ -141,7 +137,6 @@ function CalendarEntryRow({ entry, locale, copy, onInspect, compact = false }: {
     formControlFocusClassName,
     compact && "py-2 text-[12px]",
     failed && "bg-destructive/[0.045]",
-    entry.kind === "recorded" && !failed && "bg-muted/45",
   );
 
   return (
@@ -150,7 +145,7 @@ function CalendarEntryRow({ entry, locale, copy, onInspect, compact = false }: {
       className={actionClass}
       aria-label={`${name}, ${entryTime(entry, locale)}, ${status}${entry.job.protected ? `, ${copy.system}` : ""}`}
       aria-haspopup="dialog"
-      onClick={(event) => onInspect(entry.job, event.currentTarget)}
+      onClick={(event) => onInspect(entry, event.currentTarget)}
     >
       {content}
     </button>
@@ -162,12 +157,12 @@ function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }:
   dayLabel: string;
   locale: string;
   copy: CalendarCopy;
-  onInspect: AutomationCalendarProps["onInspect"];
+  onInspect: (entry: CalendarEntry, trigger: HTMLElement) => void;
 }) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const pendingSelection = useRef<SessionAutomationJob | null>(null);
+  const pendingSelection = useRef<CalendarEntry | null>(null);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -190,12 +185,12 @@ function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }:
         aria-labelledby={titleId}
         className="w-80 max-w-[calc(100vw-2rem)] overscroll-contain p-2"
         onCloseAutoFocus={(event) => {
-          const job = pendingSelection.current;
+          const entry = pendingSelection.current;
           pendingSelection.current = null;
-          if (!job || !triggerRef.current?.isConnected) return;
+          if (!entry || !triggerRef.current?.isConnected) return;
           // Hand off after the day popover exits, retaining a mounted return target.
           event.preventDefault();
-          onInspect(job, triggerRef.current);
+          onInspect(entry, triggerRef.current);
         }}
       >
         <div className="mb-1 flex items-center gap-2 px-2 py-1">
@@ -210,8 +205,8 @@ function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }:
             entry={entry}
             locale={locale}
             copy={copy}
-            onInspect={(job) => {
-              pendingSelection.current = job;
+            onInspect={(entry) => {
+              pendingSelection.current = entry;
               setOpen(false);
             }}
             compact
@@ -222,8 +217,20 @@ function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }:
   );
 }
 
-export function AutomationCalendar({ jobs, month, locale, copy, onInspect }: AutomationCalendarProps) {
+export function AutomationCalendar({ token = "", jobs, month, locale, copy, onInspect }: AutomationCalendarProps) {
   const calendarRef = useRef<HTMLElement | null>(null);
+  const runTrigger = useRef<HTMLElement | null>(null);
+  const [selectedRun, setSelectedRun] = useState<{ job: SessionAutomationJob; run: AutomationRunRecord } | null>(null);
+  const [runOpen, setRunOpen] = useState(false);
+  const inspectEntry = (entry: CalendarEntry, trigger: HTMLElement) => {
+    if (!entry.run) {
+      onInspect(entry.job, trigger);
+      return;
+    }
+    runTrigger.current = trigger;
+    setSelectedRun({ job: entry.job, run: entry.run });
+    setRunOpen(true);
+  };
   const [wideCalendar, setWideCalendar] = useState(true);
   const today = startOfDay(new Date());
   const gridStart = addDays(month, -mondayIndex(month));
@@ -258,7 +265,7 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect }: Aut
   }, []);
 
   return (
-    <section ref={calendarRef} className="automation-calendar overflow-hidden bg-[hsl(var(--settings-surface))]">
+    <section ref={calendarRef} tabIndex={-1} className="automation-calendar overflow-hidden bg-[hsl(var(--settings-surface))]">
       <div className="automation-calendar-header bg-foreground/[0.025]">
         {wideCalendar ? <div className="automation-calendar-weekdays" aria-hidden>
           {weekdayLabels.map((label) => <div key={label}>{label}</div>)}
@@ -297,7 +304,7 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect }: Aut
                       entry={entry}
                       locale={locale}
                       copy={copy}
-                      onInspect={onInspect}
+                      onInspect={inspectEntry}
                     />
                   ))}
                   {entries.length > 3 ? (
@@ -306,7 +313,7 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect }: Aut
                       dayLabel={dayLabel}
                       locale={locale}
                       copy={copy}
-                      onInspect={onInspect}
+                      onInspect={inspectEntry}
                     />
                   ) : null}
                 </div>
@@ -329,7 +336,7 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect }: Aut
                       entry={entry}
                       locale={locale}
                       copy={copy}
-                      onInspect={onInspect}
+                      onInspect={inspectEntry}
                       compact
                     />
                   ))}
@@ -342,6 +349,18 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect }: Aut
         )}
       </div> : null}
 
+      {selectedRun ? <AutomationRunDialog
+        token={token}
+        job={selectedRun.job} run={selectedRun.run} locale={locale} open={runOpen}
+        onOpenChange={setRunOpen}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (runOpen) return;
+          setSelectedRun(null);
+          const target = runTrigger.current?.isConnected ? runTrigger.current : calendarRef.current;
+          target?.focus({ preventScroll: true });
+        }}
+      /> : null}
     </section>
   );
 }

@@ -1046,7 +1046,8 @@
     align-items: center;
     gap: 0.5rem 1rem;
     min-block-size: 4rem;
-    padding: 0.75rem 0.25rem;
+    padding-block: 0.75rem;
+    padding-inline: 0.75rem 0.25rem;
   }
   .automation-create-composer .thread-composer-collapsible-layout {
     padding-block-start: 0;

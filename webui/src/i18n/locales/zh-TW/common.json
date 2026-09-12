@@ -886,6 +886,16 @@
       "notEnabled": "未啟用"
     },
     "automations": {
+      "taskInfo": "任務資訊",
+      "runDetails": {
+        "loading": "正在載入回覆…",
+        "loadError": "回覆載入失敗。",
+        "retry": "重試",
+        "emptyOutput": "本次執行未產生回覆。",
+        "result": "執行結果",
+        "duration": "耗時",
+        "noOutput": "此記錄未儲存回覆正文。"
+      },
       "create": "建立自動任務",
       "createPrompt": "想讓 nanobot 自動幫你做什麼？",
       "createInput": "描述自動任務",

@@ -571,6 +571,7 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <AutomationsSettings
+              token={token}
               payload={automations}
               titleOverrides={titleOverrides}
               settingsSnapshot={controller.settings}

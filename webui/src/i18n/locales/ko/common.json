@@ -886,6 +886,16 @@
       "notEnabled": "비활성화됨"
     },
     "automations": {
+      "taskInfo": "작업 정보",
+      "runDetails": {
+        "loading": "응답을 불러오는 중…",
+        "loadError": "응답을 불러오지 못했습니다.",
+        "retry": "다시 시도",
+        "emptyOutput": "생성된 응답이 없습니다.",
+        "result": "실행 결과",
+        "duration": "소요 시간",
+        "noOutput": "이 기록에는 응답 본문이 저장되지 않았습니다."
+      },
       "create": "자동화 만들기",
       "createPrompt": "nanobot이 무엇을 자동으로 해주면 좋을까요?",
       "createInput": "자동화 설명",

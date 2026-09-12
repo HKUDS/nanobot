@@ -34,6 +34,7 @@ from nanobot.session.session_handles import (
     SessionHandleResolver,
 )
 from nanobot.triggers.local_types import LocalTrigger
+from nanobot.webui.automation_results import cron_run_response, trigger_run_response
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
@@ -979,6 +980,8 @@ class GatewayHTTPHandler:
     ) -> Response | None:
         if got == "/api/webui/automations":
             return self._handle_webui_automations(request)
+        if got == "/api/webui/automations/result":
+            return await self._handle_webui_automation_result(request)
         m = re.match(r"^/api/webui/automations/(enable|disable|delete|run|update)$", got)
         if m:
             return await self._handle_webui_automation_action(request, m.group(1))
@@ -1029,6 +1032,48 @@ class GatewayHTTPHandler:
                 pending_job_ids=pending_job_ids,
             )
         )
+
+    async def _handle_webui_automation_result(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _request_query(request)
+        job_id = (_query_first(query, "id") or "").strip()
+        try:
+            run_at_ms = int(_query_first(query, "run_at_ms") or "")
+        except ValueError:
+            return _http_error(400, "invalid run timestamp")
+        if not job_id or run_at_ms < 0:
+            return _http_error(400, "invalid automation run")
+        kind = _query_first(query, "kind") or "cron"
+        try:
+            if kind == "local_trigger":
+                trigger = self.local_trigger_store.get(job_id) if self.local_trigger_store else None
+                if trigger is None or self.local_trigger_store is None:
+                    return _http_error(404, "automation not found")
+                deliveries = [item for item in trigger.run_history if item.run_at_ms == run_at_ms]
+                if len(deliveries) != 1:
+                    return _http_error(404, "run not found")
+                response = await asyncio.to_thread(
+                    trigger_run_response, self.local_trigger_store.runs_dir, trigger, deliveries[0],
+                )
+            elif kind == "cron":
+                job = self.cron_service.get_job(job_id) if self.cron_service else None
+                if job is None or self.cron_service is None:
+                    return _http_error(404, "automation not found")
+                if job.payload.kind == "system_event":
+                    return _http_error(403, "system automation is protected")
+                runs = [item for item in job.state.run_history if item.run_at_ms == run_at_ms]
+                if len(runs) != 1:
+                    return _http_error(404, "run not found")
+                response = await asyncio.to_thread(
+                    cron_run_response, self.cron_service.store_path.parent / "runs", job, runs[0],
+                )
+            else:
+                return _http_error(400, "invalid automation kind")
+        except OSError:
+            self._log.exception("Could not read automation run result")
+            return _http_error(500, "Could not read run result")
+        return _http_json_response({"response": response})
 
     async def _handle_webui_automation_action(
         self,

@@ -886,6 +886,16 @@
       "notEnabled": "Chưa bật"
     },
     "automations": {
+      "taskInfo": "Thông tin tác vụ",
+      "runDetails": {
+        "loading": "Đang tải phản hồi…",
+        "loadError": "Không tải được phản hồi.",
+        "retry": "Thử lại",
+        "emptyOutput": "Lần chạy này không tạo phản hồi.",
+        "result": "Kết quả",
+        "duration": "Thời gian chạy",
+        "noOutput": "Bản ghi này không lưu nội dung phản hồi."
+      },
       "create": "Tạo tự động hóa",
       "createPrompt": "Bạn muốn nanobot tự động làm gì?",
       "createInput": "Mô tả tác vụ tự động",

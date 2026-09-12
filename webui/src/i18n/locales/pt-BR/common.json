@@ -900,6 +900,16 @@
       "notEnabled": "Não habilitado"
     },
     "automations": {
+      "taskInfo": "Informações da tarefa",
+      "runDetails": {
+        "loading": "Carregando resposta…",
+        "loadError": "Não foi possível carregar a resposta.",
+        "retry": "Tentar novamente",
+        "emptyOutput": "Nenhuma resposta foi gerada.",
+        "result": "Resultado",
+        "duration": "Duração",
+        "noOutput": "Este registro não inclui o texto da resposta."
+      },
       "create": "Criar automação",
       "createPrompt": "O que você gostaria de automatizar com o nanobot?",
       "createInput": "Descreva uma automação",

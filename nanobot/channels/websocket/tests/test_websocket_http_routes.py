@@ -18,7 +18,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.loader import load_config, save_config
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from nanobot.cron.types import CronJob, CronPayload, CronRunResult, CronSchedule
 from nanobot.optional_features import InstallResult
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY
@@ -2417,6 +2417,57 @@ async def test_session_delete_removes_unpersisted_new_chat(
 
 
 @pytest.mark.asyncio
+async def test_webui_automation_result_is_authenticated_and_returns_only_selected_response(
+    bus: MagicMock, tmp_path: Path,
+) -> None:
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+
+    async def execute(job: CronJob) -> CronRunResult:
+        cron.write_run_record("selected-run", {
+            "job_id": job.id, "session_key": job.payload.session_key,
+            "status": "ok", "response": "Selected **reply**", "rendered_prompt": "private prompt",
+        })
+        return CronRunResult(run_id="selected-run", response="Selected **reply**")
+
+    cron = CronService(tmp_path / "cron" / "jobs.json", on_job=execute)
+    job = cron.add_job(name="Reminder", schedule=CronSchedule(kind="every", every_ms=86400000),
+                       message="hi", session_key="websocket:abc", origin_channel="websocket",
+                       origin_chat_id="abc")
+    assert await cron.run_job(job.id, force=True)
+    completed = cron.get_job(job.id)
+    assert completed is not None
+    run_at = completed.state.run_history[-1].run_at_ms
+    cron.register_system_job(CronJob(id="system", name="system",
+                                    schedule=CronSchedule(kind="every", every_ms=86400000),
+                                    payload=CronPayload(kind="system_event")))
+    channel = _ch(bus, session_manager=_seed_session(tmp_path, key="websocket:abc"),
+                  cron_service=cron, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        path = f"{base_url}/api/webui/automations/result?id={job.id}&run_at_ms={run_at}"
+        assert (await _http_get(path)).status_code == 401
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+        result = await _http_get(path, headers=auth)
+        assert result.status_code == 200, result.text
+        assert result.json() == {"response": "Selected **reply**"}
+        listed = await _http_get(f"{base_url}/api/webui/automations", headers=auth)
+        assert "Selected **reply**" not in listed.text
+        for query, status in [
+            (f"id={job.id}&run_at_ms=invalid", 400),
+            (f"id={job.id}&run_at_ms=0", 404),
+            (f"id=missing&run_at_ms={run_at}", 404),
+            (f"id=system&run_at_ms={run_at}", 403),
+            (f"id={job.id}&run_at_ms={run_at}&kind=invalid", 400),
+        ]:
+            response = await _http_get(f"{base_url}/api/webui/automations/result?{query}", headers=auth)
+            assert response.status_code == status
+    finally:
+        await channel.stop()
+        await server_task
+
+
 async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
     bus: MagicMock, tmp_path: Path
 ) -> None:

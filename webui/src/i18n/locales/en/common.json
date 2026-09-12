@@ -1086,6 +1086,16 @@
       "notEnabled": "Not enabled"
     },
     "automations": {
+      "taskInfo": "Task information",
+      "runDetails": {
+        "loading": "Loading response…",
+        "loadError": "Couldn’t load the response.",
+        "retry": "Retry",
+        "emptyOutput": "No reply was generated.",
+        "result": "Result",
+        "duration": "Duration",
+        "noOutput": "This record doesn’t include the response text."
+      },
       "create": "Create automation",
       "createPrompt": "What would you like nanobot to automate?",
       "createInput": "Describe an automation",

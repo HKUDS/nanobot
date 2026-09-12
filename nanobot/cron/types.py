@@ -83,20 +83,31 @@ class CronPayload:
 
 
 @dataclass
+class CronRunResult:
+    """Result and durable record identity returned by a cron executor."""
+
+    run_id: str
+    response: str
+
+
+@dataclass
 class CronRunRecord:
     """A single execution record for a cron job."""
     run_at_ms: int
     status: Literal["ok", "error", "skipped"]
     duration_ms: int = 0
     error: str | None = None
+    run_id: str | None = None
 
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronRunRecord:
+        run_id = get_camel_snake(data, "runId", "run_id")
         return cls(
             run_at_ms=_store_int(get_camel_snake(data, "runAtMs", "run_at_ms", 0)),
             status=data["status"],
             duration_ms=_store_int(get_camel_snake(data, "durationMs", "duration_ms", 0)),
             error=data.get("error"),
+            run_id=run_id if isinstance(run_id, str) else None,
         )
 
 
