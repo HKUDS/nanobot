@@ -82,6 +82,9 @@ documents = [
 langfuse = [
     "langfuse>=3.0.0,<4.0.0",
 ]
+langsmith = [
+    "langsmith>=0.3.13,<1.0.0",
+]
 pdf = [
     # Compatibility extra: PDF reading is bundled since v0.2.3.
     "pypdf>=5.0.0,<6.0.0",
