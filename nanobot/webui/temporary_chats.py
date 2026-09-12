@@ -150,6 +150,17 @@ class WebUITemporaryChats:
             raise TemporaryChatError("temporary_chat_unavailable")
         self._media_paths.setdefault(chat_id, set()).update(paths)
 
+    def discard_registered_media(self, chat_id: str, paths: list[str]) -> None:
+        """Drop media registrations for paths that will not be dispatched."""
+        if not paths:
+            return
+        registered = self._media_paths.get(chat_id)
+        if registered is None:
+            return
+        registered.difference_update(paths)
+        if not registered:
+            del self._media_paths[chat_id]
+
     def chat_ids_for_owner(self, owner: object) -> tuple[str, ...]:
         return tuple(self._owner_chat_ids.get(owner, ()))
 
