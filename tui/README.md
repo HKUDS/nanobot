@@ -50,6 +50,12 @@ distinguish modified Enter keys. `Alt+Enter` and `Ctrl+Enter` are also accepted 
 Unsent prompts return to the composer if the turn stops or fails.
 
 Use `/sessions` to search and switch persisted conversations without leaving the terminal.
+When the owner shared inbox is configured, a plain `nanobot` opens **Czat główny**,
+the same conversation as Telegram and WebUI. **Powiadomienia** stays above it in
+the session picker and is read-only. Its unread state is shared across clients;
+notifications remain visible when Telegram delivery is unavailable. The feed
+refreshes when the gateway announces a change. An explicit `--session` takes
+precedence; `--session ""` starts a new ordinary WebSocket conversation.
 `/new-chat` preserves the current conversation and starts another one; nanobot's existing `/new`
 command keeps its cross-channel behavior and resets the current chat. Each launch starts a new
 session using the launch directory as its workspace; `--session` selects an existing session and

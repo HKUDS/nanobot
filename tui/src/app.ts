@@ -129,6 +129,7 @@ interface ChatClient {
   newChat(scope?: WorkspaceScopePayload): void
   forkChat?(sourceChatId: string, beforeUserIndex: number, title?: string): void
   setWorkspaceScope(scope: WorkspaceScopePayload): void
+  markNotificationsRead?(ids: string[]): Promise<{ changed: number }>
   updateRecovery(
     action: "continue" | "dismiss",
     chatId: string,
@@ -559,6 +560,8 @@ export class NanobotTui {
   private sessionLoadId = 0
   private sessionLoading = false
   private sessionRefreshPending = false
+  private sharedHistoryPending = false
+  private sharedHistoryDirty = false
   private sessionRefreshTimer: ReturnType<typeof setInterval> | null = null
   private readonly commandTurns = new Map<string, ResolvedSlashCommandLifecycle>()
   private readonly modelCommandTurns = new Set<string>()
@@ -1010,11 +1013,19 @@ export class NanobotTui {
       return
     }
     if (command?.source === "gateway") {
+      if (this.notificationView) {
+        this.status.content = "Powiadomienia · otwórz Czat główny przez /sessions"
+        return
+      }
       const lifecycle = resolveSlashCommandLifecycle(visibleContent, command.command)
       if (lifecycle) this.sendGatewayCommand(visibleContent, lifecycle)
       return
     }
     if (visibleContent.startsWith("!")) {
+      if (this.notificationView) {
+        this.status.content = "Powiadomienia · otwórz Czat główny przez /sessions"
+        return
+      }
       this.sendGatewayCommand(visibleContent, "side_channel", false, { userShell: true })
       return
     }
@@ -1032,6 +1043,10 @@ export class NanobotTui {
   }
 
   private sendPrompt(prompt: QueuedPrompt, steering = false): boolean {
+    if (this.notificationView) {
+      this.status.content = "Powiadomienia · otwórz Czat główny przez /sessions"
+      return false
+    }
     let turnId: string
     try {
       turnId = this.client.send(prompt.content, prompt.options)
@@ -1292,6 +1307,10 @@ export class NanobotTui {
         this.setDefaultModel(event.model_name, event.model_preset)
         return
       case "session_updated":
+        if (event.chat_id === "shared-notifications"
+          || (event.chat_id === "shared-main" && !this.activeTurn)) {
+          void this.refreshSharedHistory()
+        }
         if (event.workspace_scope) this.applyWorkspaceScope(event.workspace_scope)
         if (
           !this.sessionTitle
@@ -1358,6 +1377,7 @@ export class NanobotTui {
         this.historyBeforeCursor = history.beforeCursor
         this.historyHasMore = history.hasMoreBefore
         this.transcript.history(history.messages)
+        this.acknowledgeNotifications(history.unreadNotificationIds)
         this.restorePromptHistory(history.messages)
         const reversedHistory = [...history.messages].reverse()
         const lastUser = reversedHistory.find((message) => message.role === "user")
@@ -1381,6 +1401,42 @@ export class NanobotTui {
     const events = this.pendingEvents
     this.pendingEvents = null
     for (const event of events || []) this.accept(event)
+  }
+
+  private get notificationView(): boolean {
+    return this.client.activeChatId === "shared-notifications"
+  }
+
+  private acknowledgeNotifications(ids?: string[]): void {
+    if (!this.notificationView || !ids?.length || !this.client.markNotificationsRead) return
+    void this.client.markNotificationsRead(ids).catch(() => {
+      this.status.content = "Nie zapisano odczytu powiadomień · ponów połączenie"
+    })
+  }
+
+  private async refreshSharedHistory(): Promise<void> {
+    this.sharedHistoryDirty = true
+    if (this.sharedHistoryPending || this.quitting) return
+    this.sharedHistoryPending = true
+    try {
+      while (this.sharedHistoryDirty && !this.quitting) {
+        this.sharedHistoryDirty = false
+        const chatId = this.client.activeChatId
+        if (chatId !== "shared-notifications" && chatId !== "shared-main") return
+        const history = await fetchHistory(this.options.apiUrl, this.options.apiToken,
+          chatId, undefined, this.apiReauthenticator)
+        if (chatId !== this.client.activeChatId || this.activeTurn || this.quitting) continue
+        this.transcript.reset({ model: this.modelName || this.modelPreset,
+          workspace: this.options.workspace, version: this.options.version, access: this.options.access })
+        this.transcript.history(history.messages)
+        this.restorePromptHistory(history.messages)
+        this.acknowledgeNotifications(history.unreadNotificationIds)
+      }
+    } catch {
+      this.status.content = "Nie odświeżono wspólnego czatu · ponów połączenie"
+    } finally {
+      this.sharedHistoryPending = false
+    }
   }
 
   private clearRecoveryState(): void {
@@ -1632,6 +1688,10 @@ export class NanobotTui {
   }
 
   private canSendPrompt(prompt: QueuedPrompt): boolean {
+    if (this.notificationView) {
+      this.status.content = "Powiadomienia · otwórz Czat główny przez /sessions"
+      return false
+    }
     if (this.draft.hasImageLabelConflict(this.composer.plainText)) {
       this.status.content = "Duplicate image placeholder text · rename or remove it before sending"
       return false
@@ -2151,7 +2211,8 @@ export class NanobotTui {
         ? "Search sessions"
         : this.branchMenu.visible
           ? "Search branch points"
-          : this.activeTurn ? activePlaceholder : COMPOSER_PLACEHOLDER
+          : this.notificationView ? "Powiadomienia · /sessions otwiera Czat główny"
+            : this.activeTurn ? activePlaceholder : COMPOSER_PLACEHOLDER
     if (this.composer.placeholder !== placeholder) this.composer.placeholder = placeholder
   }
 

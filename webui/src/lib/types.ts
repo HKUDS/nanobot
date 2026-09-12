@@ -75,6 +75,8 @@ export interface UIMessage {
   kind?: MessageKind;
   isStreaming?: boolean;
   createdAt: number;
+  delivery_state?: "pending" | "delivered" | "uncertain" | "not_sent";
+  read?: boolean;
   /** For trace rows: each individual hint line, so consecutive hints can
    * render as a single collapsible group. */
   traces?: string[];
@@ -388,6 +390,7 @@ export interface UIFileEdit {
 export interface ChatSummary {
   sharedStream?: "main" | "notifications";
   readOnly?: boolean;
+  unreadCount?: number;
   profileName?: string;
   /** Server-side session key, e.g. ``websocket:abcd-...``. */
   key: string;

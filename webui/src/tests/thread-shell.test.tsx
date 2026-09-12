@@ -194,6 +194,7 @@ function makeClient() {
     },
     sendMessage,
     sendSystemCommand: vi.fn().mockResolvedValue(undefined),
+    requestMutation: vi.fn().mockResolvedValue({ changed: 1 }),
     newChat: vi.fn(),
     forkChat: vi.fn(),
     attach: vi.fn(),
@@ -4508,4 +4509,37 @@ it("shows delivered notifications as a read-only stream without an LLM composer"
   />));
   expect(screen.getByRole("status", { name: "" })).toHaveTextContent("tylko do odczytu");
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+});
+
+it("updates delivery status on an existing notification and acknowledges only its snapshot", async () => {
+  webuiThreadCache.clear();
+  const client = makeClient();
+  let delivery: UIMessage["delivery_state"] = "pending";
+  const previousFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+    if (String(input).includes("/webui-thread")) return Promise.resolve(httpJson({
+      schemaVersion: 3, sessionKey: "websocket:shared-notifications", completed_turn_ids: [],
+      messages: [{ id: "notification:one", role: "assistant", content: "Spotkanie za chwilę",
+        createdAt: 1000, delivery_state: delivery, read: false }],
+    }));
+    return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+  }));
+  try {
+    render(wrap(client, <ThreadShell
+      session={{ ...session("shared-notifications"), sharedStream: "notifications", readOnly: true }}
+      title="Powiadomienia" onToggleSidebar={() => {}}
+    />));
+    await screen.findByText("Telegram: oczekuje na potwierdzenie");
+    await waitFor(() => expect(client.requestMutation).toHaveBeenCalledWith(
+      "notifications.read", { ids: ["notification:one"] },
+    ));
+    delivery = "uncertain";
+    act(() => client._emitSessionUpdate("shared-notifications"));
+    await screen.findByText("Telegram: brak potwierdzenia dostarczenia");
+    expect(screen.getAllByText("Spotkanie za chwilę")).toHaveLength(1);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  } finally {
+    vi.stubGlobal("fetch", previousFetch);
+  }
 });

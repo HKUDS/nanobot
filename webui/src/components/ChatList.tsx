@@ -931,7 +931,8 @@ export const ChatList = memo(function ChatList({
                       ? "running"
                       : recovery.has(s.chatId)
                         ? "recovery"
-                        : updated.has(s.chatId) && !topicActive
+                        : (s.sharedStream === "notifications"
+                            ? (s.unreadCount ?? 0) > 0 : updated.has(s.chatId)) && !topicActive
                           ? "updated"
                           : null;
                     const hasPaneMoveTarget = Boolean(onAttachPane)

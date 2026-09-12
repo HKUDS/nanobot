@@ -149,6 +149,26 @@ describe("NanobotTui layout", () => {
 
   const createRenderer = (options: Parameters<typeof createTestRenderer>[0]) => createTestRenderer(options)
 
+  test("notification composer cannot send chat messages or shell commands", async () => {
+    setup = await createRenderer({ width: 100, height: 18, screenMode: "alternate-screen" })
+    const sent: string[] = []
+    const notificationClient = client(sent)
+    notificationClient.activeChatId = "shared-notifications"
+    const app = NanobotTui.mount(setup.renderer, options, notificationClient,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    const ui = app as unknown as { composer: TextareaRenderable; ready: boolean; status: TextRenderable }
+    app.accept({ event: "attached", chat_id: "shared-notifications" })
+    await waitUntil(() => ui.ready)
+    ui.composer.setText("Run this task")
+    ui.composer.submit()
+    await waitUntil(() => ui.status.plainText.includes("Powiadomienia"))
+    ui.composer.setText("!echo forbidden")
+    ui.composer.submit()
+    await setup.renderOnce()
+    expect(sent).toEqual([])
+    expect(ui.composer.plainText).toBe("!echo forbidden")
+  })
+
   test("keeps short transcripts and the composer anchored at the top", async () => {
     setup = await createRenderer({
       width: 100,

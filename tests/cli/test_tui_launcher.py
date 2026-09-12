@@ -72,6 +72,18 @@ def test_default_tui_starts_fresh_but_explicit_session_wins() -> None:
     assert _initial_tui_chat_id("websocket:chosen") == "chosen"
 
 
+def test_configured_owner_tui_opens_main_and_preserves_explicit_selection() -> None:
+    config = Config.model_validate({"channels": {"telegram": {
+        "enabled": True, "allowFrom": ["7"],
+        "technical": {"sharedInbox": True, "mainChatId": "7"},
+    }}})
+    assert _initial_tui_chat_id(None, config=config) == "shared-main"
+    assert _initial_tui_chat_id("websocket:other", config=config) == "other"
+    assert _initial_tui_chat_id("", config=config) is None
+    config.channels.telegram["allowFrom"] = ["8"]
+    assert _initial_tui_chat_id(None, config=config) is None
+
+
 def test_default_tui_workspace_is_the_launch_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

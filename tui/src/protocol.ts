@@ -244,6 +244,7 @@ export interface HistorySnapshot {
   hasMoreBefore: boolean
   beforeCursor: string | null
   userMessageOffset: number
+  unreadNotificationIds?: string[]
 }
 
 export interface TokenUsage {
@@ -337,6 +338,9 @@ export interface SessionSummary {
   workspaceScope?: WorkspaceScopePayload | null
   pinned: boolean
   archived: boolean
+  sharedStream?: "main" | "notifications"
+  readOnly?: boolean
+  unreadCount?: number
 }
 
 const SKILL_REFERENCE_NAME = /^[A-Za-z0-9_-]+$/u
@@ -728,7 +732,10 @@ export async function fetchHistory(
         ...(typeof message.turnId === "string" ? { turnId: message.turnId } : {}),
       })
     } else if (content.trim()) {
-      messages.push({ role: "assistant", content, forkIndex: userIndex })
+      const delivery = chatId === "shared-notifications"
+        ? notificationDeliveryLabel(message.delivery_state) : ""
+      messages.push({ role: "assistant", content: delivery ? `${content}\n\n${delivery}` : content,
+        forkIndex: userIndex })
     }
   }
   return {
@@ -740,7 +747,18 @@ export async function fetchHistory(
     userMessageOffset: typeof payload.page?.user_message_offset === "number"
       ? Math.max(0, payload.page.user_message_offset)
       : 0,
+    ...(chatId === "shared-notifications" ? {
+      unreadNotificationIds: (payload.messages ?? []).flatMap((message) =>
+        typeof message.id === "string" && message.read !== true ? [message.id] : []),
+    } : {}),
   }
+}
+
+function notificationDeliveryLabel(state: unknown): string {
+  if (state === "pending") return "Telegram: oczekuje na potwierdzenie"
+  if (state === "uncertain") return "Telegram: brak potwierdzenia dostarczenia"
+  if (state === "not_sent") return "Telegram: nie wysłano"
+  return ""
 }
 
 export async function fetchSessionContext(
@@ -908,6 +926,10 @@ export async function fetchSessions(
       ...(isWorkspaceScope(value.workspace_scope) ? { workspaceScope: value.workspace_scope } : {}),
       pinned: pinned.has(value.key),
       archived: archived.has(value.key),
+      ...(value.shared_stream === "main" || value.shared_stream === "notifications"
+        ? { sharedStream: value.shared_stream, readOnly: value.read_only === true,
+            unreadCount: typeof value.unread_count === "number" ? value.unread_count : 0 }
+        : {}),
     }]
   })
 }
@@ -1341,6 +1363,10 @@ export class NanobotClient {
       if (!isRecoveryState(result)) throw new Error("gateway returned an invalid recovery state")
       return result
     })
+  }
+
+  markNotificationsRead(ids: string[]): Promise<{ changed: number }> {
+    return this.requestMutation("notifications.read", { ids })
   }
 
   private requestMutation<T>(

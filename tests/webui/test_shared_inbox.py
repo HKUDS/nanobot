@@ -70,6 +70,60 @@ async def test_receipts_are_deduplicated_durable_and_never_llm_messages(inbox):
     assert SharedInbox(changed_owner, inbox.sessions, inbox.bus).messages(NOTIFICATIONS_CHAT_ID) == []
 
 
+async def test_generated_notifications_are_visible_without_delivery_and_acknowledge_exact_rows(inbox):
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.bus.outbound_events import ProgressEvent, StreamedResponseEvent
+    from nanobot.channels.telegram.user_notifications import notification_receipt_id
+
+    metadata = {"_user_notification": {"id": "attention-one"}}
+    message = OutboundMessage("telegram", "7", "Calendar needs attention", metadata=metadata)
+    await inbox.observe_outbound(message)
+    rows = inbox.messages(NOTIFICATIONS_CHAT_ID)
+    assert rows[0]["delivery_state"] == "pending"
+    assert inbox.rows()[0]["unread_count"] == 1
+    await inbox.mark_read([rows[0]["id"]])
+    await inbox.observe_outbound(message, "uncertain")
+    assert inbox.messages(NOTIFICATIONS_CHAT_ID)[0]["delivery_state"] == "uncertain"
+    await inbox.delivered(message.content, notification_receipt_id(metadata, message.content))
+    message.event = StreamedResponseEvent()
+    await inbox.observe_outbound(message)  # Generated-final may arrive after Telegram receipt.
+    assert len(inbox.messages(NOTIFICATIONS_CHAT_ID)) == 1
+    assert inbox.rows()[0]["unread_count"] == 0
+    assert inbox.messages(NOTIFICATIONS_CHAT_ID)[0]["delivery_state"] == "delivered"
+    message.content = "SECRET TOOL ARGUMENT"
+    message.event = ProgressEvent(tool_hint=True)
+    await inbox.observe_outbound(message)
+    message.event = None
+    message.chat_id = "another-owner"
+    await inbox.observe_outbound(message)
+    assert len(inbox.messages(NOTIFICATIONS_CHAT_ID)) == 1
+
+
+async def test_notification_acknowledgement_is_authenticated_mutation(inbox, tmp_path):
+    from types import SimpleNamespace
+
+    services = gateway(inbox, tmp_path)
+    await inbox.record_notification("Notice", "one")
+    request = Request("/api/webui/notifications/read", Headers())
+    assert (await services.http._handle_notifications_read(request)).status_code == 401
+    connection = SimpleNamespace(request=Request("/", Headers()))
+    response = await services.http.dispatch_webui_mutation(
+        connection, "notifications.read", {"ids": ["notification:one"]},
+    )
+    assert response.status_code == 200
+    assert json.loads(response.body) == {"changed": 1}
+    assert inbox.rows()[0]["unread_count"] == 0
+
+
+def test_corrupt_notification_store_does_not_hide_main_chat(inbox):
+    inbox._path.write_text('{"owner":', encoding="utf-8")
+    rows = inbox.rows()
+    assert len(rows) == 2
+    assert rows[0]["feed_error"] == "notification_store_unavailable"
+    assert rows[1]["title"] == "Czat główny"
+    assert inbox._path.read_text(encoding="utf-8") == '{"owner":'
+
+
 async def test_webui_final_answer_mirrors_once_without_rewriting_history(inbox):
     session = inbox.sessions.get_or_create("telegram:7")
     session.add_message("user", "hello from webui")
@@ -162,7 +216,7 @@ async def test_channel_manager_composes_shared_routing_without_global_unified_le
     telegram = manager.channels["telegram"]
     websocket = manager.channels["websocket"]
     assert websocket.gateway.shared_inbox is manager._shared_inbox
-    assert telegram._technical.on_delivered is not None
+    assert telegram._technical.on_notification is not None
     await BaseChannel._handle_message(telegram, "7", "7", "hello", is_dm=False)
     inbound = await inbox.bus.consume_inbound()
     assert inbound.session_key_override == "telegram:7"
@@ -247,7 +301,7 @@ async def test_rebuild_checks_effective_notification_bot_identity(
     rebuilt = manager._build_channel("telegram", TelegramChannel, changed, runtime_name="telegram")
     assert shared.active is matches
     assert (rebuilt.on_notification_delivered is not None) is matches
-    assert (rebuilt.technical_notifier.on_delivered is not None) is matches
+    assert (rebuilt.technical_notifier.on_notification is not None) is matches
     if matches:
         assert len(shared.rows()) == 2
         assert shared.messages(NOTIFICATIONS_CHAT_ID)[0]["content"] == "Already delivered"
@@ -261,7 +315,7 @@ async def test_rebuild_checks_effective_notification_bot_identity(
         reverted = manager._build_channel("telegram", TelegramChannel, section, runtime_name="telegram")
         assert not shared.active  # Recomposition, not another hot reload, is required.
         assert reverted.on_notification_delivered is None
-        assert reverted.technical_notifier.on_delivered is None
+        assert reverted.technical_notifier.on_notification is None
     # The inbox retains only the public bot ID, never either credential.
     assert shared.config.token == ""
     stored = shared._path.read_text(encoding="utf-8")

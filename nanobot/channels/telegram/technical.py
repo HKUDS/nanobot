@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import timedelta
@@ -24,6 +25,7 @@ from nanobot.events import (
     RecoveryStateEvent,
     RetryStatusEvent,
 )
+from nanobot.webui.notification_store import DeliveryState
 
 if TYPE_CHECKING:
     from nanobot.channels.telegram.technical_config import TelegramTechnicalConfig
@@ -70,6 +72,7 @@ class TelegramTechnicalNotifier:
         self.failed = 0
         self.sent = 0
         self.on_delivered: Callable[[str, int], Awaitable[None]] | None = None
+        self.on_notification: Callable[[str, str, DeliveryState], Awaitable[None]] | None = None
 
     def start(self) -> None:
         if not self.config.enabled or self._task is not None:
@@ -175,7 +178,9 @@ class TelegramTechnicalNotifier:
                 await bot.initialize()
             while True:
                 text = await self._queue.get()
+                identity = f"technical-{uuid.uuid4().hex}"
                 cooldown = MIN_SEND_INTERVAL
+                await self._record(text, identity, "pending")
                 try:
                     async with asyncio.timeout(SEND_TIMEOUT):
                         receipt = await bot.send_message(
@@ -183,12 +188,17 @@ class TelegramTechnicalNotifier:
                             disable_notification=True,
                         )
                     self.sent += 1
+                    await self._record(text, identity, "delivered")
                     if self.on_delivered is not None:
                         try:
                             await self.on_delivered(text, receipt.message_id)
                         except Exception:
                             logger.warning("Telegram notification receipt could not be saved")
+                except asyncio.CancelledError:
+                    await self._record(text, identity, "uncertain")
+                    raise
                 except Exception as exc:
+                    await self._record(text, identity, "uncertain")
                     self.failed += 1
                     cooldown = FAILURE_COOLDOWN
                     if isinstance(exc, RetryAfter):
@@ -211,8 +221,19 @@ class TelegramTechnicalNotifier:
         finally:
             self._active = False
             self._unsubscribe()
-            self._discard_pending()
+            while not self._queue.empty():
+                text = self._queue.get_nowait()
+                await self._record(text, f"technical-{uuid.uuid4().hex}", "not_sent")
+                self._queue.task_done()
+                self.dropped += 1
             if bot is not None:
                 with suppress(Exception):
                     async with asyncio.timeout(SEND_TIMEOUT):
                         await bot.shutdown()
+
+    async def _record(self, text: str, identity: str, state: DeliveryState) -> None:
+        if self.on_notification is not None:
+            try:
+                await self.on_notification(text, identity, state)
+            except Exception:
+                logger.warning("Technical notification state could not be saved")

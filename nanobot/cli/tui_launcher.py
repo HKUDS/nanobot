@@ -84,8 +84,9 @@ def launch_tui(
     theme: str,
 ) -> int:
     """Run the native TUI against the shared local gateway."""
-    chat_id = _initial_tui_chat_id(session_id)
-    tui_workspace = _initial_tui_workspace(workspace_override)
+    chat_id = _initial_tui_chat_id(session_id, config=config)
+    tui_workspace = (config.workspace_path if chat_id in {"shared-main", "shared-notifications"}
+                     else _initial_tui_workspace(workspace_override))
     command = resolve_tui_command()
     base_url, bootstrap_secret = _tui_gateway_connection(config)
     gateway: _GatewayHandle | None = None
@@ -534,10 +535,24 @@ def _websocket_chat_id(session_id: str) -> str | None:
     return session_id or None
 
 
-def _initial_tui_chat_id(session_id: str | None) -> str | None:
+def _initial_tui_chat_id(session_id: str | None, *, config: Config | None = None) -> str | None:
     """Start fresh unless the caller explicitly selects a TUI chat."""
     if session_id is not None:
         return _websocket_chat_id(session_id)
+    if config is not None:
+        from nanobot.channels.telegram.technical_config import TelegramTechnicalConfig
+        from nanobot.config.loader import resolve_env_refs
+
+        raw = getattr(config.channels, "telegram", None)
+        if isinstance(raw, dict):
+            try:
+                section = cast(dict[str, Any], resolve_env_refs(cast(dict[str, Any], raw)))
+                technical = TelegramTechnicalConfig.model_validate(section.get("technical", {}))
+                if (technical.shared_inbox and section.get("enabled") is True
+                        and section.get("allowFrom", section.get("allow_from")) == [technical.main_chat_id]):
+                    return "shared-main"
+            except ValueError:
+                pass  # Match the gateway's unavailable shared-inbox configuration.
     return None
 
 

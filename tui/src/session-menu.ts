@@ -121,10 +121,12 @@ export class SessionMenu {
       .map((session) => ({
         ...session,
         active: session.chatId === currentChatId,
-        unread: this.unreadChatIds.has(session.chatId),
+        unread: session.sharedStream === "notifications"
+          ? (session.unreadCount ?? 0) > 0 : this.unreadChatIds.has(session.chatId),
       }))
       .sort((left, right) => {
-        return Number(right.active) - Number(left.active)
+        return sharedPriority(right) - sharedPriority(left)
+          || Number(right.active) - Number(left.active)
           || sessionPriority(right) - sessionPriority(left)
           || Number(right.pinned) - Number(left.pinned)
           || Number(left.archived) - Number(right.archived)
@@ -280,6 +282,10 @@ function sessionPriority(session: SessionMenuRow): number {
     || session.recoveryState?.status === "failed") return 3
   if (session.runStartedAt !== null) return 2
   return session.unread ? 1 : 0
+}
+
+function sharedPriority(session: SessionSummary): number {
+  return session.sharedStream === "notifications" ? 2 : session.sharedStream === "main" ? 1 : 0
 }
 
 function timestamp(value: string | null): number {

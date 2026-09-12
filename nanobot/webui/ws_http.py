@@ -173,6 +173,7 @@ _WEBUI_MUTATION_PATHS = {
     "skill.update": "/api/webui/skills/update",
     "skill.delete": "/api/webui/skills/delete",
     "sidebar.update": "/api/webui/sidebar-state/update",
+    "notifications.read": "/api/webui/notifications/read",
     "workspace.pick_folder": "/api/workspaces/pick-folder",
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
@@ -504,6 +505,7 @@ class GatewayHTTPHandler:
             "/api/webui/skills/update",
             "/api/webui/skills/delete",
             "/api/webui/sidebar-state/update",
+            "/api/webui/notifications/read",
             "/api/workspaces/pick-folder",
         }
 
@@ -1405,7 +1407,26 @@ class GatewayHTTPHandler:
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
             return self._handle_webui_sidebar_state_update(request)
+        if got == "/api/webui/notifications/read":
+            return await self._handle_notifications_read(request)
         return None
+
+    async def _handle_notifications_read(self, request: WsRequest) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self.shared_inbox is None or not self.shared_inbox.active:
+            return _http_error(404, "shared inbox unavailable")
+        payload = _mutation_payload(request)
+        identities = payload.get("ids") if payload is not None else None
+        if not isinstance(identities, list) or any(
+            not isinstance(identity, str) for identity in cast(list[object], identities)
+        ):
+            return _http_error(400, "notification ids must be a list of strings")
+        try:
+            changed = await self.shared_inbox.mark_read(cast(list[str], identities))
+        except ValueError:
+            return _http_error(400, "invalid notification ids")
+        return _http_json_response({"changed": changed})
 
     def _handle_commands(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):

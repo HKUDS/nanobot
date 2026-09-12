@@ -198,6 +198,7 @@ export async function listSessions(
     handle?: SessionHandle | null;
     shared_stream?: "main" | "notifications";
     read_only?: boolean;
+    unread_count?: number;
     profile_name?: string;
   };
   const body = await request<{ sessions: Row[] }>(
@@ -221,6 +222,7 @@ export async function listSessions(
       workspaceScope: s.workspace_scope ?? null,
       sharedStream: s.shared_stream,
       readOnly: s.read_only,
+      unreadCount: s.unread_count,
       profileName: s.profile_name,
       handle,
     };

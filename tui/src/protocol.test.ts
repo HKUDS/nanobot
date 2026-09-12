@@ -19,6 +19,24 @@ import {
   type InboundEvent,
 } from "./protocol"
 
+test("notification history includes delivery state and exact unread identities", async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = Object.assign(() => Promise.resolve(new Response(JSON.stringify({ messages: [
+    { id: "notification:one", role: "assistant", content: "Reminder", read: false,
+      delivery_state: "uncertain" },
+    { id: "notification:two", role: "assistant", content: "Read already", read: true,
+      delivery_state: "delivered" },
+  ] }))), { preconnect: originalFetch.preconnect })
+  try {
+    const history = await fetchHistory("http://nanobot.test", "token", "shared-notifications")
+    expect(history.unreadNotificationIds).toEqual(["notification:one"])
+    expect(history.messages[0]?.content).toContain("brak potwierdzenia dostarczenia")
+    expect(history.messages[1]?.content).toBe("Read already")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 class FakeSocket {
   static readonly OPEN = 1
   readonly sent: string[] = []

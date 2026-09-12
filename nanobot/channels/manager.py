@@ -247,7 +247,7 @@ class ChannelManager:
                         notifier.config, main_token=channel.config.token,
                     )
                     if shared_inbox.active:
-                        notifier.on_delivered = shared_inbox.delivered
+                        notifier.on_notification = shared_inbox.record_notification
                         channel.on_notification_delivered = shared_inbox.delivered
             elif cls.name == "websocket":
                 shared_inbox.bind_websocket(channel)
@@ -831,6 +831,13 @@ class ChannelManager:
                 if destination is not None and not destination.accepts_outbound(msg):
                     continue
 
+                shared = getattr(self, "_shared_inbox", None)
+                if shared is not None:
+                    try:
+                        await shared.observe_outbound(msg)
+                    except Exception:
+                        logger.warning("Owner notification could not be persisted before delivery")
+
                 event = msg.event
                 progress_event = event if isinstance(event, ProgressEvent) else None
                 if progress_event and (
@@ -1066,9 +1073,11 @@ class ChannelManager:
                 await self._send_once(channel, msg)
                 return  # Send succeeded
             except asyncio.CancelledError:
+                await self._mark_notification_uncertain(msg)
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
                 if not channel.should_retry_send_error(e):
+                    await self._mark_notification_uncertain(msg)
                     logger.error(
                         "Send to {} failed with a non-retryable {}: {}",
                         msg.channel,
@@ -1083,6 +1092,7 @@ class ChannelManager:
                     else loop.time() >= deadline
                 )
                 if exhausted:
+                    await self._mark_notification_uncertain(msg)
                     logger.exception(
                         "Failed to send to {} after {} attempts",
                         msg.channel, attempt,
@@ -1101,7 +1111,16 @@ class ChannelManager:
                 try:
                     await asyncio.sleep(delay)
                 except asyncio.CancelledError:
+                    await self._mark_notification_uncertain(msg)
                     raise  # Propagate cancellation during sleep
+
+    async def _mark_notification_uncertain(self, msg: OutboundMessage) -> None:
+        shared = getattr(self, "_shared_inbox", None)
+        if shared is not None:
+            try:
+                await shared.observe_outbound(msg, "uncertain")
+            except Exception:
+                logger.warning("Owner notification delivery state could not be persisted")
 
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""

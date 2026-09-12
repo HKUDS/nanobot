@@ -7,18 +7,16 @@ Telegram sessions are reused; legacy global unified history is never adopted.
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SessionTurnPersisted, TurnCompleted
 from nanobot.runtime_context import public_history_message
 from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.webui.notification_store import DeliveryState, NotificationStore
 from nanobot.webui.session_identity import webui_session_key
 
 if TYPE_CHECKING:
@@ -45,6 +43,9 @@ class SharedInbox:
         self._mirrored_turns: dict[str, None] = {}
         self.main_session_key = f"telegram:{config.main_chat_id}"
         self._path = sessions.sessions_dir / "telegram-notification-receipts.json"
+        self.notifications = NotificationStore(
+            self._path, owner=config.main_chat_id, target=config.chat_id,
+        )
         self._lock = asyncio.Lock()
         self._socket: Any = None
 
@@ -91,40 +92,40 @@ class SharedInbox:
                 ))
 
     def _receipts(self) -> list[dict[str, Any]]:
-        try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return []
-        # A changed destination/owner must not expose the previous operator's feed.
-        if not isinstance(data, dict):
-            return []
-        receipt_data = cast(dict[str, Any], data)
-        if receipt_data.get("owner") != self.config.main_chat_id or receipt_data.get("target") != self.config.chat_id:
-            return []
-        rows = receipt_data.get("messages")
-        if not isinstance(rows, list):
-            return []
-        return [cast(dict[str, Any], row) for row in cast(list[Any], rows)[-MAX_RECEIPTS:]
-                if isinstance(row, dict)]
+        return self.notifications.rows()
 
     def _save_receipt(self, text: str, message_id: int | str) -> None:
-        rows = self._receipts()
-        receipt_id = f"notification:{message_id}"
-        if any(row.get("id") == receipt_id for row in rows):
+        self.notifications.record(text, message_id, "delivered")
+
+    async def record_notification(
+        self, text: str, identity: str, state: DeliveryState = "pending",
+    ) -> None:
+        if not self.active:
             return
-        rows.append({"id": receipt_id, "role": "assistant", "content": text,
-                     "createdAt": int(datetime.now(timezone.utc).timestamp() * 1000)})
-        payload = {"owner": self.config.main_chat_id, "target": self.config.chat_id,
-                   "messages": rows[-MAX_RECEIPTS:]}
-        fd, name = tempfile.mkstemp(prefix=".notification-", dir=self._path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(payload, stream, ensure_ascii=False)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(name, self._path)
-        finally:
-            Path(name).unlink(missing_ok=True)
+        async with self._lock:
+            await asyncio.to_thread(self.notifications.record, text, identity, state)
+        await self.refresh(NOTIFICATIONS_CHAT_ID)
+
+    async def observe_outbound(
+        self, msg: OutboundMessage, state: DeliveryState = "pending",
+    ) -> None:
+        from nanobot.channels.telegram.user_notifications import notification_receipt_id
+
+        if (not self.active or msg.channel != "telegram"
+                or msg.chat_id != self.config.main_chat_id
+                or (msg.event is not None and not isinstance(msg.event, StreamedResponseEvent))):
+            return
+        identity = notification_receipt_id(msg.metadata, msg.content)
+        if identity is not None:
+            await self.record_notification(msg.content, identity, state)
+
+    async def mark_read(self, identities: list[str]) -> int:
+        if not self.active:
+            return 0
+        changed = await asyncio.to_thread(self.notifications.mark_read, identities)
+        if changed:
+            await self.refresh(NOTIFICATIONS_CHAT_ID)
+        return changed
 
     async def delivered(self, text: str, message_id: int | str) -> None:
         # Called only after a confirmed Telegram send. Persistence failure must
@@ -141,14 +142,25 @@ class SharedInbox:
         result: list[dict[str, Any]] = []
         for chat_id, title, stream in ((NOTIFICATIONS_CHAT_ID, "Powiadomienia", "notifications"),
                                       (MAIN_CHAT_ID, "Czat główny", "main")):
-            messages = self.messages(chat_id)
+            feed_error = False
+            try:
+                messages = self.messages(chat_id)
+            except (OSError, ValueError):
+                if stream != "notifications":
+                    raise
+                messages = []
+                feed_error = True
             last = messages[-1] if messages else None
             timestamp = datetime.fromtimestamp(last["createdAt"] / 1000, timezone.utc).isoformat() if last else None
             result.append({"key": webui_session_key(chat_id), "title": title,
                            "shared_stream": stream, "read_only": stream == "notifications",
+                           "unread_count": sum(not row.get("read", True) for row in messages)
+                           if stream == "notifications" else 0,
                            "profile_name": self.config.profile_name,
                            "updated_at": timestamp, "created_at": timestamp,
-                           "message_count": len(messages), "preview": last["content"][:160] if last else ""})
+                           "message_count": len(messages),
+                           "preview": "Nie można odczytać powiadomień" if feed_error else last["content"][:160] if last else "",
+                           **({"feed_error": "notification_store_unavailable"} if feed_error else {})})
         return result
 
     def messages(self, chat_id: str) -> list[dict[str, Any]]:

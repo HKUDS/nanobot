@@ -523,6 +523,13 @@ export function MessageBubble({
             </MarkdownText>
           </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
+          {message.delivery_state && message.delivery_state !== "delivered" ? (
+            <p className="mt-2 text-xs text-muted-foreground" role="status">
+              {message.delivery_state === "pending" ? "Telegram: oczekuje na potwierdzenie"
+                : message.delivery_state === "uncertain" ? "Telegram: brak potwierdzenia dostarczenia"
+                  : "Telegram: nie wysłano"}
+            </p>
+          ) : null}
         </>
       )}
       {showAssistantFooterSlot ? (

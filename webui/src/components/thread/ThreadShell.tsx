@@ -844,6 +844,18 @@ export function ThreadShell({
     dismissStreamError,
   } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
 
+  useEffect(() => {
+    if (session?.sharedStream !== "notifications" || !messagesReady) return;
+    const acknowledge = () => {
+      if (document.visibilityState !== "visible") return;
+      const ids = messages.filter((message) => message.read === false).map((message) => message.id);
+      if (ids.length) void client.requestMutation("notifications.read", { ids }).catch(() => {});
+    };
+    acknowledge();
+    document.addEventListener("visibilitychange", acknowledge);
+    return () => document.removeEventListener("visibilitychange", acknowledge);
+  }, [client, messages, messagesReady, session?.sharedStream]);
+
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const requestKey = historyKey;
     if (!requestKey) return;
@@ -1142,6 +1154,12 @@ export function ThreadShell({
     // canonical replay arrives (e.g. after ``session_updated`` refresh), prefer it
     // so rendering converges to the same shape as a manual refresh.
     const normalizedHistory = projectWebuiThreadMessages(historical);
+    if (session?.sharedStream === "notifications") {
+      // Transport receipts and read acknowledgements update existing rows. This
+      // feed has no local agent turn whose streaming tail needs preservation.
+      setMessages(normalizedHistory);
+      return;
+    }
     const keepLiveMessages = (current: UIMessage[]) => projectWebuiThreadMessages(current);
     if (hasNewCanonicalHistory && pendingCanonicalHydrate) {
       // Transcript replay strips streaming metadata and uses persisted ids.
@@ -1260,6 +1278,7 @@ export function ThreadShell({
     historyActiveTurnId,
     hasPendingToolCalls,
     historyKey,
+    session?.sharedStream,
   ]);
 
   useLayoutEffect(() => {
@@ -1723,7 +1742,7 @@ export function ThreadShell({
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
       {session?.sharedStream === "notifications" ? (
         <p className="max-w-sm px-4 text-sm leading-6 text-muted-foreground">
-          Brak powiadomień. Tutaj pojawią się komunikaty dostarczone do Telegrama.
+          Brak powiadomień. Tutaj pojawią się nowe komunikaty oraz ich stan dostarczenia do Telegrama.
         </p>
       ) : <HeroGreeting text={t(heroGreetingKey)} />}
     </div>

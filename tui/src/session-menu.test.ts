@@ -42,6 +42,27 @@ describe("SessionMenu", () => {
     setup = undefined
   })
 
+  test("keeps shared feeds first and restores unread status from the gateway", async () => {
+    setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
+    const menu = new SessionMenu(setup.renderer, {
+      text: "#FFFFFF", muted: "#999999", border: "#555555", accent: "#FF8A33",
+    })
+    setup.renderer.root.add(menu.root)
+    const notifications: SessionSummary = { ...sessions[0]!, chatId: "shared-notifications",
+      title: "Powiadomienia", sharedStream: "notifications", readOnly: true, unreadCount: 2 }
+    const main: SessionSummary = { ...sessions[0]!, chatId: "shared-main",
+      title: "Czat główny", sharedStream: "main" }
+    menu.open([sessions[0]!, main, notifications], "one", 6)
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame.indexOf("Powiadomienia")).toBeLessThan(frame.indexOf("Czat główny"))
+    expect(frame.indexOf("Czat główny")).toBeLessThan(frame.indexOf("API migration"))
+    expect(frame).toContain("• Powiadomienia")
+    menu.replace([sessions[0]!, main, { ...notifications, unreadCount: 0 }], "one")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).not.toContain("• Powiadomienia")
+  })
+
   test("marks, filters, and chooses gateway sessions", async () => {
     setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
     const menu = new SessionMenu(setup.renderer, {
