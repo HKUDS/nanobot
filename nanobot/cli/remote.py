@@ -12,6 +12,8 @@ from pathlib import Path
 
 import typer
 
+from nanobot.webui.session_identity import webui_session_key
+
 
 def _ssh_path(path: Path) -> str:
     value = str(path.expanduser().absolute())
@@ -45,7 +47,7 @@ def remote_command(
     ssh = shutil.which("ssh")
     if ssh is None:
         raise ValueError("OpenSSH client is not installed")
-    command = [executable, "agent", "--session", "websocket:shared-" + stream, "--theme", theme]
+    command = [executable, "agent", "--session", webui_session_key("shared-" + stream), "--theme", theme]
     if config is not None:
         command.extend(["--config", config])
     # Disable ambient SSH configuration, proxies, forwarding and password fallback.

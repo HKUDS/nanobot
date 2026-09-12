@@ -138,3 +138,12 @@ mail rules, full device execution and installers, complete client parity, and
 final rollout acceptance remain unfinished. A `ready` development artifact is
 not a deployed change. Setup and boundaries are documented in
 [development controls](development-control.md) and [remote sessions](remote-session.md).
+
+The first hosted run on the published increment passed the frontend, TUI on
+Linux/Windows, Docker, mail and calendar jobs. Python jobs caught a duplicated
+session-prefix literal in the remote launcher and two POSIX assumptions in new
+tests. The launcher now uses the canonical session-identity function; the Codex
+handshake test uses a real portable Python subprocess, and the installer test
+checks parsed argument boundaries. Local revalidation: **7780 passed, 53 skipped**
+plus 39 focused tests and clean strict types/lint. Hosted revalidation is pending;
+the earlier failed runs are not reported as green.

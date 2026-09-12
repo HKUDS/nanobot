@@ -1,5 +1,6 @@
 """Service installation preserves interpreter identity and systemd argument boundaries."""
 
+import shlex
 import sys
 from pathlib import Path
 
@@ -23,6 +24,10 @@ def test_installer_renders_real_templates_idempotently_without_touching_wireguar
     after = {path.name: path.read_text(encoding="utf-8") for path in target.iterdir()}
     assert before == after
     assert "@PYTHON@" not in after["nanobot-supervisor.service"]
-    assert str(config) in after["nanobot-supervisor.service"]
+    command = next(line.removeprefix("ExecStart=") for line in after["nanobot-supervisor.service"].splitlines()
+                   if line.startswith("ExecStart="))
+    argv = shlex.split(command)
+    assert argv[0] == str(Path(sys.executable).absolute())
+    assert argv[argv.index("--config") + 1] == str(config.resolve())
     assert "OnCalendar=*:0/10" in after["nanobot-supervisor.timer"]
     assert set(after) == {"nanobot-supervisor.service", "nanobot-supervisor.timer"}

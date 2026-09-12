@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -68,7 +70,7 @@ async def test_concurrent_reads_coalesce_and_failure_retains_last_observation(tm
     assert stale.observed_at == 1000
     assert stale.attempted_at == 1061
     assert stale.buckets[0].primary.used_percent == 34
-    assert "MUST_NOT_BE_PERSISTED" not in monitor.path.read_text()
+    assert "MUST_NOT_BE_PERSISTED" not in monitor.path.read_text(encoding="utf-8")
 
 
 async def test_disabled_monitor_never_starts_app_server(tmp_path: Path, monkeypatch):
@@ -79,16 +81,24 @@ async def test_disabled_monitor_never_starts_app_server(tmp_path: Path, monkeypa
     reader.assert_not_called()
 
 
-async def test_documented_read_only_handshake_no_turn_or_login(tmp_path: Path):
-    executable = tmp_path / "codex-test"
-    executable.write_text("#!/usr/bin/python3\n" + "\n".join([
+async def test_documented_read_only_handshake_no_turn_or_login(tmp_path: Path, monkeypatch):
+    script = tmp_path / "codex_test.py"
+    script.write_text("\n".join([
         "import json,sys",
         "a=json.loads(sys.stdin.readline()); assert a['method']=='initialize'",
         "print(json.dumps({'id':a['id'],'result':{}}),flush=True)",
         "b=json.loads(sys.stdin.readline()); assert b['method']=='initialized'",
         "c=json.loads(sys.stdin.readline()); assert c['method']=='account/rateLimits/read'",
         f"print(json.dumps({{'id':2,'result':{quota()!r}}}),flush=True)",
-    ]) + "\n")
-    executable.chmod(0o700)
-    response = await codex_limits.read_app_server(str(executable))
+    ]) + "\n", encoding="utf-8")
+    original = asyncio.create_subprocess_exec
+
+    async def spawn(executable, *args, **kwargs):
+        assert executable == sys.executable and args == ("app-server", "--stdio")
+        # A real pipe/process test on every OS; only replace the executable
+        # under test, avoiding POSIX shebang and executable-bit assumptions.
+        return await original(sys.executable, str(script), **kwargs)
+
+    monkeypatch.setattr(codex_limits.asyncio, "create_subprocess_exec", spawn)
+    response = await codex_limits.read_app_server(sys.executable)
     assert response == quota()
