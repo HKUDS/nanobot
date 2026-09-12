@@ -2417,6 +2417,60 @@ async def test_session_delete_removes_unpersisted_new_chat(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["every", "cron", "at"])
+async def test_webui_automation_edit_keeps_pending_run(bus, tmp_path, monkeypatch, kind):
+    now = 1_900_000_000_000
+    monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: now)
+    schedules = {
+        "every": CronSchedule(kind="every", every_ms=60_000),
+        "cron": CronSchedule(kind="cron", expr="* * * * *", tz="UTC"),
+        "at": CronSchedule(kind="at", at_ms=now + 60_000),
+    }
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    job = cron.add_job(
+        name="Report",
+        schedule=schedules[kind],
+        message="Write the report",
+        session_key="websocket:report",
+        origin_channel="websocket",
+        origin_chat_id="report",
+    )
+    due_at = job.state.next_run_at_ms
+    assert due_at is not None
+    now = due_at + 1_000
+    channel = _ch(bus, cron_service=cron, workspace_path=tmp_path)
+    try:
+        response = await _webui_mutate(
+            channel,
+            "automation.update",
+            {
+                "id": job.id,
+                "values": {
+                    "name": "Updated report",
+                    "message": "Include the latest figures",
+                    "schedule": {
+                        "kind": kind,
+                        "every_ms": job.schedule.every_ms,
+                        "at_ms": job.schedule.at_ms,
+                        "expr": job.schedule.expr,
+                        "tz": job.schedule.tz,
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        row = next(item for item in response.json()["jobs"] if item["id"] == job.id)
+        assert row["name"] == "Updated report"
+        assert row["payload"]["message"] == "Include the latest figures"
+        assert row["state"]["next_run_at_ms"] == due_at
+        persisted = CronService(cron.store_path).get_job(job.id)
+        assert persisted is not None
+        assert persisted.state.next_run_at_ms == due_at
+    finally:
+        await channel.stop()
+
+
+@pytest.mark.asyncio
 async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
     bus: MagicMock, tmp_path: Path
 ) -> None:

@@ -809,6 +809,7 @@ class CronService:
 
         For ``channel`` and ``to``, pass an explicit value (including ``None``)
         to update; omit (sentinel ``...``) to leave unchanged.
+        Preserve the next occurrence unless the schedule actually changes.
         """
         store = self._require_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
@@ -817,6 +818,7 @@ class CronService:
         if job.payload.kind == "system_event":
             return "protected"
 
+        schedule_changed = schedule is not None and schedule != job.schedule
         if schedule is not None:
             _validate_schedule_for_add(schedule)
             job.schedule = schedule
@@ -836,10 +838,10 @@ class CronService:
         self._enforce_agent_binding(job)
 
         job.updated_at_ms = _now_ms()
-        if job.enabled:
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
-        else:
+        if not job.enabled:
             job.state.next_run_at_ms = None
+        elif schedule_changed:
+            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
 
         if self._should_persist_store():
             self._save_store()
