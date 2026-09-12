@@ -132,6 +132,80 @@ def test_prepare_call_parses_json_string_arguments() -> None:
     assert error is None
 
 
+def test_prepare_call_decodes_json_string_for_nested_object_schema() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        _FakeTool(
+            "read_note",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "path": {"type": "string"},
+                                },
+                                "required": ["type", "path"],
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "name": {"type": "string"},
+                                },
+                                "required": ["type", "name"],
+                            },
+                        ],
+                    },
+                    "format": {"type": "string"},
+                },
+                "required": ["target", "format"],
+            },
+        )
+    )
+
+    tool, params, error = registry.prepare_call(
+        "read_note",
+        {
+            "target": '{"type":"path","path":"Projects/nanobot.md"}',
+            "format": "content",
+        },
+    )
+
+    assert tool is not None
+    assert error is None
+    assert params == {
+        "target": {"type": "path", "path": "Projects/nanobot.md"},
+        "format": "content",
+    }
+
+
+def test_prepare_call_preserves_json_like_text_for_string_schema() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        _FakeTool(
+            "echo_text",
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            },
+        )
+    )
+
+    tool, params, error = registry.prepare_call(
+        "echo_text",
+        {"value": '{"type":"path"}'},
+    )
+
+    assert tool is not None
+    assert error is None
+    assert params == {"value": '{"type":"path"}'}
+
+
 def test_prepare_call_rejects_malformed_json_string_arguments() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))

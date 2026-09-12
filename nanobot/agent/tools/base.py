@@ -1,6 +1,7 @@
 """Base class for agent tools."""
 from __future__ import annotations
 
+import json
 import math
 import typing
 from abc import ABC, abstractmethod
@@ -255,8 +256,55 @@ class Tool(ABC):
             return params
         return self._cast_object(params, schema)
 
+    @classmethod
+    def _schema_for_type(cls, schema: dict[str, Any], expected_type: str) -> dict[str, Any] | None:
+        """Return a direct or union branch for a simple JSON container type."""
+        if cls._resolve_type(schema.get("type")) == expected_type:
+            return schema
+
+        for key in ("oneOf", "anyOf"):
+            options = schema.get(key)
+            if not isinstance(options, list):
+                continue
+            for option in cast(list[Any], options):
+                if not isinstance(option, dict):
+                    continue
+                option_schema = cast(dict[str, Any], option)
+                if cls._resolve_type(option_schema.get("type")) == expected_type:
+                    return option_schema
+        return None
+
+    @staticmethod
+    def _decode_json_container(value: Any, expected_type: str) -> Any:
+        """Decode a JSON string only when it contains the expected container type."""
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        opening = "{" if expected_type == "object" else "["
+        if not stripped.startswith(opening):
+            return value
+
+        try:
+            parsed = json.loads(stripped)
+        except (TypeError, ValueError):
+            return value
+
+        if expected_type == "object" and isinstance(parsed, dict):
+            return cast(dict[str, Any], parsed)
+        if expected_type == "array" and isinstance(parsed, list):
+            return cast(list[Any], parsed)
+        return value
+
     def _cast_value(self, val: Any, schema: dict[str, Any]) -> Any:
         t = self._resolve_type(schema.get("type"))
+        if t is None:
+            for candidate in ("object", "array"):
+                branch = self._schema_for_type(schema, candidate)
+                if branch is not None:
+                    t = candidate
+                    schema = branch
+                    break
 
         if t == "boolean" and isinstance(val, bool):
             return val
@@ -283,6 +331,9 @@ class Tool(ABC):
             if low in self._BOOL_FALSE:
                 return False
             return val
+
+        if t in ("array", "object"):
+            val = self._decode_json_container(val, t)
 
         if t == "array" and isinstance(val, list):
             items = schema.get("items")
