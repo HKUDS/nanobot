@@ -130,6 +130,37 @@ def test_source_paths_and_symlinks_cannot_escape(tmp_path: Path):
             contained(root, relative)
 
 
+def test_small_edits_preserve_large_files_and_reject_ambiguous_or_frozen_targets(tmp_path: Path):
+    base = repository(tmp_path)
+    large = "# preserved context\n" * 30_000 + "VALUE = 1\n"
+    (base / "feature.py").write_text(large, encoding="utf-8")
+    source = tmp_path / "source"
+    copy_source(base, source)
+    candidate = Candidate(source, base, [])
+    candidate.edit("feature.py", "VALUE = 1", "VALUE = 2")
+    assert (source / "feature.py").read_text(encoding="utf-8") == large.replace("VALUE = 1", "VALUE = 2")
+    for old in ("", "missing text", "# preserved context"):
+        with pytest.raises(ValueError):
+            candidate.edit("feature.py", old, "replacement")
+    with pytest.raises(ValueError, match="frozen"):
+        candidate.edit("tests/check.py", "assert feature.VALUE > 0", "assert True")
+    assert (source / "tests/check.py").read_bytes() == (base / "tests/check.py").read_bytes()
+
+
+async def test_worker_supports_exact_edit_protocol_without_full_file_output(tmp_path: Path):
+    require_sandbox()
+    store = project(tmp_path)
+    response = LLMResponse(content=None, tool_calls=[
+        ToolCallRequest(id="edit", name="candidate", arguments={"action": "edit", "path": "feature.py",
+                                                                 "old_text": "VALUE = 1", "content": "VALUE = 2"}),
+        ToolCallRequest(id="done", name="candidate", arguments={"action": "done"}),
+    ])
+    runner = worker(tmp_path, store, ScriptedProvider([response, review_response()]))
+    result = await runner.run(proposal(store).id)
+    assert result.stage == "ready", result.blocked_reason
+    assert Path(result.artifact_path, "feature.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+
+
 def test_checks_fail_closed_without_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     root = repository(tmp_path)
     candidate = Candidate(root, root, [])

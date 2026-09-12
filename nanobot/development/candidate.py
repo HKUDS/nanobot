@@ -136,6 +136,15 @@ class Candidate:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
 
+    def edit(self, relative: str, old_text: str, content: str) -> None:
+        """Apply one exact, unambiguous replacement through the same write guard."""
+        if not old_text:
+            raise ValueError("edit requires non-empty old_text")
+        previous = self.read(relative)
+        if previous.count(old_text) != 1:
+            raise ValueError("old_text must match exactly once; read the current source before editing")
+        self.write(relative, previous.replace(old_text, content, 1))
+
     def verify_frozen(self) -> None:
         for path in source_files(self.baseline):
             relative = path.relative_to(self.baseline).as_posix()

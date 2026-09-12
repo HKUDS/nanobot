@@ -39,6 +39,10 @@ can expose a test virtual environment; `sourceDependencies` can mount relative
 `node_modules` directories. Tests must not rewrite source files; such a result is
 invalidated. Existing tests cannot be changed by the candidate; new tests can be
 added.
+The builder can read files in bounded pages and apply an exact replacement in an
+existing file. A replacement must match once; missing or ambiguous source text is
+rejected. This permits small changes in large modules without asking a model to
+regenerate the entire file, while keeping the same path and frozen-test guards.
 
 The builder uses the configured default model and provider, including Astra when
 that is the selected preset. `builderProtocol` can be `auto`, `tools` or `json`.
