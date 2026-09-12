@@ -1,0 +1,19 @@
+[Unit]
+Description=Carillon IMAP IDLE watcher for Nanobot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@HOME@/.local/bin/carillon --config @HOME@/.nanobot/workspace/.nanobot/mail/carillon.toml watch
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@HOME@/.nanobot/workspace/.nanobot/mail
+UMask=0077
+
+[Install]
+WantedBy=default.target

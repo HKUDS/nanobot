@@ -1,0 +1,37 @@
+# Copy to a private path outside the source repository and chmod 600.
+# This sample intentionally contains no real addresses, credentials, or folder names.
+
+[worker]
+database = "state/events.sqlite3"
+himalaya_binary = "/home/USER/.local/bin/himalaya"
+himalaya_config = "himalaya.toml"
+# Keep true until audit results have been reviewed.
+dry_run = true
+command_timeout_seconds = 30
+max_message_bytes = 2000000
+max_attempts = 8
+retry_base_seconds = 5
+stale_after_seconds = 300
+poll_seconds = 2
+# Periodic recovery for missed Carillon hooks. Allowed interval: 120–300 seconds.
+reconcile_interval_seconds = 180
+# Refuse unexpectedly large mailbox listings rather than consuming unbounded resources.
+reconcile_max_messages = 5000
+reconcile_max_response_bytes = 2000000
+
+[accounts.example]
+source_mailboxes = ["INBOX"]
+allowed_folders = ["Orders", "Newsletters", "Review"]
+# Omit this to leave unmatched messages in place.
+unmatched_destination = "Review"
+
+[[accounts.example.rules]]
+name = "known shop messages"
+destination = "Orders"
+sender_globs = ["orders@shop.example", "*@billing.shop.example"]
+subject_contains = ["order", "invoice", "receipt"]
+
+[[accounts.example.rules]]
+name = "mailing lists"
+destination = "Newsletters"
+header_contains = { list-unsubscribe = ["http://", "https://", "mailto:"] }

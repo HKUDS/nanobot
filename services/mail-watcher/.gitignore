@@ -1,0 +1,12 @@
+# Never commit runtime state or real account configuration.
+state/
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+config/*.toml
+!config/*.example.toml
+himalaya.toml
+carillon.toml
+mail.toml
+.env
+.env.*

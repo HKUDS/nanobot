@@ -42,6 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       python_required: ${{ steps.paths.outputs.python_required }}
+      mail_watcher_required: ${{ steps.paths.outputs.mail_watcher_required }}
       webui_required: ${{ steps.paths.outputs.webui_required }}
       tui_required: ${{ steps.paths.outputs.tui_required }}
       docker_required: ${{ steps.paths.outputs.docker_required }}
@@ -60,6 +61,7 @@ jobs:
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           python_required=true
+          mail_watcher_required=true
           webui_required=true
           tui_required=true
           docker_required=true
@@ -74,6 +76,7 @@ jobs:
             changed_files="$(git diff --name-only --no-renames "$diff_range")" &&
             [[ -n "$changed_files" ]]; then
             python_required=false
+            mail_watcher_required=false
             webui_required=false
             tui_required=false
             docker_required=false
@@ -83,6 +86,7 @@ jobs:
                 .github/workflows/*)
                   # A workflow change must exercise every affected execution path.
                   python_required=true
+                  mail_watcher_required=true
                   webui_required=true
                   tui_required=true
                   docker_required=true
@@ -113,12 +117,16 @@ jobs:
                 tui/*)
                   tui_required=true
                   ;;
+                services/mail-watcher/*)
+                  mail_watcher_required=true
+                  ;;
                 docs/*|.agent/*|.github/ISSUE_TEMPLATE/*|AGENTS.md|CLAUDE.md|COMMUNICATION.md|CONTRIBUTING.md|README.md|SECURITY.md|webui/README.md|render.yaml)
                   # Documentation-only changes are already filtered at the event level.
                   ;;
                 *)
                   # Keep new or unclassified paths covered until they are categorized.
                   python_required=true
+                  mail_watcher_required=true
                   webui_required=true
                   tui_required=true
                   docker_required=true
@@ -128,6 +136,7 @@ jobs:
           fi
 
           echo "python_required=$python_required" >> "$GITHUB_OUTPUT"
+          echo "mail_watcher_required=$mail_watcher_required" >> "$GITHUB_OUTPUT"
           echo "webui_required=$webui_required" >> "$GITHUB_OUTPUT"
           echo "tui_required=$tui_required" >> "$GITHUB_OUTPUT"
           echo "docker_required=$docker_required" >> "$GITHUB_OUTPUT"
@@ -228,6 +237,37 @@ jobs:
           uv run --no-sync python -m pytest
           tests/cli/test_commands.py
           --durations=25 --durations-min=1.0
+
+  mail_watcher:
+    name: Mail watcher service
+    needs: changes
+    if: needs.changes.outputs.mail_watcher_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install service and test dependencies
+        working-directory: services/mail-watcher
+        run: python -m pip install -e '.[dev]'
+
+      - name: Lint service
+        working-directory: services/mail-watcher
+        run: ruff check .
+
+      - name: Test service
+        working-directory: services/mail-watcher
+        run: pytest -q
+
+      - name: Build service wheel
+        working-directory: services/mail-watcher
+        run: python -m pip wheel --no-deps --wheel-dir dist .
 
   windows_process:
     name: Python (Windows process compatibility)

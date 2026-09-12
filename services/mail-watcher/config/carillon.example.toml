@@ -1,0 +1,21 @@
+# Carillon watches one mailbox per account. Replace all example values.
+# Store this file outside the source repository with mode 600.
+
+[accounts.example]
+default = true
+imap.mailbox = "INBOX"
+imap.server = "imaps://imap.example.org"
+imap.sasl.plain.username = "user@example.org"
+imap.sasl.plain.password.command = ["/usr/bin/secret-tool", "lookup", "service", "mail-example"]
+
+# Use absolute paths. Carillon exports event values as the lowercase environment
+# variables `mailbox` and `id`; argv-list entries are not templates. enqueue-env
+# reads only those fixed names and validates both values without a shell or eval.
+imap.hook.on-message-added.cmd = [
+  "/home/USER/.local/bin/nanobot-mail",
+  "--config",
+  "/home/USER/.nanobot/workspace/.nanobot/mail/config.toml",
+  "enqueue-env",
+  "--account",
+  "example",
+]

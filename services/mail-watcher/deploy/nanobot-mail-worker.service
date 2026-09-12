@@ -1,0 +1,19 @@
+[Unit]
+Description=Nanobot durable mail classification worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@HOME@/.local/bin/nanobot-mail --config @HOME@/.nanobot/workspace/.nanobot/mail/config.toml work
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@HOME@/.nanobot/workspace/.nanobot/mail
+UMask=0077
+
+[Install]
+WantedBy=default.target
