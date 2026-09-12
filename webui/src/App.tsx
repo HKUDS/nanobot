@@ -2865,6 +2865,7 @@ function Shell({
                     initialSection={settingsInitialSection}
                     initialSettings={settingsSnapshot}
                     showSidebar={view === "settings"}
+                    mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                     onToggleTheme={toggle}
                     onBackToChat={onBackToChat}
                     onModelNameChange={onModelNameChange}

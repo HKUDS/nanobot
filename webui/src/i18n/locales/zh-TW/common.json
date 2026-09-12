@@ -887,7 +887,7 @@
     },
     "automations": {
       "create": "建立自動任務",
-      "createPrompt": "想讓 nanobot 定時幫你做什麼？",
+      "createPrompt": "想讓 nanobot 自動幫你做什麼？",
       "createInput": "描述自動任務",
       "createRequest": "請為以下需求建立自動任務：\n\n{{request}}",
       "errors": {
@@ -905,6 +905,14 @@
       },
       "yourTasks": "你的自動任務",
       "systemTasks": "系統任務",
+      "views": {
+        "label": "自動任務檢視",
+        "tasks": "任務",
+        "calendar": "行事曆"
+      },
+      "filter": "篩選",
+      "filteredBy": "篩選：{{status}}",
+      "commandCondition": "透過指令觸發",
       "instructions": "任務指示",
       "done": "完成",
       "moreDetails": "更多詳細資訊",
@@ -915,7 +923,7 @@
       "filters": {
         "all": "全部",
         "active": "已啟用",
-        "paused": "已暫停",
+        "paused": "已停用",
         "failed": "需要處理",
         "system": "系統"
       },
@@ -943,8 +951,8 @@
         "updated": "更新時間"
       },
       "runNow": "立即執行",
-      "pause": "暫停",
-      "resume": "繼續",
+      "pause": "停用",
+      "resume": "啟用",
       "edit": "編輯",
       "delete": "刪除",
       "protected": "受保護",
@@ -958,7 +966,7 @@
       "status": {
         "system": "系統",
         "running": "正在執行",
-        "paused": "已暫停",
+        "paused": "已停用",
         "failed": "失敗",
         "completed": "已完成",
         "noSchedule": "無排程",
@@ -973,12 +981,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "每{{day}} {{time}}",
         "at": "於 {{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}}（{{tz}}）",
         "withTz": "{{summary}}（{{tz}}）",
         "dailyAt": "每天 {{time}}",
+        "monthlyAt": "每月 {{day}} 日 {{time}}",
         "weekdaysAt": "每週一至週五 {{time}}",
         "hourlyAt": "每小時第 {{minute}} 分鐘",
         "hourlyWindow": "每天 {{start}} 時至 {{end}} 時之間，於每小時第 {{minute}} 分鐘執行",
@@ -986,7 +996,7 @@
         "custom": "自訂排程"
       },
       "next": {
-        "paused": "已暫停",
+        "paused": "已停用",
         "pending": "正在執行",
         "local": "等待觸發",
         "none": "沒有後續執行排程"
@@ -1004,7 +1014,10 @@
         "unit": "單位",
         "cronExpression": "Cron 表達式",
         "timezone": "時區",
-        "runAt": "執行時間"
+        "runAt": "執行時間",
+        "runDate": "執行日期",
+        "runTime": "執行時刻",
+        "chooseDate": "選擇日期"
       },
       "scheduleTypes": {
         "every": "間隔",

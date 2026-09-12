@@ -1087,7 +1087,7 @@
     },
     "automations": {
       "create": "Create automation",
-      "createPrompt": "What would you like nanobot to schedule?",
+      "createPrompt": "What would you like nanobot to automate?",
       "createInput": "Describe an automation",
       "createRequest": "Create an automation for this request:\n\n{{request}}",
       "errors": {
@@ -1105,6 +1105,14 @@
       },
       "yourTasks": "Your automations",
       "systemTasks": "System tasks",
+      "views": {
+        "label": "Automation view",
+        "tasks": "Tasks",
+        "calendar": "Calendar"
+      },
+      "filter": "Filter",
+      "filteredBy": "Filter: {{status}}",
+      "commandCondition": "Triggered by command",
       "instructions": "Instructions",
       "done": "Done",
       "moreDetails": "More details",
@@ -1115,7 +1123,7 @@
       "filters": {
         "all": "All",
         "active": "Active",
-        "paused": "Paused",
+        "paused": "Disabled",
         "failed": "Needs attention",
         "system": "System"
       },
@@ -1143,8 +1151,8 @@
         "updated": "Updated"
       },
       "runNow": "Run now",
-      "pause": "Pause",
-      "resume": "Resume",
+      "pause": "Disable",
+      "resume": "Enable",
       "edit": "Edit",
       "delete": "Delete",
       "protected": "Protected",
@@ -1158,7 +1166,7 @@
       "status": {
         "system": "System",
         "running": "Running now",
-        "paused": "Paused",
+        "paused": "Disabled",
         "failed": "Failed",
         "completed": "Completed",
         "noSchedule": "No schedule",
@@ -1173,12 +1181,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "Every {{day}} at {{time}}",
         "at": "At {{time}}",
         "every": "Every {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} ({{tz}})",
         "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Daily at {{time}}",
+        "monthlyAt": "Monthly on day {{day}} at {{time}}",
         "weekdaysAt": "Weekdays at {{time}}",
         "hourlyAt": "Hourly at :{{minute}}",
         "hourlyWindow": "Hourly {{start}}-{{end}} at :{{minute}}",
@@ -1186,7 +1196,7 @@
         "custom": "Custom schedule"
       },
       "next": {
-        "paused": "Paused",
+        "paused": "Disabled",
         "pending": "Running now",
         "local": "Waiting for trigger",
         "none": "No next run"
@@ -1204,7 +1214,10 @@
         "unit": "Unit",
         "cronExpression": "Cron expression",
         "timezone": "Timezone",
-        "runAt": "Run at"
+        "runAt": "Run at",
+        "runDate": "Run date",
+        "runTime": "Run time",
+        "chooseDate": "Choose date"
       },
       "scheduleTypes": {
         "every": "Interval",

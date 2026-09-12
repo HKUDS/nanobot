@@ -887,7 +887,7 @@
     },
     "automations": {
       "create": "자동화 만들기",
-      "createPrompt": "nanobot이 언제 무엇을 해주면 좋을까요?",
+      "createPrompt": "nanobot이 무엇을 자동으로 해주면 좋을까요?",
       "createInput": "자동화 설명",
       "createRequest": "다음 요청에 맞는 자동화를 만들어 주세요:\n\n{{request}}",
       "errors": {
@@ -905,6 +905,14 @@
       },
       "yourTasks": "내 자동화",
       "systemTasks": "시스템 작업",
+      "views": {
+        "label": "자동화 보기",
+        "tasks": "작업",
+        "calendar": "캘린더"
+      },
+      "filter": "필터",
+      "filteredBy": "필터: {{status}}",
+      "commandCondition": "명령으로 실행",
       "instructions": "지침",
       "done": "완료",
       "moreDetails": "상세 정보",
@@ -915,7 +923,7 @@
       "filters": {
         "all": "전체",
         "active": "활성",
-        "paused": "일시 중지",
+        "paused": "비활성화",
         "failed": "확인 필요",
         "system": "시스템"
       },
@@ -943,8 +951,8 @@
         "updated": "업데이트"
       },
       "runNow": "지금 실행",
-      "pause": "일시 중지",
-      "resume": "재개",
+      "pause": "비활성화",
+      "resume": "활성화",
       "edit": "편집",
       "delete": "삭제",
       "protected": "보호됨",
@@ -958,7 +966,7 @@
       "status": {
         "system": "시스템",
         "running": "실행 중",
-        "paused": "일시 중지",
+        "paused": "비활성화",
         "failed": "실패",
         "completed": "완료",
         "noSchedule": "일정 없음",
@@ -973,12 +981,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "매주 {{day}} {{time}}",
         "at": "{{time}}",
         "every": "{{duration}}마다",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} ({{tz}})",
         "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "매일 {{time}}",
+        "monthlyAt": "매월 {{day}}일 {{time}}",
         "weekdaysAt": "월요일~금요일 {{time}}",
         "hourlyAt": "매시 {{minute}}분",
         "hourlyWindow": "{{start}}~{{end}} 사이 매시 {{minute}}분",
@@ -986,7 +996,7 @@
         "custom": "사용자 지정 일정"
       },
       "next": {
-        "paused": "일시 중지",
+        "paused": "비활성화",
         "pending": "실행 중",
         "local": "트리거 대기 중",
         "none": "다음 실행 없음"
@@ -1004,7 +1014,10 @@
         "unit": "단위",
         "cronExpression": "Cron 식",
         "timezone": "시간대",
-        "runAt": "실행 시간"
+        "runAt": "실행 시간",
+        "runDate": "실행 날짜",
+        "runTime": "실행 시각",
+        "chooseDate": "날짜 선택"
       },
       "scheduleTypes": {
         "every": "간격",

@@ -1,6 +1,5 @@
 import { CircleAlert, Loader2, X } from "lucide-react";
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { formControlFocusClassName } from "@/components/ui/form-control";
@@ -18,9 +17,6 @@ type CalendarEntry = {
 };
 
 type CalendarCopy = {
-  previousMonth: string;
-  nextMonth: string;
-  today: string;
   planned: string;
   recorded: string;
   running: string;
@@ -29,13 +25,14 @@ type CalendarCopy = {
   close: string;
   noEntries: string;
   completed: string;
+  system: string;
 };
 
 interface AutomationCalendarProps {
   jobs: SessionAutomationJob[];
+  month: Date;
   locale: string;
   copy: CalendarCopy;
-  filters?: ReactNode;
   onInspect: (job: SessionAutomationJob, trigger: HTMLElement) => void;
 }
 
@@ -43,16 +40,8 @@ function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function startOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
 function addDays(date: Date, amount: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + amount);
-}
-
-function addMonths(date: Date, amount: number): Date {
-  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
 }
 
 function mondayIndex(date: Date): number {
@@ -134,13 +123,6 @@ function CalendarEntryRow({ entry, locale, copy, onInspect, compact = false }: {
           : copy.recorded;
   const content = (
     <>
-      <span className={cn(
-        "mt-[0.4rem] h-1.5 w-1.5 shrink-0 rounded-full",
-        running && "bg-[hsl(var(--usage-token))]",
-        failed && "bg-destructive",
-        !running && !failed && entry.kind === "planned" && "border border-foreground/50 bg-background",
-        !running && !failed && entry.kind === "recorded" && "bg-foreground/45",
-      )} aria-hidden />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium text-foreground">{name}</span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] leading-4 text-muted-foreground">
@@ -148,6 +130,7 @@ function CalendarEntryRow({ entry, locale, copy, onInspect, compact = false }: {
           {failed ? <CircleAlert className="h-3 w-3" aria-hidden /> : null}
           <span className="tabular-nums">{entryTime(entry, locale)}</span>
           {compact ? <span>{status}</span> : null}
+          {entry.job.protected ? <span>{copy.system}</span> : null}
         </span>
       </span>
     </>
@@ -165,7 +148,7 @@ function CalendarEntryRow({ entry, locale, copy, onInspect, compact = false }: {
     <button
       type="button"
       className={actionClass}
-      aria-label={`${name}, ${entryTime(entry, locale)}, ${status}`}
+      aria-label={`${name}, ${entryTime(entry, locale)}, ${status}${entry.job.protected ? `, ${copy.system}` : ""}`}
       aria-haspopup="dialog"
       onClick={(event) => onInspect(entry.job, event.currentTarget)}
     >
@@ -193,7 +176,7 @@ function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }:
           ref={triggerRef}
           type="button"
           className={cn(
-            "min-h-6 w-full rounded-compact pe-2 ps-[1.375rem] py-1 text-left text-[10px] text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.055] hover:text-foreground motion-reduce:transition-none",
+            "min-h-6 w-full rounded-compact px-2 py-1 text-left text-[10px] text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.055] hover:text-foreground motion-reduce:transition-none",
             formControlFocusClassName,
           )}
         >
@@ -239,8 +222,7 @@ function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }:
   );
 }
 
-export function AutomationCalendar({ jobs, locale, copy, filters, onInspect }: AutomationCalendarProps) {
-  const [month, setMonth] = useState(() => startOfMonth(new Date()));
+export function AutomationCalendar({ jobs, month, locale, copy, onInspect }: AutomationCalendarProps) {
   const calendarRef = useRef<HTMLElement | null>(null);
   const [wideCalendar, setWideCalendar] = useState(true);
   const today = startOfDay(new Date());
@@ -276,44 +258,8 @@ export function AutomationCalendar({ jobs, locale, copy, filters, onInspect }: A
   }, []);
 
   return (
-    <section ref={calendarRef} className="automation-calendar overflow-hidden rounded-panel bg-[hsl(var(--settings-surface))]">
+    <section ref={calendarRef} className="automation-calendar overflow-hidden bg-[hsl(var(--settings-surface))]">
       <div className="automation-calendar-header bg-foreground/[0.025]">
-        <div className="automation-calendar-toolbar">
-          <h2 className="min-w-0 text-[15px] font-semibold text-foreground">{monthLabel}</h2>
-          {filters ? <div className="automation-calendar-filters min-w-0">{filters}</div> : null}
-          <div className="automation-calendar-navigation flex items-center gap-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-control px-3 text-[12px]"
-              onClick={() => setMonth(startOfMonth(new Date()))}
-            >
-              {copy.today}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground"
-              aria-label={copy.previousMonth}
-              onClick={() => setMonth((value) => addMonths(value, -1))}
-            >
-              <span className="text-lg leading-none" aria-hidden>‹</span>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground"
-              aria-label={copy.nextMonth}
-              onClick={() => setMonth((value) => addMonths(value, 1))}
-            >
-              <span className="text-lg leading-none" aria-hidden>›</span>
-            </Button>
-          </div>
-        </div>
-
         {wideCalendar ? <div className="automation-calendar-weekdays" aria-hidden>
           {weekdayLabels.map((label) => <div key={label}>{label}</div>)}
         </div> : null}
@@ -395,21 +341,6 @@ export function AutomationCalendar({ jobs, locale, copy, filters, onInspect }: A
           <div className="flex min-h-28 items-center justify-center text-[13px] text-muted-foreground">{copy.noEntries}</div>
         )}
       </div> : null}
-
-      {jobs.length ? (
-        <div className="automation-meta-row py-2 text-[10px] text-muted-foreground">
-          <span className="flex h-4 w-4 items-center justify-center" aria-hidden>
-            <span className="h-1.5 w-1.5 rounded-full border border-foreground/50 bg-background" />
-          </span>
-          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>{copy.planned}</span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-foreground/45" aria-hidden />
-              {copy.recorded}
-            </span>
-          </span>
-        </div>
-      ) : null}
 
     </section>
   );

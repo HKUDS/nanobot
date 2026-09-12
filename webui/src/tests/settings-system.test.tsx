@@ -40,6 +40,11 @@ const agentPlugin = {
   source: "agent-plugin",
 };
 
+function selectAutomationFilter(name: string) {
+  fireEvent.pointerDown(screen.getByRole("button", { name: /^Filter/ }), { button: 0, ctrlKey: false });
+  fireEvent.click(screen.getByRole("menuitemradio", { name }));
+}
+
 describe("Settings system domains", () => {
   installSettingsViewTestHooks();
 
@@ -164,6 +169,24 @@ describe("Settings system domains", () => {
     expect(screen.getByTestId("settings-section-transition")).not.toHaveClass("settings-feature-page");
   });
 
+  it.each(["apps", "skills", "automations", "channels"] as const)(
+    "keeps the standalone %s semantic heading and follows the main navigation state",
+    (initialSection) => {
+      renderSettingsView({ initialSection, initialSettings: settingsPayload(), showSidebar: false, mainNavigationExpanded: true });
+      const page = screen.getByTestId("settings-section-transition");
+      expect(page).toHaveAttribute("data-main-navigation-expanded", "true");
+      const heading = within(page).getByRole("heading", { level: 1 });
+      expect(heading.parentElement).toHaveClass("settings-feature-header");
+      expect(heading).not.toHaveAttribute("aria-hidden");
+    },
+  );
+
+  it("does not hide a standalone heading when the navigation is collapsed or absent", () => {
+    renderSettingsView({ initialSection: "skills", initialSettings: settingsPayload(), showSidebar: false, mainNavigationExpanded: false });
+    expect(screen.getByTestId("settings-section-transition")).toHaveAttribute("data-main-navigation-expanded", "false");
+    expect(screen.getByRole("heading", { name: "Skills", level: 1 })).toBeVisible();
+  });
+
   it("uses the inline section heading layout to align Apps titles and counts", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -238,7 +261,7 @@ describe("Settings system domains", () => {
     const input = screen.getByRole("textbox", { name: "Describe an automation" });
     expect(input).toHaveAttribute(
       "placeholder",
-      "What would you like nanobot to schedule?",
+      "What would you like nanobot to automate?",
     );
     fireEvent.change(input, { target: { value: "Summarize updates every weekday at 9" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -278,14 +301,14 @@ describe("Settings system domains", () => {
     });
 
     expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Paused 0" }));
+    selectAutomationFilter("Disabled 0");
     expect(screen.queryByRole("button", { name: /Daily summary/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Today" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "All 1" }));
+    selectAutomationFilter("All 1");
     expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
   });
 
-  it("wraps automation filters and keeps every option selectable", async () => {
+  it("reveals status filters on demand and keeps every option selectable", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === "/api/settings") return jsonResponse(settingsPayload());
       if (String(input) === "/api/webui/automations") {
@@ -293,7 +316,7 @@ describe("Settings system domains", () => {
           {
             id: "heartbeat", name: "heartbeat", enabled: true, protected: true,
             schedule: { kind: "every", every_ms: 1_800_000 },
-            payload: { message: "System-managed automation" }, state: {},
+            payload: { message: "System-managed automation" }, state: { next_run_at_ms: Date.now() + 60_000 },
           },
           {
             id: "paused-job", name: "Paused reminder", enabled: false,
@@ -307,20 +330,18 @@ describe("Settings system domains", () => {
     }));
     renderSettingsView({ initialSection: "automations", initialSettings: settingsPayload(), showSidebar: false });
 
-    const filters = await screen.findByRole("group", { name: "Automations" });
-    expect(within(filters).getByRole("button", { name: "All 1" }).parentElement).toHaveClass("segmented-control", "flex-wrap");
-    expect(within(filters).getAllByRole("button")).toHaveLength(4);
-    expect(within(filters).getByRole("button", { name: "All 1" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(filters).queryByRole("button", { name: /System/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "System tasks 1" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: /heartbeat/ })).toBeVisible();
-
-    fireEvent.click(within(filters).getByRole("button", { name: "Paused 1" }));
-    expect(within(filters).getByRole("button", { name: "Paused 1" })).toHaveAttribute("aria-pressed", "true");
+    const trigger = await screen.findByRole("button", { name: "Filter", exact: true });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    const menu = screen.getByRole("menu", { name: "Filter" });
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(4);
+    expect(within(menu).getByRole("menuitemradio", { name: "All 1" })).toHaveAttribute("aria-checked", "true");
+    expect(within(menu).queryByRole("menuitemradio", { name: /System/ })).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Disabled 1" }));
+    expect(screen.getByRole("button", { name: "Filter: Disabled" })).toBeVisible();
     expect(screen.getByRole("button", { name: /Paused reminder/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: /heartbeat/ })).not.toBeInTheDocument();
-    expect(within(filters).getAllByRole("button", { pressed: true })).toHaveLength(1);
+
   });
 
   it("coalesces focus refreshes while automations are already loading", async () => {

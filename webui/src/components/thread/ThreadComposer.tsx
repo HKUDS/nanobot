@@ -2200,6 +2200,27 @@ export function ThreadComposer({
     && value.length === 0 && images.length === 0 && !inlineError
     && !normalizedQuotedContext && !queuedPrompts.length && !goalState?.active
     && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
+  useLayoutEffect(() => {
+    if (!compactWhenIdle) return;
+    const form = formRef.current;
+    const primary = form?.querySelector<HTMLElement>(".thread-composer-footer-primary");
+    const actions = form?.querySelector<HTMLElement>(".thread-composer-footer-actions");
+    if (!form || !primary || !actions) return;
+    const controls = Array.from(primary.children).filter((child) => getComputedStyle(child).display !== "none");
+    // Reserve the real toolbar width, including translated model labels, while
+    // the footer slides beneath the input. Neither control is remounted.
+    const measure = () => {
+      const gap = parseFloat(getComputedStyle(primary).columnGap) || 0;
+      const width = controls.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0)
+        + Math.max(0, controls.length - 1) * gap + actions.getBoundingClientRect().width;
+      form.style.setProperty("--composer-compact-controls-width", `${width}px`);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    controls.forEach((control) => observer?.observe(control));
+    observer?.observe(actions);
+    return () => observer?.disconnect();
+  }, [compactWhenIdle, modelLabel, voiceRecorder.isRecording, workspaceScope]);
   const inputTextClasses = cn(
     "w-full resize-none bg-transparent",
     isHero
@@ -2282,8 +2303,8 @@ export function ThreadComposer({
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
-            ? "max-w-[58rem] rounded-prominent bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
-            : "max-w-[49.5rem] rounded-panel bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
+            ? "max-w-[58rem] rounded-prominent bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]"
+            : "max-w-[49.5rem] rounded-panel bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]",
           compactWhenIdle && "thread-composer-collapsible transition-colors motion-reduce:transition-none",
           interactionDisabled && "opacity-60",
           sessionDragPreview && "ring-1 ring-primary/25",

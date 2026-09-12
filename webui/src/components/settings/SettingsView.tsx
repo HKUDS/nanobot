@@ -12,6 +12,7 @@ interface SettingsViewProps {
   initialSection?: SettingsSectionKey;
   initialSettings?: SettingsPayload | null;
   showSidebar?: boolean;
+  mainNavigationExpanded?: boolean;
   onToggleTheme: () => void;
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
@@ -38,6 +39,7 @@ export function SettingsView({
   initialSection = "overview",
   initialSettings = null,
   showSidebar = true,
+  mainNavigationExpanded = false,
   onToggleTheme,
   onBackToChat,
   onModelNameChange,
@@ -68,6 +70,7 @@ export function SettingsView({
       controller={controller}
       theme={theme}
       showSidebar={showSidebar}
+      mainNavigationExpanded={mainNavigationExpanded}
       onToggleTheme={onToggleTheme}
       onBackToChat={onBackToChat}
       skills={skills}

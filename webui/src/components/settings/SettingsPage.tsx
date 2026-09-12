@@ -49,6 +49,7 @@ interface SettingsPageProps {
   controller: SettingsController;
   theme: "light" | "dark";
   showSidebar: boolean;
+  mainNavigationExpanded: boolean;
   onToggleTheme: () => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
@@ -69,6 +70,7 @@ export function SettingsPage({
   controller,
   theme,
   showSidebar,
+  mainNavigationExpanded,
   onToggleTheme,
   onBackToChat,
   skills,
@@ -734,6 +736,7 @@ export function SettingsPage({
           data-testid="settings-section-transition"
           ref={setDialogLayoutAnchor}
           data-settings-section={activeSection}
+          data-main-navigation-expanded={mainNavigationExpanded}
           className={cn(
             "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
             "motion-reduce:animate-none sm:py-8 lg:py-12",
@@ -744,7 +747,7 @@ export function SettingsPage({
           )}
         >
           {!showSidebar ? (
-            <div className={activeSection === "automations" ? "lg:hidden" : "mb-7"}>
+            <div className={activeSection === "automations" ? "lg:hidden" : "settings-feature-header mb-7"}>
               <button
                 type="button"
                 onClick={backToChat}

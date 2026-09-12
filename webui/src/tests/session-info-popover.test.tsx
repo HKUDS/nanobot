@@ -81,7 +81,7 @@ describe("SessionInfoPopover", () => {
     expect(detail).toHaveClass("max-w-[520px]", "rounded-modal");
     expect(within(detail).getByText("Instructions")).toBeInTheDocument();
     expect(within(detail).getByText("Check the project status")).toBeInTheDocument();
-    await user.click(within(detail).getByRole("button", { name: "Done" }));
+    await user.click(within(detail).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Morning check" })).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Session details" })).toHaveFocus();
   });
@@ -103,14 +103,14 @@ describe("SessionInfoPopover", () => {
     await user.click(screen.getByRole("button", { name: "Session details" }));
     await user.click(await screen.findByRole("button", { name: /Morning check/ }));
     const detail = screen.getByRole("dialog", { name: "Morning check" });
-    await user.click(within(detail).getByRole("button", { name: "Pause" }));
+    await user.click(within(detail).getByRole("button", { name: "Disable" }));
 
     expect(requestMutation).toHaveBeenCalledWith(
       "automation.disable",
       { id: "job-1" },
       20_000,
     );
-    expect(await within(detail).findByRole("button", { name: "Resume" })).toBeInTheDocument();
+    expect(await within(detail).findByRole("button", { name: "Enable" })).toBeInTheDocument();
   });
 
   it("returns from the shared editor to the same task detail", async () => {

@@ -887,7 +887,7 @@
     },
     "automations": {
       "create": "自動タスクを作成",
-      "createPrompt": "nanobot にいつ、何をしてほしいですか？",
+      "createPrompt": "nanobot に何を自動化してほしいですか？",
       "createInput": "自動タスクを説明",
       "createRequest": "次の依頼に対する自動タスクを作成してください：\n\n{{request}}",
       "errors": {
@@ -905,6 +905,14 @@
       },
       "yourTasks": "自分の自動化",
       "systemTasks": "システムタスク",
+      "views": {
+        "label": "自動化の表示",
+        "tasks": "タスク",
+        "calendar": "カレンダー"
+      },
+      "filter": "絞り込み",
+      "filteredBy": "絞り込み：{{status}}",
+      "commandCondition": "コマンドで実行",
       "instructions": "指示",
       "done": "完了",
       "moreDetails": "詳細情報",
@@ -915,7 +923,7 @@
       "filters": {
         "all": "すべて",
         "active": "有効",
-        "paused": "一時停止",
+        "paused": "無効",
         "failed": "要対応",
         "system": "システム"
       },
@@ -943,8 +951,8 @@
         "updated": "更新"
       },
       "runNow": "今すぐ実行",
-      "pause": "一時停止",
-      "resume": "再開",
+      "pause": "無効にする",
+      "resume": "有効にする",
       "edit": "編集",
       "delete": "削除",
       "protected": "保護済み",
@@ -958,7 +966,7 @@
       "status": {
         "system": "システム",
         "running": "実行中",
-        "paused": "一時停止",
+        "paused": "無効",
         "failed": "失敗",
         "completed": "完了",
         "noSchedule": "スケジュールなし",
@@ -973,12 +981,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "毎週{{day}} {{time}}",
         "at": "{{time}}",
         "every": "{{duration}} ごと",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}}（{{tz}}）",
         "withTz": "{{summary}}（{{tz}}）",
         "dailyAt": "毎日 {{time}}",
+        "monthlyAt": "毎月{{day}}日 {{time}}",
         "weekdaysAt": "月曜日〜金曜日 {{time}}",
         "hourlyAt": "毎時 {{minute}} 分",
         "hourlyWindow": "{{start}}〜{{end}} の毎時 {{minute}} 分",
@@ -986,7 +996,7 @@
         "custom": "カスタムスケジュール"
       },
       "next": {
-        "paused": "一時停止",
+        "paused": "無効",
         "pending": "実行中",
         "local": "トリガー待ち",
         "none": "次回実行なし"
@@ -1004,7 +1014,10 @@
         "unit": "単位",
         "cronExpression": "Cron 式",
         "timezone": "タイムゾーン",
-        "runAt": "実行日時"
+        "runAt": "実行日時",
+        "runDate": "実行日",
+        "runTime": "実行時刻",
+        "chooseDate": "日付を選択"
       },
       "scheduleTypes": {
         "every": "間隔",

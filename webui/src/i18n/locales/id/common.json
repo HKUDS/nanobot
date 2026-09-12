@@ -887,7 +887,7 @@
     },
     "automations": {
       "create": "Buat otomatisasi",
-      "createPrompt": "Apa yang ingin kamu jadwalkan dengan nanobot?",
+      "createPrompt": "Apa yang ingin kamu otomatisasi dengan nanobot?",
       "createInput": "Jelaskan otomatisasi",
       "createRequest": "Buat otomatisasi untuk permintaan ini:\n\n{{request}}",
       "errors": {
@@ -905,6 +905,14 @@
       },
       "yourTasks": "Otomatisasi Anda",
       "systemTasks": "Tugas sistem",
+      "views": {
+        "label": "Tampilan otomatisasi",
+        "tasks": "Tugas",
+        "calendar": "Kalender"
+      },
+      "filter": "Filter",
+      "filteredBy": "Filter: {{status}}",
+      "commandCondition": "Dipicu oleh perintah",
       "instructions": "Instruksi",
       "done": "Selesai",
       "moreDetails": "Detail lainnya",
@@ -915,7 +923,7 @@
       "filters": {
         "all": "Semua",
         "active": "Aktif",
-        "paused": "Dijeda",
+        "paused": "Dinonaktifkan",
         "failed": "Perlu ditangani",
         "system": "Sistem"
       },
@@ -943,8 +951,8 @@
         "updated": "Diperbarui"
       },
       "runNow": "Jalankan sekarang",
-      "pause": "Jeda",
-      "resume": "Lanjutkan",
+      "pause": "Nonaktifkan",
+      "resume": "Aktifkan",
       "edit": "Ubah",
       "delete": "Hapus",
       "protected": "Terlindungi",
@@ -958,7 +966,7 @@
       "status": {
         "system": "Sistem",
         "running": "Sedang berjalan",
-        "paused": "Dijeda",
+        "paused": "Dinonaktifkan",
         "failed": "Gagal",
         "completed": "Selesai",
         "noSchedule": "Tanpa jadwal",
@@ -973,12 +981,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "Setiap {{day}} pukul {{time}}",
         "at": "Pada {{time}}",
         "every": "Setiap {{duration}}",
         "cron": "Cron {{expr}}",
         "cronWithTz": "Cron {{expr}} ({{tz}})",
         "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Setiap hari pukul {{time}}",
+        "monthlyAt": "Setiap tanggal {{day}} pukul {{time}}",
         "weekdaysAt": "Senin–Jumat pukul {{time}}",
         "hourlyAt": "Setiap jam pada menit {{minute}}",
         "hourlyWindow": "Setiap jam dari {{start}} hingga {{end}}, pada menit {{minute}}",
@@ -986,7 +996,7 @@
         "custom": "Jadwal khusus"
       },
       "next": {
-        "paused": "Dijeda",
+        "paused": "Dinonaktifkan",
         "pending": "Sedang berjalan",
         "local": "Menunggu pemicu",
         "none": "Tidak ada jadwal berikutnya"
@@ -1004,7 +1014,10 @@
         "unit": "Unit",
         "cronExpression": "Ekspresi cron",
         "timezone": "Zona waktu",
-        "runAt": "Jalankan pada"
+        "runAt": "Jalankan pada",
+        "runDate": "Tanggal eksekusi",
+        "runTime": "Waktu eksekusi",
+        "chooseDate": "Pilih tanggal"
       },
       "scheduleTypes": {
         "every": "Interval",

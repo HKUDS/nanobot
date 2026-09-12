@@ -6,6 +6,7 @@ import {
   ChevronDown,
   CircleAlert,
   Clipboard,
+  ListFilter,
   Loader2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -13,14 +14,15 @@ import { useTranslation } from "react-i18next";
 import { channelTranslator } from "@/channel-plugins/i18n";
 import { channelUiOwner, channelUiPresentation } from "@/channel-plugins/registry";
 import { AutomationCalendar } from "@/components/settings/system/AutomationCalendar";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
+import { AutomationRunAtPicker, parseAutomationRunAt } from "@/components/settings/system/AutomationRunAtPicker";
 import {
   modelPresetOptionsFromSettings,
   toModelBadgeInfo,
 } from "@/components/thread/model-preset";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { Button } from "@/components/ui/button";
-import { Disclosure, DisclosureContent } from "@/components/ui/disclosure";
+import { Disclosure } from "@/components/ui/disclosure";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ExpandableText } from "@/components/ui/expandable-text";
 import {
   Dialog,
@@ -50,7 +52,6 @@ export type AutomationFilter = "all" | "active" | "paused" | "failed" | "system"
 export type AutomationAction = "enable" | "disable" | "delete" | "run";
 
 const EMPTY_TITLE_OVERRIDES: Record<string, string> = {};
-const SYSTEM_TASKS_OPEN_STORAGE_KEY = "nanobot-webui.automation-system-tasks-open";
 
 export function AutomationsSettings({
   payload, loading, filter, actionKey, error,
@@ -97,35 +98,28 @@ export function AutomationsSettings({
   const [inspectedJob, setInspectedJob] = useState<SessionAutomationJob | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
-  const [systemOpen, setSystemOpen] = useState(() => {
-    try {
-      return window.localStorage.getItem(SYSTEM_TASKS_OPEN_STORAGE_KEY) !== "false";
-    } catch {
-      return true;
-    }
+  const [view, setView] = useState<"tasks" | "calendar">("calendar");
+  const [month, setMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const pageTitle = useRef<HTMLHeadingElement | null>(null);
   const selectedTrigger = useRef<HTMLElement | null>(null);
   const afterDetailClose = useRef<((job: SessionAutomationJob) => void) | null>(null);
-  const filtered = useMemo(() => {
-    return jobs
-      .filter((job) => automationMatchesFilter(job, filter));
-  }, [filter, jobs]);
-  const personalJobs = jobs.filter((job) => !job.protected);
-  const personal = filtered.filter((job) => !job.protected);
-  const system = filtered.filter((job) => job.protected);
+  const visibleJobs = useMemo(() => jobs.filter((job) => !job.protected), [jobs]);
+  const filtered = useMemo(() => visibleJobs.filter((job) => automationMatchesFilter(job, filter)), [filter, visibleJobs]);
   // Keep an inspected task open when an action moves it outside the current filter.
   const liveSelectedJob = jobs.find((job) => job.id === inspectedJob?.id);
   // Retain the last detail through its exit, even if a one-shot task disappears.
   const selectedJob = liveSelectedJob ?? inspectedJob;
   const summaryOptions: Array<{ value: AutomationFilter; label: string; count: number }> = [
-    { value: "all", label: tx("settings.automations.filters.all", "All"), count: personalJobs.length },
+    { value: "all", label: tx("settings.automations.filters.all", "All"), count: visibleJobs.length },
     { value: "active", label: tx("settings.automations.filters.active", "Active"),
-      count: personalJobs.filter((job) => automationMatchesFilter(job, "active")).length },
-    { value: "paused", label: tx("settings.automations.filters.paused", "Paused"),
-      count: personalJobs.filter((job) => automationMatchesFilter(job, "paused")).length },
+      count: visibleJobs.filter((job) => automationMatchesFilter(job, "active")).length },
+    { value: "paused", label: tx("settings.automations.filters.paused", "Disabled"),
+      count: visibleJobs.filter((job) => automationMatchesFilter(job, "paused")).length },
     { value: "failed", label: tx("settings.automations.filters.failed", "Needs attention"),
-      count: personalJobs.filter(automationNeedsAttention).length },
+      count: visibleJobs.filter(automationNeedsAttention).length },
   ];
   const configuredPresetNames = useMemo(
     () => new Set(settingsSnapshot?.model_presets?.map((preset) => preset.name) ?? []),
@@ -163,19 +157,6 @@ export function AutomationsSettings({
     onReturnToDetailHandled?.();
   }, [jobs, onReturnToDetailHandled, returnToDetailJob]);
 
-  const renderJob = (job: SessionAutomationJob) => (
-    <AutomationListItem
-      key={job.id}
-      job={job}
-      locale={locale}
-      disabled={Boolean(job.protected) && !systemOpen}
-      onSelect={(button) => {
-        selectedTrigger.current = button;
-        setInspectedJob(job);
-        setDetailOpen(true);
-      }}
-    />
-  );
   const inspectJob = (job: SessionAutomationJob, trigger: HTMLElement) => {
     selectedTrigger.current = trigger;
     setInspectedJob(job);
@@ -201,10 +182,37 @@ export function AutomationsSettings({
     options,
     activeModelPreset,
   );
+  const filterLabel = filter === "all" ? tx("settings.automations.filter", "Filter") : tx("settings.automations.filteredBy", "Filter: {{status}}", {
+    status: summaryOptions.find((option) => option.value === filter)?.label,
+  });
+  const filters = visibleJobs.length ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" aria-label={filterLabel} title={filterLabel}
+          className={cn("h-8 text-[12px]", filter === "all" ? "w-8 p-0 text-muted-foreground" : "gap-1.5 bg-background text-foreground")}>
+          <ListFilter className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+          {filter !== "all" ? filterLabel : null}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" aria-label={tx("settings.automations.filter", "Filter")}>
+        <DropdownMenuRadioGroup value={filter} onValueChange={(value) => {
+          const option = summaryOptions.find((item) => item.value === value);
+          if (option) onFilterChange(option.value);
+        }}>
+          {summaryOptions.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value} className="gap-6">
+              <span>{option.label}</span>
+              <span className="ms-auto tabular-nums text-muted-foreground">{option.count}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null;
 
   return (
     <div className="automations-page">
-      <header className="mb-7">
+      <header className="settings-feature-header mb-7">
         <h1 ref={pageTitle} tabIndex={-1} className="text-[24px] font-normal leading-tight tracking-normal text-foreground outline-none sm:text-[28px]">
           {tx("settings.nav.automations", "Automations")}
         </h1>
@@ -221,7 +229,7 @@ export function AutomationsSettings({
               inputAriaLabel={tx("settings.automations.createInput", "Describe an automation")}
               placeholder={tx(
                 "settings.automations.createPrompt",
-                "What would you like nanobot to schedule?",
+                "What would you like nanobot to automate?",
               )}
               variant="thread"
               compactWhenIdle
@@ -240,89 +248,115 @@ export function AutomationsSettings({
         ) : null}
 
         {error ? <AutomationError message={error} /> : null}
-        {loading && !payload ? (
-          <div role="status" className="flex h-44 items-center justify-center rounded-panel border border-border/70 bg-[hsl(var(--settings-surface))] text-[13px] text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            {tx("settings.automations.loading", "Loading automations...")}
-          </div>
-        ) : (
-          <AutomationCalendar
-            jobs={personal}
-            locale={locale}
-            filters={jobs.length ? (
-              <div role="group" aria-label={tx("settings.nav.automations", "Automations")}>
-                <SegmentedControl
-                  value={filter}
-                  className="flex-wrap justify-start"
-                  itemClassName="px-2.5"
-                  options={summaryOptions.map((option) => ({
-                    value: option.value,
-                    label: <>{option.label} <span className="ml-0.5 tabular-nums opacity-65">{option.count}</span></>,
-                  }))}
-                  onChange={onFilterChange}
-                />
+        <div className="automation-panel overflow-hidden rounded-panel bg-[hsl(var(--settings-surface))]">
+          <div className="automation-panel-toolbar bg-foreground/[0.025]">
+            <div className="automation-view-switch" role="group" aria-label={tx("settings.automations.views.label", "Automation view")}>
+              <SegmentedControl
+                value={view}
+                className="bg-[var(--automation-view-track)]"
+                itemClassName="min-h-8"
+                options={[
+                  { value: "tasks", label: tx("settings.automations.views.tasks", "Tasks") },
+                  { value: "calendar", label: tx("settings.automations.views.calendar", "Calendar") },
+                ]}
+                onChange={setView}
+              />
+            </div>
+            {view === "calendar" ? (
+              <h2 className="shrink-0 text-[13px] font-normal text-muted-foreground">
+                {new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(month)}
+              </h2>
+            ) : null}
+            {filters ? <div className="automation-panel-filters min-w-0">{filters}</div> : null}
+            {view === "calendar" ? (
+              <div className="automation-calendar-navigation flex shrink-0 items-center gap-1">
+                <Button type="button" variant="outline" size="sm" className="h-8 rounded-control px-3 text-[12px]"
+                  onClick={() => { const today = new Date(); setMonth(new Date(today.getFullYear(), today.getMonth(), 1)); }}>
+                  {tx("settings.automations.calendar.today", "Today")}
+                </Button>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"
+                  aria-label={tx("settings.automations.calendar.previousMonth", "Previous month")}
+                  onClick={() => setMonth((value) => new Date(value.getFullYear(), value.getMonth() - 1, 1))}>
+                  <span className="text-lg leading-none" aria-hidden>‹</span>
+                </Button>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"
+                  aria-label={tx("settings.automations.calendar.nextMonth", "Next month")}
+                  onClick={() => setMonth((value) => new Date(value.getFullYear(), value.getMonth() + 1, 1))}>
+                  <span className="text-lg leading-none" aria-hidden>›</span>
+                </Button>
               </div>
             ) : null}
-            copy={{
-              previousMonth: tx("settings.automations.calendar.previousMonth", "Previous month"),
-              nextMonth: tx("settings.automations.calendar.nextMonth", "Next month"),
-              today: tx("settings.automations.calendar.today", "Today"),
-              planned: tx("settings.automations.calendar.planned", "Planned"),
-              recorded: tx("settings.automations.calendar.recorded", "Recorded"),
-              running: tx("settings.automations.status.running", "Running"),
-              failed: tx("settings.automations.status.failed", "Failed"),
-              more: (count) => tx("settings.automations.calendar.more", "+{{count}} more", { count }),
-              close: tx("common.close", "Close"),
-              noEntries: personal.length
-                ? tx("settings.automations.calendar.noEntries", "No runs in this month.")
-                : personalJobs.length
-                  ? tx("settings.automations.noMatches", "No automations match this view.")
-                  : tx("settings.automations.empty", "No automations yet."),
-              completed: tx("settings.automations.status.completed", "Completed"),
-            }}
-            onInspect={inspectJob}
-          />
-        )}
-
-        {system.length ? (
-          <SettingsGroup>
-            <section className="py-2">
-              <button
-                type="button"
-                aria-expanded={systemOpen}
-                aria-controls="automation-system-tasks"
-                onClick={() => {
-                  const open = !systemOpen;
-                  setSystemOpen(open);
-                  try {
-                    window.localStorage.setItem(SYSTEM_TASKS_OPEN_STORAGE_KEY, String(open));
-                  } catch {
-                    // Unavailable storage must not prevent expanding or collapsing.
-                  }
-                }}
-                className={cn("automation-meta-row min-h-10 w-full items-center rounded-control py-1.5 text-left text-[13px] font-medium text-muted-foreground settings-hover", formControlFocusClassName)}
-              >
-                <span className="h-4 w-4" aria-hidden />
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate">{tx("settings.automations.systemTasks", "System tasks")}</span>
-                  <span className="text-[12px] font-normal tabular-nums text-muted-foreground/60">{system.length}</span>
-                  {system.some(automationNeedsAttention) ? (
-                    <span className="ml-auto inline-flex items-center gap-1.5 text-[12px] font-normal text-amber-700 dark:text-amber-400">
-                      <CircleAlert className="h-3.5 w-3.5" aria-hidden />
-                      {tx("settings.automations.filters.failed", "Needs attention")}
-                    </span>
-                  ) : null}
-                </span>
-                <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", systemOpen && "rotate-180")} aria-hidden />
-              </button>
-              <DisclosureContent id="automation-system-tasks" open={systemOpen}>
-                <ul aria-label={tx("settings.automations.systemTasks", "System tasks")} className="space-y-1 px-4 pt-1 sm:px-6">
-                  {system.map(renderJob)}
+          </div>
+          {loading && !payload ? (
+            <div role="status" className="flex h-44 items-center justify-center rounded-panel border border-border/70 bg-[hsl(var(--settings-surface))] text-[13px] text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+              {tx("settings.automations.loading", "Loading automations...")}
+            </div>
+          ) : view === "tasks" ? (
+            <section className="p-1" aria-label={tx("settings.automations.views.tasks", "Tasks")}>
+              {filtered.length ? (
+                <ul className="space-y-1">
+                  {filtered.map((job) => {
+                    const status = automationStatusKey(job);
+                    const emphasizedStatus = status === "running" || status === "failed" || status === "paused";
+                    return (
+                      <li key={job.id}>
+                        <button
+                          type="button"
+                          aria-haspopup="dialog"
+                          onClick={(event) => inspectJob(job, event.currentTarget)}
+                          className={cn("flex w-full min-w-0 flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-control px-3 py-3 text-start transition-colors hover:bg-foreground/[0.045] motion-reduce:transition-none", formControlFocusClassName)}
+                        >
+                          <span className="min-w-0 flex-1 basis-48">
+                            <span className="block truncate text-[14px] font-medium text-foreground">{job.name || job.id}</span>
+                            <span className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[12px] leading-5 text-muted-foreground">
+                              <span>{formatAutomationSchedule(job, locale, tx)}</span>
+                              {job.protected ? <span>{tx("settings.automations.filters.system", "System")}</span> : null}
+                            </span>
+                          </span>
+                          {emphasizedStatus ? (
+                            <span className={cn("inline-flex items-center gap-1.5 text-[12px]", status === "failed" ? "text-destructive" : "text-muted-foreground")}>
+                              {status === "running" ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
+                              {status === "failed" ? <CircleAlert className="h-3.5 w-3.5" aria-hidden /> : null}
+                              {tx(`settings.automations.status.${status}`, status === "paused" ? "Disabled" : status === "running" ? "Running" : "Failed")}
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
-              </DisclosureContent>
+              ) : (
+                <p className="px-3 py-10 text-center text-[13px] text-muted-foreground">
+                  {visibleJobs.length ? tx("settings.automations.noMatches", "No automations match this view.") : tx("settings.automations.empty", "No automations yet.")}
+                </p>
+              )}
             </section>
-          </SettingsGroup>
-        ) : null}
+          ) : (
+            <AutomationCalendar
+              jobs={filtered}
+              month={month}
+              locale={locale}
+              copy={{
+                planned: tx("settings.automations.calendar.planned", "Planned"),
+                recorded: tx("settings.automations.calendar.recorded", "Recorded"),
+                running: tx("settings.automations.status.running", "Running"),
+                failed: tx("settings.automations.status.failed", "Failed"),
+                more: (count) => tx("settings.automations.calendar.more", "+{{count}} more", { count }),
+                close: tx("common.close", "Close"),
+                system: tx("settings.automations.filters.system", "System"),
+                noEntries: filtered.length
+                  ? tx("settings.automations.calendar.noEntries", "No runs in this month.")
+                  : visibleJobs.length
+                    ? tx("settings.automations.noMatches", "No automations match this view.")
+                    : tx("settings.automations.empty", "No automations yet."),
+                completed: tx("settings.automations.status.completed", "Completed"),
+              }}
+              onInspect={inspectJob}
+            />
+          )}
+        </div>
+
       </div>
 
       <AutomationDetailDialog
@@ -402,53 +436,6 @@ export function AutomationDetailDialog({
   );
 }
 
-function AutomationListItem({ job, locale, disabled, onSelect }: {
-  job: SessionAutomationJob;
-  locale: string;
-  disabled: boolean;
-  onSelect: (button: HTMLButtonElement) => void;
-}) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
-    t(key, { defaultValue: fallback, ...(values ?? {}) });
-  const attention = automationNeedsAttention(job);
-  const compact = Boolean(job.protected);
-  const summary = job.state.last_error
-    ? localizedAutomationError(job.state.last_error, tx)
-    : compact ? null : automationSummary(job, tx);
-  const running = Boolean(job.state.pending);
-  return (
-    <li>
-      <button
-        type="button"
-        disabled={disabled}
-        aria-haspopup="dialog"
-        onClick={(event) => onSelect(event.currentTarget)}
-        className={cn(
-          "automation-task-row grid w-full grid-cols-1 items-center gap-x-4 gap-y-2 rounded-control px-2 py-3 text-left transition-colors duration-150 settings-hover",
-          formControlFocusClassName,
-        )}
-      >
-        <span className="min-w-0">
-          <span className="block truncate text-[14px] font-semibold leading-5 text-foreground">{job.name || job.id}</span>
-          {summary ? <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">{summary}</span> : null}
-        </span>
-        <span className="automation-task-state flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-          {attention && !running ? (
-            <>
-              <CircleAlert className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden />
-              <span className="text-amber-700 dark:text-amber-400">{tx("settings.automations.filters.failed", "Needs attention")}</span>
-              {!job.enabled ? <span>{tx("settings.automations.next.paused", "Paused")}</span> : null}
-            </>
-          ) : (
-            <span title={formatAutomationNextTitle(job, locale, tx)}>{formatAutomationNext(job, tx)}</span>
-          )}
-        </span>
-      </button>
-    </li>
-  );
-}
 
 function AutomationDetailPanel({
   job, locale, actionKey, error, onAction, onRequestEdit, onRequestDelete,
@@ -464,7 +451,6 @@ function AutomationDetailPanel({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
-  const origin = automationOriginLabel(job, t);
   const originHref = job.origin?.channel === "websocket" && job.origin.session_key
     ? `#/chat/${encodeURIComponent(job.origin.session_key)}` : null;
   const localTrigger = isLocalTriggerAutomation(job);
@@ -494,12 +480,12 @@ function AutomationDetailPanel({
         {canManage ? (
           <DialogDescription className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] leading-5">
             <span className="font-medium text-foreground/80">{formatAutomationSchedule(job, locale, tx)}</span>
-            <span className="inline-flex min-w-0 items-center gap-1.5">
+            {!localTrigger ? <span className="inline-flex min-w-0 items-center gap-1.5">
               <span>{tx("settings.automations.labels.next", "Next")}</span>
               <span className="text-foreground/80" title={formatAutomationNextTitle(job, locale, tx)}>
                 {formatAutomationNext(job, tx)}
               </span>
-            </span>
+            </span> : null}
           </DialogDescription>
         ) : null}
       </DialogHeader>
@@ -553,9 +539,9 @@ function AutomationDetailPanel({
                 </span>
               : lastStatus || tx("settings.automations.neverRun", "Not run yet")}
           </AutomationDetail>
-          {!job.protected ? (
+          {!job.protected && job.origin?.channel && job.origin.channel !== "websocket" ? (
             <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")}>
-              <span className="block truncate" title={origin}>{origin}</span>
+              {automationChannelLabel(job.origin.channel, t)}
             </AutomationDetail>
           ) : null}
         </dl>
@@ -585,7 +571,7 @@ function AutomationDetailPanel({
           <div className="flex min-w-0 flex-wrap items-center gap-1">
             <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={busy || !canToggle} onClick={() => void onAction(job.enabled ? "disable" : "enable", job)}>
               {actionKey === `${job.enabled ? "disable" : "enable"}:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-              {job.enabled ? tx("settings.automations.pause", "Pause") : tx("settings.automations.resume", "Resume")}
+              {job.enabled ? tx("settings.automations.pause", "Disable") : tx("settings.automations.resume", "Enable")}
             </Button>
             {!localTrigger ? (
               <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!canRun || busy} onClick={() => void onAction("run", job)}>
@@ -710,6 +696,7 @@ export function AutomationEditDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [draft, setDraft] = useState<AutomationEditDraft>(() => automationDraftFromJob(null));
+  const validationId = useId();
   const localTrigger = isLocalTriggerAutomation(job);
 
   useEffect(() => {
@@ -750,6 +737,12 @@ export function AutomationEditDialog({
           {...dialogFocus}
           aria-describedby={undefined}
           className="w-[min(calc(100vw-2rem),34rem)]"
+          onEscapeKeyDown={(event) => {
+            // Escape in the nested date calendar must not cancel the editor.
+            if (event.target instanceof Element && event.target.closest("[data-automation-date-calendar]")) {
+              event.preventDefault();
+            }
+          }}
         >
           <form className="space-y-5" onSubmit={submit}>
             <DialogHeader>
@@ -869,20 +862,16 @@ export function AutomationEditDialog({
               ) : null}
 
               {!localTrigger && draft.scheduleKind === "at" ? (
-                <label className="block space-y-1.5">
-                  <span className="text-[12px] font-medium text-muted-foreground">
-                    {tx("settings.automations.fields.runAt", "Run at")}
-                  </span>
-                  <Input
-                    type="datetime-local"
-                    value={draft.atLocal}
-                    onChange={(event) => setDraft((prev) => ({ ...prev, atLocal: event.target.value }))}
-                  />
-                </label>
+                <AutomationRunAtPicker
+                  value={draft.atLocal}
+                  onChange={(atLocal) => setDraft((prev) => ({ ...prev, atLocal }))}
+                  disabled={saving}
+                  errorId={validation ? validationId : undefined}
+                />
               ) : null}
 
               {validation ? (
-                <div className="rounded-control bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
+                <div id={validationId} className="rounded-control bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
                   {validation}
                 </div>
               ) : null}
@@ -972,15 +961,6 @@ function automationTriggerCommand(job: SessionAutomationJob): string {
   return job.trigger?.command || job.payload.command || job.payload.message || "";
 }
 
-function automationSummary(
-  job: SessionAutomationJob,
-  tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
-): string {
-  if (isLocalTriggerAutomation(job)) {
-    return automationTriggerCommand(job) || tx("settings.automations.localTrigger", "Local trigger");
-  }
-  return job.payload.message || tx("settings.automations.systemTask", "System-managed automation");
-}
 
 function automationNeedsAttention(job: SessionAutomationJob): boolean {
   return job.state.last_status === "error";
@@ -989,7 +969,6 @@ function automationNeedsAttention(job: SessionAutomationJob): boolean {
 function automationStatusKey(
   job: SessionAutomationJob,
 ): "active" | "running" | "paused" | "failed" | "system" | "completed" | "idle" {
-  if (job.protected) return "system";
   if (job.state.pending) return "running";
   if (!job.enabled) return "paused";
   if (job.state.last_status === "error") return "failed";
@@ -1054,7 +1033,7 @@ function automationEditDraftError(
     return tx("settings.automations.validation.cronRequired", "Enter a Cron expression.");
   }
   if (draft.scheduleKind === "at") {
-    const atMs = new Date(draft.atLocal).getTime();
+    const atMs = parseAutomationRunAt(draft.atLocal)?.getTime() ?? NaN;
     if (!Number.isFinite(atMs)) {
       return tx("settings.automations.validation.timeRequired", "Choose a run time.");
     }
@@ -1096,7 +1075,7 @@ function automationSchedulePayloadFromDraft(draft: AutomationEditDraft): Automat
     if (!expr) return "invalid";
     return { kind: "cron", expr, ...(draft.tz.trim() ? { tz: draft.tz.trim() } : {}) };
   } else {
-    const atMs = new Date(draft.atLocal).getTime();
+    const atMs = parseAutomationRunAt(draft.atLocal)?.getTime() ?? NaN;
     if (!Number.isFinite(atMs)) return "invalid";
     return { kind: "at", at_ms: atMs };
   }
@@ -1116,11 +1095,6 @@ function automationScheduleChanged(
   return draft.atLocal !== formatLocalDateTimeInput(job.schedule.at_ms ?? NaN);
 }
 
-const HOST_AUTOMATION_CHANNEL_LABELS: Record<string, string> = {
-  api: "API",
-  cli: "CLI",
-};
-
 function automationMatchesFilter(job: SessionAutomationJob, filter: AutomationFilter): boolean {
   const status = automationStatusKey(job);
   if (filter === "active") return status === "active" || status === "running";
@@ -1130,22 +1104,12 @@ function automationMatchesFilter(job: SessionAutomationJob, filter: AutomationFi
   return true;
 }
 
+const HOST_AUTOMATION_CHANNEL_LABELS: Record<string, string> = {
+  api: "API",
+  cli: "CLI",
+};
 
-function automationOriginLabel(
-  job: SessionAutomationJob,
-  t: TFunction,
-): string {
-  if (job.protected) return t("settings.automations.origin.system", { defaultValue: "System" });
-  const origin = job.origin;
-  if (!origin) return t("settings.automations.origin.unknown", { defaultValue: "No linked chat" });
-  if (origin.channel !== "websocket") return automationChannelLabel(origin.channel, t);
-  return origin.title || origin.preview || origin.session_key || automationChannelLabel(origin.channel, t);
-}
-
-function automationChannelLabel(
-  channel: string,
-  t: TFunction,
-): string {
+function automationChannelLabel(channel: string, t: TFunction): string {
   const key = channel.trim().toLowerCase();
   const presentation = channelUiPresentation(key);
   if (presentation) {
@@ -1173,20 +1137,19 @@ function formatAutomationSchedule(
     });
   }
   if (job.schedule.kind === "cron" && job.schedule.expr) {
-    const summary = formatCronScheduleSummary(job.schedule.expr, tx);
+    const summary = formatCronScheduleSummary(job.schedule.expr, locale, tx);
     if (summary) return summary;
-    return tx("settings.automations.schedule.cron", "Cron {{expr}}", {
-      expr: job.schedule.expr,
-    });
+    return tx("settings.automations.schedule.custom", "Custom schedule");
   }
   if (isLocalTriggerAutomation(job)) {
-    return tx("settings.automations.schedule.local", "Local trigger");
+    return tx("settings.automations.commandCondition", "Triggered by command");
   }
   return tx("settings.automations.schedule.custom", "Custom schedule");
 }
 
 function formatCronScheduleSummary(
   expr: string,
+  locale: string,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string | null {
   const parts = expr.trim().split(/\s+/);
@@ -1201,6 +1164,17 @@ function formatCronScheduleSummary(
     const time = `${String(numericHour).padStart(2, "0")}:${String(numericMinute).padStart(2, "0")}`;
     if (everyDay) return tx("settings.automations.schedule.dailyAt", "Daily at {{time}}", { time });
     if (workdays) return tx("settings.automations.schedule.weekdaysAt", "Weekdays at {{time}}", { time });
+    const weekday = /^\d$/.test(dayOfWeek) ? Number(dayOfWeek) : ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].indexOf(dayOfWeek.toUpperCase());
+    if (dayOfMonth === "*" && month === "*" && weekday >= 0 && weekday <= 7) {
+      return tx("settings.automations.schedule.weeklyAt", "Every {{day}} at {{time}}", {
+        day: new Intl.DateTimeFormat(locale, { weekday: "long" }).format(new Date(2024, 0, 7 + weekday % 7)),
+        time,
+      });
+    }
+    const day = cronNumericToken(dayOfMonth, 31);
+    if (day !== null && day > 0 && month === "*" && dayOfWeek === "*") {
+      return tx("settings.automations.schedule.monthlyAt", "Monthly on day {{day}} at {{time}}", { day, time });
+    }
   }
 
   if (everyDay && numericMinute !== null && hour === "*") {
@@ -1234,7 +1208,7 @@ function formatAutomationNext(
   job: SessionAutomationJob,
   tx: (key: string, fallback: string, values?: Record<string, unknown>) => string,
 ): string {
-  if (!job.enabled) return tx("settings.automations.next.paused", "Paused");
+  if (!job.enabled) return tx("settings.automations.next.paused", "Disabled");
   if (job.state.pending) return tx("settings.automations.next.pending", "Running now");
   if (isLocalTriggerAutomation(job)) {
     return tx("settings.automations.next.local", "Waiting for trigger");

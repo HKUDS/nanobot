@@ -61,6 +61,7 @@
     --sidebar-border: 40 8% 90.5%;
     --settings-canvas: var(--background);
     --settings-surface: 60 6% 96.7%;
+    --automation-view-track: hsl(0 0% 91%);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
@@ -103,6 +104,7 @@
     --sidebar-border: var(--border);
     --settings-canvas: var(--background);
     --settings-surface: var(--card);
+    --automation-view-track: hsl(var(--muted) / 0.65);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
@@ -1026,85 +1028,109 @@
   }
   /* Stack a task's status below its title when the content column is narrow. */
   .automations-page {
+    --settings-inset: 1rem;
     container: automations / inline-size;
   }
   .automation-create-composer .thread-composer-surface {
     max-inline-size: none;
   }
-  .automation-calendar-toolbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+  .automation-create-composer .thread-composer-input textarea {
+    padding-inline: var(--settings-inset);
+  }
+  .automation-view-switch .segmented-control button {
+    padding-inline: calc(var(--settings-inset) - 0.5rem);
+  }
+  .automation-panel-toolbar {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.75rem 1rem;
+    gap: 0.5rem 1rem;
     min-block-size: 4rem;
-    padding: 1rem;
+    padding: 0.75rem 0.25rem;
   }
-  .automation-calendar-navigation {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: end;
+  .automation-create-composer .thread-composer-collapsible-layout {
+    padding-block-start: 0;
   }
-  .automation-calendar-filters {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-  @container automations (max-width: 20rem) {
-    .automation-calendar-filters .segmented-control {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      inline-size: 100%;
-      border-radius: 1rem;
+  /* Match the main sidebar's lg visibility; its collapsed rail has no labels. */
+  @media (min-width: 1024px) {
+    .settings-feature-page[data-main-navigation-expanded="true"] .settings-feature-header {
+      margin-block-end: 0;
+    }
+    .settings-feature-page[data-main-navigation-expanded="true"] .settings-feature-header h1 {
+      @apply sr-only;
     }
   }
-  @container automations (min-width: 48rem) {
-    .automation-calendar-toolbar {
-      grid-template-columns: minmax(0, 1fr) auto auto;
-      padding-inline: 1.5rem;
-    }
-    .automation-calendar-filters {
-      grid-column: 2;
-      grid-row: 1;
-    }
-    .automation-calendar-navigation { grid-column: 3; }
+  .automation-run-at-picker {
+    container: automation-run-at / inline-size;
+  }
+  @container automation-run-at (min-width: 18rem) {
+    .automation-run-at-fields { grid-template-columns: minmax(0, 1fr) 7rem; }
+  }
+  .automation-panel-filters {
+    margin-inline-start: auto;
   }
   .thread-composer-collapsible-layout {
     container: composer-layout / inline-size;
   }
+  .thread-composer-collapsible .thread-composer-input textarea:placeholder-shown {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+    display: block;
+    block-size: 3.125rem !important;
+  }
   @container composer-layout (min-width: 40rem) {
-    .thread-composer-collapsible[data-compact] {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: center;
+    .thread-composer-collapsible .thread-composer-input {
+      inline-size: 100%;
+    }
+    .thread-composer-collapsible .thread-composer-input textarea {
+      display: block;
+      min-block-size: 3.5rem;
+      padding-block: 1.125rem;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-input {
+      inline-size: max(0px, calc(100% - var(--composer-compact-controls-width, 15rem) - 1.5rem));
     }
     .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
       display: block;
       block-size: 3.5rem !important;
       min-block-size: 3.5rem;
       padding-block: 1.125rem;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
+    }
+    .thread-composer-collapsible .thread-composer-footer {
+      min-block-size: 3.5rem;
+      margin-block-start: 0;
+      padding: 0.5rem;
+      pointer-events: none;
     }
     .thread-composer-collapsible[data-compact] .thread-composer-footer {
-      padding: 0.5rem;
-      transition: none;
+      margin-block-start: -3.5rem;
+    }
+    .thread-composer-collapsible .thread-composer-footer-primary {
+      flex: 1 0 auto;
+      margin-inline-start: auto;
+      pointer-events: auto;
     }
     .thread-composer-collapsible[data-compact] .thread-composer-footer-primary {
-      flex: none;
+      flex-grow: 0;
     }
-    .thread-composer-collapsible[data-compact] .thread-composer-footer-actions {
+    .thread-composer-collapsible .thread-composer-footer-actions {
       max-inline-size: none;
+      margin-inline-start: 0;
+      pointer-events: auto;
     }
-  }
-  .automation-meta-row {
-    display: grid;
-    grid-template-columns: 1rem minmax(0, 1fr) auto;
-    column-gap: 0.5rem;
-    padding-inline: 1rem;
-  }
-  @media (min-width: 640px) {
-    .automation-meta-row {
-      padding-inline: 1.5rem;
+    @media (prefers-reduced-motion: no-preference) {
+      .thread-composer-collapsible .thread-composer-input {
+        transition: inline-size 220ms ease-out;
+      }
+      .thread-composer-collapsible .thread-composer-footer {
+        transition: margin-block-start 220ms ease-out;
+      }
+      .thread-composer-collapsible .thread-composer-footer-primary {
+        transition: flex-grow 220ms ease-out;
+      }
     }
   }
   .automation-calendar-grid { display: none; }
@@ -1135,19 +1161,6 @@
     }
     .automation-calendar-day:nth-child(7n) { border-inline-end: 0; }
     .automation-calendar-day:nth-last-child(-n + 7) { border-block-end: 0; }
-  }
-  .automation-task-state {
-    grid-column: 1;
-    grid-row: 2;
-  }
-  @container automations (min-width: 36rem) {
-    .automation-task-row { grid-template-columns: minmax(0, 1fr) auto; }
-    .automation-task-state {
-      grid-column: 2;
-      grid-row: 1;
-      max-width: 18rem;
-      justify-content: flex-end;
-    }
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
     margin-block-start: var(--settings-module-gap, 20px);
