@@ -48,7 +48,7 @@ class FakeResponse:
         self.status_code = status_code
         self.text = str(payload)
         self.content = content
-        self.request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+        self.request = httpx.Request("POST", "https://openrouter.ai/api/v1/images")
         self._sse_lines = sse_lines
 
     def json(self) -> dict[str, Any]:
@@ -70,15 +70,19 @@ class FakeResponse:
 
 
 class FakeClient:
-    def __init__(self, response: FakeResponse) -> None:
-        self.response = response
-        self.get_response = response
+    def __init__(
+        self,
+        response: FakeResponse | list[FakeResponse],
+        get_response: FakeResponse | None = None,
+    ) -> None:
+        self.responses = response if isinstance(response, list) else [response]
+        self.get_response = get_response if get_response is not None else self.responses[0]
         self.calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
 
     async def post(self, url: str, **kwargs: Any) -> FakeResponse:
         self.calls.append({"url": url, **kwargs})
-        return self.response
+        return self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
 
     async def get(self, url: str, **kwargs: Any) -> FakeResponse:
         self.get_calls.append({"url": url, **kwargs})
@@ -122,19 +126,27 @@ def generated_image_downloads(monkeypatch) -> list[tuple[str, str | None]]:
 async def test_openrouter_image_generation_payload_and_response(tmp_path: Path) -> None:
     ref = tmp_path / "ref.png"
     ref.write_bytes(PNG_BYTES)
+    raw_b64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
+    model = "openai/gpt-5.4-image-2"
     fake = FakeClient(
         FakeResponse(
             {
-                "choices": [
+                "data": [{"b64_json": raw_b64, "media_type": "image/png"}]
+            }
+        ),
+        get_response=FakeResponse(
+            {
+                "data": [
                     {
-                        "message": {
-                            "content": "done",
-                            "images": [{"image_url": {"url": PNG_DATA_URL}}],
-                        }
+                        "id": model,
+                        "supported_parameters": {
+                            "aspect_ratio": {"values": ["1:1", "16:9"]},
+                            "resolution": {"values": ["1K", "2K", "4K"]},
+                        },
                     }
                 ]
             }
-        )
+        ),
     )
     client = OpenRouterImageGenerationClient(
         api_key="sk-or-test",
@@ -145,7 +157,7 @@ async def test_openrouter_image_generation_payload_and_response(tmp_path: Path) 
 
     response = await client.generate(
         prompt="make this blue",
-        model="openai/gpt-5.4-image-2",
+        model=model,
         reference_images=[str(ref)],
         aspect_ratio="16:9",
         image_size="2K",
@@ -153,22 +165,112 @@ async def test_openrouter_image_generation_payload_and_response(tmp_path: Path) 
 
     assert isinstance(response, GeneratedImageResponse)
     assert response.images == [PNG_DATA_URL]
-    assert response.content == "done"
+    assert response.content == ""
 
+    assert fake.get_calls[0]["url"] == "https://openrouter.ai/api/v1/images/models"
+    assert "Authorization" not in fake.get_calls[0]["headers"]
     call = fake.calls[0]
-    assert call["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert call["url"] == "https://openrouter.ai/api/v1/images"
     assert call["headers"]["Authorization"] == "Bearer sk-or-test"
     assert call["headers"]["X-Test"] == "1"
     body = call["json"]
-    assert body["modalities"] == ["image", "text"]
-    assert body["image_config"] == {"aspect_ratio": "16:9", "image_size": "2K"}
-    assert body["messages"][0]["content"][0] == {"type": "text", "text": "make this blue"}
-    assert body["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert body["model"] == model
+    assert body["prompt"] == "make this blue"
+    assert body["stream"] is False
+    assert body["aspect_ratio"] == "16:9"
+    assert body["resolution"] == "2K"
+    assert body["input_references"][0]["type"] == "image_url"
+    assert body["input_references"][0]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_openrouter_extra_body_controls_native_image_configuration() -> None:
+    raw_b64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
+    model = "openai/gpt-5.4-image-2"
+    fake = FakeClient(
+        FakeResponse({"data": [{"b64_json": raw_b64}]}),
+        get_response=FakeResponse(
+            {
+                "data": [
+                    {
+                        "id": model,
+                        "supported_parameters": {
+                            "aspect_ratio": {"values": ["1:1", "16:9"]},
+                            "resolution": {"values": ["1K", "4K"]},
+                        },
+                    }
+                ]
+            }
+        ),
+    )
+    client = OpenRouterImageGenerationClient(
+        api_key="sk-or-test",
+        extra_body={
+            "resolution": "4K",
+            "aspect_ratio": "16:9",
+            "quality": "high",
+            "n": 2,
+        },
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    await client.generate(
+        prompt="draw",
+        model=model,
+        aspect_ratio="1:1",
+        image_size="1K",
+    )
+
+    body = fake.calls[0]["json"]
+    assert body["resolution"] == "4K"
+    assert body["aspect_ratio"] == "16:9"
+    assert body["quality"] == "high"
+    assert body["n"] == 2
+    assert "size" not in body
+
+
+@pytest.mark.asyncio
+async def test_openrouter_uses_native_images_endpoint() -> None:
+    raw_b64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
+    model = "openai/gpt-5.4-image-2"
+    fake = FakeClient(
+        FakeResponse({"data": [{"b64_json": raw_b64}]}),
+        get_response=FakeResponse(
+            {
+                "data": [
+                    {
+                        "id": model,
+                        "supported_parameters": {},
+                    }
+                ]
+            }
+        ),
+    )
+    client = OpenRouterImageGenerationClient(
+        api_key="sk-or-test",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(
+        prompt="draw",
+        model=model,
+        aspect_ratio="1:1",
+        image_size="1K",
+    )
+
+    assert response.images == [PNG_DATA_URL]
+    assert response.content == ""
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["url"] == "https://openrouter.ai/api/v1/images"
+    assert "/chat/completions" not in fake.calls[0]["url"]
 
 
 @pytest.mark.asyncio
 async def test_openrouter_image_generation_requires_images() -> None:
-    fake = FakeClient(FakeResponse({"choices": [{"message": {"content": "text only"}}]}))
+    fake = FakeClient(
+        FakeResponse({"data": []}),
+        get_response=FakeResponse({"data": [{"id": "model", "supported_parameters": {}}]}),
+    )
     client = OpenRouterImageGenerationClient(api_key="sk-or-test", client=fake)  # type: ignore[arg-type]
 
     with pytest.raises(ImageGenerationError, match="returned no images"):
