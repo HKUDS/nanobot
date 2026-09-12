@@ -59,6 +59,45 @@ MCPServerLoader = Callable[[], Mapping[str, "MCPServerConfig"]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
 
 
+def _looks_like_error_envelope(rendered: str) -> bool:
+    """Detect a business-error envelope returned with ``isError=False``.
+
+    Some MCP servers report failures by embedding an error payload in the
+    result content (``{"code": 404, "msg": "data not exist", "data": null}``)
+    while leaving ``CallToolResult.isError`` False. nanobot would otherwise
+    treat the call as successful and the agent would keep retrying until the
+    tool timeout, and the generic timeout message would hide the real cause.
+
+    Flag such payloads so they surface as a tool error. The check is
+    deliberately conservative: it only triggers on a single JSON object that
+    explicitly signals failure (HTTP-style ``code >= 400``, ``success: false``,
+    ``isError: true``, or a non-empty scalar ``error`` field), so ordinary
+    prose or success envelopes (e.g. ``{"code": 0, "data": {...}}``) are
+    unaffected.
+    """
+    text = rendered.strip()
+    if not text or text[0] not in "{[":
+        return False
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    payload = cast(dict[str, Any], parsed)
+    code = payload.get("code")
+    if isinstance(code, int) and code >= 400:
+        return True
+    if payload.get("success") is False:
+        return True
+    if payload.get("isError") is True:
+        return True
+    error = payload.get("error")
+    if error is not None and not isinstance(error, (dict, list)):
+        return True
+    return False
+
+
 class MCPConnection(Protocol):
     async def aclose(self) -> None: ...
 
@@ -687,9 +726,6 @@ class MCPToolWrapper(_MCPWrapperBase):
                 # Success — extract text and persist any image content as artifacts.
                 try:
                     rendered = self._render_call_result(result.content, kwargs)
-                    if getattr(result, "isError", False):
-                        return ToolResult.error(rendered)
-                    return rendered
                 except Exception as exc:
                     logger.exception(
                         "MCP tool '{}' failed while rendering result: {}: {}",
@@ -700,6 +736,13 @@ class MCPToolWrapper(_MCPWrapperBase):
                     return ToolResult.error(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
+                # Some servers embed a business-error envelope in the result
+                # content while leaving ``isError`` False. Surface those as
+                # failures so the agent can react instead of looping until the
+                # tool timeout overwrites the real cause.
+                if getattr(result, "isError", False) or _looks_like_error_envelope(rendered):
+                    return ToolResult.error(rendered)
+                return rendered
 
     def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
         """Turn MCP content blocks into a tool result string.
