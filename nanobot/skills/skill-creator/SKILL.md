@@ -328,7 +328,7 @@ Write the YAML frontmatter with `name` and `description`:
   - Include all "when to use" information here - Not in the body. The body is only loaded after triggering, so "When to Use This Skill" sections in the body are not helpful to the agent.
   - Example description for a `docx` skill: "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. Use when the agent needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks"
 
-Keep frontmatter minimal. In `nanobot`, `metadata` and `always` are also supported when needed, but avoid adding extra fields unless they are actually required.
+Keep frontmatter minimal. In `nanobot`, `metadata` and `always` are also supported when needed. Set `disable-model-invocation: true` for workflows that only the user should trigger explicitly with `$skill-name`; their descriptions stay out of model and subagent skill summaries until invoked. Avoid adding extra fields unless they are actually required.
 
 ##### Body
 
