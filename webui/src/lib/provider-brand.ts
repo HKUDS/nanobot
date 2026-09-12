@@ -150,6 +150,7 @@ const PROVIDER_LABEL_ALIASES: Record<string, string> = {
 
 const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   aihubmix: brand("aihubmix.com", "#111827", "AH"),
+  aimlapi: brand("aimlapi.com", "#111827", "AM"),
   ant_ling: brand("ant-ling.com", "#7C3AED", "AL"),
   anthropic: brand("anthropic.com", "#D97757", "A"),
   assemblyai: brand("assemblyai.com", "#111827", "AA"),

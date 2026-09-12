@@ -226,6 +226,26 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="edenai",
         default_api_base="https://api.edenai.run/v3",
     ),
+    # AI/ML API: OpenAI-compatible gateway. Models use the "vendor/model" naming
+    # scheme (e.g. "openai/gpt-5"); the full id is sent upstream. The default
+    # headers identify nanobot to the gateway, the same way the OpenRouter
+    # attribution headers do; they ride only on this provider's requests.
+    ProviderSpec(
+        name="aimlapi",
+        keywords=("aimlapi",),
+        env_key="AIMLAPI_API_KEY",
+        display_name="aimlapi.com",
+        backend="openai_compat",
+        default_extra_headers=(
+            ("HTTP-Referer", "https://github.com/HKUDS/nanobot"),
+            ("X-Title", "nanobot"),
+            ("X-AIMLAPI-Source", "agent/hkuds-nanobot"),
+            ("X-AIMLAPI-Partner-ID", "part_TcTxHfamJ2kkNiFsYzEVELTy"),
+        ),
+        is_gateway=True,
+        detect_by_base_keyword="aimlapi",
+        default_api_base="https://api.aimlapi.com/v1",
+    ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
     # models.dev/OpenCode use provider id "opencode" and model ids like
     # "opencode/<model>"; send the bare model upstream.
