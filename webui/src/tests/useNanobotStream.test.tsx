@@ -296,6 +296,95 @@ describe("useNanobotStream", () => {
     requestFrame.mockRestore();
   });
 
+  it("paces visible updates and immediately flushes the final ordered text", () => {
+    vi.useFakeTimers();
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const fake = fakeClient();
+    const { result, unmount } = renderHook(() => useNanobotStream("paced", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    try {
+      act(() => fake.emit("paced", { event: "delta", chat_id: "paced", text: "first" }));
+      expect(frames).toHaveLength(1);
+      act(() => frames.shift()!(1_000));
+      expect(result.current.messages[0].content).toBe("first");
+      act(() => {
+        fake.emit("paced", { event: "delta", chat_id: "paced", text: " 中文" });
+        fake.emit("paced", { event: "delta", chat_id: "paced", text: "🚀" });
+        vi.advanceTimersByTime(49);
+      });
+      expect(frames).toHaveLength(0);
+      expect(result.current.messages[0].content).toBe("first");
+      now.mockReturnValue(1_050);
+      act(() => vi.advanceTimersByTime(1));
+      expect(frames).toHaveLength(1);
+      act(() => frames.shift()!(1_050));
+      expect(result.current.messages[0].content).toBe("first 中文🚀");
+      act(() => {
+        fake.emit("paced", { event: "delta", chat_id: "paced", text: " tail" });
+        fake.emit("paced", { event: "stream_end", chat_id: "paced" });
+      });
+      expect(result.current.messages[0].content).toBe("first 中文🚀 tail");
+      act(() => fake.emit("paced", { event: "turn_end", chat_id: "paced" }));
+      expect(result.current.messages[0].isStreaming).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      unmount();
+      requestFrame.mockRestore();
+      now.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["frame", "timer"] as const)("moves a pending visible %s to background cadence and flushes on return", (pending) => {
+    vi.useFakeTimers();
+    const descriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const fake = fakeClient();
+    const { result, unmount } = renderHook(() => useNanobotStream("visibility", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const visibility = (value: string) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      act(() => fake.emit("visibility", { event: "delta", chat_id: "visibility", text: "first" }));
+      if (pending === "timer") act(() => frames.shift()!(1_000));
+      act(() => {
+        fake.emit("visibility", { event: "delta", chat_id: "visibility", text: " hidden" });
+        visibility("hidden");
+        vi.advanceTimersByTime(999);
+      });
+      expect(result.current.messages[0]?.content).toBe(pending === "timer" ? "first" : undefined);
+      act(() => vi.advanceTimersByTime(1));
+      expect(result.current.messages[0].content).toBe("first hidden");
+      act(() => {
+        fake.emit("visibility", { event: "delta", chat_id: "visibility", text: " returned" });
+        visibility("visible");
+      });
+      expect(result.current.messages[0].content).toBe("first hidden returned");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      unmount();
+      requestFrame.mockRestore();
+      now.mockRestore();
+      if (descriptor) Object.defineProperty(document, "visibilityState", descriptor);
+      else delete (document as Document & { visibilityState?: string }).visibilityState;
+      vi.useRealTimers();
+    }
+  });
+
   it("coalesces hidden-tab deltas without scheduling paint frames", () => {
     vi.useFakeTimers();
     const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
