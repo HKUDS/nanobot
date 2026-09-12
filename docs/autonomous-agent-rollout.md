@@ -40,7 +40,7 @@ unchecked items are not claimed to be implemented or deployed.
 - [ ] Model-independent operation through provider adapters and capability detection;
       preserve Astra as the configured default, allow explicit model switching,
       and report unsupported capabilities without claiming equivalent behavior.
-- [ ] Live Codex account limits in WebUI/TUI and on demand in chat: authoritative
+- [x] Live Codex account limits in WebUI/TUI and on demand in chat: authoritative
       usage windows and reset times when available, last refresh and stale/error
       states; keep subscription quotas distinct from local token accounting.
 - [ ] Additional stability controls: bounded retries, persisted checkpoints,
@@ -88,3 +88,53 @@ of the full rollout:
 - Live existing integration verifier passed: IMAP6folders, CalDAV8calendars and
   11events, sleep disabled, all four original services active, shared histories
   canonical and ordered. Full final-version acceptance remains outstanding.
+
+### Development, quotas and remote terminal checkpoint
+
+Verified on 2026-09-12 after deploying the development and quota controls:
+
+- Full backend suite: **7763 passed, 53 skipped**, one existing aiohttp
+  deprecation warning. WebUI: **1412 passed** across 93 files. TUI: **239 passed**.
+  WebUI lint/build and TUI types/build passed. Full Ruff and strict BasedPyright
+  passed. Later worker-recovery changes passed **150** development/operations/
+  command tests; the remote CLI selection passed **194** tests. Strict types
+  remained clean across 377 source files.
+- Two real `openai-codex/gpt-6-astra` jobs edited a small isolated repository,
+  passed fixed checks and a separate review, and produced an artifact marked
+  `ready`. One worker ran as its own systemd service and completed across an
+  actual gateway restart. These smoke runs consumed 6014 and 5805 reported
+  tokens respectively. They did not modify production source or send messages.
+- Runtime development controls are enabled for the canonical owner, with all
+  **19 requirements** and five initial proposals seeded from
+  [development-project.json](../deploy/development-project.json). The project
+  remains paused while the rollout is being implemented here. `/development`,
+  `/rozwoj`, the development tool and WebUI panel access the same durable store.
+- The worker freezes baseline checks, isolates execution with bubblewrap, limits
+  repair attempts and daily usage, and preserves interrupted preparation/build/
+  verification stages. The ten-minute external supervisor can resume previously
+  started development through an independent service with a durable retry cap.
+- Live authenticated quota reads succeeded and confirmed that the Codex CLI
+  account matches the gateway's OAuth account. Missing authentication was
+  rejected. The displayed quota windows come from the provider, and stale reads
+  keep their previous observation. `/limits` and the TUI/WebUI use the same source.
+- After restarting the updated gateway, Apple/mail linkage, shared histories,
+  Telegram, IMAP authentication/discovery and CalDAV checks passed again.
+  All four configured services and the ten-minute supervisor timer were active.
+- `nanobot remote` is implemented and tested, including parsing its generated
+  configuration with the real OpenSSH client. It runs the TUI on the gateway
+  through a verified SSH route; no new tunnel or exposed bootstrap is needed.
+  A live second-device connection has **not** been verified without its details.
+
+The entire backend suite also received an exploratory run inside the stricter
+offline builder environment: **7736 passed, 63 skipped, 17 failed**. Those failures
+involve real DNS assumptions, absent host passwd entries and attempts to build
+missing WebUI assets offline. They are not counted as a passing acceptance run.
+The configured starter checks are full Ruff plus development/operations/command
+tests; their isolated preflight passed after provisioning the tokenizer data as
+an explicit read-only dependency. Broad offline acceptance needs further work.
+
+Production release/rollback, proactive attention and shared actions, collaborative
+mail rules, full device execution and installers, complete client parity, and
+final rollout acceptance remain unfinished. A `ready` development artifact is
+not a deployed change. Setup and boundaries are documented in
+[development controls](development-control.md) and [remote sessions](remote-session.md).

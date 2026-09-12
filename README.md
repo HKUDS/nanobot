@@ -37,7 +37,7 @@
 
 This is an independently maintained fork. Upstream authorship and the MIT license are preserved; the language links and community channels above belong to upstream. The `nanobot-ai` package on PyPI and upstream installers do **not** install this fork's additions. Use the source installation below.
 
-**Status:** integration work is in progress on `codex/integrations-stability-upstream`. Features described as available below exist in this checkout; unfinished autonomous development, remote-node support, and live account-limit displays are tracked in the [rollout checklist](./docs/autonomous-agent-rollout.md). The [previous integration verification report](./docs/rollout-20260912.md) records a specific tested revision, not a guarantee about later commits or another installation.
+**Status:** integration work is in progress on `codex/integrations-stability-upstream`. This checkout includes isolated development controls, Codex account-limit monitoring, and remote terminal sessions. Production deployment/rollback automation and the full device-node workflow remain in the [rollout checklist](./docs/autonomous-agent-rollout.md). The [previous integration verification report](./docs/rollout-20260912.md) records a specific tested revision, not a guarantee about later commits or another installation.
 
 ## Start Here
 
@@ -51,6 +51,8 @@ This is an independently maintained fork. Upstream authorship and the MIT licens
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
 | Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md) |
+| Continue work from another computer over WireGuard and SSH | [Remote terminal sessions](./docs/remote-session.md) |
+| Manage development jobs or inspect Codex account limits | [Development controls](./docs/development-control.md) |
 | Contribute a change and run the checks | [Development and tests](#development-and-tests) and [Contributing](#-contribute) |
 
 ## What can nanobot do?
@@ -83,7 +85,7 @@ Requirements:
 - Python **3.11 or newer** and Git.
 - [Bun](https://bun.sh/) for the source WebUI and TUI; TUI CI uses Bun **1.3.13**.
 - A configured provider account, API endpoint, or local model server. Tool use, images, and other capabilities depend on the provider and model.
-- Linux with systemd for the optional external supervisor. Core CLI/WebUI also support macOS and Windows; Windows ARM64 currently lacks the native TUI runtime.
+- Linux with systemd for the optional external supervisor, plus bubblewrap for isolated development execution. Core CLI/WebUI also support macOS and Windows; Windows ARM64 currently lacks the native TUI runtime.
 
 ```bash
 git clone --branch codex/integrations-stability-upstream --single-branch https://github.com/szymongalka/nanobot-extended.git
@@ -267,20 +269,29 @@ controls, secret handling, and optional shell sandboxing.
 | Apple / iCloud | Email and an Apple app-specific password configure linked CalDAV and iCloud IMAP. Leaving the password field empty preserves the saved secret. | Use the Apple integration form. Sleep and wake-up planning remains disabled by default. Install and configure the [calendar monitor](./services/icloud-calendar/README.md) separately. |
 | Mail | All-folder discovery, durable event intake, dry-run routing, and connection checks. No initial rules or folder allowlist is required. | The [mail watcher](./services/mail-watcher/README.md) uses separately installed Himalaya and Carillon. All-folder mode does not move mail. Collaborative rule creation is still planned. |
 | Recovery | Persisted sustained goals can resume through the gateway watchdog. An external systemd supervisor can check the gateway and goal scanner every ten minutes with a bounded restart budget. | Goal recovery is opt-in through `gateway.goalRecovery.enabled`; see the [supervisor guide](./docs/external-supervisor.md). Paused work and uncertain tool outcomes remain held for review. |
+| Development controls | An owner-managed backlog, checkpoints, isolated builder, fixed baseline/tests, and a fresh model review. WebUI and `/development` commands expose progress, continue, pause, start, and cancel controls. | Configure `tools.development` and Linux bubblewrap; an optional systemd worker survives gateway restarts and supports bounded recovery. A `ready` artifact awaits deployment. See [Development controls](./docs/development-control.md#development-project). |
+| Codex account limits | Returned quota windows, usage percentages, reset times, and stale/unknown states appear in WebUI and TUI. `/limits` or `/limity` shows the owner's summary. | Enable `tools.codexLimits` with an already authenticated Codex CLI. Quotas come from its account endpoint and are separate from conversation token counts. See [Codex subscription quota](./docs/development-control.md#codex-subscription-quota). |
+| Remote terminal | `nanobot remote` opens Main or Notifications on the gateway through SSH over an existing WireGuard route. | Requires the configured route, an authorized SSH identity, and a verified host key. The TUI and tasks run on the gateway; this does not add execution in the second computer's workspace. See [Remote session setup](./docs/remote-session.md). |
 
 Upstream channel adapters include Discord, Slack, Matrix, Teams, email, and others;
 see [Chat Apps](./docs/chat-apps.md). MCP, skills, and model adapters remain available.
 Model support does not imply that every provider offers the same tools, context
 window, media support, or account-usage information.
 
+The development builder uses the configured model, including Astra, through
+native tool calls or validated JSON actions where supported. Its checks and
+review requirements remain the same across providers. Development work is limited
+to one active change, at most two repair attempts, and a configured daily budget;
+the [control guide](./docs/development-control.md) explains setup and recovery.
+
 ### Work in progress
 
 The [acceptance checklist](./docs/autonomous-agent-rollout.md) tracks proactive
-attention summaries, notification actions, full TUI/WebUI task controls, remote
-nodes over an existing WireGuard route plus SSH, installation automation, isolated
-self-development with verification and rollback, and live Codex account limits.
-These are not complete features of this checkout. Token counts shown in an
-existing conversation are not a subscription quota display.
+attention summaries, notification actions, full TUI/WebUI task controls, device
+nodes that execute in their own workspaces, and complete installation automation.
+The development release/rollback adapter and autonomous backlog scheduler are
+also unfinished: passing tests and review produces a verified source artifact,
+not an automatic production deployment.
 
 If nanobot worked for you, a star on GitHub is the simplest way to support the project.
 
