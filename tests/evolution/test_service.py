@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -39,7 +40,8 @@ def test_record_turn_is_private_and_does_not_store_content(tmp_path: Path) -> No
     assert "private user request" not in service.store.experiences_path.read_text(encoding="utf-8")
     assert rows[0]["session_hash"] != "websocket:user:secret-chat"
     assert rows[0]["tools"] == ["read_file"]
-    assert stat.S_IMODE(service.store.experiences_path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(service.store.experiences_path.stat().st_mode) == 0o600
 
 
 def test_explicit_turn_local_tools_override_historical_transcript(tmp_path: Path) -> None:
@@ -137,7 +139,7 @@ def test_evaluate_never_promotes_in_observe_mode(tmp_path: Path) -> None:
 
     assert artifact["evaluation"]["passed"] is True
     assert artifact["promoted"] is False
-    rejected = json.loads((tmp_path / "evolution" / "rejected" / "experiment-1.json").read_text())
+    rejected = json.loads((tmp_path / "evolution" / "rejected" / "experiment-1.json").read_text(encoding="utf-8"))
     assert rejected["policy"]["auto_applicable"] is False
 
 

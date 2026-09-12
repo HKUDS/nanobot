@@ -15,11 +15,18 @@ def test_evolution_defaults_are_private_and_observe_only() -> None:
     assert config.auto_apply_max_risk == 0
 
 
-def test_evolution_storage_must_be_workspace_relative() -> None:
+@pytest.mark.parametrize("path", [
+    "../outside", "/tmp/evolution", r"\tmp\evolution", r"C:\outside",
+    "C:outside", r"..\outside", r"nested\..\outside", r"\\server\share", "", "  ",
+])
+def test_evolution_storage_must_be_workspace_relative(path: str) -> None:
     with pytest.raises(ValidationError, match="workspace-relative"):
-        EvolutionConfig(storage_dir="../outside")
-    with pytest.raises(ValidationError, match="workspace-relative"):
-        EvolutionConfig(storage_dir="/tmp/evolution")
+        EvolutionConfig(storage_dir=path)
+
+
+@pytest.mark.parametrize("path", ["evolution", ".nanobot/evolution", r"notes\evolution"])
+def test_evolution_storage_accepts_portable_relative_paths(path: str) -> None:
+    assert EvolutionConfig(storage_dir=path).storage_dir == path
 
 
 def test_auto_apply_requires_controlled_mode() -> None:

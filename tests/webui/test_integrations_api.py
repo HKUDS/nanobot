@@ -55,7 +55,7 @@ def test_mail_secret_write_only_private_and_idempotent_account_upsert(handler, c
     assert result.status == 200
     assert SECRET not in repr(result)
     assert SECRET not in caplog.text
-    assert SECRET not in handler.settings.config.path.read_text()
+    assert SECRET not in handler.settings.config.path.read_text(encoding="utf-8")
     cfg = handler.settings.config.load()
     reference = cfg.personal_integrations.mail_accounts[0].credential_ref
     store = CredentialStore(cfg.workspace_path)
@@ -133,9 +133,9 @@ def test_export_real_consumer_toml_without_password_and_without_starting(handler
     assert result.payload["exported"] is True
     config = handler.settings.config.load()
     root = config.workspace_path / ".nanobot/mail"
-    worker = tomllib.loads((root / "config.toml").read_text())
-    client = tomllib.loads((root / "himalaya.toml").read_text())
-    watcher = tomllib.loads((root / "carillon.toml").read_text())
+    worker = tomllib.loads((root / "config.toml").read_text(encoding="utf-8"))
+    client = tomllib.loads((root / "himalaya.toml").read_text(encoding="utf-8"))
+    watcher = tomllib.loads((root / "carillon.toml").read_text(encoding="utf-8"))
     assert worker["worker"]["dry_run"] is True
     assert worker["accounts"]["work"]["source_mailboxes"] == ["INBOX"]
     assert client["accounts"]["work"]["imap"]["server"] == "imaps://imap.example.org:993"
@@ -143,7 +143,7 @@ def test_export_real_consumer_toml_without_password_and_without_starting(handler
     assert command[0] == sys.executable
     assert command[1:3] == ["-m", "nanobot.integrations.credentials"]
     assert "enqueue-env" in watcher["accounts"]["work"]["imap"]["hook"]["on-message-added"]["cmd"]
-    assert all(SECRET not in p.read_text() for p in root.glob("*.toml"))
+    assert all(SECRET not in p.read_text(encoding="utf-8") for p in root.glob("*.toml"))
     assert handler.handle("prepare", {}).status == 200
     handler.handle("mail", account(password="rotated"))
     assert handler.payload()["exported"] is False
@@ -159,7 +159,7 @@ def test_export_preserves_unmanaged_or_manually_changed_config(handler):
     target.write_text("# Manually configured, leave intact\n")
     result = handler.handle("prepare", {})
     assert result.status == 400
-    assert target.read_text() == "# Manually configured, leave intact\n"
+    assert target.read_text(encoding="utf-8") == "# Manually configured, leave intact\n"
     assert not (root / "config.toml").exists()
 
 
@@ -195,11 +195,11 @@ def test_icloud_export_keeps_existing_monitor_config_and_trigger(handler):
     (project / "data/config.toml").write_text(original)
     result = handler.handle("prepare", {})
     assert result.status == 200
-    exported = tomllib.loads((project / "data/webui.toml").read_text())
+    exported = tomllib.loads((project / "data/webui.toml").read_text(encoding="utf-8"))
     assert exported["nanobot_config_path"] == str(handler.settings.config.path)
     assert exported["trigger_id"] == "trigger-123"
     assert exported["auto_manage_sleep"] is False
-    assert (project / "data/config.toml").read_text() == original
+    assert (project / "data/config.toml").read_text(encoding="utf-8") == original
     assert SECRET not in repr(exported)
 
 
@@ -296,7 +296,7 @@ def test_export_detects_editor_change_after_preflight(handler, monkeypatch):
 
     monkeypatch.setattr(module, "atomic_private_write", edit_while_recording_intent)
     assert handler.handle("prepare", {}).status == 400
-    assert path.read_text() == "# changed by operator\n"
+    assert path.read_text(encoding="utf-8") == "# changed by operator\n"
     assert handler.payload()["exported"] is False
     assert handler.handle("prepare", {}).status == 400
 
@@ -318,14 +318,14 @@ def test_export_invalidates_on_trigger_and_config_path_change(handler, tmp_path)
     source.write_text('trigger_id = "second"\n')
     assert handler.payload()["exported"] is False
     assert handler.handle("prepare", {}).status == 200
-    assert tomllib.loads((project / "data/webui.toml").read_text())["trigger_id"] == "second"
+    assert tomllib.loads((project / "data/webui.toml").read_text(encoding="utf-8"))["trigger_id"] == "second"
 
 
 def test_generation_only_outputs_files_not_arbitrary_commands(handler):
     handler.handle("mail", account(password=SECRET, username="user; echo unsafe@example.org"))
     assert handler.handle("prepare", {}).status == 200
     path = handler.settings.config.load().workspace_path / ".nanobot/mail/himalaya.toml"
-    data = tomllib.loads(path.read_text())["accounts"]["work"]["imap"]["sasl"]["plain"]
+    data = tomllib.loads(path.read_text(encoding="utf-8"))["accounts"]["work"]["imap"]["sasl"]["plain"]
     assert data["username"] == "user; echo unsafe@example.org"
     assert all("echo unsafe" not in arg for arg in data["password"]["command"])
 
@@ -339,7 +339,7 @@ def test_connection_slots_inert_private_and_bound_to_endpoint(handler, name):
     result = handler.handle(name, {"base_url": "https://service.example.org/", "password": SECRET})
     assert result.status == 200
     assert SECRET not in repr(result)
-    assert SECRET not in handler.settings.config.path.read_text()
+    assert SECRET not in handler.settings.config.path.read_text(encoding="utf-8")
     saved = getattr(handler.settings.config.load().personal_integrations, name)
     assert saved.base_url == "https://service.example.org"
     assert result.payload["connection_slots"][name]["credential_configured"] is True
@@ -466,12 +466,12 @@ def test_default_all_folders_without_rules_exports_without_time_manager(handler)
     assert handler.handle("icloud", {"username": "apple@example.org", "password": SECRET}).status == 200
     assert handler.handle("prepare", {}).status == 200
     root = handler.settings.config.load().workspace_path / ".nanobot/mail"
-    worker = tomllib.loads((root / "config.toml").read_text())
+    worker = tomllib.loads((root / "config.toml").read_text(encoding="utf-8"))
     account_config = worker["accounts"]["icloud"]
     assert account_config["folder_policy"] == "all"
     assert not account_config["allowed_folders"] and not account_config.get("rules")
     assert worker["worker"]["dry_run"] is True
-    plain = tomllib.loads((root / "himalaya.toml").read_text())["accounts"]["icloud"]["imap"]["sasl"]["plain"]
+    plain = tomllib.loads((root / "himalaya.toml").read_text(encoding="utf-8"))["accounts"]["icloud"]["imap"]["sasl"]["plain"]
     assert plain["password"]["command"][-1] == handler.settings.config.load().personal_integrations.icloud.credential_ref
 
 

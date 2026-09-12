@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
@@ -149,8 +149,11 @@ class EvolutionConfig(Base):
     @field_validator("storage_dir")
     @classmethod
     def validate_storage_dir(cls, value: str) -> str:
-        path = Path(value)
-        if path.is_absolute() or ".." in path.parts or not value.strip():
+        # A Windows rooted path (\foo) is not absolute without a drive, but
+        # joining it still discards the workspace directory. Validate both
+        # syntaxes so moving a configuration between OSes cannot change scope.
+        paths = (PurePosixPath(value), PureWindowsPath(value))
+        if not value.strip() or any(path.anchor or ".." in path.parts for path in paths):
             raise ValueError("storageDir must be a non-empty workspace-relative path")
         return value
 

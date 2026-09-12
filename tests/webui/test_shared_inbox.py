@@ -1,5 +1,6 @@
 """Shared inbox auth, canonical-history, and delivery-receipt regressions (no network)."""
 import json
+import os
 from unittest.mock import AsyncMock
 
 import pytest
@@ -63,7 +64,8 @@ async def test_receipts_are_deduplicated_durable_and_never_llm_messages(inbox):
     assert len(reloaded.messages(NOTIFICATIONS_CHAT_ID)) == 2
     assert inbox.sessions.read_session_file("websocket:shared-notifications") is None
     assert inbox.sessions.read_session_file("telegram:7") is None
-    assert inbox._path.stat().st_mode & 0o777 == 0o600
+    if os.name == "posix":
+        assert inbox._path.stat().st_mode & 0o777 == 0o600
     changed_owner = inbox.config.model_copy(update={"main_chat_id": "8"})
     assert SharedInbox(changed_owner, inbox.sessions, inbox.bus).messages(NOTIFICATIONS_CHAT_ID) == []
 
@@ -262,7 +264,7 @@ async def test_rebuild_checks_effective_notification_bot_identity(
         assert reverted.technical_notifier.on_delivered is None
     # The inbox retains only the public bot ID, never either credential.
     assert shared.config.token == ""
-    stored = shared._path.read_text()
+    stored = shared._path.read_text(encoding="utf-8")
     for token in (technical_token, main_token, new_technical_token, new_main_token):
         if token:
             assert token not in stored
