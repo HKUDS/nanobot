@@ -247,6 +247,107 @@ async def test_tool_execution_batches_read_only_tools_before_exclusive_work():
 
 
 @pytest.mark.asyncio
+async def test_tool_execution_reports_completed_batch_before_next_batch():
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "read_a",
+        delay=0.01,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+    tools.register(_DelayTool(
+        "read_b",
+        delay=0.01,
+        read_only=True,
+        shared_events=shared_events,
+    ))
+    tools.register(_DelayTool(
+        "write_a",
+        delay=0,
+        read_only=False,
+        shared_events=shared_events,
+    ))
+    completed_batches: list[tuple[list[str], list[Any]]] = []
+
+    async def on_batch_completed(
+        batch_calls: list[ToolCallRequest],
+        batch_results: list[Any],
+    ) -> None:
+        call_ids = [call.id for call in batch_calls]
+        completed_batches.append((call_ids, list(batch_results)))
+        shared_events.append(f"checkpoint:{','.join(call_ids)}")
+
+    await execute_tool_calls(
+        tools,
+        [
+            ToolCallRequest(id="ro1", name="read_a", arguments={}),
+            ToolCallRequest(id="ro2", name="read_b", arguments={}),
+            ToolCallRequest(id="rw1", name="write_a", arguments={}),
+        ],
+        concurrent=True,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=AgentHook(),
+        context=AgentHookContext(iteration=0, messages=[]),
+        on_batch_completed=on_batch_completed,
+    )
+
+    assert completed_batches == [
+        (["ro1", "ro2"], ["read_a", "read_b"]),
+        (["rw1"], ["write_a"]),
+    ]
+    checkpoint_index = shared_events.index("checkpoint:ro1,ro2")
+    assert shared_events.index("end:read_a") < checkpoint_index
+    assert shared_events.index("end:read_b") < checkpoint_index
+    assert checkpoint_index < shared_events.index("start:write_a")
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_stops_before_next_batch_when_batch_callback_fails():
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    tools.register(_DelayTool(
+        "write_a",
+        delay=0,
+        read_only=False,
+        shared_events=shared_events,
+    ))
+    tools.register(_DelayTool(
+        "write_b",
+        delay=0,
+        read_only=False,
+        shared_events=shared_events,
+    ))
+    completed_batches: list[list[str]] = []
+
+    async def failing_checkpoint(
+        batch_calls: list[ToolCallRequest],
+        _batch_results: list[Any],
+    ) -> None:
+        completed_batches.append([call.id for call in batch_calls])
+        raise RuntimeError("checkpoint failed")
+
+    with pytest.raises(RuntimeError, match="checkpoint failed"):
+        await execute_tool_calls(
+            tools,
+            [
+                ToolCallRequest(id="w1", name="write_a", arguments={}),
+                ToolCallRequest(id="w2", name="write_b", arguments={}),
+            ],
+            concurrent=True,
+            external_lookup_counts={},
+            workspace_violation_counts={},
+            hook=AgentHook(),
+            context=AgentHookContext(iteration=0, messages=[]),
+            on_batch_completed=failing_checkpoint,
+        )
+
+    assert completed_batches == [["w1"]]
+    assert shared_events == ["start:write_a", "end:write_a"]
+
+
+@pytest.mark.asyncio
 async def test_tool_execution_does_not_batch_exclusive_read_only_tools():
     tools = ToolRegistry()
     shared_events: list[str] = []
