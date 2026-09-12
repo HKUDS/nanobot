@@ -1,6 +1,9 @@
 """Runtime context for tool construction."""
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -24,6 +27,12 @@ _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
     "nanobot_tool_request_context",
     default=None,
 )
+_CURRENT_TOOL_INVOCATION_CONTEXT: ContextVar["ToolInvocationContext | None"] = ContextVar(
+    "nanobot_tool_invocation_context",
+    default=None,
+)
+
+_TOOL_INVOCATION_KEY_DOMAIN = "nanobot.tool.invocation.v1"
 
 
 @dataclass(frozen=True)
@@ -40,6 +49,14 @@ class RequestContext:
     turn_id: str | None = None
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ToolInvocationContext:
+    """Identity of the currently executing logical tool call."""
+
+    tool_call_id: str
+    invocation_key: str | None = None
 
 
 @runtime_checkable
@@ -73,6 +90,38 @@ def current_request_context() -> RequestContext | None:
 def current_request_session_key() -> str | None:
     ctx = current_request_context()
     return ctx.session_key if ctx else None
+
+
+def _derive_tool_invocation_key(tool_call_id: str) -> str | None:
+    request = current_request_context()
+    if request is None or not request.session_key or not tool_call_id:
+        return None
+
+    payload = json.dumps(
+        [_TOOL_INVOCATION_KEY_DOMAIN, request.session_key, tool_call_id],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+@contextmanager
+def tool_invocation_context(tool_call_id: str) -> Generator[ToolInvocationContext, None, None]:
+    """Bind one tool-call-local identity and restore the previous value."""
+    ctx = ToolInvocationContext(
+        tool_call_id=tool_call_id,
+        invocation_key=_derive_tool_invocation_key(tool_call_id),
+    )
+    token = _CURRENT_TOOL_INVOCATION_CONTEXT.set(ctx)
+    try:
+        yield ctx
+    finally:
+        _CURRENT_TOOL_INVOCATION_CONTEXT.reset(token)
+
+
+def current_tool_invocation_context() -> ToolInvocationContext | None:
+    """Return the current tool invocation identity, if inside a tool call."""
+    return _CURRENT_TOOL_INVOCATION_CONTEXT.get()
 
 
 @dataclass
