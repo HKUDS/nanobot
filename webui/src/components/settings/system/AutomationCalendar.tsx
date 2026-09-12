@@ -1,8 +1,10 @@
-import { ChevronDown, CircleAlert, Clock3, Loader2 } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { CircleAlert, Loader2, X } from "lucide-react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { formControlFocusClassName } from "@/components/ui/form-control";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { SessionAutomationJob } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -24,10 +26,8 @@ type CalendarCopy = {
   running: string;
   failed: string;
   more: (count: number) => string;
+  close: string;
   noEntries: string;
-  outsideMonth: string;
-  paused: string;
-  attention: string;
   completed: string;
 };
 
@@ -35,6 +35,7 @@ interface AutomationCalendarProps {
   jobs: SessionAutomationJob[];
   locale: string;
   copy: CalendarCopy;
+  filters?: ReactNode;
   onInspect: (job: SessionAutomationJob, trigger: HTMLElement) => void;
 }
 
@@ -173,7 +174,72 @@ function CalendarEntryRow({ entry, locale, copy, onInspect, compact = false }: {
   );
 }
 
-export function AutomationCalendar({ jobs, locale, copy, onInspect }: AutomationCalendarProps) {
+function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }: {
+  entries: CalendarEntry[];
+  dayLabel: string;
+  locale: string;
+  copy: CalendarCopy;
+  onInspect: AutomationCalendarProps["onInspect"];
+}) {
+  const [open, setOpen] = useState(false);
+  const titleId = useId();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const pendingSelection = useRef<SessionAutomationJob | null>(null);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          ref={triggerRef}
+          type="button"
+          className={cn(
+            "min-h-6 w-full rounded-compact pe-2 ps-[1.375rem] py-1 text-left text-[10px] text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.055] hover:text-foreground motion-reduce:transition-none",
+            formControlFocusClassName,
+          )}
+        >
+          {copy.more(entries.length - 3)}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side="right"
+        collisionPadding={16}
+        aria-labelledby={titleId}
+        className="w-80 max-w-[calc(100vw-2rem)] overscroll-contain p-2"
+        onCloseAutoFocus={(event) => {
+          const job = pendingSelection.current;
+          pendingSelection.current = null;
+          if (!job || !triggerRef.current?.isConnected) return;
+          // Hand off after the day popover exits, retaining a mounted return target.
+          event.preventDefault();
+          onInspect(job, triggerRef.current);
+        }}
+      >
+        <div className="mb-1 flex items-center gap-2 px-2 py-1">
+          <h3 id={titleId} className="min-w-0 flex-1 text-[13px] font-semibold">{dayLabel}</h3>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label={copy.close} onClick={() => setOpen(false)}>
+            <X className="h-4 w-4" aria-hidden />
+          </Button>
+        </div>
+        {entries.map((entry) => (
+          <CalendarEntryRow
+            key={entry.id}
+            entry={entry}
+            locale={locale}
+            copy={copy}
+            onInspect={(job) => {
+              pendingSelection.current = job;
+              setOpen(false);
+            }}
+            compact
+          />
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export function AutomationCalendar({ jobs, locale, copy, filters, onInspect }: AutomationCalendarProps) {
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const calendarRef = useRef<HTMLElement | null>(null);
   const [wideCalendar, setWideCalendar] = useState(true);
@@ -190,15 +256,11 @@ export function AutomationCalendar({ jobs, locale, copy, onInspect }: Automation
     const key = dateKey(entry.startMs);
     entriesByDay.set(key, [...(entriesByDay.get(key) ?? []), entry]);
   });
-  const visibleJobIds = new Set(visibleEntries.map((entry) => entry.job.id));
-  const outsideJobs = jobs.filter((job) => !visibleJobIds.has(job.id));
   const monthLabel = new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(month);
   const weekdayFormatter = new Intl.DateTimeFormat(locale, { weekday: "short" });
   const dayFormatter = new Intl.DateTimeFormat(locale, { day: "numeric" });
   const agendaDateFormatter = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", weekday: "short" });
   const weekdayLabels = Array.from({ length: 7 }, (_, index) => weekdayFormatter.format(addDays(new Date(2026, 0, 5), index)));
-
-  const inspectOutsideJob = (job: SessionAutomationJob, target: HTMLElement) => onInspect(job, target);
 
   useLayoutEffect(() => {
     const calendar = calendarRef.current;
@@ -214,52 +276,50 @@ export function AutomationCalendar({ jobs, locale, copy, onInspect }: Automation
   }, []);
 
   return (
-    <section ref={calendarRef} className="automation-calendar overflow-hidden rounded-panel border border-border/70 bg-[hsl(var(--settings-surface))]">
-      <div className="flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 sm:px-6">
-        <h2 className="min-w-0 flex-1 text-[15px] font-semibold text-foreground">{monthLabel}</h2>
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-control px-3 text-[12px]"
-            onClick={() => setMonth(startOfMonth(new Date()))}
-          >
-            {copy.today}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground"
-            aria-label={copy.previousMonth}
-            onClick={() => setMonth((value) => addMonths(value, -1))}
-          >
-            <span className="text-lg leading-none" aria-hidden>‹</span>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground"
-            aria-label={copy.nextMonth}
-            onClick={() => setMonth((value) => addMonths(value, 1))}
-          >
-            <span className="text-lg leading-none" aria-hidden>›</span>
-          </Button>
+    <section ref={calendarRef} className="automation-calendar overflow-hidden rounded-panel bg-[hsl(var(--settings-surface))]">
+      <div className="automation-calendar-header bg-foreground/[0.025]">
+        <div className="automation-calendar-toolbar">
+          <h2 className="min-w-0 text-[15px] font-semibold text-foreground">{monthLabel}</h2>
+          {filters ? <div className="automation-calendar-filters min-w-0">{filters}</div> : null}
+          <div className="automation-calendar-navigation flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-control px-3 text-[12px]"
+              onClick={() => setMonth(startOfMonth(new Date()))}
+            >
+              {copy.today}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              aria-label={copy.previousMonth}
+              onClick={() => setMonth((value) => addMonths(value, -1))}
+            >
+              <span className="text-lg leading-none" aria-hidden>‹</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              aria-label={copy.nextMonth}
+              onClick={() => setMonth((value) => addMonths(value, 1))}
+            >
+              <span className="text-lg leading-none" aria-hidden>›</span>
+            </Button>
+          </div>
         </div>
+
+        {wideCalendar ? <div className="automation-calendar-weekdays" aria-hidden>
+          {weekdayLabels.map((label) => <div key={label}>{label}</div>)}
+        </div> : null}
       </div>
 
-      {!jobs.length ? (
-        <div className="flex min-h-48 items-center justify-center px-6 text-center text-[13px] text-muted-foreground">
-          {copy.noEntries}
-        </div>
-      ) : null}
-
-      {jobs.length > 0 && wideCalendar ? <div className="automation-calendar-grid" aria-label={monthLabel}>
-        <div className="automation-calendar-weekdays" aria-hidden>
-          {weekdayLabels.map((label) => <div key={label}>{label}</div>)}
-        </div>
+      {wideCalendar ? <div className="automation-calendar-grid" aria-label={monthLabel}>
         <div className="automation-calendar-month">
           {days.map((day) => {
             const entries = entriesByDay.get(dateKey(day)) ?? [];
@@ -295,25 +355,13 @@ export function AutomationCalendar({ jobs, locale, copy, onInspect }: Automation
                     />
                   ))}
                   {entries.length > 3 ? (
-                    <details className="group/more">
-                      <summary className={cn(
-                        "cursor-pointer list-none rounded-control px-2 py-1 text-[10px] text-muted-foreground settings-hover [&::-webkit-details-marker]:hidden",
-                        formControlFocusClassName,
-                      )}>
-                        {copy.more(entries.length - 3)}
-                      </summary>
-                      <div className="mt-0.5 space-y-0.5">
-                        {entries.slice(3).map((entry) => (
-                          <CalendarEntryRow
-                            key={entry.id}
-                            entry={entry}
-                            locale={locale}
-                            copy={copy}
-                            onInspect={onInspect}
-                          />
-                        ))}
-                      </div>
-                    </details>
+                    <CalendarOverflowEntries
+                      entries={entries}
+                      dayLabel={dayLabel}
+                      locale={locale}
+                      copy={copy}
+                      onInspect={onInspect}
+                    />
                   ) : null}
                 </div>
               </div>
@@ -322,7 +370,7 @@ export function AutomationCalendar({ jobs, locale, copy, onInspect }: Automation
         </div>
       </div> : null}
 
-      {jobs.length > 0 && !wideCalendar ? <div className="automation-calendar-agenda px-3 py-2 sm:px-4">
+      {!wideCalendar ? <div className="automation-calendar-agenda px-3 py-2 sm:px-4">
         {visibleEntries.length ? (
           <ol>
             {days.filter((day) => entriesByDay.has(dateKey(day))).map((day) => (
@@ -363,47 +411,6 @@ export function AutomationCalendar({ jobs, locale, copy, onInspect }: Automation
         </div>
       ) : null}
 
-      {outsideJobs.length ? (
-        <details
-          key={`${month.getTime()}:${visibleEntries.length ? "mixed" : "outside-only"}`}
-          className="group"
-          open={!visibleEntries.length || undefined}
-        >
-          <summary className={cn("automation-meta-row min-h-11 cursor-pointer list-none items-center text-[12px] text-muted-foreground settings-hover [&::-webkit-details-marker]:hidden", formControlFocusClassName)}>
-            <Clock3 className="h-3.5 w-3.5 place-self-center" aria-hidden />
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate">{copy.outsideMonth}</span>
-              <span className="tabular-nums text-muted-foreground/65">{outsideJobs.length}</span>
-            </span>
-            <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden />
-          </summary>
-          <ul className="px-4 pb-2 sm:px-6">
-            {outsideJobs.map((job) => (
-              <li key={job.id}>
-                <button
-                  type="button"
-                  className={cn("grid min-h-10 w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-x-2 rounded-control text-left text-[12px] settings-hover", formControlFocusClassName)}
-                  aria-haspopup="dialog"
-                  onClick={(event) => inspectOutsideJob(job, event.currentTarget)}
-                >
-                  <span className="h-4 w-4" aria-hidden />
-                  <span className="truncate font-medium text-foreground">{job.name || job.id}</span>
-                  <span className="flex shrink-0 flex-wrap justify-end gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-                    {(job.state.last_status === "error" || job.state.last_error)
-                      ? <span>{copy.attention}</span> : null}
-                    {!job.enabled ? <span>{copy.paused}</span> : null}
-                    {job.enabled && job.delete_after_run && job.state.last_status === "ok"
-                      ? <span>{copy.completed}</span> : null}
-                    {job.enabled && !(job.delete_after_run && job.state.last_status === "ok")
-                      && job.state.last_status !== "error" && !job.state.last_error
-                      ? <span>{copy.outsideMonth}</span> : null}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
     </section>
   );
 }

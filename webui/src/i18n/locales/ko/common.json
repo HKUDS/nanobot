@@ -886,9 +886,8 @@
       "notEnabled": "비활성화됨"
     },
     "automations": {
-      "viewOptions": "검색 및 필터",
       "create": "자동화 만들기",
-      "createPrompt": "만들 자동화를 설명하세요. 예: 평일 오전 9시에 프로젝트 진행 상황 요약",
+      "createPrompt": "nanobot이 언제 무엇을 해주면 좋을까요?",
       "createInput": "자동화 설명",
       "createRequest": "다음 요청에 맞는 자동화를 만들어 주세요:\n\n{{request}}",
       "errors": {
@@ -901,8 +900,8 @@
         "planned": "예정",
         "recorded": "기록",
         "more": "+{{count}}개 더",
-        "noEntries": "이번 달 실행 기록이 없습니다.",
-        "outsideMonth": "이번 달 날짜 없음"
+        "less": "접기",
+        "noEntries": "이번 달 실행 기록이 없습니다."
       },
       "yourTasks": "내 자동화",
       "systemTasks": "시스템 작업",
@@ -926,7 +925,6 @@
         "updated": "업데이트",
         "name": "이름"
       },
-      "search": "작업, 메시지, 연결된 채팅 또는 일정 검색",
       "queue": "대기열",
       "loading": "자동화를 불러오는 중...",
       "noMatches": "이 보기와 일치하는 자동화가 없습니다.",

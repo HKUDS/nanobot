@@ -886,9 +886,8 @@
       "notEnabled": "Chưa bật"
     },
     "automations": {
-      "viewOptions": "Tìm kiếm và lọc",
       "create": "Tạo tự động hóa",
-      "createPrompt": "Mô tả tác vụ tự động, ví dụ: tóm tắt tiến độ dự án lúc 9:00 mỗi ngày làm việc",
+      "createPrompt": "Bạn muốn nanobot làm gì theo lịch?",
       "createInput": "Mô tả tác vụ tự động",
       "createRequest": "Tạo một tác vụ tự động cho yêu cầu này:\n\n{{request}}",
       "errors": {
@@ -901,8 +900,8 @@
         "planned": "Đã lên lịch",
         "recorded": "Đã ghi nhận",
         "more": "+{{count}} mục khác",
-        "noEntries": "Không có lần chạy nào trong tháng này.",
-        "outsideMonth": "Không có ngày trong tháng này"
+        "less": "Thu gọn",
+        "noEntries": "Không có lần chạy nào trong tháng này."
       },
       "yourTasks": "Tác vụ tự động của bạn",
       "systemTasks": "Tác vụ hệ thống",
@@ -926,7 +925,6 @@
         "updated": "Đã cập nhật",
         "name": "Tên"
       },
-      "search": "Tìm tác vụ, tin nhắn, cuộc trò chuyện liên kết hoặc lịch",
       "queue": "Hàng đợi",
       "loading": "Đang tải tự động hóa...",
       "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",

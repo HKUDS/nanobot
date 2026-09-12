@@ -1086,9 +1086,8 @@
       "notEnabled": "Not enabled"
     },
     "automations": {
-      "viewOptions": "Search and filter",
       "create": "Create automation",
-      "createPrompt": "Describe an automation, for example: summarize project updates every weekday at 9:00",
+      "createPrompt": "What would you like nanobot to schedule?",
       "createInput": "Describe an automation",
       "createRequest": "Create an automation for this request:\n\n{{request}}",
       "errors": {
@@ -1101,8 +1100,8 @@
         "planned": "Planned",
         "recorded": "Recorded",
         "more": "+{{count}} more",
-        "noEntries": "No runs in this month.",
-        "outsideMonth": "Without a date in this month"
+        "less": "Show less",
+        "noEntries": "No runs in this month."
       },
       "yourTasks": "Your automations",
       "systemTasks": "System tasks",
@@ -1126,7 +1125,6 @@
         "updated": "Updated",
         "name": "Name"
       },
-      "search": "Search task, message, linked chat, or schedule",
       "queue": "Queue",
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",

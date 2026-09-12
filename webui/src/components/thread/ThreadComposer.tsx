@@ -194,6 +194,7 @@ interface ThreadComposerProps {
   disabled?: boolean;
   placeholder?: string;
   inputAriaLabel?: string;
+  compactWhenIdle?: boolean;
   isStreaming?: boolean;
   modelLabel?: string | null;
   modelDetail?: string | null;
@@ -895,6 +896,7 @@ export function ThreadComposer({
   disabled,
   placeholder,
   inputAriaLabel,
+  compactWhenIdle = false,
   isStreaming = false,
   modelLabel = null,
   modelDetail = null,
@@ -936,6 +938,8 @@ export function ThreadComposer({
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const [composerFocused, setComposerFocused] = useState(false);
+  const blurFrame = useRef<number | null>(null);
   const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
   const [sessionDragPreview, setSessionDragPreview] = useState<{
     mention: SessionMention;
@@ -1058,14 +1062,18 @@ export function ThreadComposer({
   } = useClipboardAndDrop(addFiles);
 
   useEffect(() => {
-    if (interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
+    if (compactWhenIdle || interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
       return;
     }
     const el = textareaRef.current;
     if (!el) return;
     const id = requestAnimationFrame(() => el.focus());
     return () => cancelAnimationFrame(id);
-  }, [hasTouchPrimaryPointer, interactionDisabled, showProjectPicker, workspaceError]);
+  }, [compactWhenIdle, hasTouchPrimaryPointer, interactionDisabled, showProjectPicker, workspaceError]);
+
+  useEffect(() => () => {
+    if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+  }, []);
 
   useEffect(() => {
     if (!focusRequest || interactionDisabled) return;
@@ -2188,6 +2196,10 @@ export function ThreadComposer({
         : t("thread.composer.voice.hint");
   const showStopButton = isStreaming && !!onStop;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
+  const compactIdle = compactWhenIdle && !isHero && !composerFocused
+    && value.length === 0 && images.length === 0 && !inlineError
+    && !normalizedQuotedContext && !queuedPrompts.length && !goalState?.active
+    && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
   const inputTextClasses = cn(
     "w-full resize-none bg-transparent",
     isHero
@@ -2201,6 +2213,20 @@ export function ThreadComposer({
   return (
     <form
       ref={formRef}
+      onFocusCapture={() => {
+        if (!compactWhenIdle) return;
+        // Portaled model controls belong to this composer too: keep its layout
+        // stable while moving between the input, toolbar, and model picker.
+        if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+      }}
+      onBlurCapture={() => {
+        if (!compactWhenIdle) return;
+        if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+        blurFrame.current = requestAnimationFrame(() => {
+          blurFrame.current = null;
+          setComposerFocused(false);
+        });
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -2224,7 +2250,11 @@ export function ThreadComposer({
       onDrop={(event) => {
         if (!handleSessionDrop(event)) onDrop(event);
       }}
-      className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
+      className={cn(
+        "relative w-full",
+        isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0",
+        compactWhenIdle && "thread-composer-collapsible-layout",
+      )}
     >
       {showSlashMenu ? (
         <SlashCommandPalette
@@ -2248,11 +2278,13 @@ export function ThreadComposer({
       ) : null}
       <div
         ref={surfaceRef}
+        data-compact={compactIdle || undefined}
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
             ? "max-w-[58rem] rounded-prominent bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
             : "max-w-[49.5rem] rounded-panel bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
+          compactWhenIdle && "thread-composer-collapsible transition-colors motion-reduce:transition-none",
           interactionDisabled && "opacity-60",
           sessionDragPreview && "ring-1 ring-primary/25",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
@@ -2336,7 +2368,7 @@ export function ThreadComposer({
           </div>
         ) : null}
         <GoalStateStrip goalState={goalState} />
-        <div className="relative">
+        <div className="thread-composer-input relative min-w-0">
           {hasMentionDecorations ? (
             <ComposerCliMentionOverlay
               segments={displayMentionSegments}
@@ -2350,6 +2382,9 @@ export function ThreadComposer({
           <textarea
             ref={textareaRef}
             value={value}
+            onFocus={() => {
+              if (compactWhenIdle) setComposerFocused(true);
+            }}
             onChange={(e) => {
               secondEnterPromptIdRef.current = null;
               setValue(e.target.value);

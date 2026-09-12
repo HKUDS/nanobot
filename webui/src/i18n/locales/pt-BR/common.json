@@ -900,9 +900,8 @@
       "notEnabled": "Não habilitado"
     },
     "automations": {
-      "viewOptions": "Buscar e filtrar",
       "create": "Criar automação",
-      "createPrompt": "Descreva uma automação, por exemplo: resumir o andamento do projeto todo dia útil às 9:00",
+      "createPrompt": "O que você gostaria de agendar com o nanobot?",
       "createInput": "Descreva uma automação",
       "createRequest": "Crie uma automação para esta solicitação:\n\n{{request}}",
       "errors": {
@@ -915,8 +914,8 @@
         "planned": "Planejado",
         "recorded": "Registrado",
         "more": "+{{count}} mais",
-        "noEntries": "Nenhuma execução neste mês.",
-        "outsideMonth": "Sem data neste mês"
+        "less": "Mostrar menos",
+        "noEntries": "Nenhuma execução neste mês."
       },
       "yourTasks": "Suas automações",
       "systemTasks": "Tarefas do sistema",
@@ -940,7 +939,6 @@
         "updated": "Atualizada",
         "name": "Nome"
       },
-      "search": "Buscar tarefa, mensagem, conversa vinculada ou agendamento",
       "queue": "Fila",
       "loading": "Carregando automações...",
       "noMatches": "Nenhuma automação corresponde a esta visualização.",

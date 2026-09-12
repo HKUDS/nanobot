@@ -67,6 +67,11 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
   );
 }
 
+function currentMonthTimestamp(day: number, hour = 10, minute = 0): number {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), day, hour, minute).getTime();
+}
+
 function baseSettingsPayload() {
   return {
     agent: {
@@ -1372,7 +1377,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(17),
               last_status: "ok",
               pending: false,
               run_history: [],
@@ -1397,7 +1402,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 11, 30, 0),
+              next_run_at_ms: currentMonthTimestamp(17, 11, 30),
               last_status: "ok",
               pending: false,
               run_history: [],
@@ -1432,22 +1437,30 @@ describe("App layout", () => {
 
     fireEvent.click(automationsButton);
 
-    const heading = await screen.findByRole("heading", { name: "Automations" });
+    const heading = await screen.findByRole(
+      "heading",
+      { name: "Automations" },
+      { timeout: 5_000 },
+    );
     expect(heading).toBeInTheDocument();
     const automationsMain = heading.closest("main");
     expect(automationsMain).not.toBeNull();
     expect(within(automationsMain as HTMLElement).queryByText("Settings")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText(
+      "Daily repo check",
+      {},
+      { timeout: 5_000 },
+    )).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Check the repo status")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Daily repo check/ }));
     expect(within(screen.getByRole("dialog", { name: "Daily repo check" })).getByText("Check the repo status")).toBeVisible();
     expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
-    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /WeChat quiz/ }));
     expect(screen.getByText("WeChat")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
     expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /heartbeat/ })).toBeVisible();
@@ -1459,16 +1472,6 @@ describe("App layout", () => {
     );
     expect(document.title).toBe("Automations · nanobot");
 
-    const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
-      "Search task, message, linked chat, or schedule",
-    );
-    fireEvent.change(searchInput, { target: { value: "WeChat" } });
-    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
-    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
-
-    fireEvent.change(searchInput, { target: { value: "09-23" } });
-    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
-    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps automation linked-chat titles in sync with live sidebar renames", async () => {
@@ -1490,7 +1493,8 @@ describe("App layout", () => {
       "/api/webui/automations": { jobs: [{
         id: "reminder", name: "Drink water", enabled: true,
         schedule: { kind: "every", every_ms: 60_000 },
-        payload: { message: "Take a break" }, state: {},
+        payload: { message: "Take a break" },
+        state: { next_run_at_ms: currentMonthTimestamp(17) },
         origin: { session_key: key, channel: "websocket", chat_id: "linked-chat",
           title: "Stored title", preview: "Original preview" },
       }] },
@@ -1501,7 +1505,8 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
     fireEvent.click(await screen.findByRole("button", { name: /Drink water/ }));
     const dialog = screen.getByRole("dialog", { name: "Drink water" });
-    expect(within(dialog).getByRole("link", { name: "推特大战场" })).toHaveAttribute(
+    expect(within(dialog).getByText("推特大战场")).toBeVisible();
+    expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
       "href", "#/chat/websocket%3Alinked-chat",
     );
     for (const title of ["新会话名称", ""]) {
@@ -1512,9 +1517,7 @@ describe("App layout", () => {
       });
       const expected = title || "Stored title";
       expect(within(sidebar).getByText(expected)).toBeInTheDocument();
-      expect(within(dialog).getByRole("link", { name: expected })).toHaveAttribute(
-        "href", "#/chat/websocket%3Alinked-chat",
-      );
+      expect(within(dialog).getByText(expected)).toBeVisible();
     }
     expect(requestMutationSpy).not.toHaveBeenCalled();
   });
@@ -1533,6 +1536,7 @@ describe("App layout", () => {
       },
       state: {
         next_run_at_ms: null,
+        last_run_at_ms: currentMonthTimestamp(12),
         last_status: "ok",
         pending: false,
         run_history: [],
@@ -1605,12 +1609,12 @@ describe("App layout", () => {
       "The full content should remain available without forcing the user into a small nested scroll area.",
     ].join("\n");
     const history = [
-      { run_at_ms: Date.UTC(2026, 3, 12, 10, 0, 0), status: "error", duration_ms: 900, error: "oldest failure" },
-      { run_at_ms: Date.UTC(2026, 3, 13, 10, 0, 0), status: "error", duration_ms: 800, error: "second oldest failure" },
-      { run_at_ms: Date.UTC(2026, 3, 14, 10, 0, 0), status: "ok", duration_ms: 700 },
-      { run_at_ms: Date.UTC(2026, 3, 15, 10, 0, 0), status: "ok", duration_ms: 600 },
-      { run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0), status: "ok", duration_ms: 500 },
-      { run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0), status: "ok", duration_ms: 400 },
+      { run_at_ms: currentMonthTimestamp(12), status: "error", duration_ms: 900, error: "oldest failure" },
+      { run_at_ms: currentMonthTimestamp(13), status: "error", duration_ms: 800, error: "second oldest failure" },
+      { run_at_ms: currentMonthTimestamp(14), status: "ok", duration_ms: 700 },
+      { run_at_ms: currentMonthTimestamp(15), status: "ok", duration_ms: 600 },
+      { run_at_ms: currentMonthTimestamp(16), status: "ok", duration_ms: 500 },
+      { run_at_ms: currentMonthTimestamp(17), status: "ok", duration_ms: 400 },
     ];
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
@@ -1628,7 +1632,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 18, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(18),
               last_status: "ok",
               pending: false,
               run_history: history,
@@ -1651,7 +1655,11 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
-    fireEvent.click(await screen.findByRole("button", { name: /Long detail automation/ }));
+    fireEvent.click(await screen.findByRole(
+      "button",
+      { name: /Long detail automation.*Planned/ },
+      { timeout: 5_000 },
+    ));
     const detailPanel = await screen.findByRole("dialog", { name: "Long detail automation" });
     const message = Array.from(detailPanel.querySelectorAll("section p")).find(
       (node) => node.textContent === longMessage,
@@ -1689,13 +1697,13 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
-              last_run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(17),
+              last_run_at_ms: currentMonthTimestamp(16),
               last_status: "ok",
               pending: false,
               run_history: [
                 {
-                  run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+                  run_at_ms: currentMonthTimestamp(16),
                   status: "ok",
                   duration_ms: 500,
                 },
@@ -1727,7 +1735,7 @@ describe("App layout", () => {
     expect(screen.queryByText("任务队列")).not.toBeInTheDocument();
     expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("检查仓库状态")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /每日检查/ }));
+    fireEvent.click(screen.getByRole("button", { name: /每日检查.*计划运行/ }));
     const detail = within(screen.getByRole("dialog", { name: "每日检查" }));
     expect(detail.getByText("检查仓库状态")).toBeVisible();
     expect(detail.getByText(/每 1天/)).toBeInTheDocument();

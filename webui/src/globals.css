@@ -1031,6 +1031,71 @@
   .automation-create-composer .thread-composer-surface {
     max-inline-size: none;
   }
+  .automation-calendar-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    min-block-size: 4rem;
+    padding: 1rem;
+  }
+  .automation-calendar-navigation {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .automation-calendar-filters {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  @container automations (max-width: 20rem) {
+    .automation-calendar-filters .segmented-control {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      inline-size: 100%;
+      border-radius: 1rem;
+    }
+  }
+  @container automations (min-width: 48rem) {
+    .automation-calendar-toolbar {
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      padding-inline: 1.5rem;
+    }
+    .automation-calendar-filters {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .automation-calendar-navigation { grid-column: 3; }
+  }
+  .thread-composer-collapsible-layout {
+    container: composer-layout / inline-size;
+  }
+  @container composer-layout (min-width: 40rem) {
+    .thread-composer-collapsible[data-compact] {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+      display: block;
+      block-size: 3.5rem !important;
+      min-block-size: 3.5rem;
+      padding-block: 1.125rem;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer {
+      padding: 0.5rem;
+      transition: none;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer-primary {
+      flex: none;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer-actions {
+      max-inline-size: none;
+    }
+  }
   .automation-meta-row {
     display: grid;
     grid-template-columns: 1rem minmax(0, 1fr) auto;
@@ -1050,7 +1115,6 @@
     .automation-calendar-weekdays {
       display: grid;
       grid-template-columns: repeat(7, minmax(0, 1fr));
-      border-block-end: 1px solid hsl(var(--border) / 0.6);
     }
     .automation-calendar-weekdays > div {
       padding: 8px 10px;

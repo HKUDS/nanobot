@@ -2,21 +2,18 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
-  ArrowUpDown,
   Check,
   ChevronDown,
-  ChevronRight,
   CircleAlert,
   Clipboard,
   Loader2,
-  Search,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
 import { channelUiOwner, channelUiPresentation } from "@/channel-plugins/registry";
 import { AutomationCalendar } from "@/components/settings/system/AutomationCalendar";
-import { SETTINGS_SEARCH_INPUT_CLASS, SettingsGroup } from "@/components/settings/shared/SettingsControls";
+import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 import {
   modelPresetOptionsFromSettings,
   toModelBadgeInfo,
@@ -33,12 +30,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -56,17 +47,16 @@ import type {
 import { cn } from "@/lib/utils";
 
 export type AutomationFilter = "all" | "active" | "paused" | "failed" | "system";
-export type AutomationSort = "next" | "last" | "updated" | "name";
 export type AutomationAction = "enable" | "disable" | "delete" | "run";
 
 const EMPTY_TITLE_OVERRIDES: Record<string, string> = {};
 const SYSTEM_TASKS_OPEN_STORAGE_KEY = "nanobot-webui.automation-system-tasks-open";
 
 export function AutomationsSettings({
-  payload, loading, query, filter, sort, actionKey, error,
+  payload, loading, filter, actionKey, error,
   titleOverrides = EMPTY_TITLE_OVERRIDES,
   settingsSnapshot = null,
-  onQueryChange, onFilterChange, onSortChange, onAction,
+  onFilterChange, onAction,
   onRequestEdit, onRequestDelete, onStartChat, onManageModels,
   returnToDetailJob = null, onReturnToDetailHandled,
 }: {
@@ -74,14 +64,10 @@ export function AutomationsSettings({
   titleOverrides?: Record<string, string>;
   settingsSnapshot?: SettingsPayload | null;
   loading: boolean;
-  query: string;
   filter: AutomationFilter;
-  sort: AutomationSort;
   actionKey: string | null;
   error: string | null;
-  onQueryChange: (value: string) => void;
   onFilterChange: (value: AutomationFilter) => void;
-  onSortChange: (value: AutomationSort) => void;
   onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
   onRequestEdit: (job: SessionAutomationJob) => void;
   onRequestDelete: (job: SessionAutomationJob) => void;
@@ -118,16 +104,13 @@ export function AutomationsSettings({
       return true;
     }
   });
-  const searchInput = useRef<HTMLInputElement | null>(null);
   const pageTitle = useRef<HTMLHeadingElement | null>(null);
   const selectedTrigger = useRef<HTMLElement | null>(null);
   const afterDetailClose = useRef<((job: SessionAutomationJob) => void) | null>(null);
   const filtered = useMemo(() => {
-    const searchTokens = parseAutomationSearchQuery(query);
-    return sortAutomationJobs(jobs, sort)
-      .filter((job) => automationMatchesFilter(job, filter))
-      .filter((job) => !searchTokens.length || automationMatchesSearch(job, searchTokens));
-  }, [filter, jobs, query, sort]);
+    return jobs
+      .filter((job) => automationMatchesFilter(job, filter));
+  }, [filter, jobs]);
   const personalJobs = jobs.filter((job) => !job.protected);
   const personal = filtered.filter((job) => !job.protected);
   const system = filtered.filter((job) => job.protected);
@@ -144,12 +127,6 @@ export function AutomationsSettings({
     { value: "failed", label: tx("settings.automations.filters.failed", "Needs attention"),
       count: personalJobs.filter(automationNeedsAttention).length },
   ];
-  const sortLabel = {
-    next: tx("settings.automations.sort.next", "Next run"),
-    last: tx("settings.automations.sort.last", "Last run"),
-    updated: tx("settings.automations.sort.updated", "Updated"),
-    name: tx("settings.automations.sort.name", "Name"),
-  } satisfies Record<AutomationSort, string>;
   const configuredPresetNames = useMemo(
     () => new Set(settingsSnapshot?.model_presets?.map((preset) => preset.name) ?? []),
     [settingsSnapshot],
@@ -177,10 +154,6 @@ export function AutomationsSettings({
     if (liveSelectedJob) setInspectedJob(liveSelectedJob);
     else setDetailOpen(false);
   }, [liveSelectedJob]);
-
-  useEffect(() => {
-    if (query) setSystemOpen(true);
-  }, [query]);
 
   useEffect(() => {
     if (!returnToDetailJob) return;
@@ -248,9 +221,10 @@ export function AutomationsSettings({
               inputAriaLabel={tx("settings.automations.createInput", "Describe an automation")}
               placeholder={tx(
                 "settings.automations.createPrompt",
-                "Describe an automation, for example: summarize project updates every weekday at 9:00",
+                "What would you like nanobot to schedule?",
               )}
               variant="thread"
+              compactWhenIdle
               modelLabel={modelBadgeLabel}
               modelDetail={modelBadge.model}
               modelPreset={activeModelPreset}
@@ -265,74 +239,30 @@ export function AutomationsSettings({
           </div>
         ) : null}
 
-        {jobs.length ? (
-          <section
-            aria-label={tx("settings.automations.viewOptions", "Search and filter")}
-            className="grid min-w-0 items-center gap-3 sm:grid-cols-[minmax(13rem,1fr)_auto_auto]"
-          >
-            <div className="relative min-w-0">
-              <Search className="pointer-events-none absolute start-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input
-                ref={searchInput}
-                value={query}
-                onChange={(event) => onQueryChange(event.target.value)}
-                aria-label={tx("settings.automations.search", "Search task, message, linked chat, or schedule")}
-                placeholder={tx("settings.automations.search", "Search task, message, linked chat, or schedule")}
-                className={cn("h-10 ps-11 text-[13px]", SETTINGS_SEARCH_INPUT_CLASS)}
-              />
-            </div>
-            <div role="group" aria-label={tx("settings.nav.automations", "Automations")} className="min-w-0 max-w-full">
-              <SegmentedControl
-                value={filter}
-                className="flex-wrap justify-start"
-                itemClassName="px-2.5"
-                options={summaryOptions.map((option) => ({
-                  value: option.value,
-                  label: <>{option.label} <span className="ml-0.5 tabular-nums opacity-65">{option.count}</span></>,
-                }))}
-                onChange={onFilterChange}
-              />
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-9 justify-self-start gap-1.5 px-2 text-[11px] text-muted-foreground sm:justify-self-end">
-                  <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
-                  {sortLabel[sort]}
-                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {(Object.keys(sortLabel) as AutomationSort[]).map((value) => (
-                  <DropdownMenuItem key={value} onClick={() => onSortChange(value)}>
-                    <span>{sortLabel[value]}</span>
-                    {sort === value ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden /> : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </section>
-        ) : null}
-
         {error ? <AutomationError message={error} /> : null}
         {loading && !payload ? (
           <div role="status" className="flex h-44 items-center justify-center rounded-panel border border-border/70 bg-[hsl(var(--settings-surface))] text-[13px] text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
             {tx("settings.automations.loading", "Loading automations...")}
           </div>
-        ) : payload && jobs.length && !filtered.length ? (
-          <div className="flex min-h-32 items-center justify-center gap-3 rounded-panel border border-border/70 bg-[hsl(var(--settings-surface))] px-4 text-[12px] text-muted-foreground">
-            <span>{tx("settings.automations.noMatches", "No automations match this view.")}</span>
-            <Button variant="ghost" size="sm" onClick={() => {
-              onQueryChange("");
-              onFilterChange("all");
-            }}>
-              {tx("settings.automations.clearFilters", "Clear filters")}
-            </Button>
-          </div>
         ) : (
           <AutomationCalendar
             jobs={personal}
             locale={locale}
+            filters={jobs.length ? (
+              <div role="group" aria-label={tx("settings.nav.automations", "Automations")}>
+                <SegmentedControl
+                  value={filter}
+                  className="flex-wrap justify-start"
+                  itemClassName="px-2.5"
+                  options={summaryOptions.map((option) => ({
+                    value: option.value,
+                    label: <>{option.label} <span className="ml-0.5 tabular-nums opacity-65">{option.count}</span></>,
+                  }))}
+                  onChange={onFilterChange}
+                />
+              </div>
+            ) : null}
             copy={{
               previousMonth: tx("settings.automations.calendar.previousMonth", "Previous month"),
               nextMonth: tx("settings.automations.calendar.nextMonth", "Next month"),
@@ -342,14 +272,12 @@ export function AutomationsSettings({
               running: tx("settings.automations.status.running", "Running"),
               failed: tx("settings.automations.status.failed", "Failed"),
               more: (count) => tx("settings.automations.calendar.more", "+{{count}} more", { count }),
+              close: tx("common.close", "Close"),
               noEntries: personal.length
                 ? tx("settings.automations.calendar.noEntries", "No runs in this month.")
                 : personalJobs.length
                   ? tx("settings.automations.noMatches", "No automations match this view.")
                   : tx("settings.automations.empty", "No automations yet."),
-              outsideMonth: tx("settings.automations.calendar.outsideMonth", "Without a date in this month"),
-              paused: tx("settings.automations.filters.paused", "Paused"),
-              attention: tx("settings.automations.filters.failed", "Needs attention"),
               completed: tx("settings.automations.status.completed", "Completed"),
             }}
             onInspect={inspectJob}
@@ -412,7 +340,7 @@ export function AutomationsSettings({
           if (detailOpen) return;
           setInspectedJob(null);
           const target = selectedTrigger.current?.isConnected
-            ? selectedTrigger.current : searchInput.current ?? pageTitle.current;
+            ? selectedTrigger.current : pageTitle.current;
           target?.focus({ preventScroll: true });
           const next = afterDetailClose.current;
           afterDetailClose.current = null;
@@ -452,7 +380,6 @@ export function AutomationDetailDialog({
         <DialogContent
           {...(job.protected ? { "aria-describedby": undefined } : {})}
           {...(!open ? { inert: "", "aria-hidden": true } : {})}
-          showCloseButton={false}
           className={cn(
             "flex max-h-[calc(100dvh-2rem)] max-w-[520px] flex-col gap-0 overflow-hidden p-0",
             job.protected && "max-w-[440px]",
@@ -465,7 +392,6 @@ export function AutomationDetailDialog({
             locale={locale}
             actionKey={actionKey}
             error={error}
-            onClose={() => onOpenChange(false)}
             onAction={onAction}
             onRequestEdit={onRequestEdit}
             onRequestDelete={onRequestDelete}
@@ -525,13 +451,12 @@ function AutomationListItem({ job, locale, disabled, onSelect }: {
 }
 
 function AutomationDetailPanel({
-  job, locale, actionKey, error, onClose, onAction, onRequestEdit, onRequestDelete,
+  job, locale, actionKey, error, onAction, onRequestEdit, onRequestDelete,
 }: {
   job: SessionAutomationJob;
   locale: string;
   actionKey: string | null;
   error: string | null;
-  onClose: () => void;
   onAction: (action: AutomationAction, job: SessionAutomationJob) => void | Promise<void>;
   onRequestEdit: (job: SessionAutomationJob) => void;
   onRequestDelete: (job: SessionAutomationJob) => void;
@@ -564,19 +489,16 @@ function AutomationDetailPanel({
 
   return (
     <>
-      <DialogHeader className="shrink-0 px-6 pb-3 pt-5 text-left">
-        <div className="flex items-center justify-between gap-3">
-          <DialogTitle className="min-w-0 break-words leading-6">{job.name || job.id}</DialogTitle>
-          <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={onClose}>
-            {tx("settings.automations.done", "Done")}
-          </Button>
-        </div>
+      <DialogHeader className="shrink-0 px-6 pb-3 pr-14 pt-5 text-left">
+        <DialogTitle className="min-w-0 break-words leading-6 text-balance">{job.name || job.id}</DialogTitle>
         {canManage ? (
-          <DialogDescription className="flex flex-wrap gap-x-3 gap-y-1 text-[13px] leading-5">
-            <span>{formatAutomationSchedule(job, locale, tx)}</span>
-            {timezone ? <span>{timezone}</span> : null}
-            <span title={formatAutomationNextTitle(job, locale, tx)}>
-              {formatAutomationNext(job, tx)}
+          <DialogDescription className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] leading-5">
+            <span className="font-medium text-foreground/80">{formatAutomationSchedule(job, locale, tx)}</span>
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span>{tx("settings.automations.labels.next", "Next")}</span>
+              <span className="text-foreground/80" title={formatAutomationNextTitle(job, locale, tx)}>
+                {formatAutomationNext(job, tx)}
+              </span>
             </span>
           </DialogDescription>
         ) : null}
@@ -633,17 +555,12 @@ function AutomationDetailPanel({
           </AutomationDetail>
           {!job.protected ? (
             <AutomationDetail label={tx("settings.automations.labels.origin", "Linked chat")}>
-              {originHref ? (
-                <a href={originHref} className="inline-flex min-w-0 max-w-full items-center gap-2 hover:text-foreground hover:underline">
-                  <span className="truncate">{origin}</span>
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                </a>
-              ) : origin}
+              <span className="block truncate" title={origin}>{origin}</span>
             </AutomationDetail>
           ) : null}
         </dl>
         <Disclosure
-          className="mt-3 border-t border-border/45 pt-1"
+          className="mt-2"
           summaryClassName={cn("flex min-h-10 cursor-pointer items-center justify-between gap-3 rounded-control py-2.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground", formControlFocusClassName)}
           summary={<>
             {tx("settings.automations.moreDetails", "More details")}
@@ -651,6 +568,11 @@ function AutomationDetailPanel({
           </>}
         >
           <dl>
+            {timezone && canManage ? (
+              <AutomationDetail label={tx("settings.automations.fields.timezone", "Timezone")}>
+                {timezone}
+              </AutomationDetail>
+            ) : null}
             {job.delete_after_run ? <AutomationDetail label={tx("settings.automations.oneShot", "One-time")}>{tx("settings.automations.oneShotHint", "Removed after running")}</AutomationDetail> : null}
             {job.created_at_ms ? <AutomationDetail label={tx("settings.automations.labels.created", "Created")}>{fmtDateTime(job.created_at_ms, locale)}</AutomationDetail> : null}
             {job.updated_at_ms ? <AutomationDetail label={tx("settings.automations.labels.updated", "Updated")}>{fmtDateTime(job.updated_at_ms, locale)}</AutomationDetail> : null}
@@ -659,27 +581,29 @@ function AutomationDetailPanel({
         </Disclosure>
       </div>
       {canManage ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border/45 px-6 py-3">
-          <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={busy || !canToggle} onClick={() => void onAction(job.enabled ? "disable" : "enable", job)}>
-            {actionKey === `${job.enabled ? "disable" : "enable"}:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-            {job.enabled ? tx("settings.automations.pause", "Pause") : tx("settings.automations.resume", "Resume")}
-          </Button>
-          {!localTrigger ? (
-            <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!canRun || busy} onClick={() => void onAction("run", job)}>
-              {actionKey === `run:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-              {tx("settings.automations.runNow", "Run now")}
+        <div className="flex shrink-0 flex-col gap-2 border-t border-border/45 px-6 py-3 sm:flex-row sm:items-center">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={busy || !canToggle} onClick={() => void onAction(job.enabled ? "disable" : "enable", job)}>
+              {actionKey === `${job.enabled ? "disable" : "enable"}:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+              {job.enabled ? tx("settings.automations.pause", "Pause") : tx("settings.automations.resume", "Resume")}
             </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            disabled={busy}
-            onClick={() => onRequestDelete(job)}
-          >
-            {tx("settings.automations.delete", "Delete")}
-          </Button>
-          <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
+            {!localTrigger ? (
+              <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!canRun || busy} onClick={() => void onAction("run", job)}>
+                {actionKey === `run:${job.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                {tx("settings.automations.runNow", "Run now")}
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={busy}
+              onClick={() => onRequestDelete(job)}
+            >
+              {tx("settings.automations.delete", "Delete")}
+            </Button>
+          </div>
+          <div className="flex max-w-full flex-wrap justify-end gap-2 sm:ml-auto">
             <Button variant="outline" size="sm" disabled={busy} onClick={() => onRequestEdit(job)}>
               {tx("settings.automations.edit", "Edit")}
             </Button>
@@ -723,7 +647,7 @@ function automationMessageNeedsExpansion(message: string): boolean {
 
 function AutomationDetail({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] items-start gap-4 py-2.5 text-[13px] leading-5">
+    <div className="grid min-w-0 grid-cols-[minmax(6.5rem,0.75fr)_minmax(0,1.75fr)] items-start gap-4 py-2.5 text-[13px] leading-5">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-words text-right text-foreground [overflow-wrap:anywhere]" title={title}>{children}</dd>
     </div>
@@ -1077,23 +1001,6 @@ function automationStatusKey(
   return "active";
 }
 
-function sortAutomationJobs(jobs: SessionAutomationJob[], sort: AutomationSort): SessionAutomationJob[] {
-  const byName = (left: SessionAutomationJob, right: SessionAutomationJob) =>
-    (left.name || left.id).localeCompare(right.name || right.id);
-  return [...jobs].sort((left, right) => {
-    if (sort === "name") return byName(left, right);
-    if (sort === "last") {
-      return (right.state.last_run_at_ms ?? 0) - (left.state.last_run_at_ms ?? 0) || byName(left, right);
-    }
-    if (sort === "updated") {
-      return (right.updated_at_ms ?? 0) - (left.updated_at_ms ?? 0) || byName(left, right);
-    }
-    const leftNext = left.state.next_run_at_ms ?? Number.MAX_SAFE_INTEGER;
-    const rightNext = right.state.next_run_at_ms ?? Number.MAX_SAFE_INTEGER;
-    return leftNext - rightNext || byName(left, right);
-  });
-}
-
 function automationDraftFromJob(job: SessionAutomationJob | null): AutomationEditDraft {
   const every = automationIntervalDraft(job?.schedule.every_ms ?? 3_600_000);
   const scheduleKind = job?.schedule.kind === "at" || job?.schedule.kind === "cron"
@@ -1209,147 +1116,10 @@ function automationScheduleChanged(
   return draft.atLocal !== formatLocalDateTimeInput(job.schedule.at_ms ?? NaN);
 }
 
-type AutomationSearchField = "id" | "name" | "message" | "chat" | "cron" | "schedule" | "status";
-
-interface AutomationSearchToken {
-  field: AutomationSearchField | null;
-  value: string;
-}
-
-const AUTOMATION_SEARCH_FIELDS = new Set<AutomationSearchField>([
-  "id",
-  "name",
-  "message",
-  "chat",
-  "cron",
-  "schedule",
-  "status",
-]);
-
 const HOST_AUTOMATION_CHANNEL_LABELS: Record<string, string> = {
   api: "API",
   cli: "CLI",
 };
-
-function parseAutomationSearchQuery(query: string): AutomationSearchToken[] {
-  return (query.match(/[^\s:]+:"[^"]+"|"[^"]+"|\S+/g) ?? [])
-    .map((rawPart): AutomationSearchToken | null => {
-      const part = trimAutomationSearchValue(rawPart);
-      if (!part) return null;
-      const fieldMatch = part.match(/^([A-Za-z]+):(.*)$/);
-      if (!fieldMatch) return { field: null, value: part.toLowerCase() };
-      const field = fieldMatch[1].toLowerCase() as AutomationSearchField;
-      const value = trimAutomationSearchValue(fieldMatch[2]).toLowerCase();
-      if (!value) return null;
-      return AUTOMATION_SEARCH_FIELDS.has(field)
-        ? { field, value }
-        : { field: null, value: part.toLowerCase() };
-    })
-    .filter((token): token is AutomationSearchToken => Boolean(token));
-}
-
-function trimAutomationSearchValue(value: string): string {
-  return value.trim().replace(/^"|"$/g, "").trim();
-}
-
-function automationMatchesSearch(job: SessionAutomationJob, tokens: AutomationSearchToken[]): boolean {
-  return tokens.every((token) => automationSearchText(job, token.field).includes(token.value));
-}
-
-function automationSearchText(job: SessionAutomationJob, field: AutomationSearchField | null = null): string {
-  return automationSearchParts(job, field)
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function automationSearchParts(
-  job: SessionAutomationJob,
-  field: AutomationSearchField | null,
-): Array<string | number | null | undefined> {
-  const originParts = automationOriginSearchParts(job);
-  const scheduleParts = automationScheduleSearchParts(job);
-  if (field === "id") return [job.id];
-  if (field === "name") return [job.name, job.id];
-  if (field === "message") return [job.payload.message, job.payload.command, job.trigger?.command];
-  if (field === "chat") return originParts;
-  if (field === "cron" || field === "schedule") return scheduleParts;
-  if (field === "status") return [automationStatusKey(job), job.enabled ? "enabled" : "disabled"];
-  return [
-    job.id,
-    job.name,
-    job.payload.message,
-    job.payload.command,
-    job.trigger?.command,
-    isLocalTriggerAutomation(job) ? "trigger local" : null,
-    ...scheduleParts,
-    automationStatusKey(job),
-    ...originParts,
-  ];
-}
-
-function automationOriginSearchParts(job: SessionAutomationJob): Array<string | null | undefined> {
-  const origin = job.origin;
-  if (!origin) return [];
-  const channel = origin.channel.trim().toLowerCase();
-  return [
-    origin.session_key,
-    origin.title,
-    origin.preview,
-    origin.channel,
-    automationChannelDisplayName(channel),
-  ];
-}
-
-function automationScheduleSearchParts(job: SessionAutomationJob): Array<string | number | null | undefined> {
-  const schedule = job.schedule;
-  const parts: Array<string | number | null | undefined> = [
-    schedule.kind,
-    schedule.expr,
-    schedule.tz,
-    schedule.every_ms,
-    schedule.at_ms,
-  ];
-  if (schedule.kind === "cron" && schedule.expr) {
-    parts.push(...automationCronSearchParts(schedule.expr));
-  }
-  return parts;
-}
-
-function automationCronSearchParts(expr: string): string[] {
-  const parts = expr.trim().split(/\s+/);
-  if (parts.length !== 5) return [];
-  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
-  const everyDay = dayOfMonth === "*" && month === "*" && dayOfWeek === "*";
-  const numericMinute = cronNumericToken(minute, 59);
-  const numericHour = cronNumericToken(hour, 23);
-  if (numericMinute === null) return [];
-  const paddedMinute = String(numericMinute).padStart(2, "0");
-
-  if (numericHour !== null) {
-    const time = `${String(numericHour).padStart(2, "0")}:${paddedMinute}`;
-    return [time, `:${paddedMinute}`];
-  }
-
-  if (everyDay && hour === "*") {
-    return [`:${paddedMinute}`, `hourly at :${paddedMinute}`];
-  }
-
-  const range = /^(\d{1,2})-(\d{1,2})$/.exec(hour);
-  if (!everyDay || !range) return [];
-  const start = Number(range[1]);
-  const end = Number(range[2]);
-  if (start > 23 || end > 23) return [];
-  const paddedRange = `${String(start).padStart(2, "0")}-${String(end).padStart(2, "0")}`;
-  const rawRange = `${start}-${end}`;
-  return [
-    paddedRange,
-    rawRange,
-    `:${paddedMinute}`,
-    `${paddedRange} at :${paddedMinute}`,
-    `hourly ${paddedRange} at :${paddedMinute}`,
-  ];
-}
 
 function automationMatchesFilter(job: SessionAutomationJob, filter: AutomationFilter): boolean {
   const status = automationStatusKey(job);
@@ -1385,11 +1155,6 @@ function automationChannelLabel(
   return displayName
     ? t(`settings.automations.channels.${key}`, { defaultValue: displayName })
     : channel;
-}
-
-function automationChannelDisplayName(channel: string): string | undefined {
-  const key = channel.trim().toLowerCase();
-  return channelUiPresentation(key)?.displayName ?? HOST_AUTOMATION_CHANNEL_LABELS[key];
 }
 
 function formatAutomationSchedule(

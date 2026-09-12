@@ -886,9 +886,8 @@
       "notEnabled": "未啟用"
     },
     "automations": {
-      "viewOptions": "搜尋與篩選",
       "create": "建立自動任務",
-      "createPrompt": "描述要建立的自動任務，例如：每個工作日 9:00 彙整專案進度",
+      "createPrompt": "想讓 nanobot 定時幫你做什麼？",
       "createInput": "描述自動任務",
       "createRequest": "請為以下需求建立自動任務：\n\n{{request}}",
       "errors": {
@@ -901,8 +900,8 @@
         "planned": "預定執行",
         "recorded": "實際記錄",
         "more": "另有 {{count}} 項",
-        "noEntries": "本月沒有執行記錄。",
-        "outsideMonth": "本月沒有日期的任務"
+        "less": "收合",
+        "noEntries": "本月沒有執行記錄。"
       },
       "yourTasks": "你的自動任務",
       "systemTasks": "系統任務",
@@ -926,7 +925,6 @@
         "updated": "更新時間",
         "name": "名稱"
       },
-      "search": "搜尋任務、訊息、關聯對話或排程",
       "queue": "任務佇列",
       "loading": "正在載入自動任務…",
       "noMatches": "目前沒有符合條件的自動任務。",

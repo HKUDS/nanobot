@@ -233,11 +233,12 @@ describe("Settings system domains", () => {
     });
 
     expect(screen.getByRole("heading", { name: "Automations" })).toBeInTheDocument();
-    expect(await screen.findByText("No automations yet.")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelectorAll(".automation-calendar-day").length).toBeGreaterThanOrEqual(35));
+    expect(screen.queryByText("No automations yet.")).not.toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "Describe an automation" });
     expect(input).toHaveAttribute(
       "placeholder",
-      "Describe an automation, for example: summarize project updates every weekday at 9:00",
+      "What would you like nanobot to schedule?",
     );
     fireEvent.change(input, { target: { value: "Summarize updates every weekday at 9" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -263,7 +264,7 @@ describe("Settings system domains", () => {
             enabled: true,
             schedule: { kind: "cron", expr: "0 9 * * *" },
             payload: { message: "Summarize the day" },
-            state: {},
+            state: { next_run_at_ms: Date.now() + 60_000 },
           }],
         });
       }
@@ -278,8 +279,9 @@ describe("Settings system domains", () => {
 
     expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Paused 0" }));
-    expect(await screen.findByText("No automations match this view.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.queryByRole("button", { name: /Daily summary/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Today" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "All 1" }));
     expect(await screen.findByRole("button", { name: /Daily summary/ })).toBeInTheDocument();
   });
 
@@ -296,7 +298,8 @@ describe("Settings system domains", () => {
           {
             id: "paused-job", name: "Paused reminder", enabled: false,
             schedule: { kind: "every", every_ms: 86_400_000 },
-            payload: { message: "Check the repo" }, state: {},
+            payload: { message: "Check the repo" },
+            state: { last_run_at_ms: Date.now() - 60_000, last_status: "ok" },
           },
         ] });
       }

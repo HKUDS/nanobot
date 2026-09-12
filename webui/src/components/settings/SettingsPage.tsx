@@ -97,8 +97,6 @@ export function SettingsPage({
     automationsError,
     automationsFilter,
     automationsLoading,
-    automationsQuery,
-    automationsSort,
     beginModelPresetCreation,
     cancelModelPresetCreation,
     changeModelCallOrder,
@@ -195,8 +193,6 @@ export function SettingsPage({
     setAutomationPendingDelete,
     setAutomationPendingEdit,
     setAutomationsFilter,
-    setAutomationsQuery,
-    setAutomationsSort,
     setCliAppsError,
     setCliAppsMessage,
     setCustomMcpForm,
@@ -578,14 +574,10 @@ export function SettingsPage({
               settingsSnapshot={controller.settings}
               onStartChat={onStartAutomationChat}
               loading={automationsLoading}
-              query={automationsQuery}
               filter={automationsFilter}
-              sort={automationsSort}
               actionKey={automationAction}
               error={automationsError}
-              onQueryChange={setAutomationsQuery}
               onFilterChange={setAutomationsFilter}
-              onSortChange={setAutomationsSort}
               onAction={handleAutomationAction}
               onRequestEdit={(job) => {
                 setAutomationDetailReturn(null);

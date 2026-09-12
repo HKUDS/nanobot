@@ -1086,9 +1086,8 @@
       "notEnabled": "未启用"
     },
     "automations": {
-      "viewOptions": "搜索与筛选",
       "create": "创建自动任务",
-      "createPrompt": "描述要创建的自动任务，例如：每个工作日 9:00 汇总项目进展",
+      "createPrompt": "想让 nanobot 定时帮你做什么？",
       "createInput": "描述一个自动任务",
       "createRequest": "请为以下需求创建自动任务：\n\n{{request}}",
       "errors": {
@@ -1101,8 +1100,8 @@
         "planned": "计划运行",
         "recorded": "实际记录",
         "more": "还有 {{count}} 项",
-        "noEntries": "本月没有运行记录。",
-        "outsideMonth": "本月没有日期的任务"
+        "less": "收起",
+        "noEntries": "本月没有运行记录。"
       },
       "yourTasks": "你的自动任务",
       "systemTasks": "系统任务",
@@ -1126,7 +1125,6 @@
         "updated": "更新时间",
         "name": "名称"
       },
-      "search": "搜索任务、消息、关联会话或计划",
       "queue": "任务队列",
       "loading": "正在加载自动任务...",
       "noMatches": "当前视图没有匹配的自动任务。",

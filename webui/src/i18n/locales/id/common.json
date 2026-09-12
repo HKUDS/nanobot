@@ -886,9 +886,8 @@
       "notEnabled": "Belum aktif"
     },
     "automations": {
-      "viewOptions": "Cari dan filter",
       "create": "Buat otomatisasi",
-      "createPrompt": "Jelaskan otomatisasi, misalnya: rangkum perkembangan proyek setiap hari kerja pukul 09.00",
+      "createPrompt": "Apa yang ingin kamu jadwalkan dengan nanobot?",
       "createInput": "Jelaskan otomatisasi",
       "createRequest": "Buat otomatisasi untuk permintaan ini:\n\n{{request}}",
       "errors": {
@@ -901,8 +900,8 @@
         "planned": "Terjadwal",
         "recorded": "Tercatat",
         "more": "+{{count}} lainnya",
-        "noEntries": "Tidak ada eksekusi bulan ini.",
-        "outsideMonth": "Tanpa tanggal di bulan ini"
+        "less": "Tampilkan lebih sedikit",
+        "noEntries": "Tidak ada eksekusi bulan ini."
       },
       "yourTasks": "Otomatisasi Anda",
       "systemTasks": "Tugas sistem",
@@ -926,7 +925,6 @@
         "updated": "Diperbarui",
         "name": "Nama"
       },
-      "search": "Cari tugas, pesan, chat terkait, atau jadwal",
       "queue": "Antrean",
       "loading": "Memuat otomasi...",
       "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
