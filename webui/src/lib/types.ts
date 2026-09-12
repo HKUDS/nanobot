@@ -1587,6 +1587,7 @@ export type Outbound =
       mcp_presets?: OutboundMcpPresetMention[];
       session_mentions?: SessionMention[];
       quoted_context?: string;
+      intent?: "create_automation";
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the

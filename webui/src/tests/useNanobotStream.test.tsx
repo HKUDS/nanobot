@@ -2622,6 +2622,24 @@ describe("useNanobotStream", () => {
     expect(outbound[3]).not.toHaveProperty("quotedContext");
   });
 
+  it("keeps automation intent out of the optimistic user message", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-automation", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => {
+      result.current.send("每天八点提醒我喝水", undefined, { intent: "create_automation" });
+    });
+    expect(result.current.messages[0].content).toBe("每天八点提醒我喝水");
+    expect(result.current.messages[0]).not.toHaveProperty("intent");
+    expect(fake.client.sendMessage).toHaveBeenCalledWith(
+      "chat-automation",
+      "每天八点提醒我喝水",
+      undefined,
+      expect.objectContaining({ intent: "create_automation", turnId: expect.any(String) }),
+    );
+  });
+
   it("attaches assistant media_urls to complete messages", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-m", EMPTY_MESSAGES), {

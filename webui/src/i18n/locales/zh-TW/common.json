@@ -899,7 +899,6 @@
       "create": "建立自動任務",
       "createPrompt": "想讓 nanobot 自動幫你做什麼？",
       "createInput": "描述自動任務",
-      "createRequest": "請為以下需求建立自動任務：\n\n{{request}}",
       "errors": {
         "legacyMissingDestination": "這個舊版自動任務缺少傳送目標，無法繼續執行。請從關聯對話中重新建立該任務。"
       },

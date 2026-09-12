@@ -899,7 +899,6 @@
       "create": "自動タスクを作成",
       "createPrompt": "nanobot に何を自動化してほしいですか？",
       "createInput": "自動タスクを説明",
-      "createRequest": "次の依頼に対する自動タスクを作成してください：\n\n{{request}}",
       "errors": {
         "legacyMissingDestination": "この旧形式の自動タスクには送信先がありません。続行するには、関連チャットから作り直してください。"
       },

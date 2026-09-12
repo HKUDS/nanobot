@@ -1496,6 +1496,89 @@ async def test_webui_message_projects_quote_to_trusted_runtime_context(bus: Magi
 
 
 @pytest.mark.asyncio
+async def test_webui_automation_intent_is_hidden_and_not_inherited_by_cron(
+    bus: MagicMock, tmp_path: Path,
+) -> None:
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronSchedule
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_HISTORY_META,
+        append_runtime_context,
+        public_history_message,
+    )
+
+    channel = _ch(bus)
+    conn = MagicMock()
+    channel._webui_connections.add(conn)
+    original = "每天八点提醒我喝水"
+    envelope = {
+        "type": "message", "chat_id": "chat-automation", "content": original,
+        "intent": "create_automation", "webui": True,
+    }
+    await channel._dispatch_envelope(conn, "webui-client", envelope)
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.content == original
+    assert "intent" not in msg.metadata
+    [block] = msg.metadata[RUNTIME_CONTEXT_INPUT_META]
+    assert block.source == "webui_automation_creation"
+    assert "create an automation" in block.content
+    assert "not to execute the task immediately" in block.content
+
+    # Model input includes the context; public history strips the exact saved suffix.
+    content, marker = append_runtime_context(msg.content, [block])
+    assert block.content in content
+    assert public_history_message({
+        "role": "user", "content": content, RUNTIME_CONTEXT_HISTORY_META: marker,
+    }) == {"role": "user", "content": original}
+    body = build_webui_thread_response("websocket:chat-automation")
+    assert body is not None
+    assert [message["content"] for message in body["messages"]] == [original]
+
+    store_path = tmp_path / "cron" / "jobs.json"
+    cron = CronService(store_path)
+    job = cron.add_job(
+        name="Water", schedule=CronSchedule(kind="every", every_ms=60_000),
+        message=original, session_key="websocket:chat-automation",
+        origin_channel="websocket", origin_chat_id="chat-automation",
+        origin_metadata=msg.metadata,
+    )
+    reloaded = CronService(store_path).get_job(job.id)
+    assert reloaded is not None
+    assert RUNTIME_CONTEXT_INPUT_META not in reloaded.payload.origin_metadata
+    assert "intent" not in reloaded.payload.origin_metadata
+
+    await channel._dispatch_envelope(conn, "webui-client", {
+        **envelope, "content": "Thanks", "intent": None,
+    })
+    assert RUNTIME_CONTEXT_INPUT_META not in bus.publish_inbound.await_args.args[0].metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("trusted", "webui", "intent", "shell"), [
+    (False, True, "create_automation", False),
+    (True, False, "create_automation", False),
+    (True, True, None, False),
+    (True, True, "delete_automation", False),
+    (True, True, {"instruction": "arbitrary prompt"}, False),
+    (True, True, "create_automation", True),
+])
+async def test_webui_automation_context_requires_valid_trusted_intent(
+    bus: MagicMock, trusted: bool, webui: bool, intent: object, shell: bool,
+) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    if trusted:
+        channel._webui_connections.add(conn)
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": "chat-intent",
+        "content": "!echo hello" if shell else "hello",
+        "intent": intent, "webui": webui, "user_shell": shell,
+    })
+    msg = bus.publish_inbound.await_args.args[0]
+    assert RUNTIME_CONTEXT_INPUT_META not in msg.metadata
+
+
+@pytest.mark.asyncio
 async def test_webui_message_scope_inherits_persisted_session_scope(
     bus: MagicMock,
     tmp_path,

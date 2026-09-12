@@ -1099,7 +1099,6 @@
       "create": "Create automation",
       "createPrompt": "What would you like nanobot to automate?",
       "createInput": "Describe an automation",
-      "createRequest": "Create an automation for this request:\n\n{{request}}",
       "errors": {
         "legacyMissingDestination": "This older automation is missing its delivery destination. Recreate it from the linked chat to continue."
       },

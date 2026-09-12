@@ -913,7 +913,6 @@
       "create": "Criar automação",
       "createPrompt": "O que você gostaria de automatizar com o nanobot?",
       "createInput": "Descreva uma automação",
-      "createRequest": "Crie uma automação para esta solicitação:\n\n{{request}}",
       "errors": {
         "legacyMissingDestination": "Esta automação antiga não tem um destino de entrega. Recrie-a na conversa vinculada para continuar."
       },

@@ -176,13 +176,9 @@ export function AutomationsSettings({
     images?: SendAttachment[],
     options?: SendOptions,
   ) => onStartChat?.(
-    tx(
-      "settings.automations.createRequest",
-      "Create an automation for this request:\n\n{{request}}",
-      { request: content.trim() },
-    ),
+    content.trim(),
     images,
-    options,
+    { ...options, intent: "create_automation" },
     activeModelPreset,
   );
   const filterLabel = filter === "all" ? tx("settings.automations.filter", "Filter") : tx("settings.automations.filteredBy", "Filter: {{status}}", {

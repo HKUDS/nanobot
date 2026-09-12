@@ -490,9 +490,9 @@ describe("Automation task list and detail sheet", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onStartChat).toHaveBeenCalledWith(
-      "Create an automation for this request:\n\nEvery weekday at 9, summarize my open pull requests",
+      "Every weekday at 9, summarize my open pull requests",
       undefined,
-      undefined,
+      { intent: "create_automation" },
       "fast",
     );
     await waitFor(() => expect(composer).toHaveValue(""));
@@ -512,9 +512,9 @@ describe("Automation task list and detail sheet", () => {
     await user.type(composer, "Run a deep weekly review");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     expect(onStartChat).toHaveBeenCalledWith(
-      "Create an automation for this request:\n\nRun a deep weekly review",
+      "Run a deep weekly review",
       undefined,
-      undefined,
+      { intent: "create_automation" },
       "deep",
     );
   });

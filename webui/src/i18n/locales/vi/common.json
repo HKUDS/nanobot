@@ -899,7 +899,6 @@
       "create": "Tạo tự động hóa",
       "createPrompt": "Bạn muốn nanobot tự động làm gì?",
       "createInput": "Mô tả tác vụ tự động",
-      "createRequest": "Tạo một tác vụ tự động cho yêu cầu này:\n\n{{request}}",
       "errors": {
         "legacyMissingDestination": "Tác vụ tự động cũ này thiếu nơi nhận. Hãy tạo lại từ cuộc trò chuyện liên kết để tiếp tục."
       },

@@ -899,7 +899,6 @@
       "create": "Créer une automatisation",
       "createPrompt": "Que voulez-vous automatiser avec nanobot ?",
       "createInput": "Décrire une automatisation",
-      "createRequest": "Crée une automatisation pour cette demande :\n\n{{request}}",
       "errors": {
         "legacyMissingDestination": "Cette ancienne automatisation n’a plus de destination. Recréez-la depuis la discussion liée pour continuer."
       },

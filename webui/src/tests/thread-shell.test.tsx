@@ -1423,6 +1423,7 @@ describe("ThreadShell", () => {
       id: "automation-first-message",
       chatId: "chat-new",
       content: "Every weekday at 9, summarize open pull requests",
+      options: { intent: "create_automation" as const },
     };
 
     render(
@@ -1448,6 +1449,12 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
     expect(consumed).toHaveBeenCalledOnce();
     expect(consumed).toHaveBeenCalledWith(pendingFirstMessage.id);
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      "chat-new",
+      pendingFirstMessage.content,
+      undefined,
+      expect.objectContaining({ intent: "create_automation" }),
+    );
   });
 
   it("keeps the first landing message when new chat history is still empty", async () => {

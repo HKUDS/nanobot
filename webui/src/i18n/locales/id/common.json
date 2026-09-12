@@ -899,7 +899,6 @@
       "create": "Buat otomatisasi",
       "createPrompt": "Apa yang ingin kamu otomatisasi dengan nanobot?",
       "createInput": "Jelaskan otomatisasi",
-      "createRequest": "Buat otomatisasi untuk permintaan ini:\n\n{{request}}",
       "errors": {
         "legacyMissingDestination": "Otomatisasi lama ini tidak memiliki tujuan pengiriman. Buat ulang dari chat terkait untuk melanjutkan."
       },
