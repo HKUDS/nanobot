@@ -180,9 +180,6 @@ class Service:
         return len(selected)
 
     def _enqueue(self, content: str) -> None:
-        source = Path("/root/nanobot-extended")
-        if source.exists() and str(source) not in sys.path:
-            sys.path.insert(0, str(source))
         from nanobot.triggers.local_store import LocalTriggerStore
         store = LocalTriggerStore(Path(self.config.workspace_path))
         store.enqueue(self.config.trigger_id, content)
