@@ -150,15 +150,21 @@ _SYSTEM_ROUTES = {
 
 _INTEGRATION_ROUTES = {
     "/api/settings/integrations": "status",
+    "/api/settings/integrations/motis": "motis",
+    "/api/settings/integrations/firefly-iii": "firefly_iii",
     "/api/settings/integrations/icloud": "icloud",
     "/api/settings/integrations/mail": "mail",
     "/api/settings/integrations/prepare": "prepare",
+    "/api/settings/integrations/check": "check",
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/integrations/motis",
+    "/api/settings/integrations/firefly-iii",
     "/api/settings/integrations/icloud",
     "/api/settings/integrations/mail",
     "/api/settings/integrations/prepare",
+    "/api/settings/integrations/check",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
     "/api/settings/model-configurations/update",

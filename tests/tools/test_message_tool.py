@@ -376,3 +376,15 @@ async def test_message_tool_cli_context_may_target_other_ws_chat(tmp_path) -> No
     assert result.startswith("Message sent")
     assert sent[0].channel == "websocket"
     assert sent[0].chat_id == target
+
+
+@pytest.mark.asyncio
+async def test_proactive_telegram_has_notification_identity_not_source_metadata():
+    sent = []
+    async def send(msg):
+        sent.append(msg)
+    tool = MessageTool(send_callback=send)
+    with request_context(RequestContext(channel="websocket", chat_id="operator", metadata={"private": "fixture"})):
+        await tool.execute(content="notice", channel="telegram", chat_id="7")
+    assert set(sent[0].metadata) == {"_user_notification"}
+    assert len(sent[0].metadata["_user_notification"]["id"]) == 32

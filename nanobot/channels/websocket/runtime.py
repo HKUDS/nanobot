@@ -1098,6 +1098,8 @@ class WebSocketChannel(BaseChannel):
         transcript_overrides: dict[str, Any] | None = None,
     ) -> bool:
         """Persist one canonical turn event and retain unsafe owners on failure."""
+        if self.gateway.shared_inbox is not None and chat_id == "shared-main":
+            return True  # Canonical Telegram history is the only main transcript.
         if not self._temporary_chats.should_persist_transcript(chat_id):
             return True
         persisted = self._transcripts.prepare_and_append(
@@ -1142,6 +1144,8 @@ class WebSocketChannel(BaseChannel):
         include_source: bool = False,
     ) -> bool:
         """Persist the canonical end of a live stream, never its wire chunks."""
+        if self.gateway.shared_inbox is not None and chat_id == "shared-main":
+            return True
         if not self._temporary_chats.should_persist_transcript(chat_id):
             return True
         persisted = self._transcripts.prepare_and_append_stream_event(
@@ -1463,6 +1467,8 @@ class WebSocketChannel(BaseChannel):
             body["scope"] = scope
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
+            if chat_id in {"shared-main", "shared-notifications"} and connection not in self._webui_connections:
+                continue
             await self._safe_send_to(connection, raw, label=" session_updated ")
 
     async def send_user_input(

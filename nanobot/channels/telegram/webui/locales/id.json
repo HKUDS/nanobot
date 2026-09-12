@@ -26,6 +26,14 @@
         "placeholder": "* atau ID pengguna Telegram",
         "help": "Kosongkan untuk memakai kode pairing."
       },
+      "technical_profileName": {"label": "Profil notifikasi", "help": "Profil tambahan khusus pesan keluar."},
+      "technical_mainChatId": {"label": "ID pemilik", "help": "ID pengguna pribadi; daftar izin hanya boleh berisi ID ini."},
+      "technical_sharedInbox": {"label": "Obrolan bersama Telegram / WebUI", "help": "Aktif setelah mulai ulang; tidak memerlukan profil teknis."},
+      "technical_enabled": {"label": "Notifikasi teknis", "help": "Opsional: hanya nama dan status, tanpa argumen, hasil, atau log mentah."},
+      "technical_chatId": {"label": "ID obrolan teknis", "placeholder": "-1001234567890", "help": "Grup atau kanal khusus; pesan masuk diabaikan."},
+      "technical_token": {"label": "Token bot teknis (opsional)", "help": "Kosong memakai bot utama. Pesan pribadi teknis memerlukan bot terpisah."},
+      "technical_includeToolEvents": {"label": "Sertakan nama dan status alat"},
+      "technical_includeStatusEvents": {"label": "Sertakan status proses dan percobaan ulang"},
       "groupPolicy": {
         "label": "Perilaku grup",
         "choices": {

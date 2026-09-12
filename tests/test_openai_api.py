@@ -522,6 +522,7 @@ async def test_process_direct_accepts_media() -> None:
 
     loop = AgentLoop.__new__(AgentLoop)
     loop._session_locks = {}
+    loop.goal_recovery = None  # Match the default normally set by __init__.
     loop.runtime_event_publisher = RuntimeEventPublisher(MessageBus())
 
     captured_msg = None

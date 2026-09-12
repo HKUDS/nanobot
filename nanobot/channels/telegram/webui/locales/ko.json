@@ -26,6 +26,14 @@
         "placeholder": "* 또는 Telegram 사용자 ID",
         "help": "페어링 코드를 사용하려면 비워 두세요."
       },
+      "technical_profileName": {"label": "알림 프로필 이름", "help": "발신 전용 추가 프로필입니다."},
+      "technical_mainChatId": {"label": "소유자 사용자 ID", "help": "개인 숫자 ID. 허용 목록에는 이 ID만 포함해야 합니다."},
+      "technical_sharedInbox": {"label": "Telegram / WebUI 공유 채팅", "help": "재시작 후 활성화됩니다. 기술 알림 프로필은 필수가 아닙니다."},
+      "technical_enabled": {"label": "기술 알림", "help": "선택 사항: 이름과 상태만 전송하며 인수, 결과, 원시 로그는 제외합니다."},
+      "technical_chatId": {"label": "기술 채팅 ID", "placeholder": "-1001234567890", "help": "전용 그룹 또는 채널. 수신 메시지는 무시됩니다."},
+      "technical_token": {"label": "기술 봇 토큰 (선택 사항)", "help": "비워 두면 기본 봇을 사용합니다. 개인 기술 알림에는 별도 봇이 필요합니다."},
+      "technical_includeToolEvents": {"label": "도구 이름과 실행 상태 포함"},
+      "technical_includeStatusEvents": {"label": "실행 및 재시도 상태 포함"},
       "groupPolicy": {
         "label": "그룹 동작",
         "choices": {

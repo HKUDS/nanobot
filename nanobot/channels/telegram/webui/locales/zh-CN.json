@@ -26,6 +26,14 @@
         "placeholder": "* 或 Telegram 用户 ID",
         "help": "留空则使用配对码。"
       },
+      "technical_profileName": {"label": "通知配置名称", "help": "额外的仅发送通知配置。"},
+      "technical_mainChatId": {"label": "所有者用户 ID", "help": "个人数字 ID；允许列表只能包含此 ID。"},
+      "technical_sharedInbox": {"label": "Telegram / WebUI 共享聊天", "help": "重启后启用；无需启用技术通知。"},
+      "technical_enabled": {"label": "技术通知", "help": "可选：仅名称和状态，不包含参数、结果或原始日志。"},
+      "technical_chatId": {"label": "技术通知聊天 ID", "placeholder": "-1001234567890", "help": "专用群组或频道；忽略收到的消息。"},
+      "technical_token": {"label": "技术通知机器人令牌（可选）", "help": "留空则使用主机器人。技术通知私聊需要单独的机器人。"},
+      "technical_includeToolEvents": {"label": "包含工具名称和运行状态"},
+      "technical_includeStatusEvents": {"label": "包含运行、重试和上下文状态"},
       "groupPolicy": {
         "label": "群组行为",
         "choices": {

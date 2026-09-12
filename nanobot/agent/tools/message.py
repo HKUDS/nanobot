@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
@@ -229,6 +230,10 @@ class MessageTool(Tool):
                 return ToolResult.error(f"Error: media path is not allowed: {str(e)}")
 
         metadata = dict(default_metadata) if same_target else {}
+        if not same_target and channel == "telegram":
+            # Trusted proactive sends have an explicit receipt identity. The
+            # Telegram edge records only confirmed owner-facing deliveries.
+            metadata["_user_notification"] = {"id": uuid4().hex}
         if message_id:
             metadata["message_id"] = message_id
         if media:

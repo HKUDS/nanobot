@@ -5,7 +5,7 @@ import signal
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 from loguru import logger
@@ -42,6 +42,10 @@ from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.webui.build import BuildMode
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
+
+if TYPE_CHECKING:
+    from nanobot.channels.manager import ChannelManager
+    from nanobot.session.recovery import RecoveryCoordinator
 
 __all__ = ["_run_gateway"]
 
@@ -337,6 +341,19 @@ async def _close_gateway_runtime(
             await runtime_tasks
 
 
+def _bind_shared_inbox_recovery(
+    recovery: "RecoveryCoordinator", channels: "ChannelManager",
+) -> None:
+    """Bind recovery to exactly the inbox composed by the channel manager.
+
+    Resolve activity on each scan/action/admission, not once at startup: a
+    fail-closed channel reconfiguration must also revoke queued WebUI recovery.
+    """
+    shared = getattr(channels, "_shared_inbox", None)
+    if shared is not None:
+        recovery.shared_main_session_key = lambda: shared.main_session_key if shared.active else None
+
+
 def _run_gateway(
     config: Config,
     *,
@@ -373,6 +390,7 @@ def _run_gateway(
     )
     from nanobot.providers.fallback_provider import FallbackProvider
     from nanobot.providers.image_generation import image_gen_provider_configs
+    from nanobot.session.goal_recovery import GoalRecoveryWatchdog
     from nanobot.session.manager import SessionManager
     from nanobot.session.recovery import RecoveryCoordinator
     from nanobot.session.webui_turns import (
@@ -476,6 +494,7 @@ def _run_gateway(
         sessions=session_manager,
         bus=bus,
         unified_session=config.agents.defaults.unified_session,
+        auto_goal_recovery=config.gateway.goal_recovery.enabled,
     )
 
     # Create agent with cron service
@@ -731,6 +750,7 @@ def _run_gateway(
         webui_recovery_action=recovery.handle_action,
         config_path=Path(config_path),
     )
+    _bind_shared_inbox_recovery(recovery, channels)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -914,6 +934,16 @@ def _run_gateway(
             # accepting new input.  That makes a new user message reliably
             # supersede an old recoverable turn instead of racing its queue.
             await recovery.scan()
+            goal_watchdog = GoalRecoveryWatchdog(
+                sessions=session_manager,
+                bus=bus,
+                config=config.gateway.goal_recovery,
+                is_busy=lambda key: agent.is_session_busy(key),
+                is_channel_enabled=lambda name: channels.get_channel(name) is not None,
+            )
+            if config.gateway.goal_recovery.enabled:
+                agent.goal_recovery = goal_watchdog
+
             async def _run_agent() -> None:
                 try:
                     await mcp_provider.connect()
@@ -952,6 +982,10 @@ def _run_gateway(
                     name="nanobot-gateway-client-monitor",
                 ),
             ]
+            if config.gateway.goal_recovery.enabled:
+                tasks.append(asyncio.create_task(
+                    goal_watchdog.run(), name="nanobot-goal-recovery",
+                ))
             if health_server_enabled:
                 tasks.append(asyncio.create_task(
                     _health_server(config.gateway.host, port),

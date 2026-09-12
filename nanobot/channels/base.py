@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -31,6 +32,7 @@ class BaseChannel(ABC):
     send_progress: bool = True
     send_tool_hints: bool = True
     show_reasoning: bool = True
+    session_key_resolver: Callable[[str, str], str] | None = None
 
     def __init__(self, config: Any, bus: MessageBus):
         """
@@ -100,6 +102,17 @@ class BaseChannel(ABC):
         can apply any retry policy in one place.
         """
         pass
+
+    def observe_outbound(self, msg: OutboundMessage) -> None:
+        """Observe routed events without I/O; optional lossy edge feeds only.
+
+        Implementations must not mutate messages, publish to the bus, or block.
+        """
+        return
+
+    def accepts_outbound(self, msg: OutboundMessage) -> bool:
+        """Enforce channel-owned target/event isolation before any delivery path."""
+        return True
 
     def progress_transport_defaults(self) -> tuple[bool, bool] | None:
         """Return channel-owned defaults for progress and tool-hint messages.
@@ -314,7 +327,10 @@ class BaseChannel(ABC):
             content=content,
             media=media or [],
             metadata=meta,
-            session_key_override=session_key,
+            session_key_override=session_key or (
+                self.session_key_resolver(self.name, str(chat_id))
+                if self.session_key_resolver is not None else None
+            ),
             require_existing_session=require_existing_session,
         )
 

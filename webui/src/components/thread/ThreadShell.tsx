@@ -1558,7 +1558,11 @@ export function ThreadShell({
           onDismiss={dismissStreamError}
         />
       ) : null}
-      {session ? (
+      {session?.readOnly ? (
+        <div role="status" className="px-4 py-3 text-sm text-muted-foreground">
+          Powiadomienia · tylko do odczytu. Wyłącznie komunikaty dostarczone do Telegrama.
+        </div>
+      ) : session ? (
         <ThreadComposer
           onSend={handleThreadSend}
           disabled={!chatId}
@@ -1664,7 +1668,11 @@ export function ThreadShell({
     </div>
   ) : (
     <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
-      <HeroGreeting text={t(heroGreetingKey)} />
+      {session?.sharedStream === "notifications" ? (
+        <p className="max-w-sm px-4 text-sm leading-6 text-muted-foreground">
+          Brak powiadomień. Tutaj pojawią się komunikaty dostarczone do Telegrama.
+        </p>
+      ) : <HeroGreeting text={t(heroGreetingKey)} />}
     </div>
   );
   const sessionInfoAction = historyKey ? (

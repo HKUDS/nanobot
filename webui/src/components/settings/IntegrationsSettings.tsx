@@ -2,13 +2,19 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Loader2, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { ConnectionDiagnostics } from "@/components/settings/integrations/ConnectionDiagnostics";
+import { ConnectionSlotForm } from "@/components/settings/integrations/ConnectionSlotForm";
 import { IcloudIntegrationForm, MailIntegrationForm } from "@/components/settings/integrations/IntegrationForms";
 import { ReadOnlyRow, SettingsGroup, SettingsSectionTitle } from "@/components/settings/shared/SettingsControls";
 import { Button } from "@/components/ui/button";
 import {
+  checkIntegration,
+  type ConnectionCheckRequest,
   fetchIntegrations,
   prepareIntegrations,
   saveIcloudIntegration,
+  saveConnectionSlot,
+  type ConnectionSlotName,
   saveMailIntegration,
   type IntegrationsPayload,
 } from "@/lib/integrations";
@@ -41,7 +47,7 @@ export function IntegrationsSettings() {
   const tx = (key: string, defaultValue: string) => t(`settings.integrations.${key}`, { defaultValue });
   const [payload, setPayload] = useState<IntegrationsPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<"icloud" | "mail" | "prepare" | null>(null);
+  const [action, setAction] = useState<"icloud" | "mail" | "prepare" | "check" | ConnectionSlotName | null>(null);
   const [error, setError] = useState<"load" | "save" | "prepare" | null>(null);
   const [success, setSuccess] = useState<"saved" | "prepared" | "refreshed" | null>(null);
   const [prepareMessage, setPrepareMessage] = useState<string | null>(null);
@@ -85,7 +91,7 @@ export function IntegrationsSettings() {
   }, [refresh]);
 
   const mutate = async (
-    kind: "icloud" | "mail" | "prepare",
+    kind: "icloud" | "mail" | "prepare" | ConnectionSlotName,
     operation: () => Promise<IntegrationsPayload>,
   ): Promise<boolean> => {
     if (mutationPending.current || loading) return false;
@@ -104,6 +110,18 @@ export function IntegrationsSettings() {
     } catch {
       if (mounted.current) setError(kind === "prepare" ? "prepare" : "save");
       return false;
+    } finally {
+      mutationPending.current = false;
+      if (mounted.current) setAction(null);
+    }
+  };
+
+  const check = async (request: ConnectionCheckRequest) => {
+    if (mutationPending.current || loading) throw new Error("Busy");
+    mutationPending.current = true;
+    setAction("check");
+    try {
+      return await checkIntegration(client, request);
     } finally {
       mutationPending.current = false;
       if (mounted.current) setAction(null);
@@ -141,7 +159,7 @@ export function IntegrationsSettings() {
             {tx("prepareHint", "Przygotowanie tworzy pliki konfiguracji dla usług z zapisanych ustawień, bez ich uruchamiania. Najpierw zapisz zmiany w formularzach. Odświeżanie nie nadpisuje niezapisanych pól.")}
           </p>
           {loading ? <p role="status" className="text-[13px]">{tx("loading", "Wczytywanie danych integracji…")}</p> : null}
-          {action ? <p role="status" className="text-[13px]">{tx("saving", "Zapisywanie konfiguracji…")}</p> : null}
+          {action ? <p role="status" className="text-[13px]">{action === "check" ? "Sprawdzanie połączenia…" : tx("saving", "Zapisywanie konfiguracji…")}</p> : null}
           {error ? <p role="alert" className="text-[13px] text-destructive">{errorMessage}</p> : null}
           {success ? (
             <p role="status" className="text-[13px] text-muted-foreground">
@@ -192,9 +210,24 @@ export function IntegrationsSettings() {
               <ReadOnlyRow key={service.id} title={service.label} value={stateLabel(service.state)} description={service.detail} />
             ))}
           </Card>
-          <Card title={tx("icloud.title", "iCloud — kalendarz")}>
+          <Card title="Diagnostyka połączeń">
+            <ConnectionDiagnostics payload={payload} busy={loading || action !== null} onCheck={check} />
+          </Card>
+          <Card title={tx("icloud.accountTitle", "Apple — kalendarz i poczta iCloud")}>
             <IcloudIntegrationForm config={payload.icloud} busy={action !== null} refreshing={loading} onSave={(value) => mutate("icloud", () => saveIcloudIntegration(client, value))} />
           </Card>
+          {payload.connection_slots ? (
+            <div className="grid min-w-0 gap-6 xl:grid-cols-2">
+              {(["motis", "firefly_iii"] as const).map((name) => {
+                const title = name === "motis" ? "MOTIS" : "Firefly III";
+                return <Card key={name} title={title}>
+                  <ConnectionSlotForm title={title} config={payload.connection_slots![name]}
+                    busy={action !== null || loading}
+                    onSave={(value) => mutate(name, () => saveConnectionSlot(client, name, value))} />
+                </Card>;
+              })}
+            </div>
+          ) : null}
           <Card title={tx("mail.title", "Poczta — konta IMAP")}>
             <MailIntegrationForm accounts={payload.mail.accounts} busy={action !== null} refreshing={loading} onSave={(value) => mutate("mail", () => saveMailIntegration(client, value))} />
           </Card>

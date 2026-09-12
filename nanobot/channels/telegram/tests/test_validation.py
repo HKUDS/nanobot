@@ -307,3 +307,21 @@ def test_validate_telegram_rejects_invalid_proxy_without_trying_token(
     assert result["can_enable"] is False
     assert proxy not in str(result)
     assert any(check["id"] == "proxy_format" for check in result["checks"])
+
+
+def test_technical_token_is_secret_and_defaults_are_opt_in() -> None:
+    assert SETUP_SPEC.fields["technical.token"].kind == "secret"
+    assert SETUP_SPEC.fields["technical.enabled"].default is False
+
+
+def test_technical_configuration_failure_is_explicit_without_network_or_secrets(monkeypatch):
+    monkeypatch.setattr(
+        telegram_validation, "_get_me",
+        lambda *_: pytest.fail("unsafe technical configuration must fail before network"),
+    )
+    result = telegram_validation.validate({
+        "token": "123456:TOP_SECRET", "technical": {"enabled": True, "chatId": "7"},
+    }, None)
+    assert any(item["id"] == "technical_config" and item["status"] == "fail"
+               for item in result["checks"])
+    assert "TOP_SECRET" not in str(result)

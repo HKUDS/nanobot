@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
+    from nanobot.webui.shared_inbox import SharedInbox
 
 
 def _default_webui_dist() -> Path | None:
@@ -147,6 +148,25 @@ class ChannelManager:
         self._started = False
         self._origin_reply_fingerprints: OrderedDict[tuple[str, str, str], str] = OrderedDict()
 
+        self._shared_inbox: SharedInbox | None = None
+        telegram_section = getattr(config.channels, "telegram", None)
+        if isinstance(telegram_section, dict) and session_manager is not None:
+            from nanobot.channels.telegram.technical_config import TelegramTechnicalConfig
+            from nanobot.config.loader import resolve_env_refs
+            from nanobot.webui.shared_inbox import SharedInbox
+
+            try:
+                telegram_config = cast(dict[str, Any], resolve_env_refs(cast(dict[str, Any], telegram_section)))
+                technical = TelegramTechnicalConfig.model_validate(telegram_config.get("technical", {}))
+                if (technical.shared_inbox and telegram_config.get("enabled") is True
+                        and telegram_config.get("allowFrom", telegram_config.get("allow_from")) == [technical.main_chat_id]):
+                    self._shared_inbox = SharedInbox(
+                        technical, session_manager, self.bus,
+                        main_token=telegram_config.get("token", ""),
+                    )
+                    self.bus.subscribe(self._shared_inbox.observe_runtime)
+            except ValueError:
+                logger.warning("Shared Telegram inbox unavailable; check owner configuration")
         self._init_channels()
 
     def _channel_section(
@@ -189,6 +209,7 @@ class ChannelManager:
             workspace = Path(self.config.workspace_path)
             gateway = build_gateway_services(
                 config=parsed,
+                shared_inbox=getattr(self, "_shared_inbox", None),
                 bus=self.bus,
                 session_manager=self._session_manager,
                 static_dist_path=static_path,
@@ -214,6 +235,22 @@ class ChannelManager:
             )
             kwargs["gateway"] = gateway
         channel = cls(section, self.bus, **kwargs)
+        shared_inbox = getattr(self, "_shared_inbox", None)
+        if shared_inbox is not None:
+            channel.session_key_resolver = shared_inbox.session_key
+            if cls.name == "telegram" and (runtime_name is None or runtime_name == "telegram"):
+                from nanobot.channels.telegram.runtime import TelegramChannel
+
+                if isinstance(channel, TelegramChannel):
+                    notifier = channel.technical_notifier
+                    shared_inbox.active = shared_inbox.active and shared_inbox.matches_config(
+                        notifier.config, main_token=channel.config.token,
+                    )
+                    if shared_inbox.active:
+                        notifier.on_delivered = shared_inbox.delivered
+                        channel.on_notification_delivered = shared_inbox.delivered
+            elif cls.name == "websocket":
+                shared_inbox.bind_websocket(channel)
         if runtime_name and runtime_name != channel.name:
             channel.name = runtime_name
         progress_default, tool_hints_default = channel.progress_transport_defaults() or (
@@ -782,6 +819,17 @@ class ChannelManager:
                         self.bus.consume_outbound(),
                         timeout=1.0
                     )
+
+                # Edge observers see typed tool events before main-channel hint
+                # filtering. They only enqueue redacted strings, never await I/O.
+                for observer in self.channels.values():
+                    try:
+                        observer.observe_outbound(msg)
+                    except Exception:
+                        logger.warning("Channel outbound observer failed; event dropped")
+                destination = self.channels.get(msg.channel)
+                if destination is not None and not destination.accepts_outbound(msg):
+                    continue
 
                 event = msg.event
                 progress_event = event if isinstance(event, ProgressEvent) else None

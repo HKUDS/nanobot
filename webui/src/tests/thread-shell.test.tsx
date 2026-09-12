@@ -4254,3 +4254,15 @@ describe("ThreadShell", () => {
   });
 
 });
+
+
+it("shows delivered notifications as a read-only stream without an LLM composer", () => {
+  const client = makeClient();
+  render(wrap(client, <ThreadShell
+    session={{ ...session("shared-notifications"), sharedStream: "notifications", readOnly: true }}
+    title="Powiadomienia"
+    onToggleSidebar={() => {}}
+  />));
+  expect(screen.getByRole("status", { name: "" })).toHaveTextContent("tylko do odczytu");
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+});

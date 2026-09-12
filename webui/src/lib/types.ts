@@ -380,6 +380,9 @@ export interface UIFileEdit {
 }
 
 export interface ChatSummary {
+  sharedStream?: "main" | "notifications";
+  readOnly?: boolean;
+  profileName?: string;
   /** Server-side session key, e.g. ``websocket:abcd-...``. */
   key: string;
   /** Local channel + chat_id parts derived from ``key`` for convenience. */

@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import httpx
 
 from nanobot.channels.contracts import ChannelValidationContext
+from nanobot.channels.telegram.technical_config import TelegramTechnicalConfig
 from nanobot.channels.validation import (
     check,
     message_from_response,
@@ -48,6 +49,25 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
     raw_proxy = string_value(values.get("proxy"))
     token = string_value(resolve_env_refs(raw_token))
     proxy = string_value(resolve_env_refs(raw_proxy))
+    try:
+        technical = TelegramTechnicalConfig.model_validate(
+            resolve_env_refs(values.get("technical", {}))
+        )
+        technical.validate_credentials(token)
+        if technical.shared_inbox and values.get("allowFrom") != [technical.main_chat_id]:
+            raise ValueError("sharedInbox requires singleton owner allowFrom")
+    except ValueError:
+        checks.append(check(
+            "technical_config", "Technical notifications", "fail",
+            "Check technical.chatId and credentials: same-bot delivery needs a dedicated "
+            "negative group/channel ID; technical DMs need a separate bot token.",
+        ))
+        return status_from_checks("telegram", checks, missing)
+    if technical.enabled:
+        checks.append(check(
+            "technical_config", "Technical notifications", "pass",
+            "Outbound-only target configured. Delivery/permissions are not probed here.",
+        ))
     if raw_token and not token:
         checks.append(
             check(

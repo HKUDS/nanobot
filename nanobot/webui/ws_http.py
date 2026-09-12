@@ -149,9 +149,12 @@ _WEBUI_MUTATION_PATHS = {
     "workspace.pick_folder": "/api/workspaces/pick-folder",
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
+    "settings.integrations.motis": "/api/settings/integrations/motis",
+    "settings.integrations.firefly_iii": "/api/settings/integrations/firefly-iii",
     "settings.integrations.icloud": "/api/settings/integrations/icloud",
     "settings.integrations.mail": "/api/settings/integrations/mail",
     "settings.integrations.prepare": "/api/settings/integrations/prepare",
+    "settings.integrations.check": "/api/settings/integrations/check",
     "settings.agent.update": "/api/settings/update",
     "settings.model_configuration.create": "/api/settings/model-configurations/create",
     "settings.model_configuration.update": "/api/settings/model-configurations/update",
@@ -337,6 +340,7 @@ class GatewayHTTPHandler:
     ) -> None:
         self.config = config
         self.session_manager = session_manager
+        self.shared_inbox: Any = None
         self.static_dist_path = static_dist_path
         self.runtime_model_name = runtime_model_name
         self.bus = bus
@@ -806,6 +810,11 @@ class GatewayHTTPHandler:
             if handle is not None:
                 row["handle"] = handle.public_payload()
             cleaned.append(row)
+        if self.shared_inbox is not None:
+            from nanobot.webui.shared_inbox import SHARED_CHAT_IDS
+
+            cleaned = [row for row in cleaned if row["key"].split(":", 1)[1] not in SHARED_CHAT_IDS]
+            cleaned = self.shared_inbox.rows() + cleaned
         return {"sessions": cleaned}
 
     def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
@@ -816,6 +825,13 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
+        from nanobot.webui.shared_inbox import SHARED_CHAT_IDS
+
+        chat_id = decoded_key.split(":", 1)[1]
+        if chat_id in SHARED_CHAT_IDS:
+            if self.shared_inbox is None or not self.shared_inbox.active:
+                return _http_error(404, "session not found")
+            return _http_json_response(self.shared_inbox.thread(chat_id))
         scope = self.workspaces.scope_for_session_key(decoded_key)
 
         def load_session_messages() -> list[dict[str, Any]] | None:
@@ -933,6 +949,10 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
+        from nanobot.webui.shared_inbox import SHARED_CHAT_IDS
+
+        if decoded_key.split(":", 1)[1] in SHARED_CHAT_IDS:
+            return _http_error(403, "shared chats cannot be deleted")
         query = _request_query(request)
         delete_automations = (_query_first(query, "delete_automations") or "").lower()
         automation_jobs = session_automation_jobs(

@@ -26,6 +26,14 @@
         "placeholder": "* ou IDs de usuário do Telegram",
         "help": "Deixe vazio para usar códigos de pareamento."
       },
+      "technical_profileName": {"label": "Perfil de notificações", "help": "Perfil adicional somente de saída."},
+      "technical_mainChatId": {"label": "ID do proprietário", "help": "ID privado; a lista de permitidos deve conter apenas este ID."},
+      "technical_sharedInbox": {"label": "Conversas compartilhadas Telegram / WebUI", "help": "Ativa após reiniciar, sem exigir o perfil técnico."},
+      "technical_enabled": {"label": "Notificações técnicas", "help": "Opcional: nomes e estados, sem argumentos, resultados ou logs brutos."},
+      "technical_chatId": {"label": "ID da conversa técnica", "placeholder": "-1001234567890", "help": "Grupo ou canal dedicado; mensagens recebidas são ignoradas."},
+      "technical_token": {"label": "Token do bot técnico (opcional)", "help": "Vazio usa o bot principal. Mensagens técnicas privadas exigem outro bot."},
+      "technical_includeToolEvents": {"label": "Incluir nomes e estados de ferramentas"},
+      "technical_includeStatusEvents": {"label": "Incluir estados e novas tentativas"},
       "groupPolicy": {
         "label": "Comportamento em grupos",
         "choices": {

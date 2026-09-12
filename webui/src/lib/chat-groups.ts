@@ -41,6 +41,14 @@ export function groupSessions(
   labels: ChatGroupLabels,
   options: ChatGroupingOptions,
 ): SessionGroup[] {
+  const shared = sessions.filter((session) => session.sharedStream);
+  if (shared.length) {
+    shared.sort((a, b) => Number(a.sharedStream === "main") - Number(b.sharedStream === "main"));
+    return [
+      { id: "shared-inbox", label: "Telegram", sessions: shared },
+      ...groupSessions(sessions.filter((session) => !session.sharedStream), labels, options),
+    ];
+  }
   if (sessions.some((session) => session.workspaceScope?.project_path)) {
     return groupSessionsByProject(sessions, labels, options);
   }
@@ -220,6 +228,8 @@ export function displayTitle(
   titleOverrides: Record<string, string>,
   fallbackTitle: string,
 ): string {
+  if (session.sharedStream === "notifications") return "Powiadomienia";
+  if (session.sharedStream === "main") return "Czat główny";
   return (
     titleOverrides[session.key]?.trim()
     || session.title?.trim()

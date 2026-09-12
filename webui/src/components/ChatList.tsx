@@ -911,7 +911,7 @@ export const ChatList = memo(function ChatList({
                       );
                     }
 
-                    const isPinned = pinned.has(s.key);
+                    const isPinned = Boolean(s.sharedStream) || pinned.has(s.key);
                     const isArchived = archived.has(s.key);
                     const preview = visibleSessionPreview(s.preview);
                     const showPreview = showPreviews && preview && preview !== title;
@@ -929,7 +929,7 @@ export const ChatList = memo(function ChatList({
                       && paneGroupTargets.some((target) => (
                         target.key !== paneGroup?.tabKey && !target.atCapacity
                       ));
-                    const canDragSession = !deleteSelectionMode
+                    const canDragSession = !s.sharedStream && !deleteSelectionMode
                       && (!topicActive || hasPaneMoveTarget);
                     const actionMenuId = `session:${s.key}`;
                     return (
@@ -1029,7 +1029,7 @@ export const ChatList = memo(function ChatList({
                               </span>
                           </button>
                           <SessionActivityIndicator state={activityState} />
-                          {!deleteSelectionMode ? (
+                          {!deleteSelectionMode && !s.sharedStream ? (
                             <DropdownMenu
                               modal={false}
                               open={actionMenus.openId === actionMenuId}

@@ -15,7 +15,7 @@ from websockets.datastructures import Headers
 from nanobot.integrations.credentials import CredentialStore, PrivateStoreError, icloud_credentials
 from nanobot.webui.integrations_api import IntegrationsSettingsHandler
 from nanobot.webui.settings_services import WebUISettingsServices
-from tests.webui.test_settings_routes import _mutation_request, _router
+from webui.test_settings_routes import _mutation_request, _router
 
 SECRET = "test-only-password-do-not-log"
 
@@ -108,8 +108,10 @@ def test_icloud_secret_and_existing_secret_preserved(handler, monkeypatch):
     result = handler.handle("icloud", {"username": "apple@example.org", "sleep_hours": 9})
     assert result.status == 200
     assert icloud_credentials(handler.settings.config.path)[1] == SECRET
-    result = handler.handle("icloud", {"username": "another@example.org"})
-    assert result.status == 400
+    result = handler.handle("icloud", {"username": "another@example.org", "password": ""})
+    assert result.status == 200
+    assert icloud_credentials(handler.settings.config.path)[:2] == ("another@example.org", SECRET)
+    assert handler.settings.config.load().personal_integrations.icloud.sleep_hours == 9
 
 
 def test_secret_cleaned_up_on_config_save_failure(handler, monkeypatch):
@@ -326,3 +328,210 @@ def test_generation_only_outputs_files_not_arbitrary_commands(handler):
     data = tomllib.loads(path.read_text())["accounts"]["work"]["imap"]["sasl"]["plain"]
     assert data["username"] == "user; echo unsafe@example.org"
     assert all("echo unsafe" not in arg for arg in data["password"]["command"])
+
+
+@pytest.mark.parametrize("name", ["motis", "firefly_iii"])
+def test_connection_slots_inert_private_and_bound_to_endpoint(handler, name):
+    initial = handler.payload()["connection_slots"][name]
+    assert initial["enabled"] is False
+    assert initial["read_only"] is True
+    assert initial["status"] == "adapter_not_installed"
+    result = handler.handle(name, {"base_url": "https://service.example.org/", "password": SECRET})
+    assert result.status == 200
+    assert SECRET not in repr(result)
+    assert SECRET not in handler.settings.config.path.read_text()
+    saved = getattr(handler.settings.config.load().personal_integrations, name)
+    assert saved.base_url == "https://service.example.org"
+    assert result.payload["connection_slots"][name]["credential_configured"] is True
+    assert "credential_ref" not in result.payload["connection_slots"][name]
+    assert handler.handle(name, {"base_url": saved.base_url}).status == 200
+    assert getattr(handler.settings.config.load().personal_integrations, name).credential_ref == saved.credential_ref
+    assert handler.handle(name, {"base_url": "https://other.example.org"}).status == 400
+
+
+@pytest.mark.parametrize("values", [
+    {"enabled": True}, {"read_only": False}, {"credential_ref": "a" * 32},
+    {"base_url": "https://user:password@example.org"}, {"base_url": "https://example.org?token=secret"},
+    {"base_url": "file:///etc/passwd"}, {"base_url": "http://example.org"},
+    {"base_url": "http://169.254.169.254"}, {"base_url": "https://example.org:0"},
+    {"base_url": "https://example.org", "password": "bad\nsecret"}, {"password": SECRET},
+])
+def test_connection_slot_rejects_activation_unsafe_url_and_secrets(handler, values):
+    before = handler.settings.config.path.read_bytes()
+    result = handler.handle("firefly_iii", values)
+    assert result.status == 400
+    assert SECRET not in repr(result)
+    assert handler.settings.config.path.read_bytes() == before
+
+
+def test_connection_slot_secret_cleanup_after_failed_write(handler, monkeypatch):
+    monkeypatch.setattr("nanobot.webui.settings_services.save_config",
+                        lambda *args: (_ for _ in ()).throw(OSError(SECRET)))
+    result = handler.handle("firefly_iii", {"base_url": "https://example.org", "password": SECRET})
+    assert result.status == 500
+    assert SECRET not in repr(result)
+    directory = handler.settings.config.load().workspace_path / ".nanobot/integrations/secrets"
+    assert not list(directory.iterdir())
+
+
+@pytest.mark.parametrize("path", ["/api/settings/integrations/motis", "/api/settings/integrations/firefly-iii"])
+def test_connection_slots_are_ws_only_mutations(path):
+    from nanobot.webui.settings_routes import WebUISettingsRouter
+    assert WebUISettingsRouter.is_mutation_path(path)
+
+
+@pytest.mark.parametrize('key', ['personalIntegrations', 'personal_integrations'])
+def test_root_integration_config_aliases_roundtrip(key):
+    from nanobot.config.schema import Config
+    config = Config.model_validate({key: {'motis': {'baseUrl': 'https://motis.example.org'}}})
+    assert config.personal_integrations.motis.base_url == 'https://motis.example.org'
+    assert config.model_dump(by_alias=True)['personalIntegrations']['motis']['readOnly'] is True
+
+
+def test_apple_link_is_idempotent_shared_and_fixed(handler):
+    first = handler.handle("icloud", {"username": "apple@example.org", "password": SECRET})
+    assert first.status == 200
+    saved = handler.settings.config.load().personal_integrations
+    assert len(saved.mail_accounts) == 1
+    mail = saved.mail_accounts[0]
+    assert (mail.host, mail.port, mail.managed_by) == ("imap.mail.me.com", 993, "icloud")
+    assert mail.credential_ref == saved.icloud.credential_ref
+    assert mail.folder_policy == "all" and not mail.rules
+    assert first.payload["icloud"]["linked_mail_account_id"] == mail.id
+    assert "credential_ref" not in repr(first.payload)
+    reference = mail.credential_ref
+    for password in ("", None):
+        values = {"username": "edited@example.org"}
+        if password is not None:
+            values["password"] = password
+        assert handler.handle("icloud", values).status == 200
+    saved = handler.settings.config.load().personal_integrations
+    assert len(saved.mail_accounts) == 1
+    assert saved.mail_accounts[0].id == mail.id
+    assert saved.mail_accounts[0].username == "edited@example.org"
+    assert saved.mail_accounts[0].credential_ref == saved.icloud.credential_ref == reference
+    assert handler.handle("icloud", {"password": "new-apple-secret"}).status == 200
+    saved = handler.settings.config.load().personal_integrations
+    assert saved.mail_accounts[0].credential_ref == saved.icloud.credential_ref != reference
+    store = CredentialStore(handler.settings.config.load().workspace_path)
+    assert store.get(saved.icloud.credential_ref) == "new-apple-secret"
+    assert store.get(reference) == SECRET  # previous exports/backups still reference it
+
+
+def test_apple_adopts_matching_legacy_mail_without_losing_rules(handler):
+    assert handler.handle("mail", account(
+        id="old-apple", username="apple@example.org", email="apple@example.org",
+        host="imap.mail.me.com", password="old-mail-password",
+    )).status == 200
+    old = handler.settings.config.load().personal_integrations.mail_accounts[0]
+    assert handler.handle("icloud", {"username": "apple@example.org", "password": SECRET}).status == 200
+    settings = handler.settings.config.load().personal_integrations
+    assert len(settings.mail_accounts) == 1
+    saved = settings.mail_accounts[0]
+    assert saved.id == "old-apple" and saved.managed_by == "icloud"
+    assert saved.rules == old.rules and saved.allowed_folders == old.allowed_folders
+    assert saved.folder_policy == "allowlist"
+    assert saved.credential_ref == settings.icloud.credential_ref != old.credential_ref
+    assert handler.handle("icloud", {"username": "changed@example.org"}).status == 200
+    saved = handler.settings.config.load().personal_integrations.mail_accounts[0]
+    assert saved.id == "old-apple" and saved.rules == old.rules
+
+
+def test_linked_mail_identity_and_credential_owned_by_apple(handler):
+    assert handler.handle("icloud", {"username": "apple@example.org", "password": SECRET}).status == 200
+    linked = handler.settings.config.load().personal_integrations.mail_accounts[0]
+    for changes in ({"host": "other.example.org"}, {"password": "new-password"},
+                    {"email": "other@example.org"}, {"username": "other@example.org"},
+                    {"managed_by": None}):
+        before = handler.settings.config.path.read_bytes()
+        assert handler.handle("mail", {"id": linked.id, **changes}).status == 400
+        assert handler.settings.config.path.read_bytes() == before
+    assert handler.handle("mail", {"id": linked.id, "folder_policy": "all",
+                                   "rules": [{"name": "review", "destination": "Review",
+                                              "sender_globs": ["*@example.org"]}]}).status == 200
+    assert handler.handle("icloud", {"username": "new@example.org"}).status == 200
+    assert len(handler.settings.config.load().personal_integrations.mail_accounts[0].rules) == 1
+
+
+def test_apple_id_collision_does_not_replace_generic_account(handler):
+    assert handler.handle("mail", account(id="icloud", password=SECRET)).status == 200
+    old = handler.settings.config.load().personal_integrations.mail_accounts[0]
+    assert handler.handle("icloud", {"username": "apple@example.org", "password": "apple-password"}).status == 200
+    accounts = handler.settings.config.load().personal_integrations.mail_accounts
+    assert len(accounts) == 2 and accounts[0] == old
+    assert accounts[1].id == "icloud-2" and accounts[1].managed_by == "icloud"
+
+
+def test_default_all_folders_without_rules_exports_without_time_manager(handler):
+    assert handler.handle("icloud", {"username": "apple@example.org", "password": SECRET}).status == 200
+    assert handler.handle("prepare", {}).status == 200
+    root = handler.settings.config.load().workspace_path / ".nanobot/mail"
+    worker = tomllib.loads((root / "config.toml").read_text())
+    account_config = worker["accounts"]["icloud"]
+    assert account_config["folder_policy"] == "all"
+    assert not account_config["allowed_folders"] and not account_config.get("rules")
+    assert worker["worker"]["dry_run"] is True
+    plain = tomllib.loads((root / "himalaya.toml").read_text())["accounts"]["icloud"]["imap"]["sasl"]["plain"]
+    assert plain["password"]["command"][-1] == handler.settings.config.load().personal_integrations.icloud.credential_ref
+
+
+def test_partial_mail_edit_keeps_existing_rules_and_restrictions(handler):
+    assert handler.handle("mail", account(password=SECRET)).status == 200
+    old = handler.settings.config.load().personal_integrations.mail_accounts[0]
+    assert handler.handle("mail", {"id": "work", "email": "new@example.org", "password": ""}).status == 200
+    saved = handler.settings.config.load().personal_integrations.mail_accounts[0]
+    assert saved.rules == old.rules and saved.folder_policy == "allowlist"
+    assert saved.credential_ref == old.credential_ref
+    # Explicit all-folder mode preserves optional proposals, not move permission.
+    assert handler.handle("mail", {"id": "work", "folder_policy": "all"}).status == 200
+    assert handler.settings.config.load().personal_integrations.mail_accounts[0].rules == old.rules
+
+
+@pytest.mark.parametrize("payload", [{}, {"target": "arbitrary"}, {"target": "mail"},
+                                      {"target": "icloud", "host": "other.example.org"},
+                                      {"target": "icloud", "password": SECRET},
+                                      {"target": "icloud", "account_id": "work"}])
+def test_connection_check_contract_rejects_overrides(handler, monkeypatch, payload):
+    monkeypatch.setattr("nanobot.webui.integrations_api.check_connection", lambda *args: pytest.fail("invalid probe"))
+    result = handler.handle("check", payload)
+    assert result.status == 400 and SECRET not in repr(result)
+
+
+def test_connection_check_does_not_save_or_export(handler, monkeypatch):
+    calls = []
+    def check(config, request):
+        calls.append(request.model_dump())
+        return {"ok": True, "read_only": True, "checks": []}
+    monkeypatch.setattr("nanobot.webui.integrations_api.check_connection", check)
+    before = handler.settings.config.path.read_bytes()
+    assert handler.handle("check", {"target": "icloud"}).payload["ok"] is True
+    assert calls == [{"target": "icloud", "account_id": None}]
+    assert handler.settings.config.path.read_bytes() == before
+
+
+def test_apple_link_capacity_failure_rolls_back_new_secret(handler):
+    for index in range(20):
+        assert handler.handle("mail", account(id=f"mail-{index}", password=SECRET)).status == 200
+    before = handler.settings.config.path.read_bytes()
+    directory = handler.settings.config.load().workspace_path / ".nanobot/integrations/secrets"
+    references = set(directory.iterdir())
+    assert handler.handle("icloud", {"username": "apple@example.org", "password": "new-secret"}).status == 400
+    assert handler.settings.config.path.read_bytes() == before
+    assert set(directory.iterdir()) == references
+
+
+def test_manual_mail_cannot_duplicate_the_linked_apple_account(handler):
+    assert handler.handle("icloud", {"username": "apple@example.org", "password": SECRET}).status == 200
+    duplicate = account(id="duplicate", email="apple@example.org", username="apple@example.org",
+                        host="imap.mail.me.com", password="new-password")
+    assert handler.handle("mail", duplicate).status == 400
+    assert len(handler.settings.config.load().personal_integrations.mail_accounts) == 1
+
+
+def test_partial_save_preserves_camelcase_api_support(handler):
+    assert handler.handle("icloud", {"username": "apple@example.org", "password": SECRET}).status == 200
+    assert handler.handle("icloud", {"sleepHours": 9}).status == 200
+    assert handler.settings.config.load().personal_integrations.icloud.sleep_hours == 9
+    assert handler.handle("mail", account(password=SECRET)).status == 200
+    assert handler.handle("mail", {"id": "work", "folderPolicy": "all"}).status == 200
+    assert handler.settings.config.load().personal_integrations.mail_accounts[1].folder_policy == "all"

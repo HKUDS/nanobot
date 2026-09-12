@@ -54,6 +54,7 @@ def fingerprint(config: Config, config_path: Path, *, trigger_id: str | None = N
         "settings": config.personal_integrations.model_dump(),
         "config_path": str(config_path.resolve()), "workspace": str(config.workspace_path.resolve()),
         "python": sys.executable, "himalaya": _binary("himalaya"), "nanobot_mail": _binary("nanobot-mail"),
+        "time_manager_installed": private_path(config.workspace_path, "projects/icloud-time-manager/time_manager/cli.py").is_file(),
         "trigger_id": (trigger_id if trigger_id is not None else _monitor_trigger(config))
         if config.personal_integrations.icloud.username else "",
     }
@@ -102,8 +103,8 @@ def _prepare_locked(config: Config, config_path: Path) -> dict[str, str]:
                     "enqueue-env", "--account", account.id]
             carillon.extend([*backend, 'imap.mailbox = "INBOX"',
                              f"imap.hook.on-message-added.cmd = {array(hook)}", ""])
-            worker.extend(["", f"[accounts.{account.id}]", 'source_mailboxes = ["INBOX"]',
-                           f"allowed_folders = {array(account.allowed_folders)}"])
+            worker.extend(["", f"[accounts.{account.id}]", f"folder_policy = {quote(account.folder_policy)}",
+                           'source_mailboxes = ["INBOX"]', f"allowed_folders = {array(account.allowed_folders)}"])
             for rule in account.rules:
                 worker.extend(["", f"[[accounts.{account.id}.rules]]", f"name = {quote(rule.name)}",
                                f"destination = {quote(rule.destination)}",
@@ -114,15 +115,16 @@ def _prepare_locked(config: Config, config_path: Path) -> dict[str, str]:
                       ".nanobot/mail/carillon.toml": "\n".join(carillon) + "\n"})
     icloud = settings.icloud
     trigger_id = _monitor_trigger(config) if icloud.username else ""
-    if icloud.username:
+    project = private_path(workspace, "projects/icloud-time-manager")
+    # Apple mail is independent of this optional legacy consumer. Do not require
+    # installing or activating sleep/wake automation to export its IMAP account.
+    if icloud.username and (project / "time_manager/cli.py").is_file():
         if not secrets.configured(icloud.credential_ref):
             raise PrivateStoreError("Najpierw zapisz hasło aplikacji iCloud.")
-        project = private_path(workspace, "projects/icloud-time-manager")
-        if not (project / "time_manager/cli.py").is_file():
-            raise PrivateStoreError("Brak zainstalowanego monitora czasu; konfiguracja iCloud jest zapisana.")
         data = icloud.model_dump(exclude={"username", "credential_ref"})
         data.update(nanobot_config_path=str(config_path), workspace_path=str(workspace),
-                    state_path="data/state.sqlite3", trigger_id=trigger_id)
+                    state_path="data/state.sqlite3", trigger_id=trigger_id,
+                    calendar_only=True, auto_manage_sleep=False)
         lines = [MARKER]
         for key, value in data.items():
             rendered = quote(value) if isinstance(value, str) else str(value).lower()

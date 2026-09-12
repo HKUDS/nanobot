@@ -48,6 +48,7 @@ class GatewayServices:
     local_trigger_store: LocalTriggerStore | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    shared_inbox: Any = None
 
 
 def build_gateway_services(
@@ -59,6 +60,7 @@ def build_gateway_services(
     workspace_path: Path,
     default_restrict_to_workspace: bool,
     config_path: Path | None = None,
+    shared_inbox: Any = None,
     runtime_model_name: Callable[[], str | None] | None,
     refresh_runtime_config: Callable[[], None] | None = None,
     runtime_surface: str,
@@ -140,6 +142,7 @@ def build_gateway_services(
         recovery_action=recovery_action,
         log=logger,
     )
+    http.shared_inbox = shared_inbox
     endpoint = WebUIGatewayEndpoint(config=config, http=http, tokens=tokens)
     return GatewayServices(
         http=http,
@@ -152,6 +155,7 @@ def build_gateway_services(
         workspaces=workspaces,
         temporary_chats=temporary_chats,
         session_projection=session_projection,
+        shared_inbox=shared_inbox,
         session_manager=session_manager,
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,

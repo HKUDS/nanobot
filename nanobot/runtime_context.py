@@ -186,7 +186,9 @@ def detach_runtime_context(
         else:
             return None
         rendered = marker_data.get("rendered")
-        if isinstance(rendered, list) and all(isinstance(value, str) for value in rendered):
+        if isinstance(rendered, list) and all(
+            isinstance(value, str) for value in cast(list[object], rendered)
+        ):
             context_blocks = [
                 {"type": "text", "text": value}
                 for value in cast(list[str], rendered)

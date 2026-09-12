@@ -474,6 +474,14 @@ class ApiConfig(Base):
         )
 
 
+class GoalRecoveryConfig(Base):
+    """Opt-in native watchdog for stalled, explicitly sustained goals."""
+
+    enabled: bool = False
+    interval_seconds: int = Field(default=600, ge=60, le=86400)
+    max_backoff_seconds: int = Field(default=3600, ge=600, le=604800)
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
@@ -481,6 +489,7 @@ class GatewayConfig(Base):
     port: int = 18790
     restart_mode: Literal["auto", "exec", "spawn", "exit"] = "auto"
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    goal_recovery: GoalRecoveryConfig = Field(default_factory=GoalRecoveryConfig)
 
 
 class MCPServerConfig(Base):
@@ -568,7 +577,11 @@ class Config(BaseSettings):
     _source_path: Path | None = PrivateAttr(default=None)
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
-    personal_integrations: PersonalIntegrationsConfig = Field(default_factory=PersonalIntegrationsConfig)
+    personal_integrations: PersonalIntegrationsConfig = Field(
+        default_factory=PersonalIntegrationsConfig,
+        validation_alias=AliasChoices("personalIntegrations", "personal_integrations"),
+        serialization_alias="personalIntegrations",
+    )
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)

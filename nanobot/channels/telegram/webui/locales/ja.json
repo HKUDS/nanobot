@@ -26,6 +26,14 @@
         "placeholder": "* または Telegram ユーザー ID",
         "help": "ペアリングコードを使う場合は空欄にします。"
       },
+      "technical_profileName": {"label": "通知プロファイル名", "help": "送信専用の追加プロファイルです。"},
+      "technical_mainChatId": {"label": "所有者のユーザーID", "help": "個人の数値ID。許可リストにはこのIDのみを指定します。"},
+      "technical_sharedInbox": {"label": "Telegram / WebUI 共有チャット", "help": "再起動後に有効。技術通知プロファイルは必須ではありません。"},
+      "technical_enabled": {"label": "技術通知", "help": "任意。名前と状態のみを送信し、引数、結果、生ログは送信しません。"},
+      "technical_chatId": {"label": "技術通知チャットID", "placeholder": "-1001234567890", "help": "専用グループまたはチャンネル。受信メッセージは無視されます。"},
+      "technical_token": {"label": "技術通知ボットのトークン（任意）", "help": "空欄ならメインボットを使用。個人宛の技術通知には別のボットが必要です。"},
+      "technical_includeToolEvents": {"label": "ツール名と実行状態を含める"},
+      "technical_includeStatusEvents": {"label": "実行、再試行、コンテキストの状態を含める"},
       "groupPolicy": {
         "label": "グループでの動作",
         "choices": {

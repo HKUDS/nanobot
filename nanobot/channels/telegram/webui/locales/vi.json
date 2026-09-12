@@ -26,6 +26,14 @@
         "placeholder": "* hoặc ID người dùng Telegram",
         "help": "Để trống để dùng mã ghép nối."
       },
+      "technical_profileName": {"label": "Tên hồ sơ thông báo", "help": "Hồ sơ bổ sung chỉ gửi đi."},
+      "technical_mainChatId": {"label": "ID chủ sở hữu", "help": "ID cá nhân dạng số; danh sách cho phép chỉ chứa ID này."},
+      "technical_sharedInbox": {"label": "Trò chuyện chung Telegram / WebUI", "help": "Có hiệu lực sau khi khởi động lại; không bắt buộc hồ sơ kỹ thuật."},
+      "technical_enabled": {"label": "Thông báo kỹ thuật", "help": "Tùy chọn: chỉ tên và trạng thái, không gửi tham số, kết quả hay nhật ký thô."},
+      "technical_chatId": {"label": "ID trò chuyện kỹ thuật", "placeholder": "-1001234567890", "help": "Nhóm hoặc kênh riêng; bỏ qua tin nhắn đến."},
+      "technical_token": {"label": "Token bot kỹ thuật (tùy chọn)", "help": "Để trống dùng bot chính. Tin nhắn kỹ thuật riêng cần bot khác."},
+      "technical_includeToolEvents": {"label": "Bao gồm tên và trạng thái công cụ"},
+      "technical_includeStatusEvents": {"label": "Bao gồm trạng thái và lần thử lại"},
       "groupPolicy": {
         "label": "Hành vi trong nhóm",
         "choices": {

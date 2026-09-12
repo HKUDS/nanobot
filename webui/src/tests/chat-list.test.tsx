@@ -1547,3 +1547,31 @@ describe("ChatList", () => {
     expect(screen.getAllByText("Projects")).toHaveLength(1);
   });
 });
+
+
+describe("shared Telegram inbox", () => {
+  it("pins Powiadomienia before Czat główny regardless of archive, title, and pin preferences", () => {
+    const notifications = session({ chatId: "shared-notifications", title: "Powiadomienia", sharedStream: "notifications", readOnly: true });
+    const main = session({ chatId: "shared-main", title: "Czat główny", sharedStream: "main" });
+    render(<ChatList
+      sessions={[session({ chatId: "other", title: "Other" }), main, notifications]}
+      activeKey={main.key}
+      onSelect={vi.fn()}
+      onRequestDelete={vi.fn()}
+      pinnedKeys={["websocket:other"]}
+      archivedKeys={[notifications.key, main.key]}
+      titleOverrides={{ [main.key]: "Should not rename" }}
+      onTogglePin={vi.fn()}
+      onRequestRename={vi.fn()}
+      onToggleArchive={vi.fn()}
+    />);
+    const titles = screen.getAllByRole("button").map((button) => button.textContent);
+    expect(titles.findIndex((title) => title?.includes("Powiadomienia")))
+      .toBeLessThan(titles.findIndex((title) => title?.includes("Czat główny")));
+    expect(titles.findIndex((title) => title?.includes("Czat główny")))
+      .toBeLessThan(titles.findIndex((title) => title?.includes("Other")));
+    expect(screen.queryByRole("button", { name: /Actions.*Powiadomienia/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Powiadomienia" }).closest("li"))
+      .not.toHaveAttribute("draggable", "true");
+  });
+});

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, TypeAlias, TypeVar, cast
 from urllib.parse import urlparse
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 from telegram import (
     BotCommand,
     InlineKeyboardButton,
@@ -33,11 +33,19 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.telegram.technical import TelegramTechnicalNotifier
+from nanobot.channels.telegram.technical_config import TelegramTechnicalConfig
+from nanobot.channels.telegram.user_notifications import notification_receipt_id
 from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.events import (
+    ContextCompactionEvent,
+    RecoveryStateEvent,
+    RetryStatusEvent,
+    RetryWaitEvent,
+)
 from nanobot.security.network import validate_url_target
-from nanobot.utils.helpers import split_message
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
@@ -372,11 +380,6 @@ def _split_telegram_markdown_html_chunks(
     return chunks
 
 
-def _split_telegram_markdown_html(content: str, max_html_len: int) -> list[str]:
-    """Split raw Telegram Markdown and return HTML chunks within Telegram's limit."""
-    return [html for _, html in _split_telegram_markdown_html_chunks(content, max_html_len)]
-
-
 _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
 _STREAM_EDIT_INTERVAL_DEFAULT = 0.6  # min seconds between edit_message_text calls
@@ -389,6 +392,9 @@ class _StreamBuf:
     message_id: int | None = None
     last_edit: float = 0.0
     stream_id: str | None = None
+    # Original deltas, independent of the current message's rebalanced Markdown tail.
+    # Used only for a receipt after every final delivery operation has succeeded.
+    full_text: str = ""
 
 
 @dataclass
@@ -404,8 +410,11 @@ class _QueuedTelegramUpdate:
 class TelegramConfig(Base):
     """Telegram channel configuration."""
 
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     enabled: bool = False
     token: str = ""
+    technical: TelegramTechnicalConfig = Field(default_factory=TelegramTechnicalConfig)
     mode: Literal["polling", "webhook"] = "polling"
     allow_from: list[str] = Field(default_factory=list)
     proxy: str | None = None
@@ -426,6 +435,13 @@ class TelegramConfig(Base):
     webhook_path: str = "/telegram"
     webhook_secret_token: str = ""
     webhook_max_connections: int = Field(default=4, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_technical_config(self) -> "TelegramConfig":
+        self.technical.validate_credentials(self.token)
+        if self.technical.shared_inbox and self.allow_from != [self.technical.main_chat_id]:
+            raise ValueError("sharedInbox requires allowFrom containing only mainChatId")
+        return self
 
     @field_validator("webhook_path")
     @classmethod
@@ -516,6 +532,55 @@ class TelegramChannel(BaseChannel):
         self._last_poll_ok: float = 0.0  # monotonic time of last getUpdates round trip
         self._app_ready = asyncio.Event()  # cleared while the app is being rebuilt
         self._teardown_lock = asyncio.Lock()
+        self.on_notification_delivered: Callable[[str, str], Awaitable[None]] | None = None
+        self._technical = TelegramTechnicalNotifier(
+            self.config.technical, bus, main_token=self.config.token, proxy=self.config.proxy,
+        )
+
+    @property
+    def technical_notifier(self) -> TelegramTechnicalNotifier:
+        """Expose the notification adapter to the channel lifecycle owner."""
+        return self._technical
+
+    def _is_technical_chat(self, chat_id: str | int) -> bool:
+        technical = self.config.technical
+        return (
+            technical.enabled
+            and (technical.uses_main_bot(self.config.token) or technical.chat_id.startswith("-"))
+            and str(chat_id) == technical.chat_id
+        )
+
+    def observe_outbound(self, msg: OutboundMessage) -> None:
+        self._technical.observe_outbound(msg)
+
+    def accepts_outbound(self, msg: OutboundMessage) -> bool:
+        if self._is_technical_chat(msg.chat_id):
+            return False  # Only the separate sender may write to this destination.
+        if self.config.technical.enabled and isinstance(msg.event, (
+            ProgressEvent, ContextCompactionEvent, RetryWaitEvent,
+            RetryStatusEvent, RecoveryStateEvent,
+        )):
+            return False  # Main Telegram is answer-only; WebUI is unchanged.
+        return True
+
+    async def _handle_message(
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
+        is_dm: bool = False,
+        authorization_id: str | None = None,
+        require_existing_session: bool = False,
+    ) -> None:
+        if self._is_technical_chat(chat_id):
+            return  # Before authorization/pairing and before unified-session routing.
+        await super()._handle_message(
+            sender_id, chat_id, content, media, metadata, session_key, is_dm,
+            authorization_id, require_existing_session,
+        )
 
     def _require_app(self) -> TelegramApplication:
         if self._app is None:
@@ -573,6 +638,7 @@ class TelegramChannel(BaseChannel):
                 # re-raise keeps PTB's token-bearing message out of the log.
                 await self._teardown_app()
                 self._running = False
+                await self._technical.stop()
                 self.logger.error("bot token rejected by Telegram")
                 raise RuntimeError("Telegram bot token was rejected by the server") from None
             except Exception as e:
@@ -583,6 +649,7 @@ class TelegramChannel(BaseChannel):
                     # Never heals on its own: fail instead of retrying forever
                     # while ChannelManager keeps reporting the channel running.
                     self._running = False
+                    await self._technical.stop()
                     self.logger.error("startup failed: {}", self._format_telegram_error(e))
                     raise
                 self.logger.error(
@@ -718,6 +785,7 @@ class TelegramChannel(BaseChannel):
             )
 
         self._app_ready.set()
+        self._technical.start()
 
     @staticmethod
     def _is_transient_startup_error(exc: Exception) -> bool:
@@ -788,6 +856,7 @@ class TelegramChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         self._running = False
+        await self._technical.stop()
 
         # Cancel all typing indicators
         for chat_id in list(self._typing_tasks):
@@ -960,6 +1029,8 @@ class TelegramChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
+        if not self.accepts_outbound(msg):
+            return
         app = await self._wait_for_app()
         if app is None:
             self.logger.warning("bot not running")
@@ -1073,6 +1144,7 @@ class TelegramChannel(BaseChannel):
                     chat_id, text, reply_params, thread_kwargs, reply_markup,
                 )
                 if rich_ok:
+                    await self._record_notification(msg, text)
                     return
 
             chunks = _split_telegram_markdown(text, TELEGRAM_MAX_MESSAGE_LEN)
@@ -1083,6 +1155,31 @@ class TelegramChannel(BaseChannel):
                     render_as_blockquote=render_as_blockquote,
                     reply_markup=reply_markup if is_last else None,
                 )
+            await self._record_notification(msg, text)
+
+    async def _record_notification(self, msg: OutboundMessage, text: str) -> None:
+        """Record only confirmed owner-facing automation, without retrying delivery."""
+        callback = self.on_notification_delivered
+        if (callback is None or isinstance(msg.event, ProgressEvent)
+                or msg.chat_id != self.config.technical.main_chat_id):
+            return
+        receipt_id = notification_receipt_id(msg.metadata, text)
+        if receipt_id is not None:
+            try:
+                await callback(text, receipt_id)
+            except Exception:
+                self.logger.warning("Notification receipt persistence failed; delivery will not be retried")
+
+    async def _finish_stream_notification(
+        self, chat_id: str, buf: _StreamBuf, metadata: dict[str, Any],
+    ) -> None:
+        # Retire delivery state before local persistence: even a failed receipt
+        # must not make a duplicate stream_end edit/send any Telegram content again.
+        self._stream_bufs.pop(chat_id, None)
+        text = buf.full_text or buf.text
+        await self._record_notification(OutboundMessage(
+            channel=self.name, chat_id=chat_id, content=text, metadata=metadata,
+        ), text)
 
     async def _call_with_retry(
         self,
@@ -1172,6 +1269,8 @@ class TelegramChannel(BaseChannel):
         merge_next: bool = False,
     ) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
+        if self._is_technical_chat(chat_id):
+            return
         app = await self._wait_for_app()
         if app is None:
             return
@@ -1207,13 +1306,13 @@ class TelegramChannel(BaseChannel):
             if self.config.rich_messages and not getattr(self, "_rich_send_disabled", False):
                 rich_ok = await self._try_edit_rich(int_chat_id, buf.message_id, raw_text)
                 if rich_ok:
-                    self._stream_bufs.pop(chat_id, None)
+                    await self._finish_stream_notification(chat_id, buf, meta)
                     return
 
             # Legacy path: edit existing streaming message with HTML
-            html_chunks = _split_telegram_markdown_html(raw_text, TELEGRAM_HTML_MAX_LEN)
-            primary_html = html_chunks[0]
-            extra_html_chunks = html_chunks[1:]
+            chunks = _split_telegram_markdown_html_chunks(raw_text, TELEGRAM_HTML_MAX_LEN)
+            primary_plain, primary_html = chunks[0]
+            extra_chunks = chunks[1:]
             try:
                 await self._call_with_retry(
                     app.bot.edit_message_text,
@@ -1226,24 +1325,22 @@ class TelegramChannel(BaseChannel):
                 # to avoid doubling connection demand during pool exhaustion.
                 if self._is_not_modified_error(e):
                     self.logger.debug("Final stream edit already applied for {}", chat_id)
-                    self._stream_bufs.pop(chat_id, None)
-                    return
-                self.logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
-                # Fall back to raw markdown (not HTML) so users don't see raw tags.
-                primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
-                try:
-                    await self._call_with_retry(
-                        app.bot.edit_message_text,
-                        chat_id=int_chat_id, message_id=buf.message_id,
-                        text=primary_plain,
-                    )
-                except Exception as e2:
-                    if self._is_not_modified_error(e2):
-                        self.logger.debug("Final stream plain edit already applied for {}", chat_id)
-                    else:
-                        self.logger.warning("Final stream edit failed: {}", e2)
-                        raise  # Let ChannelManager handle retry
-            for extra_html_chunk in extra_html_chunks:
+                else:
+                    self.logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                    # Use the matching raw chunk, not a differently split prefix.
+                    try:
+                        await self._call_with_retry(
+                            app.bot.edit_message_text,
+                            chat_id=int_chat_id, message_id=buf.message_id,
+                            text=primary_plain,
+                        )
+                    except Exception as e2:
+                        if self._is_not_modified_error(e2):
+                            self.logger.debug("Final stream plain edit already applied for {}", chat_id)
+                        else:
+                            self.logger.warning("Final stream edit failed: {}", e2)
+                            raise  # Let ChannelManager handle retry
+            for extra_markdown, extra_html_chunk in extra_chunks:
                 try:
                     await self._call_with_retry(
                         app.bot.send_message,
@@ -1251,10 +1348,14 @@ class TelegramChannel(BaseChannel):
                         parse_mode="HTML",
                         **thread_kwargs,
                     )
-                except Exception:
-                    # Fall back to _send_text which handles HTML→plain gracefully.
-                    await self._send_text(int_chat_id, extra_html_chunk)
-            self._stream_bufs.pop(chat_id, None)
+                except BadRequest:
+                    # Only an explicit rejection permits a plain fallback. An
+                    # uncertain network/send failure must not trigger another send.
+                    await self._call_with_retry(
+                        app.bot.send_message,
+                        chat_id=int_chat_id, text=extra_markdown, **thread_kwargs,
+                    )
+            await self._finish_stream_notification(chat_id, buf, meta)
             return
 
         buf = self._stream_bufs.get(chat_id)
@@ -1263,6 +1364,7 @@ class TelegramChannel(BaseChannel):
             self._stream_bufs[chat_id] = buf
         elif buf.stream_id is None:
             buf.stream_id = stream_id
+        buf.full_text += delta
         buf.text += delta
 
         if not buf.text.strip():
@@ -1374,6 +1476,8 @@ class TelegramChannel(BaseChannel):
         """Handle /start command."""
         if not update.message or not update.effective_user:
             return
+        if self._is_technical_chat(update.message.chat_id):
+            return
 
         user = update.effective_user
         sender_id = self._sender_id(user)
@@ -1389,6 +1493,8 @@ class TelegramChannel(BaseChannel):
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command for allowed users only."""
         if not update.message or not update.effective_user:
+            return
+        if self._is_technical_chat(update.message.chat_id):
             return
         user = update.effective_user
         sender_id = self._sender_id(user)
@@ -1665,6 +1771,8 @@ class TelegramChannel(BaseChannel):
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
             return
+        if self._is_technical_chat(update.message.chat_id):
+            return
         if not self._running:
             await self._process_forward_command(update, context)
             return
@@ -1675,6 +1783,8 @@ class TelegramChannel(BaseChannel):
         message = update.message
         user = update.effective_user
         if message is None or user is None:
+            return
+        if self._is_technical_chat(message.chat_id):
             return
         sender_id = self._sender_id(user)
         if not self.is_allowed(sender_id):
@@ -1703,6 +1813,8 @@ class TelegramChannel(BaseChannel):
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
             return
+        if self._is_technical_chat(update.message.chat_id):
+            return
         if not self._running:
             await self._process_message_update(update, context)
             return
@@ -1714,6 +1826,8 @@ class TelegramChannel(BaseChannel):
         message = update.message
         user = update.effective_user
         if message is None or user is None:
+            return
+        if self._is_technical_chat(message.chat_id):
             return
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
@@ -1958,6 +2072,8 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         query_message = query.message
         chat_id = query_message.chat.id if query_message else None
+        if chat_id is not None and self._is_technical_chat(chat_id):
+            return
         sender_id = self._sender_id(user)
         if not chat_id:
             self.logger.warning("Callback query without chat_id")

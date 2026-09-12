@@ -26,6 +26,37 @@
         "placeholder": "* or Telegram user IDs",
         "help": "Leave empty to use pairing codes."
       },
+      "technical_profileName": {
+        "label": "Notification profile name",
+        "help": "Additional outbound-only profile; separate from the assistant conversation."
+      },
+      "technical_mainChatId": {
+        "label": "Main Telegram owner ID",
+        "help": "Private numeric user ID. Shared inbox requires Allowed users to contain only this ID."
+      },
+      "technical_sharedInbox": {
+        "label": "Shared Telegram / WebUI inbox",
+        "help": "Pins Powiadomienia above Czat główny after gateway restart. Technical notifications are optional. Main history stays in the Telegram session."
+      },
+      "technical_enabled": {
+        "label": "Outbound-only technical notifications",
+        "help": "Optional names/status-only additional profile. Main Telegram becomes answer-only. No arguments, results, reasoning or raw logs are copied."
+      },
+      "technical_chatId": {
+        "label": "Technical chat ID",
+        "placeholder": "-1001234567890",
+        "help": "Dedicated group/channel numeric ID. Inbound messages there are ignored when using the main bot."
+      },
+      "technical_token": {
+        "label": "Technical bot token (optional)",
+        "help": "Blank reuses the main bot. A technical DM requires a separate bot; this bot is never polled."
+      },
+      "technical_includeToolEvents": {
+        "label": "Include tool names and lifecycle status"
+      },
+      "technical_includeStatusEvents": {
+        "label": "Include turn, retry and context status"
+      },
       "groupPolicy": {
         "label": "Group behavior",
         "choices": {

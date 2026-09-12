@@ -13,6 +13,10 @@ const response = (body: unknown) => ({ ok: true, status: 200, json: async () => 
 
 function fixture(): IntegrationsPayload {
   return {
+    connection_slots: {
+      motis: { enabled: false, base_url: "", read_only: true, credential_configured: false, status: "adapter_not_installed" },
+      firefly_iii: { enabled: false, base_url: "", read_only: true, credential_configured: false, status: "adapter_not_installed" },
+    },
     icloud: {
       username: "apple@example.com", timezone: "Europe/Warsaw", management_calendar: "Agent",
       sleep_hours: 8, default_wake_time: "07:00", morning_preparation_minutes: 30,
@@ -21,7 +25,7 @@ function fixture(): IntegrationsPayload {
     mail: {
       accounts: ["personal", "work"].map((id) => ({
         id, email: `${id}@example.com`, host: "imap.example.com", port: 993,
-        username: id, allowed_folders: ["INBOX"], rules: [], credential_configured: true,
+        username: id, allowed_folders: [], folder_policy: "all" as const, rules: [], credential_configured: true,
       })),
       dry_run: true, reconcile_interval_seconds: 300,
     },
@@ -96,15 +100,14 @@ describe("Integrations settings", () => {
     await loaded();
     expect(screen.getByLabelText("Hasło aplikacji iCloud")).toHaveAttribute("type", "password");
     expect(screen.getByLabelText("Hasło aplikacji iCloud")).toHaveValue("");
-    change("Strefa czasowa", "UTC");
+    change("Apple ID (e-mail)", "changed@example.com");
     const next = fixture();
-    next.icloud.timezone = "UTC";
+    next.icloud.username = "changed@example.com";
     requestMutation.mockResolvedValue(next);
     fireEvent.click(screen.getByRole("button", { name: "Zapisz konfigurację iCloud" }));
     await screen.findByText("Konfiguracja zapisana. Nie uruchomiono usług ani nie przetestowano połączenia.");
-    const { credential_configured: configured, ...fields } = next.icloud;
-    expect(configured).toBe(true);
-    expect(requestMutation).toHaveBeenCalledWith("settings.integrations.icloud", fields, 20_000);
+    expect(next.icloud.credential_configured).toBe(true);
+    expect(requestMutation).toHaveBeenCalledWith("settings.integrations.icloud", { username: "changed@example.com" }, 20_000);
     expect(requestMutation.mock.calls[0][1]).not.toHaveProperty("password");
     expect(screen.getByLabelText("Hasło aplikacji iCloud")).toHaveValue("");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -131,7 +134,7 @@ describe("Integrations settings", () => {
     expect(requestMutation.mock.calls[1][1]).not.toHaveProperty("password");
   });
 
-  it("keeps separate multi-account drafts, clears secrets on selection, and saves one account/rules", async () => {
+  it("keeps separate multi-account drafts and saves one account without changing folder policy or rules", async () => {
     renderPanel();
     await loaded();
     change("Serwer IMAP", "personal.example.com");
@@ -142,12 +145,9 @@ describe("Integrations settings", () => {
     change("Konto pocztowe", "personal");
     expect(screen.getByLabelText("Serwer IMAP")).toHaveValue("personal.example.com");
     change("Konto pocztowe", "work");
-    change("Dozwolone foldery (jeden w wierszu)", " INBOX \n\n Faktury\n");
-    fireEvent.click(screen.getByRole("button", { name: "Dodaj regułę" }));
-    change("Nazwa reguły", "Faktury");
-    change("Folder docelowy", "Faktury");
-    change("Nadawca / glob (jeden w wierszu)", "*@billing.example\n sender@example.com");
-    change("Fragment tematu (jeden w wierszu)", "faktura\n invoice ");
+    expect(screen.queryByLabelText(/Dozwolone foldery/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dodaj regułę" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Wszystkie foldery są dostępne/)).toBeInTheDocument();
     change("Hasło aplikacji IMAP", "mail-app-secret");
     expect(screen.getByLabelText("Hasło aplikacji IMAP")).toHaveAttribute("type", "password");
     fireEvent.click(screen.getByRole("button", { name: "Zapisz konfigurację konta" }));
@@ -155,8 +155,6 @@ describe("Integrations settings", () => {
     await screen.findByText("Konfiguracja zapisana. Nie uruchomiono usług ani nie przetestowano połączenia.");
     expect(requestMutation).toHaveBeenCalledWith("settings.integrations.mail", {
       id: "work", email: "work@example.com", host: "imap.example.com", port: 993, username: "work",
-      allowed_folders: ["INBOX", "Faktury"],
-      rules: [{ name: "Faktury", destination: "Faktury", sender_globs: ["*@billing.example", "sender@example.com"], subject_contains: ["faktura", "invoice"] }],
       password: "mail-app-secret",
     }, 20_000);
     expect(screen.getByRole("option", { name: "personal@example.com (personal)" })).toBeInTheDocument();
@@ -208,7 +206,7 @@ describe("Integrations settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Zapisz konfigurację konta" }));
     await screen.findByText("Konfiguracja zapisana. Nie uruchomiono usług ani nie przetestowano połączenia.");
     expect(requestMutation.mock.calls[0][0]).toBe("settings.integrations.mail");
-    expect(requestMutation.mock.calls[0][1]).toEqual({ id: "third", email: "third@example.com", host: "imap.third.example", port: 993, username: "third@example.com", allowed_folders: ["INBOX"], rules: [] });
+    expect(requestMutation.mock.calls[0][1]).toEqual({ id: "third", email: "third@example.com", host: "imap.third.example", port: 993, username: "third@example.com" });
     expect(screen.getByLabelText("Konto pocztowe")).toHaveValue("third");
     expect(within(screen.getByLabelText("Konto pocztowe")).getAllByRole("option")).toHaveLength(4);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -217,18 +215,18 @@ describe("Integrations settings", () => {
   it("preserves dirty forms through refresh, including edits during fetch, and uses the current token", async () => {
     const view = renderPanel();
     await loaded();
-    change("Kalendarz zarządzany", "Niezapisany kalendarz");
+    change("Apple ID (e-mail)", "unsaved@example.com");
     change("Serwer IMAP", "unsaved.example.com");
     view.rerender(<ClientProvider client={client} token="fresh-token"><IntegrationsSettings /></ClientProvider>);
     let resolve!: (value: Response) => void;
     fetchMock.mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; }));
     fireEvent.click(screen.getByRole("button", { name: "Odśwież status" }));
-    change("Kalendarz zarządzany", "Edycja w czasie odświeżania");
+    change("Apple ID (e-mail)", "editing@example.com");
     const updated = fixture();
-    updated.icloud.management_calendar = "Z serwera";
+    updated.icloud.username = "server@example.com";
     updated.memory.items = 17;
     await act(async () => resolve(response(updated)));
-    expect(screen.getByLabelText("Kalendarz zarządzany")).toHaveValue("Edycja w czasie odświeżania");
+    expect(screen.getByLabelText("Apple ID (e-mail)")).toHaveValue("editing@example.com");
     expect(screen.getByLabelText("Serwer IMAP")).toHaveValue("unsaved.example.com");
     expect(within(screen.getByRole("region", { name: "Pamięć" })).getByText("17")).toBeInTheDocument();
     expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer fresh-token");
@@ -238,7 +236,7 @@ describe("Integrations settings", () => {
   it("prepares saved consumer configurations through WS without testing or starting services", async () => {
     renderPanel();
     await loaded();
-    change("Strefa czasowa", "Niezapisana strefa");
+    change("Apple ID (e-mail)", "unsaved@example.com");
     const next = fixture();
     next.exported = true;
     next.message = "Pliki konfiguracji przygotowane lokalnie.";
@@ -246,7 +244,7 @@ describe("Integrations settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Przygotuj konfiguracje usług" }));
     expect(await screen.findByText("Konfiguracje usług przygotowane. Usługi nie zostały uruchomione.")).toBeInTheDocument();
     expect(screen.getByText(next.message)).toBeInTheDocument();
-    expect(screen.getByLabelText("Strefa czasowa")).toHaveValue("Niezapisana strefa");
+    expect(screen.getByLabelText("Apple ID (e-mail)")).toHaveValue("unsaved@example.com");
     expect(requestMutation).toHaveBeenCalledTimes(1);
     expect(requestMutation).toHaveBeenCalledWith("settings.integrations.prepare", {}, 20_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -306,5 +304,92 @@ describe("Integrations settings", () => {
     await loaded();
     expect(screen.getByTestId("settings-section-transition")).toHaveAttribute("data-settings-section", "integrations");
     expect(screen.getByRole("button", { name: "Integracje" })).toHaveAttribute("aria-current", "page");
+  });
+});
+
+
+it("saves inert integration slots over WS and clears tokens even on failure", async () => {
+  renderPanel();
+  await loaded();
+  const secret = "private-firefly-token";
+  change("Adres Firefly III", "https://finance.example.org");
+  change("Token Firefly III (opcjonalny)", secret);
+  requestMutation.mockRejectedValue(new Error(secret));
+  fireEvent.click(screen.getByRole("button", { name: "Zapisz miejsce Firefly III" }));
+  expect(screen.getByLabelText("Token Firefly III (opcjonalny)")).toHaveValue("");
+  await screen.findByRole("alert");
+  expect(requestMutation).toHaveBeenCalledWith("settings.integrations.firefly_iii", {
+    base_url: "https://finance.example.org", password: secret,
+  }, 20_000);
+  expect(document.body).not.toHaveTextContent(secret);
+  expect(screen.getByRole("form", { name: "Konfiguracja MOTIS" })).toHaveTextContent("adapter nie jest jeszcze zainstalowany");
+});
+
+
+it("shows exactly email and password for Apple and guards unsaved edits on browser exit", async () => {
+  renderPanel();
+  await loaded();
+  const form = screen.getByRole("form", { name: "Konfiguracja iCloud" });
+  expect(form.querySelectorAll("input")).toHaveLength(2);
+  expect(within(form).queryByLabelText(/pobud|snu|Strefa|Kalendarz zarządzany/i)).not.toBeInTheDocument();
+  const clean = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(clean);
+  expect(clean.defaultPrevented).toBe(false);
+  change("Apple ID (e-mail)", "changed@example.com");
+  const dirty = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(dirty);
+  expect(dirty.defaultPrevented).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Zapisz konfigurację iCloud" }));
+  await screen.findByText("Konfiguracja zapisana. Nie uruchomiono usług ani nie przetestowano połączenia.");
+  const saved = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(saved);
+  expect(saved.defaultPrevented).toBe(false);
+});
+
+it("reuses the linked Apple account and sends edits to the single Apple form", async () => {
+  const initial = fixture();
+  initial.mail.accounts = [];
+  fetchMock.mockResolvedValue(response(initial));
+  renderPanel();
+  await loaded();
+  const next = fixture();
+  next.mail.accounts = [{ id: "icloud", email: "apple@example.com", username: "apple@example.com", host: "imap.mail.me.com", port: 993, allowed_folders: [], folder_policy: "all", managed_by: "icloud", rules: [], credential_configured: true }];
+  requestMutation.mockResolvedValue(next);
+  fireEvent.click(screen.getByRole("button", { name: "Zapisz konfigurację iCloud" }));
+  await screen.findByText("Konfiguracja zapisana. Nie uruchomiono usług ani nie przetestowano połączenia.");
+  expect(screen.getByLabelText("Konto pocztowe")).toHaveValue("icloud");
+  expect(screen.getByLabelText("Serwer IMAP")).toBeDisabled();
+  expect(screen.getByLabelText("Hasło aplikacji IMAP")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Zapisz konfigurację konta" })).toBeDisabled();
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+  fireEvent.click(screen.getByRole("button", { name: "Edytuj konto Apple" }));
+  expect(scroll).toHaveBeenCalled();
+  expect(screen.getByLabelText("Apple ID (e-mail)")).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Dodaj nowe konto" }));
+  expect(screen.getByLabelText("Serwer IMAP")).toBeEnabled();
+  expect(requestMutation).toHaveBeenCalledTimes(1);
+});
+
+describe("read-only connection diagnostics", () => {
+  it("checks saved Apple credentials explicitly without transmitting form drafts or rendering raw diagnostics", async () => {
+    renderPanel();
+    await loaded();
+    change("Hasło aplikacji iCloud", "unsaved-private-value");
+    change("Apple ID (e-mail)", "draft@example.org");
+    requestMutation.mockResolvedValue({ ok: false, read_only: true, checks: [
+      { service: "imap", ok: false, code: "authentication_failed", message: "private-backend-error" },
+    ] });
+    fireEvent.click(screen.getByRole("button", { name: "Sprawdź połączenie Apple" }));
+    await screen.findByText(/IMAP: Uwierzytelnienie odrzucone/);
+    expect(requestMutation).toHaveBeenCalledWith("settings.integrations.check", { target: "icloud" }, 20_000);
+    expect(document.body).not.toHaveTextContent("private-backend-error");
+    expect(screen.getByLabelText("Apple ID (e-mail)")).toHaveValue("draft@example.org");
+  });
+  it("does not reflect arbitrary probe errors", async () => {
+    renderPanel(); await loaded();
+    requestMutation.mockRejectedValue(new Error("secret-probe-error"));
+    fireEvent.click(screen.getByRole("button", { name: "Sprawdź IMAP: personal" }));
+    await screen.findByText("Nie udało się wykonać testu. Sprawdź połączenie z panelem.");
+    expect(document.body).not.toHaveTextContent("secret-probe-error");
   });
 });

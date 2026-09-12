@@ -27,11 +27,24 @@ export interface MailIntegrationAccount {
   port: number;
   username: string;
   allowed_folders: string[];
+  folder_policy?: "all" | "allowlist";
+  managed_by?: "icloud" | null;
   rules: MailIntegrationRule[];
   credential_configured: boolean;
 }
 
+export type ConnectionSlotName = "motis" | "firefly_iii";
+export interface ConnectionSlot {
+  enabled: false;
+  base_url: string;
+  read_only: true;
+  credential_configured: boolean;
+  status: "adapter_not_installed";
+}
+export type ConnectionSlotUpdate = Pick<ConnectionSlot, "base_url"> & { password?: string };
+
 export interface IntegrationsPayload {
+  connection_slots?: Record<ConnectionSlotName, ConnectionSlot>;
   icloud: IcloudIntegration;
   mail: {
     accounts: MailIntegrationAccount[];
@@ -57,10 +70,10 @@ export interface IntegrationsPayload {
   message?: string;
 }
 
-export type IcloudIntegrationUpdate = Omit<IcloudIntegration, "credential_configured"> & {
+export type IcloudIntegrationUpdate = Pick<IcloudIntegration, "username"> & {
   password?: string;
 };
-export type MailIntegrationUpdate = Omit<MailIntegrationAccount, "credential_configured"> & {
+export type MailIntegrationUpdate = Pick<MailIntegrationAccount, "id" | "email" | "host" | "port" | "username"> & {
   password?: string;
 };
 
@@ -100,6 +113,9 @@ export function parseIntegrationsPayload(value: unknown): IntegrationsPayload {
   const evolution = record(payload.evolution);
   if (mail.dry_run !== true) return invalidResponse();
   return {
+    ...(payload.connection_slots == null ? {} : {
+      connection_slots: parseConnectionSlots(payload.connection_slots),
+    }),
     icloud: {
       username: text(icloud.username),
       timezone: text(icloud.timezone),
@@ -118,6 +134,9 @@ export function parseIntegrationsPayload(value: unknown): IntegrationsPayload {
           id: text(account.id), email: text(account.email), host: text(account.host),
           port: number(account.port), username: text(account.username),
           allowed_folders: array(account.allowed_folders, text),
+          folder_policy: account.folder_policy == null ? (Array.isArray(account.allowed_folders) && account.allowed_folders.length ? "allowlist" : "all")
+            : account.folder_policy === "all" || account.folder_policy === "allowlist" ? account.folder_policy : invalidResponse(),
+          managed_by: account.managed_by == null ? null : account.managed_by === "icloud" ? "icloud" : invalidResponse(),
           credential_configured: boolean(account.credential_configured),
           rules: array(account.rules, (value) => {
             const rule = record(value);
@@ -194,4 +213,38 @@ export async function prepareIntegrations(client: WebUIMutationTransport) {
   return parseIntegrationsPayload(await client.requestMutation<unknown>(
     "settings.integrations.prepare", {}, 20_000,
   ));
+}
+
+function parseConnectionSlots(value: unknown): Record<ConnectionSlotName, ConnectionSlot> {
+  const slots = record(value);
+  const parse = (value: unknown): ConnectionSlot => {
+    const slot = record(value);
+    if (slot.enabled !== false || slot.read_only !== true || slot.status !== "adapter_not_installed") return invalidResponse();
+    return { enabled: false, read_only: true, status: "adapter_not_installed",
+      base_url: text(slot.base_url), credential_configured: boolean(slot.credential_configured) };
+  };
+  return { motis: parse(slots.motis), firefly_iii: parse(slots.firefly_iii) };
+}
+
+export async function saveConnectionSlot(
+  client: WebUIMutationTransport, name: ConnectionSlotName, payload: ConnectionSlotUpdate,
+) {
+  return parseIntegrationsPayload(await client.requestMutation<unknown>(
+    `settings.integrations.${name}`, withOptionalPassword(payload), 20_000,
+  ));
+}
+
+export type ConnectionCheckRequest = { target: "icloud" } | { target: "mail"; account_id: string };
+export interface ConnectionReport {
+  ok: boolean;
+  checks: Array<{ service: string; ok: boolean; code: string }>;
+}
+export async function checkIntegration(client: WebUIMutationTransport, request: ConnectionCheckRequest): Promise<ConnectionReport> {
+  const payload = record(await client.requestMutation<unknown>("settings.integrations.check", request, 20_000));
+  if (payload.read_only !== true) return invalidResponse();
+  return { ok: boolean(payload.ok), checks: array(payload.checks, (value) => {
+    const item = record(value);
+    // Never render arbitrary server messages or credential-bearing diagnostics.
+    return { service: text(item.service), ok: boolean(item.ok), code: text(item.code) };
+  }) };
 }

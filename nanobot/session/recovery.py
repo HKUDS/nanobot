@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -29,6 +29,7 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.session.manager import Session, SessionManager
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 from nanobot.webui.session_identity import webui_chat_id, webui_session_key
+from nanobot.webui.shared_inbox import MAIN_CHAT_ID, SHARED_CHAT_IDS
 
 RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -273,6 +274,17 @@ def _runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
     return False
 
 
+def runtime_checkpoint_safe_to_resume(value: object) -> bool:
+    """Whether a durable checkpoint proves no tool calls remain uncertain."""
+    if not isinstance(value, dict):
+        return False
+    checkpoint = cast(dict[str, Any], value)
+    return (
+        checkpoint.get("phase") in {"tools_completed", "final_response"}
+        and _runtime_checkpoint_is_well_formed(checkpoint)
+    )
+
+
 def restore_runtime_checkpoint(session: Session) -> bool:
     """Materialize the durable checkpoint exactly once and clear it.
 
@@ -455,6 +467,10 @@ class RecoveryCoordinator:
     sessions: SessionManager
     bus: MessageBus
     unified_session: bool = False
+    auto_goal_recovery: bool = False
+    # Composed from the running inbox, never inferred from Telegram keys or
+    # last_channel. A supplied resolver also keeps ordinary chats out of unified.
+    shared_main_session_key: Callable[[], str | None] | None = None
     _active_recovery_tasks: dict[str, asyncio.Task[Any]] = dataclasses.field(
         default_factory=dict,
         init=False,
@@ -548,6 +564,20 @@ class RecoveryCoordinator:
 
     async def admit(self, message: InboundMessage) -> bool:
         """Reject stale queued recoveries and let new user input supersede them."""
+        if message.channel == "websocket" and self.shared_main_session_key is not None:
+            try:
+                if self._session_key(message.chat_id) != message.session_key:
+                    return False
+            except RecoveryActionError:
+                return False  # A queued shared-main action outlived its owner mapping.
+        if PENDING_FOLLOWUP_ID_KEY in message.metadata:
+            # A journal replay is not fresh user consent. Recheck gates that may
+            # have appeared after startup enqueue, before normal supersession.
+            from nanobot.session.goal_recovery import session_recovery_hold_reason
+
+            session = self.sessions.get_or_create(message.session_key)
+            if session_recovery_hold_reason(session) is not None:
+                return False
         recovery_id = message.metadata.get(RECOVERY_INBOUND_METADATA_KEY)
         if isinstance(recovery_id, str):
             session = self.sessions.get_or_create(message.session_key)
@@ -557,6 +587,12 @@ class RecoveryCoordinator:
                 and state["status"] == "resuming"
                 and state["recovery_id"] == recovery_id
             )
+        # Native continuations are not new user approval. In particular, a
+        # watchdog queued before a confirmation gate appeared must not clear it.
+        if turn_continuation.internal_continuation_inbound(message.metadata):
+            session = self.sessions.get_cached(message.session_key)
+            state = recovery_state_from_metadata(session.metadata) if session else None
+            return not state or state["status"] == "recovered"
         if message.channel != "websocket":
             return True
         session = self.sessions.get_or_create(message.session_key)
@@ -604,7 +640,10 @@ class RecoveryCoordinator:
             raise RecoveryActionError("missing chat_id")
         if not isinstance(recovery_id, str) or not recovery_id:
             raise RecoveryActionError("missing recovery_id")
-        session = self.sessions.get_or_create(self._session_key(chat_id))
+        session_key = self._session_key(chat_id)
+        if self.sessions.read_session_metadata(session_key) is None:
+            raise RecoveryActionError("recovery session is unavailable", status=409)
+        session = self.sessions.get_or_create(session_key)
         state = recovery_state_from_metadata(session.metadata)
         if not state or state["recovery_id"] != recovery_id:
             raise RecoveryActionError("recovery state is stale", status=409)
@@ -650,6 +689,9 @@ class RecoveryCoordinator:
         )
         pending = session.metadata.get(PENDING_USER_TURN_KEY) is True
         state = recovery_state_from_metadata(session.metadata)
+        if state and (state["status"] in {"awaiting_user", "failed"} or state.get("reason") == "dismissed"):
+            await self._publish(chat_id, state)
+            return  # A saved journal/transcript is not permission to replace a user's gate.
         if not pending and checkpoint is None:
             if state and state["status"] == "resuming":
                 resume_count = self._resume_message_count(session)
@@ -693,9 +735,6 @@ class RecoveryCoordinator:
                 )
                 self.sessions.save(session)
                 await self._publish(chat_id, waiting)
-            return
-        if state and state["status"] in {"awaiting_user", "failed"}:
-            await self._publish(chat_id, state)
             return
         if state and state["status"] == "resuming":
             restore_runtime_checkpoint(session)
@@ -766,6 +805,42 @@ class RecoveryCoordinator:
             self.sessions.save(session)
             await self._publish(chat_id, waiting)
             return
+        # Persisted follow-ups are already user-authored work, not permission to
+        # replay uncertain tools or clear a pre-existing review/approval/stop.
+        # Classify the safe case before creating a generic restart gate; admission
+        # can then revalidate the same safety gates without treating replay as new
+        # user consent. Keep the journal until its user rows are committed.
+        from nanobot.session.goal_recovery import session_recovery_hold_reason
+
+        if pending_followups(session) and session_recovery_hold_reason(session) is None:
+            restore_runtime_checkpoint(session)
+            restore_pending_interruption(session)
+            recovered = self._set_state(
+                session, status="recovered", recovery_id=recovery_id,
+                attempts=0, reason="followups_pending",
+            )
+            self.sessions.save(session)
+            await self._publish(chat_id, recovered)
+            return
+        # Only newly classified safe interruptions of active sustained goals may
+        # use the explicit watchdog opt-in. Existing confirmation states and all
+        # uncertain/malformed tool checkpoints above remain review-only.
+        if self.auto_goal_recovery:
+            from nanobot.session.goal_recovery import goal_recovery_hold_reason
+
+            if goal_recovery_hold_reason(session) is None:
+                restore_runtime_checkpoint(session)
+                restore_pending_interruption(session)
+                scheduled = self._set_state(
+                    session,
+                    status="recovered",
+                    recovery_id=recovery_id,
+                    attempts=0,
+                    reason="goal_watchdog_scheduled",
+                )
+                self.sessions.save(session)
+                await self._publish(chat_id, scheduled)
+                return
         # A gateway restart is a lifecycle boundary.  Never enqueue model work
         # implicitly: even a synchronized checkpoint may sit next to an
         # external side effect that the user should review first.  The final
@@ -811,8 +886,16 @@ class RecoveryCoordinator:
         )
 
     async def _requeue_pending_followups(self, session: Session) -> None:
-        """Return durable live-turn follow-ups to the bus after a restart."""
+        """Return safe follow-ups, without interpreting a journal as new consent."""
+        from nanobot.session.goal_recovery import session_recovery_hold_reason
+
+        route = self._websocket_route(session)
+        if route is None or session_recovery_hold_reason(session) is not None:
+            return
         for message in pending_followups(session):
+            # Persisted routing hints cannot select another pane. The active
+            # canonical-session resolver owns recovery delivery after restart.
+            message.chat_id = route[1]
             await self.bus.publish_inbound(message)
 
     @staticmethod
@@ -878,6 +961,13 @@ class RecoveryCoordinator:
         return state
 
     def _session_key(self, chat_id: str) -> str:
+        if chat_id in SHARED_CHAT_IDS:
+            key = self.shared_main_session_key() if self.shared_main_session_key else None
+            if chat_id == MAIN_CHAT_ID and key is not None:
+                return key
+            raise RecoveryActionError("shared recovery is unavailable", status=409)
+        if self.shared_main_session_key is not None:
+            return webui_session_key(chat_id)
         return UNIFIED_SESSION_KEY if self.unified_session else webui_session_key(chat_id)
 
     @staticmethod
@@ -921,16 +1011,23 @@ class RecoveryCoordinator:
             )
         )
 
-    @staticmethod
-    def _websocket_route(session: Session) -> tuple[str, str] | None:
-        return RecoveryCoordinator._websocket_route_for(session.key, session.metadata)
+    def _websocket_route(self, session: Session) -> tuple[str, str] | None:
+        return self._websocket_route_for(session.key, session.metadata)
 
-    @staticmethod
     def _websocket_route_for(
+        self,
         session_key: str,
         metadata: Mapping[str, Any],
     ) -> tuple[str, str] | None:
+        if self.shared_main_session_key is not None:
+            shared_key = self.shared_main_session_key()
+            if shared_key is not None and session_key == shared_key:
+                return ("websocket", MAIN_CHAT_ID)
+            if session_key == UNIFIED_SESSION_KEY:
+                return None  # Never adopt legacy mixed history into this mapping.
         chat_id = webui_chat_id(session_key)
+        if chat_id in SHARED_CHAT_IDS:
+            return None  # Reserved views are not independent LLM sessions.
         if chat_id is not None:
             return ("websocket", chat_id)
         if session_key == UNIFIED_SESSION_KEY:

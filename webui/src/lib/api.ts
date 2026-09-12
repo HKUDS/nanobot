@@ -195,6 +195,9 @@ export async function listSessions(
     recovery_state?: RecoveryState | null;
     workspace_scope?: WorkspaceScopePayload | null;
     handle?: SessionHandle | null;
+    shared_stream?: "main" | "notifications";
+    read_only?: boolean;
+    profile_name?: string;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -215,6 +218,9 @@ export async function listSessions(
       runStartedAt: s.run_started_at ?? null,
       recoveryState: s.recovery_state ?? null,
       workspaceScope: s.workspace_scope ?? null,
+      sharedStream: s.shared_stream,
+      readOnly: s.read_only,
+      profileName: s.profile_name,
       handle,
     };
   });

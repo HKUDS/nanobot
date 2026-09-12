@@ -79,6 +79,7 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
+from nanobot.session.goal_recovery import GoalRecoveryWatchdog
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     runner_wall_llm_timeout_s,
@@ -434,6 +435,7 @@ class AgentLoop:
             except Exception as exc:
                 # Evolution is auxiliary and must never prevent or impair normal turns.
                 logger.warning("Evolution engine disabled (fail-open): {}", exc)
+        self.goal_recovery: GoalRecoveryWatchdog | None = None
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
         self._discarding_sessions: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -787,7 +789,7 @@ class AgentLoop:
             if entry.get("role") == "user" and isinstance(marker, dict):
                 content, retained_marker = retain_persistent_runtime_context(
                     entry.get("content"),
-                    marker,
+                    cast(dict[str, Any], marker),
                 )
                 entry["content"] = content
                 cleaned_meta = dict(cast(dict[str, Any], internal_meta))
@@ -939,6 +941,15 @@ class AgentLoop:
             chat_id=ctx.msg.chat_id,
             content=content,
             metadata={**metadata, "render_as": "text"},
+        )
+
+    def is_session_busy(self, key: str) -> bool:
+        """Whether a native watchdog must leave session ownership alone."""
+        lock = self._session_locks.get(key)
+        return (
+            key in self._pending_queues or key in self._discarding_sessions
+            or (lock is not None and lock.locked())
+            or any(not task.done() for task in self._active_tasks.get(key, ()))
         )
 
     def _track_active_task(self, key: str, task: asyncio.Task[Any]) -> None:
@@ -1396,6 +1407,8 @@ class AgentLoop:
                     continue
                 if msg.require_existing_session and self.sessions.get_cached(effective_key) is None:
                     continue
+                if self.goal_recovery and not self.goal_recovery.observe_inbound(msg, effective_key):
+                    continue
                 if msg.is_user_input:
                     await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
                 if msg.channel != "system" and self.commands.is_priority(raw):
@@ -1524,6 +1537,8 @@ class AgentLoop:
         completion_published = False
         try:
             async with lock, gate:
+                if self.goal_recovery and not self.goal_recovery.claim(msg):
+                    return
                 # Only the task that owns the session lock may publish the
                 # active mid-turn injection queue for this session.
                 pending = asyncio.Queue(maxsize=20)
@@ -1545,11 +1560,19 @@ class AgentLoop:
                         publish_completion=not continuing,
                     )
                     completion_published = not continuing
+                    if self.goal_recovery:
+                        self.goal_recovery.finish(
+                            msg, delivery._stop_reason or "completed",
+                        )
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
                 except asyncio.CancelledError:
                     for _, coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=asyncio.CancelledError())
+                    if self.goal_recovery and session_key not in self._discarding_sessions:
+                        self.goal_recovery.finish(
+                            msg, "cancelled", shutdown=self._preserve_inflight_turns_on_shutdown,
+                        )
                     logger.info("Task cancelled for session {}", session_key)
                     try:
                         await delivery.abort_stream()
@@ -1586,6 +1609,8 @@ class AgentLoop:
                         )
                     raise
                 except Exception as exc:
+                    if self.goal_recovery:
+                        self.goal_recovery.finish(msg, "error")
                     logger.exception("Error processing message for session {}", session_key)
                     await delivery.fail(
                         publish_completion=not turn_continuation.internal_continuation_pending(
@@ -2384,7 +2409,7 @@ class AgentLoop:
             if role == "user" and isinstance(runtime_context_meta, dict):
                 content, retained_marker = retain_persistent_runtime_context(
                     content,
-                    runtime_context_meta,
+                    cast(dict[str, Any], runtime_context_meta),
                 )
                 entry["content"] = content
                 runtime_context_meta = retained_marker
@@ -2530,6 +2555,8 @@ class AgentLoop:
             media=media or [],
             metadata=metadata,
         )
+        if self.goal_recovery and not ephemeral:
+            self.goal_recovery.observe_inbound(msg, session_key)
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._get_session_lock(session_key)
         try:

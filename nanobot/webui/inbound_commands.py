@@ -137,6 +137,7 @@ class WebUICommandRouter:
         self._workspaces = gateway.workspaces
         self._temporary_chats = gateway.temporary_chats
         self._session_projection = gateway.session_projection
+        self._shared_inbox = gateway.shared_inbox
         self._webui_connections = gateway.endpoint.webui_connections
         self._session_access = (
             WebuiSessionAccess(gateway.session_manager)
@@ -285,7 +286,20 @@ class WebUICommandRouter:
         envelope: dict[str, Any],
     ) -> None:
         """Execute one typed WebUI command."""
+        from nanobot.webui.shared_inbox import NOTIFICATIONS_CHAT_ID, SHARED_CHAT_IDS
+
         command_type = envelope.get("type")
+        reserved_chat = envelope.get("chat_id")
+        if isinstance(reserved_chat, str) and reserved_chat in SHARED_CHAT_IDS:
+            if self._shared_inbox is None or not self._shared_inbox.active or connection not in self._webui_connections:
+                await self._transport.webui_send_event(connection, "error", detail="access_denied")
+                return
+            if reserved_chat == NOTIFICATIONS_CHAT_ID and command_type != "attach":
+                await self._transport.webui_send_event(connection, "error", detail="read_only_chat", chat_id=reserved_chat)
+                return
+            if command_type not in {"attach", "message"}:
+                await self._transport.webui_send_event(connection, "error", detail="shared_chat_operation_unsupported", chat_id=reserved_chat)
+                return
         if command_type == "webui_request":
             await self.start_webui_request(connection, envelope)
             return
@@ -642,7 +656,7 @@ class WebUICommandRouter:
 
         accepted = False
         try:
-            if is_webui and (
+            if is_webui and not (self._shared_inbox is not None and chat_id == "shared-main") and (
                 temporary_policy is None or temporary_policy.persist_transcript
             ):
                 self._transcripts.append_user_message(

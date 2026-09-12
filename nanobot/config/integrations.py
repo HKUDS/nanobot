@@ -4,10 +4,12 @@ from __future__ import annotations
 import ipaddress
 import re
 from datetime import time
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from nanobot.config.integration_slots import IntegrationSlot
 from nanobot.config_base import Base
 
 
@@ -81,8 +83,23 @@ class MailAccountConfig(IntegrationModel):
     port: int = Field(default=993, ge=1, le=65535)
     username: str = Field(min_length=1, max_length=320)
     credential_ref: str = Field(default="", pattern=r"^(?:[a-f0-9]{32})?$")
+    managed_by: Literal["icloud"] | None = None
+    folder_policy: Literal["all", "allowlist"] = "all"
     allowed_folders: list[str] = Field(default_factory=list, max_length=100)
     rules: list[MailRuleConfig] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_legacy_allowlist(cls, value: Any) -> Any:
+        # Existing explicit restrictions remain restrictions. Empty/default lists
+        # never mean "no mailbox access"; new accounts discover all folders.
+        if not isinstance(value, dict):
+            return value
+        data = cast(dict[Any, Any], value)  # checked mapping; Pydantic validates its fields below
+        if "folder_policy" not in data and "folderPolicy" not in data:
+            if data.get("allowed_folders") or data.get("allowedFolders"):
+                return {**data, "folder_policy": "allowlist"}
+        return data
 
     @field_validator("host")
     @classmethod
@@ -109,7 +126,7 @@ class MailAccountConfig(IntegrationModel):
         return value.strip()
 
     @model_validator(mode="after")
-    def folder_policy(self) -> MailAccountConfig:
+    def validate_folder_policy(self) -> MailAccountConfig:
         if "@" not in self.email:
             raise ValueError("invalid email address")
         if len(self.allowed_folders) != len(set(self.allowed_folders)):
@@ -118,12 +135,21 @@ class MailAccountConfig(IntegrationModel):
             if (not folder.strip() or len(folder) > 200 or folder.startswith("-")
                     or any(ord(c) < 32 for c in folder)):
                 raise ValueError("invalid folder")
-        if any(rule.destination not in self.allowed_folders for rule in self.rules):
+        for rule in self.rules:
+            if rule.destination.startswith("-"):
+                raise ValueError("invalid rule destination")
+        if self.folder_policy == "allowlist" and any(
+            rule.destination not in self.allowed_folders for rule in self.rules
+        ):
             raise ValueError("rule destination must be in the folder allowlist")
+        if self.managed_by == "icloud" and (self.host, self.port) != ("imap.mail.me.com", 993):
+            raise ValueError("iCloud mail requires its fixed IMAPS endpoint")
         return self
 
 
 class PersonalIntegrationsConfig(IntegrationModel):
+    motis: IntegrationSlot = Field(default_factory=IntegrationSlot)
+    firefly_iii: IntegrationSlot = Field(default_factory=IntegrationSlot)
     icloud: ICloudIntegrationConfig = Field(default_factory=ICloudIntegrationConfig)
     mail_accounts: list[MailAccountConfig] = Field(default_factory=list, max_length=20)
     reconcile_interval_seconds: int = Field(default=180, ge=120, le=300)
@@ -133,4 +159,11 @@ class PersonalIntegrationsConfig(IntegrationModel):
         ids = [account.id for account in self.mail_accounts]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate mail account IDs")
+        linked = [account for account in self.mail_accounts if account.managed_by == "icloud"]
+        if len(linked) > 1:
+            raise ValueError("duplicate linked iCloud account")
+        if linked and (linked[0].username, linked[0].credential_ref) != (
+            self.icloud.username, self.icloud.credential_ref
+        ):
+            raise ValueError("linked iCloud credentials must share the Apple source")
         return self

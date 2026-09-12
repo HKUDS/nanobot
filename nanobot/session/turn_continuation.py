@@ -32,6 +32,7 @@ _GOAL_CONTINUATION_SENDER = "system:continuation"
 _GOAL_CONTINUATION_ROUNDS_KEY = "_sustained_goal_continuation_rounds"
 _MAX_GOAL_CONTINUATION_ROUNDS = 12
 _STRIPPED_INBOUND_META_KEYS = {
+    "_goal_recovery_id",  # The watchdog claim belongs only to its initial slice.
     INTERNAL_CONTINUATION_PENDING_META,
     "goal_requested",
     "original_command",
