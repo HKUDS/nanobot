@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn thiết lập MoChat",
+    "officialLabel": "Mở MoChat",
+    "fields": {
+      "clawToken": {
+        "label": "Mã Claw",
+        "placeholder": "Mã Claw của MoChat"
+      },
+      "baseUrl": {
+        "label": "URL máy chủ",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "ID người dùng của agent",
+        "placeholder": "ID người dùng agent không bắt buộc"
+      },
+      "sessions": {
+        "label": "Phiên",
+        "placeholder": "ID phiên, phân tách bằng dấu phẩy"
+      },
+      "panels": {
+        "label": "Bảng",
+        "placeholder": "ID bảng, phân tách bằng dấu phẩy"
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "socketUrl": {
+        "label": "URL ổ cắm"
+      },
+      "socketPath": {
+        "label": "Đường dẫn ổ cắm"
+      },
+      "socketDisableMsgpack": {
+        "label": "Tắt MessagePack",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "Độ trễ kết nối lại"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "Độ trễ kết nối lại tối đa"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "Hết thời gian kết nối"
+      },
+      "refreshIntervalMs": {
+        "label": "Khoảng thời gian làm mới"
+      },
+      "watchTimeoutMs": {
+        "label": "Hết thời gian xem"
+      },
+      "watchLimit": {
+        "label": "Kích thước lô đồng hồ"
+      },
+      "retryDelayMs": {
+        "label": "Trì hoãn thử lại"
+      },
+      "maxRetryAttempts": {
+        "label": "Số lần thử lại tối đa"
+      },
+      "mention_requireInGroups": {
+        "label": "Yêu cầu đề cập trong nhóm",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "groups": {
+        "label": "Quy tắc nhóm (JSON)"
+      },
+      "replyDelayMode": {
+        "label": "Chế độ trì hoãn trả lời"
+      },
+      "replyDelayMs": {
+        "label": "Trả lời chậm trễ"
+      }
+    }
+  }
+}

@@ -312,6 +312,14 @@ describe("ThreadViewport", () => {
     expect(screen.getByTestId("thread-composer-dock")).toHaveClass("min-w-0");
   });
 
+  it("uses the shared content-column width for conversation messages", () => {
+    render(<ThreadViewport messages={messages} isStreaming={false} composer={<div>composer</div>} />);
+
+    expect(screen.getByTestId("thread-message-region").firstElementChild).toHaveClass(
+      "mx-auto", "w-full", "max-w-[var(--content-column-width)]",
+    );
+  });
+
   it("top-aligns a short active turn while the agent is responding", () => {
     render(
       <ThreadViewport
@@ -1459,6 +1467,7 @@ describe("ThreadViewport", () => {
 
   it("renders only the tail window for long history by default", () => {
     const longMessages = makeLongMessages(300);
+    const firstVisible = longMessages.length - INITIAL_HISTORY_WINDOW;
 
     render(
       <ThreadViewport
@@ -1468,8 +1477,8 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    expect(screen.queryByText("message 139")).not.toBeInTheDocument();
-    expect(screen.getByText("message 140")).toBeInTheDocument();
+    expect(screen.queryByText(`message ${firstVisible - 1}`)).not.toBeInTheDocument();
+    expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
     expect(screen.getByText("message 299")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
   });
@@ -1507,6 +1516,7 @@ describe("ThreadViewport", () => {
   });
 
   it("prefetches earlier history within half a viewport of the top", () => {
+    const expandedFirstVisible = 300 - INITIAL_HISTORY_WINDOW - HISTORY_WINDOW_INCREMENT;
     const { container } = render(
       <ThreadViewport
         messages={makeLongMessages(300)}
@@ -1525,14 +1535,16 @@ describe("ThreadViewport", () => {
     act(() => {
       dispatchUserScroll(scroller);
     });
-    expect(screen.queryByText("message 139")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(`message ${300 - INITIAL_HISTORY_WINDOW - 1}`),
+    ).not.toBeInTheDocument();
 
     scroller.scrollTop = 250;
     act(() => {
       dispatchUserScroll(scroller);
     });
-    expect(screen.getByText("message 20")).toBeInTheDocument();
-    expect(screen.queryByText("message 19")).not.toBeInTheDocument();
+    expect(screen.getByText(`message ${expandedFirstVisible}`)).toBeInTheDocument();
+    expect(screen.queryByText(`message ${expandedFirstVisible - 1}`)).not.toBeInTheDocument();
   });
 
   it("keeps the first visible history item fixed while deferred rows materialize", () => {
@@ -1560,7 +1572,8 @@ describe("ThreadViewport", () => {
         },
       });
 
-      const anchor = screen.getByText("message 140")
+      const firstVisible = 300 - INITIAL_HISTORY_WINDOW;
+      const anchor = screen.getByText(`message ${firstVisible}`)
         .closest<HTMLElement>("[data-thread-display-unit]");
       expect(anchor).not.toBeNull();
       hitTarget = anchor;
@@ -1825,6 +1838,39 @@ describe("ThreadViewport", () => {
     expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
   });
 
+  it.each([2, 3, 100])("keeps %i prompts navigable before a very long answer", async (count) => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockReturnValue("started");
+    const { promptEls, scroller } = await renderPromptRailViewport({
+      messages: makeLongMessages(count),
+    });
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1_000_000,
+    });
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", { configurable: true, value: index * 40 });
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    const markers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    if (count < 30) {
+      expect(markers).toHaveLength(count);
+      markers.forEach((marker, index) => {
+        fireEvent.click(marker);
+        expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, index * 40 - 16));
+      });
+    } else {
+      expect(markers.length).toBeGreaterThan(1);
+      expect(markers.length).toBeLessThan(count);
+    }
+    fireEvent.click(markers[markers.length - 1]);
+    expect(navigateTo).toHaveBeenLastCalledWith((count - 1) * 40 - 16);
+  });
+
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
       .mockReturnValue("started");
@@ -1878,15 +1924,16 @@ describe("ThreadViewport", () => {
 
   it("expands the window start to avoid cutting an agent activity cluster", () => {
     const clustered = makeLongMessages(200);
+    const boundary = clustered.length - INITIAL_HISTORY_WINDOW;
     clustered.splice(
-      38,
+      boundary - 2,
       3,
       {
         id: "r0",
         role: "assistant",
         content: "",
         reasoning: "first reasoning",
-        createdAt: 38,
+        createdAt: boundary - 2,
       },
       {
         id: "t0",
@@ -1894,14 +1941,14 @@ describe("ThreadViewport", () => {
         kind: "trace",
         content: "tool()",
         traces: ["tool()"],
-        createdAt: 39,
+        createdAt: boundary - 1,
       },
       {
         id: "r1",
         role: "assistant",
         content: "",
         reasoning: "second reasoning",
-        createdAt: 40,
+        createdAt: boundary,
       },
     );
 

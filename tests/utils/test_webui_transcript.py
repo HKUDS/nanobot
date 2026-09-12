@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event, Lock
+
+import pytest
 
 import nanobot.webui.transcript as transcript_module
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
+    TranscriptReplayStats,
     append_fork_marker,
     append_transcript_object,
     build_webui_thread_response,
+    build_webui_trace_detail_response,
     fork_transcript_before_user_index,
     read_transcript_lines,
     replay_transcript_to_ui_messages,
+    webui_transcript_revision,
     webui_transcript_segments_dir,
     write_session_messages_as_transcript,
 )
@@ -126,6 +134,283 @@ def test_segmented_transcript_paginates_latest_and_older_without_overlap(
     ]
 
 
+def test_missing_page_query_uses_bounded_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript._DEFAULT_TRANSCRIPT_PAGE_LIMIT", 4)
+    key = "websocket:bounded-default"
+    for idx in range(1, 5):
+        _append_numbered_turn(key, "bounded-default", idx)
+
+    latest = build_webui_thread_response(key)
+
+    assert latest is not None
+    assert _message_contents(latest) == _numbered_turn_texts(3, 4)
+    assert latest["page"]["has_more_before"] is True
+    assert latest["page"]["loaded_message_count"] == 4
+
+
+def test_large_trace_details_are_deferred_and_resolved(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:deferred-trace"
+    trace = f'exec({json.dumps({"command": "x" * 40_000})})'
+    for event in (
+        {"event": "user", "chat_id": "deferred-trace", "text": "run it"},
+        {
+            "event": "message",
+            "chat_id": "deferred-trace",
+            "kind": "progress",
+            "text": trace,
+        },
+        {"event": "message", "chat_id": "deferred-trace", "text": "done"},
+        {"event": "turn_end", "chat_id": "deferred-trace"},
+    ):
+        append_transcript_object(key, event)
+
+    payload = build_webui_thread_response(key, limit=40, direction="latest")
+
+    assert payload is not None
+    trace_message = next(message for message in payload["messages"] if message.get("kind") == "trace")
+    assert trace_message["content"] == "exec(…)"
+    assert trace_message["traces"] == ["exec(…)"]
+    assert trace_message["traceDetail"]["bytes"] > 32 * 1024
+    assert len(json.dumps(payload)) < len(trace)
+
+    detail = build_webui_trace_detail_response(key, trace_message["traceDetail"]["ref"])
+
+    assert detail == {
+        "message_id": trace_message["id"],
+        "content": trace,
+        "traces": [trace],
+    }
+
+
+@pytest.mark.parametrize(
+    ("delta_event", "end_event"),
+    [("reasoning_delta", "reasoning_end"), ("delta", "stream_end")],
+)
+def test_legacy_active_trace_details_match_compacted_page(
+    tmp_path, monkeypatch, delta_event: str, end_event: str,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:legacy-active-traces"
+    traces = [f'exec({json.dumps({"command": label * 40_000})})' for label in ("A", "B")]
+    rows = [
+        {"event": "user", "text": "run it"},
+        {"event": delta_event, "text": "first "},
+        {"event": delta_event, "text": "second"},
+        {"event": end_event},
+        {"event": "message", "kind": "progress", "text": traces[0]},
+        {"event": "message", "text": "between tools"},
+        {"event": "message", "kind": "progress", "text": traces[1]},
+        {"event": "message", "text": "done"},
+        {"event": "turn_end"},
+    ]
+    path = transcript_module.webui_transcript_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    original_bytes = path.read_bytes()
+
+    payload = build_webui_thread_response(key, limit=40, direction="latest")
+
+    assert payload is not None
+    messages = [message for message in payload["messages"] if message.get("kind") == "trace"]
+    assert len(messages) == 2
+    for message, trace in zip(messages, traces, strict=True):
+        detail = build_webui_trace_detail_response(key, message["traceDetail"]["ref"])
+        assert detail == {
+            "message_id": message["id"],
+            "content": trace,
+            "traces": [trace],
+        }
+    assert path.read_bytes() == original_bytes
+
+
+def test_large_structured_trace_error_is_bounded_and_resolved(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:deferred-trace-error"
+    full_error = "failure: " + "界" * 40_000
+    for event in (
+        {"event": "user", "chat_id": "deferred-trace-error", "text": "run it"},
+        {
+            "event": "message",
+            "chat_id": "deferred-trace-error",
+            "kind": "progress",
+            "text": 'exec({"command":"false"})',
+            "tool_events": [
+                {
+                    "phase": "error",
+                    "call_id": "call-exec",
+                    "name": "exec",
+                    "error": full_error,
+                }
+            ],
+        },
+        {"event": "message", "chat_id": "deferred-trace-error", "text": "done"},
+        {"event": "turn_end", "chat_id": "deferred-trace-error"},
+    ):
+        append_transcript_object(key, event)
+
+    payload = build_webui_thread_response(key, limit=40, direction="latest")
+
+    assert payload is not None
+    trace_message = next(message for message in payload["messages"] if message.get("kind") == "trace")
+    assert len(json.dumps(trace_message).encode("utf-8")) < 4_096
+    assert len(trace_message["toolEvents"][0]["error"].encode("utf-8")) <= 512
+
+    detail = build_webui_trace_detail_response(key, trace_message["traceDetail"]["ref"])
+
+    assert detail is not None
+    assert detail["toolEvents"][0]["error"] == full_error
+
+
+def test_many_short_trace_rows_are_bounded_and_resolved(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:deferred-many-traces"
+    trace_count = 2_000
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "deferred-many-traces", "text": "run many tools"},
+    )
+    for index in range(trace_count):
+        append_transcript_object(
+            key,
+            {
+                "event": "message",
+                "chat_id": "deferred-many-traces",
+                "kind": "progress",
+                "text": f"tool_{index}(value)",
+            },
+        )
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "deferred-many-traces", "text": "done"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "deferred-many-traces"})
+
+    payload = build_webui_thread_response(key, limit=40, direction="latest")
+
+    assert payload is not None
+    trace_message = next(message for message in payload["messages"] if message.get("kind") == "trace")
+    assert trace_message["traceDetail"]["traceCount"] == trace_count
+    assert len(trace_message["traces"]) <= 16
+    assert len(json.dumps(trace_message).encode("utf-8")) < 4_096
+
+    detail = build_webui_trace_detail_response(key, trace_message["traceDetail"]["ref"])
+
+    assert detail is not None
+    assert len(detail["traces"]) == trace_count
+    assert detail["traces"][0] == "tool_0(value)"
+    assert detail["traces"][-1] == f"tool_{trace_count - 1}(value)"
+
+
+def test_transcript_revision_tracks_artifacts_and_variants(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:revision"
+    append_transcript_object(key, {"event": "user", "chat_id": "revision", "text": "one"})
+
+    first = webui_transcript_revision(key, variant={"limit": 40})
+    same = webui_transcript_revision(key, variant={"limit": 40})
+    other_variant = webui_transcript_revision(key, variant={"limit": 80})
+    append_transcript_object(key, {"event": "message", "chat_id": "revision", "text": "two"})
+    changed = webui_transcript_revision(key, variant={"limit": 40})
+
+    assert first is not None
+    assert same == first
+    assert other_variant != first
+    assert changed != first
+
+
+def test_single_oversized_turn_is_bounded_and_marked(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_RECORDS", 5)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_BYTES", 1_200)
+    key = "websocket:oversized-turn"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "oversized-turn", "text": "question"},
+    )
+    for idx in range(20):
+        append_transcript_object(
+            key,
+            {
+                "event": "message",
+                "chat_id": "oversized-turn",
+                "kind": "progress",
+                "text": f"progress {idx} " + ("x" * 160),
+            },
+        )
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "oversized-turn", "text": "final answer"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "oversized-turn"})
+    stats = TranscriptReplayStats()
+
+    latest = build_webui_thread_response(key, stats=stats)
+
+    assert latest is not None
+    assert stats.selected_records <= 5
+    assert stats.selected_bytes <= 1_200
+    assert stats.capped_by_records is True
+    assert stats.capped_by_bytes is True
+    assert stats.truncated_oversized_turn is True
+    assert latest["page"]["truncated_oversized_turn"] is True
+    assert latest["messages"][0]["content"] == "question"
+    assert latest["messages"][-1]["content"] == "final answer"
+
+
+def test_truncated_turn_does_not_advertise_ambiguous_trace_detail(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_RECORDS", 6)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_BYTES", 1_000_000)
+    key = "websocket:truncated-trace-detail"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "truncated-trace-detail", "text": "question"},
+    )
+    for prefix in ("first", "second"):
+        for idx in range(4):
+            append_transcript_object(
+                key,
+                {
+                    "event": "message",
+                    "chat_id": "truncated-trace-detail",
+                    "kind": "progress",
+                    "text": f"{prefix}_{idx}({('x' * 12_000)})",
+                },
+            )
+        if prefix == "first":
+            append_transcript_object(
+                key,
+                {
+                    "event": "message",
+                    "chat_id": "truncated-trace-detail",
+                    "text": "intermediate",
+                },
+            )
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "truncated-trace-detail", "text": "done"},
+    )
+    append_transcript_object(
+        key,
+        {"event": "turn_end", "chat_id": "truncated-trace-detail"},
+    )
+
+    payload = build_webui_thread_response(key, limit=40, direction="latest")
+
+    assert payload is not None
+    assert payload["page"]["truncated_oversized_turn"] is True
+    trace_message = next(message for message in payload["messages"] if message.get("kind") == "trace")
+    assert trace_message["content"] == "second_3(…)"
+    assert all(trace.startswith("second_") for trace in trace_message["traces"])
+    assert "traceDetail" not in trace_message
+    assert len(json.dumps(trace_message).encode("utf-8")) < 4_096
+
+
 def test_latest_page_reads_active_chunk_once(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:single-active-read"
@@ -198,6 +483,83 @@ def test_segment_manifest_can_be_rebuilt_when_missing_or_corrupt(tmp_path, monke
 
     assert len([line for line in lines if line.get("event") == "user"]) == 4
     assert manifest.read_text(encoding="utf-8").lstrip().startswith("{")
+
+
+def test_manifest_repair_is_single_flight(tmp_path, monkeypatch) -> None:
+    key = "websocket:manifest-single-flight"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "manifest-single-flight", 4)
+    manifest = webui_transcript_segments_dir(key) / "manifest.json"
+    manifest.write_text("{not json", encoding="utf-8")
+    original = transcript_module._rebuild_segment_manifest
+    rebuild_started = Event()
+    release_rebuild = Event()
+    calls = 0
+    calls_lock = Lock()
+
+    def slow_rebuild(*args, **kwargs):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        rebuild_started.set()
+        assert release_rebuild.wait(2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(transcript_module, "_rebuild_segment_manifest", slow_rebuild)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(transcript_module._read_segment_manifest_entries, key)
+        assert rebuild_started.wait(2)
+        second = executor.submit(transcript_module._read_segment_manifest_entries, key)
+        release_rebuild.set()
+        assert first.result(timeout=2) == second.result(timeout=2)
+
+    assert calls == 1
+
+
+def test_page_read_compacts_legacy_immutable_segment(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:compact-segment"
+    segment_id = "000001"
+    rows = [
+        {"event": "user", "chat_id": "compact-segment", "text": "q"},
+        {
+            "event": "delta",
+            "chat_id": "compact-segment",
+            "stream_id": "answer-1",
+            "text": "answer ",
+        },
+        {
+            "event": "delta",
+            "chat_id": "compact-segment",
+            "stream_id": "answer-1",
+            "text": "done",
+        },
+        {
+            "event": "stream_end",
+            "chat_id": "compact-segment",
+            "stream_id": "answer-1",
+        },
+        {"event": "turn_end", "chat_id": "compact-segment"},
+    ]
+    segment_path = transcript_module._segment_file_path(key, segment_id)
+    transcript_module._write_records_to_path(segment_path, rows)
+    transcript_module._write_segment_manifest(
+        key,
+        [transcript_module._segment_manifest_entry(key, segment_id)],
+    )
+    stats = TranscriptReplayStats()
+
+    latest = build_webui_thread_response(key, stats=stats)
+    persisted = transcript_module._read_transcript_file(segment_path)
+
+    assert latest is not None
+    assert _message_contents(latest) == ["q", "answer done"]
+    assert [record["event"] for record in persisted] == [
+        "user",
+        "stream_end",
+        "turn_end",
+    ]
+    assert stats.compacted_delta_records == 2
+    assert transcript_module._load_segment_manifest_entries(key) is not None
 
 
 def test_rotation_does_not_reread_existing_segments(tmp_path, monkeypatch) -> None:
@@ -393,6 +755,33 @@ def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:
     assert msgs[1]["content"] == "a"
     assert msgs[1]["reasoning"] == "think"
     assert msgs[1]["latencyMs"] == 42
+
+
+def test_completed_turn_persists_canonical_stream_end_text(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:compact-deltas"
+    for event in (
+        {"event": "user", "chat_id": "compact-deltas", "text": "q"},
+        {"event": "reasoning_delta", "chat_id": "compact-deltas", "text": "think "},
+        {"event": "reasoning_delta", "chat_id": "compact-deltas", "text": "more"},
+        {"event": "reasoning_end", "chat_id": "compact-deltas"},
+        {"event": "delta", "chat_id": "compact-deltas", "text": "answer "},
+        {"event": "delta", "chat_id": "compact-deltas", "text": "done"},
+        {"event": "stream_end", "chat_id": "compact-deltas"},
+        {"event": "turn_end", "chat_id": "compact-deltas"},
+    ):
+        append_transcript_object(key, event)
+
+    lines = read_transcript_lines(key)
+
+    assert [record["event"] for record in lines] == [
+        "user",
+        "reasoning_end",
+        "stream_end",
+        "turn_end",
+    ]
+    assert lines[1]["text"] == "think more"
+    assert lines[2]["text"] == "answer done"
 
 
 def test_replay_canonical_completed_stream_records() -> None:
@@ -1698,6 +2087,34 @@ def test_replay_merges_length_recovery_segments_into_one_assistant_message() -> 
     assert len(msgs) == 1
     assert msgs[0]["role"] == "assistant"
     assert msgs[0]["content"] == "first second"
+
+
+@pytest.mark.parametrize("event", ["delta", "stream_end"])
+def test_replay_recovery_answer_does_not_overwrite_an_unfinished_turn(event: str) -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {
+            "event": "stream_end", "text": "Original answer", "turn_id": "original",
+            "resuming": True, "merge_next": True,
+        },
+        {"event": event, "text": "Recovered answer", "turn_id": "recovery"},
+        {"event": "turn_end", "turn_id": "recovery"},
+    ])
+
+    assert [(m["turnId"], m["content"]) for m in msgs] == [
+        ("original", "Original answer"), ("recovery", "Recovered answer"),
+    ]
+
+
+def test_replay_reasoning_after_an_ordinary_answer_preserves_the_answer_boundary() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {"event": "delta", "text": "First answer"},
+        {"event": "reasoning_end", "text": "Consider the next answer"},
+        {"event": "stream_end", "text": "Next answer"},
+        {"event": "turn_end"},
+    ])
+
+    assert [m["content"] for m in msgs] == ["First answer", "Next answer"]
+    assert msgs[1]["reasoning"] == "Consider the next answer"
 
 
 def test_replay_tool_events_dedupes_finish_after_start() -> None:

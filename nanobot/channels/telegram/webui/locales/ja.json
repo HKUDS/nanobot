@@ -1,21 +1,11 @@
 {
-  "description": "Telegram のチャットから nanobot と会話します。",
-  "requirements": "ボットトークン、許可するユーザー、ゲートウェイ",
   "setup": {
     "docsLabel": "Telegram 設定ガイドを開く",
     "officialLabel": "BotFather を開く",
-    "tryIt": "Telegram ボットに /start または短い DM を送信します。",
-    "summary": "有効化すると Telegram 対応がオンになります。メッセージの送受信には BotFather トークンが必要です。",
-    "steps": [
-      "BotFather でボットを作成し、トークンをコピーします。",
-      "トークンを追加し、ボットに連絡できるユーザーを選びます。",
-      "保存して Telegram を有効にし、DM を送るかグループでメンションします。"
-    ],
     "fields": {
       "token": {
         "label": "ボットトークン",
-        "placeholder": "123456:ABC...",
-        "help": "BotFather で作成します。"
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "ネットワークプロキシ",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "許可するユーザー",
-        "placeholder": "* または Telegram ユーザー ID",
-        "help": "ペアリングコードを使う場合は空欄にします。"
+        "placeholder": "* または Telegram ユーザー ID"
       },
       "technical_profileName": {"label": "通知プロファイル名", "help": "送信専用の追加プロファイルです。"},
       "technical_mainChatId": {"label": "所有者のユーザーID", "help": "個人の数値ID。許可リストにはこのIDのみを指定します。"},
@@ -41,6 +30,71 @@
           "open": "すべてのメッセージ",
           "allowlist": "許可リスト"
         }
+      },
+      "mode": {
+        "label": "接続モード",
+        "choices": {
+          "polling": "ロングポーリング",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "メッセージに返信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "reactEmoji": {
+        "label": "絵文字を読む"
+      },
+      "connectionPoolSize": {
+        "label": "接続プールのサイズ"
+      },
+      "poolTimeout": {
+        "label": "接続プールのタイムアウト"
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "インラインキーボード",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "richMessages": {
+        "label": "リッチメッセージ",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "streamEditInterval": {
+        "label": "ストリーム更新間隔"
+      },
+      "webhookUrl": {
+        "label": "Webhook URL"
+      },
+      "webhookListenHost": {
+        "label": "Webhook リッスン ホスト"
+      },
+      "webhookListenPort": {
+        "label": "Webhook リッスン ポート"
+      },
+      "webhookPath": {
+        "label": "Webhook パス"
+      },
+      "webhookSecretToken": {
+        "label": "Webhook シークレット トークン"
+      },
+      "webhookMaxConnections": {
+        "label": "Webhook 接続の最大数"
       }
     }
   }

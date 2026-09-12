@@ -90,7 +90,7 @@ async def test_provider_can_emit_without_an_event_specific_runner_callback():
         return LLMResponse(content="done")
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = request
+    provider.chat_stream_with_retry = request
     tools = MagicMock()
     tools.get_definitions.return_value = []
     await AgentRunner().run(make_run_spec(
@@ -106,7 +106,7 @@ async def test_runner_propagates_context_governance_failure():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock()
+    provider.chat_stream_with_retry = AsyncMock()
     tools = MagicMock()
     tools.get_definitions.return_value = []
     initial_messages = [
@@ -127,7 +127,7 @@ async def test_runner_propagates_context_governance_failure():
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         ))
 
-    provider.chat_with_retry.assert_not_awaited()
+    provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -135,7 +135,7 @@ async def test_runner_locally_fits_oversized_initial_transcript(monkeypatch):
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
     tools = MagicMock()
     tools.get_definitions.return_value = []
     old_content = "x" * 20_000
@@ -167,7 +167,7 @@ async def test_runner_locally_fits_oversized_initial_transcript(monkeypatch):
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_args.kwargs["messages"] == [
+    assert provider.chat_stream_with_retry.await_args.kwargs["messages"] == [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "continue"},
     ]
@@ -203,7 +203,7 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
         requests.append((messages, provider_context))
         return LLMResponse(content="done", provider_state=candidate_state)
 
-    provider.chat_with_retry = request
+    provider.chat_stream_with_retry = request
     tools = MagicMock()
     tools.get_definitions.return_value = []
     old_answer = "old answer " * 2_000
@@ -263,7 +263,7 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
 
 async def test_runner_rejects_oversized_delta_without_summarizable_history(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock()
+    provider.chat_stream_with_retry = AsyncMock()
     tools = MagicMock()
     tools.get_definitions.return_value = []
     monkeypatch.setattr(
@@ -294,13 +294,13 @@ async def test_runner_rejects_oversized_delta_without_summarizable_history(monke
         [{"role": "system", "content": "system"}],
         None,
     )
-    provider.chat_with_retry.assert_not_awaited()
+    provider.chat_stream_with_retry.assert_not_awaited()
 
 
 async def test_runner_governs_history_before_summarizing_it(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = False
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
     tools = MagicMock()
     tools.get_definitions.return_value = []
     monkeypatch.setattr(
@@ -375,7 +375,7 @@ async def test_native_compaction_uses_provider_request_boundary(
         version=1,
         payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
     )
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content=None,
             tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
@@ -457,7 +457,7 @@ async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
         requests.append(messages)
         return responses.pop(0)
 
-    provider.chat_with_retry = request
+    provider.chat_stream_with_retry = request
     tools = MagicMock()
     tools.get_definitions.return_value = []
     full_result = "tool-result:" + ("x" * 4_000)
@@ -511,7 +511,7 @@ async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
 async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = False
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content=None,
             tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
@@ -584,7 +584,7 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
 
 async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
     tools = MagicMock()
     tools.get_definitions.return_value = []
     old_answer = "old answer"
@@ -622,7 +622,7 @@ async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch)
 
     summarized = consolidate.await_args.args[0]
     assert all(message.get("content") != current_input for message in summarized)
-    provider.chat_with_retry.assert_not_awaited()
+    provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -631,7 +631,7 @@ async def test_runner_governs_messages_added_by_before_iteration_hook(monkeypatc
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
     tools = MagicMock()
     tools.get_definitions.return_value = []
     oversized = "hook-added-oversized-message"
@@ -662,7 +662,7 @@ async def test_runner_governs_messages_added_by_before_iteration_hook(monkeypatc
             hook=MutatingHook(),
         ))
 
-    provider.chat_with_retry.assert_not_awaited()
+    provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -681,7 +681,7 @@ async def test_runner_drops_resumable_provider_state_when_request_is_fitted(monk
         payload={"items": [{"type": "message", "content": "fresh state"}]},
     )
 
-    async def chat_with_retry(*, provider_context=None, **_kwargs):
+    async def chat_stream_with_retry(*, provider_context=None, **_kwargs):
         captured_contexts.append(provider_context)
         return LLMResponse(
             content="done",
@@ -689,7 +689,7 @@ async def test_runner_drops_resumable_provider_state_when_request_is_fitted(monk
             provider_state=candidate,
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     monkeypatch.setattr(
@@ -741,7 +741,7 @@ async def test_runner_fits_each_malformed_retry_with_its_actual_tools(monkeypatc
     estimated_tools: list[object] = []
     definitions = [{"type": "function", "function": {"name": "read_file"}}]
 
-    async def chat_with_retry(*, messages, tools=None, **_kwargs):
+    async def chat_stream_with_retry(*, messages, tools=None, **_kwargs):
         calls.append({"messages": [dict(message) for message in messages], "tools": tools})
         if len(calls) < 3:
             return LLMResponse(
@@ -760,7 +760,7 @@ async def test_runner_fits_each_malformed_retry_with_its_actual_tools(monkeypatc
         user_count = sum(message.get("role") == "user" for message in messages)
         return (600 if user_count > 1 else 100), "test-counter"
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = definitions
     monkeypatch.setattr(
@@ -807,7 +807,7 @@ async def test_runner_fits_empty_response_finalization_before_dispatch(monkeypat
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
-    async def chat_with_retry(*, messages, tools=None, **_kwargs):
+    async def chat_stream_with_retry(*, messages, tools=None, **_kwargs):
         calls.append({"messages": [dict(message) for message in messages], "tools": tools})
         if len(calls) < 3:
             return LLMResponse(
@@ -825,7 +825,7 @@ async def test_runner_fits_empty_response_finalization_before_dispatch(monkeypat
         has_finalization = any("conversation above" in content for content in contents)
         return (600 if has_original and has_finalization else 100), "test-counter"
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     monkeypatch.setattr(
@@ -862,7 +862,7 @@ async def test_runner_fits_max_iteration_finalization_before_dispatch(monkeypatc
     calls: list[dict] = []
     oversized_result = "oversized-current-tool-result"
 
-    async def chat_with_retry(*, messages, tools=None, **_kwargs):
+    async def chat_stream_with_retry(*, messages, tools=None, **_kwargs):
         calls.append({"messages": [dict(message) for message in messages], "tools": tools})
         if len(calls) == 1:
             return LLMResponse(
@@ -882,7 +882,7 @@ async def test_runner_fits_max_iteration_finalization_before_dispatch(monkeypatc
         )
         return (600 if has_oversized else 100), "test-counter"
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value=oversized_result)
@@ -1047,14 +1047,14 @@ async def test_runner_counts_resumed_provider_state_before_dispatch(monkeypatch)
     provider.can_resume_conversation_state.return_value = True
     captured_contexts = []
 
-    async def chat_with_retry(*, provider_context=None, **_kwargs):
+    async def chat_stream_with_retry(*, provider_context=None, **_kwargs):
         captured_contexts.append(provider_context)
         return LLMResponse(
             content="done",
             usage=LLMUsage.reported(input_tokens=100, output_tokens=10),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     current_message = {"role": "user", "content": "new delta"}
@@ -1110,7 +1110,7 @@ async def test_runner_refuses_locally_fitted_request_that_still_cannot_fit(
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
     tools = MagicMock()
     tools.get_definitions.return_value = []
     monkeypatch.setattr(
@@ -1135,7 +1135,7 @@ async def test_runner_refuses_locally_fitted_request_that_still_cannot_fit(
 
     assert exc_info.value.estimated_tokens == 2_000
     assert exc_info.value.input_budget == expected_budget
-    provider.chat_with_retry.assert_not_awaited()
+    provider.chat_stream_with_retry.assert_not_awaited()
 
 
 def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch):
@@ -1328,11 +1328,11 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
     provider = MagicMock()
     captured_messages: list[dict] = []
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         captured_messages[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -1370,7 +1370,6 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     response = LLMResponse(content="new answer", tool_calls=[], usage=None)
-    provider.chat_with_retry = AsyncMock(return_value=response)
     provider.chat_stream_with_retry = AsyncMock(return_value=response)
 
     loop = AgentLoop(
@@ -1407,7 +1406,7 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
     assert result is not None
     assert result.content == "new answer"
 
-    request_messages = provider.chat_with_retry.await_args.kwargs["messages"]
+    request_messages = provider.chat_stream_with_retry.await_args.kwargs["messages"]
     synthetic = [
         message
         for message in request_messages
@@ -1451,11 +1450,11 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
     provider = MagicMock()
     captured_messages: list[dict] = []
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         captured_messages[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 

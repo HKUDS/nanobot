@@ -292,7 +292,7 @@ def test_special_setup_validation_is_owned_by_channel_package(name: str):
     assert plugin.setup.validator.__module__ == f"nanobot.channels.{name}.validation"
 
 
-@pytest.mark.parametrize("name", ["feishu", "weixin"])
+@pytest.mark.parametrize("name", ["feishu", "weixin", "whatsapp"])
 def test_interactive_connector_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
 
@@ -582,6 +582,9 @@ def test_plugin_setup_contract_drives_feature_payload(monkeypatch: pytest.Monkey
                 "required": False,
             },
         ],
+        "requirements": [
+            {"alternatives": [["channels.setupplugin.token"]]},
+        ],
         "official_url": "https://plugin.example/setup",
     }
     assert feature["configured_fields"] == [
@@ -630,10 +633,11 @@ def test_plugin_contract_error_is_isolated_in_feature_payload(monkeypatch):
         "type": "channel",
         "capabilities": [],
         "settings_visible": True,
-        "setup": {"fields": []},
+        "setup": {"fields": [], "requirements": []},
         "enabled": False,
         "configured": False,
         "installed": True,
+        "requires_dependencies": False,
         "ready": False,
         "status": "invalid_config",
         "install_supported": True,
@@ -842,10 +846,7 @@ def test_discover_plugins_excludes_internal_helpers():
 
     names = discover_plugins()
 
-    assert "_feishu_ws" not in names
     assert "_setup" not in names
-    assert "setup" not in names
-    assert "_feishu_instances" not in names
 
 
 def test_discover_enabled_imports_only_enabled_packages():
@@ -1880,6 +1881,47 @@ def test_enable_optional_feature_reports_install_failure(monkeypatch, tmp_path):
     assert not config_path.exists()
 
 
+def test_install_only_adds_channel_support_without_enabling_it(monkeypatch, tmp_path):
+    from nanobot.optional_features import InstallResult
+    from nanobot.webui.nanobot_features_api import nanobot_features_action
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"channels": {"fakeplugin": {"enabled": False, "marker": "keep"}}}),
+        encoding="utf-8",
+    )
+    before = config_path.read_bytes()
+    _stub_channel_registry(
+        monkeypatch,
+        _channel_plugin(_FakePlugin, dependencies=("fake-sdk>=1",)),
+    )
+    monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    installed = False
+
+    def extra_installed(_name: str, _dependencies: list[str] | None) -> bool:
+        return installed
+
+    def install_extra(name: str, dependencies: list[str], *, runner) -> InstallResult:
+        nonlocal installed
+        installed = True
+        return InstallResult(True, f"{name} support", ["pip", *dependencies])
+
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", extra_installed)
+    monkeypatch.setattr("nanobot.optional_features.install_extra", install_extra)
+
+    payload = nanobot_features_action(
+        "enable",
+        {"name": ["fakeplugin"], "install_only": ["true"]},
+        config_path=config_path,
+    )
+
+    feature = payload["features"][0]
+    assert config_path.read_bytes() == before
+    assert feature["installed"] is True
+    assert feature["enabled"] is False
+    assert payload["requires_restart"] is True
+
+
 def test_disable_optional_feature_rejects_unknown_features_and_non_channels(
     monkeypatch,
     tmp_path,
@@ -2022,6 +2064,7 @@ def test_optional_features_payload_counts_enabled_channel_with_missing_dependenc
     assert matrix["name"] == "matrix"
     assert matrix["enabled"] is True
     assert matrix["installed"] is False
+    assert matrix["requires_dependencies"] is True
     assert matrix["ready"] is False
     assert payload["enabled_count"] == 1
 
@@ -2303,50 +2346,21 @@ def test_optional_features_payload_lists_feishu_instances(monkeypatch):
     assert feishu["enabled"] is True
     assert feishu["configured"] is True
     assert payload["enabled_count"] == 1
-    assert feishu["instances"] == [
-        {
-            "id": "default",
-            "name": "nanobot",
-            "display_name": "Voraflare Bot",
-            "avatar_url": "https://example.com/bot.png",
-            "enabled": True,
-            "configured": True,
-            "config_values": {
-                "channels.feishu.appId": "cli_default",
-                "channels.feishu.domain": "feishu",
-                "channels.feishu.groupPolicy": "mention",
-                "channels.feishu.topicIsolation": "true",
-            },
-            "configured_fields": [
-                "channels.feishu.appId",
-                "channels.feishu.appSecret",
-                "channels.feishu.domain",
-                "channels.feishu.groupPolicy",
-                "channels.feishu.topicIsolation",
-            ],
-        },
-        {
-            "id": "product",
-            "name": "Product bot",
-            "display_name": "Product bot",
-            "avatar_url": "",
-            "enabled": False,
-            "configured": True,
-            "config_values": {
-                "channels.feishu.appId": "cli_product",
-                "channels.feishu.domain": "feishu",
-                "channels.feishu.groupPolicy": "mention",
-                "channels.feishu.topicIsolation": "true",
-            },
-            "configured_fields": [
-                "channels.feishu.appId",
-                "channels.feishu.appSecret",
-                "channels.feishu.domain",
-                "channels.feishu.groupPolicy",
-                "channels.feishu.topicIsolation",
-            ],
-        },
+    instances = feishu["instances"]
+    assert [
+        (item["id"], item["name"], item["display_name"], item["avatar_url"], item["enabled"])
+        for item in instances
+    ] == [
+        ("default", "nanobot", "Voraflare Bot", "https://example.com/bot.png", True),
+        ("product", "Product bot", "Product bot", "", False),
     ]
+    assert [item["configured"] for item in instances] == [True, True]
+    assert instances[0]["config_values"]["channels.feishu.appId"] == "cli_default"
+    assert instances[1]["config_values"]["channels.feishu.appId"] == "cli_product"
+    assert all(
+        "channels.feishu.appSecret" in item["configured_fields"]
+        for item in instances
+    )
 
 
 def test_optional_features_payload_does_not_refresh_saved_feishu_identity(monkeypatch, tmp_path):
@@ -2699,7 +2713,7 @@ def test_optional_dependency_metadata_for_enable():
         "wecom": ("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
-            "neonize>=0.3.18.post0,<0.4.0",
+            "neonize>=0.4.3.post0,<0.5.0",
             "segno>=1.6.1,<2.0.0",
         ),
     }

@@ -1429,14 +1429,12 @@ def delete_model_configuration(config: Config, query: QueryParams) -> None:
     if name not in config.model_presets:
         raise WebUISettingsError("unknown model configuration")
     defaults = config.agents.defaults
-    referenced = defaults.model_preset == name or any(
-        fallback == name for fallback in defaults.fallback_models
-    )
-    if referenced:
+    if defaults.model_preset == name:
         raise WebUISettingsError(
-            "remove the model preset from the call order first",
+            "the primary model preset cannot be deleted",
             status=409,
         )
+    defaults.fallback_models = [fallback for fallback in defaults.fallback_models if fallback != name]
     del config.model_presets[name]
 
 

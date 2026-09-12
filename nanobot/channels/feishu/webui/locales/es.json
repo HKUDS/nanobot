@@ -1,17 +1,8 @@
 {
-  "description": "Usa nanobot en chats y grupos de Feishu.",
-  "requirements": "Credenciales de Feishu, suscripción a eventos y gateway",
   "setup": {
     "primaryAction": "Conectar Feishu",
     "docsLabel": "Abrir guía de Feishu",
     "officialLabel": "Abrir consola de Feishu",
-    "tryIt": "Envía un DM o menciona al asistente en un grupo.",
-    "summary": "La conexión crea o vincula una app de Feishu por QR y guarda sus credenciales.",
-    "steps": [
-      "Haz clic en Conectar y escanea el QR con Feishu o Lark.",
-      "Aprueba la conexión. nanobot guarda el App ID y el Secret automáticamente.",
-      "Envía un DM al bot o menciónalo en un grupo de Feishu."
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
@@ -19,8 +10,7 @@
       },
       "appSecret": {
         "label": "App Secret",
-        "placeholder": "Déjalo vacío para conservar el secreto",
-        "help": "Pega uno nuevo solo al rotar credenciales."
+        "placeholder": "Déjalo vacío para conservar el secreto"
       },
       "domain": {
         "label": "Región",
@@ -34,7 +24,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       },
       "allowFrom": {
@@ -47,21 +37,45 @@
           "true": "Una sesión separada por tema",
           "false": "Una sesión compartida para el grupo"
         }
+      },
+      "name": {
+        "label": "Nombre de cuenta"
+      },
+      "encryptKey": {
+        "label": "Clave de cifrado"
+      },
+      "verificationToken": {
+        "label": "Token de verificación"
+      },
+      "reactEmoji": {
+        "label": "Leer emojis"
+      },
+      "doneEmoji": {
+        "label": "emoji hecho"
+      },
+      "toolHintPrefix": {
+        "label": "Prefijo de sugerencia de herramienta"
+      },
+      "replyToMessage": {
+        "label": "Responder al mensaje",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "streaming": {
+        "label": "Transmisión",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
       }
     }
   },
   "custom": {
-    "toggleAssistant": "Asistente {{name}}",
+    "toggleAssistant": "Activar el asistente {{name}}",
     "configured": "Conectado",
     "needsSetup": "Necesita autorización",
-    "noAppId": "Sin App ID",
-    "createAnother": "Crear otro asistente",
-    "createHint": "Crea un bot Feishu independiente para otro equipo o flujo.",
-    "createAssistant": "Crear asistente",
-    "reconnect": "Reconectar",
-    "countNone": "Ningún asistente conectado",
-    "countOne": "1 asistente conectado",
-    "countMany": "{{count}} asistentes conectados",
     "qrAlt": "Código QR de conexión de Feishu",
     "scanTitle": "Escanea con Feishu",
     "scanDescription": "Escanea con Feishu o Lark en tu teléfono. nanobot completará la configuración tras la autorización.",

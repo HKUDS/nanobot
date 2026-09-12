@@ -49,7 +49,11 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
-from nanobot.webui.outbound_wire import WebUIWirePayload, WebUIWirePersistence
+from nanobot.webui.outbound_wire import (
+    WebUIWirePayload,
+    WebUIWirePersistence,
+    project_tool_events,
+)
 from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
@@ -809,6 +813,9 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        **({"terminal": {
+                            "protocolVersion": 1, "gatewayId": self.gateway.tokens.instance_id,
+                        }} if _query_first(query, "terminal_protocol") == "1" else {}),
                     },
                     ensure_ascii=False,
                 )
@@ -1198,7 +1205,7 @@ class WebSocketChannel(BaseChannel):
         if isinstance(lat, (int, float)):
             payload["latency_ms"] = int(lat)
         if progress_event and progress_event.tool_events:
-            payload["tool_events"] = progress_event.tool_events
+            payload["tool_events"] = project_tool_events(progress_event.tool_events)
         agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
         if agent_ui is not None:
             payload["agent_ui"] = agent_ui

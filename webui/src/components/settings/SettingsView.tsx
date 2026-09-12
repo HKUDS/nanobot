@@ -1,11 +1,12 @@
 import { SettingsPage } from "@/components/settings/SettingsPage";
-import type { SettingsSectionKey } from "@/components/settings/contracts";
+import type { SettingsExitGuard, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
 import type { SettingsPayload, SkillSummary } from "@/lib/types";
 
 export type { SettingsSectionKey } from "@/components/settings/contracts";
 
 interface SettingsViewProps {
+  registerExitGuard?: (guard: SettingsExitGuard | null) => void;
   theme: "light" | "dark";
   initialSection?: SettingsSectionKey;
   initialSettings?: SettingsPayload | null;
@@ -15,6 +16,7 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   skills?: SkillSummary[];
+  titleOverrides?: Record<string, string>;
   onSectionChange?: (section: SettingsSectionKey) => void;
   onLogout?: () => void;
   onRestart?: () => void;
@@ -24,6 +26,7 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({
+  registerExitGuard,
   theme,
   initialSection = "overview",
   initialSettings = null,
@@ -33,6 +36,7 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   skills = [],
+  titleOverrides,
   onSectionChange,
   onLogout,
   onRestart,
@@ -52,12 +56,14 @@ export function SettingsView({
 
   return (
     <SettingsPage
+      registerExitGuard={registerExitGuard}
       controller={controller}
       theme={theme}
       showSidebar={showSidebar}
       onToggleTheme={onToggleTheme}
       onBackToChat={onBackToChat}
       skills={skills}
+      titleOverrides={titleOverrides}
       onLogout={onLogout}
       isRestarting={isRestarting}
       hostChromeInset={hostChromeInset}

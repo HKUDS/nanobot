@@ -60,6 +60,12 @@ class WebUIGatewayEndpoint:
         got, query = parse_request_path(request.path)
         expected_ws = normalize_config_path(self._config.path)
         if got == expected_ws and is_websocket_upgrade(request):
+            terminal_version = query_first(query, "terminal_protocol")
+            if terminal_version is not None and (
+                terminal_version != "1"
+                or query_first(query, "terminal_instance") != self._tokens.instance_id
+            ):
+                return connection.respond(409, "Terminal instance or protocol changed")
             client_id = query_first(query, "client_id") or ""
             if len(client_id) > 128:
                 client_id = client_id[:128]

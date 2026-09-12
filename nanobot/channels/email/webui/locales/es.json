@@ -1,26 +1,21 @@
 {
-  "description": "Permite que nanobot reciba y responda correos.",
-  "requirements": "Bandeja IMAP, envío SMTP, contraseña de app y consentimiento explícito",
+  "displayName": "Correo electrónico",
   "setup": {
     "docsLabel": "Abrir guía de Email",
     "officialLabel": "Abrir guía de contraseñas de app",
-    "tryIt": "Envía un correo de prueba al buzón conectado.",
-    "summary": "Email lee mensajes por IMAP y responde por SMTP. Usa un buzón dedicado y da tu consentimiento antes de activarlo.",
-    "steps": [
-      "Crea un buzón dedicado y, si hace falta, una contraseña de app.",
-      "Elige un proveedor o introduce manualmente IMAP y SMTP.",
-      "Da tu consentimiento, guarda y activa Email; después envía un mensaje de prueba."
-    ],
+    "presetLabel": "Relleno rápido",
+    "sections": {
+      "receiving": "Recepción de correo",
+      "sending": "Envío de correo"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Personalizado"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {
-        "label": "Consentimiento concedido",
-        "help": "Control de seguridad obligatorio. Déjalo desactivado hasta decidir conectar este buzón al bot.",
+        "label": "Permitir que nanobot lea y envíe correos",
         "choices": {
           "true": "Concedido",
           "false": "No concedido"
@@ -36,8 +31,7 @@
       },
       "imapPassword": {
         "label": "Contraseña IMAP",
-        "placeholder": "Contraseña de app",
-        "help": "Usa una contraseña de app si el proveedor la exige."
+        "placeholder": "Contraseña de app"
       },
       "smtpHost": {
         "label": "Host SMTP",
@@ -49,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "Contraseña SMTP",
-        "placeholder": "Contraseña de app",
-        "help": "Normalmente es la misma que para IMAP."
+        "placeholder": "Contraseña de app"
       },
       "imapPort": {
         "label": "Puerto IMAP",
@@ -65,13 +58,12 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Intervalo de consulta",
+        "label": "Intervalo de consulta del correo (segundos)",
         "placeholder": "30"
       },
       "allowFrom": {
         "label": "Remitentes permitidos",
-        "placeholder": "Correos separados por comas",
-        "help": "Déjalo vacío para exigir vinculación previa."
+        "placeholder": "Correos separados por comas"
       },
       "verifyDkim": {
         "label": "Verificar DKIM",
@@ -86,6 +78,83 @@
           "true": "Activado",
           "false": "Desactivado"
         }
+      },
+      "imapMailbox": {
+        "label": "buzón IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS SMTP",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL SMTP",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Respuestas automáticas",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "markSeen": {
+        "label": "Marcar como leído",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "postAction": {
+        "label": "Después del procesamiento",
+        "choices": {
+          "delete": "Eliminar",
+          "move": "Mover"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Mover al buzón"
+      },
+      "postActionExpunge": {
+        "label": "Aplicar permanentemente la acción",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignorar mensajes omitidos",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Longitud máxima del cuerpo"
+      },
+      "subjectPrefix": {
+        "label": "Prefijo del asunto de respuesta"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Tipos de archivos adjuntos permitidos"
+      },
+      "maxAttachmentSize": {
+        "label": "Tamaño máximo de archivo adjunto"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Archivos adjuntos máximos"
       }
     }
   }

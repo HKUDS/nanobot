@@ -84,7 +84,6 @@ class TestBuildDreamPrompt:
         assert result is not None
         prompt, _ = result
         assert prompt.startswith("Custom Dream prompt.")
-        assert "memory consolidation engine" not in prompt
         assert "## Conversation History" in prompt
         assert "keep this fact" in prompt
 
@@ -111,7 +110,7 @@ class TestBuildDreamPrompt:
 
         assert result is not None
         prompt, _ = result
-        assert "memory consolidation engine" in prompt
+        assert prompt.startswith(store.default_dream_prompt() + "\n\n## Conversation History\n")
 
     def test_truncates_long_entries_at_1000_chars(self, store):
         long_content = "x" * 2000
@@ -397,7 +396,7 @@ class TestEphemeralDirect:
         provider.get_default_model.return_value = "test-model"
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
-        provider.chat_with_retry = AsyncMock(
+        provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage=None)
         )
 
@@ -450,7 +449,7 @@ class TestEphemeralDirect:
 
         assert response is not None
         assert response.content == "done"
-        loop.provider.chat_with_retry.assert_awaited()
+        loop.provider.chat_stream_with_retry.assert_awaited()
 
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
         """Verify that ephemeral=True is forwarded to TurnContext."""
@@ -494,7 +493,7 @@ class TestEphemeralDirect:
 
     async def test_ephemeral_response_reports_stop_reason(self, tmp_path, _make_loop):
         loop, store = _make_loop
-        loop.provider.chat_with_retry.return_value = LLMResponse(
+        loop.provider.chat_stream_with_retry.return_value = LLMResponse(
             content="provider error",
             finish_reason="error",
         )
@@ -514,7 +513,7 @@ class TestEphemeralDirect:
         from nanobot.providers.base import ToolCallRequest
 
         loop, store = _make_loop
-        loop.provider.chat_with_retry = AsyncMock(side_effect=[
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
             LLMResponse(
                 content="trying an edit",
                 finish_reason="tool_calls",
@@ -542,7 +541,7 @@ class TestEphemeralDirect:
         assert resp is not None
         assert resp.metadata["_stop_reason"] == "completed"
         assert MemoryStore.dream_run_completed(resp) is True
-        second_request = loop.provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+        second_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
         tool_result = next(message for message in second_request if message["role"] == "tool")
         assert "Error" in tool_result["content"]
 
@@ -568,11 +567,11 @@ class TestEphemeralDirect:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
 
-        async def chat_with_retry(**kwargs):
+        async def chat_stream_with_retry(**kwargs):
             captured["messages"] = kwargs["messages"]
             return LLMResponse(content="done", finish_reason="stop")
 
-        provider.chat_with_retry = chat_with_retry
+        provider.chat_stream_with_retry = chat_stream_with_retry
         loop = AgentLoop(
             bus=MessageBus(),
             provider=provider,
@@ -625,11 +624,11 @@ class TestEphemeralDirect:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
 
-        async def chat_with_retry(**kwargs):
+        async def chat_stream_with_retry(**kwargs):
             captured["messages"] = kwargs["messages"]
             return LLMResponse(content="done", finish_reason="stop")
 
-        provider.chat_with_retry = chat_with_retry
+        provider.chat_stream_with_retry = chat_stream_with_retry
         loop = AgentLoop(
             bus=MessageBus(),
             provider=provider,
@@ -672,7 +671,7 @@ class TestEphemeralHooks:
         provider.get_default_model.return_value = "test-model"
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
-        provider.chat_with_retry = AsyncMock(
+        provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(
                 content="done", finish_reason="stop", tool_calls=[], usage=None,
             )

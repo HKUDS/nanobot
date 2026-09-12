@@ -1,21 +1,11 @@
 {
-  "description": "Trò chuyện với nanobot từ Telegram.",
-  "requirements": "Token bot, người dùng được phép và gateway",
   "setup": {
     "docsLabel": "Mở hướng dẫn Telegram",
     "officialLabel": "Mở BotFather",
-    "tryIt": "Gửi /start hoặc tin nhắn riêng ngắn đến bot Telegram.",
-    "summary": "Bật sẽ kích hoạt hỗ trợ Telegram. Bạn vẫn cần token BotFather để trao đổi tin nhắn.",
-    "steps": [
-      "Tạo bot bằng BotFather và sao chép token.",
-      "Thêm token và chọn người có thể nhắn cho bot.",
-      "Lưu và bật Telegram, sau đó gửi tin nhắn riêng hoặc nhắc bot trong nhóm."
-    ],
     "fields": {
       "token": {
         "label": "Token bot",
-        "placeholder": "123456:ABC...",
-        "help": "Tạo bằng BotFather."
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "Proxy mạng",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "Người dùng được phép",
-        "placeholder": "* hoặc ID người dùng Telegram",
-        "help": "Để trống để dùng mã ghép nối."
+        "placeholder": "* hoặc ID người dùng Telegram"
       },
       "technical_profileName": {"label": "Tên hồ sơ thông báo", "help": "Hồ sơ bổ sung chỉ gửi đi."},
       "technical_mainChatId": {"label": "ID chủ sở hữu", "help": "ID cá nhân dạng số; danh sách cho phép chỉ chứa ID này."},
@@ -41,6 +30,71 @@
           "open": "Mọi tin nhắn",
           "allowlist": "Danh sách cho phép"
         }
+      },
+      "mode": {
+        "label": "Chế độ kết nối",
+        "choices": {
+          "polling": "Bỏ phiếu dài",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "Trả lời tin nhắn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "reactEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "connectionPoolSize": {
+        "label": "Kích thước nhóm kết nối"
+      },
+      "poolTimeout": {
+        "label": "Hết thời gian chờ nhóm kết nối"
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "Bàn phím nội tuyến",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "richMessages": {
+        "label": "Tin nhắn phong phú",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Khoảng thời gian cập nhật luồng"
+      },
+      "webhookUrl": {
+        "label": "URL webhook"
+      },
+      "webhookListenHost": {
+        "label": "Máy chủ lắng nghe Webhook"
+      },
+      "webhookListenPort": {
+        "label": "Cổng nghe Webhook"
+      },
+      "webhookPath": {
+        "label": "Đường dẫn webhook"
+      },
+      "webhookSecretToken": {
+        "label": "Mã thông báo bí mật Webhook"
+      },
+      "webhookMaxConnections": {
+        "label": "Kết nối webhook tối đa"
       }
     }
   }

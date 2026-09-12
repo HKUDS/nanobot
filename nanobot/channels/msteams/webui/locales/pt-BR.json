@@ -1,26 +1,15 @@
 {
-  "description": "Use o nanobot em conversas do Microsoft Teams.",
-  "requirements": "Credenciais do app bot Azure e endpoint público de callback",
   "setup": {
     "docsLabel": "Abrir guia do Teams",
     "officialLabel": "Abrir portal de desenvolvedores do Teams",
-    "tryIt": "Instale o app do Teams e envie uma mensagem de teste.",
-    "summary": "O Teams recebe mensagens pela URL de callback do Bot Framework. Em produção, precisa de um endpoint HTTPS acessível.",
-    "steps": [
-      "Crie um Azure Bot ou app Teams e copie o App ID e o segredo do cliente.",
-      "Exponha o caminho de callback por HTTPS e defina-o como endpoint de mensagens.",
-      "Salve e ative o Teams; depois, instale o app e envie uma mensagem de teste."
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
-        "placeholder": "Microsoft App ID",
-        "help": "Copie do registro do Azure Bot ou do app Teams."
+        "placeholder": "Microsoft App ID"
       },
       "appPassword": {
         "label": "Segredo do cliente",
-        "placeholder": "••••••",
-        "help": "Crie um segredo do cliente para o app Microsoft."
+        "placeholder": "••••••"
       },
       "tenantId": {
         "label": "ID do locatário",
@@ -33,6 +22,52 @@
       "allowFrom": {
         "label": "Usuários permitidos",
         "placeholder": "IDs de usuário do Teams separados por vírgulas"
+      },
+      "host": {
+        "label": "Ouça o apresentador"
+      },
+      "port": {
+        "label": "Porta de escuta"
+      },
+      "replyInThread": {
+        "label": "Responder no tópico",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Resposta apenas com menção"
+      },
+      "validateInboundAuth": {
+        "label": "Validar solicitações recebidas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "refTtlDays": {
+        "label": "Vida útil da conversa"
+      },
+      "pruneWebChatRefs": {
+        "label": "Remover conversas do Web Chat",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Remover conversas não pessoais",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Intervalo de atualização da conversa"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Hosts de serviço confiáveis"
       }
     }
   }

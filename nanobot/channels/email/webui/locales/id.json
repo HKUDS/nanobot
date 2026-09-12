@@ -1,26 +1,21 @@
 {
-  "description": "Izinkan nanobot menerima dan membalas email.",
-  "requirements": "Kotak masuk IMAP, pengirim SMTP, kata sandi aplikasi, dan persetujuan eksplisit",
+  "displayName": "Email",
   "setup": {
     "docsLabel": "Buka panduan Email",
     "officialLabel": "Buka panduan kata sandi aplikasi",
-    "tryIt": "Kirim email uji ke kotak surat yang terhubung.",
-    "summary": "Email membaca pesan melalui IMAP dan membalas melalui SMTP. Gunakan kotak surat khusus dan berikan persetujuan sebelum mengaktifkan.",
-    "steps": [
-      "Buat kotak surat khusus dan kata sandi aplikasi bila diperlukan.",
-      "Pilih preset penyedia atau masukkan IMAP dan SMTP secara manual.",
-      "Berikan persetujuan, simpan dan aktifkan Email, lalu kirim pesan uji."
-    ],
+    "presetLabel": "Isi cepat",
+    "sections": {
+      "receiving": "Penerimaan email",
+      "sending": "Pengiriman email"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Kustom"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {
-        "label": "Persetujuan diberikan",
-        "help": "Sakelar keamanan wajib. Aktifkan hanya setelah sengaja menghubungkan kotak surat ini ke bot.",
+        "label": "Izinkan nanobot membaca dan mengirim email",
         "choices": {
           "true": "Diberikan",
           "false": "Belum diberikan"
@@ -36,8 +31,7 @@
       },
       "imapPassword": {
         "label": "Kata sandi IMAP",
-        "placeholder": "Kata sandi aplikasi",
-        "help": "Gunakan kata sandi aplikasi jika diwajibkan penyedia."
+        "placeholder": "Kata sandi aplikasi"
       },
       "smtpHost": {
         "label": "Host SMTP",
@@ -49,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "Kata sandi SMTP",
-        "placeholder": "Kata sandi aplikasi",
-        "help": "Biasanya sama dengan kata sandi aplikasi IMAP."
+        "placeholder": "Kata sandi aplikasi"
       },
       "imapPort": {
         "label": "Port IMAP",
@@ -65,13 +58,12 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Interval pemeriksaan",
+        "label": "Interval pemeriksaan email (detik)",
         "placeholder": "30"
       },
       "allowFrom": {
         "label": "Pengirim yang diizinkan",
-        "placeholder": "Alamat email, dipisahkan koma",
-        "help": "Kosongkan untuk mewajibkan pairing terlebih dahulu."
+        "placeholder": "Alamat email, dipisahkan koma"
       },
       "verifyDkim": {
         "label": "Verifikasi DKIM",
@@ -86,6 +78,83 @@
           "true": "Aktif",
           "false": "Nonaktif"
         }
+      },
+      "imapMailbox": {
+        "label": "kotak surat IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS SMTP",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL SMTP",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Balasan otomatis",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "markSeen": {
+        "label": "Tandai sebagai telah dibaca",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "postAction": {
+        "label": "Setelah diproses",
+        "choices": {
+          "delete": "Hapus",
+          "move": "Pindah"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Pindah ke kotak surat"
+      },
+      "postActionExpunge": {
+        "label": "Terapkan tindakan secara permanen",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Abaikan pesan yang dilewati",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Panjang tubuh maksimal"
+      },
+      "subjectPrefix": {
+        "label": "Awalan subjek balasan"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Jenis lampiran yang diizinkan"
+      },
+      "maxAttachmentSize": {
+        "label": "Ukuran lampiran maksimum"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Lampiran maksimum"
       }
     }
   }

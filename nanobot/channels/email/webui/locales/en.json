@@ -1,26 +1,20 @@
 {
-  "description": "Let nanobot receive and answer email messages.",
-  "requirements": "IMAP inbox, SMTP sender, app password, explicit consent",
   "setup": {
     "docsLabel": "Open Email setup",
     "officialLabel": "Open app password guide",
-    "tryIt": "Send a test email to the connected mailbox.",
-    "summary": "Email reads messages over IMAP and replies over SMTP. Use a dedicated mailbox and grant consent before enabling it.",
-    "steps": [
-      "Create a dedicated mailbox and, when required, an app password.",
-      "Choose a provider preset or enter the IMAP and SMTP settings manually.",
-      "Grant consent, save and enable Email, then send a test message to the mailbox."
-    ],
+    "presetLabel": "Quick fill",
+    "sections": {
+      "receiving": "Receiving mail",
+      "sending": "Sending mail"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Custom"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {
-        "label": "Consent granted",
-        "help": "Required safety switch. Leave false until this bot mailbox is intentionally connected.",
+        "label": "Allow nanobot to read and send email",
         "choices": {
           "true": "Granted",
           "false": "Not granted"
@@ -36,8 +30,7 @@
       },
       "imapPassword": {
         "label": "IMAP password",
-        "placeholder": "App password",
-        "help": "Use an app password when your mail provider requires one."
+        "placeholder": "App password"
       },
       "smtpHost": {
         "label": "SMTP host",
@@ -49,8 +42,7 @@
       },
       "smtpPassword": {
         "label": "SMTP password",
-        "placeholder": "App password",
-        "help": "Usually the same app password used for IMAP."
+        "placeholder": "App password"
       },
       "imapPort": {
         "label": "IMAP port",
@@ -65,13 +57,12 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Poll interval",
+        "label": "Check for mail every (seconds)",
         "placeholder": "30"
       },
       "allowFrom": {
         "label": "Allowed senders",
-        "placeholder": "Email addresses, comma separated",
-        "help": "Leave empty to require pairing before a sender can use email."
+        "placeholder": "Email addresses, comma separated"
       },
       "verifyDkim": {
         "label": "Verify DKIM",
@@ -86,6 +77,83 @@
           "true": "On",
           "false": "Off"
         }
+      },
+      "imapMailbox": {
+        "label": "IMAP mailbox"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Automatic replies",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "markSeen": {
+        "label": "Mark as read",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "postAction": {
+        "label": "After processing",
+        "choices": {
+          "delete": "Delete",
+          "move": "Move"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Move to mailbox"
+      },
+      "postActionExpunge": {
+        "label": "Permanently apply action",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignore skipped messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Maximum body length"
+      },
+      "subjectPrefix": {
+        "label": "Reply subject prefix"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Allowed attachment types"
+      },
+      "maxAttachmentSize": {
+        "label": "Maximum attachment size"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Maximum attachments"
       }
     }
   }

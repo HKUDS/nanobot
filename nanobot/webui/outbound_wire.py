@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
+from typing import Any, Literal, NotRequired, TypeAlias, TypedDict, cast
 
 from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
@@ -15,6 +15,49 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.events import AgentEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+
+_JSONValue: TypeAlias = (
+    str | int | float | bool | None | list["_JSONValue"] | dict[str, "_JSONValue"]
+)
+
+_TOOL_EVENT_BINARY_OMISSION = "[binary content omitted from WebUI]"
+
+
+def _is_base64_data_url(value: str) -> bool:
+    candidate = value.lstrip()
+    return candidate[:5].casefold() == "data:" and ";base64," in candidate[:256].casefold()
+
+
+def _project_tool_event_value(value: object) -> _JSONValue:
+    """Copy one dynamic value while removing inline binary payloads."""
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    if isinstance(value, str):
+        if _is_base64_data_url(value):
+            return _TOOL_EVENT_BINARY_OMISSION
+        return value
+    if isinstance(value, dict):
+        data = cast(dict[object, object], value)
+        return {
+            str(key): _project_tool_event_value(item)
+            for key, item in data.items()
+        }
+    if isinstance(value, list):
+        return [_project_tool_event_value(item) for item in cast(list[object], value)]
+    if isinstance(value, tuple):
+        return [_project_tool_event_value(item) for item in cast(tuple[object, ...], value)]
+    return str(value)
+
+
+def project_tool_events(events: list[dict[str, Any]]) -> list[dict[str, _JSONValue]]:
+    """Build WebUI-safe tool events without mutating model-facing results."""
+    projected_events: list[dict[str, _JSONValue]] = []
+    for event in events:
+        projected = _project_tool_event_value(cast(object, event))
+        if not isinstance(projected, dict):
+            continue
+        projected_events.append(projected)
+    return projected_events
 
 
 class _ChatWirePayload(TypedDict):

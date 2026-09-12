@@ -21,6 +21,21 @@ SETUP_SPEC = ChannelSetupSpec(
         "allowFrom": field("list"),
         "verifyDkim": field("bool", default=True),
         "verifySpf": field("bool", default=True),
+        "imapMailbox": field(default="INBOX"),
+        "imapUseSsl": field("bool", default=True),
+        "smtpUseTls": field("bool", default=True),
+        "smtpUseSsl": field("bool", default=False),
+        "autoReplyEnabled": field("bool", default=True),
+        "markSeen": field("bool", default=True),
+        "postAction": field("enum", choices={"delete", "move"}),
+        "postActionMoveMailbox": field(),
+        "postActionExpunge": field("bool", default=False),
+        "postActionIgnoreSkipped": field("bool", default=True),
+        "maxBodyChars": field("int", default=12000),
+        "subjectPrefix": field(default="Re: "),
+        "allowedAttachmentTypes": field("list"),
+        "maxAttachmentSize": field("int", default=2_000_000),
+        "maxAttachmentsPerEmail": field("int", default=5),
     },
     required=required_fields(
         "consentGranted",
@@ -33,6 +48,7 @@ SETUP_SPEC = ChannelSetupSpec(
     ),
     official_url="https://support.google.com/accounts/answer/185833",
     validator=validate,
+    verifies_connection=True,
 )
 
 PLUGIN = ChannelPlugin(

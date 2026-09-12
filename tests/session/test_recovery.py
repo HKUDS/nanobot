@@ -23,6 +23,15 @@ from nanobot.session.recovery import (
 from nanobot.webui import session_list_index, transcript
 
 
+@pytest.fixture(autouse=True)
+def isolate_display_history(tmp_path, monkeypatch):
+    """Transcript-only recovery must never discover the operator's real chats."""
+    display_dir = tmp_path / "display-history"
+    display_dir.mkdir()
+    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: display_dir)
+    monkeypatch.setattr(transcript, "get_webui_dir", lambda: display_dir)
+
+
 def _persist(manager: SessionManager, session: Session) -> None:
     session.metadata["webui"] = True
     manager.save(session)

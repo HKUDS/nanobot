@@ -1,26 +1,21 @@
 {
-  "description": "nanobot이 이메일을 받고 답장하도록 합니다.",
-  "requirements": "IMAP 받은편지함, SMTP 발신, 앱 비밀번호 및 명시적 동의",
+  "displayName": "이메일",
   "setup": {
     "docsLabel": "이메일 설정 가이드 열기",
     "officialLabel": "앱 비밀번호 가이드 열기",
-    "tryIt": "연결된 사서함으로 테스트 이메일을 보내세요.",
-    "summary": "이메일은 IMAP으로 읽고 SMTP로 답장합니다. 전용 사서함을 사용하고 활성화 전에 동의하세요.",
-    "steps": [
-      "전용 사서함을 만들고 필요하면 앱 비밀번호를 생성하세요.",
-      "제공자 프리셋을 선택하거나 IMAP 및 SMTP 설정을 직접 입력하세요.",
-      "동의하고 저장한 뒤 이메일을 활성화하고 테스트 메시지를 보내세요."
-    ],
+    "presetLabel": "빠른 입력",
+    "sections": {
+      "receiving": "메일 수신",
+      "sending": "메일 발신"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "사용자 지정"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {
-        "label": "동의함",
-        "help": "필수 안전 스위치입니다. 이 봇 사서함을 연결하기로 결정하기 전에는 끄세요.",
+        "label": "nanobot의 이메일 읽기 및 보내기 허용",
         "choices": {
           "true": "동의함",
           "false": "동의하지 않음"
@@ -36,8 +31,7 @@
       },
       "imapPassword": {
         "label": "IMAP 비밀번호",
-        "placeholder": "앱 비밀번호",
-        "help": "메일 제공자가 요구하면 앱 비밀번호를 사용하세요."
+        "placeholder": "앱 비밀번호"
       },
       "smtpHost": {
         "label": "SMTP 호스트",
@@ -49,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "SMTP 비밀번호",
-        "placeholder": "앱 비밀번호",
-        "help": "보통 IMAP과 같은 앱 비밀번호를 사용합니다."
+        "placeholder": "앱 비밀번호"
       },
       "imapPort": {
         "label": "IMAP 포트",
@@ -65,13 +58,12 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "확인 간격",
+        "label": "이메일 확인 간격(초)",
         "placeholder": "30"
       },
       "allowFrom": {
         "label": "허용된 발신자",
-        "placeholder": "이메일 주소, 쉼표로 구분",
-        "help": "비워 두면 발신자가 먼저 페어링해야 합니다."
+        "placeholder": "이메일 주소, 쉼표로 구분"
       },
       "verifyDkim": {
         "label": "DKIM 확인",
@@ -86,6 +78,83 @@
           "true": "켜짐",
           "false": "꺼짐"
         }
+      },
+      "imapMailbox": {
+        "label": "IMAP 사서함"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "자동 답장",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "markSeen": {
+        "label": "읽음으로 표시",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "postAction": {
+        "label": "처리 후",
+        "choices": {
+          "delete": "삭제",
+          "move": "이동"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "사서함으로 이동"
+      },
+      "postActionExpunge": {
+        "label": "영구적으로 작업 적용",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "건너뛴 메시지 무시",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "maxBodyChars": {
+        "label": "최대 몸체 길이"
+      },
+      "subjectPrefix": {
+        "label": "답장 제목 접두어"
+      },
+      "allowedAttachmentTypes": {
+        "label": "허용되는 첨부 파일 유형"
+      },
+      "maxAttachmentSize": {
+        "label": "최대 첨부 파일 크기"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "최대 첨부 파일"
       }
     }
   }

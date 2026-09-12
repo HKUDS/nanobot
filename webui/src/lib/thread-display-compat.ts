@@ -24,73 +24,74 @@ export function normalizeLegacyLongTaskMessages(messages: UIMessage[]): UIMessag
   });
 }
 
-/**
- * Replay timestamps an assistant row when its first output is recorded, while
- * latency covers the whole turn. Derive the end from the matching user start
- * so the displayed time cannot double-count the pre-output interval.
- */
-function deriveAssistantCompletionTimes(messages: UIMessage[]): UIMessage[] {
-  const userStartedAtByTurn = new Map<string, number>();
-  let latestUserStartedAt: number | undefined;
-
-  return messages.map((message) => {
-    if (message.role === "user") {
-      if (Number.isFinite(message.createdAt)) {
-        latestUserStartedAt = message.createdAt;
-        if (message.turnId) userStartedAtByTurn.set(message.turnId, message.createdAt);
-      }
-      return message;
-    }
-    if (
-      message.role !== "assistant"
-      || message.kind === "trace"
-      || message.completedAt !== undefined
-      || message.latencyMs === undefined
-      || !Number.isFinite(message.latencyMs)
-      || message.latencyMs < 0
-    ) {
-      return message;
-    }
-
-    const startedAt = message.turnId
-      ? userStartedAtByTurn.get(message.turnId)
-      : message.source
-        ? undefined
-        : latestUserStartedAt;
-    if (startedAt === undefined) return message;
-    return { ...message, completedAt: startedAt + message.latencyMs };
-  });
+interface PreparedMessage {
+  message: UIMessage;
+  hidden: boolean;
+  compact: boolean;
 }
 
-function identifyCompactReplies(messages: UIMessage[]): UIMessage[] {
-  const turns = new Set(messages.flatMap((message) => (
-    message.role === "user" && message.content.trim().toLowerCase() === "/compact" && message.turnId
-      ? [message.turnId]
-      : []
-  )));
-  return messages.map((message) => {
-    if (message.role !== "assistant" || message.kind || message.isStreaming
-      || !message.turnId || !turns.has(message.turnId)) return message;
-    if (message.content === "Nothing to compact.") return { ...message, compactReply: "empty" };
-    if (message.content === "Unable to compact context. Check the logs and try again.") {
-      return { ...message, compactReply: "failed" };
-    }
-    return message;
-  });
+const preparedMessages = new WeakMap<UIMessage, PreparedMessage>();
+const completionMessages = new WeakMap<UIMessage, { completedAt: number; message: UIMessage }>();
+
+function prepareMessage(original: UIMessage): PreparedMessage {
+  const cached = preparedMessages.get(original);
+  if (cached) return cached;
+  const message = scrubSubagentUiMessages(normalizeLegacyLongTaskMessages([original]))[0];
+  const prepared = {
+    message,
+    hidden: isSystemCommandTurnId(message.turnId)
+      || (message.role === "user" && isModelCommandText(message.content))
+      || (message.role === "assistant" && isModelCommandResponseText(message.content)),
+    compact: message.role === "user" && message.content.trim().toLowerCase() === "/compact",
+  };
+  preparedMessages.set(original, prepared);
+  return prepared;
 }
 
 export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
-  const normalized = scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
-  const hiddenTurns = new Set(normalized.flatMap((message) => (
-    message.role === "user" && isModelCommandText(message.content) && message.turnId
-      ? [message.turnId]
-      : []
-  )));
-  const visible = normalized.filter((message) => (
-    !isSystemCommandTurnId(message.turnId)
-    && (!message.turnId || !hiddenTurns.has(message.turnId))
-    && !(message.role === "user" && isModelCommandText(message.content))
-    && !(message.role === "assistant" && isModelCommandResponseText(message.content))
-  ));
-  return deriveAssistantCompletionTimes(identifyCompactReplies(visible));
+  const hiddenTurns = new Set<string>();
+  const compactTurns = new Set<string>();
+  for (const original of messages) {
+    const { message, hidden, compact } = prepareMessage(original);
+    if (message.role !== "user" || !message.turnId) continue;
+    if (hidden && isModelCommandText(message.content)) hiddenTurns.add(message.turnId);
+    if (compact && !hidden) compactTurns.add(message.turnId);
+  }
+  const visible: UIMessage[] = [];
+  const starts = new Map<string, number>();
+  let latestStart: number | undefined;
+  for (const original of messages) {
+    const prepared = prepareMessage(original);
+    let message = prepared.message;
+    if (prepared.hidden || (message.turnId && hiddenTurns.has(message.turnId))) continue;
+    if (message.role === "user" && Number.isFinite(message.createdAt)) {
+      latestStart = message.createdAt;
+      if (message.turnId) starts.set(message.turnId, message.createdAt);
+    }
+    if (message.role === "assistant" && !message.kind && !message.isStreaming
+      && message.turnId && compactTurns.has(message.turnId)) {
+      if (message.content === "Nothing to compact.") message = { ...message, compactReply: "empty" };
+      if (message.content === "Unable to compact context. Check the logs and try again.") {
+        message = { ...message, compactReply: "failed" };
+      }
+    }
+    // Replay latency starts at the user prompt, not the first assistant output.
+    if (message.role === "assistant" && message.kind !== "trace"
+      && message.completedAt === undefined && message.latencyMs !== undefined
+      && Number.isFinite(message.latencyMs) && message.latencyMs >= 0) {
+      const start = message.turnId ? starts.get(message.turnId) : message.source ? undefined : latestStart;
+      if (start !== undefined) {
+        const completedAt = start + message.latencyMs;
+        const cached = completionMessages.get(message);
+        if (cached?.completedAt === completedAt) message = cached.message;
+        else {
+          const completed = { ...message, completedAt };
+          completionMessages.set(message, { completedAt, message: completed });
+          message = completed;
+        }
+      }
+    }
+    visible.push(message);
+  }
+  return visible;
 }

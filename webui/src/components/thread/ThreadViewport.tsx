@@ -56,6 +56,8 @@ interface ThreadViewportProps {
   loadingOlder?: boolean;
   userMessageOffset?: number;
   onLoadOlder?: () => Promise<void> | void;
+  traceDetailScope?: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onQuoteSelection?: (text: string) => void;
@@ -71,7 +73,7 @@ const SOFT_KEYBOARD_MIN_INSET_PX = 80;
 const SESSION_HANDOFF_EXIT_DURATION_MS = 80;
 const SESSION_HANDOFF_ENTER_DURATION_MS = 140;
 const SESSION_HANDOFF_OPACITY = 0.82;
-export const INITIAL_HISTORY_WINDOW = 160;
+export const INITIAL_HISTORY_WINDOW = 120;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
 interface HistoryScrollAnchor {
@@ -239,6 +241,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   loadingOlder = false,
   userMessageOffset = 0,
   onLoadOlder,
+  traceDetailScope = null,
+  onLoadTraceDetails,
   onOpenFilePreview,
   onForkFromMessage,
   onQuoteSelection,
@@ -873,7 +877,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               )}
             >
-              <div ref={messageContentRef} className="mx-auto min-w-0 w-full max-w-[49.5rem] shrink-0">
+              <div ref={messageContentRef} className="mx-auto min-w-0 w-full max-w-[var(--content-column-width)] shrink-0">
                 <ThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}
@@ -886,6 +890,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   mcpPresets={mcpPresets}
                   slashCommands={slashCommands}
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
+                  traceDetailScope={traceDetailScope}
+                  onLoadTraceDetails={onLoadTraceDetails}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromMessage={onForkFromMessage}
                   onQuoteSelection={onQuoteSelection}

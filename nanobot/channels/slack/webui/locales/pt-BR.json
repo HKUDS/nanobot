@@ -1,29 +1,18 @@
 {
-  "description": "Use o nanobot em workspaces do Slack.",
-  "requirements": "Token do app Slack, token do bot e instalação no workspace",
   "setup": {
     "docsLabel": "Abrir guia do Slack",
     "officialLabel": "Abrir aplicativos do Slack",
-    "tryIt": "Mencione o app Slack ou envie uma mensagem direta.",
-    "summary": "O Slack usa Socket Mode por padrão e precisa dos tokens do app e do bot.",
-    "steps": [
-      "Crie um app Slack com o manifesto fornecido e ative o Socket Mode.",
-      "Instale o app no workspace e copie os tokens do app e do bot.",
-      "Salve e ative o Slack; depois, mencione o app ou envie uma DM."
-    ],
     "actions": {
-      "slack-manifest": "Copiar manifesto"
+      "slack-manifest": "Copiar manifesto do aplicativo"
     },
     "fields": {
       "appToken": {
         "label": "Token do app",
-        "placeholder": "xapp-...",
-        "help": "Crie-o no Socket Mode do Slack."
+        "placeholder": "xapp-..."
       },
       "botToken": {
         "label": "Token do bot",
-        "placeholder": "xoxb-...",
-        "help": "Use o token do bot após instalar o app Slack."
+        "placeholder": "xoxb-..."
       },
       "groupPolicy": {
         "label": "Comportamento em grupos",
@@ -32,6 +21,72 @@
           "open": "Todas as mensagens",
           "allowlist": "Lista de permissão"
         }
+      },
+      "mode": {
+        "label": "Modo de conexão",
+        "choices": {
+          "socket": "Modo de soquete"
+        }
+      },
+      "webhookPath": {
+        "label": "Caminho do webhook"
+      },
+      "replyInThread": {
+        "label": "Responder no tópico",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Ler emoticons"
+      },
+      "doneEmoji": {
+        "label": "Emoji pronto"
+      },
+      "includeThreadContext": {
+        "label": "Incluir contexto do thread",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limite de contexto do thread"
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos"
+      },
+      "groupAllowFrom": {
+        "label": "Canais permitidos"
+      },
+      "groupRequireMention": {
+        "label": "Exigir menções nos canais",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_enabled": {
+        "label": "Habilitar mensagens diretas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_policy": {
+        "label": "Acesso direto a mensagens",
+        "choices": {
+          "allowlist": "Lista de permissões",
+          "open": "Abrir"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Usuários de mensagens diretas permitidos"
+      },
+      "proxy": {
+        "label": "Proxy de rede",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

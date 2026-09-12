@@ -9,6 +9,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "botId": field(),
         "secret": field("secret"),
         "allowFrom": field("list"),
+        "welcomeMessage": field(),
     },
     required=required_fields("botId", "secret"),
     official_url="https://developer.work.weixin.qq.com/",

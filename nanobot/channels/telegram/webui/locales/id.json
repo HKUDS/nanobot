@@ -1,21 +1,11 @@
 {
-  "description": "Mengobrol dengan nanobot dari Telegram.",
-  "requirements": "Token bot, pengguna yang diizinkan, dan gateway",
   "setup": {
     "docsLabel": "Buka panduan Telegram",
     "officialLabel": "Buka BotFather",
-    "tryIt": "Kirim /start atau DM singkat ke bot Telegram Anda.",
-    "summary": "Mengaktifkan akan menyalakan dukungan Telegram. Token BotFather tetap diperlukan untuk bertukar pesan.",
-    "steps": [
-      "Buat bot dengan BotFather dan salin tokennya.",
-      "Tambahkan token dan pilih siapa yang boleh mengirim pesan ke bot.",
-      "Simpan dan aktifkan Telegram, lalu kirim DM atau sebut bot di grup."
-    ],
     "fields": {
       "token": {
         "label": "Token bot",
-        "placeholder": "123456:ABC...",
-        "help": "Buat dengan BotFather."
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "Proxy jaringan",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
-        "placeholder": "* atau ID pengguna Telegram",
-        "help": "Kosongkan untuk memakai kode pairing."
+        "placeholder": "* atau ID pengguna Telegram"
       },
       "technical_profileName": {"label": "Profil notifikasi", "help": "Profil tambahan khusus pesan keluar."},
       "technical_mainChatId": {"label": "ID pemilik", "help": "ID pengguna pribadi; daftar izin hanya boleh berisi ID ini."},
@@ -37,10 +26,75 @@
       "groupPolicy": {
         "label": "Perilaku grup",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
+      },
+      "mode": {
+        "label": "Modus koneksi",
+        "choices": {
+          "polling": "Jajak pendapat yang panjang",
+          "webhook": "kait web"
+        }
+      },
+      "replyToMessage": {
+        "label": "Membalas pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "connectionPoolSize": {
+        "label": "Ukuran kumpulan koneksi"
+      },
+      "poolTimeout": {
+        "label": "Batas waktu kumpulan koneksi habis"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "Keyboard sebaris",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "richMessages": {
+        "label": "Pesan yang kaya",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Interval pembaruan aliran"
+      },
+      "webhookUrl": {
+        "label": "URL kait web"
+      },
+      "webhookListenHost": {
+        "label": "Tuan rumah mendengarkan webhook"
+      },
+      "webhookListenPort": {
+        "label": "Port mendengarkan webhook"
+      },
+      "webhookPath": {
+        "label": "Jalur webhook"
+      },
+      "webhookSecretToken": {
+        "label": "Token rahasia webhook"
+      },
+      "webhookMaxConnections": {
+        "label": "Koneksi webhook maksimum"
       }
     }
   }

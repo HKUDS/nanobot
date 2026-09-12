@@ -33,17 +33,58 @@ EXPECTED_CHANNELS = {
     "whatsapp",
 }
 
+INTERNAL_CHANNEL_FIELDS = {
+    "feishu": {"instanceId", "identityKey"},
+    "signal": {"allowFrom"},
+    "weixin": {"token"},
+    "whatsapp": {"databasePath", "lidMappings"},
+    # nanobot WebUI owns this transport and intentionally has no channel dialog.
+    "websocket": {
+        "allowFrom",
+        "host",
+        "maxMessageBytes",
+        "path",
+        "pingIntervalS",
+        "pingTimeoutS",
+        "port",
+        "publicWsUrl",
+        "sslCertfile",
+        "sslKeyfile",
+        "streaming",
+        "token",
+        "tokenIssuePath",
+        "tokenIssueSecret",
+        "tokenTtlS",
+        "trustedProxyAuth",
+        "unixSocketPath",
+        "websocketRequiresToken",
+    },
+}
+
+
+def _flatten_channel_fields(value: object, prefix: str = "") -> set[str]:
+    if not isinstance(value, dict):
+        return {prefix} if prefix else set()
+    if not value:
+        return {prefix} if prefix else set()
+    fields: set[str] = set()
+    for key, nested in value.items():
+        path = f"{prefix}.{key}" if prefix else key
+        fields.update(_flatten_channel_fields(nested, path))
+    return fields
+
 
 def test_channel_setup_spec_derives_route_and_secret_metadata() -> None:
     slack = channel_setup_spec("slack")
 
     assert slack is not None
     assert slack.secrets == {"appToken", "botToken"}
-    assert slack.route_field_types == {
-        "appToken": "secret",
-        "botToken": "secret",
-        "groupPolicy": ("enum", {"mention", "open", "allowlist"}),
-    }
+    assert slack.route_field_types["appToken"] == "secret"
+    assert slack.route_field_types["botToken"] == "secret"
+    assert slack.route_field_types["groupPolicy"] == (
+        "enum",
+        {"mention", "open", "allowlist"},
+    )
     assert slack.simple_required_fields == ("appToken", "botToken")
     assert slack.fields["groupPolicy"].default == "mention"
     group_policy = next(
@@ -73,7 +114,7 @@ def test_channel_setup_spec_separates_writable_and_snapshot_fields() -> None:
 
     assert matrix is not None
     assert discord is not None
-    assert "allowFrom" not in matrix.route_field_types
+    assert "allowFrom" in matrix.route_field_types
     assert "allowFrom" in matrix.snapshot_fields
     assert "allowFrom" in discord.route_field_types
     assert "allowFrom" not in discord.snapshot_fields
@@ -87,10 +128,24 @@ def test_webui_forms_have_writable_mattermost_and_whatsapp_contracts() -> None:
     assert whatsapp is not None
     assert mattermost.route_field_types["serverUrl"] == "string"
     assert mattermost.route_field_types["token"] == "secret"
+    assert whatsapp.route_field_types["proxy"] == "string"
     assert whatsapp.route_field_types["allowFrom"] == "list"
     assert whatsapp.route_field_types["groupPolicy"] == (
         "enum",
         {"mention", "open"},
+    )
+
+
+def test_weixin_token_is_managed_only_by_qr_login() -> None:
+    weixin = channel_setup_spec("weixin")
+
+    assert weixin is not None
+    assert weixin.simple_required_fields == ("token",)
+    assert "token" not in weixin.route_field_types
+    assert "token" not in weixin.snapshot_fields
+    assert all(
+        field["field"] != "token"
+        for field in weixin.to_public_dict("weixin")["fields"]
     )
 
 
@@ -127,6 +182,13 @@ def test_channel_locales_cover_authoritative_setup_contracts() -> None:
         )
         setup_messages = english["setup"]
         field_messages = setup_messages.get("fields", {})
+        contract_message_keys = {
+            re.sub(r"[^A-Za-z0-9_-]+", "_", field_name)
+            for field_name in plugin.setup.fields
+        }
+        assert not set(field_messages) - contract_message_keys, (
+            f"{name} has locale copy for fields outside its setup contract"
+        )
         for field_name, field in plugin.setup.fields.items():
             if not field.writable:
                 continue
@@ -134,6 +196,26 @@ def test_channel_locales_cover_authoritative_setup_contracts() -> None:
             assert message_key in field_messages, f"{name} field {field_name} has no locale copy"
         if plugin.setup.official_url:
             assert setup_messages.get("officialLabel"), f"{name} has no localized official label"
+
+
+def test_every_runtime_channel_field_has_a_webui_contract() -> None:
+    for name, plugin in discover_plugins().items():
+        runtime_fields = _flatten_channel_fields(plugin.load_channel_class().default_config())
+        runtime_fields.discard("enabled")
+        setup = plugin.setup
+        assert setup is not None
+        contract_fields = set(setup.fields)
+        internal_fields = INTERNAL_CHANNEL_FIELDS.get(name, set())
+
+        assert not runtime_fields - contract_fields - internal_fields, (
+            f"{name} runtime fields missing from WebUI contract: "
+            f"{sorted(runtime_fields - contract_fields - internal_fields)}"
+        )
+        assert not {
+            field_name
+            for field_name in runtime_fields - internal_fields
+            if field_name not in setup.route_field_types
+        }, f"{name} has user-configurable runtime fields that WebUI cannot save"
 
 
 def test_channel_manifests_only_import_contract_modules() -> None:
@@ -182,6 +264,24 @@ def test_weixin_package_manifest_owns_runtime_and_webui_metadata() -> None:
     assert plugin.dependencies == ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0")
     assert plugin.connector == "nanobot.channels.weixin.connect:WeixinConnectStore"
     assert plugin.webui == "webui/index.tsx"
+
+
+def test_whatsapp_package_manifest_owns_browser_connector() -> None:
+    plugin = load_channel_package("whatsapp")
+
+    assert plugin is not None
+    assert plugin.connector == "nanobot.channels.whatsapp.connect:WhatsAppConnectStore"
+    assert plugin.webui == "webui/index.tsx"
+
+
+def test_mochat_package_manifest_exposes_required_setup() -> None:
+    plugin = load_channel_package("mochat")
+
+    assert plugin is not None
+    assert plugin.webui == "webui/index.ts"
+    assert plugin.settings_visible is True
+    assert plugin.setup is not None
+    assert plugin.setup.simple_required_fields == ("clawToken",)
 
 
 def test_package_manifests_do_not_import_runtimes() -> None:

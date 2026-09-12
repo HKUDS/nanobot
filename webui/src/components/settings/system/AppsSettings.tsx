@@ -48,6 +48,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
+import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { isGenericRepositoryLogoUrl, logoFallbackUrls } from "@/lib/provider-brand";
 import type {
@@ -245,7 +246,7 @@ export function AppsCatalogSettings({
     )
     : "";
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <div role="status" className="sr-only">{oauthStatusAnnouncement}</div>
       <section className="space-y-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -303,7 +304,7 @@ export function AppsCatalogSettings({
         {loading ? (
           <div className="flex h-36 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            {tx("settings.apps.loading", "Loading Apps...")}
+            {tx("settings.apps.loading", "Loading apps…")}
           </div>
         ) : items.length ? (
           <div className="grid grid-cols-1 gap-x-10 gap-y-1 py-3 xl:grid-cols-2">
@@ -412,7 +413,7 @@ function CliAppsCatalogRow({
   const description = app.description || app.requires || app.entry_point || app.name;
 
   return (
-    <article className="apps-catalog-row group flex min-w-0 items-center gap-3 rounded-control px-3 py-3 transition-colors hover:bg-muted/45">
+    <article className="apps-catalog-row group flex min-w-0 items-center gap-3 rounded-control px-3 py-3 transition-colors settings-hover">
       <CliAppLogo app={app} showBrandLogos={showBrandLogos} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
@@ -544,7 +545,7 @@ function McpAppsCatalogRow({
   const readyInstalled = preset.enabled ?? configuredInstalled;
   const runtimeConnected = !toggleable && preset.runtime_status === "connected";
   const runtimeConnecting = !toggleable && preset.runtime_status === "connecting";
-  const runtimeFailed = !toggleable && preset.runtime_status === "failed";
+  const runtimeFailed = !toggleable && preset.installed && preset.runtime_status === "failed";
   const statusLabel = toggleable
     ? tx("settings.nanobotFeatures.enabled", "Enabled")
     : runtimeConnected
@@ -583,7 +584,7 @@ function McpAppsCatalogRow({
   };
 
   return (
-    <article className="min-w-0 rounded-control transition-colors hover:bg-muted/45">
+    <article className="min-w-0 rounded-control transition-colors settings-hover">
       <div className="group flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3">
         <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
         <div className="min-w-[8rem] flex-[1_1_8rem]">
@@ -600,14 +601,14 @@ function McpAppsCatalogRow({
           <p
             className={cn(
               "mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-5 text-muted-foreground",
-              runtimeFailed && configuredInstalled && "font-medium text-destructive",
+              runtimeFailed && "font-medium text-destructive",
             )}
           >
-            {runtimeFailed && configuredInstalled ? (
+            {runtimeFailed ? (
               <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
             ) : null}
             <span className="truncate">
-              {runtimeFailed && configuredInstalled ? failureLabel : detail}
+              {runtimeFailed ? failureLabel : detail}
             </span>
           </p>
         </div>
@@ -646,7 +647,7 @@ function McpAppsCatalogRow({
                 <Trash2 className="h-4 w-4" aria-hidden />
               </AppsActionButton>
             </>
-          ) : runtimeFailed && configuredInstalled ? (
+          ) : runtimeFailed ? (
             <AppsActionButton
               ariaLabel={t("settings.mcp.manageTitle", {
                 name: preset.display_name,
@@ -856,7 +857,7 @@ function McpAppsCatalogRow({
           preset={preset}
           values={values}
           actionKey={actionKey}
-          statusLabel={runtimeFailed && configuredInstalled ? failureStatusLabel : statusLabel}
+          statusLabel={runtimeFailed ? failureStatusLabel : statusLabel}
           statusTone={runtimeFailed ? "warning" : configuredInstalled ? "success" : "neutral"}
           tab={managementTab}
           icon={<McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} compact />}
@@ -918,9 +919,9 @@ export const AppsActionButton = forwardRef<HTMLButtonElement, AppsActionButtonPr
           visibleLabel
             ? "h-8 w-auto gap-1.5 px-3 text-[12px] font-semibold"
             : "h-9 w-9",
-          tone === "installed" && "bg-transparent hover:bg-muted/70 hover:text-foreground",
+          tone === "installed" && "bg-transparent settings-hover hover:text-foreground",
           tone === "danger" && "bg-transparent hover:bg-destructive/10 hover:text-destructive",
-          tone === "default" && "bg-muted/70 hover:bg-muted hover:text-foreground",
+          tone === "default" && "bg-muted/70 settings-hover hover:text-foreground",
           className,
         )}
       >
@@ -1146,16 +1147,12 @@ function McpCustomServerPanel({
                 htmlFor={headersInputId}
                 className="mb-1 block text-[11.5px] font-medium text-muted-foreground"
               >
-                {tx("settings.mcp.headers", "Headers JSON")}
+                {tx("settings.mcp.headers", "Headers (JSON)")}
               </label>
-              <Textarea
-                id={headersInputId}
-                aria-describedby={headersHelpId}
-                value={form.headers}
-                onChange={(event) => update("headers", event.target.value)}
-                placeholder={'{"Authorization":"Bearer ..."}'}
-                className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
-              />
+              <SettingsTextEditor id={headersInputId} title={tx("settings.mcp.headers", "Headers (JSON)")}
+                  value={form.headers} onSave={(value) => update("headers", value)}
+                  placeholder={'{"Authorization":"Bearer ..."}'}
+                />
               <p
                 id={headersHelpId}
                 className="mt-1 text-[11.5px] leading-5 text-muted-foreground"
@@ -1180,7 +1177,7 @@ function McpCustomServerPanel({
               aria-hidden
             />
             {advancedOpen
-              ? tx("settings.mcp.hideAdvanced", "Hide advanced")
+              ? tx("settings.mcp.hideAdvanced", "Hide advanced options")
               : tx("settings.mcp.advancedOptions", "Advanced options")}
           </Button>
 
@@ -1196,30 +1193,26 @@ function McpCustomServerPanel({
               {!remote ? (
                 <label className="min-w-0">
                   <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
-                    {tx("settings.mcp.args", "Args JSON")}
+                    {tx("settings.mcp.args", "Arguments (JSON)")}
                   </span>
-                  <Textarea
-                    value={form.args}
-                    onChange={(event) => update("args", event.target.value)}
-                    placeholder={'["-y", "docs-mcp"]'}
-                    className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
-                  />
+                  <SettingsTextEditor title={tx("settings.mcp.args", "Arguments (JSON)")}
+                  value={form.args} onSave={(value) => update("args", value)}
+                  placeholder={'["-y", "docs-mcp"]'}
+                />
                 </label>
               ) : null}
               <label className="min-w-0">
                 <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
-                  {tx("settings.mcp.env", "Env JSON")}
+                  {tx("settings.mcp.env", "Environment variables (JSON)")}
                 </span>
-                <Textarea
-                  value={form.env}
-                  onChange={(event) => update("env", event.target.value)}
+                <SettingsTextEditor title={tx("settings.mcp.env", "Environment variables (JSON)")}
+                  value={form.env} onSave={(value) => update("env", value)}
                   placeholder={'{"API_KEY":"..."}'}
-                  className="min-h-[68px] resize-y bg-background/80 font-mono text-[12px]"
                 />
               </label>
               <label className="min-w-0">
                 <span className="mb-1 block text-[11.5px] font-medium text-muted-foreground">
-                  {tx("settings.mcp.timeout", "Tool timeout")}
+                  {tx("settings.mcp.timeout", "Tool timeout (seconds)")}
                 </span>
                 <Input
                   value={form.toolTimeout}
@@ -1240,7 +1233,7 @@ function McpCustomServerPanel({
               className="h-9 w-full rounded-full px-4 text-[12.5px] font-semibold sm:w-auto"
             >
               {customBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
-              {tx("settings.mcp.saveCustom", "Save MCP")}
+              {tx("settings.mcp.saveCustom", "Save MCP server")}
             </Button>
           </div>
         </div>
@@ -1253,11 +1246,9 @@ function McpCustomServerPanel({
               <span className="mb-1.5 block text-[11.5px] font-medium text-muted-foreground">
                 {tx("settings.mcp.configImport", "Import mcp.json")}
               </span>
-              <Textarea
-                value={configImport}
-                onChange={(event) => onConfigImportChange(event.target.value)}
+              <SettingsTextEditor title={tx("settings.mcp.configImport", "Import mcp.json")}
+                value={configImport} onSave={onConfigImportChange}
                 placeholder={'{"mcpServers":{"docs":{"command":"npx","args":["-y","docs-mcp"]}}}'}
-                className="min-h-[84px] resize-y bg-background/80 font-mono text-[12px]"
               />
             </label>
             <Button
@@ -1295,7 +1286,7 @@ function mcpOAuthStatusText(
       }
       return popupBlocked
         ? tx("settings.mcp.openSignInToContinue", "Open the sign-in page to continue.")
-        : tx("settings.mcp.finishSignInInBrowser", "Finish signing in in the browser window.");
+        : tx("settings.mcp.finishSignInInBrowser", "Complete sign-in in the browser window.");
     case "connecting":
       return tx("settings.mcp.finishingConnection", "Finishing connection...");
     case "authorized":
@@ -1433,7 +1424,7 @@ function CliAppReadyPanel({
             size="sm"
             variant="ghost"
             onClick={copyPrompt}
-            className="h-8 rounded-full px-3 text-[12px] font-medium text-muted-foreground hover:bg-muted/65 hover:text-foreground"
+            className="h-8 rounded-full px-3 text-[12px] font-medium text-muted-foreground settings-hover hover:text-foreground"
           >
             {copied ? <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden /> : null}
             {copied

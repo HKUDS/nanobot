@@ -1,26 +1,15 @@
 {
-  "description": "在 Discord 服务器和私信中使用 nanobot。",
-  "requirements": "Discord 机器人令牌、权限和网关",
   "setup": {
     "docsLabel": "打开 Discord 配置指南",
     "officialLabel": "打开 Discord 开发者后台",
-    "tryIt": "在服务器中提及机器人，或向它发送私信。",
-    "summary": "启用只会打开 Discord 支持；还需要机器人令牌和服务器权限。",
-    "steps": [
-      "在 Discord Developer Portal 中创建机器人并复制令牌。",
-      "将机器人邀请到服务器，并授予读取/发送消息及斜杠命令权限。",
-      "保存并启用 Discord，然后提及机器人或发送私信。"
-    ],
     "fields": {
       "token": {
         "label": "机器人令牌",
-        "placeholder": "Discord 机器人令牌",
-        "help": "从 Discord Developer Portal 的 Bot 页面创建。"
+        "placeholder": "Discord 机器人令牌"
       },
       "allowChannels": {
         "label": "允许的频道",
-        "placeholder": "频道 ID，用逗号分隔",
-        "help": "留空则允许机器人可读取的所有频道。"
+        "placeholder": "频道 ID，用逗号分隔"
       },
       "groupPolicy": {
         "label": "群组行为",
@@ -33,6 +22,34 @@
       "allowFrom": {
         "label": "允许的用户",
         "placeholder": "用户 ID，用逗号分隔"
+      },
+      "proxy": {
+        "label": "网络代理"
+      },
+      "proxyUsername": {
+        "label": "代理用户名"
+      },
+      "proxyPassword": {
+        "label": "代理密码"
+      },
+      "intents": {
+        "label": "Gateway Intents"
+      },
+      "readReceiptEmoji": {
+        "label": "已读表情"
+      },
+      "workingEmoji": {
+        "label": "处理中表情"
+      },
+      "workingEmojiDelay": {
+        "label": "处理中表情延迟"
+      },
+      "streaming": {
+        "label": "流式输出",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
       }
     }
   }

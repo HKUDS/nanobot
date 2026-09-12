@@ -2564,17 +2564,17 @@ def test_open_webui_browser_reports_launch_failure(monkeypatch, capsys) -> None:
     )
 
 
-def test_launch_browser_uses_macos_foreground_opener(monkeypatch) -> None:
-    seen: list[list[str]] = []
+def test_launch_browser_uses_macos_url_services(monkeypatch) -> None:
+    seen: list[str] = []
     monkeypatch.setattr(cli_webui_support.sys, "platform", "darwin")
     monkeypatch.setattr(
-        cli_webui_support.subprocess,
-        "run",
-        lambda command, **_kwargs: seen.append(command) or SimpleNamespace(returncode=0),
+        cli_webui_support,
+        "_launch_macos_browser",
+        lambda url: seen.append(url) or True,
     )
 
     assert cli_webui_support._launch_browser("http://127.0.0.1:8765/") is True
-    assert seen == [["open", "http://127.0.0.1:8765/"]]
+    assert seen == ["http://127.0.0.1:8765/"]
 
 
 def test_launch_browser_uses_default_browser_off_macos(monkeypatch) -> None:

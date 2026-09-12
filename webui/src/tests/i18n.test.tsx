@@ -159,7 +159,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.sections.about",
   "settings.rows.theme",
   "settings.rows.language",
-  "settings.rows.density",
   "settings.rows.activityMode",
   "settings.rows.fileEditDisplay",
   "settings.rows.codeWrap",
@@ -171,7 +170,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.rows.contextWindow",
   "settings.help.theme",
   "settings.help.language",
-  "settings.help.density",
   "settings.help.activityMode",
   "settings.help.fileEditDisplay",
   "settings.help.codeWrap",
@@ -182,8 +180,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.help.webuiDefaultAccess",
   "settings.values.light",
   "settings.values.dark",
-  "settings.values.comfortable",
-  "settings.values.compact",
   "settings.values.expanded",
   "settings.values.enabled",
   "settings.values.disabled",
@@ -232,7 +228,6 @@ const LOCALIZED_CHANNEL_SHELL_KEYS = [
   "settings.channels.instanceConfigured",
   "settings.channels.instanceNeedsSetup",
   "settings.channels.managedByWebui",
-  "settings.channels.officialGuide",
   "settings.channels.optional",
   "settings.channels.providerPreset",
   "settings.channels.requiredSetup",
@@ -241,11 +236,9 @@ const LOCALIZED_CHANNEL_SHELL_KEYS = [
   "settings.channels.savedSettings",
   "settings.channels.saveSettings",
   "settings.channels.selectChannel",
-  "settings.channels.setupSteps",
   "settings.channels.showSecret",
   "settings.channels.toggleChannel",
   "settings.channels.toggleInstance",
-  "settings.channels.tryIt",
   "settings.channels.validation.connected",
   "settings.channels.validation.configured",
   "settings.channels.validation.invalid",
@@ -483,10 +476,10 @@ describe("webui i18n", () => {
     const user = userEvent.setup();
 
     render(<LanguageSwitcher />);
-    await user.click(screen.getByRole("button", { name: "Change language" }));
+    await user.click(screen.getByRole("combobox", { name: "Change language" }));
 
     for (const { nativeLabel } of supportedLocales) {
-      expect(screen.getByRole("menuitemradio", { name: nativeLabel })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: nativeLabel })).toBeInTheDocument();
     }
   });
 
@@ -505,8 +498,8 @@ describe("webui i18n", () => {
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");
 
-    await user.click(screen.getByRole("button", { name: "Change language" }));
-    await user.click(screen.getByRole("menuitemradio", { name: /简体中文/i }));
+    await user.click(screen.getByRole("combobox", { name: "Change language" }));
+    await user.click(screen.getByRole("option", { name: /简体中文/i }));
 
     await waitFor(() => {
       expect(document.documentElement.lang).toBe("zh-CN");

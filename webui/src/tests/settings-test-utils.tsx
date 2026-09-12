@@ -128,6 +128,7 @@ export function renderSettingsView(
       | "overview"
       | "appearance"
       | "apps"
+      | "skills"
       | "channels"
       | "automations"
       | "advanced"
@@ -140,6 +141,7 @@ export function renderSettingsView(
     onBackToChat?: () => void;
     onSettingsChange?: (payload: SettingsPayload) => void;
     onNativeEngineRestart?: () => Promise<string>;
+    onRestart?: () => void;
   } = {},
 ) {
   render(
@@ -154,6 +156,7 @@ export function renderSettingsView(
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}
         onNativeEngineRestart={options.onNativeEngineRestart}
+        onRestart={options.onRestart}
       />
     </ClientProvider>,
   );

@@ -66,7 +66,7 @@ class TestToolEventProgress:
             LLMResponse(content="Visible", tool_calls=[tool_call]),
             LLMResponse(content="Done", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.tools.prepare_call = MagicMock(return_value=(None, {"path": "foo.txt"}, None))
         loop.tools.execute = AsyncMock(return_value="ok")
@@ -136,7 +136,7 @@ class TestToolEventProgress:
             LLMResponse(content="", tool_calls=[tool_call]),
             LLMResponse(content="Done", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
         tool = WriteFileTool(workspace=tmp_path)
         loop.tools.prepare_call = MagicMock(
@@ -207,7 +207,7 @@ class TestToolEventProgress:
             LLMResponse(content="", tool_calls=[tool_call]),
             LLMResponse(content="Done", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.tools.prepare_call = MagicMock(
             return_value=(tool, {"path": "foo.txt", "content": "new\n"}, None),
@@ -248,7 +248,7 @@ class TestToolEventProgress:
             LLMResponse(content="", tool_calls=[tool_call]),
             LLMResponse(content="Done", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.tools.prepare_call = MagicMock(
             return_value=(None, {"command": "printf hi > foo.txt"}, None),
@@ -287,7 +287,7 @@ class TestToolEventProgress:
             LLMResponse(content="", tool_calls=[tool_call]),
             LLMResponse(content="Done", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.tools.prepare_call = MagicMock(return_value=(None, {"command": "ls"}, None))
         loop.tools.execute = AsyncMock(return_value="file.txt")
@@ -463,8 +463,8 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "openai-codex/gpt-5.5"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Hello", tool_calls=[]))
-        provider.chat_stream_with_retry = AsyncMock()
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Hello", tool_calls=[]))
+        provider.chat_with_retry = AsyncMock()
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
         loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -482,8 +482,8 @@ class TestToolEventProgress:
         assert [m.content for m in outbound] == ["Hello"]
         assert not any(isinstance(m.event, ProgressEvent) for m in outbound)
         assert not any(isinstance(m.event, StreamedResponseEvent) for m in outbound)
-        provider.chat_stream_with_retry.assert_not_awaited()
-        provider.chat_with_retry.assert_awaited_once()
+        provider.chat_with_retry.assert_not_awaited()
+        provider.chat_stream_with_retry.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_streaming_channel_streams_provider_deltas_for_codex_style_provider(
@@ -633,14 +633,13 @@ class TestToolEventProgress:
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
 
-        async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        async def chat_stream_with_retry(*, on_content_delta=None, **kwargs):
+            if on_content_delta is None:
+                return LLMResponse(content="summary", finish_reason="stop")
             await on_content_delta("partial")
             return LLMResponse(content="partial", finish_reason="length")
 
         provider.chat_stream_with_retry = chat_stream_with_retry
-        provider.chat_with_retry = AsyncMock(
-            return_value=LLMResponse(content="summary", finish_reason="stop")
-        )
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.max_iterations = 1
@@ -722,10 +721,8 @@ class TestToolEventProgress:
         provider.chat_stream_with_retry = AsyncMock(side_effect=[
             LLMResponse(content=None, tool_calls=[]),
             LLMResponse(content=None, tool_calls=[]),
+            LLMResponse(content="final answer", tool_calls=[]),
         ])
-        provider.chat_with_retry = AsyncMock(
-            return_value=LLMResponse(content="final answer", tool_calls=[]),
-        )
         loop = AgentLoop(
             bus=bus,
             provider=provider,
@@ -754,8 +751,7 @@ class TestToolEventProgress:
         final = [message for message in outbound if message.content == "final answer"]
         assert len(final) == 1
         assert final[0].event is None
-        provider.chat_stream_with_retry.assert_awaited()
-        provider.chat_with_retry.assert_awaited_once()
+        assert provider.chat_stream_with_retry.await_count == 3
 
     @pytest.mark.asyncio
     async def test_independent_late_subagent_result_gets_complete_webui_turn(
@@ -1026,7 +1022,7 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -1100,7 +1096,7 @@ class TestToolEventProgress:
         release_title = asyncio.Event()
         calls = 0
 
-        async def chat_with_retry(*_args: object, **_kwargs: object) -> LLMResponse:
+        async def chat_stream_with_retry(*_args: object, **_kwargs: object) -> LLMResponse:
             nonlocal calls
             calls += 1
             if calls == 1:
@@ -1109,7 +1105,7 @@ class TestToolEventProgress:
             await release_title.wait()
             return LLMResponse(content="Generated title", tool_calls=[])
 
-        provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
+        provider.chat_stream_with_retry = AsyncMock(side_effect=chat_stream_with_retry)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -1146,7 +1142,7 @@ class TestToolEventProgress:
 
         assert isinstance(session_updated.event, SessionUpdatedEvent)
         assert session_updated.event.scope == "metadata"
-        assert provider.chat_with_retry.await_count == 2
+        assert provider.chat_stream_with_retry.await_count == 2
 
     @pytest.mark.asyncio
     async def test_webui_title_generation_uses_turn_model_snapshot(
@@ -1157,7 +1153,7 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -1207,6 +1203,77 @@ class TestToolEventProgress:
         assert captured["model"] == "test-model"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
+    async def test_webui_title_requires_inbound_opt_in(
+        self,
+        tmp_path: Path,
+        metadata: dict[str, object],
+    ) -> None:
+        from nanobot.session.manager import SessionManager
+        from nanobot.session.webui_turns import maybe_generate_webui_title_after_turn
+
+        sessions = SessionManager(tmp_path)
+        session = sessions.get_or_create("websocket:chat1")
+        session.metadata["webui"] = True
+        session.add_message("user", "say hello")
+        session.add_message("assistant", "Hello")
+        sessions.save(session)
+        provider = MagicMock()
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Greeting"))
+
+        generated = await maybe_generate_webui_title_after_turn(
+            channel="websocket",
+            chat_id="chat1",
+            metadata=metadata,
+            sessions=sessions,
+            session_key=session.key,
+            provider=provider,
+            model="test-model",
+        )
+
+        assert generated is False
+        provider.chat_stream_with_retry.assert_not_awaited()
+        assert "title" not in session.metadata
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
+    async def test_webui_turn_without_opt_in_does_not_schedule_title(
+        self,
+        tmp_path: Path,
+        metadata: dict[str, object],
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done"))
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        session = loop.sessions.get_or_create("websocket:chat1")
+        session.metadata["webui"] = True
+        loop.sessions.save(session)
+        scheduled: list[object] = []
+
+        def schedule_background(coro: object) -> None:
+            scheduled.append(coro)
+            if hasattr(coro, "close"):
+                coro.close()
+
+        loop.schedule_background = schedule_background  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+            metadata=metadata,
+        ))
+
+        assert scheduled == []
+        provider.chat_stream_with_retry.assert_awaited_once()
+        assert "title" not in session.metadata
+
+    @pytest.mark.asyncio
     async def test_webui_command_turn_does_not_schedule_title_generation(
         self,
         tmp_path: Path,
@@ -1215,7 +1282,7 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
 
@@ -1244,7 +1311,7 @@ class TestToolEventProgress:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         loop.tools.get_definitions = MagicMock(return_value=[])
 

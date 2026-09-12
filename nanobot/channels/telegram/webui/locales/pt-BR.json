@@ -1,21 +1,11 @@
 {
-  "description": "Converse com o nanobot pelo Telegram.",
-  "requirements": "Token do bot, usuários permitidos e gateway",
   "setup": {
     "docsLabel": "Abrir guia do Telegram",
     "officialLabel": "Abrir BotFather",
-    "tryIt": "Envie /start ou uma DM curta ao seu bot do Telegram.",
-    "summary": "Ativar liga o suporte ao Telegram. Um token do BotFather ainda é necessário para trocar mensagens.",
-    "steps": [
-      "Crie um bot com o BotFather e copie o token.",
-      "Adicione o token e escolha quem pode enviar mensagens ao bot.",
-      "Salve e ative o Telegram; depois, envie uma DM ou mencione o bot em um grupo."
-    ],
     "fields": {
       "token": {
         "label": "Token do bot",
-        "placeholder": "123456:ABC...",
-        "help": "Crie-o com o BotFather."
+        "placeholder": "123456:ABC..."
       },
       "proxy": {
         "label": "Proxy de rede",
@@ -23,8 +13,7 @@
       },
       "allowFrom": {
         "label": "Usuários permitidos",
-        "placeholder": "* ou IDs de usuário do Telegram",
-        "help": "Deixe vazio para usar códigos de pareamento."
+        "placeholder": "* ou IDs de usuário do Telegram"
       },
       "technical_profileName": {"label": "Perfil de notificações", "help": "Perfil adicional somente de saída."},
       "technical_mainChatId": {"label": "ID do proprietário", "help": "ID privado; a lista de permitidos deve conter apenas este ID."},
@@ -41,6 +30,71 @@
           "open": "Todas as mensagens",
           "allowlist": "Lista de permissão"
         }
+      },
+      "mode": {
+        "label": "Modo de conexão",
+        "choices": {
+          "polling": "Votação longa",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "Responder à mensagem",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Ler emoticons"
+      },
+      "connectionPoolSize": {
+        "label": "Tamanho do pool de conexões"
+      },
+      "poolTimeout": {
+        "label": "Tempo limite do pool de conexões"
+      },
+      "streaming": {
+        "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "Teclados embutidos",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "richMessages": {
+        "label": "Mensagens ricas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Intervalo de atualização de fluxo"
+      },
+      "webhookUrl": {
+        "label": "URL do webhook"
+      },
+      "webhookListenHost": {
+        "label": "Host de escuta do webhook"
+      },
+      "webhookListenPort": {
+        "label": "Porta de escuta do webhook"
+      },
+      "webhookPath": {
+        "label": "Caminho do webhook"
+      },
+      "webhookSecretToken": {
+        "label": "Token secreto do webhook"
+      },
+      "webhookMaxConnections": {
+        "label": "Máximo de conexões de webhook"
       }
     }
   }

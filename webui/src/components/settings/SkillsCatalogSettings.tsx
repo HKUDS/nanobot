@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
   Check,
@@ -25,6 +25,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
+import { ExpandableText } from "@/components/ui/expandable-text";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -77,7 +79,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const disabledCount = skills.filter((skill) => skill.enabled === false).length;
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <SegmentedControl
         value={view}
         mode="tabs"
@@ -222,7 +224,7 @@ function SkillCatalogRow({
       className={cn(
         "group flex w-full min-w-0 items-center gap-3 rounded-control px-2 py-3 text-left",
         "transition-colors duration-150",
-        "hover:bg-muted/70",
+        "settings-hover",
         "focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         !enabled && "opacity-60",
       )}
@@ -279,6 +281,7 @@ function SkillDetailSheet({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const descriptionId = useId();
 
   useEffect(() => {
     if (!open || !skill) return;
@@ -368,7 +371,7 @@ function SkillDetailSheet({
           side="right"
           closeButtonClassName={cn(
             "right-2 top-2 inline-flex h-10 w-10 items-center justify-center rounded-full opacity-100",
-            "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+            "text-muted-foreground transition-colors settings-hover hover:text-foreground",
             "sm:right-3 sm:top-3",
           )}
           className={cn(
@@ -407,18 +410,21 @@ function SkillDetailSheet({
                     {statusLabel}
                   </Pill>
                 </div>
-                <p
-                  className={cn(
-                    "mt-3 text-[13px] leading-5 text-muted-foreground",
-                    descriptionExpandable && !descriptionExpanded && "line-clamp-5",
-                  )}
-                >
-                  {activeSkill.description}
-                </p>
+                <div className="mt-3">
+                  <ExpandableText
+                    id={descriptionId}
+                    expanded={descriptionExpanded || !descriptionExpandable}
+                    lines={5}
+                    className="text-[13px] leading-5 text-muted-foreground"
+                  >
+                    {activeSkill.description}
+                  </ExpandableText>
+                </div>
                 {descriptionExpandable ? (
                   <button
                     type="button"
                     aria-expanded={descriptionExpanded}
+                    aria-controls={descriptionId}
                     onClick={() => setDescriptionExpanded((value) => !value)}
                     className="mt-1.5 min-h-8 rounded-full text-[12px] font-medium text-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
@@ -570,19 +576,22 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
   const content =
     markdown ||
     t("settings.skills.rawInstructionsEmpty", {
-      defaultValue: "No raw instructions.",
+      defaultValue: "No skill file content available.",
     });
 
   return (
-    <details className="group rounded-floating border border-border/45 bg-muted/20 px-3 py-3">
-      <summary className="flex min-h-11 cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
+    <Disclosure
+      className="rounded-floating border border-border/45 bg-muted/20 px-3 py-3"
+      summaryClassName="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-sm text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      summary={<>
         <span>
           {t("settings.skills.instructionsTitle", { defaultValue: "Skill instructions" })}
         </span>
         <code className="font-mono text-[10px] font-normal text-muted-foreground">
           SKILL.md
         </code>
-      </summary>
+      </>}
+    >
       <div className="mt-3 overflow-hidden rounded-control border border-border/35 bg-background/70">
         <pre
           className={cn(
@@ -596,7 +605,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
           {content}
         </pre>
       </div>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -661,7 +670,7 @@ function RequirementsSection({
               })}
               title={option.label}
               onClick={() => void copyCommand(option.command)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors settings-hover hover:text-foreground sm:h-7 sm:w-7"
             >
               {copiedCommand === option.command ? (
                 <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
@@ -675,14 +684,14 @@ function RequirementsSection({
         {!installOptions.length && missing_bins.length ? (
           <SetupRequirement
             icon={<Terminal className="h-3.5 w-3.5" aria-hidden />}
-            label={t("settings.skills.missingCommands", { defaultValue: "Missing CLI" })}
+            label={t("settings.skills.missingCommands", { defaultValue: "Missing command-line tools" })}
             items={missing_bins}
           />
         ) : null}
         {missing_env.length ? (
           <SetupRequirement
             icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />}
-            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing ENV" })}
+            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing environment variables" })}
             items={missing_env}
           />
         ) : null}

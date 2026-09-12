@@ -2316,6 +2316,56 @@ async def test_send_progress_includes_structured_tool_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_progress_omits_binary_tool_results_from_wire_and_transcript() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-binary-tool-result")
+    data_url = f"data:image/png;base64,{'A' * (2 * 1024 * 1024)}"
+    tool_events = [
+        {
+            "version": 1,
+            "phase": "end",
+            "call_id": "call-image",
+            "name": "read_file",
+            "arguments": {"path": "/media/screenshot.png"},
+            "result": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                    "_meta": {"path": "/media/screenshot.png"},
+                },
+                {"type": "text", "text": "(Image file: /media/screenshot.png)"},
+            ],
+            "error": None,
+            "files": [],
+            "embeds": [],
+        }
+    ]
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-binary-tool-result",
+        content="read_file completed",
+        event=ProgressEvent(content="read_file completed", tool_events=tool_events),
+    ))
+
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    [wire_event] = payload["tool_events"]
+    assert wire_event["result"][0]["image_url"]["url"] == (
+        "[binary content omitted from WebUI]"
+    )
+    assert len(mock_ws.send.await_args.args[0].encode("utf-8")) < 4096
+
+    [persisted] = read_transcript_lines("websocket:chat-binary-tool-result")
+    assert persisted["tool_events"] == payload["tool_events"]
+    assert data_url not in json.dumps(persisted)
+
+    # WebUI projection must not alter the result that the runner sends back to the model.
+    assert tool_events[0]["result"][0]["image_url"]["url"] == data_url
+
+
+@pytest.mark.asyncio
 async def test_send_file_edit_progress_uses_file_edit_event() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
@@ -5485,6 +5535,77 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     assert body["messages"][0]["role"] == "user"
     assert body["messages"][0]["content"] == "hi"
     assert body["has_pending_tool_calls"] is False
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_dispatch_runs_replay_off_event_loop(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:threaded-history"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "threaded-history", "text": "hi"},
+    )
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+    original = gateway.http._handle_webui_thread_get
+
+    def slow_replay(*args: Any, **kwargs: Any):
+        time.sleep(0.15)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(gateway.http, "_handle_webui_thread_get", slow_replay)
+    request_task = asyncio.create_task(
+        gateway.http._dispatch_session_routes(request, request.path)
+    )
+
+    await asyncio.sleep(0.03)
+
+    assert request_task.done() is False
+    response = await request_task
+    assert response is not None
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_diagnostics_hash_session_key(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_RECORDS", 1)
+    key = "websocket:private-session-name"
+    for event in (
+        {"event": "user", "chat_id": "private-session-name", "text": "hi"},
+        {"event": "message", "chat_id": "private-session-name", "text": "hello"},
+        {"event": "turn_end", "chat_id": "private-session-name"},
+    ):
+        append_transcript_object(key, event)
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    gateway.http._log = MagicMock()
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    response = await gateway.http._dispatch_session_routes(request, request.path)
+
+    assert response is not None
+    assert response.status_code == 200
+    call = gateway.http._log.warning.call_args
+    assert call is not None
+    assert key not in " ".join(str(value) for value in call.args)
 
 
 @pytest.mark.asyncio

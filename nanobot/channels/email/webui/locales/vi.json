@@ -1,33 +1,28 @@
 {
-  "description": "Cho phép nanobot nhận và trả lời email.",
-  "requirements": "Hộp thư IMAP, gửi SMTP, mật khẩu ứng dụng và sự đồng ý rõ ràng",
+  "displayName": "Email",
   "setup": {
     "docsLabel": "Mở hướng dẫn Email",
     "officialLabel": "Mở hướng dẫn mật khẩu ứng dụng",
-    "tryIt": "Gửi email thử đến hộp thư đã kết nối.",
-    "summary": "Email đọc thư qua IMAP và trả lời qua SMTP. Dùng hộp thư riêng và cấp quyền trước khi bật.",
-    "steps": [
-      "Tạo hộp thư riêng và mật khẩu ứng dụng nếu cần.",
-      "Chọn nhà cung cấp hoặc nhập thủ công cài đặt IMAP và SMTP.",
-      "Cấp quyền, lưu và bật Email, sau đó gửi tin nhắn thử."
-    ],
+    "presetLabel": "Điền nhanh",
+    "sections": {
+      "receiving": "Nhận thư",
+      "sending": "Gửi thư"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Tùy chỉnh"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {
-        "label": "Đã đồng ý",
-        "help": "Công tắc an toàn bắt buộc. Chỉ bật sau khi chủ động kết nối hộp thư này với bot.",
+        "label": "Cho phép nanobot đọc và gửi email",
         "choices": {
           "true": "Đã đồng ý",
           "false": "Chưa đồng ý"
         }
       },
       "imapHost": {
-        "label": "Host IMAP",
+        "label": "Máy chủ IMAP",
         "placeholder": "imap.gmail.com"
       },
       "imapUsername": {
@@ -36,11 +31,10 @@
       },
       "imapPassword": {
         "label": "Mật khẩu IMAP",
-        "placeholder": "Mật khẩu ứng dụng",
-        "help": "Dùng mật khẩu ứng dụng khi nhà cung cấp yêu cầu."
+        "placeholder": "Mật khẩu ứng dụng"
       },
       "smtpHost": {
-        "label": "Host SMTP",
+        "label": "Máy chủ SMTP",
         "placeholder": "smtp.gmail.com"
       },
       "smtpUsername": {
@@ -49,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "Mật khẩu SMTP",
-        "placeholder": "Mật khẩu ứng dụng",
-        "help": "Thường giống mật khẩu ứng dụng dùng cho IMAP."
+        "placeholder": "Mật khẩu ứng dụng"
       },
       "imapPort": {
         "label": "Cổng IMAP",
@@ -65,13 +58,12 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Chu kỳ kiểm tra",
+        "label": "Chu kỳ kiểm tra thư (giây)",
         "placeholder": "30"
       },
       "allowFrom": {
         "label": "Người gửi được phép",
-        "placeholder": "Địa chỉ email, phân tách bằng dấu phẩy",
-        "help": "Để trống để yêu cầu ghép nối trước."
+        "placeholder": "Địa chỉ email, phân tách bằng dấu phẩy"
       },
       "verifyDkim": {
         "label": "Xác minh DKIM",
@@ -86,6 +78,83 @@
           "true": "Bật",
           "false": "Tắt"
         }
+      },
+      "imapMailbox": {
+        "label": "Hộp thư IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS SMTP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL SMTP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Trả lời tự động",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "markSeen": {
+        "label": "Đánh dấu là đã đọc",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "postAction": {
+        "label": "Sau khi xử lý",
+        "choices": {
+          "delete": "Xóa",
+          "move": "Di chuyển"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Di chuyển tới hộp thư"
+      },
+      "postActionExpunge": {
+        "label": "Áp dụng hành động vĩnh viễn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Bỏ qua tin nhắn bị bỏ qua",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Chiều dài cơ thể tối đa"
+      },
+      "subjectPrefix": {
+        "label": "Trả lời tiền tố chủ đề"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Các loại tệp đính kèm được phép"
+      },
+      "maxAttachmentSize": {
+        "label": "Kích thước tệp đính kèm tối đa"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Tệp đính kèm tối đa"
       }
     }
   }

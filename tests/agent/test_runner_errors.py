@@ -23,7 +23,7 @@ async def test_runner_returns_tool_exception_to_model_for_recovery():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="working",
             tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
@@ -44,7 +44,7 @@ async def test_runner_returns_tool_exception_to_model_for_recovery():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 2
+    assert provider.chat_stream_with_retry.await_count == 2
     assert result.stop_reason == "completed"
     assert result.error is None
     assert result.final_content == "recovered"
@@ -111,7 +111,7 @@ async def test_llm_error_not_appended_to_session_messages():
     )
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
@@ -140,7 +140,7 @@ async def test_llm_arrearage_error_surfaces_clear_message():
     from nanobot.agent.runner import _ARREARAGE_ERROR_MESSAGE, AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="HTTP 402 insufficient_quota", finish_reason="error", error_status_code=402,
     ))
     tools = MagicMock()
@@ -177,7 +177,7 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="Request blocked by provider policy.",
         finish_reason=finish_reason,
         tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={"command": "echo nope"})],
@@ -208,7 +208,7 @@ async def test_runner_returns_structured_tool_error_to_model_for_recovery():
 
     provider = MagicMock(spec=LLMProvider)
 
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="working",
             tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})],
@@ -229,7 +229,7 @@ async def test_runner_returns_structured_tool_error_to_model_for_recovery():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 2
+    assert provider.chat_stream_with_retry.await_count == 2
     assert result.final_content == "used another path"
     assert result.stop_reason == "completed"
     assert result.tool_events == [
@@ -243,7 +243,7 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
 
     provider = MagicMock(spec=LLMProvider)
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         if not any(msg.get("role") == "tool" for msg in messages):
             return LLMResponse(
                 content="working",
@@ -254,7 +254,7 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
             )
         return LLMResponse(content="done", usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     output = "Error: generated report successfully\n\nExit code: 0"
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -283,7 +283,7 @@ async def test_runner_preserves_tool_error_results_in_messages():
 
     provider = MagicMock(spec=LLMProvider)
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         return LLMResponse(
             content=None,
             tool_calls=[
@@ -293,8 +293,7 @@ async def test_runner_preserves_tool_error_results_in_messages():
             usage=None,
         )
 
-    provider.chat_with_retry = chat_with_retry
-    provider.chat_stream_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
 
     call_idx = 0
 
@@ -351,7 +350,7 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
     provider = MagicMock(spec=LLMProvider)
     # First call: truncated (length) with blank content and a dropped tool call.
     # Second call: normal completion so the loop can terminate.
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="",
             finish_reason="length",

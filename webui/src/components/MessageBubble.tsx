@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
@@ -302,9 +304,9 @@ function IncomingSessionMessage({
         </div>
       </div>
       {createdAtLabel || showCopyAction ? (
-        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <TooltipProvider>
           <div
-            className="mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
+            className="message-actions mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
           >
             {showCopyAction ? <MessageCopyButton content={message.content} /> : null}
             {createdAtLabel ? (
@@ -422,7 +424,7 @@ export function MessageBubble({
           </p>
         ) : null}
         {showDeliveryStatus || showCreatedAt || (hasText && showCopyAction) ? (
-          <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+          <TooltipProvider>
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
               {showCreatedAt ? (
                 <MessageTimestamp
@@ -524,13 +526,13 @@ export function MessageBubble({
         </>
       )}
       {showAssistantFooterSlot ? (
-        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <TooltipProvider>
           <div
             data-assistant-footer
             data-state={showAssistantFooterRow ? "visible" : "reserved"}
             aria-hidden={showAssistantFooterRow ? undefined : true}
             className={cn(
-              "mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
+              "message-actions mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
               "transition-opacity duration-300 ease-out motion-reduce:transition-none",
               showAssistantFooterRow
                 ? "opacity-100"
@@ -887,8 +889,8 @@ export function StreamingLabelSheen({
       <span
         data-sheen-text={active ? sheenText : undefined}
         className={cn(
-          "block w-fit max-w-full truncate font-medium leading-normal",
-          active ? "streaming-text-sheen" : "text-muted-foreground",
+          "block w-fit max-w-full truncate pr-0.5 font-medium leading-normal",
+          active ? "streaming-text-sheen after:pr-0.5" : "text-muted-foreground",
         )}
       >
         {children}
@@ -934,16 +936,23 @@ function TraceGroup({ message }: TraceGroupProps) {
   const lines = message.traces ?? [message.content];
   const count = lines.length;
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const releaseContent = useCallback(() => setHasOpened(false), []);
+  const contentId = useId();
   return (
     <div className="w-full">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) setHasOpened(true);
+          setOpen((value) => !value);
+        }}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
           "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
         )}
         aria-expanded={open}
+        aria-controls={contentId}
       >
         <Wrench className="h-3.5 w-3.5" aria-hidden />
         <span className="font-medium">
@@ -954,17 +963,14 @@ function TraceGroup({ message }: TraceGroupProps) {
         <ChevronRight
           aria-hidden
           className={cn(
-            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
+            "ml-auto h-3.5 w-3.5 transition-transform duration-200 motion-reduce:transition-none",
             open && "rotate-90",
           )}
         />
       </button>
-      {open && (
-        <ul
-          className={cn(
-            "mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3",
-            "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-          )}
+      <DisclosureContent id={contentId} open={open} onExitComplete={releaseContent}>
+        {hasOpened && <ul
+          className="mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3"
         >
           {lines.map((line, i) => (
             <li
@@ -974,8 +980,8 @@ function TraceGroup({ message }: TraceGroupProps) {
               {line}
             </li>
           ))}
-        </ul>
-      )}
+        </ul>}
+      </DisclosureContent>
     </div>
   );
 }

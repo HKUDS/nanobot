@@ -41,6 +41,7 @@ import type {
   WebSearchSettingsUpdate,
   WorkspacesPayload,
   WebuiThreadPersistedPayload,
+  WebuiThreadTraceDetailPayload,
   WorkspaceScopePayload,
 } from "./types";
 import { fetchWithTimeout } from "./http";
@@ -232,6 +233,8 @@ export interface FetchWebuiThreadOptions {
   direction?: "latest";
   before?: string | null;
   signal?: AbortSignal;
+  revision?: string;
+  cached?: WebuiThreadPersistedPayload;
 }
 
 export async function fetchWebuiThread(
@@ -249,15 +252,35 @@ export async function fetchWebuiThread(
   const query = params.toString();
   const suffix = query ? `?${query}` : "";
   const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (options?.revision) headers["If-None-Match"] = `"${options.revision}"`;
   const res = await fetchWithTimeout(url, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
     credentials: "same-origin",
     cache: "no-store",
     signal: options?.signal,
   });
+  if (res.status === 304 && options?.cached) return options.cached;
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return (await res.json()) as WebuiThreadPersistedPayload;
+}
+
+export async function fetchWebuiThreadTraceDetail(
+  token: string,
+  key: string,
+  ref: string,
+  base: string = "",
+): Promise<WebuiThreadTraceDetailPayload> {
+  const query = new URLSearchParams({ ref });
+  const url = `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread/trace-detail?${query}`;
+  const res = await fetchWithTimeout(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return (await res.json()) as WebuiThreadTraceDetailPayload;
 }
 
 export async function fetchFilePreview(
@@ -572,12 +595,16 @@ export async function stopApiService(
 export async function enableNanobotFeature(
   transport: WebUIMutationTransport,
   name: string,
-  options: { instanceId?: string } = {},
+  options: { instanceId?: string; installOnly?: boolean } = {},
 ): Promise<NanobotFeaturesPayload> {
   return mutation<NanobotFeaturesPayload>(
     transport,
     "settings.feature.enable",
-    { name, ...(options.instanceId ? { instance_id: options.instanceId } : {}) },
+    {
+      name,
+      ...(options.instanceId ? { instance_id: options.instanceId } : {}),
+      ...(options.installOnly ? { install_only: true } : {}),
+    },
     PACKAGE_MUTATION_TIMEOUT_MS,
   );
 }
@@ -617,22 +644,14 @@ export async function runPairingAction(
 export async function startChannelConnect(
   transport: WebUIMutationTransport,
   channel: string,
-  options: {
-    domain?: string;
-    instanceId?: string;
-    mode?: "replace" | "create";
-    force?: boolean;
-  } = {},
+  params: Readonly<Record<string, string | boolean>> = {},
 ): Promise<ChannelConnectPayload> {
   return mutation<ChannelConnectPayload>(
     transport,
     "settings.channel.connect.start",
     {
+      ...params,
       channel,
-      ...(options.domain ? { domain: options.domain } : {}),
-      ...(options.instanceId ? { instance_id: options.instanceId } : {}),
-      ...(options.mode ? { mode: options.mode } : {}),
-      ...(options.force ? { force: true } : {}),
     },
     PACKAGE_MUTATION_TIMEOUT_MS,
   );
@@ -670,7 +689,7 @@ export async function cancelChannelConnect(
 export async function configureChannel(
   transport: WebUIMutationTransport,
   name: string,
-  values: Record<string, string>,
+  values: Record<string, string | null>,
   options: { enable?: boolean; instanceId?: string } = {},
 ): Promise<ChannelConfigurePayload> {
   return mutation<ChannelConfigurePayload>(
@@ -689,7 +708,7 @@ export async function configureChannel(
 export async function validateChannel(
   transport: WebUIMutationTransport,
   name: string,
-  values: Record<string, string> = {},
+  values: Record<string, string | null> = {},
   options: { instanceId?: string } = {},
 ): Promise<ChannelValidationPayload> {
   return mutation<ChannelValidationPayload>(
@@ -1084,4 +1103,12 @@ export async function updateTranscriptionSettings(
       max_upload_mb: update.maxUploadMb,
     },
   );
+}
+
+
+export async function updateRuntimeConfigSettings(
+  transport: WebUIMutationTransport,
+  values: Record<string, import("@/lib/types").RuntimeConfigValue>,
+): Promise<SettingsPayload> {
+  return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
 }

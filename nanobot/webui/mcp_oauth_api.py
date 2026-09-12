@@ -287,7 +287,15 @@ class McpOAuthManager:
             flow.error = "MCP authorization timed out."
             raise _OAuthCallbackError(flow.error) from exc
 
-    async def _connect(self, flow: _McpOAuthFlow, handlers: MCPOAuthHandlers) -> bool:
+    @staticmethod
+    async def _close_connections(connections: dict[str, MCPConnection]) -> None:
+        for connection in connections.values():
+            with suppress(Exception):
+                await connection.aclose()
+
+    async def _connect(
+        self, flow: _McpOAuthFlow, handlers: MCPOAuthHandlers
+    ) -> dict[str, MCPConnection]:
         connections: dict[str, MCPConnection] = {}
         try:
             connections = await connect_mcp_servers(
@@ -295,20 +303,19 @@ class McpOAuthManager:
                 ToolRegistry(),
                 oauth_handlers={flow.name: handlers},
             )
-            succeeded = flow.name in connections
-            if not succeeded and flow.error is None:
+            if flow.name not in connections:
+                await self._close_connections(connections)
+                connections = {}
+            if not connections and flow.error is None:
                 flow.error = "Could not complete the MCP OAuth connection."
-            return succeeded
+            return connections
         except asyncio.CancelledError:
             raise
         except Exception:
             if flow.error is None:
                 flow.error = "Could not complete the MCP OAuth connection."
-            return False
-        finally:
-            for connection in connections.values():
-                with suppress(Exception):
-                    await connection.aclose()
+            await self._close_connections(connections)
+            return {}
 
     async def _connect_and_reload(
         self,
@@ -316,8 +323,8 @@ class McpOAuthManager:
         handlers: MCPOAuthHandlers,
         reload_mcp: McpReload,
     ) -> bool:
-        succeeded = await self._connect(flow, handlers)
-        if not succeeded:
+        connections = await self._connect(flow, handlers)
+        if flow.name not in connections:
             return False
         try:
             flow.reload_result = await reload_mcp()
@@ -335,6 +342,8 @@ class McpOAuthManager:
                 "message": "Signed in, but nanobot could not activate the MCP tools.",
                 "requires_restart": True,
             }
+        finally:
+            await self._close_connections(connections)
         return True
 
     def _flow(self, flow_id: str) -> _McpOAuthFlow:
@@ -346,7 +355,14 @@ class McpOAuthManager:
     def _payload(self, flow: _McpOAuthFlow) -> dict[str, Any]:
         task = flow.task
         connected = flow.reload_result.get("connected") if flow.reload_result is not None else None
-        if task is not None and task.cancelled():
+        activated = flow.reload_result is not None and (
+            flow.reload_result.get("ok") or (isinstance(connected, list) and flow.name in connected)
+        )
+        if activated:
+            status = "connected"
+        elif flow.reload_result is not None:
+            status = "authorized"
+        elif task is not None and task.cancelled():
             status = "cancelled"
         elif task is not None and task.done():
             try:
@@ -355,12 +371,6 @@ class McpOAuthManager:
                 succeeded = False
             if not succeeded:
                 status = "failed"
-            elif flow.reload_result is None:
-                status = "authorized"
-            elif flow.reload_result.get("ok") or (
-                isinstance(connected, list) and flow.name in connected
-            ):
-                status = "connected"
             else:
                 status = "authorized"
         elif flow.callback_received:

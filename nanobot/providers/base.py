@@ -1321,14 +1321,17 @@ class LLMProvider(ABC):
         streaming should override this method.
         """
         _ = on_thinking_delta, on_tool_call_delta
-        response = await self.chat(
-            messages=messages,
-            tools=tools,
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            tool_choice=tool_choice,
+        response = await asyncio.wait_for(
+            self.chat(
+                messages=messages,
+                tools=tools,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                tool_choice=tool_choice,
+            ),
+            timeout=resolve_stream_idle_timeout_s(),
         )
         if on_content_delta and response.content:
             await on_content_delta(response.content)

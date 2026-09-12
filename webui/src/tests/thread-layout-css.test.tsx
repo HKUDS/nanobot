@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
@@ -25,10 +25,10 @@ describe("thread layout containment", () => {
     }
   });
 
-  it("keeps wide display math locally scrollable with its left edge reachable", () => {
+  it("keeps wide display math locally scrollable with its left edge reachable", async () => {
     const source = `$$\n${Array.from({ length: 25 }, () => "x^{2}").join(" + ")}\n$$`;
     const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
-    expect(container.querySelector(".markdown-content .katex-display > .katex")).not.toBeNull();
+    await waitFor(() => expect(container.querySelector(".markdown-content .katex-display > .katex")).not.toBeNull());
     const scrollport = rulesFor(".markdown-content .katex-display");
     expect(scrollport).toContain("max-width: 100%;");
     expect(scrollport).toContain("overflow-x: auto;");

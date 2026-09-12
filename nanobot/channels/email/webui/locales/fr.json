@@ -1,26 +1,21 @@
 {
-  "description": "Permettez à nanobot de recevoir et répondre aux e-mails.",
-  "requirements": "Boîte IMAP, envoi SMTP, mot de passe d’application et consentement explicite",
+  "displayName": "E-mail",
   "setup": {
     "docsLabel": "Ouvrir le guide Email",
     "officialLabel": "Ouvrir le guide des mots de passe d’application",
-    "tryIt": "Envoyez un e-mail test à la boîte connectée.",
-    "summary": "Email lit les messages via IMAP et répond via SMTP. Utilisez une boîte dédiée et accordez votre consentement avant l’activation.",
-    "steps": [
-      "Créez une boîte dédiée et, si nécessaire, un mot de passe d’application.",
-      "Choisissez un fournisseur ou saisissez les paramètres IMAP et SMTP.",
-      "Accordez le consentement, enregistrez et activez Email, puis envoyez un message test."
-    ],
+    "presetLabel": "Remplissage rapide",
+    "sections": {
+      "receiving": "Réception des e-mails",
+      "sending": "Envoi des e-mails"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "Personnalisé"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {
-        "label": "Consentement accordé",
-        "help": "Sécurité obligatoire. N’activez qu’après avoir choisi de connecter cette boîte au bot.",
+        "label": "Autoriser nanobot à lire et envoyer des e-mails",
         "choices": {
           "true": "Accordé",
           "false": "Non accordé"
@@ -36,8 +31,7 @@
       },
       "imapPassword": {
         "label": "Mot de passe IMAP",
-        "placeholder": "Mot de passe d’application",
-        "help": "Utilisez un mot de passe d’application si le fournisseur l’exige."
+        "placeholder": "Mot de passe d’application"
       },
       "smtpHost": {
         "label": "Hôte SMTP",
@@ -49,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "Mot de passe SMTP",
-        "placeholder": "Mot de passe d’application",
-        "help": "Généralement identique à celui d’IMAP."
+        "placeholder": "Mot de passe d’application"
       },
       "imapPort": {
         "label": "Port IMAP",
@@ -65,13 +58,12 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Intervalle de relève",
+        "label": "Intervalle de relève (secondes)",
         "placeholder": "30"
       },
       "allowFrom": {
         "label": "Expéditeurs autorisés",
-        "placeholder": "Adresses séparées par des virgules",
-        "help": "Laissez vide pour imposer l’association avant utilisation."
+        "placeholder": "Adresses séparées par des virgules"
       },
       "verifyDkim": {
         "label": "Vérifier DKIM",
@@ -86,6 +78,83 @@
           "true": "Activé",
           "false": "Désactivé"
         }
+      },
+      "imapMailbox": {
+        "label": "Boîte aux lettres IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP-TLS",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP-SSL",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Réponses automatiques",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "markSeen": {
+        "label": "Marquer comme lu",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "postAction": {
+        "label": "Après traitement",
+        "choices": {
+          "delete": "Supprimer",
+          "move": "Déplacer"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Déplacer vers la boîte aux lettres"
+      },
+      "postActionExpunge": {
+        "label": "Appliquer l'action de manière permanente",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignorer les messages ignorés",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Longueur maximale du corps"
+      },
+      "subjectPrefix": {
+        "label": "Préfixe du sujet de la réponse"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Types de pièces jointes autorisés"
+      },
+      "maxAttachmentSize": {
+        "label": "Taille maximale des pièces jointes"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Nombre maximal de pièces jointes"
       }
     }
   }

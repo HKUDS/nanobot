@@ -12,6 +12,7 @@ import type { UIMessage } from "@/lib/types";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -125,19 +126,26 @@ describe("ThreadMessages", () => {
     expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
   });
 
-  it("still defers historical non-tail answers on their initial render", () => {
-    render(
-      <ThreadMessages
-        messages={[
-          { id: "u1", role: "user", content: "old question", createdAt: 1 },
-          { id: "a1", role: "assistant", content: "historical answer", createdAt: 2 },
-          { id: "u2", role: "user", content: "latest question", createdAt: 3 },
-        ]}
-        isStreaming={false}
-      />,
-    );
-
-    expect(screen.getByText("historical answer").closest(".thread-render-unit")).not.toBeNull();
+  it("recycles offscreen historical content while preserving its measured space", () => {
+    let notify: (entries: Array<{ isIntersecting: boolean }>) => void = () => {};
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: typeof notify) { notify = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    const view = render(<ThreadMessages messages={[
+      { id: "u1", role: "user", content: "old question", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "historical answer", createdAt: 2 },
+      { id: "u2", role: "user", content: "latest question", createdAt: 3 },
+    ]} isStreaming={false} />);
+    const unit = screen.getByText("historical answer").closest<HTMLElement>("[data-thread-display-unit]")!;
+    vi.spyOn(unit, "getBoundingClientRect").mockReturnValue({ height: 240 } as DOMRect);
+    act(() => notify([{ isIntersecting: false }]));
+    expect(unit.style.height).toBe("240px");
+    expect(unit.childElementCount).toBe(0);
+    act(() => notify([{ isIntersecting: true }]));
+    expect(screen.getByText("historical answer")).toBeVisible();
+    expect(view.container).toHaveTextContent("old question");
   });
 
   it("preserves an answer's markdown tree across completion and the next prompt", async () => {

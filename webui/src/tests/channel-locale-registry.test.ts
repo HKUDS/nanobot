@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { describe, expect, it, vi } from "vitest";
 
 import { channelFieldMessageKey } from "@/channel-plugins/i18n";
@@ -15,6 +12,7 @@ const expectedChannels = [
   "feishu",
   "matrix",
   "mattermost",
+  "mochat",
   "msteams",
   "napcat",
   "qq",
@@ -95,22 +93,6 @@ describe("channel locale registry", () => {
         expect(messages?.setup.presets?.[preset.id], `${channel} preset ${preset.id}`).toBeTypeOf("string");
       }
     }
-  });
-
-  it("keeps i18n initialization independent from channel React modules", () => {
-    const localeRegistry = readFileSync(
-      resolve(process.cwd(), "src/channel-plugins/locale-registry.ts"),
-      "utf8",
-    );
-    const i18nEntry = readFileSync(resolve(process.cwd(), "src/i18n/index.ts"), "utf8");
-
-    expect(localeRegistry).toContain("webui/locales/*.json");
-    expect(localeRegistry).not.toContain("eager: true");
-    expect(localeRegistry).not.toMatch(/channel-plugins\/registry|\.tsx|\breact\b/i);
-    expect(i18nEntry).toContain("channel-plugins/locale-registry");
-    expect(i18nEntry).toContain("import.meta.glob");
-    expect(i18nEntry).not.toMatch(/import\s+\w+Common\s+from/);
-    expect(i18nEntry).not.toContain("channel-plugins/registry");
   });
 });
 

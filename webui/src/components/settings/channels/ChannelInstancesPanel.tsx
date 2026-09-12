@@ -7,23 +7,20 @@ import { ToggleButton } from "@/components/settings/ToggleButton";
 import type { ChannelConfigField } from "@/components/settings/channels/catalog";
 import {
   CredentialForm,
-  channelValidationStatusClass,
-  channelValidationStatusIcon,
   channelValuesForSave,
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
 import {
+  channelValidationStatusClass,
+  channelValidationStatusIcon,
+} from "@/components/settings/channels/ChannelValidationProgress";
+import {
+  CHANNEL_SETUP_PANEL_CLASS_NAME,
   ChannelLogo,
   ChannelRuntimeError,
-  ChannelStatusBadge,
   channelSetup,
-  channelStatusLabel,
   localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
-import {
-  ChannelGuideLink,
-  ChannelSetupSteps,
-} from "@/components/settings/channels/ChannelSetupParts";
 import { Button } from "@/components/ui/button";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import {
@@ -41,7 +38,6 @@ import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export type ChannelInstancesPanelCustomization = {
-  countLabel?: (runningCount: number) => string;
   toggleAriaLabel?: (instance: NanobotChannelInstanceInfo) => string;
   configuredLabel?: string;
   needsSetupLabel?: string;
@@ -53,14 +49,12 @@ export type ChannelInstancesPanelCustomization = {
 export function ChannelInstancesPanel({
   feature,
   showBrandLogos,
-  chatAppsDocsUrl,
   instances: providedInstances,
   onFeaturesUpdate,
   customization = {},
 }: {
   feature: NanobotFeatureInfo;
   showBrandLogos: boolean;
-  chatAppsDocsUrl?: string;
   instances?: NanobotChannelInstanceInfo[];
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   customization?: ChannelInstancesPanelCustomization;
@@ -70,8 +64,9 @@ export function ChannelInstancesPanel({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const displayName = localizedChannelDisplayName(feature, t);
   const instances = providedInstances ?? feature.instances ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [busyInstanceId, setBusyInstanceId] = useState<string | null>(null);
+  const [editor, setEditor] = useState<{ id: string; expanded: boolean } | null>(null);
+  const selectedId = editor?.id;
+  const [pendingToggle, setPendingToggle] = useState<{ id: string; checked: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selected = selectedId ? instances.find((instance) => instance.id === selectedId) : undefined;
   const setup = useMemo(
@@ -87,9 +82,9 @@ export function ChannelInstancesPanel({
   );
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [savingFields, setSavingFields] = useState(false);
-  const configuredCount = instances.filter((instance) => instance.configured).length;
-  const runningCount = instances.filter((instance) => instance.runtime_status === "running").length;
-  const selectedValuesKey = JSON.stringify(selected?.config_values ?? {});
+  const selectedValuesKey = JSON.stringify(
+    defaultChannelFieldValues(instanceFields, selected?.config_values),
+  );
   const selectedConfiguredFields = useMemo(
     () => new Set(selected?.configured_fields ?? []),
     [selected?.configured_fields],
@@ -97,17 +92,18 @@ export function ChannelInstancesPanel({
 
   useEffect(() => {
     if (selectedId && !instances.some((instance) => instance.id === selectedId)) {
-      setSelectedId(null);
+      setEditor(null);
     }
   }, [instances, selectedId]);
 
   useEffect(() => {
     setFieldValues(defaultChannelFieldValues(instanceFields, selected?.config_values));
     setVisibleSecrets({});
-  }, [instanceFields, selected?.id, selectedValuesKey]);
+  }, [selected?.id, selectedValuesKey]);
 
   const toggleInstance = async (instance: NanobotChannelInstanceInfo, checked: boolean) => {
-    setBusyInstanceId(instance.id);
+    if (pendingToggle || savingFields) return;
+    setPendingToggle({ id: instance.id, checked });
     setNotice(null);
     try {
       const payload = checked
@@ -117,12 +113,12 @@ export function ChannelInstancesPanel({
     } catch (err) {
       setNotice((err as Error).message);
     } finally {
-      setBusyInstanceId(null);
+      setPendingToggle(null);
     }
   };
 
   const saveSelectedInstanceSettings = async () => {
-    if (!selected) return;
+    if (!selected || pendingToggle || savingFields) return;
     setSavingFields(true);
     setNotice(null);
     try {
@@ -135,7 +131,7 @@ export function ChannelInstancesPanel({
       if (payload.nanobot_features) {
         onFeaturesUpdate(payload.nanobot_features);
       }
-      setNotice(tx("settings.channels.savedSettings", "Saved settings."));
+      setNotice(tx("settings.channels.savedSettings", "Settings saved."));
     } catch (err) {
       setNotice((err as Error).message);
     } finally {
@@ -144,35 +140,24 @@ export function ChannelInstancesPanel({
   };
 
   return (
-    <aside className="min-h-full rounded-panel bg-settings-surface p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[18px] font-semibold leading-6 text-foreground">
-              {displayName}
-            </h3>
-            <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-              {customization.countLabel?.(runningCount)
-                ?? t("settings.channels.configuredInstances", {
-                  count: configuredCount,
-                  defaultValue: `${configuredCount} instances configured`,
-                })}
-            </p>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <ChannelStatusBadge status={feature.runtime_status}>
-            {channelStatusLabel(feature, tx)}
-          </ChannelStatusBadge>
-        </div>
+    <aside className={CHANNEL_SETUP_PANEL_CLASS_NAME}>
+      <div className="pe-20">
+        <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
+        <h3 className="sr-only">{displayName}</h3>
       </div>
 
       <ChannelRuntimeError message={feature.runtime_error} />
 
       <div className="mt-5 space-y-3">
         {instances.map((instance) => {
-          const expanded = selected?.id === instance.id;
+          const expanded = selected?.id === instance.id && editor?.expanded === true;
+          const toggling = pendingToggle?.id === instance.id;
+          const checked = toggling ? pendingToggle.checked : instanceToggleChecked(instance);
+          const instanceSummary = customization.renderInstanceSummary
+            ? customization.renderInstanceSummary(instance)
+            : instance.id;
+          const instanceAction = customization.renderInstanceAction?.(instance);
+          const hasInstanceOverview = Boolean(instanceSummary || instanceAction);
           return (
             <article
               key={instance.id}
@@ -180,18 +165,11 @@ export function ChannelInstancesPanel({
                 "overflow-hidden rounded-floating transition-colors",
                 expanded
                   ? "bg-background"
-                  : "bg-background/70 hover:bg-muted",
+                  : "bg-background/70",
               )}
             >
-              <div className="flex items-center gap-3 px-3 py-3">
-                <button
-                  type="button"
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                  onClick={() =>
-                    setSelectedId((current) => (current === instance.id ? null : instance.id))
-                  }
-                  aria-expanded={expanded}
-                >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-3">
+                <div className="flex min-w-0 flex-[1_1_12rem] items-center gap-3">
                   <ChannelInstanceAvatar
                     feature={feature}
                     instance={instance}
@@ -200,22 +178,43 @@ export function ChannelInstancesPanel({
                   <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
                     {channelInstanceDisplayName(instance)}
                   </span>
-                  <ChevronDown
-                    className={cn(
-                      "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                      expanded && "rotate-180",
-                    )}
-                    aria-hidden
+                  <ChannelInstanceStatusBadge
+                    instance={instance}
+                    configuredLabel={customization.configuredLabel}
+                    needsSetupLabel={customization.needsSetupLabel}
                   />
-                </button>
-                <div className="flex shrink-0 items-center gap-2">
-                  {busyInstanceId === instance.id ? (
+                </div>
+                <div className="ms-auto flex shrink-0 items-center gap-3">
+                  {instanceFields.length ? (
+                    <button
+                      type="button"
+                      className="inline-flex min-h-8 items-center gap-1.5 rounded px-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-offset-2"
+                      onClick={() =>
+                        setEditor((current) => ({
+                          id: instance.id,
+                          expanded: current?.id !== instance.id || !current.expanded,
+                        }))
+                      }
+                      aria-expanded={expanded}
+                    >
+                      {tx("settings.channels.advanced", "Advanced")}
+                      <ChevronDown
+                        className={cn(
+                          "h-3.5 w-3.5 transition-transform motion-reduce:transition-none",
+                          expanded && "rotate-180",
+                        )}
+                        aria-hidden
+                      />
+                    </button>
+                  ) : null}
+                  {toggling ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
                   ) : null}
                   <ToggleButton
-                    checked={instanceToggleChecked(instance)}
+                    checked={checked}
                     disabled={
-                      busyInstanceId === instance.id
+                      Boolean(pendingToggle)
+                      || savingFields
                       || !instance.configured
                     }
                     ariaLabel={customization.toggleAriaLabel?.(instance)
@@ -223,51 +222,28 @@ export function ChannelInstancesPanel({
                         name: channelInstanceDisplayName(instance),
                         defaultValue: "{{name}} instance",
                       })}
-                    label={instanceToggleChecked(instance) ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+                    label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
                     onChange={(checked) => void toggleInstance(instance, checked)}
                   />
                 </div>
               </div>
 
-              {expanded ? (
-                <div className="space-y-5 px-4 pb-4">
-                  <section className="pt-4">
-                    <div className="mb-3 flex items-start justify-between gap-3">
+              {hasInstanceOverview || (expanded && instanceFields.length > 0) ? (
+                <div className="space-y-3 px-4 pb-4 pt-1">
+                  {hasInstanceOverview ? <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    {instanceSummary ? (
                       <p className="min-w-0 flex-1 truncate font-mono text-[11.5px] leading-6 text-muted-foreground">
-                        {customization.renderInstanceSummary?.(instance) ?? instance.id}
+                        {instanceSummary}
                       </p>
-                      <ChannelInstanceStatusBadge
-                        instance={instance}
-                        configuredLabel={customization.configuredLabel}
-                        needsSetupLabel={customization.needsSetupLabel}
-                      />
-                    </div>
-                    {customization.renderInstanceAction?.(instance)}
-                  </section>
-                  <ChannelSetupSteps
-                    steps={setup.steps}
-                    action={
-                      <ChannelGuideLink
-                        feature={feature}
-                        setup={setup}
-                        chatAppsDocsUrl={chatAppsDocsUrl}
-                        compact
-                      />
-                    }
-                  />
-                  {instanceFields.length ? (
-                    <details className="group text-[12px] leading-5 text-muted-foreground">
-                      <summary className="cursor-pointer list-none text-[12px] font-semibold text-foreground">
-                        <span className="inline-flex items-center gap-1.5">
-                          {tx("settings.channels.advanced", "Advanced")}
-                          <ChevronDown
-                            className="h-3.5 w-3.5 transition-transform group-open:rotate-180"
-                            aria-hidden
-                          />
-                        </span>
-                      </summary>
+                    ) : <span className="flex-1" />}
+                    {instanceAction}
+                  </section> : null}
+                  {expanded && instanceFields.length > 0 ? (
+                    <div className={cn(
+                      "text-[12px] leading-5 text-muted-foreground",
+                      hasInstanceOverview && "border-t border-border/50 pt-3",
+                    )}>
                       <form
-                        className="mt-3"
                         onSubmit={(event) => {
                           event.preventDefault();
                           void saveSelectedInstanceSettings();
@@ -291,8 +267,8 @@ export function ChannelInstancesPanel({
                             type="submit"
                             size="sm"
                             variant="secondary"
-                            className="h-8 rounded-full bg-muted/70 px-3 text-[12px] font-semibold hover:bg-muted"
-                            disabled={savingFields}
+                            className="h-8 rounded-full bg-muted/70 px-3 text-[12px] font-semibold settings-hover"
+                            disabled={savingFields || Boolean(pendingToggle)}
                           >
                             {savingFields ? (
                               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -301,7 +277,7 @@ export function ChannelInstancesPanel({
                           </Button>
                         </div>
                       </form>
-                    </details>
+                    </div>
                   ) : null}
                 </div>
               ) : null}

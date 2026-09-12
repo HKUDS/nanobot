@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan penyiapan MoChat",
+    "officialLabel": "Buka MoChat",
+    "fields": {
+      "clawToken": {
+        "label": "Token Claw",
+        "placeholder": "Token Claw MoChat"
+      },
+      "baseUrl": {
+        "label": "URL server",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "ID pengguna agen",
+        "placeholder": "ID pengguna agen opsional"
+      },
+      "sessions": {
+        "label": "Sesi",
+        "placeholder": "ID sesi, pisahkan dengan koma"
+      },
+      "panels": {
+        "label": "Panel",
+        "placeholder": "ID panel, pisahkan dengan koma"
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan",
+        "placeholder": "ID pengguna, pisahkan dengan koma"
+      },
+      "socketUrl": {
+        "label": "URL soket"
+      },
+      "socketPath": {
+        "label": "Jalur soket"
+      },
+      "socketDisableMsgpack": {
+        "label": "Nonaktifkan MessagePack",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "Sambungkan kembali penundaan"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "Penundaan penyambungan kembali maksimum"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "Batas waktu koneksi habis"
+      },
+      "refreshIntervalMs": {
+        "label": "Interval penyegaran"
+      },
+      "watchTimeoutMs": {
+        "label": "Waktu tunggu tonton habis"
+      },
+      "watchLimit": {
+        "label": "Perhatikan ukuran batch"
+      },
+      "retryDelayMs": {
+        "label": "Coba lagi penundaan"
+      },
+      "maxRetryAttempts": {
+        "label": "Percobaan ulang maksimum"
+      },
+      "mention_requireInGroups": {
+        "label": "Memerlukan penyebutan dalam kelompok",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "groups": {
+        "label": "Aturan grup (JSON)"
+      },
+      "replyDelayMode": {
+        "label": "Mode penundaan balasan"
+      },
+      "replyDelayMs": {
+        "label": "Keterlambatan balasan"
+      }
+    }
+  }
+}

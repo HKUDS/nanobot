@@ -1,26 +1,15 @@
 {
-  "description": "Use nanobot from Mattermost channels and DMs.",
-  "requirements": "Mattermost server URL, bot token, channel access",
   "setup": {
     "docsLabel": "Open Mattermost setup",
     "officialLabel": "Open Mattermost bot guide",
-    "tryIt": "Mention the bot in a Mattermost channel or send it a direct message.",
-    "summary": "Mattermost connects through a bot account on your server and listens for channel and direct messages.",
-    "steps": [
-      "Create a Mattermost bot account and copy its access token.",
-      "Enter the server URL and grant the bot access to the target team and channels.",
-      "Save and enable Mattermost, then mention the bot or send a direct message."
-    ],
     "fields": {
       "serverUrl": {
         "label": "Server URL",
-        "placeholder": "https://mattermost.example.com",
-        "help": "Use the base URL of your Mattermost workspace."
+        "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "Bot token",
-        "placeholder": "Mattermost bot token",
-        "help": "Create this from a Mattermost bot account."
+        "placeholder": "Mattermost bot token"
       },
       "teamId": {
         "label": "Team ID",
@@ -45,6 +34,78 @@
       "allowFrom": {
         "label": "Allowed users",
         "placeholder": "User IDs, comma separated"
+      },
+      "allowFromMatchMode": {
+        "label": "User matching",
+        "choices": {
+          "email": "Email",
+          "id": "User ID",
+          "username": "Username"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Allowed channels"
+      },
+      "replyInThread": {
+        "label": "Reply in thread",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Include thread context",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Thread context limit"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "reactEmoji": {
+        "label": "Read emoji"
+      },
+      "doneEmoji": {
+        "label": "Done emoji"
+      },
+      "sendProgress": {
+        "label": "Send progress",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "sendToolHints": {
+        "label": "Send tool hints",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "dm_enabled": {
+        "label": "Enable direct messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "dm_policy": {
+        "label": "Direct message access",
+        "choices": {
+          "allowlist": "Allowlist",
+          "open": "Open"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Allowed direct-message users"
       }
     }
   }

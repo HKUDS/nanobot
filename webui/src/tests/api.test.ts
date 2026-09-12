@@ -28,6 +28,7 @@ import {
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
+  fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
   importMcpConfig,
   installMarketplaceSkill,
@@ -113,6 +114,47 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
+      }),
+    );
+  });
+
+  it("revalidates a cached WebUI thread and reuses it on 304", async () => {
+    const cached = {
+      schemaVersion: 3,
+      revision: "rev-1",
+      messages: [],
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 304,
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1", {
+      revision: cached.revision,
+      cached,
+    })).resolves.toBe(cached);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "If-None-Match": '"rev-1"',
+        },
+        cache: "no-store",
+      }),
+    );
+  });
+
+  it("fetches deferred trace details with encoded session and ref", async () => {
+    await fetchWebuiThreadTraceDetail("tok", "websocket:chat-1", "9.tr-deadbeefdeadbeef");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread/trace-detail?ref=9.tr-deadbeefdeadbeef",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+        cache: "no-store",
       }),
     );
   });
@@ -256,6 +298,20 @@ describe("webui API helpers", () => {
       "settings.channel.connect.cancel",
       { channel: "weixin", session_id: "session+/=" },
       20_000,
+    );
+  });
+
+  it("forwards channel-owned connect parameters without overriding the channel", async () => {
+    await startChannelConnect(mutationTransport, "plugin-chat", {
+      region: "eu",
+      interactive: false,
+      channel: "another-channel",
+    });
+
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.channel.connect.start",
+      { channel: "plugin-chat", region: "eu", interactive: false },
+      150_000,
     );
   });
 
@@ -807,6 +863,13 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenLastCalledWith(
       "settings.feature.enable",
       { name: "matrix" },
+      150_000,
+    );
+
+    await enableNanobotFeature(mutationTransport, "whatsapp", { installOnly: true });
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "settings.feature.enable",
+      { name: "whatsapp", install_only: true },
       150_000,
     );
 

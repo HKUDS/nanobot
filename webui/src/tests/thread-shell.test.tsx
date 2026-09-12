@@ -8,8 +8,15 @@ import { ThreadShell } from "@/components/thread/ThreadShell";
 import i18n from "@/i18n";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
-import type { CliAppsPayload, ConnectionStatus, SettingsPayload, UIMessage } from "@/lib/types";
+import type {
+  CliAppsPayload,
+  ConnectionStatus,
+  SettingsPayload,
+  UIMessage,
+  WebuiThreadPersistedPayload,
+} from "@/lib/types";
 
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -262,6 +269,36 @@ function httpJson(body: unknown) {
   };
 }
 
+function traceDetailThread(
+  deferred: boolean,
+  answer: string,
+  revision?: string,
+): WebuiThreadPersistedPayload {
+  return {
+    schemaVersion: 3,
+    ...(revision ? { revision } : {}),
+    messages: [
+      {
+        id: "trace-shared",
+        role: "tool",
+        kind: "trace",
+        content: deferred ? "exec(…)" : 'exec({"command":"echo full"})',
+        traces: [deferred ? "exec(…)" : 'exec({"command":"echo full"})'],
+        ...(deferred
+          ? { traceDetail: { ref: "1.trace-shared", bytes: 40_000, traceCount: 1 } }
+          : {}),
+        createdAt: 1_000,
+      },
+      {
+        id: "answer-shared",
+        role: "assistant",
+        content: answer,
+        createdAt: 2_000,
+      },
+    ],
+  };
+}
+
 function setDocumentVisibility(value: DocumentVisibilityState): void {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -417,6 +454,7 @@ function settingsWithFastPreset(): SettingsPayload {
 
 describe("ThreadShell", () => {
   beforeEach(() => {
+    webuiThreadCache.clear();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -425,6 +463,153 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("surfaces and retries a deferred trace-detail request failure", async () => {
+    const client = makeClient();
+    let detailCalls = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailCalls += 1;
+        if (detailCalls === 1) {
+          return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+        }
+        return Promise.resolve(httpJson({
+          message_id: "trace-deferred",
+          content: 'exec({"command":"echo full"})',
+          traces: ['exec({"command":"echo full"})'],
+        }));
+      }
+      if (url.includes("websocket%3Atrace-detail-retry/webui-thread")) {
+        return Promise.resolve(httpJson({
+          schemaVersion: 3,
+          messages: [
+            {
+              id: "trace-deferred",
+              role: "tool",
+              kind: "trace",
+              content: "exec(…)",
+              traces: ["exec(…)"],
+              traceDetail: { ref: "1.trace-deferred", bytes: 40_000, traceCount: 1 },
+              createdAt: 1_000,
+            },
+            { id: "answer", role: "assistant", content: "done", createdAt: 2_000 },
+          ],
+        }));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("trace-detail-retry")}
+        title="Trace detail retry"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const activity = await screen.findByRole("button", { name: /Worked/ });
+    fireEvent.click(activity);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Full activity details could not be loaded.",
+    );
+    expect(detailCalls).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(detailCalls).toBe(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+
+    fireEvent.click(activity);
+    fireEvent.click(activity);
+    await act(async () => Promise.resolve());
+    expect(detailCalls).toBe(2);
+  });
+
+  it("ignores a deferred trace-detail failure after switching sessions", async () => {
+    const client = makeClient();
+    const detailUrls: string[] = [];
+    let rejectDetail!: (reason: Error) => void;
+    const pendingDetail = new Promise<Response>((_resolve, reject) => {
+      rejectDetail = reject;
+    });
+    const cachedB = traceDetailThread(false, "done-b", "rev-b");
+    webuiThreadCache.set("websocket:trace-failure-b", cachedB);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailUrls.push(url);
+        return pendingDetail;
+      }
+      if (url.includes("websocket%3Atrace-failure-a/webui-thread")) {
+        return Promise.resolve(httpJson(traceDetailThread(true, "done-a")));
+      }
+      if (url.includes("websocket%3Atrace-failure-b/webui-thread")) {
+        return Promise.resolve(httpJson(cachedB));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Trace ${chatId}`}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const { rerender } = render(view("trace-failure-a"));
+    fireEvent.click(await screen.findByRole("button", { name: /Worked/ }));
+
+    rerender(view("trace-failure-b"));
+    await screen.findByText("done-b");
+    await act(async () => rejectDetail(new Error("late failure")));
+
+    expect(detailUrls).toHaveLength(1);
+    expect(detailUrls[0]).toContain("websocket%3Atrace-failure-a");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not carry a visible trace-detail failure into a cached session", async () => {
+    const client = makeClient();
+    const detailUrls: string[] = [];
+    const cachedB = traceDetailThread(false, "cached-b", "rev-visible-b");
+    webuiThreadCache.set("websocket:visible-failure-b", cachedB);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailUrls.push(url);
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+      }
+      if (url.includes("websocket%3Avisible-failure-a/webui-thread")) {
+        return Promise.resolve(httpJson(traceDetailThread(true, "failed-a")));
+      }
+      if (url.includes("websocket%3Avisible-failure-b/webui-thread")) {
+        return Promise.resolve(httpJson(cachedB));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Trace ${chatId}`}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const { rerender } = render(view("visible-failure-a"));
+    fireEvent.click(await screen.findByRole("button", { name: /Worked/ }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    rerender(view("visible-failure-b"));
+    await screen.findByText("cached-b");
+
+    expect(detailUrls).toHaveLength(1);
+    expect(detailUrls[0]).toContain("websocket%3Avisible-failure-a");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders each logical round in a completed turn as its own usage bar", async () => {
@@ -497,6 +682,53 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("img", {
       name: /input tokens 16,400.*KV cache hit rate 99%.*output tokens 236/i,
     })).toBeInTheDocument();
+    expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
+    for (const phase of ["started", "failed"] as const) {
+      act(() => client._emitChat("usage-chart", {
+        event: "context_compaction", chat_id: "usage-chart", compaction_id: "failed", phase,
+      }));
+      expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
+    }
+    act(() => client._emitChat("usage-chart", {
+      event: "context_compaction", chat_id: "usage-chart",
+      compaction_id: "success", phase: "succeeded",
+    }));
+    expect(trigger).toHaveAccessibleName("Open context usage");
+    expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(4);
+  });
+
+  it.each([false, true])("restores context after compaction only with newer usage (%s)", async (newReply) => {
+    const client = makeClient();
+    const messages: UIMessage[] = [
+      {
+        id: "old", role: "assistant", content: "Before compact", createdAt: 1_000,
+        contextWindowTokens: 1_000_000, usage: { context_tokens: 170_000 },
+        roundUsages: [{ prompt_tokens: 170_000 }],
+      },
+      {
+        id: "compact", role: "assistant", kind: "compaction", content: "", createdAt: 2_000,
+        compaction: { id: "compact", phase: "succeeded" },
+      },
+    ];
+    if (newReply) messages.push({
+      id: "new", role: "assistant", content: "After compact", createdAt: 3_000,
+      contextWindowTokens: 1_000_000, usage: { context_tokens: 20_700 },
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Acompact-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, messages })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    render(wrap(client, <ThreadShell
+      session={session("compact-usage")} title="Compact usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    if (newReply) {
+      expect(trigger).toHaveAccessibleName("Context 2%. Open context usage");
+    } else {
+      expect(trigger).toHaveAccessibleName("Open context usage");
+    }
   });
 
   it("moves the session handle into the pane only when the workbench is split", () => {
@@ -522,7 +754,7 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    expect(within(portal).getByText("@soro")).toBeInTheDocument();
+    expect(within(portal).queryByText("@soro")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Session @soro")).not.toBeInTheDocument();
 
     unmount();
@@ -737,8 +969,10 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
-    expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
+    expect(screen.queryByLabelText("Default")).not.toBeInTheDocument();
   });
 
   it("falls back to the current preset while a renamed session reference is stale", async () => {
@@ -762,7 +996,9 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
@@ -844,7 +1080,9 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("fast · gpt-4 · Company Proxy")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-4 · Company Proxy");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
@@ -896,10 +1134,13 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(screen.getByText("deepseek-chat")).toBeInTheDocument();
     expect(badge).toHaveAttribute("data-fallback", "true");
-    expect(badge).toHaveAttribute(
-      "title",
-      "Default · using deepseek/deepseek-chat",
+    expect(badge).not.toHaveAttribute("title");
+    fireEvent.focus(screen.getByLabelText("deepseek-chat"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "deepseek-chat · deepseek/deepseek-chat",
     );
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("Default");
+    fireEvent.blur(screen.getByLabelText("deepseek-chat"));
     expect(logo).toBeInTheDocument();
 
     act(() => {
@@ -1281,7 +1522,9 @@ describe("ThreadShell", () => {
     await act(async () => {
       rerender(view(session("chat-new", "fast")));
     });
-    expect(screen.getByTitle("fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
 

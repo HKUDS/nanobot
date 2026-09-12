@@ -94,6 +94,8 @@ class EmailChannel(BaseChannel):
 
     name = "email"
     display_name = "Email"
+    send_progress = False
+    send_tool_hints = False
     _IMAP_MONTHS = (
         "Jan",
         "Feb",
@@ -127,6 +129,10 @@ class EmailChannel(BaseChannel):
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return EmailConfig().model_dump(by_alias=True)
+
+    def progress_transport_defaults(self) -> tuple[bool, bool]:
+        """Email delivers one final reply instead of intermediate trace messages."""
+        return False, False
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):

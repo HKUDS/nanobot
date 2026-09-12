@@ -1,29 +1,18 @@
 {
-  "description": "Slack ワークスペースから nanobot を利用します。",
-  "requirements": "Slack アプリトークン、ボットトークン、ワークスペースへのインストール",
   "setup": {
     "docsLabel": "Slack 設定ガイドを開く",
     "officialLabel": "Slack アプリを開く",
-    "tryIt": "Slack アプリをメンションするか、DM を送信します。",
-    "summary": "Slack は既定で Socket Mode を使うため、アプリレベルとボットレベルの両方のトークンが必要です。",
-    "steps": [
-      "提供されたマニフェストから Slack アプリを作成し、Socket Mode を有効にします。",
-      "アプリをワークスペースにインストールし、アプリとボットのトークンをコピーします。",
-      "保存して Slack を有効にし、アプリをメンションするか DM を送信します。"
-    ],
     "actions": {
-      "slack-manifest": "マニフェストをコピー"
+      "slack-manifest": "アプリマニフェストをコピー"
     },
     "fields": {
       "appToken": {
         "label": "アプリトークン",
-        "placeholder": "xapp-...",
-        "help": "Slack の Socket Mode で作成します。"
+        "placeholder": "xapp-..."
       },
       "botToken": {
         "label": "ボットトークン",
-        "placeholder": "xoxb-...",
-        "help": "Slack アプリのインストール後にボットトークンを使います。"
+        "placeholder": "xoxb-..."
       },
       "groupPolicy": {
         "label": "グループでの動作",
@@ -32,6 +21,72 @@
           "open": "すべてのメッセージ",
           "allowlist": "許可リスト"
         }
+      },
+      "mode": {
+        "label": "接続モード",
+        "choices": {
+          "socket": "ソケットモード"
+        }
+      },
+      "webhookPath": {
+        "label": "Webhook パス"
+      },
+      "replyInThread": {
+        "label": "スレッド内で返信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "reactEmoji": {
+        "label": "絵文字を読む"
+      },
+      "doneEmoji": {
+        "label": "完了絵文字"
+      },
+      "includeThreadContext": {
+        "label": "スレッドコンテキストを含める",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "threadContextLimit": {
+        "label": "スレッドコンテキストの制限"
+      },
+      "allowFrom": {
+        "label": "許可されたユーザー"
+      },
+      "groupAllowFrom": {
+        "label": "許可されたチャネル"
+      },
+      "groupRequireMention": {
+        "label": "チャンネルでのメンションを必須にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "dm_enabled": {
+        "label": "ダイレクトメッセージを有効にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "dm_policy": {
+        "label": "ダイレクトメッセージへのアクセス",
+        "choices": {
+          "allowlist": "ホワイトリスト",
+          "open": "開く"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "許可されたダイレクトメッセージユーザー"
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

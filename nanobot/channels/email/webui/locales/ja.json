@@ -1,26 +1,21 @@
 {
-  "description": "nanobot でメールを受信し、返信します。",
-  "requirements": "IMAP 受信箱、SMTP 送信、アプリパスワード、明示的な同意",
+  "displayName": "メール",
   "setup": {
     "docsLabel": "メール設定ガイドを開く",
     "officialLabel": "アプリパスワードガイドを開く",
-    "tryIt": "接続したメールボックスにテストメールを送信します。",
-    "summary": "メールは IMAP で受信し SMTP で返信します。専用メールボックスを使い、有効化前に同意してください。",
-    "steps": [
-      "専用メールボックスを作成し、必要ならアプリパスワードを発行します。",
-      "プロバイダープリセットを選ぶか、IMAP と SMTP を手動入力します。",
-      "同意して保存し、メールを有効にしてテストメールを送信します。"
-    ],
+    "presetLabel": "クイック入力",
+    "sections": {
+      "receiving": "メール受信",
+      "sending": "メール送信"
+    },
     "presets": {
       "gmail": "Gmail",
       "outlook": "Outlook",
-      "icloud": "iCloud",
-      "custom": "カスタム"
+      "icloud": "iCloud"
     },
     "fields": {
       "consentGranted": {
-        "label": "同意済み",
-        "help": "必須の安全設定です。このボット用メールボックスを接続すると決めるまでオフにしてください。",
+        "label": "nanobot にメールの読み取りと送信を許可",
         "choices": {
           "true": "同意済み",
           "false": "未同意"
@@ -36,8 +31,7 @@
       },
       "imapPassword": {
         "label": "IMAP パスワード",
-        "placeholder": "アプリパスワード",
-        "help": "プロバイダーが求める場合はアプリパスワードを使います。"
+        "placeholder": "アプリパスワード"
       },
       "smtpHost": {
         "label": "SMTP ホスト",
@@ -49,8 +43,7 @@
       },
       "smtpPassword": {
         "label": "SMTP パスワード",
-        "placeholder": "アプリパスワード",
-        "help": "通常は IMAP と同じアプリパスワードです。"
+        "placeholder": "アプリパスワード"
       },
       "imapPort": {
         "label": "IMAP ポート",
@@ -65,13 +58,12 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "確認間隔",
+        "label": "メールの確認間隔（秒）",
         "placeholder": "30"
       },
       "allowFrom": {
         "label": "許可する送信者",
-        "placeholder": "メールアドレス（カンマ区切り）",
-        "help": "空欄の場合、送信者は先にペアリングが必要です。"
+        "placeholder": "メールアドレス（カンマ区切り）"
       },
       "verifyDkim": {
         "label": "DKIM を検証",
@@ -86,6 +78,83 @@
           "true": "オン",
           "false": "オフ"
         }
+      },
+      "imapMailbox": {
+        "label": "IMAPメールボックス"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "自動応答",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "markSeen": {
+        "label": "既読としてマークする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "postAction": {
+        "label": "加工後",
+        "choices": {
+          "delete": "削除",
+          "move": "移動"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "メールボックスに移動"
+      },
+      "postActionExpunge": {
+        "label": "アクションを永続的に適用する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "スキップされたメッセージを無視する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "maxBodyChars": {
+        "label": "最大体長"
+      },
+      "subjectPrefix": {
+        "label": "返信件名の接頭辞"
+      },
+      "allowedAttachmentTypes": {
+        "label": "許可される添付ファイルの種類"
+      },
+      "maxAttachmentSize": {
+        "label": "添付ファイルの最大サイズ"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "最大添付ファイル数"
       }
     }
   }

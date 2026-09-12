@@ -987,6 +987,7 @@ class WebUICommandRouter:
         self.request_tasks.clear()
         self.request_locks.clear()
         self.request_operations.clear()
+        await self._http_router.settings_routes.close()
         self.gateway.tokens.clear()
         self.gateway.endpoint.clear()
         self._temporary_chats.close()

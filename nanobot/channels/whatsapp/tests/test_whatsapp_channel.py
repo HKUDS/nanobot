@@ -128,6 +128,36 @@ def _patch_receipt_type(monkeypatch):
     return ReceiptType
 
 
+@pytest.mark.asyncio
+async def test_connect_client_normalizes_proxy_without_a_scheme(monkeypatch) -> None:
+    class ProxySettings:
+        def __init__(self, *, proxy_address: str) -> None:
+            self.proxy_address = proxy_address
+
+    monkeypatch.setitem(
+        sys.modules,
+        "neonize._binder",
+        SimpleNamespace(ProxySettings=ProxySettings),
+    )
+    channel = _make_channel({"proxy": "127.0.0.1:23458"})
+    client = SimpleNamespace(connect=AsyncMock(return_value=None))
+
+    await channel._connect_client(client)
+
+    settings = client.connect.await_args.args[0]
+    assert settings.proxy_address == "http://127.0.0.1:23458"
+
+
+@pytest.mark.asyncio
+async def test_connect_client_without_proxy_uses_default_connection() -> None:
+    channel = _make_channel({"proxy": ""})
+    client = SimpleNamespace(connect=AsyncMock(return_value=None))
+
+    await channel._connect_client(client)
+
+    client.connect.assert_awaited_once_with()
+
+
 class _FakeLoginClient:
     def __init__(self) -> None:
         self.handlers = {}

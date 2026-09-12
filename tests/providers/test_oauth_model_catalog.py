@@ -16,10 +16,7 @@ from nanobot.providers.oauth_model_catalog import (
     get_oauth_model_catalog,
     invalidate_oauth_model_catalog,
 )
-from nanobot.providers.openai_codex_provider import (
-    DEFAULT_OPENAI_CODEX_MODELS_URL,
-    OPENAI_CODEX_CATALOG_CLIENT_VERSION,
-)
+from nanobot.providers.openai_codex_provider import DEFAULT_OPENAI_CODEX_MODELS_URL
 from nanobot.providers.registry import ProviderModelSpec
 from nanobot.providers.xai_grok_provider import DEFAULT_XAI_GROK_MODELS_URL
 from nanobot.providers.xai_oauth import XAIToken
@@ -142,9 +139,15 @@ def test_xai_catalog_fetches_remote_models_and_reuses_capability_metadata(
     assert get_oauth_model_catalog("xai_grok").source == "cache"
 
 
+@pytest.mark.parametrize(
+    ("model_id", "label"),
+    [("gpt-new", "GPT New"), ("gpt-6-astra", "GPT-6-Astra")],
+)
 def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    model_id: str,
+    label: str,
 ) -> None:
     original_client = httpx.Client
     captured: dict[str, object] = {}
@@ -156,8 +159,8 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
             json={
                 "models": [
                     {
-                        "slug": "gpt-new",
-                        "display_name": "GPT New",
+                        "slug": model_id,
+                        "display_name": label,
                         "description": "New model",
                         "context_window": 300_000,
                         "priority": 2,
@@ -213,14 +216,16 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     assert catalog.source == "remote"
     assert [model.id for model in catalog.models] == [
         "openai-codex/gpt-first",
-        "openai-codex/gpt-new",
+        f"openai-codex/{model_id}",
     ]
+    assert catalog.models[1].label == label
     assert catalog.models[1].context_window == 300_000
     assert catalog.models[1].reasoning_efforts == ("low", "high")
     request = captured["request"]
     assert isinstance(request, httpx.Request)
     assert request.url.copy_with(query=None) == httpx.URL(DEFAULT_OPENAI_CODEX_MODELS_URL)
-    assert request.url.params["client_version"] == OPENAI_CODEX_CATALOG_CLIENT_VERSION
+    # Assert the validated wire version, not the same constant used by the request.
+    assert request.url.params["client_version"] == "0.153.4"
     assert request.headers["Authorization"] == "Bearer secret"
     assert request.headers["chatgpt-account-id"] == "account-42"
 

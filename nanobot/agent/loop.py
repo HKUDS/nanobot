@@ -80,10 +80,7 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_recovery import GoalRecoveryWatchdog
-from nanobot.session.goal_state import (
-    goal_state_runtime_lines,
-    runner_wall_llm_timeout_s,
-)
+from nanobot.session.goal_state import goal_state_runtime_lines
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
@@ -101,7 +98,6 @@ from nanobot.session.recovery import (
     restore_runtime_checkpoint,
 )
 from nanobot.session.summary import (
-    SUMMARY_CONTINUATION_TEXT,
     SessionSummary,
     SessionSummaryCheckpoint,
 )
@@ -109,7 +105,6 @@ from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
 from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
-from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.progress_events import output_events
 from nanobot.utils.runtime import (
@@ -407,7 +402,6 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
-            llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
         self._running = False
@@ -1250,86 +1244,74 @@ class AgentLoop:
         try:
             for scope in turn_scopes or ():
                 turn_scope_stack.enter_context(scope)
-            hook = build_agent_turn_hook(
-                AgentTurnHookSpec(
-                    events=events,
-                    streaming=streaming,
+            hook = build_agent_turn_hook(AgentTurnHookSpec(
+                events=events,
+                streaming=streaming,
+                channel=request_ctx.channel,
+                chat_id=request_ctx.chat_id,
+                message_id=request_ctx.message_id,
+                metadata=request_metadata,
+                attributes=dict(request_ctx.attributes),
+                session_key=active_session_key,
+                workspace=effective_scope.project_path,
+                tool_hint_max_length=self.tool_hint_max_length,
+                registered_hook_factories=self._hook_factories,
+                turn_hook_factories=list(hook_factories or []),
+                registered_hooks=self._extra_hooks,
+                turn_hooks=list(hooks or []),
+                ephemeral=ephemeral,
+                run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+            ))
+            result = await self.runner.run(AgentRunSpec(
+                initial_messages=None,
+                tools=effective_tools,
+                runtime=runtime,
+                max_iterations=self.max_iterations,
+                max_tool_result_chars=self.max_tool_result_chars,
+                transcript_input=transcript_input,
+                transcript_builder=transcript_builder,
+                hook=hook,
+                concurrent_tools=True,
+                workspace=effective_scope.project_path,
+                session_key=session.key if session else None,
+                provider_retry_mode=self.provider_retry_mode,
+                checkpoint_callback=_checkpoint,
+                consolidate_history=(
+                    partial(
+                        self.consolidator.summarize_transcript,
+                        runtime=runtime,
+                        session_key=session.key,
+                        tools=effective_tools.get_definitions(),
+                    )
+                    if session is not None and not ephemeral
+                    else None
+                ),
+                consolidate_provider_compaction=(
+                    partial(
+                        self.consolidator.summarize_provider_compaction,
+                        runtime=runtime,
+                        session_key=session.key,
+                        tools=effective_tools.get_definitions(),
+                    )
+                    if session is not None and not ephemeral
+                    else None
+                ),
+                injection_callback=_drain_pending,
+                terminal_injection_callback=_wait_for_pending,
+                continuation_callback=_goal_continue,
+                finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
+                    pending_queue_available=pending_queue is not None and session is not None,
+                    session_metadata=session_metadata,
+                    message_metadata=request_metadata,
+                ),
+                provider_state=provider_state,
+                llm_usage_source=source_from_request(
+                    active_session_key,
                     channel=request_ctx.channel,
-                    chat_id=request_ctx.chat_id,
-                    message_id=request_ctx.message_id,
                     metadata=request_metadata,
-                    attributes=dict(request_ctx.attributes),
-                    session_key=active_session_key,
-                    workspace=effective_scope.project_path,
-                    tool_hint_max_length=self.tool_hint_max_length,
-                    registered_hook_factories=self._hook_factories,
-                    turn_hook_factories=list(hook_factories or []),
-                    registered_hooks=self._extra_hooks,
-                    turn_hooks=list(hooks or []),
-                    ephemeral=ephemeral,
-                    run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
-                )
-            )
-            result = await self.runner.run(
-                AgentRunSpec(
-                    initial_messages=None,
-                    tools=effective_tools,
-                    runtime=runtime,
-                    max_iterations=self.max_iterations,
-                    max_tool_result_chars=self.max_tool_result_chars,
-                    transcript_input=transcript_input,
-                    transcript_builder=transcript_builder,
-                    hook=hook,
-                    concurrent_tools=True,
-                    workspace=effective_scope.project_path,
-                    session_key=session.key if session else None,
-                    provider_retry_mode=self.provider_retry_mode,
-                    checkpoint_callback=_checkpoint,
-                    consolidate_history=(
-                        partial(
-                            self.consolidator.summarize_transcript,
-                            runtime=runtime,
-                            session_key=session.key,
-                            tools=effective_tools.get_definitions(),
-                        )
-                        if session is not None and not ephemeral
-                        else None
-                    ),
-                    consolidate_provider_compaction=(
-                        partial(
-                            self.consolidator.summarize_provider_compaction,
-                            runtime=runtime,
-                            session_key=session.key,
-                            tools=effective_tools.get_definitions(),
-                        )
-                        if session is not None and not ephemeral
-                        else None
-                    ),
-                    injection_callback=_drain_pending,
-                    terminal_injection_callback=_wait_for_pending,
-                    # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
-                    # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
-                    llm_timeout_s=runner_wall_llm_timeout_s(
-                        self.sessions,
-                        session.key if session is not None else request_ctx.session_key,
-                        metadata=session_metadata,
-                        message_metadata=request_metadata,
-                    ),
-                    continuation_callback=_goal_continue,
-                    finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
-                        pending_queue_available=pending_queue is not None and session is not None,
-                        session_metadata=session_metadata,
-                        message_metadata=request_metadata,
-                    ),
-                    provider_state=provider_state,
-                    llm_usage_source=source_from_request(
-                        active_session_key,
-                        channel=request_ctx.channel,
-                        metadata=request_metadata,
-                    ),
-                    events=events,
-                )
-            )
+                ),
+                events=events,
+            ))
         finally:
             turn_scope_stack.close()
             reset_workspace_scope(workspace_token)
@@ -2253,8 +2235,6 @@ class AgentLoop:
     def _sanitize_persisted_blocks(
         self,
         content: list[object],
-        *,
-        should_truncate_text: bool = False,
     ) -> list[object]:
         """Strip volatile multimodal payloads before writing session history."""
         filtered: list[object] = []
@@ -2273,45 +2253,9 @@ class AgentLoop:
                 filtered.append({"type": "text", "text": image_placeholder_text(path)})
                 continue
 
-            if block_data.get("type") == "text" and isinstance(
-                block_data.get("text"),
-                str,
-            ):
-                text = cast(str, block_data["text"])
-                if should_truncate_text and len(text) > self.max_tool_result_chars:
-                    text = truncate_text_fn(text, self.max_tool_result_chars)
-                filtered.append({**block_data, "text": text})
-                continue
-
             filtered.append(block_data)
 
         return filtered
-
-    @staticmethod
-    def _insert_summary_checkpoint(
-        session: Session,
-        checkpoint: SessionSummaryCheckpoint,
-        *,
-        insert_at: int | None = None,
-    ) -> None:
-        """Commit a replacement summary and its hidden transcript boundary."""
-        hint = {
-            "role": "user",
-            "content": SUMMARY_CONTINUATION_TEXT,
-            HIDDEN_HISTORY_META: True,
-            "timestamp": datetime.now().isoformat(),
-        }
-        if insert_at is None:
-            session.messages.append(hint)
-            checkpoint_session_index = len(session.messages) - 1
-        else:
-            session.messages.insert(insert_at, hint)
-            checkpoint_session_index = insert_at
-        session.metadata["_last_summary"] = {
-            "text": checkpoint.summary,
-            "last_active": session.updated_at.isoformat(),
-        }
-        session.last_archived = checkpoint_session_index
 
     @staticmethod
     def _validated_checkpoint_boundary(
@@ -2374,9 +2318,8 @@ class AgentLoop:
         # the first message after the replacement checkpoint.
         if summary_checkpoint is not None and checkpoint_boundary == skip - 1:
             insert_at = len(session.messages) - (1 if input_persisted_early else 0)
-            self._insert_summary_checkpoint(
-                session,
-                summary_checkpoint,
+            session.commit_summary_checkpoint(
+                summary_checkpoint.summary,
                 insert_at=insert_at,
             )
 
@@ -2384,7 +2327,7 @@ class AgentLoop:
             # Insert against the raw transcript index before filtering the
             # message so persistence cleanup cannot shift the H/Δ boundary.
             if summary_checkpoint is not None and checkpoint_boundary == message_index:
-                self._insert_summary_checkpoint(session, summary_checkpoint)
+                session.commit_summary_checkpoint(summary_checkpoint.summary)
 
             entry = dict(message)
             followup_id_value = cast(object, entry.pop(PENDING_FOLLOWUP_ID_KEY, None))
@@ -2431,12 +2374,10 @@ class AgentLoop:
                     )
                     continue
                 fulfilled_tool_call_ids.add(tool_call_id_str)
-                if isinstance(content, str) and len(content) > self.max_tool_result_chars:
-                    entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
-                elif isinstance(content, list):
+                # Preserve model-visible text for replay; redact only inline images.
+                if isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(
                         cast(list[object], content),
-                        should_truncate_text=True,
                     )
                     if not filtered:
                         # Preserve the tool_call/result pair after block filtering.
@@ -2473,7 +2414,7 @@ class AgentLoop:
                     if tc.get("id")
                 )
         if summary_checkpoint is not None and checkpoint_boundary == len(messages):
-            self._insert_summary_checkpoint(session, summary_checkpoint)
+            session.commit_summary_checkpoint(summary_checkpoint.summary)
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         if saved_followup_ids:

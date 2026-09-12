@@ -17,7 +17,7 @@ def _loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
-    provider.chat_with_retry = AsyncMock(
+    provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="Reviewed", tool_calls=[], usage=None)
     )
     return AgentLoop(
@@ -66,7 +66,7 @@ async def test_session_message_runs_as_user_input_and_replies_on_target_route(
         "target",
         "Reviewed",
     )
-    provider_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+    provider_messages = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
     provider_input = next(
         row for row in reversed(provider_messages) if row.get("role") == "user"
     )
@@ -94,7 +94,7 @@ async def test_session_message_text_is_not_dispatched_as_a_slash_command(
         response = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=2)
 
         assert response.content == "Reviewed"
-        loop.provider.chat_with_retry.assert_awaited_once()
+        loop.provider.chat_stream_with_retry.assert_awaited_once()
     finally:
         loop.stop()
         await asyncio.wait_for(task, timeout=2)

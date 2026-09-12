@@ -8,7 +8,10 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
 from nanobot.channels.email.runtime import EmailChannel, EmailConfig
+from nanobot.channels.manager import ChannelManager
+from nanobot.config.schema import Config
 
 
 def _make_config(**overrides) -> EmailConfig:
@@ -48,6 +51,19 @@ def _make_raw_email(
         msg["Authentication-Results"] = auth_results
     msg.set_content(body)
     return msg.as_bytes()
+
+
+def test_email_only_enables_final_reply_delivery() -> None:
+    manager = ChannelManager.__new__(ChannelManager)
+    manager.config = Config.model_validate({"channels": {"email": {"enabled": True}}})
+    manager.bus = MessageBus()
+
+    channel = manager._build_channel("email", EmailChannel, {"enabled": True})
+
+    assert channel.send_progress is False
+    assert channel.send_tool_hints is False
+    assert channel.supports_streaming is False
+    assert type(channel).send_reasoning_delta is BaseChannel.send_reasoning_delta
 
 
 def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:

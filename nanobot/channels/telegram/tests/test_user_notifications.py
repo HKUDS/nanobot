@@ -37,6 +37,7 @@ def channel():
     channel._app = SimpleNamespace(bot=SimpleNamespace(
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=44)),
         edit_message_text=AsyncMock(),
+        do_api_request=AsyncMock(return_value=True),
     ))
     channel._app_ready.set()
     channel.on_notification_delivered = AsyncMock()
@@ -93,7 +94,7 @@ async def _overflow_notification(channel, *, rounds=1):
 
 
 @pytest.mark.parametrize("rounds", [1, 5])
-@pytest.mark.parametrize("final_mode", ["html", "not-modified", "plain", "rich"])
+@pytest.mark.parametrize("final_mode", ["html", "not-modified", "plain", "rich-enabled-late"])
 async def test_long_stream_receipt_has_all_original_deltas_once(channel, rounds, final_mode):
     from telegram.error import BadRequest
 
@@ -104,17 +105,15 @@ async def test_long_stream_receipt_has_all_original_deltas_once(channel, rounds,
         channel._app.bot.edit_message_text.side_effect = BadRequest("Message is not modified")
     elif final_mode == "plain":
         channel._app.bot.edit_message_text.side_effect = [BadRequest("Can't parse entities"), None]
-    elif final_mode == "rich":
+    elif final_mode == "rich-enabled-late":
         channel.config.rich_messages = True
-        channel._try_edit_rich = AsyncMock(return_value=True)
     await channel.send_delta("7", "", metadata, stream_id="long", stream_end=True)
     callback = channel.on_notification_delivered
     callback.assert_awaited_once_with(full_text, notification_receipt_id(metadata, full_text))
     assert "7" not in channel._stream_bufs
-    if final_mode == "rich":
-        assert channel._try_edit_rich.await_args.args[-1] == tail
-    else:
-        assert channel._app.bot.edit_message_text.await_args.kwargs["text"] == tail
+    # A legacy preview stays editable even if rich messages are enabled later.
+    assert channel._app.bot.edit_message_text.await_args.kwargs["text"] == tail
+    channel._app.bot.do_api_request.assert_not_awaited()
     counts = (channel._app.bot.send_message.await_count, channel._app.bot.edit_message_text.await_count)
     for _ in range(2):
         await channel.send_delta("7", "", metadata, stream_id="long", stream_end=True)
@@ -223,16 +222,41 @@ async def test_full_receipt_equals_confirmed_telegram_messages(channel, flush_mi
 async def test_failed_overflow_fragment_creates_no_receipt_or_fallback_send(channel, failure_at):
     from telegram.error import NetworkError
 
+    from nanobot.channels.telegram.runtime import (
+        TELEGRAM_HTML_MAX_LEN,
+        _split_telegram_markdown_html_chunks,
+    )
+
     metadata = {"_cron_trigger": {"run_id": "failed-overflow"}}
     await channel.send_delta("7", "A" * 2800, metadata, stream_id="long")
     channel._stream_bufs["7"].last_edit = 0
     bot = channel._app.bot
     bot.send_message.reset_mock()
     bot.send_message.side_effect = [SimpleNamespace(message_id=45)] * (failure_at - 1) + [NetworkError("fixture disconnected")]
-    with pytest.raises(NetworkError):
-        await channel.send_delta("7", "B" * 8000, metadata, stream_id="long")
+    await channel.send_delta("7", "B" * 8000, metadata, stream_id="long")
     channel.on_notification_delivered.assert_not_awaited()
     assert bot.send_message.await_count == failure_at
+    buf = channel._stream_bufs["7"]
+    full_text = "A" * 2800 + "B" * 8000
+    assert buf.full_text == full_text
+    assert 0 < len(buf.text) <= len(full_text)
+    if failure_at == 2:
+        assert len(buf.text) < len(full_text)
+    # Resume the unsent tail without replaying the delta or confirmed prefix.
+    remaining = buf.text
+    bot.send_message.side_effect = None
+    bot.send_message.reset_mock()
+    bot.edit_message_text.reset_mock()
+    buf.last_edit = 0
+    await channel.send_delta("7", "", metadata, stream_id="long")
+    assert buf.full_text == full_text
+    assert bot.edit_message_text.await_args.kwargs["text"] == (
+        _split_telegram_markdown_html_chunks(remaining, TELEGRAM_HTML_MAX_LEN)[0][1]
+    )
+    await channel.send_delta("7", "", metadata, stream_id="long", stream_end=True)
+    channel.on_notification_delivered.assert_awaited_once_with(
+        full_text, notification_receipt_id(metadata, full_text),
+    )
 
 
 @pytest.mark.parametrize("primary_mode", ["not-modified", "plain"])
@@ -248,7 +272,9 @@ async def test_final_split_confirmation_uses_matching_markdown_chunks(channel, p
     text = "**bold** & " * 350
     chunks = _split_telegram_markdown_html_chunks(text, TELEGRAM_HTML_MAX_LEN)
     assert len(chunks) > 1
-    await channel.send_delta("7", text, metadata, stream_id="long")
+    await channel.send_delta("7", text[:1], metadata, stream_id="long")
+    channel._stream_bufs["7"].last_edit = float("inf")
+    await channel.send_delta("7", text[1:], metadata, stream_id="long")
     bot = channel._app.bot
     bot.send_message.reset_mock()
     # Each remaining chunk is explicitly rejected as HTML, then succeeds in plain text.
@@ -282,3 +308,44 @@ async def test_merged_stream_boundary_waits_for_final_receipt(channel):
     await channel.send_delta("7", "", metadata, stream_id="long", stream_end=True)
     text += "-boundary-next round"
     channel.on_notification_delivered.assert_awaited_once_with(text, notification_receipt_id(metadata, text))
+
+
+@pytest.mark.parametrize("timeout_at", [None, "overflow", "final"])
+async def test_rich_notification_receipt_requires_every_chunk_confirmed(channel, timeout_at):
+    from telegram.error import TimedOut
+
+    channel.config.rich_messages = True
+    metadata = {"is_group": False, "_cron_trigger": {"run_id": "rich-delivery"}}
+    phase = "overflow"
+    sent_chunks = []
+
+    async def api_request(method, *, api_kwargs):
+        if method == "sendRichMessage":
+            sent_chunks.append(api_kwargs["rich_message"]["markdown"])
+            if phase == timeout_at:
+                raise TimedOut("fixture ambiguous delivery")
+        return True
+
+    channel._app.bot.do_api_request.side_effect = api_request
+    parts = ["A" * 20000, "B" * 20000]
+    await channel.send_delta("7", parts[0], metadata, stream_id="rich")
+    channel._stream_bufs["7"].last_edit = 0
+    await channel.send_delta("7", parts[1], metadata, stream_id="rich")
+    assert len(sent_chunks) == 1
+    channel.on_notification_delivered.assert_not_awaited()
+    phase = "final"
+    await channel.send_delta("7", "", metadata, stream_id="rich", stream_end=True)
+    assert len(sent_chunks) == 2
+    assert "".join(sent_chunks) == "".join(parts)
+    if timeout_at is None:
+        text = "".join(parts)
+        channel.on_notification_delivered.assert_awaited_once_with(
+            text, notification_receipt_id(metadata, text),
+        )
+    else:
+        channel.on_notification_delivered.assert_not_awaited()
+    count = channel._app.bot.do_api_request.await_count
+    await channel.send_delta("7", "", metadata, stream_id="rich", stream_end=True)
+    assert channel._app.bot.do_api_request.await_count == count
+    channel._app.bot.send_message.assert_not_awaited()
+    assert "7" not in channel._stream_bufs

@@ -1,26 +1,15 @@
 {
-  "description": "Use o nanobot em canais e DMs do Mattermost.",
-  "requirements": "URL do servidor Mattermost, token do bot e acesso aos canais",
   "setup": {
     "docsLabel": "Abrir guia do Mattermost",
     "officialLabel": "Abrir guia de bots do Mattermost",
-    "tryIt": "Mencione o bot em um canal Mattermost ou envie uma mensagem direta.",
-    "summary": "O Mattermost conecta por uma conta de bot no servidor e recebe canais e mensagens diretas.",
-    "steps": [
-      "Crie uma conta de bot Mattermost e copie o token de acesso.",
-      "Informe a URL do servidor e conceda acesso à equipe e aos canais desejados.",
-      "Salve e ative o Mattermost; depois, mencione o bot ou envie uma DM."
-    ],
     "fields": {
       "serverUrl": {
         "label": "URL do servidor",
-        "placeholder": "https://mattermost.example.com",
-        "help": "Use a URL base do seu workspace Mattermost."
+        "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "Token do bot",
-        "placeholder": "Token do bot Mattermost",
-        "help": "Crie-o em uma conta de bot Mattermost."
+        "placeholder": "Token do bot Mattermost"
       },
       "teamId": {
         "label": "ID da equipe",
@@ -45,6 +34,78 @@
       "allowFrom": {
         "label": "Usuários permitidos",
         "placeholder": "IDs de usuário separados por vírgulas"
+      },
+      "allowFromMatchMode": {
+        "label": "Correspondência de usuário",
+        "choices": {
+          "email": "E-mail",
+          "id": "ID do usuário",
+          "username": "Nome de usuário"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Canais permitidos"
+      },
+      "replyInThread": {
+        "label": "Responder no tópico",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Incluir contexto do thread",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limite de contexto do thread"
+      },
+      "streaming": {
+        "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Ler emoticons"
+      },
+      "doneEmoji": {
+        "label": "Emoji pronto"
+      },
+      "sendProgress": {
+        "label": "Enviar progresso",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "sendToolHints": {
+        "label": "Envie dicas de ferramentas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_enabled": {
+        "label": "Habilitar mensagens diretas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "dm_policy": {
+        "label": "Acesso direto a mensagens",
+        "choices": {
+          "allowlist": "Lista de permissões",
+          "open": "Abrir"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Usuários de mensagens diretas permitidos"
       }
     }
   }
