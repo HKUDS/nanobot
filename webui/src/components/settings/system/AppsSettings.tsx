@@ -1342,8 +1342,8 @@ function McpPresetLogo({
     return (
       <span
         className={cn(
-          "grid shrink-0 place-items-center border border-border/45 bg-background",
-          compact ? "h-10 w-10 rounded-control" : "h-11 w-11 rounded-compact",
+          "grid shrink-0 place-items-center overflow-hidden",
+          compact ? "h-10 w-10 rounded-control" : "h-9 w-9 rounded-[10px]",
         )}
       >
         <img
@@ -1351,7 +1351,7 @@ function McpPresetLogo({
           alt=""
           decoding="async"
           loading="lazy"
-          className={cn("object-contain", compact ? "h-[22px] w-[22px]" : "h-6 w-6")}
+          className="h-full w-full object-contain"
           onLoad={onLogoLoad}
           onError={onLogoError}
         />
@@ -1364,7 +1364,7 @@ function McpPresetLogo({
         "grid shrink-0 place-items-center font-semibold text-white",
         compact
           ? "h-10 w-10 rounded-control text-[12px]"
-          : "h-11 w-11 rounded-compact text-[13px]",
+          : "h-9 w-9 rounded-[10px] text-[12px]",
       )}
       style={{ backgroundColor: bg }}
     >
@@ -1463,7 +1463,10 @@ function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: 
 
   return (
     <span
-      className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-compact border border-border/45 bg-muted text-[13px] font-semibold"
+      className={cn(
+        "relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-[10px] text-[12px] font-semibold",
+        showRemoteLogo && logoLoaded ? "bg-transparent" : "bg-muted",
+      )}
       style={{ color: app.brand_color || "hsl(var(--muted-foreground))" }}
     >
       <span
@@ -1484,7 +1487,7 @@ function CliAppLogo({ app, showBrandLogos }: { app: CliAppInfo; showBrandLogos: 
           referrerPolicy="no-referrer"
           draggable={false}
           className={cn(
-            "absolute h-6 w-6 object-contain transition-opacity duration-150 motion-reduce:transition-none",
+            "absolute h-full w-full object-contain transition-opacity duration-150 motion-reduce:transition-none",
             logoLoaded ? "opacity-100" : "opacity-0",
           )}
           onLoad={onLogoLoad}

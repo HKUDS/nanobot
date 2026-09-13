@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ClientProvider } from "@/providers/ClientProvider";
+import { __clearLogoFallbackCacheForTests } from "@/hooks/useLogoFallback";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
@@ -208,6 +209,51 @@ describe("Settings system domains", () => {
     expect(mcpTitle.parentElement).toHaveClass("settings-section-heading");
     expect(mcpTitle.nextElementSibling).toHaveTextContent("0");
   });
+
+  it.each(["cli", "mcp"] as const)(
+    "fills the rounded %s app icon without an inset tile and preserves its fallback",
+    async (kind) => {
+      __clearLogoFallbackCacheForTests();
+      const name = kind === "cli" ? "AnyGen" : "Linear";
+      const logoUrl = `/test-${kind}-logo.svg`;
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/settings") return jsonResponse(settingsPayload());
+        if (url === "/api/settings/cli-apps") {
+          return jsonResponse({ apps: [{ ...installedAnyGen, logo_url: logoUrl }], installed_count: 1 });
+        }
+        if (url === "/api/settings/mcp-presets") {
+          return jsonResponse({ presets: [{
+            ...agentPlugin,
+            name: "linear",
+            display_name: "Linear",
+            source: "builtin",
+            enabled: true,
+            logo_url: logoUrl,
+          }], installed_count: 1 });
+        }
+        return jsonResponse({});
+      }));
+      renderSettingsView({ initialSection: "apps", initialSettings: settingsPayload() });
+      await screen.findByText("AnyGen");
+      if (kind === "mcp") fireEvent.click(screen.getByRole("button", { name: "MCP", exact: true }));
+      const row = (await screen.findByText(name)).closest("article")!;
+      const image = row.querySelector("img")!;
+      expect(image).toHaveAttribute("src", logoUrl);
+      expect(image).toHaveClass("h-full", "w-full", "object-contain");
+      fireEvent.load(image);
+      expect(image.parentElement).toHaveClass("h-9", "w-9", "overflow-hidden", "rounded-[10px]");
+      for (const tileClass of ["border", "bg-background", "bg-muted"]) {
+        expect(image.parentElement).not.toHaveClass(tileClass);
+      }
+
+      fireEvent.error(image);
+      expect(row.querySelector("img")).toBeNull();
+      const fallback = within(row).getByText(name[0], { exact: true });
+      expect(fallback).toBeVisible();
+      expect(fallback.closest(".h-9")).toHaveClass("w-9", "rounded-[10px]");
+    },
+  );
 
   it("keeps skill group labels natural without changing grouping or filtering", () => {
     render(<ClientProvider client={{} as never} token="tok">

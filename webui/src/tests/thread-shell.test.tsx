@@ -4459,8 +4459,9 @@ describe("ThreadShell", () => {
 
     expect(screen.getByRole("option", { name: /@obsidian-agent-cli/i })).toBeInTheDocument();
     expect(screen.getByTestId("composer-cli-mention-obsidian-agent-cli")).toHaveTextContent(
-      "@obsidian-agent-cli",
+      "@Obsidian",
     );
+    expect(input).toHaveValue("@Obsidian");
   });
 
   it("offers sessions across projects in restricted mode", async () => {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
 import { setAppLanguage } from "@/i18n";
+import * as clipboard from "@/lib/clipboard";
 import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
 import type {
   CliAppInfo,
@@ -394,7 +395,7 @@ describe("MessageBubble", () => {
     );
 
     expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
-    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
   });
 
   it("highlights skill references without a live skill catalog", () => {
@@ -422,8 +423,8 @@ describe("MessageBubble", () => {
     expect(skill.getAttribute("style")).not.toContain("text-shadow");
     expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
     expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
-    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
-    expect(skill.parentElement).toHaveTextContent("Ask github to review this with @zoom");
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
+    expect(skill.parentElement).toHaveTextContent("Ask github to review this with @Zoom");
   });
 
   it("highlights well-formed skill references and leaves a bare marker plain", () => {
@@ -566,14 +567,16 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} cliApps={CLI_APPS} />);
 
     const token = screen.getByTestId("message-cli-mention-zoom");
-    expect(token).toHaveTextContent("@zoom");
-    expect(token).toHaveAttribute("title", "CLI app: Zoom");
+    expect(token).toHaveTextContent("@Zoom");
+    expect(token).toHaveAttribute("title", "CLI app: Zoom (@zoom)");
     expect(token).toHaveClass("font-[550]");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #0B5CFF");
     expect(token.getAttribute("style")).not.toContain("text-shadow");
-    expect(screen.getByTestId("message-cli-mention-logo-zoom")).toBeInTheDocument();
+    const logo = screen.getByTestId("message-cli-mention-logo-zoom");
+    expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
+    expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
     expect(screen.queryByTestId("message-cli-mention-krita")).not.toBeInTheDocument();
     expect(screen.getByText(/not @krita/)).toBeInTheDocument();
   });
@@ -632,7 +635,7 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} cliApps={[]} />);
 
     const token = screen.getByTestId("message-cli-mention-drawio");
-    expect(token).toHaveTextContent("@drawio");
+    expect(token).toHaveTextContent("@Draw.io");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #F08705");
@@ -650,10 +653,61 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} mcpPresets={MCP_PRESETS} />);
 
     const token = screen.getByTestId("message-mcp-mention-browserbase");
-    expect(token).toHaveTextContent("@browserbase");
-    expect(token).toHaveAttribute("title", "MCP server: Browserbase");
+    expect(token).toHaveTextContent("@Browserbase");
+    expect(token).toHaveAttribute("title", "MCP server: Browserbase (@browserbase)");
     expect(token.getAttribute("style")).toContain("color: #111827");
-    expect(screen.getByTestId("message-mcp-mention-logo-browserbase")).toBeInTheDocument();
+    const logo = screen.getByTestId("message-mcp-mention-logo-browserbase");
+    expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
+    expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
+  });
+
+  it.each((["cli", "mcp"] as const).flatMap((kind) => [
+    ["linear", "Linear", "Linear"],
+    ["iterm2", "iTerm2", "iTerm2"],
+    ["drawio", "Draw.io", "Draw.io"],
+    ["gimp", "GIMP", "GIMP"],
+    ["google-drive", "Google Drive", "Google Drive"],
+    ["1password-cli", "1Password CLI", "1Password CLI"],
+    ["feishu-cli", "Feishu/Lark CLI", "Feishu/Lark CLI"],
+    ["local-app", "  本地应用  ", "本地应用"],
+    ["fallback-app", "   ", "fallback-app"],
+  ].map(([name, displayName, expected]) => ({ kind, name, displayName, expected }))))(
+    "uses the saved display name for $kind $name without rewriting its identifier",
+    ({ kind, name, displayName, expected }) => {
+      const message: UIMessage = {
+        id: "saved-app-name",
+        role: "user",
+        content: `Use @${name} please`,
+        ...(kind === "cli" ? {
+          cliApps: [{ name, display_name: displayName, category: "test", entry_point: name }],
+        } : {
+          mcpPresets: [{ name, display_name: displayName, category: "test", transport: "stdio" }],
+        }),
+      };
+      render(<MessageBubble message={message} />);
+      const token = screen.getByTestId(`message-${kind}-mention-${name}`);
+      expect(token.textContent).toBe(`@${expected}`);
+      expect(token).toHaveAttribute("title", `${kind === "cli" ? "CLI app" : "MCP server"}: ${expected} (@${name})`);
+      expect(token).toHaveClass("inline-flex", "items-baseline", "max-w-full", "[overflow-wrap:anywhere]");
+      expect(token.firstElementChild).toHaveClass("shrink-0");
+      expect(token.lastElementChild).toHaveClass("min-w-0", "font-semibold");
+      expect(message.content).toBe(`Use @${name} please`);
+    },
+  );
+
+  it("copies the original mention identifiers rather than display names", async () => {
+    const copy = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(true);
+    try {
+      render(<MessageBubble message={{
+        id: "copy-display-name", role: "user", content: "Please use @drawio",
+        cliApps: [{ name: "drawio", display_name: "Draw.io", category: "diagram", entry_point: "drawio" }],
+      }} />);
+      expect(screen.getByTestId("message-cli-mention-drawio")).toHaveTextContent("@Draw.io");
+      fireEvent.click(screen.getByRole("button", { name: "Copy", exact: true }));
+      await waitFor(() => expect(copy).toHaveBeenCalledWith("Please use @drawio"));
+    } finally {
+      copy.mockRestore();
+    }
   });
 
   it("renders persisted session mentions inside sent user messages", () => {
