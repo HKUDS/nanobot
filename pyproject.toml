@@ -62,6 +62,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+zalo = ["python-zalo-bot>=0.1.4", "fastapi>=0.115.0", "uvicorn>=0.34.0"]
 api = [
     "aiohttp>=3.9.0,<4.0.0",
 ]
