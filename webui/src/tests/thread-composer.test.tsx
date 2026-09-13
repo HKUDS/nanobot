@@ -1707,8 +1707,8 @@ describe("ThreadComposer", () => {
     );
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(input).toHaveValue("@blender ");
-    expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@blender");
+    expect(input).toHaveValue("@Blender ");
+    expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@Blender");
     expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Mentions" })).not.toBeInTheDocument();
@@ -1789,8 +1789,8 @@ describe("ThreadComposer", () => {
 
     fireEvent.keyDown(input, { key: "Tab" });
 
-    expect(input).toHaveValue("use @blender ");
-    expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@blender");
+    expect(input).toHaveValue("use @Blender ");
+    expect(screen.getByTestId("composer-cli-mention-blender")).toHaveTextContent("@Blender");
   });
 
   it("shows configured MCP presets in the mention palette and submits metadata", () => {
@@ -1814,9 +1814,9 @@ describe("ThreadComposer", () => {
 
     fireEvent.keyDown(input, { key: "Tab" });
 
-    expect(input).toHaveValue("use @browserbase ");
+    expect(input).toHaveValue("use @\u00a0Browserbase ");
     const mention = screen.getByTestId("composer-mcp-mention-browserbase");
-    expect(mention).toHaveTextContent("@browserbase");
+    expect(mention.textContent).toBe("@\u00a0Browserbase");
     expect(mention).toHaveClass("font-normal");
     expect(mention).not.toHaveClass("font-[550]");
 
@@ -2201,7 +2201,7 @@ describe("ThreadComposer", () => {
 
     fireEvent.keyDown(input, { key: "Tab" });
 
-    expect(input).toHaveValue("use @blender tonight");
+    expect(input).toHaveValue("use @Blender tonight");
   });
 
   it("renders a CLI app mention logo inline without moving the text cursor slot", () => {
@@ -2218,9 +2218,9 @@ describe("ThreadComposer", () => {
       target: { value: "meeting in @gimp", selectionStart: 16 },
     });
 
-    expect(input).toHaveValue("meeting in @gimp");
+    expect(input).toHaveValue("meeting in @\u00a0GIMP");
     const token = screen.getByTestId("composer-cli-mention-gimp");
-    expect(token).toHaveTextContent("@gimp");
+    expect(token.textContent).toBe("@\u00a0GIMP");
     expect(token).toHaveClass("font-normal");
     expect(token).not.toHaveClass("font-[550]");
     expect(token.className).not.toContain("zoom-in");
@@ -2231,8 +2231,14 @@ describe("ThreadComposer", () => {
     expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     const logo = screen.getByTestId("composer-cli-mention-logo-gimp");
     expect(logo.className).toContain("top-1/2");
-    expect(logo.className).toContain("left-1/2");
+    expect(logo.className).toContain("left-0");
     expect(logo.className).not.toContain("-top-");
+    expect(logo).toHaveClass("h-[0.9em]", "w-[0.9em]", "rounded-[0.25em]");
+    // The shared text projection reserves the gap; no CSS margin may shift the caret.
+    expect(logo.parentElement).toHaveTextContent("@");
+    expect(logo.parentElement).toHaveClass("inline");
+    expect(logo.parentElement).not.toHaveClass("inline-block");
+    expect(logo.parentElement?.className).not.toMatch(/(?:^|\s)(?:w-|m[rlx]-|p[rlx]-)/);
   });
 
   it("uses the shared accent when an installed CLI app has no brand metadata", () => {
@@ -2269,6 +2275,117 @@ describe("ThreadComposer", () => {
     const token = screen.getByTestId("composer-cli-mention-obsidian-agent-cli");
     expect(token.getAttribute("style")).toContain("var(--inline-token-highlight)");
     expect(token.getAttribute("style")).not.toContain("var(--primary)");
+  });
+
+  it.each([
+    ["linear", "Linear"], ["drawio", "Draw.io"], ["google-drive", "Google Drive"],
+    ["iterm2", "iTerm2"], ["gimp", "GIMP"], ["1password", "1Password"],
+    ["local", "本地应用"], ["fallback", "  "],
+  ])("shows %s's brand in the input and sends its identifier", (name, displayName) => {
+    const onSend = vi.fn();
+    const app = { ...CLI_APPS[0], name, display_name: displayName };
+    render(<ThreadComposer onSend={onSend} cliApps={[app]} />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: `请用 @${name} 帮我`, selectionStart: name.length + 5 } });
+    const label = displayName.trim() || name;
+    expect(input).toHaveValue(`请用 @\u00a0${label} 帮我`);
+    expect(screen.getByTestId(`composer-cli-mention-${name}`).textContent).toBe(`@\u00a0${label}`);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(`请用 @${name} 帮我`, undefined, {
+      cliApps: [expect.objectContaining({ name, display_name: displayName })],
+    });
+  });
+
+  it("keeps multiple long mentions intact while editing, copying, cutting and undoing", async () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} cliApps={[
+      { ...CLI_APPS[0], name: "drive", display_name: "Google Drive" },
+      { ...CLI_APPS[1], name: "drawio", display_name: "Draw.io" },
+    ]} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@drive @drawio" } });
+    input.setSelectionRange(14, 14);
+    await userEvent.type(input, " hello", { skipClick: true });
+    expect(input).toHaveValue("@\u00a0Google Drive hello @Draw.io");
+    input.setSelectionRange(0, 14);
+    const setData = vi.fn();
+    fireEvent.copy(input, { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith("text/plain", "@drive");
+    fireEvent.cut(input, { clipboardData: { setData } });
+    expect(input).toHaveValue(" hello @Draw.io");
+    fireEvent.keyDown(input, { key: "z", metaKey: true });
+    expect(input).toHaveValue("@\u00a0Google Drive hello @Draw.io");
+    fireEvent.keyDown(input, { key: "z", metaKey: true, shiftKey: true });
+    expect(input).toHaveValue(" hello @Draw.io");
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("hello @drawio", undefined, {
+      cliApps: [expect.objectContaining({ name: "drawio" })],
+    });
+  });
+
+  it("deletes a brand mention as a unit and restores it on undo", async () => {
+    render(<ThreadComposer onSend={vi.fn()} mcpPresets={[
+      { ...MCP_PRESETS[0], name: "drive", display_name: "Google Drive" },
+    ]} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@drive!" } });
+    input.setSelectionRange(14, 14);
+    await userEvent.keyboard("{Backspace}");
+    expect(input).toHaveValue("!");
+    fireEvent.keyDown(input, { key: "z", ctrlKey: true });
+    expect(input).toHaveValue("@\u00a0Google Drive!");
+  });
+
+  it("does not interrupt Chinese composition or submit on an IME confirmation", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} cliApps={[
+      { ...CLI_APPS[0], name: "drive", display_name: "Google Drive" },
+    ]} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@drive " } });
+    const logo = screen.getByTestId("composer-cli-mention-logo-drive");
+    fireEvent.compositionStart(input);
+    expect(screen.getByTestId("composer-cli-mention-logo-drive")).toBe(logo);
+    fireEvent.change(input, { target: { value: "@\u00a0Google Drive 中", selectionStart: 16 } });
+    expect(input).toHaveValue("@\u00a0Google Drive 中");
+    expect(input).toHaveClass("text-transparent");
+    expect(input.previousElementSibling).toHaveClass("z-20");
+    expect(screen.getByTestId("composer-cli-mention-logo-drive")).toBe(logo);
+    expect(input.previousElementSibling?.textContent).toBe(input.value);
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(input, { data: "中" });
+    expect(input).toHaveValue("@\u00a0Google Drive 中");
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("@drive 中", undefined, {
+      cliApps: [expect.objectContaining({ name: "drive" })],
+    });
+  });
+
+  it("clears mention editing and undo state when switching sessions during composition", () => {
+    const props = { onSend: vi.fn(), cliApps: CLI_APPS };
+    const { rerender } = render(<ThreadComposer {...props} pendingQueueKey="chat-a" />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@gimp " } });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "@\u00a0GIMP 草稿" } });
+    rerender(<ThreadComposer {...props} pendingQueueKey="chat-b" />);
+    expect(input).toHaveValue("");
+    fireEvent.compositionEnd(input, { data: "草稿" });
+    fireEvent.keyDown(input, { key: "z", metaKey: true });
+    expect(input).toHaveValue("");
+  });
+
+  it("mirrors the trailing empty line and scroll offset of a decorated textarea", () => {
+    render(<ThreadComposer onSend={vi.fn()} cliApps={CLI_APPS} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@gimp\n" } });
+    const overlay = input.previousElementSibling as HTMLElement;
+    expect(overlay.textContent).toBe("@\u00a0GIMP\n\u200b");
+    expect(input).toHaveClass("block");
+    input.scrollTop = 80;
+    fireEvent.scroll(input);
+    expect(overlay.scrollTop).toBe(80);
   });
 
   it("opens the slash command palette downward when there is more room below", async () => {
