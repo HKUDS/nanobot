@@ -40,7 +40,8 @@ import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/sett
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
-import type { SkillSummary } from "@/lib/types";
+import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
+import type { SessionAutomationJob, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
@@ -48,9 +49,16 @@ interface SettingsPageProps {
   controller: SettingsController;
   theme: "light" | "dark";
   showSidebar: boolean;
+  mainNavigationExpanded: boolean;
   onToggleTheme: () => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
+  onStartAutomationChat?: (
+    content: string,
+    images?: SendAttachment[],
+    options?: SendOptions,
+    modelPreset?: string | null,
+  ) => boolean | void | Promise<boolean | void>;
   titleOverrides?: Record<string, string>;
   onLogout?: () => void;
   isRestarting: boolean;
@@ -62,9 +70,11 @@ export function SettingsPage({
   controller,
   theme,
   showSidebar,
+  mainNavigationExpanded,
   onToggleTheme,
   onBackToChat,
   skills,
+  onStartAutomationChat,
   titleOverrides,
   onLogout,
   isRestarting,
@@ -72,6 +82,8 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
+  const [automationDetailReturn, setAutomationDetailReturn] =
+    useState<SessionAutomationJob | null>(null);
   const {
     activeSection,
     apiService,
@@ -87,8 +99,6 @@ export function SettingsPage({
     automationsError,
     automationsFilter,
     automationsLoading,
-    automationsQuery,
-    automationsSort,
     beginModelPresetCreation,
     cancelModelPresetCreation,
     changeModelCallOrder,
@@ -185,8 +195,6 @@ export function SettingsPage({
     setAutomationPendingDelete,
     setAutomationPendingEdit,
     setAutomationsFilter,
-    setAutomationsQuery,
-    setAutomationsSort,
     setCliAppsError,
     setCliAppsMessage,
     setCustomMcpForm,
@@ -563,20 +571,25 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <AutomationsSettings
+              token={token}
               payload={automations}
               titleOverrides={titleOverrides}
+              settingsSnapshot={controller.settings}
+              onStartChat={onStartAutomationChat}
               loading={automationsLoading}
-              query={automationsQuery}
               filter={automationsFilter}
-              sort={automationsSort}
               actionKey={automationAction}
               error={automationsError}
-              onQueryChange={setAutomationsQuery}
               onFilterChange={setAutomationsFilter}
-              onSortChange={setAutomationsSort}
               onAction={handleAutomationAction}
-              onRequestEdit={setAutomationPendingEdit}
+              onRequestEdit={(job) => {
+                setAutomationDetailReturn(null);
+                setAutomationPendingEdit(job);
+              }}
               onRequestDelete={setAutomationPendingDelete}
+              onManageModels={() => selectSection("models")}
+              returnToDetailJob={automationDetailReturn}
+              onReturnToDetailHandled={() => setAutomationDetailReturn(null)}
             />
           </div>
         );
@@ -709,6 +722,7 @@ export function SettingsPage({
         onOpenChange={(open) => {
           if (!open) setAutomationPendingEdit(null);
         }}
+        onCancel={(job) => setAutomationDetailReturn(job)}
         onSave={handleAutomationEdit}
       />
 
@@ -723,16 +737,18 @@ export function SettingsPage({
           data-testid="settings-section-transition"
           ref={setDialogLayoutAnchor}
           data-settings-section={activeSection}
+          data-main-navigation-expanded={mainNavigationExpanded}
           className={cn(
             "mx-auto w-full animate-in fade-in-0 slide-in-from-bottom-1 py-6 duration-200 ease-out",
             "motion-reduce:animate-none sm:py-8 lg:py-12",
             "settings-grid",
             !showSidebar && "settings-feature-page",
+            !showSidebar && activeSection === "automations" && "settings-automations-grid",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
           {!showSidebar ? (
-            <div className={activeSection === "automations" ? "lg:hidden" : "mb-7"}>
+            <div className={activeSection === "automations" ? "lg:hidden" : "settings-feature-header mb-7"}>
               <button
                 type="button"
                 onClick={backToChat}

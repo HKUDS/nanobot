@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "Impossible de joindre nanobot",
-      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
+      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que ce navigateur peut atteindre son adresse WebUI."
     },
     "auth": {
-      "label": "Mot de passe",
+      "title": "Se connecter à nanobot",
+      "label": "Mot de passe de la WebUI",
+      "help": "Ce mot de passe se trouve dans channels.websocket.tokenIssueSecret dans la configuration de nanobot, généralement ~/.nanobot/config.json. Si cette valeur est vide, utilisez channels.websocket.token.",
       "showPassword": "Afficher le mot de passe",
       "hidePassword": "Masquer le mot de passe",
       "submit": "Se connecter",
-      "required": "Saisissez le mot de passe.",
-      "invalid": "Mot de passe incorrect. Réessayez."
+      "required": "Saisissez le mot de passe de la WebUI.",
+      "invalid": "Ce mot de passe de la WebUI n’a pas été accepté. Copiez-le depuis la configuration de nanobot et réessayez."
     },
     "account": {
       "section": "Compte",
@@ -886,9 +888,42 @@
       "notEnabled": "Non activé"
     },
     "automations": {
-      "viewOptions": "Rechercher et filtrer",
+      "taskInfo": "Informations sur la tâche",
+      "runDetails": {
+        "loading": "Chargement de la réponse…",
+        "loadError": "Impossible de charger la réponse.",
+        "retry": "Réessayer",
+        "emptyOutput": "Aucune réponse n’a été générée.",
+        "result": "Résultat",
+        "duration": "Durée",
+        "noOutput": "Le texte de la réponse n’est pas conservé dans cet enregistrement."
+      },
+      "create": "Créer une automatisation",
+      "createPrompt": "Que voulez-vous automatiser avec nanobot ?",
+      "createInput": "Décrire une automatisation",
+      "errors": {
+        "legacyMissingDestination": "Cette ancienne automatisation n’a plus de destination. Recréez-la depuis la discussion liée pour continuer."
+      },
+      "calendar": {
+        "previousMonth": "Mois précédent",
+        "nextMonth": "Mois suivant",
+        "today": "Aujourd’hui",
+        "planned": "Planifié",
+        "recorded": "Enregistré",
+        "more": "+{{count}} de plus",
+        "less": "Afficher moins",
+        "noEntries": "Aucune exécution ce mois-ci."
+      },
       "yourTasks": "Vos automatisations",
       "systemTasks": "Tâches système",
+      "views": {
+        "label": "Vue des automatisations",
+        "tasks": "Tâches",
+        "calendar": "Calendrier"
+      },
+      "filter": "Filtrer",
+      "filteredBy": "Filtre : {{status}}",
+      "commandCondition": "Déclenchée par une commande",
       "instructions": "Instructions",
       "done": "Terminé",
       "moreDetails": "Plus de détails",
@@ -899,7 +934,7 @@
       "filters": {
         "all": "Toutes",
         "active": "Actives",
-        "paused": "En pause",
+        "paused": "Désactivée",
         "failed": "À traiter",
         "system": "Système"
       },
@@ -909,7 +944,6 @@
         "updated": "Mise à jour",
         "name": "Nom"
       },
-      "search": "Rechercher tâche, message, discussion liée ou planning",
       "queue": "File",
       "loading": "Chargement des automatisations...",
       "noMatches": "Aucune automatisation ne correspond à cette vue.",
@@ -928,8 +962,8 @@
         "updated": "Modifiée"
       },
       "runNow": "Exécuter maintenant",
-      "pause": "Mettre en pause",
-      "resume": "Reprendre",
+      "pause": "Désactiver",
+      "resume": "Activer",
       "edit": "Modifier",
       "delete": "Supprimer",
       "protected": "Protégée",
@@ -943,7 +977,7 @@
       "status": {
         "system": "Système",
         "running": "En cours d’exécution",
-        "paused": "En pause",
+        "paused": "Désactivée",
         "failed": "Échouée",
         "completed": "Terminée",
         "noSchedule": "Aucun planning",
@@ -958,12 +992,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "Chaque {{day}} à {{time}}",
         "at": "À {{time}}",
         "every": "Toutes les {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Chaque jour à {{time}}",
+        "monthlyAt": "Le {{day}} de chaque mois à {{time}}",
         "weekdaysAt": "Du lundi au vendredi à {{time}}",
         "hourlyAt": "Toutes les heures à :{{minute}}",
         "hourlyWindow": "Toutes les heures {{start}}-{{end}} à :{{minute}}",
@@ -971,7 +1007,7 @@
         "custom": "Planning personnalisé"
       },
       "next": {
-        "paused": "En pause",
+        "paused": "Désactivée",
         "pending": "En cours d’exécution",
         "local": "En attente du déclencheur",
         "none": "Aucune prochaine exécution"
@@ -989,7 +1025,10 @@
         "unit": "Unité",
         "cronExpression": "Expression cron",
         "timezone": "Fuseau horaire",
-        "runAt": "Exécuter à"
+        "runAt": "Exécuter à",
+        "runDate": "Date d’exécution",
+        "runTime": "Heure d’exécution",
+        "chooseDate": "Choisir une date"
       },
       "scheduleTypes": {
         "every": "Intervalle",
@@ -1192,7 +1231,7 @@
       "at": "{{time}}",
       "every": "Tous les {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Déclencheur local",
       "unknown": "Planification personnalisée"
     },
@@ -1295,12 +1334,13 @@
       "loading": "Chargement des automatisations...",
       "loadFailed": "Impossible de charger les automatisations.",
       "empty": "Aucune automatisation dans cette session pour le moment.",
+      "openCalendar": "Tout voir dans le calendrier",
       "disabled": "Désactivé",
       "schedule": {
         "at": "À {{time}}",
         "every": "Toutes les {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Déclencheur local",
         "unknown": "Planification personnalisée"
       },
@@ -1577,6 +1617,8 @@
     "activityWorkingFor": "Travail en cours depuis {{duration}}",
     "activityWorked": "Travail terminé",
     "activityWorkedFor": "Travail terminé en {{duration}}",
+    "traceDetailsLoadFailed": "Impossible de charger les détails complets de l’activité.",
+    "retryTraceDetails": "Réessayer",
     "retryConnection": "Échec de la connexion",
     "retryTimeout": "Délai d’attente du modèle dépassé",
     "retryRateLimit": "Limite de requêtes atteinte",

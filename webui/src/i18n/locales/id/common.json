@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "Tidak dapat menjangkau nanobot",
-      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
+      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan browser ini dapat menjangkau alamat WebUI-nya."
     },
     "auth": {
-      "label": "Kata sandi",
+      "title": "Hubungkan ke nanobot",
+      "label": "Kata sandi WebUI",
+      "help": "Temukan kata sandi ini di channels.websocket.tokenIssueSecret dalam konfigurasi nanobot, biasanya ~/.nanobot/config.json. Jika nilainya kosong, gunakan channels.websocket.token.",
       "showPassword": "Tampilkan kata sandi",
       "hidePassword": "Sembunyikan kata sandi",
       "submit": "Hubungkan",
-      "required": "Masukkan kata sandi.",
-      "invalid": "Kata sandi salah. Coba lagi."
+      "required": "Masukkan kata sandi WebUI.",
+      "invalid": "Kata sandi WebUI tersebut tidak diterima. Salin dari konfigurasi nanobot lalu coba lagi."
     },
     "account": {
       "section": "Akun",
@@ -886,9 +888,42 @@
       "notEnabled": "Belum aktif"
     },
     "automations": {
-      "viewOptions": "Cari dan filter",
+      "taskInfo": "Informasi tugas",
+      "runDetails": {
+        "loading": "Memuat respons…",
+        "loadError": "Respons tidak dapat dimuat.",
+        "retry": "Coba lagi",
+        "emptyOutput": "Tidak ada respons yang dihasilkan.",
+        "result": "Hasil",
+        "duration": "Durasi",
+        "noOutput": "Catatan ini tidak menyimpan teks respons."
+      },
+      "create": "Buat otomatisasi",
+      "createPrompt": "Apa yang ingin kamu otomatisasi dengan nanobot?",
+      "createInput": "Jelaskan otomatisasi",
+      "errors": {
+        "legacyMissingDestination": "Otomatisasi lama ini tidak memiliki tujuan pengiriman. Buat ulang dari chat terkait untuk melanjutkan."
+      },
+      "calendar": {
+        "previousMonth": "Bulan sebelumnya",
+        "nextMonth": "Bulan berikutnya",
+        "today": "Hari ini",
+        "planned": "Terjadwal",
+        "recorded": "Tercatat",
+        "more": "+{{count}} lainnya",
+        "less": "Tampilkan lebih sedikit",
+        "noEntries": "Tidak ada eksekusi bulan ini."
+      },
       "yourTasks": "Otomatisasi Anda",
       "systemTasks": "Tugas sistem",
+      "views": {
+        "label": "Tampilan otomatisasi",
+        "tasks": "Tugas",
+        "calendar": "Kalender"
+      },
+      "filter": "Filter",
+      "filteredBy": "Filter: {{status}}",
+      "commandCondition": "Dipicu oleh perintah",
       "instructions": "Instruksi",
       "done": "Selesai",
       "moreDetails": "Detail lainnya",
@@ -899,7 +934,7 @@
       "filters": {
         "all": "Semua",
         "active": "Aktif",
-        "paused": "Dijeda",
+        "paused": "Dinonaktifkan",
         "failed": "Perlu ditangani",
         "system": "Sistem"
       },
@@ -909,7 +944,6 @@
         "updated": "Diperbarui",
         "name": "Nama"
       },
-      "search": "Cari tugas, pesan, chat terkait, atau jadwal",
       "queue": "Antrean",
       "loading": "Memuat otomasi...",
       "noMatches": "Tidak ada otomasi yang cocok dengan tampilan ini.",
@@ -928,8 +962,8 @@
         "updated": "Diperbarui"
       },
       "runNow": "Jalankan sekarang",
-      "pause": "Jeda",
-      "resume": "Lanjutkan",
+      "pause": "Nonaktifkan",
+      "resume": "Aktifkan",
       "edit": "Ubah",
       "delete": "Hapus",
       "protected": "Terlindungi",
@@ -943,7 +977,7 @@
       "status": {
         "system": "Sistem",
         "running": "Sedang berjalan",
-        "paused": "Dijeda",
+        "paused": "Dinonaktifkan",
         "failed": "Gagal",
         "completed": "Selesai",
         "noSchedule": "Tanpa jadwal",
@@ -958,12 +992,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "Setiap {{day}} pukul {{time}}",
         "at": "Pada {{time}}",
         "every": "Setiap {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Setiap hari pukul {{time}}",
+        "monthlyAt": "Setiap tanggal {{day}} pukul {{time}}",
         "weekdaysAt": "Senin–Jumat pukul {{time}}",
         "hourlyAt": "Setiap jam pada menit {{minute}}",
         "hourlyWindow": "Setiap jam dari {{start}} hingga {{end}}, pada menit {{minute}}",
@@ -971,7 +1007,7 @@
         "custom": "Jadwal khusus"
       },
       "next": {
-        "paused": "Dijeda",
+        "paused": "Dinonaktifkan",
         "pending": "Sedang berjalan",
         "local": "Menunggu pemicu",
         "none": "Tidak ada jadwal berikutnya"
@@ -989,7 +1025,10 @@
         "unit": "Unit",
         "cronExpression": "Ekspresi cron",
         "timezone": "Zona waktu",
-        "runAt": "Jalankan pada"
+        "runAt": "Jalankan pada",
+        "runDate": "Tanggal eksekusi",
+        "runTime": "Waktu eksekusi",
+        "chooseDate": "Pilih tanggal"
       },
       "scheduleTypes": {
         "every": "Interval",
@@ -1192,7 +1231,7 @@
       "at": "{{time}}",
       "every": "Setiap {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Pemicu lokal",
       "unknown": "Jadwal khusus"
     },
@@ -1295,12 +1334,13 @@
       "loading": "Memuat otomasi...",
       "loadFailed": "Tidak dapat memuat otomasi.",
       "empty": "Belum ada otomasi dalam sesi ini.",
+      "openCalendar": "Lihat semua di kalender",
       "disabled": "Mati",
       "schedule": {
         "at": "Pada {{time}}",
         "every": "Setiap {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Pemicu lokal",
         "unknown": "Jadwal khusus"
       },
@@ -1577,6 +1617,8 @@
     "activityWorkingFor": "Memproses selama {{duration}}",
     "activityWorked": "Selesai memproses",
     "activityWorkedFor": "Diproses selama {{duration}}",
+    "traceDetailsLoadFailed": "Detail aktivitas lengkap tidak dapat dimuat.",
+    "retryTraceDetails": "Coba lagi",
     "retryConnection": "Koneksi gagal",
     "retryTimeout": "Waktu respons model habis",
     "retryRateLimit": "Batas permintaan tercapai",

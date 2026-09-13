@@ -10,6 +10,7 @@ import { logoFallbackUrls } from "@/lib/provider-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
 import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { composerMentionLabel } from "@/lib/composer-mention-text";
 
 type CliAppMentionSegment =
   | { kind: "text"; text: string }
@@ -19,6 +20,9 @@ export type CapabilityMentionSegment =
   | CliAppMentionSegment
   | { kind: "mcp"; text: string; preset: McpPresetInfo }
   | { kind: "session"; text: string; mention: SessionMention };
+
+// Paint-only weight keeps the native textarea's regular-width caret and wrapping in sync.
+const COMPOSER_BRAND_NAME_CLASS = "[-webkit-text-stroke:0.4px_currentColor]";
 
 export function cliAppInitials(app: CliAppInfo): string {
   const value = app.display_name || app.name;
@@ -185,7 +189,10 @@ function CliAppMentionToken({
 }) {
   const { t } = useTranslation();
   const color = app.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const mentionName = label.startsWith("@") ? label.slice(1) : label;
+  const displayName = app.display_name?.trim() || app.name;
+  const mentionName = variant === "message"
+    ? displayName
+    : composerMentionLabel({ kind: "cli", text: label, app }).slice(1);
   const logoUrls = useMemo(() => logoFallbackUrls(app.logo_url), [app.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const showLogo = Boolean(logoUrl);
@@ -194,12 +201,20 @@ function CliAppMentionToken({
   return (
     <InlineTokenHighlight
       testId={`${testIdPrefix}-cli-mention-${app.name}`}
-      title={t("thread.composer.mentions.cliTitle", { name: app.display_name || app.name })}
+      title={t("thread.composer.mentions.cliTitle", {
+        name: variant === "message" ? `${displayName} (${label})` : displayName,
+      })}
       color={color}
-      className={variant === "composer" ? "font-normal" : undefined}
+      className={variant === "composer" ? "font-normal" : "inline-flex max-w-full items-baseline [overflow-wrap:anywhere]"}
     >
       <span
-        className={cn("relative inline-block", showLogo && "text-transparent")}
+        className={cn(
+          "relative",
+          variant === "composer" ? "inline" : "inline-block",
+          variant === "message" && "shrink-0",
+          showLogo && "text-transparent",
+          showLogo && variant === "message" && "mr-1 w-[1.1em]",
+        )}
         style={{ lineHeight: "inherit" }}
       >
         @
@@ -207,9 +222,10 @@ function CliAppMentionToken({
           <span
             data-testid={`${testIdPrefix}-cli-mention-logo-${app.name}`}
             className={cn(
-              "absolute left-1/2 top-1/2 grid place-items-center overflow-hidden rounded-mark",
-              "-translate-x-1/2 -translate-y-1/2",
-              isHero ? "h-[0.74em] w-[0.74em]" : "h-[0.72em] w-[0.72em]",
+              "absolute left-0 top-1/2 grid -translate-y-1/2 place-items-center overflow-hidden rounded-[0.25em]",
+              variant === "message"
+                ? "h-[1.1em] w-[1.1em]"
+                : isHero ? "h-[0.92em] w-[0.92em]" : "h-[0.9em] w-[0.9em]",
             )}
           >
             <img
@@ -224,7 +240,9 @@ function CliAppMentionToken({
           </span>
         ) : null}
       </span>
-      {mentionName}
+      <span className={variant === "message" ? "min-w-0 font-semibold" : COMPOSER_BRAND_NAME_CLASS}>
+        {mentionName}
+      </span>
     </InlineTokenHighlight>
   );
 }
@@ -242,7 +260,10 @@ function McpPresetMentionToken({
 }) {
   const { t } = useTranslation();
   const color = preset.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const mentionName = label.startsWith("@") ? label.slice(1) : label;
+  const displayName = preset.display_name?.trim() || preset.name;
+  const mentionName = variant === "message"
+    ? displayName
+    : composerMentionLabel({ kind: "mcp", text: label, preset }).slice(1);
   const logoUrls = useMemo(() => logoFallbackUrls(preset.logo_url), [preset.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const showLogo = Boolean(logoUrl);
@@ -251,12 +272,20 @@ function McpPresetMentionToken({
   return (
     <InlineTokenHighlight
       testId={`${testIdPrefix}-mcp-mention-${preset.name}`}
-      title={t("thread.composer.mentions.mcpTitle", { name: preset.display_name || preset.name })}
+      title={t("thread.composer.mentions.mcpTitle", {
+        name: variant === "message" ? `${displayName} (${label})` : displayName,
+      })}
       color={color}
-      className={variant === "composer" ? "font-normal" : undefined}
+      className={variant === "composer" ? "font-normal" : "inline-flex max-w-full items-baseline [overflow-wrap:anywhere]"}
     >
       <span
-        className={cn("relative inline-block", showLogo && "text-transparent")}
+        className={cn(
+          "relative",
+          variant === "composer" ? "inline" : "inline-block",
+          variant === "message" && "shrink-0",
+          showLogo && "text-transparent",
+          showLogo && variant === "message" && "mr-1 w-[1.1em]",
+        )}
         style={{ lineHeight: "inherit" }}
       >
         @
@@ -264,9 +293,10 @@ function McpPresetMentionToken({
           <span
             data-testid={`${testIdPrefix}-mcp-mention-logo-${preset.name}`}
             className={cn(
-              "absolute left-1/2 top-1/2 grid place-items-center overflow-hidden rounded-mark",
-              "-translate-x-1/2 -translate-y-1/2",
-              isHero ? "h-[0.74em] w-[0.74em]" : "h-[0.72em] w-[0.72em]",
+              "absolute left-0 top-1/2 grid -translate-y-1/2 place-items-center overflow-hidden rounded-[0.25em]",
+              variant === "message"
+                ? "h-[1.1em] w-[1.1em]"
+                : isHero ? "h-[0.92em] w-[0.92em]" : "h-[0.9em] w-[0.9em]",
             )}
           >
             <img
@@ -281,7 +311,9 @@ function McpPresetMentionToken({
           </span>
         ) : null}
       </span>
-      {mentionName}
+      <span className={variant === "message" ? "min-w-0 font-semibold" : COMPOSER_BRAND_NAME_CLASS}>
+        {mentionName}
+      </span>
     </InlineTokenHighlight>
   );
 }

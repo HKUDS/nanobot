@@ -86,6 +86,7 @@ import {
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
+import { useComposerMentionInput } from "@/hooks/useComposerMentionInput";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
@@ -194,6 +195,7 @@ interface ThreadComposerProps {
   disabled?: boolean;
   placeholder?: string;
   inputAriaLabel?: string;
+  compactWhenIdle?: boolean;
   isStreaming?: boolean;
   modelLabel?: string | null;
   modelDetail?: string | null;
@@ -895,6 +897,7 @@ export function ThreadComposer({
   disabled,
   placeholder,
   inputAriaLabel,
+  compactWhenIdle = false,
   isStreaming = false,
   modelLabel = null,
   modelDetail = null,
@@ -936,6 +939,8 @@ export function ThreadComposer({
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const [composerFocused, setComposerFocused] = useState(false);
+  const blurFrame = useRef<number | null>(null);
   const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
   const [sessionDragPreview, setSessionDragPreview] = useState<{
     mention: SessionMention;
@@ -956,6 +961,7 @@ export function ThreadComposer({
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1058,14 +1064,18 @@ export function ThreadComposer({
   } = useClipboardAndDrop(addFiles);
 
   useEffect(() => {
-    if (interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
+    if (compactWhenIdle || interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
       return;
     }
     const el = textareaRef.current;
     if (!el) return;
     const id = requestAnimationFrame(() => el.focus());
     return () => cancelAnimationFrame(id);
-  }, [hasTouchPrimaryPointer, interactionDisabled, showProjectPicker, workspaceError]);
+  }, [compactWhenIdle, hasTouchPrimaryPointer, interactionDisabled, showProjectPicker, workspaceError]);
+
+  useEffect(() => () => {
+    if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+  }, []);
 
   useEffect(() => {
     if (!focusRequest || interactionDisabled) return;
@@ -1275,6 +1285,20 @@ export function ThreadComposer({
     () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
     [cliApps, mcpPresets, selectedSessionMentions, value],
   );
+  const editMentionInput = useCallback((next: string, cursor: number) => {
+    secondEnterPromptIdRef.current = null;
+    setValue(next);
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(cursor);
+  }, []);
+  const mentionInput = useComposerMentionInput({
+    segments: mentionSegments,
+    inputRef: textareaRef,
+    onEdit: editMentionInput,
+    resetKey: pendingQueueKey,
+  });
+  const { rawSelection, replace: replaceMentionInput } = mentionInput;
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
         value,
@@ -1290,7 +1314,7 @@ export function ThreadComposer({
         mcpPresets,
         [...selectedSessionMentions, sessionDragPreview.mention],
       )
-    : mentionSegments;
+    : mentionInput.segments;
   const activeSessionMentions = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -1494,6 +1518,14 @@ export function ThreadComposer({
     });
   }, []);
 
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el || mentionInput.isComposing) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = el.scrollTop;
+  }, [mentionInput.isComposing, mentionInput.value]);
+
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
@@ -1620,14 +1652,7 @@ export function ThreadComposer({
         const inserted = `${command.command}${suffix.startsWith(" ") ? "" : " "}`;
         const next = `${value.slice(0, skillQuery.start)}${inserted}${suffix}`;
         const nextCursor = skillQuery.start + inserted.length;
-        setValue(next);
-        setCursorPosition(nextCursor);
-        requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (!el) return;
-          el.focus();
-          el.setSelectionRange(nextCursor, nextCursor);
-        });
+        replaceMentionInput(next, nextCursor);
       } else {
         setValue(command.argHint ? `${command.command} ` : command.command);
       }
@@ -1636,7 +1661,7 @@ export function ThreadComposer({
       setInlineError(null);
       resizeTextarea();
     },
-    [isStreaming, onStop, recentSlashCommands, resizeTextarea, skillQuery, value],
+    [isStreaming, onStop, recentSlashCommands, replaceMentionInput, resizeTextarea, skillQuery, value],
   );
 
   const insertMentionCandidate = useCallback(
@@ -1656,20 +1681,13 @@ export function ThreadComposer({
         ]);
       }
       const insertion = mentionInsertion(value, candidate.name, start, end);
-      setValue(insertion.value);
-      setCursorPosition(insertion.cursor);
+      replaceMentionInput(insertion.value, insertion.cursor);
       setCliAppMenuDismissed(true);
       setSlashMenuDismissed(false);
       setInlineError(null);
       resizeTextarea();
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.focus();
-        el.setSelectionRange(insertion.cursor, insertion.cursor);
-      });
     },
-    [activeSessionMentions, resizeTextarea, value],
+    [activeSessionMentions, replaceMentionInput, resizeTextarea, value],
   );
 
   const chooseMentionCandidate = useCallback(
@@ -1692,7 +1710,7 @@ export function ThreadComposer({
       (candidate) => candidate.session_key === (sessionKey ?? preview?.mention.session_key),
     );
     if (!mention) return true;
-    const caret = preview?.start ?? textareaRef.current?.selectionStart ?? value.length;
+    const caret = preview?.start ?? rawSelection().start;
     insertMentionCandidate(
       {
         kind: "session",
@@ -1701,13 +1719,14 @@ export function ThreadComposer({
         mention,
       },
       caret,
-      preview?.end ?? textareaRef.current?.selectionEnd ?? caret,
+      preview?.end ?? rawSelection().end,
     );
     return true;
   }, [
     availableSessionMentions,
     insertMentionCandidate,
     interactionDisabled,
+    rawSelection,
     sessionDragPreview,
     value.length,
   ]);
@@ -1733,8 +1752,7 @@ export function ThreadComposer({
     }
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
-    const start = textareaRef.current?.selectionStart ?? value.length;
-    const end = textareaRef.current?.selectionEnd ?? start;
+    const { start, end } = rawSelection();
     setSessionDragPreview((current) => (
       current?.mention.session_key === mention.session_key
       && current.start === start
@@ -1743,7 +1761,7 @@ export function ThreadComposer({
         : { mention, start, end }
     ));
     return true;
-  }, [activeSessionMentions, availableSessionMentions, interactionDisabled, value.length]);
+  }, [activeSessionMentions, availableSessionMentions, interactionDisabled, rawSelection]);
 
   useEffect(() => {
     if (!sessionDragPreview) return;
@@ -1813,12 +1831,11 @@ export function ThreadComposer({
   const editQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
     secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
-    setValue(prompt.text);
+    replaceMentionInput(prompt.text, prompt.text.length);
     setSelectedSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
-    setCursorPosition(prompt.text.length);
     onQuotedContextChange?.(prompt.quotedContext ?? null);
     if (prompt.images?.length) {
       restoreReadyImages(prompt.images as RestoredReadyImage[]);
@@ -1826,13 +1843,7 @@ export function ThreadComposer({
       clear();
     }
     resizeTextarea();
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(prompt.text.length, prompt.text.length);
-    });
-  }, [clear, onQuotedContextChange, resizeTextarea, restoreReadyImages]);
+  }, [clear, onQuotedContextChange, replaceMentionInput, resizeTextarea, restoreReadyImages]);
 
   const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
     if (dragId === targetId) return;
@@ -2050,6 +2061,8 @@ export function ThreadComposer({
   ]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    mentionInput.onKeyDown(e);
+    if (e.defaultPrevented || e.nativeEvent.isComposing || mentionInput.isComposing) return;
     if (showCliAppMenu) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -2188,6 +2201,31 @@ export function ThreadComposer({
         : t("thread.composer.voice.hint");
   const showStopButton = isStreaming && !!onStop;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
+  const compactIdle = compactWhenIdle && !isHero && !composerFocused
+    && value.length === 0 && images.length === 0 && !inlineError
+    && !normalizedQuotedContext && !queuedPrompts.length && !goalState?.active
+    && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
+  useLayoutEffect(() => {
+    if (!compactWhenIdle) return;
+    const form = formRef.current;
+    const primary = form?.querySelector<HTMLElement>(".thread-composer-footer-primary");
+    const actions = form?.querySelector<HTMLElement>(".thread-composer-footer-actions");
+    if (!form || !primary || !actions) return;
+    const controls = Array.from(primary.children).filter((child) => getComputedStyle(child).display !== "none");
+    // Reserve the real toolbar width, including translated model labels, while
+    // the footer slides beneath the input. Neither control is remounted.
+    const measure = () => {
+      const gap = parseFloat(getComputedStyle(primary).columnGap) || 0;
+      const width = controls.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0)
+        + Math.max(0, controls.length - 1) * gap + actions.getBoundingClientRect().width;
+      form.style.setProperty("--composer-compact-controls-width", `${width}px`);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    controls.forEach((control) => observer?.observe(control));
+    observer?.observe(actions);
+    return () => observer?.disconnect();
+  }, [compactWhenIdle, modelLabel, voiceRecorder.isRecording, workspaceScope]);
   const inputTextClasses = cn(
     "w-full resize-none bg-transparent",
     isHero
@@ -2201,6 +2239,20 @@ export function ThreadComposer({
   return (
     <form
       ref={formRef}
+      onFocusCapture={() => {
+        if (!compactWhenIdle) return;
+        // Portaled model controls belong to this composer too: keep its layout
+        // stable while moving between the input, toolbar, and model picker.
+        if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+      }}
+      onBlurCapture={() => {
+        if (!compactWhenIdle) return;
+        if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+        blurFrame.current = requestAnimationFrame(() => {
+          blurFrame.current = null;
+          setComposerFocused(false);
+        });
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -2224,7 +2276,11 @@ export function ThreadComposer({
       onDrop={(event) => {
         if (!handleSessionDrop(event)) onDrop(event);
       }}
-      className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
+      className={cn(
+        "relative w-full",
+        isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0",
+        compactWhenIdle && "thread-composer-collapsible-layout",
+      )}
     >
       {showSlashMenu ? (
         <SlashCommandPalette
@@ -2248,11 +2304,13 @@ export function ThreadComposer({
       ) : null}
       <div
         ref={surfaceRef}
+        data-compact={compactIdle || undefined}
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
-            ? "max-w-[58rem] rounded-prominent bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
-            : "max-w-[49.5rem] rounded-panel bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
+            ? "max-w-[58rem] rounded-prominent bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]"
+            : "max-w-[49.5rem] rounded-panel bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]",
+          compactWhenIdle && "thread-composer-collapsible transition-colors motion-reduce:transition-none",
           interactionDisabled && "opacity-60",
           sessionDragPreview && "ring-1 ring-primary/25",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
@@ -2336,11 +2394,13 @@ export function ThreadComposer({
           </div>
         ) : null}
         <GoalStateStrip goalState={goalState} />
-        <div className="relative">
+        <div className="thread-composer-input relative min-w-0">
           {hasMentionDecorations ? (
             <ComposerCliMentionOverlay
+              overlayRef={mentionOverlayRef}
               segments={displayMentionSegments}
               isHero={isHero}
+              isComposing={mentionInput.isComposing}
               className={inputTextClasses}
               ghostRange={sessionDragInsertion
                 ? { start: sessionDragInsertion.tokenStart, end: sessionDragInsertion.tokenEnd }
@@ -2349,22 +2409,26 @@ export function ThreadComposer({
           ) : null}
           <textarea
             ref={textareaRef}
-            value={value}
-            onChange={(e) => {
-              secondEnterPromptIdRef.current = null;
-              setValue(e.target.value);
-              setSlashMenuDismissed(false);
-              setCliAppMenuDismissed(false);
-              setCursorPosition(e.target.selectionStart ?? e.target.value.length);
+            value={mentionInput.value}
+            onFocus={() => {
+              if (compactWhenIdle) setComposerFocused(true);
             }}
+            onChange={mentionInput.onChange}
+            onCompositionStart={mentionInput.onCompositionStart}
+            onCompositionEnd={mentionInput.onCompositionEnd}
             onBlur={() => {
               secondEnterPromptIdRef.current = null;
             }}
             onInput={onInput}
             onKeyDown={onKeyDown}
-            onKeyUp={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
-            onSelect={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
-            onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onKeyUp={() => setCursorPosition(rawSelection().start)}
+            onSelect={() => setCursorPosition(rawSelection().start)}
+            onClick={() => setCursorPosition(rawSelection().start)}
+            onCopy={mentionInput.onCopy}
+            onCut={mentionInput.onCut}
+            onScroll={(e) => {
+              if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = e.currentTarget.scrollTop;
+            }}
             onPaste={onPaste}
             rows={1}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
@@ -2372,7 +2436,7 @@ export function ThreadComposer({
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
             className={cn(
               inputTextClasses,
-              "relative z-10 caret-foreground placeholder:text-muted-foreground/70",
+              "relative z-10 block caret-foreground placeholder:text-muted-foreground/70",
               "focus:outline-none focus-visible:outline-none",
               "disabled:cursor-not-allowed",
               hasMentionDecorations && "text-transparent selection:bg-primary/20",
@@ -2774,23 +2838,31 @@ function QueuedPromptRow({
 }
 
 function ComposerCliMentionOverlay({
+  overlayRef,
   segments,
   isHero,
+  isComposing,
   className,
   ghostRange,
 }: {
+  overlayRef: Ref<HTMLDivElement>;
   segments: CapabilityMentionSegment[];
   isHero: boolean;
+  isComposing: boolean;
   className: string;
   ghostRange?: { start: number; end: number } | null;
 }) {
   let offset = 0;
+  const occurrences = new Map<string, number>();
   return (
     <div
+      ref={overlayRef}
       aria-hidden
       className={cn(
         className,
         "pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-foreground",
+        // Native IME selection backgrounds can be opaque; keep the mirrored glyphs visible.
+        isComposing && "z-20",
       )}
     >
       {segments.map((segment, index) => {
@@ -2800,9 +2872,13 @@ function ComposerCliMentionOverlay({
           return <span key={`text-${index}`}>{segment.text}</span>;
         }
         const isGhost = ghostRange?.start === start && ghostRange.end === offset;
+        const identity = `${segment.kind}-${segment.kind === "cli"
+          ? segment.app.name : segment.kind === "mcp" ? segment.preset.name : segment.mention.session_key}`;
+        const occurrence = occurrences.get(identity) ?? 0;
+        occurrences.set(identity, occurrence + 1);
         return (
           <span
-            key={`${segment.kind}-${index}`}
+            key={`${identity}-${occurrence}`}
             data-testid={isGhost ? "composer-session-drag-preview" : undefined}
             className={cn(isGhost && "opacity-45 transition-opacity duration-100")}
           >
@@ -2814,6 +2890,7 @@ function ComposerCliMentionOverlay({
           </span>
         );
       })}
+      {segments.at(-1)?.text.endsWith("\n") ? "\u200b" : null}
     </div>
   );
 }

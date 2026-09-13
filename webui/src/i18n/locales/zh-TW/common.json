@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "無法連線到 nanobot",
-      "gatewayHint": "請確認閘道已啟動（`nanobot gateway`），並且目前頁面與閘道在同一台機器上開啟。"
+      "gatewayHint": "請確認閘道已啟動（`nanobot gateway`），並且目前瀏覽器可以存取它的 WebUI 位址。"
     },
     "auth": {
-      "label": "密碼",
+      "title": "連線到 nanobot",
+      "label": "WebUI 密碼",
+      "help": "請在 nanobot 設定中的 channels.websocket.tokenIssueSecret 尋找此密碼，設定檔通常位於 ~/.nanobot/config.json。若該值為空，請使用 channels.websocket.token。",
       "showPassword": "顯示密碼",
       "hidePassword": "隱藏密碼",
       "submit": "連線",
-      "required": "請輸入密碼。",
-      "invalid": "密碼錯誤，請再試一次。"
+      "required": "請輸入 WebUI 密碼。",
+      "invalid": "該 WebUI 密碼未通過驗證。請從 nanobot 設定中複製密碼後再試一次。"
     },
     "account": {
       "section": "帳戶",
@@ -886,9 +888,42 @@
       "notEnabled": "未啟用"
     },
     "automations": {
-      "viewOptions": "搜尋與篩選",
+      "taskInfo": "任務資訊",
+      "runDetails": {
+        "loading": "正在載入回覆…",
+        "loadError": "回覆載入失敗。",
+        "retry": "重試",
+        "emptyOutput": "本次執行未產生回覆。",
+        "result": "執行結果",
+        "duration": "耗時",
+        "noOutput": "此記錄未儲存回覆正文。"
+      },
+      "create": "建立自動任務",
+      "createPrompt": "想讓 nanobot 自動幫你做什麼？",
+      "createInput": "描述自動任務",
+      "errors": {
+        "legacyMissingDestination": "這個舊版自動任務缺少傳送目標，無法繼續執行。請從關聯對話中重新建立該任務。"
+      },
+      "calendar": {
+        "previousMonth": "上個月",
+        "nextMonth": "下個月",
+        "today": "今天",
+        "planned": "預定執行",
+        "recorded": "實際記錄",
+        "more": "另有 {{count}} 項",
+        "less": "收合",
+        "noEntries": "本月沒有執行記錄。"
+      },
       "yourTasks": "你的自動任務",
       "systemTasks": "系統任務",
+      "views": {
+        "label": "自動任務檢視",
+        "tasks": "任務",
+        "calendar": "行事曆"
+      },
+      "filter": "篩選",
+      "filteredBy": "篩選：{{status}}",
+      "commandCondition": "透過指令觸發",
       "instructions": "任務指示",
       "done": "完成",
       "moreDetails": "更多詳細資訊",
@@ -899,7 +934,7 @@
       "filters": {
         "all": "全部",
         "active": "已啟用",
-        "paused": "已暫停",
+        "paused": "已停用",
         "failed": "需要處理",
         "system": "系統"
       },
@@ -909,7 +944,6 @@
         "updated": "更新時間",
         "name": "名稱"
       },
-      "search": "搜尋任務、訊息、關聯對話或排程",
       "queue": "任務佇列",
       "loading": "正在載入自動任務…",
       "noMatches": "目前沒有符合條件的自動任務。",
@@ -928,8 +962,8 @@
         "updated": "更新時間"
       },
       "runNow": "立即執行",
-      "pause": "暫停",
-      "resume": "繼續",
+      "pause": "停用",
+      "resume": "啟用",
       "edit": "編輯",
       "delete": "刪除",
       "protected": "受保護",
@@ -943,7 +977,7 @@
       "status": {
         "system": "系統",
         "running": "正在執行",
-        "paused": "已暫停",
+        "paused": "已停用",
         "failed": "失敗",
         "completed": "已完成",
         "noSchedule": "無排程",
@@ -958,12 +992,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "每{{day}} {{time}}",
         "at": "於 {{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
+        "withTz": "{{summary}}（{{tz}}）",
         "dailyAt": "每天 {{time}}",
+        "monthlyAt": "每月 {{day}} 日 {{time}}",
         "weekdaysAt": "每週一至週五 {{time}}",
         "hourlyAt": "每小時第 {{minute}} 分鐘",
         "hourlyWindow": "每天 {{start}} 時至 {{end}} 時之間，於每小時第 {{minute}} 分鐘執行",
@@ -971,7 +1007,7 @@
         "custom": "自訂排程"
       },
       "next": {
-        "paused": "已暫停",
+        "paused": "已停用",
         "pending": "正在執行",
         "local": "等待觸發",
         "none": "沒有後續執行排程"
@@ -989,7 +1025,10 @@
         "unit": "單位",
         "cronExpression": "Cron 表達式",
         "timezone": "時區",
-        "runAt": "執行時間"
+        "runAt": "執行時間",
+        "runDate": "執行日期",
+        "runTime": "執行時刻",
+        "chooseDate": "選擇日期"
       },
       "scheduleTypes": {
         "every": "間隔",
@@ -1192,7 +1231,7 @@
       "at": "{{time}}",
       "every": "每 {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}}（{{tz}}）",
       "local": "本機觸發器",
       "unknown": "自訂排程"
     },
@@ -1295,12 +1334,13 @@
       "loading": "正在載入自動任務…",
       "loadFailed": "無法載入自動任務。",
       "empty": "這個對話目前沒有自動任務。",
+      "openCalendar": "在日曆中查看全部",
       "disabled": "已關閉",
       "schedule": {
         "at": "{{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
         "local": "本機觸發器",
         "unknown": "自訂排程"
       },
@@ -1576,6 +1616,8 @@
     "activityWorkingFor": "處理中，已 {{duration}}",
     "activityWorked": "已處理",
     "activityWorkedFor": "已處理 {{duration}}",
+    "traceDetailsLoadFailed": "無法載入完整活動詳情。",
+    "retryTraceDetails": "重試",
     "retryConnection": "連線失敗",
     "retryTimeout": "模型回應逾時",
     "retryRateLimit": "請求頻率受限",

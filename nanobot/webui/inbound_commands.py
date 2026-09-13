@@ -35,6 +35,7 @@ from nanobot.session.webui_turns import (
     websocket_turn_wall_started_at,
 )
 from nanobot.utils.helpers import safe_filename
+from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -656,6 +657,11 @@ class WebUICommandRouter:
                 )
             if trusted_webui:
                 context_blocks: list[RuntimeContextBlock] = []
+                if not is_user_shell and envelope.get("intent") == "create_automation":
+                    context_blocks.append(RuntimeContextBlock(
+                        source="webui_automation_creation",
+                        content=render_template("agent/automation_creation.md", strip=True),
+                    ))
                 quote = webui_quote_runtime_context(
                     {WEBUI_QUOTE_METADATA: envelope.get("quoted_context")}
                 )

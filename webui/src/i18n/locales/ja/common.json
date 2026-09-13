@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "nanobot に接続できませんでした",
-      "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
+      "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このブラウザーから WebUI のアドレスに到達できることを確認してください。"
     },
     "auth": {
-      "label": "パスワード",
+      "title": "nanobot に接続",
+      "label": "WebUI パスワード",
+      "help": "このパスワードは nanobot の設定内の channels.websocket.tokenIssueSecret にあります。通常は ~/.nanobot/config.json です。この値が空の場合は channels.websocket.token を使用してください。",
       "showPassword": "パスワードを表示",
       "hidePassword": "パスワードを隠す",
       "submit": "接続",
-      "required": "パスワードを入力してください。",
-      "invalid": "パスワードが正しくありません。もう一度お試しください。"
+      "required": "WebUI パスワードを入力してください。",
+      "invalid": "その WebUI パスワードは受け付けられませんでした。nanobot の設定からコピーして、もう一度お試しください。"
     },
     "account": {
       "section": "アカウント",
@@ -886,9 +888,42 @@
       "notEnabled": "無効"
     },
     "automations": {
-      "viewOptions": "検索と絞り込み",
+      "taskInfo": "タスク情報",
+      "runDetails": {
+        "loading": "応答を読み込み中…",
+        "loadError": "応答を読み込めませんでした。",
+        "retry": "再試行",
+        "emptyOutput": "応答は生成されませんでした。",
+        "result": "実行結果",
+        "duration": "所要時間",
+        "noOutput": "この記録に応答本文は保存されていません。"
+      },
+      "create": "自動タスクを作成",
+      "createPrompt": "nanobot に何を自動化してほしいですか？",
+      "createInput": "自動タスクを説明",
+      "errors": {
+        "legacyMissingDestination": "この旧形式の自動タスクには送信先がありません。続行するには、関連チャットから作り直してください。"
+      },
+      "calendar": {
+        "previousMonth": "前の月",
+        "nextMonth": "次の月",
+        "today": "今日",
+        "planned": "予定",
+        "recorded": "実績",
+        "more": "ほか{{count}}件",
+        "less": "折りたたむ",
+        "noEntries": "今月の実行はありません。"
+      },
       "yourTasks": "自分の自動化",
       "systemTasks": "システムタスク",
+      "views": {
+        "label": "自動化の表示",
+        "tasks": "タスク",
+        "calendar": "カレンダー"
+      },
+      "filter": "絞り込み",
+      "filteredBy": "絞り込み：{{status}}",
+      "commandCondition": "コマンドで実行",
       "instructions": "指示",
       "done": "完了",
       "moreDetails": "詳細情報",
@@ -899,7 +934,7 @@
       "filters": {
         "all": "すべて",
         "active": "有効",
-        "paused": "一時停止",
+        "paused": "無効",
         "failed": "要対応",
         "system": "システム"
       },
@@ -909,7 +944,6 @@
         "updated": "更新日時",
         "name": "名前"
       },
-      "search": "タスク、メッセージ、関連チャット、予定を検索",
       "queue": "キュー",
       "loading": "自動タスクを読み込み中...",
       "noMatches": "この表示に一致する自動タスクはありません。",
@@ -928,8 +962,8 @@
         "updated": "更新"
       },
       "runNow": "今すぐ実行",
-      "pause": "一時停止",
-      "resume": "再開",
+      "pause": "無効にする",
+      "resume": "有効にする",
       "edit": "編集",
       "delete": "削除",
       "protected": "保護済み",
@@ -943,7 +977,7 @@
       "status": {
         "system": "システム",
         "running": "実行中",
-        "paused": "一時停止",
+        "paused": "無効",
         "failed": "失敗",
         "completed": "完了",
         "noSchedule": "スケジュールなし",
@@ -958,12 +992,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "毎週{{day}} {{time}}",
         "at": "{{time}}",
         "every": "{{duration}} ごと",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
+        "withTz": "{{summary}}（{{tz}}）",
         "dailyAt": "毎日 {{time}}",
+        "monthlyAt": "毎月{{day}}日 {{time}}",
         "weekdaysAt": "月曜日〜金曜日 {{time}}",
         "hourlyAt": "毎時 {{minute}} 分",
         "hourlyWindow": "{{start}}〜{{end}} の毎時 {{minute}} 分",
@@ -971,7 +1007,7 @@
         "custom": "カスタムスケジュール"
       },
       "next": {
-        "paused": "一時停止",
+        "paused": "無効",
         "pending": "実行中",
         "local": "トリガー待ち",
         "none": "次回実行なし"
@@ -989,7 +1025,10 @@
         "unit": "単位",
         "cronExpression": "Cron 式",
         "timezone": "タイムゾーン",
-        "runAt": "実行日時"
+        "runAt": "実行日時",
+        "runDate": "実行日",
+        "runTime": "実行時刻",
+        "chooseDate": "日付を選択"
       },
       "scheduleTypes": {
         "every": "間隔",
@@ -1192,7 +1231,7 @@
       "at": "{{time}}",
       "every": "{{duration}} ごと",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}}（{{tz}}）",
       "local": "ローカルトリガー",
       "unknown": "カスタムスケジュール"
     },
@@ -1295,12 +1334,13 @@
       "loading": "自動タスクを読み込み中...",
       "loadFailed": "自動タスクを読み込めませんでした。",
       "empty": "このセッションにはまだ自動タスクがありません。",
+      "openCalendar": "カレンダーですべて表示",
       "disabled": "オフ",
       "schedule": {
         "at": "{{time}}",
         "every": "{{duration}}ごと",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
         "local": "ローカルトリガー",
         "unknown": "カスタムスケジュール"
       },
@@ -1577,6 +1617,8 @@
     "activityWorkingFor": "{{duration}}作業中",
     "activityWorked": "作業しました",
     "activityWorkedFor": "{{duration}}作業しました",
+    "traceDetailsLoadFailed": "アクティビティの詳細を読み込めませんでした。",
+    "retryTraceDetails": "再試行",
     "retryConnection": "接続に失敗しました",
     "retryTimeout": "モデルがタイムアウトしました",
     "retryRateLimit": "リクエスト制限に達しました",

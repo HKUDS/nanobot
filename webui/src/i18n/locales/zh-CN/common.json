@@ -7,15 +7,17 @@
     },
     "error": {
       "title": "无法连接到 nanobot",
-      "gatewayHint": "请确认网关已启动（`nanobot gateway`），并且当前页面与网关运行在同一台机器上。"
+      "gatewayHint": "请确认网关已启动（`nanobot gateway`），并且当前浏览器可以访问它的 WebUI 地址。"
     },
     "auth": {
-      "label": "密码",
+      "title": "连接到 nanobot",
+      "label": "WebUI 密码",
+      "help": "请在 nanobot 配置中的 channels.websocket.tokenIssueSecret 查找此密码，配置文件通常位于 ~/.nanobot/config.json。若该值为空，请使用 channels.websocket.token。",
       "showPassword": "显示密码",
       "hidePassword": "隐藏密码",
       "submit": "连接",
-      "required": "请输入密码。",
-      "invalid": "密码错误，请重试。"
+      "required": "请输入 WebUI 密码。",
+      "invalid": "该 WebUI 密码未通过验证。请从 nanobot 配置中复制密码后重试。"
     },
     "account": {
       "section": "账户",
@@ -1086,9 +1088,42 @@
       "notEnabled": "未启用"
     },
     "automations": {
-      "viewOptions": "搜索与筛选",
+      "taskInfo": "任务信息",
+      "runDetails": {
+        "loading": "正在加载回复…",
+        "loadError": "回复加载失败。",
+        "retry": "重试",
+        "emptyOutput": "本次运行未生成回复。",
+        "result": "运行结果",
+        "duration": "耗时",
+        "noOutput": "此记录未保存回复正文。"
+      },
+      "create": "创建自动任务",
+      "createPrompt": "想让 nanobot 自动帮你做什么？",
+      "createInput": "描述一个自动任务",
+      "errors": {
+        "legacyMissingDestination": "这个旧版自动任务缺少发送目标，无法继续运行。请从关联会话中重新创建该任务。"
+      },
+      "calendar": {
+        "previousMonth": "上个月",
+        "nextMonth": "下个月",
+        "today": "今天",
+        "planned": "计划运行",
+        "recorded": "实际记录",
+        "more": "还有 {{count}} 项",
+        "less": "收起",
+        "noEntries": "本月没有运行记录。"
+      },
       "yourTasks": "你的自动任务",
       "systemTasks": "系统任务",
+      "views": {
+        "label": "自动任务视图",
+        "tasks": "任务",
+        "calendar": "日历"
+      },
+      "filter": "筛选",
+      "filteredBy": "筛选：{{status}}",
+      "commandCondition": "通过命令触发",
       "instructions": "任务指令",
       "done": "完成",
       "moreDetails": "更多信息",
@@ -1099,7 +1134,7 @@
       "filters": {
         "all": "全部",
         "active": "已启用",
-        "paused": "已暂停",
+        "paused": "已停用",
         "failed": "异常",
         "system": "系统"
       },
@@ -1109,7 +1144,6 @@
         "updated": "更新时间",
         "name": "名称"
       },
-      "search": "搜索任务、消息、关联会话或计划",
       "queue": "任务队列",
       "loading": "正在加载自动任务...",
       "noMatches": "当前视图没有匹配的自动任务。",
@@ -1128,8 +1162,8 @@
         "updated": "更新于"
       },
       "runNow": "立即运行",
-      "pause": "暂停",
-      "resume": "恢复",
+      "pause": "停用",
+      "resume": "启用",
       "edit": "编辑",
       "delete": "删除",
       "protected": "受保护",
@@ -1143,7 +1177,7 @@
       "status": {
         "system": "系统",
         "running": "正在运行",
-        "paused": "已暂停",
+        "paused": "已停用",
         "failed": "失败",
         "completed": "已完成",
         "noSchedule": "无计划",
@@ -1158,12 +1192,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "每{{day}} {{time}}",
         "at": "在 {{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
+        "withTz": "{{summary}}（{{tz}}）",
         "dailyAt": "每天 {{time}}",
+        "monthlyAt": "每月 {{day}} 日 {{time}}",
         "weekdaysAt": "周一至周五 {{time}}",
         "hourlyAt": "每小时第 {{minute}} 分钟",
         "hourlyWindow": "{{start}}-{{end}} 点每小时第 {{minute}} 分钟",
@@ -1171,7 +1207,7 @@
         "custom": "自定义计划"
       },
       "next": {
-        "paused": "已暂停",
+        "paused": "已停用",
         "pending": "正在运行",
         "local": "等待触发",
         "none": "无后续运行计划"
@@ -1189,7 +1225,10 @@
         "unit": "单位",
         "cronExpression": "Cron 表达式",
         "timezone": "时区",
-        "runAt": "运行时间"
+        "runAt": "运行时间",
+        "runDate": "运行日期",
+        "runTime": "运行时刻",
+        "chooseDate": "选择日期"
       },
       "scheduleTypes": {
         "every": "间隔",
@@ -1392,7 +1431,7 @@
       "at": "{{time}}",
       "every": "每 {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}}（{{tz}}）",
       "local": "本地触发器",
       "unknown": "自定义计划"
     },
@@ -1495,12 +1534,13 @@
       "loading": "正在加载自动任务...",
       "loadFailed": "无法加载自动任务。",
       "empty": "这个会话暂时没有自动任务。",
+      "openCalendar": "在日历中查看全部",
       "disabled": "已关闭",
       "schedule": {
         "at": "{{time}}",
         "every": "每 {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}}（{{tz}}）",
         "local": "本地触发器",
         "unknown": "自定义计划"
       },
@@ -1750,6 +1790,8 @@
     "activityWorkingFor": "处理中 {{duration}}",
     "activityWorked": "已处理",
     "activityWorkedFor": "处理了 {{duration}}",
+    "traceDetailsLoadFailed": "无法加载完整活动详情。",
+    "retryTraceDetails": "重试",
     "retryConnection": "连接失败",
     "retryTimeout": "模型响应超时",
     "retryRateLimit": "请求频率受限",

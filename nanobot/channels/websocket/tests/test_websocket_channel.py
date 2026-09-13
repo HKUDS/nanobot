@@ -1496,6 +1496,89 @@ async def test_webui_message_projects_quote_to_trusted_runtime_context(bus: Magi
 
 
 @pytest.mark.asyncio
+async def test_webui_automation_intent_is_hidden_and_not_inherited_by_cron(
+    bus: MagicMock, tmp_path: Path,
+) -> None:
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronSchedule
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_HISTORY_META,
+        append_runtime_context,
+        public_history_message,
+    )
+
+    channel = _ch(bus)
+    conn = MagicMock()
+    channel._webui_connections.add(conn)
+    original = "每天八点提醒我喝水"
+    envelope = {
+        "type": "message", "chat_id": "chat-automation", "content": original,
+        "intent": "create_automation", "webui": True,
+    }
+    await channel._dispatch_envelope(conn, "webui-client", envelope)
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.content == original
+    assert "intent" not in msg.metadata
+    [block] = msg.metadata[RUNTIME_CONTEXT_INPUT_META]
+    assert block.source == "webui_automation_creation"
+    assert "create an automation" in block.content
+    assert "not to execute the task immediately" in block.content
+
+    # Model input includes the context; public history strips the exact saved suffix.
+    content, marker = append_runtime_context(msg.content, [block])
+    assert block.content in content
+    assert public_history_message({
+        "role": "user", "content": content, RUNTIME_CONTEXT_HISTORY_META: marker,
+    }) == {"role": "user", "content": original}
+    body = build_webui_thread_response("websocket:chat-automation")
+    assert body is not None
+    assert [message["content"] for message in body["messages"]] == [original]
+
+    store_path = tmp_path / "cron" / "jobs.json"
+    cron = CronService(store_path)
+    job = cron.add_job(
+        name="Water", schedule=CronSchedule(kind="every", every_ms=60_000),
+        message=original, session_key="websocket:chat-automation",
+        origin_channel="websocket", origin_chat_id="chat-automation",
+        origin_metadata=msg.metadata,
+    )
+    reloaded = CronService(store_path).get_job(job.id)
+    assert reloaded is not None
+    assert RUNTIME_CONTEXT_INPUT_META not in reloaded.payload.origin_metadata
+    assert "intent" not in reloaded.payload.origin_metadata
+
+    await channel._dispatch_envelope(conn, "webui-client", {
+        **envelope, "content": "Thanks", "intent": None,
+    })
+    assert RUNTIME_CONTEXT_INPUT_META not in bus.publish_inbound.await_args.args[0].metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("trusted", "webui", "intent", "shell"), [
+    (False, True, "create_automation", False),
+    (True, False, "create_automation", False),
+    (True, True, None, False),
+    (True, True, "delete_automation", False),
+    (True, True, {"instruction": "arbitrary prompt"}, False),
+    (True, True, "create_automation", True),
+])
+async def test_webui_automation_context_requires_valid_trusted_intent(
+    bus: MagicMock, trusted: bool, webui: bool, intent: object, shell: bool,
+) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    if trusted:
+        channel._webui_connections.add(conn)
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": "chat-intent",
+        "content": "!echo hello" if shell else "hello",
+        "intent": intent, "webui": webui, "user_shell": shell,
+    })
+    msg = bus.publish_inbound.await_args.args[0]
+    assert RUNTIME_CONTEXT_INPUT_META not in msg.metadata
+
+
+@pytest.mark.asyncio
 async def test_webui_message_scope_inherits_persisted_session_scope(
     bus: MagicMock,
     tmp_path,
@@ -5535,6 +5618,77 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     assert body["messages"][0]["role"] == "user"
     assert body["messages"][0]["content"] == "hi"
     assert body["has_pending_tool_calls"] is False
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_dispatch_runs_replay_off_event_loop(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:threaded-history"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "threaded-history", "text": "hi"},
+    )
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+    original = gateway.http._handle_webui_thread_get
+
+    def slow_replay(*args: Any, **kwargs: Any):
+        time.sleep(0.15)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(gateway.http, "_handle_webui_thread_get", slow_replay)
+    request_task = asyncio.create_task(
+        gateway.http._dispatch_session_routes(request, request.path)
+    )
+
+    await asyncio.sleep(0.03)
+
+    assert request_task.done() is False
+    response = await request_task
+    assert response is not None
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_diagnostics_hash_session_key(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_RECORDS", 1)
+    key = "websocket:private-session-name"
+    for event in (
+        {"event": "user", "chat_id": "private-session-name", "text": "hi"},
+        {"event": "message", "chat_id": "private-session-name", "text": "hello"},
+        {"event": "turn_end", "chat_id": "private-session-name"},
+    ):
+        append_transcript_object(key, event)
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    gateway.http._log = MagicMock()
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    response = await gateway.http._dispatch_session_routes(request, request.path)
+
+    assert response is not None
+    assert response.status_code == 200
+    call = gateway.http._log.warning.call_args
+    assert call is not None
+    assert key not in " ".join(str(value) for value in call.args)
 
 
 @pytest.mark.asyncio
