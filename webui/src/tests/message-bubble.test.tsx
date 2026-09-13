@@ -690,7 +690,7 @@ describe("MessageBubble", () => {
       expect(token).toHaveAttribute("title", `${kind === "cli" ? "CLI app" : "MCP server"}: ${expected} (@${name})`);
       expect(token).toHaveClass("inline-flex", "items-baseline", "max-w-full", "[overflow-wrap:anywhere]");
       expect(token.firstElementChild).toHaveClass("shrink-0");
-      expect(token.lastElementChild).toHaveClass("min-w-0");
+      expect(token.lastElementChild).toHaveClass("min-w-0", "font-semibold");
       expect(message.content).toBe(`Use @${name} please`);
     },
   );

@@ -21,6 +21,9 @@ export type CapabilityMentionSegment =
   | { kind: "mcp"; text: string; preset: McpPresetInfo }
   | { kind: "session"; text: string; mention: SessionMention };
 
+// Paint-only weight keeps the native textarea's regular-width caret and wrapping in sync.
+const COMPOSER_BRAND_NAME_CLASS = "[-webkit-text-stroke:0.4px_currentColor]";
+
 export function cliAppInitials(app: CliAppInfo): string {
   const value = app.display_name || app.name;
   return (
@@ -237,7 +240,9 @@ function CliAppMentionToken({
           </span>
         ) : null}
       </span>
-      {variant === "message" ? <span className="min-w-0">{mentionName}</span> : mentionName}
+      <span className={variant === "message" ? "min-w-0 font-semibold" : COMPOSER_BRAND_NAME_CLASS}>
+        {mentionName}
+      </span>
     </InlineTokenHighlight>
   );
 }
@@ -306,7 +311,9 @@ function McpPresetMentionToken({
           </span>
         ) : null}
       </span>
-      {variant === "message" ? <span className="min-w-0">{mentionName}</span> : mentionName}
+      <span className={variant === "message" ? "min-w-0 font-semibold" : COMPOSER_BRAND_NAME_CLASS}>
+        {mentionName}
+      </span>
     </InlineTokenHighlight>
   );
 }

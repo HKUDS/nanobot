@@ -2241,6 +2241,28 @@ describe("ThreadComposer", () => {
     expect(logo.parentElement?.className).not.toMatch(/(?:^|\s)(?:w-|m[rlx]-|p[rlx]-)/);
   });
 
+  it.each(["cli", "mcp"] as const)("emphasizes the %s brand without changing composer text metrics", (kind) => {
+    render(<ThreadComposer
+      onSend={vi.fn()}
+      cliApps={kind === "cli" ? [{ ...CLI_APPS[0], name: "linear", display_name: "Linear" }] : []}
+      mcpPresets={kind === "mcp" ? [{ ...MCP_PRESETS[0], name: "linear", display_name: "Linear" }] : []}
+    />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@linear 帮我查看", selectionStart: 12 } });
+    const token = screen.getByTestId(`composer-${kind}-mention-linear`);
+    const name = token.lastElementChild!;
+    expect(name).toHaveTextContent("Linear");
+    expect(name).toHaveClass("[-webkit-text-stroke:0.4px_currentColor]");
+    expect(token).toHaveClass("font-normal");
+    expect(token.firstElementChild).not.toHaveClass("[-webkit-text-stroke:0.4px_currentColor]");
+    expect(input).toHaveValue("@\u00a0Linear 帮我查看");
+    expect(input).not.toHaveClass("font-semibold");
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "@\u00a0Linear 帮我查看n" } });
+    expect(token.lastElementChild).toBe(name);
+    expect(name).toHaveClass("[-webkit-text-stroke:0.4px_currentColor]");
+  });
+
   it("uses the shared accent when an installed CLI app has no brand metadata", () => {
     const mention = "@obsidian-agent-cli";
     const app: CliAppInfo = {
