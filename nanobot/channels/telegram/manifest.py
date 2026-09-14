@@ -30,6 +30,7 @@ SETUP_SPEC = ChannelSetupSpec(
         # instead of the official https://api.telegram.org. (extraHeaders is a
         # dict and is configured via config.json, not the webui form.)
         "apiBase": field("string"),
+        "extraHeaders": field("json", writable=False, snapshot=False),
     },
     required=(required("token"),),
     official_url="https://t.me/BotFather",
