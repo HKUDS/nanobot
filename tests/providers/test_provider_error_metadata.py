@@ -53,6 +53,25 @@ def test_openai_handle_error_marks_timeout_kind() -> None:
     assert response.error_kind == "timeout"
 
 
+def test_openai_handle_error_marks_timeout_from_message() -> None:
+    class FakeAPIError(Exception):
+        pass
+
+    response = OpenAICompatProvider._handle_error(FakeAPIError("timed out after 300s"))
+
+    assert response.finish_reason == "error"
+    assert response.error_kind == "timeout"
+
+
+def test_base_error_response_marks_timeout_from_message() -> None:
+    response = LLMProvider._error_response_from_exception(RuntimeError("timed out after 600s"))
+
+    assert response.finish_reason == "error"
+    assert response.error_kind == "timeout"
+    assert response.error_should_retry is True
+    assert "timed out after 600s" in (response.content or "")
+
+
 def test_anthropic_handle_error_extracts_structured_metadata() -> None:
     class FakeStatusError(Exception):
         pass
