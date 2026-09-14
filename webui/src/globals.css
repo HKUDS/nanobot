@@ -604,6 +604,58 @@
     }
   }
 
+  .thread-header {
+    container: thread-header / inline-size;
+  }
+
+  .thread-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.0625rem;
+    border-radius: var(--radius-compact);
+    pointer-events: auto;
+    background: hsl(var(--background));
+  }
+  .thread-header-controls button {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+  .thread-header-controls button > svg {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+  .thread-header-controls:empty {
+    display: none;
+  }
+  @supports ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
+    .thread-header-controls {
+      background: hsl(var(--background) / 0.96);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    .thread-header-controls {
+      background: hsl(var(--background));
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+  @media (forced-colors: active) {
+    .thread-header-controls {
+      background: Canvas;
+      outline: 1px solid ButtonText;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+  @container thread-header (max-width: 30rem) {
+    .thread-header-theme {
+      display: none;
+    }
+  }
+
   .workbench-pane {
     transform-origin: top left;
   }

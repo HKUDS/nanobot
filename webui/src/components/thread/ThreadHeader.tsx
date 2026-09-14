@@ -56,11 +56,16 @@ export function ThreadHeader({
     <div
       data-testid="thread-header"
       className={cn(
-        "pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 px-3 py-1",
+        "thread-header pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 px-3 py-1",
         minimal && "h-11",
       )}
     >
-      <div className="pointer-events-auto relative flex min-w-0 items-center gap-2 rounded-full bg-background">
+      <div
+        className={cn(
+          "thread-header-controls relative min-w-0",
+          hideSidebarToggleForHostChrome && (minimal || hideTitle) && !handle && "lg:hidden",
+        )}
+      >
         {!hideSidebarToggle ? (
           <Button
             variant="ghost"
@@ -91,7 +96,7 @@ export function ThreadHeader({
         ) : null}
       </div>
 
-      <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1 rounded-full bg-background">
+      <div className="thread-header-controls ml-auto shrink-0">
         {sessionInfoAction}
         {promptNavigatorAction}
         {actions}
@@ -148,6 +153,7 @@ export function ThreadHeader({
             theme={theme}
             onToggleTheme={onToggleTheme}
             label={t("thread.header.toggleTheme")}
+            className="thread-header-theme"
           />
         ) : null}
       </div>
