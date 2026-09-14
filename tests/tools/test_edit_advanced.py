@@ -36,14 +36,49 @@ class TestDeleteLineCleanup:
         return EditFileTool(workspace=tmp_path)
 
     @pytest.mark.asyncio
-    async def test_delete_line_consumes_trailing_newline(self, tool, tmp_path):
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    @pytest.mark.parametrize("prefix", ["", "line1\n"], ids=["first-line", "later-line"])
+    @pytest.mark.parametrize("indent", ["", "    "], ids=["unindented", "indented"])
+    async def test_delete_line_consumes_trailing_newline(
+        self, tool, tmp_path, newline, prefix, indent,
+    ):
         f = tmp_path / "a.py"
-        f.write_text("line1\nline2\nline3\n", encoding="utf-8")
-        result = await tool.execute(path=str(f), old_text="line2", new_text="")
+        content = f"{prefix}{indent}line2\nline3\n"
+        f.write_bytes(content.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(path=str(f), old_text=f"{indent}line2", new_text="")
         assert "Successfully" in result
-        content = f.read_text()
         # Should not leave a blank line where line2 was
-        assert content == "line1\nline3\n"
+        assert f.read_bytes() == f"{prefix}line3\n".replace("\n", newline).encode("utf-8")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    @pytest.mark.parametrize("prefix", ["", "header = 0\n"], ids=["first-line", "later-line"])
+    @pytest.mark.parametrize("old_text", ["  # obsolete", "  # obsolete\n# extra comment"])
+    async def test_delete_inline_suffix_preserves_trailing_newline(
+        self, tool, tmp_path, newline, prefix, old_text,
+    ):
+        f = tmp_path / "a.py"
+        content = f"{prefix}x = 1{old_text}\ny = 2\n"
+        f.write_bytes(content.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(path=str(f), old_text=old_text, new_text="")
+        assert "Successfully" in result
+        expected = f"{prefix}x = 1\ny = 2\n"
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    async def test_delete_all_distinguishes_inline_suffixes_from_whole_lines(
+        self, tool, tmp_path, newline,
+    ):
+        f = tmp_path / "a.py"
+        content = "x = 1  # obsolete\n  # obsolete\ny = 2  # obsolete\nz = 3\n"
+        f.write_bytes(content.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(
+            path=str(f), old_text="  # obsolete", new_text="", replace_all=True,
+        )
+        assert "Successfully" in result
+        expected = "x = 1\ny = 2\nz = 3\n"
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
 
     @pytest.mark.asyncio
     async def test_delete_line_with_explicit_newline_in_old_text(self, tool, tmp_path):

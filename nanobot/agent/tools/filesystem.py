@@ -1037,10 +1037,15 @@ class EditFileTool(_FsTool):
                 replacement = _preserve_quote_style(norm_old, match.text, norm_new)
                 replacement = _reindent_like_match(norm_old, match.text, replacement)
 
-                # Delete-line cleanup: when deleting text (new_text=''), consume trailing
-                # newline to avoid leaving a blank line
+                # Only consume the trailing newline when deleting complete lines;
+                # inline suffix deletions must preserve the remaining line boundary.
                 end = match.end
-                if replacement == "" and not match.text.endswith("\n") and content[end:end + 1] == "\n":
+                if (
+                    replacement == ""
+                    and (match.start == 0 or content[match.start - 1] == "\n")
+                    and not match.text.endswith("\n")
+                    and content[end:end + 1] == "\n"
+                ):
                     end += 1
 
                 new_content = new_content[: match.start] + replacement + new_content[end:]
