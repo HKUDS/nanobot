@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "primaryAction": "Połącz WeChat",
+    "docsLabel": "Otwórz instrukcję konfiguracji WeChat",
+    "officialLabel": "Otwórz WeChat",
+    "fields": {
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy",
+        "placeholder": "Identyfikatory użytkowników oddzielone przecinkami"
+      },
+      "token": {
+        "label": "Token",
+        "placeholder": "Zapisywany przy logowaniu kodem QR"
+      },
+      "sendProgress": {
+        "label": "Wysyłaj informacje o postępie"
+      },
+      "sendToolHints": {
+        "label": "Wysyłaj podsumowania działań narzędzi"
+      },
+      "streaming": {
+        "label": "Używaj strumieniowego API"
+      },
+      "replyProgressMessages": {
+        "label": "Wysyłaj uporządkowane informacje o postępie"
+      },
+      "replyProgressMaxMessages": {
+        "label": "Limit uporządkowanych informacji o postępie"
+      },
+      "contextMessageBudget": {
+        "label": "Limit wiadomości kontekstu"
+      },
+      "blockStreaming": {
+        "label": "Wysyłaj bloki odpowiedzi"
+      },
+      "blockStreamingMinChars": {
+        "label": "Minimalny rozmiar bloku"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "Limit wiadomości blokowych"
+      },
+      "baseUrl": {
+        "label": "Adres URL API"
+      },
+      "cdnBaseUrl": {
+        "label": "Adres URL CDN"
+      },
+      "routeTag": {
+        "label": "Znacznik trasy"
+      },
+      "stateDir": {
+        "label": "Katalog stanu"
+      },
+      "pollTimeout": {
+        "label": "Limit czasu odpytywania (sekundy)"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Kod QR logowania do WeChat",
+    "scanTitle": "Zeskanuj przez WeChat",
+    "waiting": "Oczekiwanie na zeskanowanie przez WeChat…",
+    "connected": "Połączono z WeChat.",
+    "stopped": "Zatrzymano logowanie do WeChat.",
+    "connecting": "Łączenie…",
+    "verifyTitle": "Wymagana weryfikacja",
+    "verifyDescription": "Wpisz liczbę widoczną w WeChat, aby kontynuować.",
+    "verifyMismatch": "Kod jest nieprawidłowy. Wpisz nową liczbę widoczną w WeChat.",
+    "expired": "Logowanie do WeChat wygasło. Zeskanuj ponownie, aby się połączyć.",
+    "failed": "Nie można połączyć WeChat. Spróbuj ponownie.",
+    "verifyPlaceholder": "Kod",
+    "verifySubmit": "Zweryfikuj"
+  }
+}

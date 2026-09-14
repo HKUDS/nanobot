@@ -1,0 +1,39 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji QQ",
+    "officialLabel": "Otwórz konsolę botów QQ",
+    "fields": {
+      "appId": {
+        "label": "Identyfikator aplikacji",
+        "placeholder": "Identyfikator aplikacji bota QQ"
+      },
+      "secret": {
+        "label": "Sekret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy",
+        "placeholder": "Identyfikatory Open ID oddzielone przecinkami"
+      },
+      "msgFormat": {
+        "label": "Format wiadomości",
+        "choices": {
+          "plain": "Zwykły tekst",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "Wiadomość potwierdzająca"
+      },
+      "mediaDir": {
+        "label": "Katalog multimediów"
+      },
+      "downloadChunkSize": {
+        "label": "Rozmiar pobieranego fragmentu"
+      },
+      "downloadMaxBytes": {
+        "label": "Maksymalny rozmiar pobierania"
+      }
+    }
+  }
+}

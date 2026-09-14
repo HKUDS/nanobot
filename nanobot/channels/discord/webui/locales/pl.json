@@ -1,0 +1,56 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji Discorda",
+    "officialLabel": "Otwórz portal Discorda",
+    "fields": {
+      "token": {
+        "label": "Token bota",
+        "placeholder": "Token bota Discorda"
+      },
+      "allowChannels": {
+        "label": "Dozwolone kanały",
+        "placeholder": "Identyfikatory kanałów oddzielone przecinkami"
+      },
+      "groupPolicy": {
+        "label": "Zachowanie w grupach",
+        "choices": {
+          "mention": "Tylko wzmianki",
+          "open": "Wszystkie wiadomości",
+          "allowlist": "Lista dozwolonych"
+        }
+      },
+      "allowFrom": {
+        "label": "Dozwoleni użytkownicy",
+        "placeholder": "Identyfikatory użytkowników oddzielone przecinkami"
+      },
+      "proxy": {
+        "label": "Serwer proxy"
+      },
+      "proxyUsername": {
+        "label": "Nazwa użytkownika proxy"
+      },
+      "proxyPassword": {
+        "label": "Hasło proxy"
+      },
+      "intents": {
+        "label": "Intencje bramy"
+      },
+      "readReceiptEmoji": {
+        "label": "Emoji odczytania"
+      },
+      "workingEmoji": {
+        "label": "Emoji pracy"
+      },
+      "workingEmojiDelay": {
+        "label": "Opóźnienie emoji pracy"
+      },
+      "streaming": {
+        "label": "Przesyłanie strumieniowe",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      }
+    }
+  }
+}
