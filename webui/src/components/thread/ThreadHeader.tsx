@@ -13,6 +13,12 @@ import {
 import { cn } from "@/lib/utils";
 import type { SessionHandle } from "@/lib/types";
 
+const controlsClassName = cn(
+  "pointer-events-auto flex items-center gap-0.5 rounded-compact bg-background p-px empty:hidden",
+  "[&_button]:h-7 [&_button]:w-7 [&_button>svg]:h-3.5 [&_button>svg]:w-3.5",
+  "forced-colors:bg-[Canvas] forced-colors:outline forced-colors:outline-1 forced-colors:outline-[ButtonText]",
+);
+
 interface ThreadHeaderProps {
   title: string;
   handle?: SessionHandle | null;
@@ -56,13 +62,15 @@ export function ThreadHeader({
     <div
       data-testid="thread-header"
       className={cn(
-        "thread-header pointer-events-none inset-x-0 top-0 z-30 flex items-center justify-between gap-3 px-3 py-1",
+        "pointer-events-none inset-x-0 top-0 z-30 flex shrink-0 items-center justify-between gap-3 px-3 py-1",
+        "[position:var(--thread-header-position,absolute)]",
         minimal && "h-11",
       )}
     >
       <div
         className={cn(
-          "thread-header-controls relative min-w-0",
+          controlsClassName,
+          "relative min-w-0",
           hideSidebarToggleForHostChrome && (minimal || hideTitle) && !handle && "lg:hidden",
         )}
       >
@@ -96,7 +104,7 @@ export function ThreadHeader({
         ) : null}
       </div>
 
-      <div className="thread-header-controls ml-auto shrink-0">
+      <div className={cn(controlsClassName, "ml-auto shrink-0")}>
         {sessionInfoAction}
         {promptNavigatorAction}
         {actions}
