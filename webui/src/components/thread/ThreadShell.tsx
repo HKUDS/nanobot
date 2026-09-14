@@ -55,6 +55,7 @@ import type {
 } from "@/lib/types";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 type MessageShape = Pick<UIMessage, "role" | "kind" | "content" | "isStreaming" | "turnId">;
@@ -1693,7 +1694,10 @@ export function ThreadShell({
 
   return (
     <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className={cn(
+        "relative flex min-w-0 flex-1 flex-col overflow-hidden",
+        headerPortalTarget === undefined && !hideHeader && "thread-workspace",
+      )}>
         {hideHeaderTitle && inlineHandle && !temporary && session?.handle ? (
           <div
             aria-label={`Session @${session.handle.name}`}

@@ -56,7 +56,7 @@ export function ThreadHeader({
     <div
       data-testid="thread-header"
       className={cn(
-        "thread-header pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 px-3 py-1",
+        "thread-header pointer-events-none inset-x-0 top-0 z-30 flex items-center justify-between gap-3 px-3 py-1",
         minimal && "h-11",
       )}
     >
@@ -153,7 +153,6 @@ export function ThreadHeader({
             theme={theme}
             onToggleTheme={onToggleTheme}
             label={t("thread.header.toggleTheme")}
-            className="thread-header-theme"
           />
         ) : null}
       </div>

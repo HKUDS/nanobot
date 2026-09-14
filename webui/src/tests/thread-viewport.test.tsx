@@ -279,7 +279,6 @@ describe("ThreadViewport", () => {
     expect(messageRegion).toHaveClass("justify-start");
     expect(messageRegion).not.toHaveClass("justify-end");
     expect(messageRegion).toHaveClass("thread-message-viewport");
-    expect(messageRegion).toHaveClass("pt-12");
     expect(messageRegion).toHaveClass("pb-0");
     expect(messageRegion.className).not.toContain("5rem");
   });
@@ -1863,6 +1862,21 @@ describe("ThreadViewport", () => {
     }
     fireEvent.click(markers[markers.length - 1]);
     expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, (count - 1) * 40 - 48));
+  });
+
+  it("keeps prompt jumps aligned when the header changes between a row and an overlay", async () => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockReturnValue("started");
+    const { scroller } = await renderPromptRailViewport();
+    const marker = screen.getByRole("button", { name: "Jump to prompt: message 1" });
+
+    scroller.style.paddingTop = "16px";
+    fireEvent.click(marker);
+    expect(navigateTo).toHaveBeenLastCalledWith(344);
+
+    scroller.style.paddingTop = "48px";
+    fireEvent.click(marker);
+    expect(navigateTo).toHaveBeenLastCalledWith(312);
   });
 
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {

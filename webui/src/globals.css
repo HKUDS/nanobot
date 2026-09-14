@@ -604,8 +604,16 @@
     }
   }
 
+  .thread-workspace {
+    container: thread-workspace / inline-size;
+  }
+
+  .thread-header-host,
   .thread-header {
-    container: thread-header / inline-size;
+    position: absolute;
+  }
+  .thread-message-viewport {
+    padding-top: 3rem;
   }
 
   .thread-header-controls {
@@ -650,9 +658,23 @@
       backdrop-filter: none;
     }
   }
-  @container thread-header (max-width: 30rem) {
-    .thread-header-theme {
-      display: none;
+  .thread-workspace[data-split="true"] .thread-header-host,
+  .thread-workspace[data-split="true"] .thread-header {
+    position: relative;
+    flex-shrink: 0;
+  }
+  .thread-workspace[data-split="true"] .thread-message-viewport {
+    padding-top: 1rem;
+  }
+  /* Allow the 49.5rem message column and a toolbar-sized margin on each side. */
+  @container thread-workspace (max-width: 72rem) {
+    .thread-header-host,
+    .thread-header {
+      position: relative;
+      flex-shrink: 0;
+    }
+    .thread-message-viewport {
+      padding-top: 1rem;
     }
   }
 

@@ -84,6 +84,11 @@ interface HistoryScrollAnchor {
 
 const THREAD_DISPLAY_UNIT_SELECTOR = "[data-thread-display-unit]";
 
+function promptTopInset(scroller: HTMLElement): number {
+  const padding = Number.parseFloat(getComputedStyle(scroller).paddingTop);
+  return Number.isFinite(padding) ? padding : PROMPT_TOP_INSET_PX;
+}
+
 function historyPrefetchDistance(scroller: HTMLElement): number {
   return Math.min(
     HISTORY_PREFETCH_MAX_PX,
@@ -298,7 +303,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           promptTop: prompt
             ? Math.min(
                 maxScrollTop,
-                Math.max(0, promptTop(scrollEl, prompt) - PROMPT_TOP_INSET_PX),
+                Math.max(0, promptTop(scrollEl, prompt) - promptTopInset(scrollEl)),
               )
             : null,
         };
@@ -478,7 +483,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     threadMotionRef.current?.navigateHistoryTo(
       Math.min(
         maxScrollTop,
-        Math.max(0, promptTop(scrollEl, prompt) - PROMPT_TOP_INSET_PX),
+        Math.max(0, promptTop(scrollEl, prompt) - promptTopInset(scrollEl)),
       ),
     );
     return true;
@@ -872,7 +877,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-message-region"
               className={cn(
                 "thread-message-viewport thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
-                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-12 sm:px-4",
+                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 sm:px-4",
                 "[overflow-anchor:none] [scrollbar-width:none]",
                 "[&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
