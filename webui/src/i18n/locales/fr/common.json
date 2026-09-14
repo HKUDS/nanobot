@@ -12,12 +12,15 @@
     "auth": {
       "title": "Se connecter à nanobot",
       "label": "Mot de passe de la WebUI",
-      "help": "Ce mot de passe se trouve dans channels.websocket.tokenIssueSecret dans la configuration de nanobot, généralement ~/.nanobot/config.json. Si cette valeur est vide, utilisez channels.websocket.token.",
+      "helpTitle": "Où trouver le mot de passe ?",
+      "helpConfig": "Sur l’appareil qui exécute nanobot, ouvrez le fichier de configuration, généralement situé ici :",
+      "helpSecret": "Copiez la valeur de ce champ comme mot de passe :",
+      "helpFallback": "Si cette valeur est vide, utilisez <code>channels.websocket.token</code>.",
       "showPassword": "Afficher le mot de passe",
       "hidePassword": "Masquer le mot de passe",
       "submit": "Se connecter",
-      "required": "Saisissez le mot de passe de la WebUI.",
-      "invalid": "Ce mot de passe de la WebUI n’a pas été accepté. Copiez-le depuis la configuration de nanobot et réessayez."
+      "required": "Saisissez le mot de passe",
+      "invalid": "Mot de passe incorrect"
     },
     "account": {
       "section": "Compte",

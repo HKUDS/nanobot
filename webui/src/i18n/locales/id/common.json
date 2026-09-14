@@ -12,12 +12,15 @@
     "auth": {
       "title": "Hubungkan ke nanobot",
       "label": "Kata sandi WebUI",
-      "help": "Temukan kata sandi ini di channels.websocket.tokenIssueSecret dalam konfigurasi nanobot, biasanya ~/.nanobot/config.json. Jika nilainya kosong, gunakan channels.websocket.token.",
+      "helpTitle": "Di mana saya bisa menemukan kata sandi?",
+      "helpConfig": "Pada perangkat yang menjalankan nanobot, buka file konfigurasi, biasanya di:",
+      "helpSecret": "Salin nilai kolom ini sebagai kata sandi:",
+      "helpFallback": "Jika nilainya kosong, gunakan <code>channels.websocket.token</code>.",
       "showPassword": "Tampilkan kata sandi",
       "hidePassword": "Sembunyikan kata sandi",
       "submit": "Hubungkan",
-      "required": "Masukkan kata sandi WebUI.",
-      "invalid": "Kata sandi WebUI tersebut tidak diterima. Salin dari konfigurasi nanobot lalu coba lagi."
+      "required": "Masukkan kata sandi",
+      "invalid": "Kata sandi salah"
     },
     "account": {
       "section": "Akun",

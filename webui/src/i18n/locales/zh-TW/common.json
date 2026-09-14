@@ -12,12 +12,15 @@
     "auth": {
       "title": "連線到 nanobot",
       "label": "WebUI 密碼",
-      "help": "請在 nanobot 設定中的 channels.websocket.tokenIssueSecret 尋找此密碼，設定檔通常位於 ~/.nanobot/config.json。若該值為空，請使用 channels.websocket.token。",
+      "helpTitle": "在哪裡找到密碼？",
+      "helpConfig": "在執行 nanobot 的裝置上開啟設定檔，通常位於：",
+      "helpSecret": "複製此欄位的值作為密碼：",
+      "helpFallback": "若該值為空，請使用 <code>channels.websocket.token</code>。",
       "showPassword": "顯示密碼",
       "hidePassword": "隱藏密碼",
       "submit": "連線",
-      "required": "請輸入 WebUI 密碼。",
-      "invalid": "該 WebUI 密碼未通過驗證。請從 nanobot 設定中複製密碼後再試一次。"
+      "required": "請輸入密碼",
+      "invalid": "密碼不正確，請重試"
     },
     "account": {
       "section": "帳戶",

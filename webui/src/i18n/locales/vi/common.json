@@ -12,12 +12,15 @@
     "auth": {
       "title": "Kết nối với nanobot",
       "label": "Mật khẩu WebUI",
-      "help": "Tìm mật khẩu này tại channels.websocket.tokenIssueSecret trong cấu hình nanobot, thường là ~/.nanobot/config.json. Nếu giá trị này trống, hãy dùng channels.websocket.token.",
+      "helpTitle": "Tìm mật khẩu ở đâu?",
+      "helpConfig": "Trên thiết bị đang chạy nanobot, mở tệp cấu hình, thường nằm tại:",
+      "helpSecret": "Sao chép giá trị của trường này làm mật khẩu:",
+      "helpFallback": "Nếu giá trị này trống, hãy dùng <code>channels.websocket.token</code>.",
       "showPassword": "Hiện mật khẩu",
       "hidePassword": "Ẩn mật khẩu",
       "submit": "Kết nối",
-      "required": "Nhập mật khẩu WebUI.",
-      "invalid": "Mật khẩu WebUI đó không được chấp nhận. Hãy sao chép từ cấu hình nanobot rồi thử lại."
+      "required": "Nhập mật khẩu",
+      "invalid": "Mật khẩu không đúng"
     },
     "account": {
       "section": "Tài khoản",

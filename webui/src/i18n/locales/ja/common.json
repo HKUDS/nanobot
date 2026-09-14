@@ -12,12 +12,15 @@
     "auth": {
       "title": "nanobot に接続",
       "label": "WebUI パスワード",
-      "help": "このパスワードは nanobot の設定内の channels.websocket.tokenIssueSecret にあります。通常は ~/.nanobot/config.json です。この値が空の場合は channels.websocket.token を使用してください。",
+      "helpTitle": "パスワードはどこにありますか？",
+      "helpConfig": "nanobot を実行しているデバイスで設定ファイルを開きます。通常は次の場所にあります：",
+      "helpSecret": "このフィールドの値をパスワードとしてコピーします：",
+      "helpFallback": "値が空の場合は <code>channels.websocket.token</code> を使用してください。",
       "showPassword": "パスワードを表示",
       "hidePassword": "パスワードを隠す",
       "submit": "接続",
-      "required": "WebUI パスワードを入力してください。",
-      "invalid": "その WebUI パスワードは受け付けられませんでした。nanobot の設定からコピーして、もう一度お試しください。"
+      "required": "パスワードを入力",
+      "invalid": "パスワードが違います"
     },
     "account": {
       "section": "アカウント",

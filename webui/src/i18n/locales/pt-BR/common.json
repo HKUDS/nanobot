@@ -12,12 +12,15 @@
     "auth": {
       "title": "Conectar ao nanobot",
       "label": "Senha da WebUI",
-      "help": "Encontre esta senha em channels.websocket.tokenIssueSecret na configuração do nanobot, normalmente em ~/.nanobot/config.json. Se esse valor estiver vazio, use channels.websocket.token.",
+      "helpTitle": "Onde encontro a senha?",
+      "helpConfig": "No dispositivo que executa o nanobot, abra o arquivo de configuração, geralmente em:",
+      "helpSecret": "Copie o valor deste campo como senha:",
+      "helpFallback": "Se esse valor estiver vazio, use <code>channels.websocket.token</code>.",
       "showPassword": "Mostrar senha",
       "hidePassword": "Ocultar senha",
       "submit": "Conectar",
-      "required": "Digite a senha da WebUI.",
-      "invalid": "Essa senha da WebUI não foi aceita. Copie-a da configuração do nanobot e tente novamente."
+      "required": "Digite a senha",
+      "invalid": "Senha incorreta"
     },
     "account": {
       "section": "Conta",
