@@ -86,3 +86,81 @@ async def test_edit_during_timer_execution_preserves_turn(
         service.stop()
         if timer is not None:
             await asyncio.gather(timer, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["remove", "disable", "reschedule"])
+async def test_due_job_edited_while_waiting_is_skipped(tmp_path: Path, action: str) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+    calls: list[str] = []
+
+    async def on_job(job: CronJob) -> None:
+        calls.append(job.name)
+        if job.name == "first":
+            entered.set()
+            await release.wait()
+        elif job.name == "last":
+            finished.set()
+
+    service = CronService(tmp_path / "cron" / "jobs.json", on_job=on_job)
+    await service.start()
+    try:
+        for name in ("first", "waiting", "last"):
+            service.add_job(
+                name=name,
+                schedule=CronSchedule(kind="every", every_ms=3_600_000),
+                message=name,
+                session_key=f"websocket:{name}",
+                origin_channel="websocket",
+                origin_chat_id=name,
+            )
+        jobs = service.list_jobs()
+        waiting = next(job for job in jobs if job.name == "waiting")
+        for job in jobs:
+            job.state.next_run_at_ms = 1
+        service._save_store()
+        service._arm_timer()
+
+        async with asyncio.timeout(2):
+            await entered.wait()
+            if action == "remove":
+                assert service.remove_job(waiting.id) == "removed"
+            elif action == "disable":
+                service.enable_job(waiting.id, False)
+            else:
+                service.update_job(
+                    waiting.id, schedule=CronSchedule(kind="every", every_ms=7_200_000),
+                )
+            edited = service.get_job(waiting.id)
+            next_run = edited.state.next_run_at_ms if edited is not None else None
+            release.set()
+            await finished.wait()
+            while service._active_executions:
+                await asyncio.sleep(0)
+
+        assert calls == ["first", "last"]
+        restored = CronService(service.store_path)
+        for job in jobs:
+            if job.id == waiting.id:
+                continue
+            completed = restored.get_job(job.id)
+            assert completed is not None
+            assert completed.state.last_status == "ok"
+            assert len(completed.state.run_history) == 1
+        skipped = restored.get_job(waiting.id)
+        if action == "remove":
+            assert skipped is None
+        else:
+            assert skipped is not None
+            assert skipped.state.run_history == []
+            assert skipped.state.next_run_at_ms == next_run
+            assert skipped.enabled is (action == "reschedule")
+        assert service._timer_task is not None
+        assert not service._timer_task.done()
+    finally:
+        timer = service._timer_task
+        service.stop()
+        if timer is not None:
+            await asyncio.gather(timer, return_exceptions=True)
