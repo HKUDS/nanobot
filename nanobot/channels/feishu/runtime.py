@@ -546,6 +546,13 @@ def _begin_registration(domain: str = "feishu") -> _RegistrationStart:
     qr_url = res.get("verification_uri_complete", "")
     if not isinstance(qr_url, str) or not qr_url:
         raise RuntimeError("Feishu / Lark registration did not return a login URL")
+    # The registration endpoint returns a /page/launcher URL, but that page
+    # rejects these device codes instantly ("Link expired") even when scanned
+    # seconds after issuance. /page/cli is the page used by other agent
+    # implementations of this flow and works for both feishu.cn and
+    # larksuite.com tenants, so rewrite the host page and keep the user_code.
+    if "/page/launcher?" in qr_url:
+        qr_url = qr_url.replace("/page/launcher?", "/page/cli?")
     interval = res.get("interval")
     expire_in = res.get("expire_in")
     return {
