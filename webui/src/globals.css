@@ -701,6 +701,11 @@
     overflow-x: auto;
   }
 
+  /* Prism's Markdown table tokens must not pick up Tailwind's table layout. */
+  .not-prose pre .token.table {
+    display: inline;
+  }
+
   /* Wide markdown tables scroll horizontally within the conversation column.
      Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
      custom `table` component (see MarkdownTextRenderer); min-w-max on the
