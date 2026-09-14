@@ -64,6 +64,7 @@ interface ThreadViewportProps {
 }
 
 const NEAR_BOTTOM_PX = 48;
+const PROMPT_TOP_INSET_PX = 48;
 const HISTORY_PREFETCH_MIN_PX = 160;
 const HISTORY_PREFETCH_MAX_PX = 480;
 const DEFAULT_SCROLL_BUTTON_BOTTOM_PX = 192;
@@ -297,7 +298,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           promptTop: prompt
             ? Math.min(
                 maxScrollTop,
-                Math.max(0, promptTop(scrollEl, prompt) - 16),
+                Math.max(0, promptTop(scrollEl, prompt) - PROMPT_TOP_INSET_PX),
               )
             : null,
         };
@@ -477,7 +478,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     threadMotionRef.current?.navigateHistoryTo(
       Math.min(
         maxScrollTop,
-        Math.max(0, promptTop(scrollEl, prompt) - 16),
+        Math.max(0, promptTop(scrollEl, prompt) - PROMPT_TOP_INSET_PX),
       ),
     );
     return true;
@@ -871,7 +872,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-message-region"
               className={cn(
                 "thread-message-viewport thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
-                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-3 sm:px-4",
+                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-12 sm:px-4",
                 "[overflow-anchor:none] [scrollbar-width:none]",
                 "[&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
@@ -967,11 +968,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         </div>
         {!hasMessages ? <div ref={bottomRef} aria-hidden className="h-px" /> : null}
       </div>
-
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-3 bg-gradient-to-b from-background to-transparent"
-      />
 
       {hasMessages ? (
         <PromptRail

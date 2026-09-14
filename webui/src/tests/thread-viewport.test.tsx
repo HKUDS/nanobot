@@ -279,7 +279,7 @@ describe("ThreadViewport", () => {
     expect(messageRegion).toHaveClass("justify-start");
     expect(messageRegion).not.toHaveClass("justify-end");
     expect(messageRegion).toHaveClass("thread-message-viewport");
-    expect(messageRegion).toHaveClass("pt-3");
+    expect(messageRegion).toHaveClass("pt-12");
     expect(messageRegion).toHaveClass("pb-0");
     expect(messageRegion.className).not.toContain("5rem");
   });
@@ -573,7 +573,7 @@ describe("ThreadViewport", () => {
     });
     await flushAnimationFrame();
 
-    expect(jumpTo).toHaveBeenCalledWith(1404);
+    expect(jumpTo).toHaveBeenCalledWith(1372);
   });
 
   it("drives the camera from a message commit when canonical replay replaces the prompt DOM id", async () => {
@@ -1681,7 +1681,7 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(targetPrompt);
 
-    expect(navigateTo).toHaveBeenCalledWith(1064);
+    expect(navigateTo).toHaveBeenCalledWith(1032);
   });
 
   it("renders markdown in prompt rail previews", async () => {
@@ -1855,14 +1855,14 @@ describe("ThreadViewport", () => {
       expect(markers).toHaveLength(count);
       markers.forEach((marker, index) => {
         fireEvent.click(marker);
-        expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, index * 40 - 16));
+        expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, index * 40 - 48));
       });
     } else {
       expect(markers.length).toBeGreaterThan(1);
       expect(markers.length).toBeLessThan(count);
     }
     fireEvent.click(markers[markers.length - 1]);
-    expect(navigateTo).toHaveBeenLastCalledWith((count - 1) * 40 - 16);
+    expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, (count - 1) * 40 - 48));
   });
 
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
@@ -1913,7 +1913,7 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(promptMarkers[promptMarkers.length - 1]);
 
-    expect(navigateTo).toHaveBeenCalledWith(8894);
+    expect(navigateTo).toHaveBeenCalledWith(8862);
   });
 
   it("expands the window start to avoid cutting an agent activity cluster", () => {

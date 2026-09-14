@@ -56,11 +56,11 @@ export function ThreadHeader({
     <div
       data-testid="thread-header"
       className={cn(
-        "relative z-30 flex items-center justify-between gap-3 px-3 py-1",
+        "pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 px-3 py-1",
         minimal && "h-11",
       )}
     >
-      <div className="relative flex min-w-0 items-center gap-2">
+      <div className="pointer-events-auto relative flex min-w-0 items-center gap-2 rounded-full bg-background">
         {!hideSidebarToggle ? (
           <Button
             variant="ghost"
@@ -91,7 +91,7 @@ export function ThreadHeader({
         ) : null}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1 rounded-full bg-background">
         {sessionInfoAction}
         {promptNavigatorAction}
         {actions}
@@ -151,10 +151,6 @@ export function ThreadHeader({
           />
         ) : null}
       </div>
-
-      {!minimal ? (
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-4" />
-      ) : null}
     </div>
   );
 }
