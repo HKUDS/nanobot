@@ -130,13 +130,36 @@ class WebuiSessionAccess:
                 if isinstance(message, dict)
             ]
 
-        thread = build_webui_thread_response(
-            session_key,
-            session_messages_loader=load_session_messages,
-        )
-        if thread is not None:
-            return _visible_messages(thread.get("messages"))
-        return _visible_messages(load_session_messages())
+        # The WebUI replay API returns one page, even when no limit is given.
+        # Session tools need the older pages too, including turns no longer in
+        # the compacted model history. Keep the UI's per-page replay budgets.
+        pages: list[list[object]] = []
+        before: str | None = None
+        while True:
+            thread = build_webui_thread_response(
+                session_key,
+                session_messages_loader=load_session_messages,
+                before=before,
+            )
+            if thread is None:
+                if before is None:
+                    return _visible_messages(load_session_messages())
+                break
+            raw_messages = thread.get("messages")
+            if isinstance(raw_messages, list):
+                pages.append(cast(list[object], raw_messages))
+            raw_page = thread.get("page")
+            if not isinstance(raw_page, dict):
+                break
+            page = cast(dict[str, Any], raw_page)
+            cursor = page.get("before_cursor")
+            if not page.get("has_more_before") or not isinstance(cursor, str) or cursor == before:
+                break
+            before = cursor
+
+        # Page traversal is newest-first; filter after restoring chronological
+        # order so message indexes and the latest-match limits stay consistent.
+        return _visible_messages([message for page in reversed(pages) for message in page])
 
     def search(
         self,
