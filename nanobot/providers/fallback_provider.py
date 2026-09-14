@@ -699,7 +699,14 @@ class FallbackProvider(LLMProvider):
             return True
         if any(token in text for token in _AUTHENTICATION_ERROR_TOKENS):
             return True
+        # ``x-should-retry: false`` means "don't retry this request on the same
+        # model". Timeouts / connection / server failures still deserve a
+        # different model — otherwise NIM-style ``timed out after Ns`` errors
+        # with that header never reach configured fallbacks (#5674).
+        text_looks_transient = any(token in text for token in _FALLBACK_ERROR_TOKENS)
         if response.error_should_retry is False:
+            if kind in _FALLBACK_ERROR_KINDS or text_looks_transient:
+                return True
             return False
         if status in {400, 404, 422}:
             return False
@@ -709,4 +716,6 @@ class FallbackProvider(LLMProvider):
             return True
         if kind in _FALLBACK_ERROR_KINDS:
             return True
-        return any(token in value for value in (kind, error_type, code, text) for token in _FALLBACK_ERROR_TOKENS)
+        return text_looks_transient or any(
+            token in value for value in (kind, error_type, code) for token in _FALLBACK_ERROR_TOKENS
+        )
