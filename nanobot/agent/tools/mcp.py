@@ -57,6 +57,7 @@ _SANITIZE_RE = re.compile(r"_+")
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 MCPServerLoader = Callable[[], Mapping[str, "MCPServerConfig"]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
+_MCP_APP_RESULT_KIND = "mcp_app_result"
 
 
 class MCPConnection(Protocol):
@@ -120,6 +121,89 @@ def _payload_value(payload: Any, key: str) -> Any:
     if isinstance(payload, Mapping):
         return cast(Mapping[str, Any], payload).get(key)
     return getattr(payload, key, None)
+
+
+def _mcp_json_value(value: Any) -> Any:
+    """Convert SDK models to JSON-compatible values without trusting their shape."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _mcp_json_value(model_dump(by_alias=True, exclude_none=True))
+    if isinstance(value, Mapping):
+        return {
+            str(key): _mcp_json_value(item)
+            for key, item in cast(Mapping[Any, Any], value).items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_mcp_json_value(item) for item in cast(Iterable[Any], value)]
+    try:
+        attributes = cast(dict[str, Any], vars(value))
+    except TypeError:
+        return str(value)
+    return {
+        str(key): _mcp_json_value(item)
+        for key, item in attributes.items()
+        if not str(key).startswith("_")
+    }
+
+
+def _mcp_tool_meta(tool_def: Any) -> dict[str, Any]:
+    raw = getattr(tool_def, "meta", None)
+    if raw is None:
+        raw = getattr(tool_def, "_meta", None)
+    value = _mcp_json_value(raw)
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
+
+
+def _mcp_app_ui(tool_def: Any) -> dict[str, Any] | None:
+    """Normalize nested and slash-delimited MCP Apps tool metadata."""
+    meta = _mcp_tool_meta(tool_def)
+    nested = meta.get("ui")
+    ui = dict(cast(dict[str, Any], nested)) if isinstance(nested, dict) else {}
+    for field in ("resourceUri", "visibility"):
+        legacy = meta.get(f"ui/{field}")
+        if field not in ui and legacy is not None:
+            ui[field] = legacy
+    return ui or None
+
+
+def _mcp_tool_is_app_only(tool_def: Any) -> bool:
+    ui = _mcp_app_ui(tool_def)
+    if ui is None:
+        return False
+    raw_visibility = ui.get("visibility")
+    if not isinstance(raw_visibility, list):
+        return False
+    visibility = {
+        str(item).strip().lower()
+        for item in cast(list[Any], raw_visibility)
+        if str(item).strip()
+    }
+    return "app" in visibility and "model" not in visibility
+
+
+def _mcp_app_tool_data(server_name: str, tool_def: Any) -> dict[str, Any] | None:
+    ui = _mcp_app_ui(tool_def)
+    if ui is None:
+        return None
+    data: dict[str, Any] = {
+        "server": server_name,
+        "name": str(tool_def.name),
+        "ui": ui,
+    }
+    for output_key, attribute in (
+        ("outputSchema", "outputSchema"),
+        ("annotations", "annotations"),
+        ("_meta", "meta"),
+    ):
+        raw = getattr(tool_def, attribute, None)
+        if raw is None and attribute == "meta":
+            raw = getattr(tool_def, "_meta", None)
+        value = _mcp_json_value(raw)
+        if value is not None:
+            data[output_key] = value
+    return data
 
 
 def _progress_params_have_token(params: Any) -> bool:
@@ -611,6 +695,7 @@ class MCPToolWrapper(_MCPWrapperBase):
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        self._mcp_app_tool = _mcp_app_tool_data(server_name, tool_def)
 
     @property
     def name(self) -> str:
@@ -687,7 +772,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                 # Success — extract text and persist any image content as artifacts.
                 try:
                     rendered = self._render_call_result(result.content, kwargs)
-                    if getattr(result, "isError", False):
+                    is_error = bool(getattr(result, "isError", False))
+                    data = self._mcp_app_result_data(result)
+                    if data is not None:
+                        return ToolResult(rendered, is_error=is_error, data=data)
+                    if is_error:
                         return ToolResult.error(rendered)
                     return rendered
                 except Exception as exc:
@@ -700,6 +789,26 @@ class MCPToolWrapper(_MCPWrapperBase):
                     return ToolResult.error(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
                     )
+
+    def _mcp_app_result_data(self, result: Any) -> dict[str, Any] | None:
+        """Preserve MCP Apps fields outside the model-facing result string."""
+        if self._mcp_app_tool is None:
+            return None
+        result_meta = getattr(result, "meta", None)
+        if result_meta is None:
+            result_meta = getattr(result, "_meta", None)
+        return {
+            "kind": _MCP_APP_RESULT_KIND,
+            "tool": self._mcp_app_tool,
+            "result": {
+                "content": _mcp_json_value(getattr(result, "content", [])),
+                "structuredContent": _mcp_json_value(
+                    getattr(result, "structuredContent", None)
+                ),
+                "_meta": _mcp_json_value(result_meta),
+                "isError": bool(getattr(result, "isError", False)),
+            },
+        }
 
     def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
         """Turn MCP content blocks into a tool result string.
@@ -1142,9 +1251,23 @@ async def connect_mcp_servers(
             allow_all_tools = "*" in enabled_tools
             registered_count = 0
             matched_enabled_tools: set[str] = set()
-            available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
-            for tool_def in tools.tools:
+            model_tools: list["MCPToolDefinition"] = []
+            tool_definitions: list["MCPToolDefinition"] = tools.tools
+            for tool_def in tool_definitions:
+                if _mcp_tool_is_app_only(tool_def):
+                    logger.debug(
+                        "MCP: skipping app-only tool '{}' from server '{}'",
+                        tool_def.name,
+                        name,
+                    )
+                    continue
+                model_tools.append(tool_def)
+            available_raw_names = [tool_def.name for tool_def in model_tools]
+            available_wrapped_names = [
+                _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
+                for tool_def in model_tools
+            ]
+            for tool_def in model_tools:
                 wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                 if (
                     not allow_all_tools
