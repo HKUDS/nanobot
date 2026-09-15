@@ -321,6 +321,8 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.13
+          # Build with baseline Bun directly: its Windows cross-target extractor is unreliable.
+          bun-download-url: ${{ runner.os == 'Windows' && 'https://github.com/oven-sh/bun/releases/download/bun-v1.3.13/bun-windows-x64-baseline.zip' || '' }}
 
       - name: Install TUI dependencies
         working-directory: tui
