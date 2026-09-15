@@ -517,6 +517,10 @@ class AgentRunner:
                     workspace_violation_counts=workspace_violation_counts,
                     hook=hook,
                     context=context,
+                    model_messages=[
+                        message for message in messages_for_model
+                        if message.get("tool_call_id") not in request_state.compacted_tool_results
+                    ],
                 )
                 tool_events.extend(new_events)
                 tools_used.extend(

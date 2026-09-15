@@ -3,15 +3,15 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
 import difflib
+import hashlib
 import mimetypes
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext
-from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
+from nanobot.agent.tools.file_state import FileStates, current_file_states
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
     BooleanSchema,
@@ -343,44 +343,11 @@ class ReadFileTool(_FsTool):
             if mime and mime.startswith("image/"):
                 return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
-            # Read dedup: same path + offset + limit + unchanged mtime → stub
-            # Always check for external modifications before dedup
-            entry = self._file_states.get(fp)
-            try:
-                current_mtime = os.path.getmtime(fp)
-            except OSError:
-                current_mtime = 0.0
-            if (
-                not force
-                and entry
-                and entry.can_dedup
-                and entry.offset == offset
-                and entry.limit == limit
+            content_hash = hashlib.sha256(raw).hexdigest()
+            if not force and self._file_states.is_unchanged(
+                fp, offset=offset, limit=limit, content_hash=content_hash,
             ):
-                if current_mtime != entry.mtime:
-                    # File was modified externally - force full read and mark as not dedupable
-                    entry.can_dedup = False
-                    self._file_states.record_read(fp, offset=offset, limit=limit)  # Update state with new mtime
-                    # Continue to read full content (don't return dedup message)
-                else:
-                    # File unchanged - return dedup message
-                    # But only if content is actually unchanged (not just mtime)
-                    current_hash = _hash_file(str(fp))
-                    if current_hash == entry.content_hash:
-                        return f"[File unchanged since last read: {path}]"
-                    else:
-                        # Content changed despite same mtime - force full read
-                        entry.can_dedup = False
-                        self._file_states.record_read(fp, offset=offset, limit=limit)
-            else:
-                # No previous state or marked as not dedupable - read full content
-                self._file_states.record_read(fp, offset=offset, limit=limit)
-                # Force full read by setting can_dedup to False for this read
-                if entry:
-                    entry.can_dedup = False
-
-            # Read the file content after dedup check
-            raw = fp.read_bytes()
+                return f"[File unchanged since last read: {path}]"
             try:
                 text_content = raw.decode("utf-8")
             except UnicodeDecodeError:
@@ -438,7 +405,9 @@ class ReadFileTool(_FsTool):
                 result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
             else:
                 result += f"\n\n(End of file — {total} lines total)"
-            self._file_states.record_read(fp, offset=offset, limit=limit)
+            self._file_states.record_read(
+                fp, offset=offset, limit=limit, content_hash=content_hash, result=result,
+            )
             return result
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
@@ -914,7 +883,7 @@ class EditFileTool(_FsTool):
 
     def _format_summary(
         self, resolved_path: Path, before: str, after: str, *,
-        created: bool = False, warning: str | None = None,
+        created: bool = False,
     ) -> FileEditResult:
         diff = FileDiff.from_text(before, after)
         added, deleted = diff.added, diff.deleted
@@ -922,8 +891,6 @@ class EditFileTool(_FsTool):
         stats = f" (+{added}/-{deleted})" if added or deleted else ""
         path = display_file_edit_path(resolved_path, self._display_workspace())
         text = f"Patch applied:\n- {action} {path}{stats}"
-        if warning:
-            text = f"{warning}\n{text}"
         return FileEditResult(text, {resolved_path: diff})
 
     async def execute(
@@ -977,9 +944,6 @@ class EditFileTool(_FsTool):
                 fp.write_text(new_text, encoding="utf-8")
                 self._file_states.record_write(fp)
                 return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
-
-            # Read-before-edit check
-            warning = self._file_states.check_read(fp)
 
             raw = fp.read_bytes()
             uses_crlf = b"\r\n" in raw
@@ -1069,7 +1033,7 @@ class EditFileTool(_FsTool):
 
             fp.write_bytes(new_content.encode("utf-8"))
             self._file_states.record_write(fp)
-            return self._format_summary(fp, content, new_content, warning=warning)
+            return self._format_summary(fp, content, new_content)
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:

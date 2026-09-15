@@ -1,6 +1,7 @@
 """Runtime context for tool construction."""
 from __future__ import annotations
 
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -73,6 +74,32 @@ def current_request_context() -> RequestContext | None:
 def current_request_session_key() -> str | None:
     ctx = current_request_context()
     return ctx.session_key if ctx else None
+
+
+@dataclass(frozen=True)
+class ToolCallContext:
+    """One tool call and the tool results still visible in its model request."""
+
+    call_id: str
+    tool_results: Mapping[str, str]
+
+
+_CURRENT_TOOL_CALL: ContextVar[ToolCallContext | None] = ContextVar(
+    "nanobot_tool_call_context", default=None,
+)
+
+
+@contextmanager
+def tool_call_context(ctx: ToolCallContext) -> Generator[None]:
+    token = _CURRENT_TOOL_CALL.set(ctx)
+    try:
+        yield
+    finally:
+        _CURRENT_TOOL_CALL.reset(token)
+
+
+def current_tool_call_context() -> ToolCallContext | None:
+    return _CURRENT_TOOL_CALL.get()
 
 
 @dataclass

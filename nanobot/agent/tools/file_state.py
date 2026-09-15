@@ -1,22 +1,23 @@
-"""Track file-read state for read-before-edit warnings and read deduplication."""
+"""Track file reads whose original results may still be in model context."""
 
 from __future__ import annotations
 
 import hashlib
-import os
 from collections import OrderedDict
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 
+from nanobot.agent.tools.context import current_tool_call_context
+
 
 @dataclass(slots=True)
 class ReadState:
-    mtime: float
     offset: int
     limit: int | None
     content_hash: str | None
-    can_dedup: bool
+    call_id: str | None
+    result_hash: str | None
 
 
 def _hash_file(p: str) -> str | None:
@@ -27,101 +28,50 @@ def _hash_file(p: str) -> str | None:
 
 
 class FileStates:
-    """Per-session read/write tracker.
-
-    Owns its own state dict so read-dedup ("File unchanged since last read")
-    and read-before-edit warnings stay scoped to one agent session and do
-    not leak across sessions sharing this process.
-    """
+    """Cache read receipts per session; deduplicate only while their results are visible."""
 
     __slots__ = ("_state",)
 
     def __init__(self) -> None:
         self._state: dict[str, ReadState] = {}
 
-    def record_read(self, path: str | Path, offset: int = 1, limit: int | None = None) -> None:
-        """Record that a file was read (called after successful read)."""
+    def record_read(
+        self, path: str | Path, offset: int = 1, limit: int | None = None, *,
+        content_hash: str | None = None, result: str | None = None,
+    ) -> None:
+        """Record the file snapshot and complete result of a successful text read."""
         p = str(Path(path).resolve())
-        try:
-            mtime = os.path.getmtime(p)
-        except OSError:
-            return
+        context = current_tool_call_context()
         self._state[p] = ReadState(
-            mtime=mtime,
             offset=offset,
             limit=limit,
-            content_hash=_hash_file(p),
-            can_dedup=True,
+            content_hash=content_hash if content_hash is not None else _hash_file(p),
+            call_id=context.call_id if context is not None else None,
+            result_hash=hashlib.sha256(result.encode("utf-8")).hexdigest() if result else None,
         )
 
     def record_write(self, path: str | Path) -> None:
-        """Record that a file was written (updates mtime in state)."""
-        p = str(Path(path).resolve())
-        try:
-            mtime = os.path.getmtime(p)
-        except OSError:
-            self._state.pop(p, None)
-            return
-        self._state[p] = ReadState(
-            mtime=mtime,
-            offset=1,
-            limit=None,
-            content_hash=_hash_file(p),
-            can_dedup=False,
-        )
+        """Invalidate a prior read after a write; a write summary is not file content."""
+        self._state.pop(str(Path(path).resolve()), None)
 
-    def check_read(self, path: str | Path) -> str | None:
-        """Warn when a file differs from its recorded read/write state.
-
-        Returns None if OK, or a warning string.
-        When mtime changed but file content is identical (e.g. touch, editor save),
-        the check passes to avoid false-positive staleness warnings.
-        """
+    def is_unchanged(
+        self, path: str | Path, offset: int = 1, limit: int | None = None, *,
+        content_hash: str | None = None,
+    ) -> bool:
+        """Check both file identity and the original result in the actual model input."""
         p = str(Path(path).resolve())
         entry = self._state.get(p)
-        if entry is None:
-            # Shell reads and content already in context may not be recorded here.
-            return None
-        try:
-            current_mtime = os.path.getmtime(p)
-        except OSError:
-            return None
-        if current_mtime != entry.mtime:
-            if entry.content_hash and _hash_file(p) == entry.content_hash:
-                entry.mtime = current_mtime
-                return None
-            return "Warning: file was modified since the last recorded read or write."
-        # mtime unchanged - still check content hash to detect quick modifications
-        if entry.content_hash and _hash_file(p) != entry.content_hash:
-            return "Warning: file was modified since the last recorded read or write."
-        return None
-
-    def is_unchanged(self, path: str | Path, offset: int = 1, limit: int | None = None) -> bool:
-        """Return True if file was previously read with same params and content is unchanged."""
-        p = str(Path(path).resolve())
-        entry = self._state.get(p)
-        if entry is None:
-            return False
-        if not entry.can_dedup:
+        context = current_tool_call_context()
+        if entry is None or context is None or not entry.call_id or not entry.result_hash:
             return False
         if entry.offset != offset or entry.limit != limit:
             return False
-        try:
-            current_mtime = os.path.getmtime(p)
-        except OSError:
+        result = context.tool_results.get(entry.call_id)
+        if result is None or hashlib.sha256(result.encode("utf-8")).hexdigest() != entry.result_hash:
+            self._state.pop(p, None)
             return False
-        if current_mtime != entry.mtime:
-            # mtime changed - check if content also changed
-            current_hash = _hash_file(p)
-            if current_hash != entry.content_hash:
-                # Content actually changed - don't dedup
-                entry.can_dedup = False
-                return False
-            # Content identical despite mtime change (e.g. touch) - mark as not dedupable to force full read next time
-            entry.can_dedup = False
-            return True
-        # mtime unchanged - content must be identical
-        return True
+        current_hash = content_hash if content_hash is not None else _hash_file(p)
+        return current_hash is not None and current_hash == entry.content_hash
 
     def get(self, path: str | Path) -> ReadState | None:
         """Return the raw ReadState entry for a path, or None."""
@@ -197,10 +147,6 @@ def record_read(path: str | Path, offset: int = 1, limit: int | None = None) -> 
 
 def record_write(path: str | Path) -> None:
     _default.record_write(path)
-
-
-def check_read(path: str | Path) -> str | None:
-    return _default.check_read(path)
 
 
 def is_unchanged(path: str | Path, offset: int = 1, limit: int | None = None) -> bool:

@@ -1,4 +1,4 @@
-"""Tests for EditFileTool enhancements: read-before-edit tracking, path suggestions,
+"""Tests for EditFileTool enhancements: read-independent editing, path suggestions,
 notebook JSON editing, and create-file semantics."""
 
 import os
@@ -22,11 +22,11 @@ def _clear_file_state():
 
 
 # ---------------------------------------------------------------------------
-# Read-before-edit tracking
+# Read-independent editing
 # ---------------------------------------------------------------------------
 
 class TestEditReadTracking:
-    """edit_file warns only when a recorded file version has changed."""
+    """edit_file validates current contents independently of prior reads."""
 
     @pytest.fixture()
     def file_states(self):
@@ -58,7 +58,7 @@ class TestEditReadTracking:
         assert f.read_text() == "hello earth"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("reread", [False, True])
+    @pytest.mark.parametrize("reread", ["none", "read_file", "shell"])
     async def test_edit_after_file_modified_since_read(
         self, read_tool, edit_tool, tmp_path, reread,
     ):
@@ -69,14 +69,20 @@ class TestEditReadTracking:
         mtime = f.stat().st_mtime
         f.write_text("hello universe", encoding="utf-8")
         os.utime(f, (mtime + 2, mtime + 2))
-        if reread:
+        if reread == "read_file":
             assert "hello universe" in await read_tool.execute(path=str(f))
+        elif reread == "shell":
+            import subprocess
+            import sys
+
+            read = subprocess.run(
+                [sys.executable, "-c", "from pathlib import Path; import sys; print(Path(sys.argv[1]).read_text())", str(f)],
+                capture_output=True, text=True, check=True,
+            )
+            assert read.stdout.strip() == "hello universe"
         result = await edit_tool.execute(path=str(f), old_text="universe", new_text="earth")
         summary = "Patch applied:\n- update a.py (+1/-1)"
-        assert result == (
-            summary if reread
-            else "Warning: file was modified since the last recorded read or write.\n" + summary
-        )
+        assert result == summary
         assert f.read_text() == "hello earth"
 
 

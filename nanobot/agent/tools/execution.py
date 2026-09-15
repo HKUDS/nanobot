@@ -9,6 +9,7 @@ from typing import Any, cast
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.context import ToolCallContext, tool_call_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.runtime import (
@@ -59,8 +60,16 @@ async def execute_tool_calls(
     workspace_violation_counts: dict[str, int],
     hook: AgentHook,
     context: AgentHookContext,
+    model_messages: list[dict[str, Any]] | None = None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
     """Execute one model response's tool calls in stable result order."""
+    visible_results = {
+        message["tool_call_id"]: message["content"]
+        for message in model_messages or []
+        if message.get("role") == "tool"
+        and isinstance(message.get("tool_call_id"), str)
+        and isinstance(message.get("content"), str)
+    }
     tool_results: list[tuple[Any, dict[str, str]]] = []
     for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
         if concurrent and len(batch) > 1:
@@ -72,6 +81,7 @@ async def execute_tool_calls(
                     workspace_violation_counts,
                     hook,
                     context,
+                    visible_results,
                 )
                 for tool_call in batch
             ))
@@ -85,6 +95,7 @@ async def execute_tool_calls(
                     workspace_violation_counts,
                     hook,
                     context,
+                    visible_results,
                 )
                 tool_results.append(result)
 
@@ -100,6 +111,7 @@ async def _execute_tool_call(
     workspace_violation_counts: dict[str, int],
     hook: AgentHook,
     context: AgentHookContext,
+    visible_results: dict[str, str],
 ) -> tuple[Any, dict[str, str]]:
     lookup_error = repeated_external_lookup_error(
         tool_call.name,
@@ -145,10 +157,11 @@ async def _execute_tool_call(
 
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
-        if tool is not None:
-            result = await tool.execute(**params)
-        else:
-            result = await tools.execute(tool_call.name, params)
+        with tool_call_context(ToolCallContext(tool_call.id, visible_results)):
+            if tool is not None:
+                result = await tool.execute(**params)
+            else:
+                result = await tools.execute(tool_call.name, params)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
