@@ -180,6 +180,14 @@ class CronTool(Tool):
             if err := self._validate_timezone(tz):
                 return err
 
+        schedule_count = sum(
+            value is not None for value in (every_seconds, cron_expr, at)
+        )
+        if schedule_count != 1:
+            return ToolResult.error(
+                "Error: exactly one of every_seconds, cron_expr, or at is required"
+            )
+
         # Build schedule
         delete_after = False
         if every_seconds:
