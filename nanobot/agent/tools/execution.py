@@ -7,10 +7,12 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from functools import cache
 from typing import Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.context import tool_invocation_context
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import ToolCallRequest
@@ -162,65 +164,66 @@ async def _execute_tool_call(
             return handled
         return payload, event
 
-    await hook.before_execute_tool(context, tool_call, tool, params)
-    try:
-        with (
-            file_read_context(tool_call.id, read_results)
-            if tool_call.name == "read_file" else nullcontext()
-        ):
-            if tool is not None:
-                result = await tool.execute(**params)
-            else:
-                result = await tools.execute(tool_call.name, params)
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        await hook.on_execute_tool_error(context, tool_call, tool, params, exc)
-        event = {
-            "name": tool_call.name,
-            "status": "error",
-            "detail": str(exc),
-        }
-        payload = _with_retry_hint(f"Error: {type(exc).__name__}: {exc}")
-        handled = _classify_violation(
-            raw_text=str(exc),
-            soft_payload=payload,
-            event=event,
-            tool_call=tool_call,
-            workspace_violation_counts=workspace_violation_counts,
-        )
-        if handled is not None:
-            return handled
-        return payload, event
+    with tool_invocation_context(tool_call.id, uuid4().hex):
+        await hook.before_execute_tool(context, tool_call, tool, params)
+        try:
+            with (
+                file_read_context(tool_call.id, read_results)
+                if tool_call.name == "read_file" else nullcontext()
+            ):
+                if tool is not None:
+                    result = await tool.execute(**params)
+                else:
+                    result = await tools.execute(tool_call.name, params)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await hook.on_execute_tool_error(context, tool_call, tool, params, exc)
+            event = {
+                "name": tool_call.name,
+                "status": "error",
+                "detail": str(exc),
+            }
+            payload = _with_retry_hint(f"Error: {type(exc).__name__}: {exc}")
+            handled = _classify_violation(
+                raw_text=str(exc),
+                soft_payload=payload,
+                event=event,
+                tool_call=tool_call,
+                workspace_violation_counts=workspace_violation_counts,
+            )
+            if handled is not None:
+                return handled
+            return payload, event
 
-    if is_tool_error_result(result):
-        await hook.on_execute_tool_error(context, tool_call, tool, params, result)
-        payload = _with_retry_hint(result)
-        event = {
-            "name": tool_call.name,
-            "status": "error",
-            "detail": result.replace("\n", " ").strip()[:120],
-        }
-        handled = _classify_violation(
-            raw_text=result,
-            soft_payload=payload,
-            event=event,
-            tool_call=tool_call,
-            workspace_violation_counts=workspace_violation_counts,
-        )
-        if handled is not None:
-            return handled
-        return payload, event
+        if is_tool_error_result(result):
+            await hook.on_execute_tool_error(context, tool_call, tool, params, result)
+            payload = _with_retry_hint(result)
+            event = {
+                "name": tool_call.name,
+                "status": "error",
+                "detail": result.replace("\n", " ").strip()[:120],
+            }
+            handled = _classify_violation(
+                raw_text=result,
+                soft_payload=payload,
+                event=event,
+                tool_call=tool_call,
+                workspace_violation_counts=workspace_violation_counts,
+            )
+            if handled is not None:
+                return handled
+            return payload, event
 
-    await hook.after_execute_tool(context, tool_call, tool, params, result)
+        await hook.after_execute_tool(context, tool_call, tool, params, result)
 
-    detail = "" if result is None else str(result)
-    detail = detail.replace("\n", " ").strip()
-    if not detail:
-        detail = "(empty)"
-    elif len(detail) > 120:
-        detail = detail[:120] + "..."
-    return result, {"name": tool_call.name, "status": "ok", "detail": detail}
+        detail = "" if result is None else str(result)
+        detail = detail.replace("\n", " ").strip()
+        if not detail:
+            detail = "(empty)"
+        elif len(detail) > 120:
+            detail = detail[:120] + "..."
+        return result, {"name": tool_call.name, "status": "ok", "detail": detail}
 
 
 def is_ssrf_violation(text: str) -> bool:
