@@ -355,7 +355,7 @@ def test_mistral_tool_call_ids_get_normalized() -> None:
     assert assistant_id == tool_id
 
 
-def test_mistral_strips_text_from_tool_call_history_by_default() -> None:
+def test_mistral_preserves_text_with_tool_call_history() -> None:
     p = _mistral_provider()
     messages = [
         {"role": "user", "content": "check"},
@@ -375,4 +375,4 @@ def test_mistral_strips_text_from_tool_call_history_by_default() -> None:
 
     sanitized = p._sanitize_messages(messages)
 
-    assert sanitized[1]["content"] is None
+    assert sanitized[1]["content"] == "I will inspect it."

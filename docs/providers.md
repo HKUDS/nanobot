@@ -332,8 +332,7 @@ The `custom` provider fits one OpenAI-compatible endpoint that is not represente
   "providers": {
     "custom": {
       "apiKey": "${CUSTOM_API_KEY}",
-      "apiBase": "https://example.com/v1",
-      "preserveToolCallContent": true
+      "apiBase": "https://example.com/v1"
     }
   },
   "modelPresets": {
@@ -353,11 +352,6 @@ The `custom` provider fits one OpenAI-compatible endpoint that is not represente
 ```
 
 `custom` does not infer a default base URL. Set `apiBase`.
-
-By default, nanobot removes assistant text from history turns that also contain `tool_calls`
-for compatibility with strict OpenAI-compatible endpoints. Set `preserveToolCallContent` to
-`true` when the endpoint follows the Chat Completions schema and the model should see its
-intermediate commentary on subsequent tool-loop requests.
 
 If you have more than one custom OpenAI-compatible endpoint, give each endpoint its own provider key under `providers` and use that same key in the model preset. The key can be a name that makes sense in your environment, such as `companyProxy`, `tenant-a`, or `dev-local`.
 
