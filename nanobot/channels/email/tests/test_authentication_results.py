@@ -81,6 +81,8 @@ def test_repeated_from_identity_is_not_authenticated(monkeypatch, extra_headers)
     _PASS.replace("spf=pass", 'spf/1 = PASS reason="" (nested (comment))'),
     _PASS.replace("header.d=example.com", 'header (comment) . d = "EXAMPLE.COM."'),
     _PASS + "; dkim=fail header.d=attacker.example",
+    _PASS.replace("smtp.mailfrom=alice@example.com", 'smtp.mailfrom="bounce token"@example.com'),
+    _PASS.replace("header.d=example.com", 'header.i="alice smith"@example.com'),
 ])
 def test_legitimate_receiver_results_remain_accepted(monkeypatch, header):
     channel, fake = _channel(monkeypatch, [header])
@@ -106,3 +108,44 @@ def test_historical_fetch_fails_closed_without_trust_anchor(monkeypatch):
     channel, fake = _channel(monkeypatch, [_PASS], trusted_authserv_ids=[])
     assert channel.fetch_messages_between_dates(date(2026, 1, 1), date(2026, 1, 2)) == []
     assert not any("(BODY.PEEK[])" in call for call in fake.uid_calls)
+
+
+@pytest.mark.parametrize("sender", [
+    "José <alice@example.com>",
+    '"张三" <alice@example.com>',
+    "=?utf-8?b?5byg5LiJ?= <alice@example.com>",
+])
+def test_international_display_name_remains_accepted(monkeypatch, sender):
+    raw = ("From: " + sender + "\r\nAuthentication-Results: " + _PASS + "\r\n\r\nHello").encode()
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    channel = EmailChannel(_make_config(
+        allow_from=["alice@example.com"], verify_spf=True, verify_dkim=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    ), MessageBus())
+    items, _ = channel._fetch_new_messages()
+    assert len(items) == 1
+    assert items[0]["sender"] == "alice@example.com"
+
+
+@pytest.mark.parametrize("sender", [
+    "alice@example.com, mallory@attacker.example",
+    "alice@example.com <mallory@attacker.example>",
+])
+def test_malformed_or_multiple_visible_mailboxes_are_rejected(monkeypatch, sender):
+    raw = ("From: " + sender + "\r\nAuthentication-Results: " + _PASS + "\r\n\r\nHello").encode()
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    channel = EmailChannel(_make_config(
+        allow_from=["alice@example.com"], verify_spf=True, verify_dkim=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    ), MessageBus())
+    items, _ = channel._fetch_new_messages()
+    assert items == []
+    assert not any("(BODY.PEEK[])" in call for call in fake.uid_calls)
+
+
+def test_international_domain_normalization_does_not_merge_distinct_domains():
+    assert EmailChannel._address_domain("alice@faß.de") == ""
+    assert EmailChannel._address_domain("alice@xn--fa-hia.de") == "xn--fa-hia.de"
+    assert EmailChannel._address_domain("alice@bücher.example") == "xn--bcher-kva.example"

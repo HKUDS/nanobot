@@ -11,6 +11,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date
 from email import policy
+from email.errors import UndecodableBytesDefect
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -881,7 +882,10 @@ class EmailChannel(BaseChannel):
         from_headers: list[Any] = parsed_msg.get_all("From") or []
         if (
             len(from_headers) != 1
-            or from_headers[0].defects
+            or any(
+                not isinstance(defect, UndecodableBytesDefect)
+                for defect in from_headers[0].defects
+            )
             or len(getaddresses([str(from_headers[0])])) != 1
         ):
             return False, False
@@ -1076,6 +1080,16 @@ class EmailChannel(BaseChannel):
                 if escaped:
                     return None
                 item_value = "".join(parsed_value)
+                if index < length and value[index] == "@" and key.casefold() in {"smtp.mailfrom", "header.i"}:
+                    # RFC 8601 pvalue permits a quoted mailbox local part
+                    # followed by @domain, not just a standalone quoted string.
+                    domain_start = index
+                    while index < length and not value[index].isspace():
+                        index += 1
+                    suffix = value[domain_start:index]
+                    if re.fullmatch(r"@[a-zA-Z0-9][a-zA-Z0-9.-]*", suffix) is None:
+                        return None
+                    item_value += suffix
                 if index < length and not value[index].isspace():
                     return None
             else:
@@ -1133,11 +1147,15 @@ class EmailChannel(BaseChannel):
         candidate = value.strip().strip("<>").rstrip(".")
         if "@" in candidate:
             candidate = candidate.rsplit("@", 1)[1]
-        candidate = candidate.casefold().rstrip(".")
+        candidate = candidate.lower().rstrip(".")
         if not candidate or any(char.isspace() for char in candidate):
             return ""
         try:
             ascii_domain = candidate.encode("idna").decode("ascii")
+            # Do not merge distinct modern IDNs via IDNA 2003 mappings (e.g.
+            # sharp-s -> ss). Ambiguous forms must use their ASCII A-label.
+            if not candidate.isascii() and ascii_domain.encode("ascii").decode("idna") != candidate:
+                return ""
         except UnicodeError:
             return ""
         if len(ascii_domain) > 253 or any(
