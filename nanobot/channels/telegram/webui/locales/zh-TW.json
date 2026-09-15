@@ -87,6 +87,11 @@
       },
       "webhookMaxConnections": {
         "label": "Webhook 最大連線數"
+      },
+      "apiBase": {
+        "label": "Bot API 位址",
+        "placeholder": "https://my-bot-api.example.com",
+        "help": "可選。指向自架的 Bot API 伺服器或閘道，而非 api.telegram.org。"
       }
     }
   }
