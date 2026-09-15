@@ -524,6 +524,7 @@ class SubagentManager:
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
             session_key_override=override,
+            require_existing_session=True,
             metadata=metadata,
         )
 
