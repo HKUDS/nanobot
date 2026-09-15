@@ -451,6 +451,45 @@ class TestEphemeralDirect:
         assert response.content == "done"
         loop.provider.chat_stream_with_retry.assert_awaited()
 
+    async def test_process_direct_accepts_iteration_override(self, _make_loop):
+        """A Dream run can use a smaller cap than the normal agent loop."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from nanobot.providers.base import ToolCallRequest
+
+        loop, _ = _make_loop
+        loop.tools.get_definitions = MagicMock(return_value=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "test_tool",
+                    "description": "test",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ])
+        loop.tools.execute = AsyncMock(return_value="ok")
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(
+                content="still working",
+                finish_reason="tool_calls",
+                tool_calls=[ToolCallRequest(id="call_1", name="test_tool", arguments={})],
+                usage=None,
+            ),
+            LLMResponse(content="done", finish_reason="stop", tool_calls=[], usage=None),
+        ])
+
+        response = await loop.process_direct(
+            "test",
+            session_key="dream:limit",
+            ephemeral=True,
+            max_iterations=1,
+        )
+
+        assert response is not None
+        assert response.metadata["_stop_reason"] == "max_iterations"
+        assert loop.provider.chat_stream_with_retry.await_count == 2
+
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
         """Verify that ephemeral=True is forwarded to TurnContext."""
         from unittest.mock import patch

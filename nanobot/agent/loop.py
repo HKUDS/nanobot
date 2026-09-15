@@ -137,6 +137,7 @@ class TurnContext:
     runtime: LLMRuntime | None
     kind: TurnKind
     delivery: TurnDelivery
+    max_iterations: int | None = None
     original_user_text: str | None = None
     session: Session | None = None
 
@@ -292,6 +293,7 @@ class AgentLoop:
         preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
         model_preset: str | None = None,
         dream_model_preset: str | None = None,
+        dream_max_iterations: int | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         turn_delivery_factory: TurnDeliveryFactory | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
@@ -341,6 +343,9 @@ class AgentLoop:
             preset_snapshot_loader=preset_snapshot_loader,
         )
         self.dream_model_preset = dream_model_preset
+        self.dream_max_iterations = (
+            dream_max_iterations if dream_max_iterations is not None else self.max_iterations
+        )
         self.max_tool_result_chars = (
             max_tool_result_chars
             if max_tool_result_chars is not None
@@ -514,6 +519,7 @@ class AgentLoop:
             model_presets=preset_helpers.configured_model_presets(config),
             model_preset=defaults.model_preset,
             dream_model_preset=defaults.dream.model_override,
+            dream_max_iterations=defaults.dream.max_iterations,
             restart_mode=config.gateway.restart_mode,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
@@ -953,6 +959,7 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
         provider_state: ProviderConversationState | None = None,
+        max_iterations: int | None = None,
     ) -> AgentRunResult:
         """Run the agent iteration loop.
 
@@ -1171,7 +1178,9 @@ class AgentLoop:
                 initial_messages=None,
                 tools=effective_tools,
                 runtime=runtime,
-                max_iterations=self.max_iterations,
+                max_iterations=(
+                    max_iterations if max_iterations is not None else self.max_iterations
+                ),
                 max_tool_result_chars=self.max_tool_result_chars,
                 transcript_input=transcript_input,
                 transcript_builder=transcript_builder,
@@ -1608,6 +1617,7 @@ class AgentLoop:
         delivery: TurnDelivery | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
+        max_iterations: int | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         kind = TurnKind.USER if msg.is_user_input else TurnKind.SYSTEM
@@ -1629,6 +1639,7 @@ class AgentLoop:
             session_key=key,
             turn_id=f"{key}:{time.time_ns()}",
             runtime=runtime,
+            max_iterations=max_iterations,
             kind=kind,
             delivery=delivery,
             original_user_text=(
@@ -1992,6 +2003,7 @@ class AgentLoop:
                 tools=ctx.tools,
                 request_context=ctx.request_context,
                 provider_state=ctx.provider_state,
+                max_iterations=ctx.max_iterations,
                 events=ctx.events,
             )
         ctx.final_content = result.final_content
@@ -2335,6 +2347,7 @@ class AgentLoop:
         runtime: LLMRuntime | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
+        max_iterations: int | None = None,
     ) -> OutboundMessage | None:
         """Process an external message directly and return the outbound payload."""
         if channel == "system":
@@ -2371,6 +2384,8 @@ class AgentLoop:
                     kwargs["on_runtime_admitted"] = on_runtime_admitted
                 if attributes is not None:
                     kwargs["attributes"] = dict(attributes)
+                if max_iterations is not None:
+                    kwargs["max_iterations"] = max_iterations
                 return await self._process_message(
                     msg,
                     **kwargs,

@@ -57,6 +57,7 @@ class DreamConfig(Base):
 
     enabled: bool = True  # Register the periodic Dream consolidation job on startup
     interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
+    max_iterations: int = Field(default=15, ge=1)  # Maximum tool-call iterations per Dream run
     cron: str | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
