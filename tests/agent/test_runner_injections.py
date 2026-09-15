@@ -975,6 +975,41 @@ def test_model_request_merge_preserves_runtime_markers_with_media() -> None:
     ]
 
 
+def test_runner_merge_preserves_ephemeral_runtime_context_lifecycle() -> None:
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_MESSAGE_META,
+        RuntimeContextBlock,
+        append_runtime_context,
+    )
+
+    first_content, first_marker = append_runtime_context(
+        "first",
+        [RuntimeContextBlock(source="voice", content="temporary", ephemeral=True)],
+    )
+    second_content, second_marker = append_runtime_context(
+        "second",
+        [RuntimeContextBlock(source="goal", content="durable")],
+    )
+    messages: list[dict] = []
+
+    AgentRunner._append_injected_messages(messages, [
+        {
+            "role": "user",
+            "content": first_content,
+            "_meta": {RUNTIME_CONTEXT_MESSAGE_META: first_marker},
+        },
+        {
+            "role": "user",
+            "content": second_content,
+            "_meta": {RUNTIME_CONTEXT_MESSAGE_META: second_marker},
+        },
+    ])
+
+    marker = messages[0]["_meta"][RUNTIME_CONTEXT_MESSAGE_META]
+    assert marker["ephemeral_blocks"] == [True, False]
+
+
 @pytest.mark.asyncio
 async def test_injection_cycles_capped_at_max():
     """Injection cycles should be capped at _MAX_INJECTION_CYCLES."""
