@@ -69,6 +69,11 @@ describe("provider brand logos", () => {
     expect(providerBrand("xiaomi")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
   });
 
+  it("resolves SenseNova brand color and initials", () => {
+    expect(providerBrand("sensenova")?.color).toBe("#0052D9");
+    expect(providerBrand("sensenova")?.initials).toBe("SN");
+  });
+
   it("keeps OpenRouter voice settings on the first-party brand domain", () => {
     expect(providerBrand("openrouter")?.logoUrls).toContain("https://openrouter.ai/favicon.ico");
     expect(providerBrand("openrouter")?.initials).toBe("OR");
