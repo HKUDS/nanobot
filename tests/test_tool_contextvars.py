@@ -8,7 +8,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.tools import Tool, ToolRegistry, ToolResult, current_tool_invocation_context
+from nanobot.agent.tools import (
+    Tool,
+    ToolInvocationContext,
+    ToolRegistry,
+    ToolResult,
+    current_tool_invocation_context,
+)
 from nanobot.agent.tools.context import (
     RequestContext,
     request_context,
@@ -34,7 +40,7 @@ def _runtime(model: str = "test-model") -> LLMRuntime:
 class _InvocationCaptureTool(Tool):
     def __init__(
         self,
-        seen: dict[str, tuple[str, str | None]],
+        seen: dict[str, tuple[str, str]],
         *,
         barrier: asyncio.Event | None = None,
         fail: bool = False,
@@ -70,7 +76,7 @@ class _InvocationCaptureTool(Tool):
     async def execute(self, label: str) -> str:
         invocation = current_tool_invocation_context()
         assert invocation is not None
-        self._seen[label] = (invocation.tool_call_id, invocation.invocation_key)
+        self._seen[label] = (invocation.tool_call_id, invocation.invocation_id)
 
         if self._barrier is not None:
             async with self._lock:
@@ -114,15 +120,15 @@ class _BlockingInvocationTool(Tool):
 class _InvocationRecordingHook(AgentHook):
     def __init__(self) -> None:
         super().__init__()
-        self.before: tuple[str, str | None] | None = None
-        self.after: tuple[str, str | None] | None = None
-        self.error: tuple[str, str | None] | None = None
+        self.before: tuple[str, str] | None = None
+        self.after: tuple[str, str] | None = None
+        self.error: tuple[str, str] | None = None
 
     @staticmethod
-    def _current() -> tuple[str, str | None]:
+    def _current() -> tuple[str, str]:
         invocation = current_tool_invocation_context()
         assert invocation is not None
-        return invocation.tool_call_id, invocation.invocation_key
+        return invocation.tool_call_id, invocation.invocation_id
 
     async def before_execute_tool(self, context, tool_call, tool, params) -> None:
         self.before = self._current()
@@ -509,8 +515,8 @@ async def test_cron_tool_no_context_returns_error(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_invocation_context_exposes_current_call_identity() -> None:
-    seen: dict[str, tuple[str, str | None]] = {}
+async def test_tool_invocation_context_exposes_provider_and_runtime_ids() -> None:
+    seen: dict[str, tuple[str, str]] = {}
     registry = ToolRegistry()
     registry.register(_InvocationCaptureTool(seen))
 
@@ -524,80 +530,102 @@ async def test_tool_invocation_context_exposes_current_call_identity() -> None:
 
     assert results == ["one"]
     assert events[0]["status"] == "ok"
-    tool_call_id, invocation_key = seen["one"]
+    tool_call_id, invocation_id = seen["one"]
     assert tool_call_id == "call-123"
-    assert invocation_key is not None
-    assert len(invocation_key) == 64
+    assert len(invocation_id) == 32
+    assert int(invocation_id, 16) >= 0
     assert current_tool_invocation_context() is None
 
 
 @pytest.mark.asyncio
-async def test_tool_invocation_key_is_stable_for_same_logical_call() -> None:
-    seen: dict[str, tuple[str, str | None]] = {}
+async def test_reused_provider_id_in_same_batch_gets_distinct_invocation_ids() -> None:
+    seen: dict[str, tuple[str, str]] = {}
     registry = ToolRegistry()
     registry.register(_InvocationCaptureTool(seen))
-    request = RequestContext(channel="test", chat_id="chat-1", session_key="test:chat-1")
-
-    with request_context(request):
-        await _run_invocation_calls(registry, [_invocation_call("call-stable", "first")])
-    with request_context(request):
-        await _run_invocation_calls(registry, [_invocation_call("call-stable", "second")])
-
-    assert seen["first"][1] is not None
-    assert seen["first"][1] == seen["second"][1]
-
-
-@pytest.mark.asyncio
-async def test_tool_invocation_keys_are_scoped_by_call_and_session() -> None:
-    seen: dict[str, tuple[str, str | None]] = {}
-    registry = ToolRegistry()
-    registry.register(_InvocationCaptureTool(seen))
-
-    with request_context(
-        RequestContext(channel="test", chat_id="a", session_key="test:a")
-    ):
-        await _run_invocation_calls(
-            registry,
-            [
-                _invocation_call("call-a", "call-a"),
-                _invocation_call("call-b", "call-b"),
-                _invocation_call("call-shared", "session-a"),
-            ],
-        )
-    with request_context(
-        RequestContext(channel="test", chat_id="b", session_key="test:b")
-    ):
-        await _run_invocation_calls(
-            registry,
-            [_invocation_call("call-shared", "session-b")],
-        )
-
-    assert seen["call-a"][1] != seen["call-b"][1]
-    assert seen["session-a"][1] != seen["session-b"][1]
-
-
-@pytest.mark.asyncio
-async def test_parallel_tool_calls_keep_task_local_invocation_context() -> None:
-    seen: dict[str, tuple[str, str | None]] = {}
-    both_entered = asyncio.Event()
-    registry = ToolRegistry()
-    registry.register(_InvocationCaptureTool(seen, barrier=both_entered))
 
     with request_context(
         RequestContext(channel="test", chat_id="chat-1", session_key="test:chat-1")
     ):
-        results, _events = await _run_invocation_calls(
+        await _run_invocation_calls(
             registry,
             [
-                _invocation_call("call-a", "a"),
-                _invocation_call("call-b", "b"),
+                _invocation_call("call-reused", "first"),
+                _invocation_call("call-reused", "second"),
             ],
-            concurrent=True,
         )
 
+    assert seen["first"][0] == seen["second"][0] == "call-reused"
+    assert seen["first"][1] != seen["second"][1]
+
+
+@pytest.mark.asyncio
+async def test_reused_provider_id_across_dispatches_gets_new_invocation_id() -> None:
+    seen: dict[str, tuple[str, str]] = {}
+    registry = ToolRegistry()
+    registry.register(_InvocationCaptureTool(seen))
+
+    with request_context(
+        RequestContext(
+            channel="test",
+            chat_id="chat-1",
+            session_key="test:chat-1",
+            turn_id="turn-a",
+        )
+    ):
+        await _run_invocation_calls(
+            registry,
+            [_invocation_call("call-reused", "first")],
+        )
+    with request_context(
+        RequestContext(
+            channel="test",
+            chat_id="chat-1",
+            session_key="test:chat-1",
+            turn_id="turn-b",
+        )
+    ):
+        await _run_invocation_calls(
+            registry,
+            [_invocation_call("call-reused", "second")],
+        )
+
+    assert seen["first"][0] == seen["second"][0] == "call-reused"
+    assert seen["first"][1] != seen["second"][1]
+
+
+@pytest.mark.asyncio
+async def test_invocation_id_does_not_require_request_or_session_context() -> None:
+    seen: dict[str, tuple[str, str]] = {}
+    registry = ToolRegistry()
+    registry.register(_InvocationCaptureTool(seen))
+
+    await _run_invocation_calls(
+        registry,
+        [_invocation_call("call-ephemeral", "ephemeral")],
+    )
+
+    assert seen["ephemeral"][0] == "call-ephemeral"
+    assert seen["ephemeral"][1]
+
+
+@pytest.mark.asyncio
+async def test_parallel_tool_calls_keep_task_local_invocation_context() -> None:
+    seen: dict[str, tuple[str, str]] = {}
+    both_entered = asyncio.Event()
+    registry = ToolRegistry()
+    registry.register(_InvocationCaptureTool(seen, barrier=both_entered))
+
+    results, _events = await _run_invocation_calls(
+        registry,
+        [
+            _invocation_call("call-reused", "a"),
+            _invocation_call("call-reused", "b"),
+        ],
+        concurrent=True,
+    )
+
     assert results == ["a", "b"]
-    assert seen["a"][0] == "call-a"
-    assert seen["b"][0] == "call-b"
+    assert seen["a"][0] == seen["b"][0] == "call-reused"
     assert seen["a"][1] != seen["b"][1]
     assert current_tool_invocation_context() is None
 
@@ -607,7 +635,7 @@ async def test_parallel_tool_calls_keep_task_local_invocation_context() -> None:
 async def test_tool_invocation_context_is_reset_after_tool_failure(
     return_error: bool,
 ) -> None:
-    seen: dict[str, tuple[str, str | None]] = {}
+    seen: dict[str, tuple[str, str]] = {}
     registry = ToolRegistry()
     registry.register(
         _InvocationCaptureTool(
@@ -617,18 +645,15 @@ async def test_tool_invocation_context_is_reset_after_tool_failure(
         )
     )
 
-    with request_context(
-        RequestContext(channel="test", chat_id="chat-1", session_key="test:chat-1")
-    ):
-        results, events = await _run_invocation_calls(
-            registry,
-            [_invocation_call("call-fail", "failure")],
-        )
-        assert current_tool_invocation_context() is None
+    results, events = await _run_invocation_calls(
+        registry,
+        [_invocation_call("call-fail", "failure")],
+    )
 
     assert events[0]["status"] == "error"
     assert "Error:" in str(results[0])
     assert seen["failure"][0] == "call-fail"
+    assert current_tool_invocation_context() is None
 
 
 @pytest.mark.asyncio
@@ -639,16 +664,13 @@ async def test_tool_invocation_context_is_reset_after_cancellation() -> None:
     registry.register(_BlockingInvocationTool(entered))
 
     async def run() -> None:
-        with request_context(
-            RequestContext(channel="test", chat_id="chat-1", session_key="test:chat-1")
-        ):
-            try:
-                await _run_invocation_calls(
-                    registry,
-                    [ToolCallRequest(id="call-cancel", name="blocking_invocation", arguments={})],
-                )
-            finally:
-                cleanup_seen.append(current_tool_invocation_context())
+        try:
+            await _run_invocation_calls(
+                registry,
+                [ToolCallRequest(id="call-cancel", name="blocking_invocation", arguments={})],
+            )
+        finally:
+            cleanup_seen.append(current_tool_invocation_context())
 
     task = asyncio.create_task(run())
     await entered.wait()
@@ -661,62 +683,41 @@ async def test_tool_invocation_context_is_reset_after_cancellation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_invocation_context_without_session_has_no_stable_key() -> None:
-    seen: dict[str, tuple[str, str | None]] = {}
-    registry = ToolRegistry()
-    registry.register(_InvocationCaptureTool(seen))
-
-    with request_context(
-        RequestContext(channel="cli", chat_id="direct", session_key=None, turn_id="turn-1")
-    ):
-        await _run_invocation_calls(
-            registry,
-            [_invocation_call("call-ephemeral", "ephemeral")],
-        )
-
-    assert seen["ephemeral"] == ("call-ephemeral", None)
-
-
-@pytest.mark.asyncio
 async def test_tool_hooks_share_the_invocation_context() -> None:
-    seen: dict[str, tuple[str, str | None]] = {}
+    seen: dict[str, tuple[str, str]] = {}
     registry = ToolRegistry()
     registry.register(_InvocationCaptureTool(seen))
     hook = _InvocationRecordingHook()
 
-    with request_context(
-        RequestContext(channel="test", chat_id="chat-1", session_key="test:chat-1")
-    ):
-        await _run_invocation_calls(
-            registry,
-            [_invocation_call("call-hook", "hook")],
-            hook=hook,
-        )
+    await _run_invocation_calls(
+        registry,
+        [_invocation_call("call-hook", "hook")],
+        hook=hook,
+    )
 
     assert hook.before == seen["hook"]
     assert hook.after == seen["hook"]
     assert hook.error is None
+    assert current_tool_invocation_context() is None
 
 
 @pytest.mark.asyncio
 async def test_tool_error_hook_sees_invocation_context() -> None:
-    seen: dict[str, tuple[str, str | None]] = {}
+    seen: dict[str, tuple[str, str]] = {}
     registry = ToolRegistry()
     registry.register(_InvocationCaptureTool(seen, fail=True))
     hook = _InvocationRecordingHook()
 
-    with request_context(
-        RequestContext(channel="test", chat_id="chat-1", session_key="test:chat-1")
-    ):
-        await _run_invocation_calls(
-            registry,
-            [_invocation_call("call-error-hook", "error")],
-            hook=hook,
-        )
+    await _run_invocation_calls(
+        registry,
+        [_invocation_call("call-error-hook", "error")],
+        hook=hook,
+    )
 
     assert hook.before == seen["error"]
     assert hook.error == seen["error"]
     assert hook.after is None
+    assert current_tool_invocation_context() is None
 
 
 @pytest.mark.asyncio
@@ -736,29 +737,28 @@ async def test_tool_invocation_context_is_reset_after_hook_exception(phase: str)
     registry = ToolRegistry()
     registry.register(_InvocationCaptureTool({}))
 
-    with request_context(
-        RequestContext(channel="test", chat_id="chat-1", session_key="test:chat-1")
-    ):
-        with pytest.raises(RuntimeError, match="hook failed"):
-            await _run_invocation_calls(
-                registry,
-                [_invocation_call("call-hook-fail", "hook-fail")],
-                hook=_FailingHook(),
-            )
-        assert current_tool_invocation_context() is None
+    with pytest.raises(RuntimeError, match="hook failed"):
+        await _run_invocation_calls(
+            registry,
+            [_invocation_call("call-hook-fail", "hook-fail")],
+            hook=_FailingHook(),
+        )
+    assert current_tool_invocation_context() is None
 
 
 def test_nested_tool_invocation_context_restores_outer_identity() -> None:
     assert current_tool_invocation_context() is None
 
-    with request_context(
-        RequestContext(channel="test", chat_id="chat-1", session_key="test:chat-1")
-    ):
-        with tool_invocation_context("call-outer") as outer:
-            assert current_tool_invocation_context() == outer
-            with tool_invocation_context("call-inner") as inner:
-                assert current_tool_invocation_context() == inner
-                assert inner.invocation_key != outer.invocation_key
-            assert current_tool_invocation_context() == outer
+    with tool_invocation_context("call-outer", "runtime-outer") as outer:
+        assert current_tool_invocation_context() == outer
+        with tool_invocation_context("call-inner", "runtime-inner") as inner:
+            assert current_tool_invocation_context() == inner
+            assert inner.invocation_id != outer.invocation_id
+        assert current_tool_invocation_context() == outer
 
     assert current_tool_invocation_context() is None
+
+
+def test_tool_invocation_symbols_are_publicly_exported() -> None:
+    assert ToolInvocationContext.__name__ == "ToolInvocationContext"
+    assert callable(current_tool_invocation_context)

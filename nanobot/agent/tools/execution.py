@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from functools import cache
 from typing import Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
@@ -163,7 +164,7 @@ async def _execute_tool_call(
             return handled
         return payload, event
 
-    with tool_invocation_context(tool_call.id):
+    with tool_invocation_context(tool_call.id, uuid4().hex):
         await hook.before_execute_tool(context, tool_call, tool, params)
         try:
             with (
