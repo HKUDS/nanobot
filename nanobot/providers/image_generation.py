@@ -2112,6 +2112,140 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
         return images
 
 
+_DASHSCOPE_ASPECT_SIZES = {
+    "1:1": "1024*1024",
+    "9:16": "720*1280",
+    "3:4": "768*1152",
+    "16:9": "1280*720",
+    "4:3": "1152*768",
+}
+
+
+def _dashscope_size(aspect_ratio: str | None, image_size: str | None) -> str:
+    """Resolve aspect ratio / image_size to a DashScope ``W*H`` size string."""
+    if image_size:
+        normalized = image_size.strip().lower().replace("x", "*")
+        if "*" in normalized:
+            return normalized
+    if aspect_ratio and aspect_ratio in _DASHSCOPE_ASPECT_SIZES:
+        return _DASHSCOPE_ASPECT_SIZES[aspect_ratio]
+    return "1024*1024"
+
+
+class DashScopeImageGenerationClient(ImageGenerationProvider):
+    """Synchronous client for DashScope (Bailian) image generation.
+
+    qwen-image / wan models serve through the same multimodal-generation
+    endpoint as chat: one POST returns signed image URLs inside
+    ``output.choices[0].message.content[*].image``. (The classic async
+    ``text2image/image-synthesis`` task flow has been retired on the public
+    host and answers ``url error``.)
+    """
+
+    provider_name = "dashscope_native"
+    model_options = ("qwen-image-3.0-pro", "wan2.7-image-pro")
+    missing_key_message = (
+        "DashScope API key is not configured. "
+        "Set providers.dashscope_native.apiKey."
+    )
+    default_timeout = 180.0
+
+    def _default_base_url(self) -> str:
+        return "https://dashscope.aliyuncs.com"
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        reference_images: list[str] | None = None,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+    ) -> GeneratedImageResponse:
+        if not self.api_key:
+            raise ImageGenerationError(self.missing_key_message)
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **self.extra_headers,
+        }
+
+        content: list[dict[str, Any]] = [
+            {"image": image_path_to_data_url(path)}
+            for path in list(reference_images or [])
+        ]
+        content.append({"text": prompt})
+        parameters: dict[str, Any] = {
+            "prompt_extend": True,
+            "size": _dashscope_size(aspect_ratio, image_size),
+        }
+        parameters.update(self.extra_body)
+        body: dict[str, Any] = {
+            "model": model,
+            "input": {"messages": [{"role": "user", "content": content}]},
+            "parameters": parameters,
+        }
+
+        url = f"{self.api_base}/api/v1/services/aigc/multimodal-generation/generation"
+        client = self._client or httpx.AsyncClient(**self._http_client_kwargs())
+        try:
+            try:
+                response = await client.post(url, headers=headers, json=body)
+            except httpx.TimeoutException as exc:
+                raise ImageGenerationError(
+                    "DashScope image generation request timed out"
+                ) from exc
+            except httpx.RequestError as exc:
+                raise ImageGenerationError(
+                    f"DashScope image generation request failed: {exc}"
+                ) from exc
+
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                detail = _http_error_detail(response)
+                raise ImageGenerationError(
+                    f"DashScope image generation failed: {detail}"
+                ) from exc
+
+            data = cast(dict[str, Any], response.json())
+            if data.get("code") or data.get("message"):
+                raise ImageGenerationError(
+                    f"DashScope image generation failed: "
+                    f"{data.get('code')}: {data.get('message')}"
+                )
+            images = await self._collect_images(data)
+            self._require_images(images, data)
+            return GeneratedImageResponse(images=images, content="", raw=data)
+        finally:
+            if self._client is None:
+                await client.aclose()
+
+    async def _collect_images(self, data: dict[str, Any]) -> list[str]:
+        output = cast(dict[str, Any], data.get("output") or {})
+        choices = output.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return []
+        choice = (
+            cast(dict[str, Any], choices[0]) if isinstance(choices[0], dict) else {}
+        )
+        message = cast(dict[str, Any], choice.get("message") or {})
+        content = message.get("content")
+        if not isinstance(content, list):
+            return []
+        images: list[str] = []
+        for raw_part in cast(list[object], content):
+            if not isinstance(raw_part, dict):
+                continue
+            url = cast(dict[str, Any], raw_part).get("image")
+            if isinstance(url, str) and url:
+                images.append(
+                    await _download_image_data_url(url, proxy=self.proxy)
+                )
+        return images
+
+
 # ---------------------------------------------------------------------------
 # Provider registration
 # ---------------------------------------------------------------------------
@@ -2127,3 +2261,4 @@ register_image_gen_provider(OpenRouterImageGenerationClient)
 register_image_gen_provider(StepFunImageGenerationClient)
 register_image_gen_provider(ZhipuImageGenerationClient)
 register_image_gen_provider(ModelScopeImageGenerationClient)
+register_image_gen_provider(DashScopeImageGenerationClient)

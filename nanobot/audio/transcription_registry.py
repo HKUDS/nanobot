@@ -80,6 +80,12 @@ TRANSCRIPTION_PROVIDERS: tuple[TranscriptionProviderSpec, ...] = (
         adapter="nanobot.providers.transcription:OpenAITranscriptionProvider",
         aliases=("silicon",),
     ),
+    TranscriptionProviderSpec(
+        name="dashscope",
+        default_model="qwen3-asr-flash",
+        adapter="nanobot.providers.transcription:DashScopeTranscriptionProvider",
+        aliases=("dashscope_native", "bailian"),
+    ),
 )
 
 _BY_NAME = {spec.name: spec for spec in TRANSCRIPTION_PROVIDERS}
