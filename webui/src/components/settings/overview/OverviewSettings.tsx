@@ -38,7 +38,6 @@ import type {
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
 import type { SettingsPayload } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export function OverviewSettings({
@@ -275,30 +274,19 @@ export function AppearanceSettings({
         <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
         <SettingsGroup>
           <SettingsRow title={t("settings.rows.theme")}>
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              className="inline-flex h-8 items-center rounded-full bg-muted p-0.5 text-[12px] font-medium text-muted-foreground"
-            >
-              <span
-                className={cn(
-                  "rounded-full px-3 py-1 transition-colors",
-                  theme === "light" &&
-                    "bg-background text-foreground ring-1 ring-inset ring-border/45",
-                )}
-              >
-                {t("settings.values.light")}
-              </span>
-              <span
-                className={cn(
-                  "rounded-full px-3 py-1 transition-colors",
-                  theme === "dark" &&
-                    "bg-background text-foreground ring-1 ring-inset ring-border/45",
-                )}
-              >
-                {t("settings.values.dark")}
-              </span>
-            </button>
+            <SegmentedControl
+              value={theme}
+              ariaLabel={t("settings.rows.theme")}
+              className="bg-muted p-0.5"
+              itemClassName="px-3"
+              options={[
+                { value: "light", label: t("settings.values.light") },
+                { value: "dark", label: t("settings.values.dark") },
+              ]}
+              onChange={(nextTheme) => {
+                if (nextTheme !== theme) onToggleTheme();
+              }}
+            />
           </SettingsRow>
 
           <SettingsRow title={t("settings.rows.language")}>
