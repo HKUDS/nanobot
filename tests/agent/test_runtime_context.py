@@ -13,7 +13,9 @@ from nanobot.runtime_context import (
     WEBUI_QUOTE_SOURCE,
     RuntimeContextBlock,
     append_runtime_context,
+    normalize_runtime_context_blocks,
     normalize_webui_quote,
+    persistable_runtime_context_blocks,
     public_history_message,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
@@ -23,6 +25,40 @@ from nanobot.sdk.types import snapshot_from_session
 from nanobot.session.manager import Session, _message_preview_text
 from nanobot.session.webui_turns import _title_inputs
 from nanobot.webui.transcript import _session_user_event
+
+
+def test_runtime_context_block_defaults_to_durable() -> None:
+    assert RuntimeContextBlock(source="s", content="c").ephemeral is False
+
+
+def test_normalize_preserves_ephemeral_flag() -> None:
+    normalized = normalize_runtime_context_blocks([
+        RuntimeContextBlock(source="durable", content="keep"),
+        RuntimeContextBlock(source="rider", content="drop", ephemeral=True),
+    ])
+    assert [(b.source, b.ephemeral) for b in normalized] == [
+        ("durable", False),
+        ("rider", True),
+    ]
+
+
+def test_persistable_filter_drops_ephemeral_blocks() -> None:
+    durable = RuntimeContextBlock(source="durable", content="keep")
+    ephemeral = RuntimeContextBlock(source="rider", content="drop", ephemeral=True)
+
+    kept = persistable_runtime_context_blocks([durable, ephemeral])
+
+    assert kept == [durable]
+
+
+def test_ephemeral_block_survives_metadata_round_trip() -> None:
+    blocks = runtime_context_blocks_from_metadata({
+        RUNTIME_CONTEXT_INPUT_META: [
+            RuntimeContextBlock(source="rider", content="spoken contract", ephemeral=True),
+        ]
+    })
+    assert blocks[0].ephemeral is True
+    assert persistable_runtime_context_blocks(blocks) == []
 
 
 @pytest.mark.asyncio
