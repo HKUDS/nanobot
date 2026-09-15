@@ -32,7 +32,7 @@ def test_edit_file_can_select_occurrence(tmp_path):
         occurrence=2,
     ))
 
-    assert "Successfully edited" in result
+    assert "Patch applied:" in result
     assert target.read_text() == "one\nsame\ntwo\nchanged\n"
 
 
@@ -66,7 +66,7 @@ def test_edit_file_expected_replacements_allows_replace_all_when_count_matches(t
         expected_replacements=2,
     ))
 
-    assert "Successfully edited" in result
+    assert "Patch applied:" in result
     assert target.read_text() == "changed\nchanged\n"
 
 
@@ -82,7 +82,7 @@ def test_edit_file_line_hint_selects_matching_occurrence(tmp_path):
         line_hint=4,
     ))
 
-    assert "Successfully edited" in result
+    assert "Patch applied:" in result
     assert target.read_text() == "one\nsame\ntwo\nchanged\n"
 
 
@@ -115,7 +115,7 @@ def test_edit_file_line_hint_can_cover_multiline_match(tmp_path):
         line_hint=3,
     ))
 
-    assert "Successfully edited" in result
+    assert "Patch applied:" in result
     assert target.read_text() == "before\nstart\nchanged\nend\nafter\n"
 
 
@@ -130,7 +130,7 @@ def test_edit_file_can_edit_ipynb_as_json(tmp_path):
         new_text='"cells": [{"cell_type": "markdown", "source": "hi"}]',
     ))
 
-    assert "Successfully edited" in result
+    assert "Patch applied:" in result
     assert '"source": "hi"' in target.read_text()
 
 

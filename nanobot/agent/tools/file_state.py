@@ -71,7 +71,7 @@ class FileStates:
         )
 
     def check_read(self, path: str | Path) -> str | None:
-        """Check if a file has been read and is fresh.
+        """Warn when a file differs from its recorded read/write state.
 
         Returns None if OK, or a warning string.
         When mtime changed but file content is identical (e.g. touch, editor save),
@@ -80,7 +80,8 @@ class FileStates:
         p = str(Path(path).resolve())
         entry = self._state.get(p)
         if entry is None:
-            return "Warning: file has not been read yet. Read it first to verify content before editing."
+            # Shell reads and content already in context may not be recorded here.
+            return None
         try:
             current_mtime = os.path.getmtime(p)
         except OSError:
@@ -89,10 +90,10 @@ class FileStates:
             if entry.content_hash and _hash_file(p) == entry.content_hash:
                 entry.mtime = current_mtime
                 return None
-            return "Warning: file has been modified since last read. Re-read to verify content before editing."
+            return "Warning: file was modified since the last recorded read or write."
         # mtime unchanged - still check content hash to detect quick modifications
         if entry.content_hash and _hash_file(p) != entry.content_hash:
-            return "Warning: file has been modified since last read. Re-read to verify content before editing."
+            return "Warning: file was modified since the last recorded read or write."
         return None
 
     def is_unchanged(self, path: str | Path, offset: int = 1, limit: int | None = None) -> bool:

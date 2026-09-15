@@ -21,6 +21,7 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
@@ -911,6 +912,20 @@ class EditFileTool(_FsTool):
         """Strip trailing whitespace from each line."""
         return "\n".join(line.rstrip() for line in text.split("\n"))
 
+    def _format_summary(
+        self, resolved_path: Path, before: str, after: str, *,
+        created: bool = False, warning: str | None = None,
+    ) -> FileEditResult:
+        diff = FileDiff.from_text(before, after)
+        added, deleted = diff.added, diff.deleted
+        action = "add" if created else "update"
+        stats = f" (+{added}/-{deleted})" if added or deleted else ""
+        path = display_file_edit_path(resolved_path, self._display_workspace())
+        text = f"Patch applied:\n- {action} {path}{stats}"
+        if warning:
+            text = f"{warning}\n{text}"
+        return FileEditResult(text, {resolved_path: diff})
+
     async def execute(
         self, path: str | None = None, old_text: str | None = None,
         new_text: str | None = None,
@@ -942,7 +957,7 @@ class EditFileTool(_FsTool):
                     fp.parent.mkdir(parents=True, exist_ok=True)
                     fp.write_text(new_text, encoding="utf-8")
                     self._file_states.record_write(fp)
-                    return f"Successfully created {fp}"
+                    return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
                 return self._file_not_found_msg(path, fp)
 
             # File size protection
@@ -961,7 +976,7 @@ class EditFileTool(_FsTool):
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
                 fp.write_text(new_text, encoding="utf-8")
                 self._file_states.record_write(fp)
-                return f"Successfully edited {fp}"
+                return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
 
             # Read-before-edit check
             warning = self._file_states.check_read(fp)
@@ -1054,10 +1069,7 @@ class EditFileTool(_FsTool):
 
             fp.write_bytes(new_content.encode("utf-8"))
             self._file_states.record_write(fp)
-            msg = f"Successfully edited {fp}"
-            if warning:
-                msg = f"{warning}\n{msg}"
-            return msg
+            return self._format_summary(fp, content, new_content, warning=warning)
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import difflib
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+
+from rapidfuzz.distance import Indel, Opcode, Opcodes
 
 TRACKED_FILE_EDIT_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 _MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
@@ -41,6 +43,108 @@ class FileEditTracker:
     path: Path
     display_path: str
     before: FileSnapshot
+
+
+@dataclass(slots=True)
+class FileDiff:
+    """One line alignment shared by edit summaries and activity events."""
+
+    before_lines: list[str]
+    after_lines: list[str]
+    opcodes: Opcodes
+    added: int
+    deleted: int
+
+    @classmethod
+    def from_text(cls, before: str, after: str) -> FileDiff:
+        before_lines = before.replace("\r\n", "\n").splitlines()
+        after_lines = after.replace("\r\n", "\n").splitlines()
+        opcodes = Indel.opcodes(before_lines, after_lines)
+        added = deleted = 0
+        for code in opcodes:
+            if code.tag in ("replace", "delete"):
+                deleted += code.src_end - code.src_start
+            if code.tag in ("replace", "insert"):
+                added += code.dest_end - code.dest_start
+        return cls(before_lines, after_lines, opcodes, added, deleted)
+
+    def matches(self, before: str, after: str) -> bool:
+        """Check that an observed file still has the compared line contents."""
+        return (
+            self.before_lines == before.replace("\r\n", "\n").splitlines()
+            and self.after_lines == after.replace("\r\n", "\n").splitlines()
+        )
+
+    def _groups(self, context: int) -> Iterator[list[Opcode]]:
+        codes = list(self.opcodes)
+        if not codes:
+            return
+        first, last = codes[0], codes[-1]
+        if first.tag == "equal":
+            codes[0] = Opcode(
+                "equal", max(first.src_start, first.src_end - context), first.src_end,
+                max(first.dest_start, first.dest_end - context), first.dest_end,
+            )
+        if last.tag == "equal":
+            last = codes[-1]
+            codes[-1] = Opcode(
+                "equal", last.src_start, min(last.src_end, last.src_start + context),
+                last.dest_start, min(last.dest_end, last.dest_start + context),
+            )
+        group: list[Opcode] = []
+        for code in codes:
+            tag = code.tag
+            i1, i2 = code.src_start, code.src_end
+            j1, j2 = code.dest_start, code.dest_end
+            if tag == "equal" and i2 - i1 > context * 2:
+                group.append(Opcode(tag, i1, i1 + context, j1, j1 + context))
+                yield group
+                group = []
+                i1, j1 = i2 - context, j2 - context
+            group.append(Opcode(tag, i1, i2, j1, j2))
+        if any(code.tag != "equal" for code in group):
+            yield group
+
+    def unified_lines(self, fromfile: str, tofile: str, context: int) -> Iterator[str]:
+        if not self.added and not self.deleted:
+            return
+        yield f"--- {fromfile}"
+        yield f"+++ {tofile}"
+        for group in self._groups(context):
+            first, last = group[0], group[-1]
+            old_count = last.src_end - first.src_start
+            new_count = last.dest_end - first.dest_start
+            old_range = _format_hunk_range(first.src_start + bool(old_count), old_count)
+            new_range = _format_hunk_range(first.dest_start + bool(new_count), new_count)
+            yield f"@@ -{old_range} +{new_range} @@"
+            for code in group:
+                if code.tag == "equal":
+                    yield from (
+                        " " + line for line in self.before_lines[code.src_start:code.src_end]
+                    )
+                if code.tag in ("replace", "delete"):
+                    yield from (
+                        "-" + line for line in self.before_lines[code.src_start:code.src_end]
+                    )
+                if code.tag in ("replace", "insert"):
+                    yield from (
+                        "+" + line for line in self.after_lines[code.dest_start:code.dest_end]
+                    )
+
+
+class FileEditResult(str):
+    """Text observation carrying reusable diffs for the tool's activity hook."""
+
+    file_diffs: dict[Path, FileDiff]
+
+    def __new__(cls, content: str, file_diffs: dict[Path, FileDiff]) -> FileEditResult:
+        result = str.__new__(cls, content)
+        result.file_diffs = file_diffs
+        return result
+
+    def __reduce__(self) -> tuple[type[str], tuple[str]]:
+        # Transcript copies and persistence carry only the model observation.
+        return str, (str(self),)
 
 
 def is_file_edit_tool(tool_name: str | None) -> bool:
@@ -79,21 +183,8 @@ def line_diff_stats(before: str | None, after: str | None) -> tuple[int, int]:
     """Return ``(added, deleted)`` for a UTF-8 text line-level diff."""
     if before is None or after is None:
         return 0, 0
-    if before == "":
-        return _text_line_count(after), 0
-    before_lines = before.replace("\r\n", "\n").splitlines()
-    after_lines = after.replace("\r\n", "\n").splitlines()
-    added = 0
-    deleted = 0
-    matcher = difflib.SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal":
-            continue
-        if tag in ("replace", "delete"):
-            deleted += i2 - i1
-        if tag in ("replace", "insert"):
-            added += j2 - j1
-    return added, deleted
+    diff = FileDiff.from_text(before, after)
+    return diff.added, diff.deleted
 
 
 def build_unified_diff_payload(
@@ -105,20 +196,14 @@ def build_unified_diff_payload(
     context_lines: int = _DIFF_CONTEXT_LINES,
     max_lines: int = _MAX_DIFF_LINES,
     max_line_chars: int = _MAX_DIFF_LINE_CHARS,
+    diff: FileDiff | None = None,
 ) -> dict[str, Any] | None:
     """Return a compact standard unified diff for WebUI rendering."""
     if before is None or after is None:
         return None
-    before_lines = before.replace("\r\n", "\n").splitlines()
-    after_lines = after.replace("\r\n", "\n").splitlines()
-    diff_lines = list(difflib.unified_diff(
-        before_lines,
-        after_lines,
-        fromfile=fromfile,
-        tofile=tofile,
-        n=max(0, int(context_lines)),
-        lineterm="",
-    ))
+    if diff is None:
+        diff = FileDiff.from_text(before, after)
+    diff_lines = list(diff.unified_lines(fromfile, tofile, max(0, int(context_lines))))
     if not diff_lines:
         return None
 
@@ -250,28 +335,6 @@ def _rewrite_hunk_header_for_body(header: str, body: list[str]) -> str:
 
 def _format_hunk_range(start: int, line_count: int) -> str:
     return str(start) if line_count == 1 else f"{start},{line_count}"
-
-
-def _text_line_count(text: str) -> int:
-    if not text:
-        return 0
-    line_count = 0
-    last_was_newline = False
-    last_was_cr = False
-    for ch in text:
-        if ch == "\r":
-            line_count += 1
-            last_was_newline = True
-            last_was_cr = True
-        elif ch == "\n":
-            if not last_was_cr:
-                line_count += 1
-            last_was_newline = True
-            last_was_cr = False
-        else:
-            last_was_newline = False
-            last_was_cr = False
-    return line_count if last_was_newline else line_count + 1
 
 
 def prepare_file_edit_trackers(
@@ -411,16 +474,24 @@ def build_file_edit_start_event(
 def build_file_edit_end_event(
     tracker: FileEditTracker,
     params: dict[str, Any] | None = None,
+    *,
+    diff: FileDiff | None = None,
 ) -> dict[str, Any]:
     after = read_file_snapshot(tracker.path)
     diff_payload: dict[str, Any] | None = None
-    if tracker.before.countable and after.countable:
-        added, deleted = line_diff_stats(tracker.before.text, after.text)
+    if (
+        tracker.before.countable and after.countable
+        and tracker.before.text is not None and after.text is not None
+    ):
+        if diff is None or not diff.matches(tracker.before.text, after.text):
+            diff = FileDiff.from_text(tracker.before.text, after.text)
+        added, deleted = diff.added, diff.deleted
         diff_payload = build_unified_diff_payload(
             tracker.before.text,
             after.text,
             fromfile=tracker.display_path,
             tofile=tracker.display_path,
+            diff=diff,
         )
         binary = False
     else:

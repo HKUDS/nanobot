@@ -46,7 +46,7 @@ class TestDeleteLineCleanup:
         content = f"{prefix}{indent}line2\nline3\n"
         f.write_bytes(content.replace("\n", newline).encode("utf-8"))
         result = await tool.execute(path=str(f), old_text=f"{indent}line2", new_text="")
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         # Should not leave a blank line where line2 was
         assert f.read_bytes() == f"{prefix}line3\n".replace("\n", newline).encode("utf-8")
 
@@ -61,7 +61,7 @@ class TestDeleteLineCleanup:
         content = f"{prefix}x = 1{old_text}\ny = 2\n"
         f.write_bytes(content.replace("\n", newline).encode("utf-8"))
         result = await tool.execute(path=str(f), old_text=old_text, new_text="")
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         expected = f"{prefix}x = 1\ny = 2\n"
         assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
 
@@ -76,7 +76,7 @@ class TestDeleteLineCleanup:
         result = await tool.execute(
             path=str(f), old_text="  # obsolete", new_text="", replace_all=True,
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         expected = "x = 1\ny = 2\nz = 3\n"
         assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
 
@@ -85,7 +85,7 @@ class TestDeleteLineCleanup:
         f = tmp_path / "a.py"
         f.write_text("line1\nline2\nline3\n", encoding="utf-8")
         result = await tool.execute(path=str(f), old_text="line2\n", new_text="")
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text() == "line1\nline3\n"
 
     @pytest.mark.asyncio
@@ -94,7 +94,7 @@ class TestDeleteLineCleanup:
         f = tmp_path / "a.py"
         f.write_text("hello world here\n", encoding="utf-8")
         result = await tool.execute(path=str(f), old_text="world ", new_text="")
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text() == "hello here\n"
 
 
@@ -119,7 +119,7 @@ class TestQuoteStylePreservation:
             old_text='message = "hello"',
             new_text='message = "goodbye"',
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == 'message = “goodbye”\n'
 
     @pytest.mark.asyncio
@@ -131,7 +131,7 @@ class TestQuoteStylePreservation:
             old_text="it's fine",
             new_text="it's better",
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == "it’s better\n"
 
 
@@ -161,7 +161,7 @@ class TestIndentationPreservation:
             old_text="def foo():\n    pass",
             new_text="def bar():\n    return 1",
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == (
             "if True:\n"
             "    def bar():\n"
@@ -238,7 +238,7 @@ class TestAdvancedReplaceAll:
             new_text="def bar():\n    return 1",
             replace_all=True,
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == (
             "if a:\n"
             "    def bar():\n"
@@ -257,7 +257,7 @@ class TestAdvancedReplaceAll:
             old_text='message = "hello"',
             new_text='message = "goodbye"',
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == "    message = “goodbye”\n"
 
 
@@ -280,7 +280,7 @@ class TestTrailingWhitespaceStrip:
         result = await tool.execute(
             path=str(f), old_text="x = 1", new_text="x = 2   \ny = 3  ",
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         content = f.read_text()
         assert "x = 2\ny = 3\n" == content
 
@@ -292,7 +292,7 @@ class TestTrailingWhitespaceStrip:
         result = await tool.execute(
             path=str(f), old_text="# Title", new_text="# Title  \nSubtitle  ",
         )
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         content = f.read_text()
         # Trailing spaces should be preserved for markdown
         assert "Title  " in content
@@ -361,6 +361,6 @@ class TestStaleDetectionContentFallback:
         os.utime(f, (stat.st_atime, stat.st_mtime + 10))
 
         result = await edit_tool.execute(path=str(f), old_text="world", new_text="earth")
-        assert "Successfully" in result
+        assert "Patch applied:" in result
         # Should NOT warn about modification since content is the same
         assert "modified" not in result.lower()
