@@ -128,6 +128,13 @@ python -m pip install nanobot-ai
 
 If pip reports `externally-managed-environment` on macOS or Linux, use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or install inside a virtual environment.
 
+Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon
+and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2.
+Pip selects the matching wheel;
+opening the TUI does not need a separate GitHub download or Bun installation. On other platforms
+or when building from the source distribution, use `nanobot --classic` or the WebUI; native TUI
+availability depends on the platform runtime.
+
 **Install from source**
 
 Clone the repository and install it in editable mode. Bun is required because the source

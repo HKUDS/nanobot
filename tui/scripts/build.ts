@@ -16,6 +16,8 @@ if (!platform || !arch || !supportedTargets.has(target)) {
 }
 
 const bunPlatform = platform === "win32" ? "windows" : platform
+// Wheels cannot select a CPU feature level: avoid the default AVX2-only x64 runtime.
+const cpuVariant = arch === "x64" ? "-baseline" : ""
 const extension = platform === "win32" ? ".exe" : ""
 const outputDir = join(import.meta.dir, "..", "dist")
 const output = join(outputDir, `nanobot-tui-${platform}-${arch}${extension}`)
@@ -24,7 +26,7 @@ await mkdir(outputDir, { recursive: true })
 const result = await Bun.build({
   entrypoints: [join(import.meta.dir, "..", "src", "index.ts")],
   compile: {
-    target: `bun-${bunPlatform}-${arch}` as Bun.Build.CompileTarget,
+    target: `bun-${bunPlatform}-${arch}${cpuVariant}` as Bun.Build.CompileTarget,
     outfile: output,
   },
 })
