@@ -144,10 +144,15 @@ documentation coordination, and the final publication handoff.
 A stable install must never combine Python from one version with a TUI from another. Publish in
 this order:
 
-1. Set the package version and publish the matching GitHub release tag (`vX.Y.Z`).
-2. Review the pinned Bun/OpenTUI licenses, source offer, and relinking materials for that tag.
-3. Manually run **Publish Terminal UI** for the exact tag and confirm the compliance review input.
-4. Wait for every platform archive and checksum to appear on the release, then publish the same
+1. Before pushing a tag, set the package version, verify the exact candidate, build both Python
+   distributions and all five TUI archives, and review licenses, source offer, and relinking
+   materials. Obtain the maintainer's source-offer commitment before publication.
+2. Merge the release preparation, verify that its packaged sources match the checked candidate,
+   then publish the matching GitHub release tag (`vX.Y.Z`). Recheck any changed sources first.
+3. Attach the preverified TUI archives and checksums to the matching GitHub Release. Alternatively,
+   manually run **Publish Terminal UI** for the exact tag with the compliance review confirmed;
+   reverify its outputs, since a rebuild does not preserve the preflight artifact hashes.
+4. Verify every platform archive and checksum is publicly downloadable, then publish the same
    `X.Y.Z` package to PyPI.
 
 The wheel contains the built WebUI. The native TUI stays a platform-specific release sidecar so

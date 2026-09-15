@@ -25,23 +25,59 @@ uploading to PyPI, and deploying the documentation are separate operations.
 7. Prepare the matching documentation PR in `Re-bin/nanobot-web`, following its
    `MAINTAINING.md`. Review English and all nine translations, preserve Nightly and previous
    releases, update the latest-version redirects, and run the complete site quality gate.
-   Candidate docs may be prepared from a commit, but must be checked against the final tag.
+   Pin source links to the checked candidate commit; confirm those source files match the
+   eventual tag before deploying. Never advertise an unpublished version as publicly available.
+8. Review the pinned Bun/OpenTUI licenses, corresponding-source materials, and relinking
+   instructions now, not after pushing the tag. Verify the exact upstream revisions are
+   retrievable and the runtime versions match the lockfile and notices. Obtain the maintainer's
+   commitment to honor `tui/SOURCE_OFFER.md` for its entire stated period; tests cannot grant it.
+9. Build all five native TUI targets using the same scripts as the publication workflow.
+   Include ad-hoc signatures for macOS before packaging. Verify every archive's checksum,
+   manifest, executable architecture, required notices/licenses, and embedded source contents.
+   Run platform-specific smoke tests where supported; record cross-compiled-only targets as
+   such and link exact-head CI evidence instead of claiming native execution everywhere.
+10. Merge the release-preparation PR only after its current checks and reviews pass. Confirm the
+    merged source tree matches the tested candidate; if it does not, rebuild and recheck before
+    tagging. Reconcile the final changelog and documentation source references. The tag must
+    point to this verified commit, not an unchecked later `main` tip.
+
+### TUI preflight without a release tag
+
+Use Bun 1.3.13 and a clean checkout. The local build and packaging scripts do not require a
+tag or GitHub Release. Run targets sequentially because native dependency preparation modifies
+the shared `node_modules` directory:
+
+```bash
+cd tui
+bun install --frozen-lockfile
+bun scripts/prepare-target.ts <target>
+bun run build -- <target>
+# For darwin-* only: ad-hoc sign dist/nanobot-tui-<target> before the next steps.
+bun scripts/release-notices.ts <target>
+python3 scripts/package-release.py <target>
+```
+
+Repeat for `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`.
+On macOS, use `codesign --force --sign - <binary>` and verify the signature. The publication
+workflow uses pinned `rcodesign` on Linux. Keep the ten `.zip`/`.zip.sha256` outputs in a
+candidate-specific directory, alongside the two Python distributions and provenance manifest.
+Do not include local configuration, instance backups, or test environments in upload selections.
 
 Keep an artifact manifest with the source commit, version, filenames, hashes, checks performed,
 and any remaining release gates. Rebuild and recheck if the packaged source changes.
 
 ## Publish, with maintainer approval
 
-1. Merge the release-preparation PR and confirm the final commit. Create and push exactly
+1. Confirm all pre-tag gates above are complete. Create and push exactly
    `vX.Y.Z`; do not move or reuse a published version tag.
 2. Create the matching GitHub Release. A draft may be used while assembling its attachments.
    Pushing the tag alone does not run `Publish Terminal UI` or upload anything to PyPI.
-3. Review the pinned Bun/OpenTUI licenses, corresponding-source materials, source-offer
-   commitment, and relinking instructions for that exact tag. Only then confirm the
-   compliance input and manually run **Publish Terminal UI** with `tag=vX.Y.Z`.
-4. Wait for all five targets: macOS arm64/x64, Linux arm64/x64, and Windows x64. Each needs
-   its release archive and `.sha256` file. Check the archive contents required by the
-   packaging contract. A successful build is not a substitute for compliance review.
+3. Attach the already verified five TUI archives and their `.sha256` files, after confirming
+   the tag's packaged sources match the artifact manifest. Verify the uploaded bytes match
+   their preflight hashes; never upload a naked executable.
+4. If instead rebuilding through **Publish Terminal UI**, use `tag=vX.Y.Z` and confirm the
+   already completed compliance review. Wait for all five targets and repeat artifact checks
+   on those new outputs. Do not substitute their new bytes under the old artifact hashes.
 5. Make the GitHub Release and all TUI attachments publicly available. Verify their public
    downloads before publishing Python, since installed clients fetch version-matched assets.
 6. Upload only the checked `nanobot_ai-X.Y.Z.tar.gz` and `nanobot_ai-X.Y.Z-py3-none-any.whl`
