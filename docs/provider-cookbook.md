@@ -528,7 +528,7 @@ Keep fallback candidates realistic. If the local fallback has a smaller context 
 
 ## Recipe: Langfuse Tracing
 
-This recipe applies after the agent works and you want observability for OpenAI-compatible provider calls.
+This recipe applies after the agent works and you want observability for OpenAI-compatible provider calls, or for the Codex OAuth provider.
 
 Install the optional package in the same Python environment that runs nanobot:
 
@@ -554,7 +554,7 @@ $env:LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 nanobot agent -m "Hello!"
 ```
 
-Langfuse is not a model provider in `config.json`. It is configured through environment variables and traces supported OpenAI-compatible provider calls. Native providers that do not use that client path may not produce Langfuse OpenAI-wrapper traces.
+Langfuse is not a model provider in `config.json`. It is configured through environment variables and traces supported OpenAI-compatible provider calls, plus Codex OAuth provider calls via Langfuse's native SDK. Other native providers that do not use either path may not produce Langfuse traces.
 
 ## Recipe: Switch Models at Runtime
 
@@ -604,7 +604,7 @@ turn keeps using the model it started with.
 | `model not found` | The model ID does not belong to the selected provider or gateway | Compare `modelPresets.<name>.provider` and `modelPresets.<name>.model` |
 | `connection refused` | Local server is not running or `apiBase` has the wrong port/path | Run `curl <apiBase>/models` |
 | `provider not found` | Provider name is misspelled or uses the config key instead of registry name | Use names such as `openrouter`, `openai`, `anthropic`, `ollama`, `vllm`, `lm_studio` |
-| Langfuse shows no traces | Env vars are missing, `langfuse` is not installed in the active Python environment, or the provider path is native | Run `python -m pip show langfuse` and restart nanobot from the same environment |
+| Langfuse shows no traces | Env vars are missing, `langfuse` is not installed in the active Python environment, or the provider path is a native provider other than Codex OAuth | Run `python -m pip show langfuse` and restart nanobot from the same environment |
 
 ## Next References
 
