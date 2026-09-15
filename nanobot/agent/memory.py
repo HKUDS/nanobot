@@ -23,7 +23,8 @@ from loguru import logger
 
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
-from nanobot.providers.base import LLMResponse, ProviderCallContext, ProviderConversationState
+from nanobot.providers.base import LLMResponse, ProviderConversationState
+from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
@@ -858,27 +859,30 @@ class MemoryArchiver:
         )
         prompt_message = {"role": "user", "content": prompt}
         provider_context = None
+        state_controller: ProviderConversationStateController | None = None
+        state_messages: list[dict[str, Any]] = []
         call_tools = request_tools
         if provider_state is not None:
-            if not runtime.provider.can_resume_conversation_state(
-                provider_state,
-                runtime.model,
-            ):
-                return raw_fallback()
             instruction_messages: list[dict[str, Any]] = []
             for message in history:
                 if message.get("role") not in {"system", "developer"}:
                     break
                 instruction_messages.append(dict(message))
             request_messages = [*instruction_messages, prompt_message]
-            provider_context = ProviderCallContext(
-                conversation_state=provider_state.with_pending_messages([
-                    *provider_state.pending_messages,
-                    prompt_message,
-                ]),
-                context_window_tokens=runtime.context_window_tokens,
+            state_controller = ProviderConversationStateController(
+                provider=runtime.provider,
+                model=runtime.model,
+                messages=state_messages,
+                state=provider_state,
                 session_id=session_key,
             )
+            state_messages.append(dict(prompt_message))
+            provider_context = state_controller.prepare_request(
+                state_messages,
+                context_window_tokens=runtime.context_window_tokens,
+            )
+            if provider_context is None or provider_context.conversation_state is None:
+                return raw_fallback()
             call_tools = []
         else:
             request_messages = [
@@ -902,27 +906,29 @@ class MemoryArchiver:
                 )
                 return raw_fallback()
 
-        async def request_archive(
-            messages: list[dict[str, Any]],
-            context: ProviderCallContext | None,
-        ) -> LLMResponse:
-            with llm_usage_source("dream"):
-                return await runtime.provider.chat_stream_with_retry(
-                    model=runtime.model,
-                    messages=messages,
-                    tools=call_tools,
-                    temperature=runtime.generation.temperature,
-                    max_tokens=runtime.generation.max_tokens,
-                    reasoning_effort=runtime.generation.reasoning_effort,
-                    provider_context=context,
+        response: LLMResponse | None = None
+        for attempt in range(2):
+            try:
+                with llm_usage_source("dream"):
+                    response = await runtime.provider.chat_stream_with_retry(
+                        model=runtime.model,
+                        messages=request_messages,
+                        tools=call_tools,
+                        temperature=runtime.generation.temperature,
+                        max_tokens=runtime.generation.max_tokens,
+                        reasoning_effort=runtime.generation.reasoning_effort,
+                        provider_context=provider_context,
+                    )
+            except Exception:
+                phase = "provider call" if attempt == 0 else "tool-call recovery"
+                logger.warning(
+                    "Memory archive {} failed, raw-dumping to history",
+                    phase,
                 )
+                return raw_fallback()
+            if response.should_execute_tools is not True or attempt == 1:
+                break
 
-        try:
-            response = await request_archive(request_messages, provider_context)
-        except Exception:
-            logger.warning("Memory archive provider call failed, raw-dumping to history")
-            return raw_fallback()
-        if response.has_tool_calls is True and response.should_execute_tools is True:
             logger.info(
                 "Memory archive provider returned {} tool call(s); requesting checkpoint",
                 len(response.tool_calls),
@@ -942,46 +948,30 @@ class MemoryArchiver:
                 }
                 for call in response.tool_calls
             ]
-            recovery_messages = [
+            request_messages = [
                 *request_messages,
                 assistant_message,
                 *tool_messages,
             ]
-            recovery_state = None
-            if (
-                provider_context is not None
-                and response.provider_state is not None
-                and runtime.provider.can_resume_conversation_state(
-                    response.provider_state,
-                    runtime.model,
+            if state_controller is not None:
+                state_controller.observe_response(
+                    response,
+                    state_messages,
                 )
-            ):
-                recovery_state = response.provider_state.with_pending_messages([
-                    *response.provider_state.pending_messages,
-                    *tool_messages,
+                state_messages.extend([
+                    state_controller.project_response_message(
+                        dict(assistant_message),
+                        response,
+                    ),
+                    *[dict(message) for message in tool_messages],
                 ])
-            elif provider_context is not None and provider_context.conversation_state is not None:
-                state = provider_context.conversation_state
-                recovery_state = state.with_pending_messages([
-                    *state.pending_messages,
-                    assistant_message,
-                    *tool_messages,
-                ])
-            recovery_context = provider_context
-            if recovery_state is not None and provider_context is not None:
-                recovery_context = ProviderCallContext(
-                    conversation_state=recovery_state,
-                    context_window_tokens=provider_context.context_window_tokens,
-                    session_id=provider_context.session_id,
-                    events=provider_context.events,
+                provider_context = state_controller.prepare_request(
+                    state_messages,
+                    context_window_tokens=runtime.context_window_tokens,
                 )
-            try:
-                response = await request_archive(recovery_messages, recovery_context)
-            except Exception:
-                logger.warning(
-                    "Memory archive tool-call recovery failed, raw-dumping to history"
-                )
-                return raw_fallback()
+                if provider_context is None or provider_context.conversation_state is None:
+                    return raw_fallback()
+        assert response is not None
         if response.finish_reason in {"error", "length"}:
             logger.warning(
                 "Memory archive provider did not complete ({}), raw-dumping to history",
