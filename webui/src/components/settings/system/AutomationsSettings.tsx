@@ -254,6 +254,7 @@ export function AutomationsSettings({
                 value={view}
                 className="rounded-[var(--radius-panel)] bg-[var(--automation-view-track)]"
                 itemClassName="min-h-8 rounded-[calc(var(--radius-panel)-0.25rem)]"
+                indicatorClassName="rounded-[calc(var(--radius-panel)-0.25rem)]"
                 options={[
                   { value: "tasks", label: tx("settings.automations.views.tasks", "Tasks") },
                   { value: "calendar", label: tx("settings.automations.views.calendar", "Calendar") },

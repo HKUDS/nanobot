@@ -954,6 +954,7 @@ function ModelAdvancedFields({
         </span>
         <SegmentedControl
           value={String(contextWindowTokens)}
+          animateIndicator={false}
           options={contextWindowOptions.map((tokens) => ({
             value: String(tokens),
             label: formatModelContextWindow(tokens),
