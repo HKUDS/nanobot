@@ -27,9 +27,8 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { fetchProviderModels } from "@/lib/api";
 import { providerBrand } from "@/lib/provider-brand";
@@ -100,23 +99,65 @@ export function ProviderPicker({
   showProviderLogos?: boolean;
   onChange: (provider: string) => void;
 }) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const selectedProvider = providers.find((provider) => provider.name === value) ?? null;
   const disabled = !!triggerProps?.disabled || providers.length === 0;
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleProviders = useMemo(() => {
+    if (!normalizedQuery) return providers;
+    return providers.filter((provider) =>
+      [provider.name, provider.label].some((field) =>
+        field.toLowerCase().includes(normalizedQuery),
+      ),
+    );
+  }, [normalizedQuery, providers]);
+
+  useEffect(() => {
+    if (open) setQuery("");
+  }, [open]);
+
+  const selectProvider = (provider: string) => {
+    onChange(provider);
+    setOpen(false);
+  };
+
+  const navigation = useComboboxNavigation({
+    open,
+    values: visibleProviders.map((provider) => provider.name),
+    selectedValue: value,
+    onSelect: selectProvider,
+    onClose: () => setOpen(false),
+  });
+
   return (
-    <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger
-          {...triggerProps}
-          aria-label={triggerProps?.["aria-label"] ?? selectedProvider?.label ?? emptyLabel}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
           type="button"
+          variant="outline"
+          {...triggerProps}
+          role="combobox"
+          aria-expanded={open}
+          aria-label={triggerProps?.["aria-label"] ?? selectedProvider?.label ?? emptyLabel}
           disabled={disabled}
+          onKeyDown={(event) => {
+            if (disabled) return;
+            if (!open && ["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+              event.preventDefault();
+              setOpen(true);
+            }
+          }}
           className={cn(
             "h-9 w-full justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none",
             "settings-hover focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "text-muted-foreground",
           )}
         >
-          <SelectValue placeholder={emptyLabel}><span className="flex min-w-0 items-center gap-2">
+          <span className="flex min-w-0 items-center gap-2">
             {selectedProvider && showProviderLogos ? (
               <ProviderPickerIcon
                 provider={selectedProvider.name}
@@ -124,29 +165,70 @@ export function ProviderPicker({
               />
             ) : null}
             <span className="truncate">{selectedProvider?.label ?? emptyLabel}</span>
-          </span></SelectValue>
-        </SelectTrigger>
-      <SelectContent>
-        {providers.map((provider) => {
-          return (
-            <SelectItem
-              key={provider.name}
-              value={provider.name}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                {showProviderLogos ? (
-                  <ProviderPickerIcon
-                    provider={provider.name}
-                    showBrandLogos={showProviderLogos}
-                  />
-                ) : null}
-                <span className="truncate">{provider.label}</span>
-              </span>
-            </SelectItem>
-          );
-        })}
-      </SelectContent>
-    </Select>
+          </span>
+          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-1.5"
+      >
+        <div className="p-1 pb-1.5">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              {...navigation.inputProps}
+              placeholder={tx("settings.providers.searchPlaceholder", "Search providers")}
+              aria-label={tx("settings.providers.searchPlaceholder", "Search providers")}
+              className="h-8 rounded-full pl-8 pr-3 text-[12px]"
+            />
+          </div>
+        </div>
+        {visibleProviders.length ? (
+          <div
+            {...navigation.listProps}
+            aria-label={tx("settings.providers.searchPlaceholder", "Search providers")}
+            className="max-h-[16rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent"
+          >
+            {visibleProviders.map((provider) => {
+              const selected = provider.name === value;
+              return (
+                <ComboboxOption
+                  key={provider.name}
+                  {...navigation.getOptionProps(provider.name)}
+                  className={cn(
+                    "flex cursor-default items-center justify-between gap-2 rounded-control px-2 py-1.5 text-[12px]",
+                    selected && "text-foreground",
+                  )}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    {showProviderLogos ? (
+                      <ProviderPickerIcon
+                        provider={provider.name}
+                        showBrandLogos={showProviderLogos}
+                      />
+                    ) : null}
+                    <span className="truncate">{provider.label}</span>
+                  </span>
+                  {selected ? (
+                    <Check className="ml-2 h-3.5 w-3.5 shrink-0 text-foreground" aria-hidden />
+                  ) : null}
+                </ComboboxOption>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+            {tx("settings.providers.noMatches", "No providers match this search.")}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 

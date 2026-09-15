@@ -5,10 +5,10 @@ import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView,
 
 
 async function chooseProviderToConfigure(label: string) {
-  fireEvent.pointerDown(
+  fireEvent.click(
     await screen.findByRole("button", { name: "Add your own model provider" }),
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+  fireEvent.click(await screen.findByRole("option", { name: label }));
 }
 
 describe("Settings providers", () => {
@@ -774,11 +774,11 @@ describe("Settings providers", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.pointerDown(
+    fireEvent.click(
       screen.getByRole("button", { name: "Add your own model provider" }),
     );
-    const customOption = await screen.findByRole("menuitem", { name: "Custom provider" });
-    const openRouterOption = screen.getByRole("menuitem", { name: "OpenRouter" });
+    const customOption = await screen.findByRole("option", { name: "Custom provider" });
+    const openRouterOption = screen.getByRole("option", { name: "OpenRouter" });
     expect(customOption.querySelector("svg, img")).not.toBeNull();
     expect(openRouterOption.querySelector("svg, img")).not.toBeNull();
     fireEvent.click(customOption);
