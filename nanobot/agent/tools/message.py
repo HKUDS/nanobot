@@ -55,7 +55,7 @@ def capture_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
             StringSchema(""),
             description=(
                 "Optional list of existing file paths to attach. "
-                "Use artifact paths returned by generate_image here when delivering generated images."
+                "Use artifact paths returned by generate_image or generate_music here when delivering generated media."
             ),
         ),
         buttons=ArraySchema(
@@ -124,8 +124,8 @@ class MessageTool(Tool):
             "Do not use this for the normal reply in the current chat: answer naturally instead. "
             "If channel/chat_id would target the current runtime conversation, do not call this tool "
             "unless the user explicitly asked you to proactively send an existing file attachment. "
-            "When generate_image creates images in the current chat, use the message tool "
-            "with the artifact paths in the media parameter to deliver the images to the user. "
+            "When generate_image creates images in the current chat, or generate_music creates audio in the current chat, use the message tool "
+            "with the artifact paths in the media parameter to deliver the files to the user. "
             "For proactive attachment delivery, use the 'media' parameter with file paths. "
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
