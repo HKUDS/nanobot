@@ -138,6 +138,9 @@ explicitly in the PR description so it can be discussed before merge.
 
 ## Release Packaging Contract
 
+Use the [release checklist](./docs/releasing.md) for candidate preparation, package checks,
+documentation coordination, and the final publication handoff.
+
 A stable install must never combine Python from one version with a TUI from another. Publish in
 this order:
 
