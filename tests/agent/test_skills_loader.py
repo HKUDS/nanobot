@@ -433,6 +433,48 @@ def test_multiple_explicit_skills_share_one_ordered_runtime_context(tmp_path: Pa
     assert "### Skill: always" not in context.content
 
 
+def test_manual_only_skill_is_hidden_from_model_but_explicitly_invocable(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    manual = skills_root / "deploy"
+    manual.mkdir(parents=True)
+    (manual / "SKILL.md").write_text(
+        "---\n"
+        "name: deploy\n"
+        "description: Deploy the current project.\n"
+        "always: true\n"
+        "disable-model-invocation: true\n"
+        "---\n\n"
+        "# Deploy\n\nRun the deployment workflow.\n",
+        encoding="utf-8",
+    )
+    automatic = skills_root / "review"
+    automatic.mkdir()
+    (automatic / "SKILL.md").write_text(
+        "---\n"
+        "name: review\n"
+        "description: Review the current changes.\n"
+        "always: true\n"
+        "disable-model-invocation: false\n"
+        "---\n\n"
+        "# Review\n",
+        encoding="utf-8",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+
+    assert {entry["name"] for entry in loader.list_skills()} == {"deploy", "review"}
+    assert loader.is_model_invocable("deploy") is False
+    assert loader.is_model_invocable("review") is True
+    assert "deploy" not in loader.build_skills_summary()
+    assert "review" in loader.build_skills_summary()
+    assert loader.get_always_skills() == ["review"]
+    assert loader.get_explicitly_invoked_skills("Please $deploy now.") == ["deploy"]
+
+
 # -- multiline description tests (YAML folded > and literal |) -----------------
 
 
