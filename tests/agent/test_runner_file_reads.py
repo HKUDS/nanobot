@@ -8,10 +8,11 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.context import TranscriptInput
+from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner
-from nanobot.agent.tools.context import current_tool_call_context
+from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.file_state import FileStates, bind_file_states, reset_file_states
-from nanobot.agent.tools.filesystem import ReadFileTool
+from nanobot.agent.tools.filesystem import ListDirTool, ReadFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -125,6 +126,79 @@ async def test_direct_read_without_model_context_never_omits_contents(tmp_path):
     assert "1| alpha" in second
 
 
+@pytest.mark.parametrize("operation", ["list_dir", "first_read", "forced_read", "repeat_batch"])
+async def test_only_repeat_reads_scan_model_results_once_per_batch(tmp_path, operation):
+    tools = _tools(tmp_path)
+    tools.register(ListDirTool(workspace=tmp_path))
+    first, contents, _ = await _read(tools, "read-1")
+
+    class CountedMessages(list):
+        scans = 0
+
+        def __iter__(self):
+            self.scans += 1
+            return super().__iter__()
+
+    messages = CountedMessages(first.messages)
+    name, arguments = "read_file", {"path": "data.txt"}
+    if operation == "list_dir":
+        name, arguments = "list_dir", {"path": "."}
+    elif operation == "first_read":
+        (tmp_path / "fresh.txt").write_text("alpha\nbeta\n", encoding="utf-8")
+        arguments = {"path": "fresh.txt"}
+    elif operation == "forced_read":
+        arguments["force"] = True
+    calls = [ToolCallRequest(id="batch-1", name=name, arguments=arguments)]
+    if operation == "repeat_batch":
+        calls.append(ToolCallRequest(id="batch-2", name=name, arguments=arguments))
+
+    results, _ = await execute_tool_calls(
+        tools, calls, concurrent=True, external_lookup_counts={}, workspace_violation_counts={},
+        hook=AgentHook(), context=AgentHookContext(iteration=0, messages=[]),
+        model_messages=messages,
+    )
+
+    if operation == "repeat_batch":
+        assert results == ["[File unchanged since last read: data.txt]"] * 2
+        assert messages.scans == 1
+    else:
+        assert messages.scans == 0
+        if operation == "list_dir":
+            assert "data.txt" in results[0]
+        else:
+            assert results == [contents]
+    # A later direct read has no model input proving that its contents are visible.
+    assert await tools.execute("read_file", {"path": "data.txt"}) == contents
+
+
+@pytest.mark.parametrize("error", [RuntimeError, asyncio.CancelledError])
+async def test_failed_file_read_restores_context(tmp_path, monkeypatch, error):
+    tools = _tools(tmp_path)
+    first, contents, _ = await _read(tools, "read-1")
+    tool = tools.get("read_file")
+    original_execute = tool.execute
+
+    async def fail(**_kwargs):
+        raise error("read interrupted")
+
+    monkeypatch.setattr(tool, "execute", fail)
+    request = execute_tool_calls(
+        tools, [ToolCallRequest(id="failed-read", name="read_file", arguments={"path": "data.txt"})],
+        concurrent=False, external_lookup_counts={}, workspace_violation_counts={},
+        hook=AgentHook(), context=AgentHookContext(iteration=0, messages=[]),
+        model_messages=first.messages,
+    )
+    if error is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            await request
+    else:
+        results, _ = await request
+        assert results[0].startswith("Error: RuntimeError: read interrupted")
+
+    monkeypatch.setattr(tool, "execute", original_execute)
+    assert await tools.execute("read_file", {"path": "data.txt"}) == contents
+
+
 async def test_native_compaction_invalidates_old_results_but_new_reads_can_dedup(tmp_path):
     tools = _tools(tmp_path)
     provider = MagicMock(spec=LLMProvider)
@@ -182,4 +256,3 @@ async def test_concurrent_sessions_keep_separate_read_contexts(tmp_path, monkeyp
     )
     assert repeated == "[File unchanged since last read: data.txt]"
     assert other_session == contents
-    assert current_tool_call_context() is None

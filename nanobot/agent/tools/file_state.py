@@ -4,11 +4,34 @@ from __future__ import annotations
 
 import hashlib
 from collections import OrderedDict
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.agent.tools.context import current_tool_call_context
+
+@dataclass(frozen=True)
+class _FileReadContext:
+    call_id: str
+    tool_results: Callable[[], Mapping[str, str]]
+
+
+_current_file_read: ContextVar[_FileReadContext | None] = ContextVar(
+    "nanobot_file_read_context", default=None,
+)
+
+
+@contextmanager
+def file_read_context(
+    call_id: str, tool_results: Callable[[], Mapping[str, str]],
+) -> Generator[None]:
+    """Bind one file read; resolve visible results only when checking a prior read."""
+    token = _current_file_read.set(_FileReadContext(call_id, tool_results))
+    try:
+        yield
+    finally:
+        _current_file_read.reset(token)
 
 
 @dataclass(slots=True)
@@ -41,7 +64,7 @@ class FileStates:
     ) -> None:
         """Record the file snapshot and complete result of a successful text read."""
         p = str(Path(path).resolve())
-        context = current_tool_call_context()
+        context = _current_file_read.get()
         self._state[p] = ReadState(
             offset=offset,
             limit=limit,
@@ -61,12 +84,12 @@ class FileStates:
         """Check both file identity and the original result in the actual model input."""
         p = str(Path(path).resolve())
         entry = self._state.get(p)
-        context = current_tool_call_context()
+        context = _current_file_read.get()
         if entry is None or context is None or not entry.call_id or not entry.result_hash:
             return False
         if entry.offset != offset or entry.limit != limit:
             return False
-        result = context.tool_results.get(entry.call_id)
+        result = context.tool_results().get(entry.call_id)
         if result is None or hashlib.sha256(result.encode("utf-8")).hexdigest() != entry.result_hash:
             self._state.pop(p, None)
             return False

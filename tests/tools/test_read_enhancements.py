@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools import file_state
-from nanobot.agent.tools.context import ToolCallContext, tool_call_context
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.utils.document import (
     DocumentExtractionError,
@@ -61,10 +60,10 @@ class TestReadDedup:
     async def test_second_read_returns_unchanged_stub(self, tool, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("\n".join(f"line {i}" for i in range(100)), encoding="utf-8")
-        with tool_call_context(ToolCallContext("read-1", {})):
+        with file_state.file_read_context("read-1", lambda: {}):
             first = await tool.execute(path=str(f))
         assert "line 0" in first
-        with tool_call_context(ToolCallContext("read-2", {"read-1": first})):
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f))
         assert "unchanged" in second.lower()
         # Stub should not contain file content
@@ -74,11 +73,11 @@ class TestReadDedup:
     async def test_read_after_external_modification_returns_full(self, tool, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("original", encoding="utf-8")
-        with tool_call_context(ToolCallContext("read-1", {})):
+        with file_state.file_read_context("read-1", lambda: {}):
             first = await tool.execute(path=str(f))
         # Modify the file externally
         f.write_text("modified content", encoding="utf-8")
-        with tool_call_context(ToolCallContext("read-2", {"read-1": first})):
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f))
         assert "modified content" in second
 
@@ -86,9 +85,9 @@ class TestReadDedup:
     async def test_different_offset_returns_full(self, tool, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("\n".join(f"line {i}" for i in range(1, 21)), encoding="utf-8")
-        with tool_call_context(ToolCallContext("read-1", {})):
+        with file_state.file_read_context("read-1", lambda: {}):
             first = await tool.execute(path=str(f), offset=1, limit=5)
-        with tool_call_context(ToolCallContext("read-2", {"read-1": first})):
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f), offset=6, limit=5)
         # Different offset → full read, not stub
         assert "line 6" in second
@@ -166,9 +165,9 @@ class TestReadDedupSessionIsolation:
 
         token = file_state.bind_file_states(session_a)
         try:
-            with tool_call_context(ToolCallContext("read-a1", {})):
+            with file_state.file_read_context("read-a1", lambda: {}):
                 first = await shared_tool.execute(path=str(f))
-            with tool_call_context(ToolCallContext("read-a2", {"read-a1": first})):
+            with file_state.file_read_context("read-a2", lambda: {"read-a1": first}):
                 repeat = await shared_tool.execute(path=str(f))
         finally:
             file_state.reset_file_states(token)
@@ -305,7 +304,7 @@ class TestFileStateHashFallback:
         f = tmp_path / "data.txt"
         f.write_text("original", encoding="utf-8")
         tool = ReadFileTool(workspace=tmp_path)
-        with tool_call_context(ToolCallContext("read-1", {})):
+        with file_state.file_read_context("read-1", lambda: {}):
             first = await tool.execute(path=str(f))
         original_mtime = os.path.getmtime(f)
 
@@ -313,7 +312,7 @@ class TestFileStateHashFallback:
         os.utime(f, (original_mtime, original_mtime))
         assert os.path.getmtime(f) == original_mtime
 
-        with tool_call_context(ToolCallContext("read-2", {"read-1": first})):
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f))
         assert "modified" in second
         assert "unchanged" not in second.lower()
