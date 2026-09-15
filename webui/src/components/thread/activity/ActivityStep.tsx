@@ -12,8 +12,10 @@ export interface ActivityStepProps {
   marker?: ReactNode;
   showMarker?: boolean;
   label: ReactNode;
+  tooltipContent?: ReactNode;
   ariaLabel?: string;
   active?: boolean;
+  animateLabel?: boolean;
   tone?: ActivityStepTone;
   className?: string;
   contentClassName?: string;
@@ -27,8 +29,10 @@ export function ActivityStep({
   marker,
   showMarker = true,
   label,
+  tooltipContent,
   ariaLabel,
   active = false,
+  animateLabel = true,
   tone = active ? "active" : "neutral",
   className,
   contentClassName,
@@ -43,7 +47,7 @@ export function ActivityStep({
       className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap"
     >
       <StreamingLabelSheen
-        active={active}
+        active={active && animateLabel}
         className={cn(
           "min-w-0 flex-1 truncate font-medium",
           tone === "error" ? "text-destructive/78" : "text-muted-foreground/85",
@@ -95,7 +99,7 @@ export function ActivityStep({
             <Tooltip>
               <TooltipTrigger asChild>{line}</TooltipTrigger>
               <TooltipContent side="top" className="max-w-[min(32rem,calc(100vw-2rem))] whitespace-pre-wrap break-words">
-                {label}
+                {tooltipContent ?? label}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

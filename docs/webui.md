@@ -178,7 +178,8 @@ or a result you must retain.
 Use the workspace picker before starting project-specific work. This gives the
 agent the right project context for file paths, shell commands, and topic
 metadata. A locally hosted WebUI opens the operating system's folder chooser
-when one is available; remote deployments keep the manual absolute path entry.
+when one is available; remote deployments use a manual absolute path on the
+nanobot host. The browser's local filesystem is never used for project selection.
 
 Selecting a project does not replace the configured agent workspace. The two
 paths have different responsibilities:
@@ -207,9 +208,10 @@ neighboring memory or profile files, and it does not allow writes outside the
 selected project. These tool exceptions do not broaden the browser's file
 preview boundary.
 
-Remote WebUI connections may reduce access for the current workspace. Selecting a
-different workspace or enabling Full Access remains limited to local and native
-clients.
+Remote WebUI connections may reduce access for the current workspace and may
+select a different workspace by entering its server-side path. A remote project
+change must use Restricted mode; enabling Full Access remains limited to local
+and native clients.
 
 ## Composer
 

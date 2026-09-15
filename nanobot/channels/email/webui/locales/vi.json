@@ -155,6 +155,11 @@
       },
       "maxAttachmentsPerEmail": {
         "label": "Tệp đính kèm tối đa"
+      },
+      "trustedAuthservIds": {
+        "label": "Dịch vụ xác thực tin cậy",
+        "placeholder": "mx.google.com, phân tách bằng dấu phẩy",
+        "help": "Giá trị authserv-id chính xác do dịch vụ nhận thư thêm vào. Bắt buộc khi xác minh SPF hoặc DKIM."
       }
     }
   }

@@ -155,6 +155,11 @@
       },
       "maxAttachmentsPerEmail": {
         "label": "最大添付ファイル数"
+      },
+      "trustedAuthservIds": {
+        "label": "信頼する認証サービス",
+        "placeholder": "mx.google.com（カンマ区切り）",
+        "help": "受信メールサービスが追加する正確な authserv-id。SPF または DKIM 検証時は必須です。"
       }
     }
   }

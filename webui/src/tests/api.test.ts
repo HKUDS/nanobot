@@ -13,6 +13,7 @@ import {
   fetchFilePreview,
   fetchFilePreviewAvailability,
   fetchAutomations,
+  fetchAutomationRunResult,
   fetchApiService,
   fetchCliApps,
   fetchInstalledCliApps,
@@ -28,6 +29,7 @@ import {
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
+  fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
   importMcpConfig,
   installMarketplaceSkill,
@@ -117,6 +119,47 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("revalidates a cached WebUI thread and reuses it on 304", async () => {
+    const cached = {
+      schemaVersion: 3,
+      revision: "rev-1",
+      messages: [],
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 304,
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1", {
+      revision: cached.revision,
+      cached,
+    })).resolves.toBe(cached);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread",
+      expect.objectContaining({
+        headers: {
+          Authorization: "Bearer tok",
+          "If-None-Match": '"rev-1"',
+        },
+        cache: "no-store",
+      }),
+    );
+  });
+
+  it("fetches deferred trace details with encoded session and ref", async () => {
+    await fetchWebuiThreadTraceDetail("tok", "websocket:chat-1", "9.tr-deadbeefdeadbeef");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread/trace-detail?ref=9.tr-deadbeefdeadbeef",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+        cache: "no-store",
+      }),
+    );
+  });
+
   it("aborts a WebUI thread request when its caller signal is aborted", async () => {
     let requestSignal: AbortSignal | null = null;
     vi.mocked(fetch).mockImplementation((_input, init) => new Promise((_resolve, reject) => {
@@ -193,6 +236,15 @@ describe("webui API helpers", () => {
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
+    );
+  });
+
+  it("fetches the selected run response with authentication and an encoded identity", async () => {
+    const controller = new AbortController();
+    await fetchAutomationRunResult("tok", "task/id", 1234, "cron", controller.signal);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/automations/result?id=task%2Fid&run_at_ms=1234&kind=cron",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, signal: expect.any(AbortSignal) }),
     );
   });
 

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
+from functools import cache
 from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.runtime import (
@@ -65,8 +68,21 @@ async def execute_tool_calls(
     hook: AgentHook,
     context: AgentHookContext,
     on_batch_completed: ToolBatchCompletedCallback | None = None,
+    model_messages: list[dict[str, Any]] | None = None,
+    compacted_tool_results: set[str] | None = None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
     """Execute one model response's tool calls in stable result order."""
+    @cache
+    def read_results() -> dict[str, str]:
+        """Index once, on the first read-dedup check in this batch."""
+        return {
+            message["tool_call_id"]: message["content"]
+            for message in model_messages or []
+            if message.get("role") == "tool"
+            and isinstance(message.get("tool_call_id"), str)
+            and isinstance(message.get("content"), str)
+            and message["tool_call_id"] not in (compacted_tool_results or ())
+        }
     tool_results: list[tuple[Any, dict[str, str]]] = []
     for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
         batch_results: list[tuple[Any, dict[str, str]]] = []
@@ -79,6 +95,7 @@ async def execute_tool_calls(
                     workspace_violation_counts,
                     hook,
                     context,
+                    read_results,
                 )
                 for tool_call in batch
             )))
@@ -91,6 +108,7 @@ async def execute_tool_calls(
                     workspace_violation_counts,
                     hook,
                     context,
+                    read_results,
                 )
                 batch_results.append(result)
 
@@ -113,6 +131,7 @@ async def _execute_tool_call(
     workspace_violation_counts: dict[str, int],
     hook: AgentHook,
     context: AgentHookContext,
+    read_results: Callable[[], dict[str, str]],
 ) -> tuple[Any, dict[str, str]]:
     lookup_error = repeated_external_lookup_error(
         tool_call.name,
@@ -158,10 +177,14 @@ async def _execute_tool_call(
 
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
-        if tool is not None:
-            result = await tool.execute(**params)
-        else:
-            result = await tools.execute(tool_call.name, params)
+        with (
+            file_read_context(tool_call.id, read_results)
+            if tool_call.name == "read_file" else nullcontext()
+        ):
+            if tool is not None:
+                result = await tool.execute(**params)
+            else:
+                result = await tools.execute(tool_call.name, params)
     except asyncio.CancelledError:
         raise
     except Exception as exc:

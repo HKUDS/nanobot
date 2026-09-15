@@ -155,6 +155,11 @@
       },
       "maxAttachmentsPerEmail": {
         "label": "Nombre maximal de pièces jointes"
+      },
+      "trustedAuthservIds": {
+        "label": "Services d’authentification approuvés",
+        "placeholder": "mx.google.com, séparés par des virgules",
+        "help": "Valeurs authserv-id exactes ajoutées par le service de réception. Requis si SPF ou DKIM est vérifié."
       }
     }
   }

@@ -67,6 +67,11 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
   );
 }
 
+function currentMonthTimestamp(day: number, hour = 10, minute = 0): number {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), day, hour, minute).getTime();
+}
+
 function baseSettingsPayload() {
   return {
     agent: {
@@ -349,19 +354,76 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
       .toBeInTheDocument();
-    const password = screen.getByLabelText("Password");
+    const password = screen.getByLabelText("WebUI password");
+    expect(password).not.toHaveAttribute("aria-describedby");
     expect(password).toHaveAttribute(
       "autocomplete",
       "current-password",
     );
     expect(password).not.toHaveAttribute("placeholder");
-    expect(screen.queryByText("Authentication required")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Incorrect password. Try again."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("switches language before connecting while preserving the password draft", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText("WebUI password"), "draft-password");
+    await user.tab({ shift: true });
+    expect(screen.getByRole("combobox", { name: "Change language" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("listbox");
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(await screen.findByRole("heading", { name: "连接到 nanobot" }))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText("WebUI 密码")).toHaveValue("draft-password");
+    expect(screen.getByRole("button", { name: "连接", exact: true })).toBeEnabled();
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("reveals password setup help with the keyboard without submitting the form", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("WebUI password");
+    await user.type(password, "draft-password");
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    const help = screen.getByRole("button", { name: "Where can I find the password?" });
+    expect(help).toHaveFocus();
+    expect(help).toHaveAttribute("aria-expanded", "false");
+    const content = document.getElementById(help.getAttribute("aria-controls")!);
+    expect(content).toHaveAttribute("aria-hidden", "true");
+
+    await user.keyboard("{Enter}");
+
+    expect(help).toHaveAttribute("aria-expanded", "true");
+    expect(content).not.toHaveAttribute("aria-hidden");
+    expect(content).toHaveTextContent("~/.nanobot/config.json");
+    expect(content).toHaveTextContent("channels.websocket.tokenIssueSecret");
+    expect(content).toHaveTextContent("If that value is empty, use channels.websocket.token.");
+
+    await user.keyboard(" ");
+
+    expect(help).toHaveAttribute("aria-expanded", "false");
+    expect(password).toHaveValue("draft-password");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
 
   it("toggles password visibility without changing the password", async () => {
@@ -372,7 +434,7 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     await user.type(password, "correct horse battery staple");
     expect(password).toHaveAttribute("type", "password");
 
@@ -397,17 +459,25 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     const connect = screen.getByRole("button", { name: "Connect" });
     expect(connect).toBeEnabled();
     fireEvent.click(connect);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Enter your password.",
+      "Enter password",
     );
+    expect(password).toHaveAttribute("placeholder", "Enter password");
     expect(password).toHaveAttribute("aria-invalid", "true");
-    expect(password).toHaveAttribute("aria-describedby", "webui-auth-error");
+    expect(password).toHaveAttribute(
+      "aria-describedby",
+      "webui-auth-error",
+    );
     expect(password).toHaveFocus();
+    fireEvent.change(password, { target: { value: "   " } });
+    fireEvent.click(connect);
+    expect(password).toHaveValue("");
+    expect(password).toHaveAttribute("placeholder", "Enter password");
     expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
 
@@ -420,11 +490,9 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
       .toBeInTheDocument();
-    expect(
-      screen.queryByText("Incorrect password. Try again."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
@@ -435,18 +503,53 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     fireEvent.change(password, { target: { value: "wrong-password" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    const retryPassword = await screen.findByLabelText("Password");
+    const retryPassword = await screen.findByLabelText("WebUI password");
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Incorrect password. Try again.",
+      "Incorrect password",
     );
+    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
+    expect(retryPassword).toHaveValue("");
     expect(retryPassword).toHaveAttribute("aria-invalid", "true");
     expect(retryPassword).toHaveFocus();
     expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
     expect(connectSpy).not.toHaveBeenCalled();
+    fireEvent.change(retryPassword, { target: { value: "retry-password" } });
+    expect(retryPassword).not.toHaveAttribute("placeholder");
+    expect(retryPassword).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears auth feedback after three seconds without moving focus", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValue(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    render(<App />);
+    const password = await screen.findByLabelText("WebUI password");
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(password).toHaveAttribute("placeholder", "Enter password");
+    act(() => vi.advanceTimersByTime(3_000));
+    expect(password).not.toHaveAttribute("placeholder");
+    expect(password).toHaveFocus();
+
+    await act(async () => {
+      fireEvent.change(password, { target: { value: "wrong-password" } });
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    });
+    const retryPassword = screen.getByLabelText("WebUI password");
+    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
+    act(() => vi.advanceTimersByTime(2_999));
+    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
+    act(() => vi.advanceTimersByTime(1));
+    expect(retryPassword).not.toHaveAttribute("placeholder");
+    expect(retryPassword).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(retryPassword).toHaveFocus();
   });
 
   it("keeps sidebar layout out of the main thread width contract", async () => {
@@ -1372,7 +1475,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(17),
               last_status: "ok",
               pending: false,
               run_history: [],
@@ -1397,7 +1500,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 11, 30, 0),
+              next_run_at_ms: currentMonthTimestamp(17, 11, 30),
               last_status: "ok",
               pending: false,
               run_history: [],
@@ -1432,46 +1535,48 @@ describe("App layout", () => {
 
     fireEvent.click(automationsButton);
 
-    const heading = await screen.findByRole("heading", { name: "Automations" });
+    const heading = await screen.findByRole(
+      "heading",
+      { name: "Automations" },
+      { timeout: 5_000 },
+    );
     expect(heading).toBeInTheDocument();
     const automationsMain = heading.closest("main");
     expect(automationsMain).not.toBeNull();
     expect(within(automationsMain as HTMLElement).queryByText("Settings")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText(
+      "Daily repo check",
+      {},
+      { timeout: 5_000 },
+    )).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Check the repo status")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Daily repo check/ }));
-    expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
-    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
+    expect(within(screen.getByRole("dialog", { name: "Daily repo check" })).getByText("Check the repo status")).toBeVisible();
+    const detail = within(screen.getByRole("dialog", { name: "Daily repo check" }));
+    expect(detail.queryByText("Release prep")).not.toBeInTheDocument();
+    expect(detail.getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Achat-a",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /WeChat quiz/ }));
     expect(screen.getByText("WeChat")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
     expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /heartbeat/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: "System tasks 1" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("heartbeat")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /heartbeat/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "System tasks 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText("heartbeat")).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
       "aria-current",
       "page",
     );
     expect(document.title).toBe("Automations · nanobot");
 
-    fireEvent.click(screen.getByRole("button", { name: "Search and filter" }));
-    const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
-      "Search task, message, linked chat, or schedule",
-    );
-    fireEvent.change(searchInput, { target: { value: "WeChat" } });
-    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
-    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
-
-    fireEvent.change(searchInput, { target: { value: "09-23" } });
-    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
-    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("keeps automation linked-chat titles in sync with live sidebar renames", async () => {
+  it("keeps the automation chat link stable across live sidebar renames without duplicating titles", async () => {
     const key = "websocket:linked-chat";
     mockSessions = [{
       key, channel: "websocket", chatId: "linked-chat", createdAt: null, updatedAt: null,
@@ -1490,7 +1595,8 @@ describe("App layout", () => {
       "/api/webui/automations": { jobs: [{
         id: "reminder", name: "Drink water", enabled: true,
         schedule: { kind: "every", every_ms: 60_000 },
-        payload: { message: "Take a break" }, state: {},
+        payload: { message: "Take a break" },
+        state: { next_run_at_ms: currentMonthTimestamp(17) },
         origin: { session_key: key, channel: "websocket", chat_id: "linked-chat",
           title: "Stored title", preview: "Original preview" },
       }] },
@@ -1501,7 +1607,9 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
     fireEvent.click(await screen.findByRole("button", { name: /Drink water/ }));
     const dialog = screen.getByRole("dialog", { name: "Drink water" });
-    expect(within(dialog).getByRole("link", { name: "推特大战场" })).toHaveAttribute(
+    expect(within(dialog).queryByText("推特大战场")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Stored title")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
       "href", "#/chat/websocket%3Alinked-chat",
     );
     for (const title of ["新会话名称", ""]) {
@@ -1512,7 +1620,8 @@ describe("App layout", () => {
       });
       const expected = title || "Stored title";
       expect(within(sidebar).getByText(expected)).toBeInTheDocument();
-      expect(within(dialog).getByRole("link", { name: expected })).toHaveAttribute(
+      expect(within(dialog).queryByText(expected)).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
         "href", "#/chat/websocket%3Alinked-chat",
       );
     }
@@ -1533,6 +1642,7 @@ describe("App layout", () => {
       },
       state: {
         next_run_at_ms: null,
+        last_run_at_ms: currentMonthTimestamp(12),
         last_status: "ok",
         pending: false,
         run_history: [],
@@ -1563,6 +1673,12 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
     expect((await screen.findAllByText("Past one-shot")).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
+    const runDetail = within(screen.getByRole("dialog", { name: "Past one-shot" }));
+    expect(runDetail.getByText("Completed")).toBeVisible();
+    expect(runDetail.queryByRole("button", { name: "Edit", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(runDetail.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Tasks", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     await screen.findByRole("dialog", { name: "Edit automation" });
@@ -1605,12 +1721,12 @@ describe("App layout", () => {
       "The full content should remain available without forcing the user into a small nested scroll area.",
     ].join("\n");
     const history = [
-      { run_at_ms: Date.UTC(2026, 3, 12, 10, 0, 0), status: "error", duration_ms: 900, error: "oldest failure" },
-      { run_at_ms: Date.UTC(2026, 3, 13, 10, 0, 0), status: "error", duration_ms: 800, error: "second oldest failure" },
-      { run_at_ms: Date.UTC(2026, 3, 14, 10, 0, 0), status: "ok", duration_ms: 700 },
-      { run_at_ms: Date.UTC(2026, 3, 15, 10, 0, 0), status: "ok", duration_ms: 600 },
-      { run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0), status: "ok", duration_ms: 500 },
-      { run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0), status: "ok", duration_ms: 400 },
+      { run_at_ms: currentMonthTimestamp(12), status: "error", duration_ms: 900, error: "oldest failure" },
+      { run_at_ms: currentMonthTimestamp(13), status: "error", duration_ms: 800, error: "second oldest failure" },
+      { run_at_ms: currentMonthTimestamp(14), status: "ok", duration_ms: 700 },
+      { run_at_ms: currentMonthTimestamp(15), status: "ok", duration_ms: 600 },
+      { run_at_ms: currentMonthTimestamp(16), status: "ok", duration_ms: 500 },
+      { run_at_ms: currentMonthTimestamp(17), status: "ok", duration_ms: 400 },
     ];
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
@@ -1628,7 +1744,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 18, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(18),
               last_status: "ok",
               pending: false,
               run_history: history,
@@ -1651,7 +1767,11 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
-    fireEvent.click(await screen.findByRole("button", { name: /Long detail automation/ }));
+    fireEvent.click(await screen.findByRole(
+      "button",
+      { name: /Long detail automation.*Planned/ },
+      { timeout: 5_000 },
+    ));
     const detailPanel = await screen.findByRole("dialog", { name: "Long detail automation" });
     const message = Array.from(detailPanel.querySelectorAll("section p")).find(
       (node) => node.textContent === longMessage,
@@ -1689,13 +1809,13 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
-              last_run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(17),
+              last_run_at_ms: currentMonthTimestamp(16),
               last_status: "ok",
               pending: false,
               run_history: [
                 {
-                  run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+                  run_at_ms: currentMonthTimestamp(16),
                   status: "ok",
                   duration_ms: 500,
                 },
@@ -1726,9 +1846,13 @@ describe("App layout", () => {
     expect(within(automationsMain as HTMLElement).queryByText("设置")).not.toBeInTheDocument();
     expect(screen.queryByText("任务队列")).not.toBeInTheDocument();
     expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
-    fireEvent.click(screen.getByRole("button", { name: /每日检查/ }));
-    expect(within(screen.getByRole("dialog", { name: "每日检查" })).getByText(/每 1天/)).toBeInTheDocument();
+    expect(screen.queryByText("检查仓库状态")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /每日检查.*计划运行/ }));
+    const detail = within(screen.getByRole("dialog", { name: "每日检查" }));
+    expect(detail.getByText("检查仓库状态")).toBeVisible();
+    expect(detail.queryByText(/每 1天/)).not.toBeInTheDocument();
+    fireEvent.click(detail.getByRole("button", { name: "任务信息" }));
+    expect(within(screen.getByRole("dialog", { name: "任务信息" })).getByText(/每 1天/)).toBeVisible();
     expect(screen.queryByText("最近健康状态")).not.toBeInTheDocument();
     expect(screen.queryByText("近期无问题")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();

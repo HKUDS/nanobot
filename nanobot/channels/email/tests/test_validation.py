@@ -46,6 +46,7 @@ def test_validate_email_presets_are_checked_without_saving(
             "channels.email.smtpHost": "smtp.gmail.com",
             "channels.email.smtpUsername": "bot@example.com",
             "channels.email.smtpPassword": "smtp-secret",
+            "channels.email.trustedAuthservIds": ["mx.google.com"],
         },
     )
 
@@ -92,6 +93,7 @@ def test_validate_email_rejects_invalid_account_credentials(
             "channels.email.imapHost": "imap.example.com",
             "channels.email.imapUsername": "bot@example.com",
             "channels.email.imapPassword": "wrong-secret",
+            "channels.email.trustedAuthservIds": ["mx.example.com"],
             "channels.email.smtpHost": "smtp.example.com",
             "channels.email.smtpUsername": "bot@example.com",
             "channels.email.smtpPassword": "smtp-secret",
@@ -107,6 +109,68 @@ def test_validate_email_rejects_invalid_account_credentials(
         "fail",
         "IMAP rejected the username or password.",
     )
+
+
+def test_validate_email_requires_trusted_authserv_ids_for_authentication(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(email_validation, "probe_tcp", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(email_validation, "_imap_login", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(email_validation, "_smtp_login", lambda *_args, **_kwargs: None)
+
+    result = validate_channel_config(
+        "email",
+        {
+            "channels.email.consentGranted": "true",
+            "channels.email.imapHost": "imap.example.com",
+            "channels.email.imapUsername": "bot@example.com",
+            "channels.email.imapPassword": "imap-secret",
+            "channels.email.smtpHost": "smtp.example.com",
+            "channels.email.smtpUsername": "bot@example.com",
+            "channels.email.smtpPassword": "smtp-secret",
+        },
+    )
+
+    assert result["status"] == "needs_setup"
+    assert result["can_enable"] is False
+    assert "trustedAuthservIds" in result["missing_fields"]
+
+
+@pytest.mark.parametrize(("anchors", "verify", "expected"), [
+    (" MX.Google.COM. , mx.receiver.example ", True, "connected"),
+    (["mx.google.com"], True, "connected"),
+    (["*"], True, "invalid"),
+    ([""], True, "invalid"),
+    ([7], True, "invalid"),
+    ("https://mx.google.com", True, "invalid"),
+    ("", True, "needs_setup"),
+    ([], False, "connected"),
+    (["*"], False, "invalid"),
+])
+def test_validate_email_authentication_matches_runtime_and_form_values(
+    tmp_path, monkeypatch, anchors, verify, expected,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    before = config_path.read_bytes()
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    monkeypatch.setattr(email_validation, "probe_tcp", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(email_validation, "_imap_login", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(email_validation, "_smtp_login", lambda *_args, **_kwargs: None)
+    result = validate_channel_config("email", {
+        "consentGranted": True,
+        "imapHost": "imap.example.com", "imapUsername": "bot@example.com", "imapPassword": "secret",
+        "smtpHost": "smtp.example.com", "smtpUsername": "bot@example.com", "smtpPassword": "secret",
+        "verifySpf": str(verify).lower(), "verifyDkim": str(verify).lower(),
+        "trustedAuthservIds": anchors,
+    })
+    assert result["status"] == expected
+    assert result["can_enable"] is (expected == "connected")
+    assert config_path.read_bytes() == before
 
 
 def test_validate_email_blocks_private_targets_when_local_access_is_disabled(

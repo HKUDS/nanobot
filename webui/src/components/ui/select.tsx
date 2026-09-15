@@ -21,11 +21,14 @@ export const SelectTrigger = React.forwardRef<
 ));
 SelectTrigger.displayName = "SelectTrigger";
 
-export function SelectContent({ children }: { children: React.ReactNode }) {
+export function SelectContent({ children, ...props }: Pick<
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>,
+  "children" | "onPointerUpCapture" | "onPointerDownOutside" | "onKeyDownCapture" | "onEscapeKeyDown"
+>) {
   const container = useFloatingPortal();
   return (
     <SelectPrimitive.Portal container={container ?? undefined}>
-      <SelectPrimitive.Content position="item-aligned" className={cn("z-50 max-h-[min(24rem,calc(100dvh-2rem))] min-w-[10rem] overflow-hidden rounded-control border border-transparent", floatingSurfaceElevationClassName)}>
+      <SelectPrimitive.Content {...props} position="item-aligned" className={cn("z-50 max-h-[min(24rem,calc(100dvh-2rem))] min-w-[10rem] overflow-hidden rounded-control border border-transparent", floatingSurfaceElevationClassName)}>
         <SelectPrimitive.ScrollUpButton className="flex h-6 items-center justify-center"><ChevronUp className="h-3.5 w-3.5" /></SelectPrimitive.ScrollUpButton>
         <SelectPrimitive.Viewport className="p-1">
           {children}

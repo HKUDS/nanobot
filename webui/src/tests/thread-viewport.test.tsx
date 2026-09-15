@@ -279,7 +279,6 @@ describe("ThreadViewport", () => {
     expect(messageRegion).toHaveClass("justify-start");
     expect(messageRegion).not.toHaveClass("justify-end");
     expect(messageRegion).toHaveClass("thread-message-viewport");
-    expect(messageRegion).toHaveClass("pt-3");
     expect(messageRegion).toHaveClass("pb-0");
     expect(messageRegion.className).not.toContain("5rem");
   });
@@ -573,7 +572,7 @@ describe("ThreadViewport", () => {
     });
     await flushAnimationFrame();
 
-    expect(jumpTo).toHaveBeenCalledWith(1404);
+    expect(jumpTo).toHaveBeenCalledWith(1372);
   });
 
   it("drives the camera from a message commit when canonical replay replaces the prompt DOM id", async () => {
@@ -1461,6 +1460,7 @@ describe("ThreadViewport", () => {
 
   it("renders only the tail window for long history by default", () => {
     const longMessages = makeLongMessages(300);
+    const firstVisible = longMessages.length - INITIAL_HISTORY_WINDOW;
 
     render(
       <ThreadViewport
@@ -1470,8 +1470,8 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    expect(screen.queryByText("message 139")).not.toBeInTheDocument();
-    expect(screen.getByText("message 140")).toBeInTheDocument();
+    expect(screen.queryByText(`message ${firstVisible - 1}`)).not.toBeInTheDocument();
+    expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
     expect(screen.getByText("message 299")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
   });
@@ -1509,6 +1509,7 @@ describe("ThreadViewport", () => {
   });
 
   it("prefetches earlier history within half a viewport of the top", () => {
+    const expandedFirstVisible = 300 - INITIAL_HISTORY_WINDOW - HISTORY_WINDOW_INCREMENT;
     const { container } = render(
       <ThreadViewport
         messages={makeLongMessages(300)}
@@ -1527,14 +1528,16 @@ describe("ThreadViewport", () => {
     act(() => {
       dispatchUserScroll(scroller);
     });
-    expect(screen.queryByText("message 139")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(`message ${300 - INITIAL_HISTORY_WINDOW - 1}`),
+    ).not.toBeInTheDocument();
 
     scroller.scrollTop = 250;
     act(() => {
       dispatchUserScroll(scroller);
     });
-    expect(screen.getByText("message 20")).toBeInTheDocument();
-    expect(screen.queryByText("message 19")).not.toBeInTheDocument();
+    expect(screen.getByText(`message ${expandedFirstVisible}`)).toBeInTheDocument();
+    expect(screen.queryByText(`message ${expandedFirstVisible - 1}`)).not.toBeInTheDocument();
   });
 
   it("keeps the first visible history item fixed while deferred rows materialize", () => {
@@ -1562,7 +1565,8 @@ describe("ThreadViewport", () => {
         },
       });
 
-      const anchor = screen.getByText("message 140")
+      const firstVisible = 300 - INITIAL_HISTORY_WINDOW;
+      const anchor = screen.getByText(`message ${firstVisible}`)
         .closest<HTMLElement>("[data-thread-display-unit]");
       expect(anchor).not.toBeNull();
       hitTarget = anchor;
@@ -1676,7 +1680,7 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(targetPrompt);
 
-    expect(navigateTo).toHaveBeenCalledWith(1064);
+    expect(navigateTo).toHaveBeenCalledWith(1032);
   });
 
   it("renders markdown in prompt rail previews", async () => {
@@ -1850,14 +1854,29 @@ describe("ThreadViewport", () => {
       expect(markers).toHaveLength(count);
       markers.forEach((marker, index) => {
         fireEvent.click(marker);
-        expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, index * 40 - 16));
+        expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, index * 40 - 48));
       });
     } else {
       expect(markers.length).toBeGreaterThan(1);
       expect(markers.length).toBeLessThan(count);
     }
     fireEvent.click(markers[markers.length - 1]);
-    expect(navigateTo).toHaveBeenLastCalledWith((count - 1) * 40 - 16);
+    expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, (count - 1) * 40 - 48));
+  });
+
+  it("keeps prompt jumps aligned when the header changes between a row and an overlay", async () => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockReturnValue("started");
+    const { scroller } = await renderPromptRailViewport();
+    const marker = screen.getByRole("button", { name: "Jump to prompt: message 1" });
+
+    scroller.style.paddingTop = "16px";
+    fireEvent.click(marker);
+    expect(navigateTo).toHaveBeenLastCalledWith(344);
+
+    scroller.style.paddingTop = "48px";
+    fireEvent.click(marker);
+    expect(navigateTo).toHaveBeenLastCalledWith(312);
   });
 
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
@@ -1908,20 +1927,21 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(promptMarkers[promptMarkers.length - 1]);
 
-    expect(navigateTo).toHaveBeenCalledWith(8894);
+    expect(navigateTo).toHaveBeenCalledWith(8862);
   });
 
   it("expands the window start to avoid cutting an agent activity cluster", () => {
     const clustered = makeLongMessages(200);
+    const boundary = clustered.length - INITIAL_HISTORY_WINDOW;
     clustered.splice(
-      38,
+      boundary - 2,
       3,
       {
         id: "r0",
         role: "assistant",
         content: "",
         reasoning: "first reasoning",
-        createdAt: 38,
+        createdAt: boundary - 2,
       },
       {
         id: "t0",
@@ -1929,14 +1949,14 @@ describe("ThreadViewport", () => {
         kind: "trace",
         content: "tool()",
         traces: ["tool()"],
-        createdAt: 39,
+        createdAt: boundary - 1,
       },
       {
         id: "r1",
         role: "assistant",
         content: "",
         reasoning: "second reasoning",
-        createdAt: 40,
+        createdAt: boundary,
       },
     );
 

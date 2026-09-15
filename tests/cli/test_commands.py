@@ -28,7 +28,7 @@ from nanobot.cli.commands import app
 from nanobot.config.schema import Config
 from nanobot.cron.service import CronJobSkippedError
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
-from nanobot.cron.types import CronJob, CronPayload
+from nanobot.cron.types import CronJob, CronPayload, CronRunResult
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
 from nanobot.providers.factory import ProviderSnapshot, make_provider, provider_signature
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -2192,6 +2192,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     workspace = tmp_path / "workspace"
     seen: dict[str, object] = {}
     _patch_webui_provider_ready(monkeypatch)
+    _patch_gateway_ports_free(monkeypatch)
     monkeypatch.setattr(
         "nanobot.cli.webui.sync_workspace_templates",
         lambda path: seen.__setitem__("templates", path),
@@ -2216,7 +2217,7 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
         ],
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     data = json.loads(config_file.read_text(encoding="utf-8"))
     websocket = data["channels"]["websocket"]
     assert websocket["enabled"] is True
@@ -2232,9 +2233,9 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
     assert options.config_path == str(config_file.resolve(strict=False))
     assert options.workspace == str(workspace.resolve(strict=False))
     compact_output = re.sub(r"\s+", " ", _strip_ansi(result.stdout))
-    assert "bootstrap secret was generated" in compact_output
+    assert "Open the WebUI manually" in compact_output
     assert "channels.websocket.tokenIssueSecret" in compact_output
-    assert "rerun without --no-open" in compact_output
+    assert "ssh -N -L 8899:127.0.0.1:8899 <user>@<server>" in compact_output
     assert seen["lease_release_wait_for_stop"] is False
     assert "stop_timeout" not in seen
 
@@ -2540,13 +2541,14 @@ def test_webui_yes_opens_settings_for_incomplete_custom_model_setup(
 def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> None:
     opened: list[str] = []
     url = "http://127.0.0.1:8765/#/?bootstrapSecret=super-secret"
+    monkeypatch.setattr(cli_webui_support, "_text_only_browser_name", lambda: None)
     monkeypatch.setattr(
         cli_webui_support,
         "_launch_browser",
         lambda value: opened.append(value) or True,
     )
 
-    cli_webui_support._open_webui_browser(url, wait=False)
+    assert cli_webui_support._open_webui_browser(url, wait=False) is True
 
     assert opened == [url]
     output = _strip_ansi(capsys.readouterr().out)
@@ -2555,13 +2557,79 @@ def test_open_webui_browser_redacts_bootstrap_secret(monkeypatch, capsys) -> Non
 
 
 def test_open_webui_browser_reports_launch_failure(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_webui_support, "_text_only_browser_name", lambda: None)
     monkeypatch.setattr(cli_webui_support, "_launch_browser", lambda _value: False)
 
-    cli_webui_support._open_webui_browser("http://127.0.0.1:8765/", wait=False)
-
-    assert "Could not open browser; visit http://127.0.0.1:8765/" in _strip_ansi(
-        capsys.readouterr().out
+    opened = cli_webui_support._open_webui_browser(
+        "http://127.0.0.1:8765/",
+        wait=False,
     )
+
+    assert opened is False
+    assert "Could not open a browser automatically." in _strip_ansi(capsys.readouterr().out)
+
+
+def test_open_webui_browser_rejects_text_only_browser(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_webui_support, "_text_only_browser_name", lambda: "links")
+    monkeypatch.setattr(
+        cli_webui_support,
+        "_launch_browser",
+        lambda _value: pytest.fail("text-only browser must not be opened"),
+    )
+
+    opened = cli_webui_support._open_webui_browser(
+        "http://127.0.0.1:8765/",
+        wait=False,
+    )
+
+    output = re.sub(r"\s+", " ", _strip_ansi(capsys.readouterr().out))
+    assert opened is False
+    assert "links" in output
+    assert "does not support JavaScript" in output
+
+
+def test_text_only_browser_name_detects_links(monkeypatch) -> None:
+    monkeypatch.setattr(cli_webui_support.sys, "platform", "linux")
+    monkeypatch.setattr(
+        cli_webui_support.webbrowser,
+        "get",
+        lambda: SimpleNamespace(name="links"),
+    )
+
+    assert cli_webui_support._text_only_browser_name() == "links"
+
+
+@pytest.mark.parametrize(
+    ("host", "tunnel_host"),
+    [
+        ("127.0.0.1", "127.0.0.1"),
+        ("0.0.0.0", "127.0.0.1"),
+        ("::1", "[::1]"),
+        ("::", "[::1]"),
+        ("192.0.2.10", "192.0.2.10"),
+    ],
+)
+def test_print_webui_manual_access_includes_password_source_and_ssh_tunnel(
+    capsys, host: str, tunnel_host: str,
+) -> None:
+    config = Config(channels={"websocket": {
+        "host": host, "port": 8899, "tokenIssueSecret": "do-not-print",
+    }})
+    config_path = Path("/srv/nanobot/config.json")
+
+    cli_webui_support._print_webui_manual_access(
+        config,
+        config_path,
+        cli_webui_support._webui_browser_url(config),
+    )
+
+    output = re.sub(r"\s+", " ", _strip_ansi(capsys.readouterr().out))
+    assert f"WebUI: http://{tunnel_host}:8899" in output
+    assert "channels.websocket.tokenIssueSecret" in output
+    assert str(config_path) in output
+    assert f"ssh -N -L 8899:{tunnel_host}:8899 <user>@<server>" in output
+    assert "Then open http://127.0.0.1:8899 on your computer." in output
+    assert "do-not-print" not in output
 
 
 def test_launch_browser_uses_macos_url_services(monkeypatch) -> None:
@@ -3205,7 +3273,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     response = asyncio.run(cron.on_job(job))
 
-    assert response == "Checked the repo."
+    assert isinstance(response, CronRunResult)
+    assert response.response == "Checked the repo."
+    assert response.run_id == seen["run_records"][-1][0]
     msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "websocket"
@@ -3247,7 +3317,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     response = asyncio.run(cron.on_job(discord_job))
 
-    assert response == "Checked the repo."
+    assert isinstance(response, CronRunResult)
+    assert response.response == "Checked the repo."
+    assert response.run_id == seen["run_records"][-1][0]
     msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "discord"
@@ -3271,7 +3343,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     response = asyncio.run(cron.on_job(telegram_job))
 
-    assert response == "Checked the repo."
+    assert isinstance(response, CronRunResult)
+    assert response.response == "Checked the repo."
+    assert response.run_id == seen["run_records"][-1][0]
     msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "telegram"
@@ -3297,7 +3371,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     response = asyncio.run(cron.on_job(feishu_job))
 
-    assert response == "Checked the repo."
+    assert isinstance(response, CronRunResult)
+    assert response.response == "Checked the repo."
+    assert response.run_id == seen["run_records"][-1][0]
     msg = seen["cron_msg"]
     assert isinstance(msg, InboundMessage)
     assert msg.channel == "feishu"

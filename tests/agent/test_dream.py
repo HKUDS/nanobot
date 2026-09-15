@@ -245,7 +245,7 @@ class TestDreamTools:
         )
 
         assert "Patch applied" in memory_result
-        assert "Successfully edited" in soul_result
+        assert "Patch applied" in soul_result
         assert "Successfully wrote" in user_result
         assert "Project Y active" in store.memory_file.read_text(encoding="utf-8")
         assert "Precise" in store.soul_file.read_text(encoding="utf-8")

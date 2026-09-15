@@ -555,6 +555,8 @@ class AgentRunner:
                     hook=hook,
                     context=context,
                     on_batch_completed=checkpoint_completed_batch,
+                    model_messages=messages_for_model,
+                    compacted_tool_results=request_state.compacted_tool_results,
                 )
                 tool_events.extend(new_events)
                 tools_used.extend(

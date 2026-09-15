@@ -155,6 +155,11 @@
       },
       "maxAttachmentsPerEmail": {
         "label": "附件數量上限"
+      },
+      "trustedAuthservIds": {
+        "label": "可信郵件驗證服務",
+        "placeholder": "mx.google.com，以逗號分隔",
+        "help": "接收郵件服務加入的正確 authserv-id。啟用 SPF 或 DKIM 驗證時必填。"
       }
     }
   }

@@ -15,6 +15,7 @@ from nanobot.bus.outbound_events import FileEditEvent
 from nanobot.events import EventSink
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.file_edit_events import (
+    FileEditResult,
     FileEditTracker,
     build_file_edit_end_event,
     build_file_edit_error_event,
@@ -76,7 +77,11 @@ class FileEditActivityHook(AgentHook):
         key = self._tool_call_key(tool_call)
         trackers = self._trackers_by_call.get(key, [])
         if trackers:
-            await self._emit([build_file_edit_end_event(tracker) for tracker in trackers])
+            diffs = result.file_diffs if isinstance(result, FileEditResult) else {}
+            await self._emit([
+                build_file_edit_end_event(tracker, diff=diffs.pop(tracker.path, None))
+                for tracker in trackers
+            ])
             self._trackers_by_call.pop(key, None)
 
     async def on_execute_tool_error(

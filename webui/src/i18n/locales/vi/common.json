@@ -7,15 +7,20 @@
     },
     "error": {
       "title": "Không thể kết nối tới nanobot",
-      "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
+      "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trình duyệt này có thể truy cập địa chỉ WebUI của gateway."
     },
     "auth": {
-      "label": "Mật khẩu",
+      "title": "Kết nối với nanobot",
+      "label": "Mật khẩu WebUI",
+      "helpTitle": "Tìm mật khẩu ở đâu?",
+      "helpConfig": "Trên thiết bị đang chạy nanobot, mở tệp cấu hình, thường nằm tại:",
+      "helpSecret": "Sao chép giá trị của trường này làm mật khẩu:",
+      "helpFallback": "Nếu giá trị này trống, hãy dùng <code>channels.websocket.token</code>.",
       "showPassword": "Hiện mật khẩu",
       "hidePassword": "Ẩn mật khẩu",
       "submit": "Kết nối",
-      "required": "Nhập mật khẩu.",
-      "invalid": "Mật khẩu không đúng. Hãy thử lại."
+      "required": "Nhập mật khẩu",
+      "invalid": "Mật khẩu không đúng"
     },
     "account": {
       "section": "Tài khoản",
@@ -886,9 +891,42 @@
       "notEnabled": "Chưa bật"
     },
     "automations": {
-      "viewOptions": "Tìm kiếm và lọc",
+      "taskInfo": "Thông tin tác vụ",
+      "runDetails": {
+        "loading": "Đang tải phản hồi…",
+        "loadError": "Không tải được phản hồi.",
+        "retry": "Thử lại",
+        "emptyOutput": "Lần chạy này không tạo phản hồi.",
+        "result": "Kết quả",
+        "duration": "Thời gian chạy",
+        "noOutput": "Bản ghi này không lưu nội dung phản hồi."
+      },
+      "create": "Tạo tự động hóa",
+      "createPrompt": "Bạn muốn nanobot tự động làm gì?",
+      "createInput": "Mô tả tác vụ tự động",
+      "errors": {
+        "legacyMissingDestination": "Tác vụ tự động cũ này thiếu nơi nhận. Hãy tạo lại từ cuộc trò chuyện liên kết để tiếp tục."
+      },
+      "calendar": {
+        "previousMonth": "Tháng trước",
+        "nextMonth": "Tháng sau",
+        "today": "Hôm nay",
+        "planned": "Đã lên lịch",
+        "recorded": "Đã ghi nhận",
+        "more": "+{{count}} mục khác",
+        "less": "Thu gọn",
+        "noEntries": "Không có lần chạy nào trong tháng này."
+      },
       "yourTasks": "Tác vụ tự động của bạn",
       "systemTasks": "Tác vụ hệ thống",
+      "views": {
+        "label": "Chế độ xem tác vụ tự động",
+        "tasks": "Tác vụ",
+        "calendar": "Lịch"
+      },
+      "filter": "Lọc",
+      "filteredBy": "Lọc: {{status}}",
+      "commandCondition": "Kích hoạt bằng lệnh",
       "instructions": "Chỉ dẫn",
       "done": "Xong",
       "moreDetails": "Chi tiết khác",
@@ -899,7 +937,7 @@
       "filters": {
         "all": "Tất cả",
         "active": "Đã bật",
-        "paused": "Đã tạm dừng",
+        "paused": "Đã tắt",
         "failed": "Cần xử lý",
         "system": "Hệ thống"
       },
@@ -909,7 +947,6 @@
         "updated": "Đã cập nhật",
         "name": "Tên"
       },
-      "search": "Tìm tác vụ, tin nhắn, cuộc trò chuyện liên kết hoặc lịch",
       "queue": "Hàng đợi",
       "loading": "Đang tải tự động hóa...",
       "noMatches": "Không có tự động hóa phù hợp với chế độ xem này.",
@@ -928,8 +965,8 @@
         "updated": "Đã cập nhật"
       },
       "runNow": "Chạy ngay",
-      "pause": "Tạm dừng",
-      "resume": "Tiếp tục",
+      "pause": "Tắt",
+      "resume": "Bật",
       "edit": "Sửa",
       "delete": "Xóa",
       "protected": "Được bảo vệ",
@@ -943,7 +980,7 @@
       "status": {
         "system": "Hệ thống",
         "running": "Đang chạy",
-        "paused": "Đã tạm dừng",
+        "paused": "Đã tắt",
         "failed": "Thất bại",
         "completed": "Hoàn tất",
         "noSchedule": "Không có lịch",
@@ -958,12 +995,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "Mỗi {{day}} lúc {{time}}",
         "at": "Vào {{time}}",
         "every": "Mỗi {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Hằng ngày lúc {{time}}",
+        "monthlyAt": "Ngày {{day}} hằng tháng lúc {{time}}",
         "weekdaysAt": "Thứ Hai đến thứ Sáu lúc {{time}}",
         "hourlyAt": "Vào phút {{minute}} mỗi giờ",
         "hourlyWindow": "Vào phút {{minute}} mỗi giờ, từ {{start}} đến {{end}}",
@@ -971,7 +1010,7 @@
         "custom": "Lịch tùy chỉnh"
       },
       "next": {
-        "paused": "Đã tạm dừng",
+        "paused": "Đã tắt",
         "pending": "Đang chạy",
         "local": "Đang chờ kích hoạt",
         "none": "Không có lần chạy tiếp theo"
@@ -989,7 +1028,10 @@
         "unit": "Đơn vị",
         "cronExpression": "Biểu thức cron",
         "timezone": "Múi giờ",
-        "runAt": "Chạy lúc"
+        "runAt": "Chạy lúc",
+        "runDate": "Ngày chạy",
+        "runTime": "Giờ chạy",
+        "chooseDate": "Chọn ngày"
       },
       "scheduleTypes": {
         "every": "Khoảng lặp",
@@ -1192,7 +1234,7 @@
       "at": "{{time}}",
       "every": "Mỗi {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Trình kích hoạt cục bộ",
       "unknown": "Lịch tùy chỉnh"
     },
@@ -1295,12 +1337,13 @@
       "loading": "Đang tải tự động hóa...",
       "loadFailed": "Không thể tải tự động hóa.",
       "empty": "Phiên này chưa có tự động hóa.",
+      "openCalendar": "Xem tất cả trong lịch",
       "disabled": "Tắt",
       "schedule": {
         "at": "Lúc {{time}}",
         "every": "Mỗi {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Trình kích hoạt cục bộ",
         "unknown": "Lịch tùy chỉnh"
       },
@@ -1577,6 +1620,8 @@
     "activityWorkingFor": "Đang xử lý trong {{duration}}",
     "activityWorked": "Đã xử lý",
     "activityWorkedFor": "Đã xử lý trong {{duration}}",
+    "traceDetailsLoadFailed": "Không thể tải đầy đủ chi tiết hoạt động.",
+    "retryTraceDetails": "Thử lại",
     "retryConnection": "Kết nối thất bại",
     "retryTimeout": "Mô hình đã hết thời gian chờ",
     "retryRateLimit": "Đã đạt giới hạn yêu cầu",

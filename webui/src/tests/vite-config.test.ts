@@ -4,12 +4,20 @@ import path from "node:path";
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
-import {
+import webuiConfig, {
   entryLazyFeatureImports,
   gzipWebuiAssets,
   webuiManualChunk,
   writeCompressedWebuiAssets,
 } from "../../vite.config";
+
+describe("development overlay dependencies", () => {
+  it("pre-bundles Dialog so sheets share layer and focus state with popovers", () => {
+    const config = webuiConfig({ command: "serve", mode: "test" });
+    expect(config.optimizeDeps?.include).toContain("@radix-ui/react-dialog");
+    expect(config.optimizeDeps?.exclude ?? []).not.toContain("@radix-ui/react-dialog");
+  });
+});
 
 describe("gzipWebuiAssets", () => {
   it("compresses finalized files after Rollup writes the bundle", () => {

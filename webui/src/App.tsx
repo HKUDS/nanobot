@@ -8,10 +8,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { ArrowRight, ChevronDown, Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
@@ -46,6 +47,7 @@ import { useSkills } from "@/hooks/useSkills";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -74,6 +76,7 @@ import type {
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Disclosure } from "@/components/ui/disclosure";
 import {
   fetchPairingRequests,
   fetchSettings,
@@ -363,10 +366,17 @@ function AuthForm({
   );
   const errorMessage = validationError ? t(`app.auth.${validationError}`) : null;
 
+  useEffect(() => {
+    if (!validationError) return;
+    const timeout = window.setTimeout(() => setValidationError(null), 3_000);
+    return () => window.clearTimeout(timeout);
+  }, [validationError]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const secret = value.trim();
     if (!secret) {
+      setValue("");
       setValidationError("required");
       inputRef.current?.focus();
       return;
@@ -376,67 +386,117 @@ function AuthForm({
   };
 
   return (
-    <div className="flex h-full w-full items-center justify-center px-6">
-      <form
-        onSubmit={handleSubmit}
-        className="flex w-full max-w-sm flex-col gap-4"
-      >
-        <div className="space-y-2">
-          <h1 className="text-sm font-medium text-foreground">
-            <label htmlFor="webui-access-password">{t("app.auth.label")}</label>
-          </h1>
-          <div className="relative">
-            <Input
-              ref={inputRef}
-              id="webui-access-password"
-              name="webui-access-password"
-              type={passwordVisible ? "text" : "password"}
-              autoComplete="current-password"
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                setValidationError(null);
-              }}
-              disabled={submitting}
-              aria-invalid={validationError ? true : undefined}
-              aria-describedby={validationError ? "webui-auth-error" : undefined}
-              className="pr-10"
-              autoFocus
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              disabled={submitting}
-              aria-label={t(
-                passwordVisible ? "app.auth.hidePassword" : "app.auth.showPassword",
-              )}
-              aria-controls="webui-access-password"
-              onClick={() => setPasswordVisible((visible) => !visible)}
-              className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              {passwordVisible ? (
-                <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              ) : (
-                <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              )}
-            </Button>
-          </div>
-          {errorMessage ? (
-            <p id="webui-auth-error" role="alert" className="text-sm text-destructive">
-              {errorMessage}
-            </p>
-          ) : null}
-        </div>
-        <Button
-          type="submit"
-          className="w-full"
-          disabled={submitting}
+    <main className="flex h-full w-full flex-col overflow-y-auto bg-background">
+      <div className="mx-5 mt-5 shrink-0 self-end sm:mx-8">
+        <LanguageSwitcher className="h-8 min-w-0 gap-2 px-3 text-xs" />
+      </div>
+      <div className="flex flex-1 shrink-0 items-center justify-center px-6 pb-20 pt-8">
+        <section
+          aria-labelledby="webui-auth-title"
+          className="w-full max-w-xs"
         >
-          {t("app.auth.submit")}
-        </Button>
-      </form>
-    </div>
+          <div className="text-center">
+            <img
+              src="/brand/nanobot_mark.svg"
+              alt=""
+              width={56}
+              height={56}
+              draggable={false}
+              className="mx-auto mb-5 h-14 w-14 select-none"
+            />
+            <h1 id="webui-auth-title" className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-[1.75rem]">
+              {t("app.auth.title")}
+            </h1>
+          </div>
+          <form onSubmit={handleSubmit} className="mt-8">
+            <div className="relative">
+              <Input
+                ref={inputRef}
+                id="webui-access-password"
+                name="webui-access-password"
+                aria-label={t("app.auth.label")}
+                type={passwordVisible ? "text" : "password"}
+                autoComplete="current-password"
+                value={value}
+                onChange={(e) => {
+                  setValue(e.target.value);
+                  setValidationError(null);
+                }}
+                disabled={submitting}
+                aria-invalid={validationError ? true : undefined}
+                aria-describedby={validationError ? "webui-auth-error" : undefined}
+                placeholder={errorMessage ?? undefined}
+                className={cn(
+                  "h-12 rounded-full border-foreground/15 bg-muted/30 px-4 pr-24 text-base",
+                  validationError && "placeholder:text-[13px] placeholder:text-red-600 dark:placeholder:text-red-400",
+                )}
+                autoFocus
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                disabled={submitting}
+                aria-label={t(
+                  passwordVisible ? "app.auth.hidePassword" : "app.auth.showPassword",
+                )}
+                aria-controls="webui-access-password"
+                onClick={() => setPasswordVisible((visible) => !visible)}
+                className="absolute right-12 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
+              >
+                {passwordVisible ? (
+                  <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                ) : (
+                  <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                )}
+              </Button>
+              <Button
+                type="submit"
+                variant="ghost"
+                size="icon"
+                disabled={submitting}
+                aria-label={t("app.auth.submit")}
+                title={t("app.auth.submit")}
+                className="absolute right-1 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full"
+              >
+                <ArrowRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+              </Button>
+            </div>
+            {errorMessage ? (
+              <p id="webui-auth-error" role="alert" className="sr-only">
+                {errorMessage}
+              </p>
+            ) : null}
+          </form>
+          <Disclosure
+            className="mt-4"
+            summaryClassName="flex min-h-11 items-center justify-center gap-1.5 rounded-compact text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            contentClassName="rounded-control bg-muted/50 p-4 text-sm leading-6 text-muted-foreground"
+            summary={(
+              <>
+                <span>{t("app.auth.helpTitle")}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-data-[state=open]/disclosure:rotate-180 motion-reduce:transition-none" strokeWidth={1.5} aria-hidden />
+              </>
+            )}
+          >
+            <p>{t("app.auth.helpConfig")}</p>
+            <code className="mt-2 block rounded-compact bg-background px-3 py-2 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
+              ~/.nanobot/config.json
+            </code>
+            <p className="mt-4">{t("app.auth.helpSecret")}</p>
+            <code className="mt-2 block rounded-compact bg-background px-3 py-2 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
+              channels.websocket.tokenIssueSecret
+            </code>
+            <p className="mt-3">
+              <Trans
+                i18nKey="app.auth.helpFallback"
+                components={{ code: <code className="font-mono text-xs text-foreground [overflow-wrap:anywhere]" /> }}
+              />
+            </p>
+          </Disclosure>
+        </section>
+      </div>
+    </main>
   );
 }
 
@@ -1111,6 +1171,13 @@ function Shell({
   const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
+    id: string;
+    chatId: string;
+    content: string;
+    images?: SendAttachment[];
+    options?: SendOptions;
+  } | null>(null);
   const settingsExitGuardRef = useRef<SettingsExitGuard | null>(null);
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
   currentShellRouteRef.current = { view, activeKey, settingsSection: settingsInitialSection };
@@ -1565,6 +1632,32 @@ function Shell({
       return null;
     }
   }, [activeWorkspaceScope, createChat, navigate, t]);
+
+  const onStartAutomationChat = useCallback(async (
+    content: string,
+    images?: SendAttachment[],
+    options?: SendOptions,
+    modelPreset?: string | null,
+  ) => {
+    const chatId = await onCreateChat(
+      options?.workspaceScope ?? activeWorkspaceScope,
+      content,
+      modelPreset,
+    );
+    if (!chatId) return false;
+    setPendingAutomationMessage({
+      id: crypto.randomUUID(),
+      chatId,
+      content,
+      images,
+      options,
+    });
+    return true;
+  }, [activeWorkspaceScope, onCreateChat]);
+
+  const onPendingAutomationMessageConsumed = useCallback((id: string) => {
+    setPendingAutomationMessage((current) => current?.id === id ? null : current);
+  }, []);
 
   const onCreateTemporaryChat = useCallback(
     async (
@@ -2739,6 +2832,8 @@ function Shell({
                             onCreateChat={
                               temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
                             }
+                            pendingFirstMessage={pendingAutomationMessage}
+                            onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
                             onForkChat={temporaryChatActive ? undefined : onForkChat}
                             onTurnEnd={onTurnEnd}
                             theme={theme}
@@ -2775,6 +2870,8 @@ function Shell({
                           onToggleSidebar={toggleSidebar}
                           onNewChat={onNewChat}
                           onCreateChat={onCreateChat}
+                          pendingFirstMessage={pendingAutomationMessage}
+                          onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
                           onForkChat={onForkChat}
                           onTurnEnd={context.active ? onTurnEnd : () => void refresh()}
                           theme={theme}
@@ -2827,11 +2924,13 @@ function Shell({
                     initialSection={settingsInitialSection}
                     initialSettings={settingsSnapshot}
                     showSidebar={view === "settings"}
+                    mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                     onToggleTheme={toggle}
                     onBackToChat={onBackToChat}
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
                     skills={skills}
+                    onStartAutomationChat={onStartAutomationChat}
                     titleOverrides={sidebarState.title_overrides}
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}

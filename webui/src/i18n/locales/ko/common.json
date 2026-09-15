@@ -7,15 +7,20 @@
     },
     "error": {
       "title": "nanobot에 연결할 수 없습니다",
-      "gatewayHint": "gateway(`nanobot gateway`)가 실행 중인지, 그리고 이 페이지가 같은 머신에서 열려 있는지 확인하세요."
+      "gatewayHint": "gateway(`nanobot gateway`)가 실행 중이고 이 브라우저에서 WebUI 주소에 접근할 수 있는지 확인하세요."
     },
     "auth": {
-      "label": "비밀번호",
+      "title": "nanobot에 연결",
+      "label": "WebUI 비밀번호",
+      "helpTitle": "비밀번호는 어디에서 찾나요?",
+      "helpConfig": "nanobot을 실행 중인 기기에서 설정 파일을 여세요. 일반적으로 다음 위치에 있습니다:",
+      "helpSecret": "이 필드의 값을 비밀번호로 복사하세요:",
+      "helpFallback": "값이 비어 있으면 <code>channels.websocket.token</code>을 사용하세요.",
       "showPassword": "비밀번호 표시",
       "hidePassword": "비밀번호 숨기기",
       "submit": "연결",
-      "required": "비밀번호를 입력하세요.",
-      "invalid": "비밀번호가 올바르지 않습니다. 다시 시도하세요."
+      "required": "비밀번호를 입력하세요",
+      "invalid": "비밀번호를 확인하세요"
     },
     "account": {
       "section": "계정",
@@ -886,9 +891,42 @@
       "notEnabled": "비활성화됨"
     },
     "automations": {
-      "viewOptions": "검색 및 필터",
+      "taskInfo": "작업 정보",
+      "runDetails": {
+        "loading": "응답을 불러오는 중…",
+        "loadError": "응답을 불러오지 못했습니다.",
+        "retry": "다시 시도",
+        "emptyOutput": "생성된 응답이 없습니다.",
+        "result": "실행 결과",
+        "duration": "소요 시간",
+        "noOutput": "이 기록에는 응답 본문이 저장되지 않았습니다."
+      },
+      "create": "자동화 만들기",
+      "createPrompt": "nanobot이 무엇을 자동으로 해주면 좋을까요?",
+      "createInput": "자동화 설명",
+      "errors": {
+        "legacyMissingDestination": "이전 형식의 자동화에 전송 대상이 없습니다. 계속하려면 연결된 채팅에서 다시 만들어 주세요."
+      },
+      "calendar": {
+        "previousMonth": "이전 달",
+        "nextMonth": "다음 달",
+        "today": "오늘",
+        "planned": "예정",
+        "recorded": "기록",
+        "more": "+{{count}}개 더",
+        "less": "접기",
+        "noEntries": "이번 달 실행 기록이 없습니다."
+      },
       "yourTasks": "내 자동화",
       "systemTasks": "시스템 작업",
+      "views": {
+        "label": "자동화 보기",
+        "tasks": "작업",
+        "calendar": "캘린더"
+      },
+      "filter": "필터",
+      "filteredBy": "필터: {{status}}",
+      "commandCondition": "명령으로 실행",
       "instructions": "지침",
       "done": "완료",
       "moreDetails": "상세 정보",
@@ -899,7 +937,7 @@
       "filters": {
         "all": "전체",
         "active": "활성",
-        "paused": "일시 중지",
+        "paused": "비활성화",
         "failed": "확인 필요",
         "system": "시스템"
       },
@@ -909,7 +947,6 @@
         "updated": "업데이트",
         "name": "이름"
       },
-      "search": "작업, 메시지, 연결된 채팅 또는 일정 검색",
       "queue": "대기열",
       "loading": "자동화를 불러오는 중...",
       "noMatches": "이 보기와 일치하는 자동화가 없습니다.",
@@ -928,8 +965,8 @@
         "updated": "업데이트"
       },
       "runNow": "지금 실행",
-      "pause": "일시 중지",
-      "resume": "재개",
+      "pause": "비활성화",
+      "resume": "활성화",
       "edit": "편집",
       "delete": "삭제",
       "protected": "보호됨",
@@ -943,7 +980,7 @@
       "status": {
         "system": "시스템",
         "running": "실행 중",
-        "paused": "일시 중지",
+        "paused": "비활성화",
         "failed": "실패",
         "completed": "완료",
         "noSchedule": "일정 없음",
@@ -958,12 +995,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "매주 {{day}} {{time}}",
         "at": "{{time}}",
         "every": "{{duration}}마다",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "매일 {{time}}",
+        "monthlyAt": "매월 {{day}}일 {{time}}",
         "weekdaysAt": "월요일~금요일 {{time}}",
         "hourlyAt": "매시 {{minute}}분",
         "hourlyWindow": "{{start}}~{{end}} 사이 매시 {{minute}}분",
@@ -971,7 +1010,7 @@
         "custom": "사용자 지정 일정"
       },
       "next": {
-        "paused": "일시 중지",
+        "paused": "비활성화",
         "pending": "실행 중",
         "local": "트리거 대기 중",
         "none": "다음 실행 없음"
@@ -989,7 +1028,10 @@
         "unit": "단위",
         "cronExpression": "Cron 식",
         "timezone": "시간대",
-        "runAt": "실행 시간"
+        "runAt": "실행 시간",
+        "runDate": "실행 날짜",
+        "runTime": "실행 시각",
+        "chooseDate": "날짜 선택"
       },
       "scheduleTypes": {
         "every": "간격",
@@ -1192,7 +1234,7 @@
       "at": "{{time}}",
       "every": "{{duration}}마다",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "로컬 트리거",
       "unknown": "사용자 지정 일정"
     },
@@ -1295,12 +1337,13 @@
       "loading": "자동화를 불러오는 중...",
       "loadFailed": "자동화를 불러오지 못했습니다.",
       "empty": "이 세션에는 아직 자동화가 없습니다.",
+      "openCalendar": "캘린더에서 모두 보기",
       "disabled": "꺼짐",
       "schedule": {
         "at": "{{time}}",
         "every": "{{duration}}마다",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "로컬 트리거",
         "unknown": "사용자 지정 일정"
       },
@@ -1577,6 +1620,8 @@
     "activityWorkingFor": "{{duration}} 동안 작업 중",
     "activityWorked": "작업함",
     "activityWorkedFor": "{{duration}} 동안 작업함",
+    "traceDetailsLoadFailed": "전체 활동 세부 정보를 불러올 수 없습니다.",
+    "retryTraceDetails": "다시 시도",
     "retryConnection": "연결 실패",
     "retryTimeout": "모델 응답 시간 초과",
     "retryRateLimit": "요청 한도 초과",

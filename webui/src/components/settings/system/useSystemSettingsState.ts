@@ -1,9 +1,6 @@
 import { useRef, useState } from "react";
 
-import type {
-  AutomationFilter,
-  AutomationSort,
-} from "@/components/settings/system/AutomationsSettings";
+import type { AutomationFilter } from "@/components/settings/system/AutomationsSettings";
 import {
   DEFAULT_CUSTOM_MCP_FORM,
   type AppsKindFilter,
@@ -53,9 +50,7 @@ export function useSystemSettingsState() {
   const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
   const [apiServiceError, setApiServiceError] = useState<string | null>(null);
   const [appsQuery, setAppsQuery] = useState("");
-  const [automationsQuery, setAutomationsQuery] = useState("");
   const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
-  const [automationsSort, setAutomationsSort] = useState<AutomationSort>("next");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
@@ -87,8 +82,6 @@ export function useSystemSettingsState() {
     automationsError,
     automationsFilter,
     automationsLoading,
-    automationsQuery,
-    automationsSort,
     cliApps,
     cliAppsAction,
     cliAppsError,
@@ -130,8 +123,6 @@ export function useSystemSettingsState() {
     setAutomationsError,
     setAutomationsFilter,
     setAutomationsLoading,
-    setAutomationsQuery,
-    setAutomationsSort,
     setCliApps,
     setCliAppsAction,
     setCliAppsError,

@@ -154,6 +154,11 @@
       },
       "maxAttachmentsPerEmail": {
         "label": "Maximum attachments"
+      },
+      "trustedAuthservIds": {
+        "label": "Trusted authentication services",
+        "placeholder": "mx.google.com, comma separated",
+        "help": "Exact authserv-id values added by the receiving mail service. Required when SPF or DKIM verification is on."
       }
     }
   }

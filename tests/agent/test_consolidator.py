@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.memory import (
+    _ARCHIVE_TOOL_RESULT,
     _HISTORY_ENTRY_HARD_CAP,
     Consolidator,
     MemoryStore,
@@ -197,6 +198,57 @@ class TestTurnTranscriptSummary:
         assert provider_context.conversation_state.pending_messages == [
             call["messages"][-1],
         ]
+
+    async def test_native_compaction_recovers_tool_call_from_response_state(
+        self,
+        consolidator,
+        mock_provider,
+        runtime,
+    ):
+        accepted = [
+            {"role": "system", "content": "stable system"},
+            {"role": "user", "content": "raw history must not be replayed"},
+        ]
+        incoming_state = _provider_state()
+        response_state = ProviderConversationState(
+            kind="openai_responses",
+            provider="openai:test",
+            model="test-model",
+            version=1,
+            payload={"items": [{"type": "function_call", "call_id": "call-1"}]},
+        )
+        mock_provider.can_resume_conversation_state.return_value = True
+        mock_provider.chat_stream_with_retry.side_effect = [
+            LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id="call-1", name="inspect", arguments={})],
+                finish_reason="tool_calls",
+                provider_state=response_state,
+            ),
+            LLMResponse(content="replacement checkpoint", finish_reason="stop"),
+        ]
+
+        result = await consolidator.summarize_provider_compaction(
+            incoming_state,
+            accepted,
+            "previous checkpoint",
+            runtime=runtime,
+            session_key="test:turn",
+            tools=[{"type": "function", "function": {"name": "inspect"}}],
+        )
+
+        assert result == "replacement checkpoint"
+        first_call, recovery_call = mock_provider.chat_stream_with_retry.await_args_list
+        assert first_call.kwargs["tools"] == recovery_call.kwargs["tools"] == []
+        recovery_context = recovery_call.kwargs["provider_context"]
+        assert recovery_context.conversation_state is not None
+        assert recovery_context.conversation_state.payload == response_state.payload
+        assert recovery_context.conversation_state.pending_messages == [{
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "inspect",
+            "content": _ARCHIVE_TOOL_RESULT,
+        }]
 
 
 class TestConsolidatorSummarize:
@@ -1190,18 +1242,30 @@ class TestCompactIdleSession:
         ]
 
     @pytest.mark.asyncio
-    async def test_tool_call_response_uses_raw_fallback(
+    async def test_tool_call_response_retries_with_disabled_tool_results(
         self,
         real_consolidator,
         mock_provider,
         store,
         runtime,
     ):
-        mock_provider.chat_stream_with_retry.return_value = LLMResponse(
-            content=None,
-            tool_calls=[ToolCallRequest(id="call-1", name="lookup", arguments={})],
-            finish_reason="tool_calls",
-        )
+        tools = [
+            {"type": "function", "function": {"name": "lookup"}},
+            {"type": "function", "function": {"name": "read_file"}},
+        ]
+        real_consolidator.archiver._get_tool_definitions.return_value = tools
+        mock_provider.chat_stream_with_retry.side_effect = [
+            LLMResponse(
+                content=None,
+                tool_calls=[
+                    ToolCallRequest(id="call-1", name="lookup", arguments={}),
+                    ToolCallRequest(id="call-2", name="read_file", arguments={}),
+                ],
+                finish_reason="stop",
+                provider_state=_provider_state(),
+            ),
+            LLMResponse(content="Recovered archive summary.", finish_reason="stop"),
+        ]
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:unexpected-tool")
         session.add_message("user", "remember this")
@@ -1213,13 +1277,65 @@ class TestCompactIdleSession:
             runtime=runtime,
         )
 
+        assert result == "Recovered archive summary."
+        assert mock_provider.chat_stream_with_retry.await_count == 2
+        first_call, recovery_call = mock_provider.chat_stream_with_retry.await_args_list
+        assert first_call.kwargs["tools"] == recovery_call.kwargs["tools"] == tools
+        assert first_call.kwargs["provider_context"] is None
+        assert recovery_call.kwargs["provider_context"] is None
+        assert "tool_choice" not in first_call.kwargs
+        assert "tool_choice" not in recovery_call.kwargs
+        recovery_messages = recovery_call.kwargs["messages"]
+        assert [message["role"] for message in recovery_messages[-3:]] == [
+            "assistant",
+            "tool",
+            "tool",
+        ]
+        assert [message["tool_call_id"] for message in recovery_messages[-2:]] == [
+            "call-1",
+            "call-2",
+        ]
+        assert all(
+            "does not execute tools" in message["content"]
+            for message in recovery_messages[-2:]
+        )
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [entry["content"] for entry in entries] == ["Recovered archive summary."]
+        assert sessions.get_or_create("cli:unexpected-tool").last_archived == 2
+
+    @pytest.mark.asyncio
+    async def test_repeated_tool_call_response_uses_raw_fallback(
+        self,
+        real_consolidator,
+        mock_provider,
+        store,
+        runtime,
+    ):
+        tool_response = LLMResponse(
+            content=None,
+            tool_calls=[ToolCallRequest(id="call-1", name="lookup", arguments={})],
+            finish_reason="tool_calls",
+        )
+        mock_provider.chat_stream_with_retry.side_effect = [tool_response, tool_response]
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:repeated-tool")
+        session.add_message("user", "remember this")
+        session.add_message("assistant", "important answer")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:repeated-tool",
+            runtime=runtime,
+        )
+
         assert result is not None
         assert "[RAW]" in result
+        assert mock_provider.chat_stream_with_retry.await_count == 2
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert entries[0]["content"].startswith("[RAW] ")
         assert "important answer" in entries[0]["content"]
-        assert sessions.get_or_create("cli:unexpected-tool").last_archived == 2
+        assert sessions.get_or_create("cli:repeated-tool").last_archived == 2
 
     @pytest.mark.asyncio
     async def test_empty_response_uses_raw_fallback(

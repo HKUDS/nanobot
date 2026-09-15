@@ -35,7 +35,8 @@ def test_workspace_payload_is_config_data_dir_scoped(tmp_path, monkeypatch) -> N
     payload = workspaces_payload(
         default_workspace=default,
         default_restrict_to_workspace=False,
-        controls_available=True,
+        can_change_project=True,
+        can_use_full_access=True,
     )
 
     assert payload["default_scope"]["project_path"] == str(default.resolve())
@@ -45,7 +46,7 @@ def test_workspace_payload_is_config_data_dir_scoped(tmp_path, monkeypatch) -> N
     assert payload["controls"]["can_pick_folder"] is False
 
 
-def test_workspace_payload_hides_mutable_state_when_controls_unavailable(
+def test_workspace_payload_allows_remote_project_selection_without_full_access(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -56,13 +57,33 @@ def test_workspace_payload_hides_mutable_state_when_controls_unavailable(
     payload = workspaces_payload(
         default_workspace=default,
         default_restrict_to_workspace=False,
-        controls_available=False,
+        can_change_project=True,
+        can_use_full_access=False,
     )
 
     assert payload["default_scope"]["project_path"] == str(default.resolve())
-    assert payload["controls"]["can_change_project"] is False
+    assert payload["controls"]["can_change_project"] is True
     assert payload["controls"]["can_use_full_access"] is False
     assert payload["controls"]["can_pick_folder"] is False
+
+
+def test_workspace_payload_hides_project_selection_when_unavailable(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    default.mkdir()
+
+    payload = workspaces_payload(
+        default_workspace=default,
+        default_restrict_to_workspace=False,
+        can_change_project=False,
+        can_use_full_access=False,
+    )
+
+    assert payload["controls"]["can_change_project"] is False
+    assert payload["controls"]["can_use_full_access"] is False
 
 
 def test_workspace_payload_advertises_native_folder_picker(tmp_path, monkeypatch) -> None:
@@ -73,7 +94,8 @@ def test_workspace_payload_advertises_native_folder_picker(tmp_path, monkeypatch
     payload = workspaces_payload(
         default_workspace=default,
         default_restrict_to_workspace=False,
-        controls_available=True,
+        can_change_project=True,
+        can_use_full_access=True,
         folder_picker_available=True,
     )
 
@@ -91,7 +113,8 @@ def test_workspace_payload_uses_webui_default_access_mode(tmp_path, monkeypatch)
     payload = workspaces_payload(
         default_workspace=default,
         default_restrict_to_workspace=True,
-        controls_available=True,
+        can_change_project=True,
+        can_use_full_access=True,
     )
 
     assert payload["default_access_mode"] == "full"
@@ -120,7 +143,11 @@ def test_webui_default_access_applies_to_unscoped_old_sessions(tmp_path, monkeyp
     )
 
     scope = controller.scope_for_session_key("websocket:old-chat")
-    new_scope = controller.scope_for_new_chat({}, controls_available=True)
+    new_scope = controller.scope_for_new_chat(
+        {},
+        can_change_project=True,
+        can_use_full_access=True,
+    )
 
     assert scope.project_path == default.resolve()
     assert scope.access_mode == "full"
@@ -301,7 +328,8 @@ def test_remote_existing_chat_can_reduce_its_workspace_access(tmp_path, monkeypa
         },
         chat_id="remote-chat",
         chat_running=False,
-        controls_available=False,
+        can_change_project=True,
+        can_use_full_access=False,
     )
 
     assert scope.project_path == project.resolve()
@@ -313,10 +341,11 @@ def test_remote_existing_chat_can_reduce_its_workspace_access(tmp_path, monkeypa
     [
         (False, "default", "restricted", True),
         (True, "default", "full", False),
-        (False, "other", "restricted", False),
+        (False, "other", "restricted", True),
+        (False, "other", "full", False),
     ],
 )
-def test_remote_new_chat_only_allows_non_escalating_scope_change(
+def test_remote_new_chat_allows_project_selection_only_in_restricted_mode(
     tmp_path,
     monkeypatch,
     default_restricted: bool,
@@ -344,7 +373,8 @@ def test_remote_new_chat_only_allows_non_escalating_scope_change(
                     "access_mode": access_mode,
                 }
             },
-            controls_available=False,
+            can_change_project=True,
+            can_use_full_access=False,
         )
 
     if allowed:
@@ -352,5 +382,39 @@ def test_remote_new_chat_only_allows_non_escalating_scope_change(
         assert scope.project_path == requested_path.resolve()
         assert scope.access_mode == access_mode
     else:
-        with pytest.raises(WorkspaceScopeError, match="workspace controls are localhost-only"):
+        with pytest.raises(
+            WorkspaceScopeError,
+            match="full workspace access is unavailable for this connection",
+        ):
             resolve()
+
+
+def test_project_selection_can_remain_disabled_for_untrusted_connections(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    default = tmp_path / "default"
+    other = tmp_path / "other"
+    default.mkdir()
+    other.mkdir()
+    controller = WebUIWorkspaceController(
+        session_manager=None,
+        default_workspace=default,
+        default_restrict_to_workspace=True,
+    )
+
+    with pytest.raises(
+        WorkspaceScopeError,
+        match="project selection is unavailable for this connection",
+    ):
+        controller.scope_for_new_chat(
+            {
+                "workspace_scope": {
+                    "project_path": str(other),
+                    "access_mode": "restricted",
+                }
+            },
+            can_change_project=False,
+            can_use_full_access=False,
+        )

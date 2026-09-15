@@ -483,7 +483,7 @@ function PresetOption({
       className={cn(
         floatingItemClassName,
         floatingItemFocusClassName,
-        "flex min-h-9 w-full cursor-pointer gap-2.5 px-2.5 py-1.5 text-left hover:bg-muted/55",
+        "flex min-h-9 w-full cursor-pointer gap-2.5 px-2.5 py-1.5 text-left hover:bg-muted/55 max-sm:min-h-11",
         selected && "bg-muted/55 text-foreground",
       )}
     >
@@ -493,8 +493,8 @@ function PresetOption({
         provider={preset.provider}
         isHero={false}
       />
-      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden whitespace-nowrap">
-        <span className="shrink-0 text-[13px] font-medium text-foreground">{preset.name}</span>
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden whitespace-nowrap max-sm:flex-col max-sm:items-start max-sm:gap-0.5 max-sm:whitespace-normal">
+        <span className="shrink-0 text-[13px] font-medium text-foreground max-sm:max-w-full max-sm:break-words">{preset.name}</span>
         {detail && detail !== preset.name ? (
           <span className="truncate text-[12px] text-muted-foreground">{detail}</span>
         ) : null}

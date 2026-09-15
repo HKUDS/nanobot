@@ -7,15 +7,20 @@
     },
     "error": {
       "title": "Couldn't reach nanobot",
-      "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
+      "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and this browser can reach its WebUI address."
     },
     "auth": {
-      "label": "Password",
+      "title": "Connect to nanobot",
+      "label": "WebUI password",
+      "helpTitle": "Where can I find the password?",
+      "helpConfig": "On the device running nanobot, open the config file, usually at:",
+      "helpSecret": "Copy the value of this field as your password:",
+      "helpFallback": "If that value is empty, use <code>channels.websocket.token</code>.",
       "showPassword": "Show password",
       "hidePassword": "Hide password",
       "submit": "Connect",
-      "required": "Enter your password.",
-      "invalid": "Incorrect password. Try again."
+      "required": "Enter password",
+      "invalid": "Incorrect password"
     },
     "account": {
       "section": "Account",
@@ -1086,9 +1091,42 @@
       "notEnabled": "Not enabled"
     },
     "automations": {
-      "viewOptions": "Search and filter",
+      "taskInfo": "Task information",
+      "runDetails": {
+        "loading": "Loading response…",
+        "loadError": "Couldn’t load the response.",
+        "retry": "Retry",
+        "emptyOutput": "No reply was generated.",
+        "result": "Result",
+        "duration": "Duration",
+        "noOutput": "This record doesn’t include the response text."
+      },
+      "create": "Create automation",
+      "createPrompt": "What would you like nanobot to automate?",
+      "createInput": "Describe an automation",
+      "errors": {
+        "legacyMissingDestination": "This older automation is missing its delivery destination. Recreate it from the linked chat to continue."
+      },
+      "calendar": {
+        "previousMonth": "Previous month",
+        "nextMonth": "Next month",
+        "today": "Today",
+        "planned": "Planned",
+        "recorded": "Recorded",
+        "more": "+{{count}} more",
+        "less": "Show less",
+        "noEntries": "No runs in this month."
+      },
       "yourTasks": "Your automations",
       "systemTasks": "System tasks",
+      "views": {
+        "label": "Automation view",
+        "tasks": "Tasks",
+        "calendar": "Calendar"
+      },
+      "filter": "Filter",
+      "filteredBy": "Filter: {{status}}",
+      "commandCondition": "Triggered by command",
       "instructions": "Instructions",
       "done": "Done",
       "moreDetails": "More details",
@@ -1099,7 +1137,7 @@
       "filters": {
         "all": "All",
         "active": "Active",
-        "paused": "Paused",
+        "paused": "Disabled",
         "failed": "Needs attention",
         "system": "System"
       },
@@ -1109,7 +1147,6 @@
         "updated": "Updated",
         "name": "Name"
       },
-      "search": "Search task, message, linked chat, or schedule",
       "queue": "Queue",
       "loading": "Loading automations...",
       "noMatches": "No automations match this view.",
@@ -1128,8 +1165,8 @@
         "updated": "Updated"
       },
       "runNow": "Run now",
-      "pause": "Pause",
-      "resume": "Resume",
+      "pause": "Disable",
+      "resume": "Enable",
       "edit": "Edit",
       "delete": "Delete",
       "protected": "Protected",
@@ -1143,7 +1180,7 @@
       "status": {
         "system": "System",
         "running": "Running now",
-        "paused": "Paused",
+        "paused": "Disabled",
         "failed": "Failed",
         "completed": "Completed",
         "noSchedule": "No schedule",
@@ -1158,12 +1195,14 @@
         "cli": "CLI"
       },
       "schedule": {
+        "weeklyAt": "Every {{day}} at {{time}}",
         "at": "At {{time}}",
         "every": "Every {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
-        "withTz": "{{summary}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
+        "withTz": "{{summary}} ({{tz}})",
         "dailyAt": "Daily at {{time}}",
+        "monthlyAt": "Monthly on day {{day}} at {{time}}",
         "weekdaysAt": "Weekdays at {{time}}",
         "hourlyAt": "Hourly at :{{minute}}",
         "hourlyWindow": "Hourly {{start}}-{{end}} at :{{minute}}",
@@ -1171,7 +1210,7 @@
         "custom": "Custom schedule"
       },
       "next": {
-        "paused": "Paused",
+        "paused": "Disabled",
         "pending": "Running now",
         "local": "Waiting for trigger",
         "none": "No next run"
@@ -1189,7 +1228,10 @@
         "unit": "Unit",
         "cronExpression": "Cron expression",
         "timezone": "Timezone",
-        "runAt": "Run at"
+        "runAt": "Run at",
+        "runDate": "Run date",
+        "runTime": "Run time",
+        "chooseDate": "Choose date"
       },
       "scheduleTypes": {
         "every": "Interval",
@@ -1392,7 +1434,7 @@
       "at": "{{time}}",
       "every": "Every {{duration}}",
       "cron": "Cron {{expr}}",
-      "cronWithTz": "Cron {{expr}} · {{tz}}",
+      "cronWithTz": "Cron {{expr}} ({{tz}})",
       "local": "Local trigger",
       "unknown": "Custom schedule"
     },
@@ -1495,12 +1537,13 @@
       "loading": "Loading automations...",
       "loadFailed": "Could not load automations.",
       "empty": "No automations in this session yet.",
+      "openCalendar": "View all in calendar",
       "disabled": "Off",
       "schedule": {
         "at": "{{time}}",
         "every": "Every {{duration}}",
         "cron": "Cron {{expr}}",
-        "cronWithTz": "Cron {{expr}} · {{tz}}",
+        "cronWithTz": "Cron {{expr}} ({{tz}})",
         "local": "Local trigger",
         "unknown": "Custom schedule"
       },
@@ -1750,6 +1793,8 @@
     "activityWorkingFor": "Working for {{duration}}",
     "activityWorked": "Worked",
     "activityWorkedFor": "Worked for {{duration}}",
+    "traceDetailsLoadFailed": "Full activity details could not be loaded.",
+    "retryTraceDetails": "Retry",
     "retryConnection": "Connection failed",
     "retryTimeout": "Model timed out",
     "retryRateLimit": "Rate limited",

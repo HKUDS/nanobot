@@ -15,18 +15,14 @@ function renderAutomationDetail(channel: string) {
         enabled: true,
         schedule: { kind: "every", every_ms: 60_000 },
         payload: { message: "Summarize updates" },
-        state: {},
+        state: { next_run_at_ms: Date.now() + 60_000 },
         origin: { channel },
       }] }}
       loading={false}
-      query=""
       filter="all"
-      sort="name"
       actionKey={null}
       error={null}
-      onQueryChange={vi.fn()}
       onFilterChange={vi.fn()}
-      onSortChange={vi.fn()}
       onAction={vi.fn()}
       onRequestEdit={vi.fn()}
       onRequestDelete={vi.fn()}

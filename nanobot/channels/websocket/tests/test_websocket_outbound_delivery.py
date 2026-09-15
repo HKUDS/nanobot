@@ -109,6 +109,8 @@ async def _wait_for_retire_tasks(channel: WebSocketChannel) -> None:
 @pytest.mark.asyncio
 async def test_message_bus_delivers_to_ten_tuis_with_one_blocked_connection() -> None:
     channel = _channel()
+    # Keep disk latency out of the connection delivery synchronization check.
+    channel._persist_turn_transcript_event = MagicMock(return_value=True)
     bus = MessageBus()
     config = Config.model_validate({"channels": {"websocket": {"enabled": False}}})
     manager = ChannelManager(config, bus)

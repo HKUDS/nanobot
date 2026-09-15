@@ -155,6 +155,11 @@
       },
       "maxAttachmentsPerEmail": {
         "label": "Máximo de anexos"
+      },
+      "trustedAuthservIds": {
+        "label": "Serviços de autenticação confiáveis",
+        "placeholder": "mx.google.com, separados por vírgulas",
+        "help": "Valores authserv-id exatos adicionados pelo serviço receptor. Obrigatório ao verificar SPF ou DKIM."
       }
     }
   }

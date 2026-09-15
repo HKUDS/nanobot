@@ -59,6 +59,7 @@ export default {
         { key: "channels.email.allowFrom", section: "access" },
         { key: "channels.email.verifyDkim", section: "security" },
         { key: "channels.email.verifySpf", section: "security" },
+        { key: "channels.email.trustedAuthservIds", section: "security" },
       ],
     },
   },

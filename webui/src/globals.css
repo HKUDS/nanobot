@@ -61,6 +61,7 @@
     --sidebar-border: 40 8% 90.5%;
     --settings-canvas: var(--background);
     --settings-surface: 60 6% 96.7%;
+    --automation-view-track: hsl(0 0% 91%);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
@@ -103,6 +104,7 @@
     --sidebar-border: var(--border);
     --settings-canvas: var(--background);
     --settings-surface: var(--card);
+    --automation-view-track: hsl(var(--muted) / 0.65);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
@@ -602,6 +604,17 @@
     }
   }
 
+  .thread-workspace {
+    container: thread-workspace / inline-size;
+  }
+  /* Keep room for the 49.5rem message column and controls in the side margin. */
+  @container thread-workspace (max-width: 72rem) {
+    .thread-workspace > * {
+      --thread-header-position: relative;
+      --thread-prompt-inset: 1rem;
+    }
+  }
+
   .workbench-pane {
     transform-origin: top left;
   }
@@ -699,6 +712,11 @@
     overflow-x: auto;
   }
 
+  /* Prism's Markdown table tokens must not pick up Tailwind's table layout. */
+  .not-prose pre .token.table {
+    display: inline;
+  }
+
   /* Wide markdown tables scroll horizontally within the conversation column.
      Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
      custom `table` component (see MarkdownTextRenderer); min-w-max on the
@@ -756,9 +774,8 @@
 }
 
 /*
- * Composer controls compress against their actual container, not the viewport.
- * Permission state has priority over the model label; both retain their full
- * accessible names and tooltip text when their visible labels are shortened.
+ * Composer controls adapt to their actual container, not just the viewport.
+ * Narrow layouts move access and usage into a separate metadata row.
  */
 .thread-composer-surface {
   container-name: thread-composer;
@@ -917,84 +934,68 @@
   }
 }
 
-@container thread-composer (max-width: 21rem) {
-  .thread-composer-footer {
-    column-gap: 0.25rem;
-    padding-inline: 0.5rem;
-  }
-
-  .thread-composer-footer-primary,
-  .thread-composer-footer-actions {
-    gap: 0.25rem;
-  }
-
-  .thread-composer-access {
-    max-width: 6.5rem;
-    padding-inline: 0.5rem;
-    font-size: 0.71875rem;
-  }
-
-  .thread-composer-access-icon {
-    margin-right: 0.25rem;
-  }
-
-  .thread-composer-access-chevron {
-    margin-left: 0.25rem;
-  }
-
-  .thread-composer-access-label-full {
-    display: none;
-  }
-
-  .thread-composer-access-label-short {
-    display: inline;
-  }
+/* Narrow composers separate message actions from permissions and usage instead
+ * of shrinking touch targets or hiding the active model and access state. */
+[data-compact-controls] .thread-composer-footer {
+  column-gap: 0.25rem;
+  padding: 0 0.5rem 0.5rem;
 }
 
-@container thread-composer (max-width: 19rem) {
-  .thread-composer-model-badge {
-    width: 2rem;
-    flex: none;
-  }
-
-  .thread-composer-model-badge .composer-model-pill {
-    width: 100%;
-    justify-content: center;
-    gap: 0;
-    padding-inline: 0;
-  }
-
-  .thread-composer-model-label {
-    display: none;
-  }
+[data-compact-controls] .thread-composer-footer-primary,
+[data-compact-controls] .thread-composer-footer-actions {
+  gap: 0.25rem;
 }
 
-@container thread-composer (max-width: 16rem) {
-  .thread-composer-access {
-    width: 2rem;
-    flex: none;
-    justify-content: center;
-    padding-inline: 0;
-  }
-
-  .thread-composer-access-icon {
-    margin-right: 0;
-  }
-
-  .thread-composer-access-label-short,
-  .thread-composer-access-chevron {
-    display: none;
-  }
+[data-compact-controls] .thread-composer-footer-actions {
+  flex: none;
+  max-width: none;
 }
 
-@container thread-composer (max-width: 15rem) {
-  .thread-composer-action.touch-target,
-  .thread-composer-access.touch-target {
-    width: 2rem;
-    min-width: 2rem;
-    height: 2rem;
-    min-height: 2rem;
-  }
+[data-compact-controls] .thread-composer-action.touch-target {
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+[data-compact-controls] .thread-composer-model-badge {
+  max-width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+}
+
+/* Keep a 44px hit area around the quieter 36px attachment/send circles.
+ * The transparent pseudo-element belongs to the button, including its disabled
+ * state; margins reserve its space so adjacent controls never overlap it. */
+[data-compact-controls] .thread-composer-round-action.touch-target {
+  position: relative;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  margin: 0.25rem;
+}
+
+[data-compact-controls] .thread-composer-round-action::before {
+  content: "";
+  position: absolute;
+  inset: -0.3125rem;
+  border-radius: inherit;
+}
+
+[data-compact-controls] .composer-model-pill {
+  height: 2.25rem;
+}
+
+.thread-composer-meta .touch-target {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.thread-composer-meta .thread-composer-access {
+  max-width: 100%;
+  padding-inline: 0.5rem;
 }
 @media (forced-colors: active) {
   [data-workbench-move-handle]:focus-visible {
@@ -1021,27 +1022,145 @@
     --settings-margin: 0.75rem;
     max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
   }
+  .settings-grid.settings-feature-page.settings-automations-grid {
+    max-inline-size: calc(60rem + 2 * var(--settings-margin));
+  }
   /* Stack a task's status below its title when the content column is narrow. */
   .automations-page {
+    --settings-inset: 1rem;
     container: automations / inline-size;
   }
-  .automation-task-state {
-    grid-column: 1;
-    grid-row: 2;
+  .automation-create-composer .thread-composer-surface {
+    max-inline-size: none;
   }
-  .automation-task-chevron {
-    grid-column: 2;
-    grid-row: 1 / span 2;
+  .automation-create-composer .thread-composer-input textarea {
+    padding-inline: var(--settings-inset);
   }
-  @container automations (min-width: 36rem) {
-    .automation-task-row { grid-template-columns: minmax(0, 1fr) auto auto; }
-    .automation-task-state {
-      grid-column: 2;
-      grid-row: 1;
-      max-width: 18rem;
-      justify-content: flex-end;
+  .automation-view-switch .segmented-control button {
+    padding-inline: calc(var(--settings-inset) - 0.5rem);
+  }
+  .automation-panel-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    min-block-size: 4rem;
+    padding-block: 0.75rem;
+    padding-inline: 0.75rem 0.25rem;
+  }
+  .automation-create-composer .thread-composer-collapsible-layout {
+    padding-block-start: 0;
+  }
+  /* Match the main sidebar's lg visibility; its collapsed rail has no labels. */
+  @media (min-width: 1024px) {
+    .settings-feature-page[data-main-navigation-expanded="true"] .settings-feature-header {
+      margin-block-end: 0;
     }
-    .automation-task-chevron { grid-column: 3; grid-row: 1; }
+    .settings-feature-page[data-main-navigation-expanded="true"] .settings-feature-header h1 {
+      @apply sr-only;
+    }
+  }
+  .automation-run-at-picker {
+    container: automation-run-at / inline-size;
+  }
+  @container automation-run-at (min-width: 18rem) {
+    .automation-run-at-fields { grid-template-columns: minmax(0, 1fr) 7rem; }
+  }
+  .automation-panel-filters {
+    margin-inline-start: auto;
+  }
+  .thread-composer-collapsible-layout {
+    container: composer-layout / inline-size;
+  }
+  .thread-composer-collapsible .thread-composer-input textarea:placeholder-shown {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+    display: block;
+    block-size: 3.125rem !important;
+  }
+  @container composer-layout (min-width: 40rem) {
+    .thread-composer-collapsible .thread-composer-input {
+      inline-size: 100%;
+    }
+    .thread-composer-collapsible .thread-composer-input textarea {
+      display: block;
+      min-block-size: 3.5rem;
+      padding-block: 1.125rem;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-input {
+      inline-size: max(0px, calc(100% - var(--composer-compact-controls-width, 15rem) - 1.5rem));
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+      display: block;
+      block-size: 3.5rem !important;
+      min-block-size: 3.5rem;
+      padding-block: 1.125rem;
+    }
+    .thread-composer-collapsible .thread-composer-footer {
+      min-block-size: 3.5rem;
+      margin-block-start: 0;
+      padding: 0.5rem;
+      pointer-events: none;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer {
+      margin-block-start: -3.5rem;
+    }
+    .thread-composer-collapsible .thread-composer-footer-primary {
+      flex: 1 0 auto;
+      margin-inline-start: auto;
+      pointer-events: auto;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer-primary {
+      flex-grow: 0;
+    }
+    .thread-composer-collapsible .thread-composer-footer-actions {
+      max-inline-size: none;
+      margin-inline-start: 0;
+      pointer-events: auto;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .thread-composer-collapsible .thread-composer-input {
+        transition: inline-size 220ms ease-out;
+      }
+      .thread-composer-collapsible .thread-composer-footer {
+        transition: margin-block-start 220ms ease-out;
+      }
+      .thread-composer-collapsible .thread-composer-footer-primary {
+        transition: flex-grow 220ms ease-out;
+      }
+    }
+  }
+  .automation-calendar-grid { display: none; }
+  .automation-calendar-agenda { display: block; }
+  @container automations (min-width: 44rem) {
+    .automation-calendar-grid { display: block; }
+    .automation-calendar-agenda { display: none; }
+    .automation-calendar-weekdays {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+    .automation-calendar-weekdays > div {
+      padding: 8px 10px;
+      color: hsl(var(--muted-foreground));
+      font-size: 10px;
+      line-height: 16px;
+      text-align: end;
+    }
+    .automation-calendar-month {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+    .automation-calendar-day {
+      min-block-size: 112px;
+      min-inline-size: 0;
+      border-inline-end: 1px solid hsl(var(--border) / 0.55);
+      border-block-end: 1px solid hsl(var(--border) / 0.55);
+    }
+    .automation-calendar-day:nth-child(7n) { border-inline-end: 0; }
+    .automation-calendar-day:nth-last-child(-n + 7) { border-block-end: 0; }
   }
   .settings-stack > :not([hidden]) ~ :not([hidden]) {
     margin-block-start: var(--settings-module-gap, 20px);
