@@ -1,4 +1,4 @@
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   ChevronDown,
@@ -11,6 +11,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Search,
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -24,6 +25,10 @@ import {
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { Button } from "@/components/ui/button";
 import {
+  ComboboxOption,
+  useComboboxNavigation,
+} from "@/components/ui/combobox";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -36,10 +41,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -634,6 +639,145 @@ function ProviderAdvancedOptions({
     </div>
   );
 }
+export function AddProviderCombobox({
+  providers,
+  showBrandLogos,
+  onSelectProvider,
+  onSelectCustom,
+}: {
+  providers: SettingsPayload["providers"];
+  showBrandLogos: boolean;
+  onSelectProvider: (provider: string) => void;
+  onSelectCustom: () => void;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (open) setQuery("");
+  }, [open]);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleProviders = useMemo(() => {
+    if (!normalizedQuery) return providers;
+    return providers.filter((provider) =>
+      [provider.name, provider.label].some((field) =>
+        field.toLowerCase().includes(normalizedQuery),
+      ),
+    );
+  }, [normalizedQuery, providers]);
+
+  const navigationValues = useMemo(
+    () => [CUSTOM_PROVIDER_CREATION_KEY, ...visibleProviders.map((provider) => provider.name)],
+    [visibleProviders],
+  );
+
+  const select = (value: string) => {
+    setOpen(false);
+    setQuery("");
+    if (value === CUSTOM_PROVIDER_CREATION_KEY) {
+      onSelectCustom();
+    } else {
+      onSelectProvider(value);
+    }
+  };
+
+  const navigation = useComboboxNavigation({
+    open,
+    values: navigationValues,
+    selectedValue: "",
+    onSelect: select,
+    onClose: () => setOpen(false),
+  });
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-state={open ? "open" : "closed"}
+          className="group settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
+              <Plus className="h-5 w-5" aria-hidden />
+            </span>
+            <span className="truncate text-[14px] font-medium text-foreground">
+              {tx("settings.providers.addOwnProvider", "Add your own model provider")}
+            </span>
+          </span>
+          <ChevronDown
+            className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
+            aria-hidden
+          />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        className="w-[380px] max-w-[calc(100vw-2rem)] p-1.5"
+      >
+        <div className="p-1 pb-1.5">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              {...navigation.inputProps}
+              placeholder={tx("settings.providers.searchPlaceholder", "Search providers")}
+              aria-label={tx("settings.providers.searchPlaceholder", "Search providers")}
+              className="h-8 rounded-full pl-8 pr-3 text-[12px]"
+            />
+          </div>
+        </div>
+        <div
+          {...navigation.listProps}
+          className="max-h-[16rem] overflow-y-auto pr-0.5 scrollbar-thin scrollbar-track-transparent"
+        >
+          <ComboboxOption
+            key={CUSTOM_PROVIDER_CREATION_KEY}
+            {...navigation.getOptionProps(CUSTOM_PROVIDER_CREATION_KEY)}
+            className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2"
+          >
+            <ProviderIcon provider="custom" showBrandLogos={showBrandLogos} />
+            <span className="truncate text-[13px] font-medium">
+              {tx("settings.providers.customProvider", "Custom provider")}
+            </span>
+          </ComboboxOption>
+          {visibleProviders.length > 0 ? (
+            <>
+              <div role="separator" className="my-1 h-px bg-border" />
+              {visibleProviders.map((provider) => (
+                <ComboboxOption
+                  key={provider.name}
+                  {...navigation.getOptionProps(provider.name)}
+                  className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2"
+                >
+                  <ProviderIcon
+                    provider={provider.name}
+                    showBrandLogos={showBrandLogos}
+                  />
+                  <span className="truncate text-[13px] font-medium">
+                    {provider.label}
+                  </span>
+                </ComboboxOption>
+              ))}
+            </>
+          ) : (
+            <div className="px-2.5 py-2 text-[12px] text-muted-foreground">
+              {tx("settings.providers.noMatches", "No providers match this search.")}
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 
 export function ProvidersSettings({
   settings,
@@ -1177,66 +1321,17 @@ export function ProvidersSettings({
             : null}
           {customProviderForm}
           {!expandedProvider && !creatingCustomProvider ? (
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="group settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
-                      <Plus className="h-5 w-5" aria-hidden />
-                    </span>
-                    <span className="truncate text-[14px] font-medium text-foreground">
-                      {tx(
-                        "settings.providers.addOwnProvider",
-                        "Add your own model provider",
-                      )}
-                    </span>
-                  </span>
-                  <ChevronDown
-                    className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
-                    aria-hidden
-                  />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                sideOffset={8}
-                className="max-h-[24rem] w-[380px] max-w-[calc(100vw-2rem)] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
-              >
-                <DropdownMenuItem
-                  onSelect={beginCustomProviderCreation}
-                  className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2 focus:bg-muted/85 focus:text-foreground"
-                >
-                  <ProviderIcon provider="custom" showBrandLogos={showBrandLogos} />
-                  <span className="truncate text-[13px] font-medium">
-                    {tx("settings.providers.customProvider", "Custom provider")}
-                  </span>
-                </DropdownMenuItem>
-                {unconfiguredProviders.length > 0 ? <DropdownMenuSeparator /> : null}
-                {unconfiguredProviders.map((provider) => (
-                  <DropdownMenuItem
-                    key={provider.name}
-                    onSelect={() => {
-                      setCreatingCustomProvider(false);
-                      if (expandedProvider !== provider.name) {
-                        onToggleProvider(provider.name);
-                      }
-                    }}
-                    className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2 focus:bg-muted/85 focus:text-foreground"
-                  >
-                    <ProviderIcon
-                      provider={provider.name}
-                      showBrandLogos={showBrandLogos}
-                    />
-                    <span className="truncate text-[13px] font-medium">
-                      {provider.label}
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <AddProviderCombobox
+              providers={unconfiguredProviders}
+              showBrandLogos={showBrandLogos}
+              onSelectCustom={beginCustomProviderCreation}
+              onSelectProvider={(provider) => {
+                setCreatingCustomProvider(false);
+                if (expandedProvider !== provider) {
+                  onToggleProvider(provider);
+                }
+              }}
+            />
           ) : null}
         </SettingsGroup>
       </section>
