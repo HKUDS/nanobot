@@ -46,7 +46,7 @@ class ToolLoader:
             try:
                 module = importlib.import_module(f".{module_name}", self._package.__name__)
             except Exception:
-                logger.exception("Failed to import tool module: %s", module_name)
+                logger.exception("Failed to import tool module: {}", module_name)
                 continue
             for attr_name in dir(module):
                 attr = getattr(module, attr_name)
@@ -85,7 +85,7 @@ class ToolLoader:
                 ):
                     plugins[ep.name] = cls
             except Exception:
-                logger.exception("Failed to load tool plugin: %s", ep.name)
+                logger.exception("Failed to load tool plugin: {}", ep.name)
         self._plugins = plugins
         return plugins
 
@@ -107,12 +107,12 @@ class ToolLoader:
                     if registry.has(tool.name):
                         if is_plugin_source and tool.name in builtin_names:
                             logger.warning(
-                                "Plugin %s skipped: conflicts with built-in tool %s",
+                                "Plugin {} skipped: conflicts with built-in tool {}",
                                 cls_label, tool.name,
                             )
                             continue
                         logger.warning(
-                            "Tool name collision: %s from %s overwrites existing",
+                            "Tool name collision: {} from {} overwrites existing",
                             tool.name, cls_label,
                         )
                     registry.register(tool)
@@ -120,7 +120,7 @@ class ToolLoader:
                     if not is_plugin_source:
                         builtin_names.add(tool.name)
                 except Exception:
-                    logger.exception("Failed to register tool: %s", cls_label)
+                    logger.exception("Failed to register tool: {}", cls_label)
         return registered
 
 
