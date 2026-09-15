@@ -53,7 +53,9 @@ def _bind_events(
         )
 
     async def publish(event: AgentEvent) -> None:
-        if not accepts(type(event)):
+        if not notification_is_deliverable(
+            event, channel=channel, publish_lifecycle=route.publish_lifecycle,
+        ):
             return
         await bus.publish_event(
             event, channel=channel, chat_id=chat_id, metadata=deepcopy(metadata),
