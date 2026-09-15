@@ -182,6 +182,7 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
         sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: dream_runtime,
+        dream_max_iterations=15,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 
@@ -191,6 +192,7 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
     assert len(calls) == 1
     assert callable(calls[0][1]["on_progress"])
     assert calls[0][1]["runtime"] is dream_runtime
+    assert calls[0][1]["max_iterations"] == 15
 
 
 def _build_runnable_dream(
@@ -234,6 +236,7 @@ def _build_runnable_dream(
         sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: None,
+        dream_max_iterations=15,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
     return ctx, store
@@ -319,6 +322,7 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
         sessions=_make_sessions(tmp_path),
         process_direct=process_direct,
         dream_runtime=lambda: None,
+        dream_max_iterations=15,
     )
     ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
 

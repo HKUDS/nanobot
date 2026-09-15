@@ -5,6 +5,7 @@ def test_dream_config_defaults_to_interval_hours() -> None:
     cfg = DreamConfig()
 
     assert cfg.interval_h == 2
+    assert cfg.max_iterations == 15
     assert cfg.cron is None
 
 
@@ -52,3 +53,10 @@ def test_dream_config_uses_model_override_name_and_accepts_legacy_model() -> Non
     assert cfg.model_override == "openrouter/sonnet"
     assert dumped["modelOverride"] == "openrouter/sonnet"
     assert "model" not in dumped
+
+
+def test_dream_config_accepts_max_iterations_alias() -> None:
+    cfg = DreamConfig.model_validate({"maxIterations": 7})
+
+    assert cfg.max_iterations == 7
+    assert cfg.model_dump(by_alias=True)["maxIterations"] == 7

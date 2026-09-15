@@ -95,14 +95,23 @@ def test_loop_from_config_requires_caller_owned_registry(tmp_path: Path) -> None
 
 def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
     registry = ToolRegistry()
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "workspace": str(tmp_path),
+                "dream": {"maxIterations": 7},
+            },
+        },
+    })
     loop = AgentLoop.from_config(
-        _config_for_loop(tmp_path),
+        config,
         tool_registry=registry,
         provider=_provider_for_loop(),
     )
 
     assert loop.tools is registry
     assert loop.tools.has("read_file")
+    assert loop.dream_max_iterations == 7
 
 
 @pytest.mark.asyncio
