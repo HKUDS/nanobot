@@ -1107,6 +1107,31 @@ def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
     assert sanitized[1]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
 
 
+def test_openai_compat_replays_tool_call_commentary_to_model() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(preserve_tool_call_content=True)
+
+    kwargs = provider._build_kwargs(
+        messages=[
+            {"role": "user", "content": "check the files"},
+            {
+                "role": "assistant",
+                "content": "I am checking the profile first.",
+                "tool_calls": [_tool_call("call_1")],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        tools=None,
+        model="gpt-5",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort="high",
+        tool_choice=None,
+    )
+
+    assert kwargs["messages"][1]["content"] == "I am checking the profile first."
+
+
 def _deepseek_kwargs(messages: list[dict]) -> dict:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(

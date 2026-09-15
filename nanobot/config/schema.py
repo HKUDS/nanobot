@@ -206,6 +206,9 @@ class ProviderConfig(Base):
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
     proxy: str | None = None  # Explicit HTTP proxy; image downloads trust its DNS and egress
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
+    # Preserve assistant text on turns that also call tools. Disabled by default
+    # for compatibility with strict OpenAI-compatible endpoints.
+    preserve_tool_call_content: bool = False
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
     # nanobot/providers/openai_compat_provider.py. Kept duplicated here to

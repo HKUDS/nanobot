@@ -526,6 +526,7 @@ class OpenAICompatProvider(LLMProvider):
         api_type: str = "auto",
         extra_query: dict[str, str] | None = None,
         proxy: str | None = None,
+        preserve_tool_call_content: bool = False,
         provider_name: str = "openai",
     ):
         super().__init__(api_key, api_base, provider_name=provider_name)
@@ -536,6 +537,7 @@ class OpenAICompatProvider(LLMProvider):
         self._api_type = api_type if spec and spec.name == "openai" else "auto"
         self._extra_query = extra_query or {}
         self._proxy = proxy or None
+        self._preserve_tool_call_content = preserve_tool_call_content
         self._native_compaction_available = True
 
         effective_base = api_base or (spec.default_api_base if spec else None) or None
@@ -785,9 +787,10 @@ class OpenAICompatProvider(LLMProvider):
                         tc_clean["function"] = function_clean
                     normalized.append(tc_clean)
                 clean["tool_calls"] = normalized
-                if clean.get("role") == "assistant":
-                    # Some OpenAI-compatible gateways reject assistant messages
-                    # that mix non-empty content with tool_calls.
+                if (
+                    clean.get("role") == "assistant"
+                    and not self._preserve_tool_call_content
+                ):
                     clean["content"] = None
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_tool_result_id(clean["tool_call_id"])

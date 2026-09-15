@@ -233,6 +233,7 @@ def _make_provider_core(
             api_type=p.api_type if p and provider_name == "openai" else "auto",
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
+            preserve_tool_call_content=p.preserve_tool_call_content if p else False,
             provider_name=provider_name,
         )
 
@@ -345,6 +346,7 @@ def provider_signature(
             fallback.context_window_tokens,
             getattr(fp, "proxy", None) if fp else None,
             fp.thinking_style if fp else None,
+            fp.preserve_tool_call_content if fp else False,
         )
 
     provider_name = config.get_provider_name(resolved.model, preset=resolved)
@@ -366,6 +368,7 @@ def provider_signature(
         resolved.context_window_tokens,
         getattr(p, "proxy", None) if p else None,
         p.thinking_style if p else None,
+        p.preserve_tool_call_content if p else False,
         tuple(_fallback_signature(fallback) for fallback in fallback_presets),
     )
 

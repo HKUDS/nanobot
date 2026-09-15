@@ -1379,6 +1379,37 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     assert kwargs["default_headers"]["x-session-affinity"] == "sticky-session"
 
 
+def test_make_provider_passes_preserve_tool_call_content_to_custom_provider():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "custom", "model": "gpt-4o-mini"}},
+            "providers": {
+                "custom": {
+                    "apiBase": "https://example.com/v1",
+                    "preserveToolCallContent": True,
+                }
+            },
+        }
+    )
+
+    provider = make_provider(config)
+
+    assert provider._preserve_tool_call_content is True
+    assert provider_signature(config) != provider_signature(
+        config.model_copy(
+            update={
+                "providers": config.providers.model_copy(
+                    update={
+                        "custom": config.providers.custom.model_copy(
+                            update={"preserve_tool_call_content": False}
+                        )
+                    }
+                )
+            }
+        )
+    )
+
+
 def test_make_provider_treats_dynamic_custom_provider_as_direct():
     config = Config.model_validate(
         {
