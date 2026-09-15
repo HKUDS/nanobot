@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
 
@@ -453,3 +454,50 @@ def test_apply_patch_edits_rolls_back_when_late_operation_fails(tmp_path):
 
     assert "file to update does not exist: missing.txt" in result
     assert first.read_text() == "before\n"
+
+
+def _run_concurrent_adds(tool, path_name: str, count: int) -> list[str]:
+    """Drive concurrent cross-session-style writers: one event loop per thread."""
+    def one(index: int) -> str:
+        return asyncio.run(
+            tool.execute(
+                edits=[{"path": path_name, "action": "add", "new_text": f"line-{index:02d}"}]
+            )
+        )
+
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        return list(pool.map(one, range(count)))
+
+
+def test_apply_patch_concurrent_adds_lose_no_updates(tmp_path):
+    """Concurrent appends to one path must serialize: every line lands exactly once."""
+    target = tmp_path / "shared.txt"
+    target.write_text("seed\n")
+    tool = ApplyPatchTool(workspace=tmp_path)
+    count = 16
+
+    results = _run_concurrent_adds(tool, "shared.txt", count)
+
+    assert all("Patch applied" in result for result in results)
+    lines = target.read_text().splitlines()
+    assert len(lines) == count + 1
+    for index in range(count):
+        assert lines.count(f"line-{index:02d}") == 1
+
+
+def test_apply_patch_concurrent_writes_leave_intact_file(tmp_path):
+    """Concurrent whole-file commits must not interleave: final content is one intact payload."""
+    from nanobot.agent.tools.filesystem import WriteFileTool
+
+    target = tmp_path / "shared.txt"
+    writer = WriteFileTool(workspace=tmp_path)
+    payloads = [f"PAYLOAD-{index:02d}-" + "x" * 200 + "\n" for index in range(16)]
+
+    def one(index: int) -> str:
+        return asyncio.run(writer.execute(path=str(target), content=payloads[index]))
+
+    with ThreadPoolExecutor(max_workers=len(payloads)) as pool:
+        results = list(pool.map(one, range(len(payloads))))
+
+    assert all("Successfully wrote" in result for result in results)
+    assert target.read_text() in payloads
