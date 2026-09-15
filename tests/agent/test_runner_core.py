@@ -360,15 +360,18 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
     assert result.provider_state.pending_messages == []
     assert checkpoints[0]["phase"] == "awaiting_tools"
     assert "provider_state" not in checkpoints[0]
-    assert checkpoints[1]["phase"] == "tools_completed"
-    assert checkpoints[1]["provider_state"].pending_messages == [{
+    assert checkpoints[1]["phase"] == "awaiting_tools"
+    assert checkpoints[1]["pending_tool_calls"] == []
+    assert "provider_state" not in checkpoints[1]
+    assert checkpoints[2]["phase"] == "tools_completed"
+    assert checkpoints[2]["provider_state"].pending_messages == [{
         "role": "tool",
         "tool_call_id": "call_1|fc_1",
         "name": "list_dir",
         "content": "tool result",
     }]
-    assert checkpoints[2]["phase"] == "final_response"
-    assert checkpoints[2]["provider_state"].payload == second_state.payload
+    assert checkpoints[3]["phase"] == "final_response"
+    assert checkpoints[3]["provider_state"].payload == second_state.payload
 
 
 @pytest.mark.asyncio
