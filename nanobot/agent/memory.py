@@ -23,12 +23,13 @@ from loguru import logger
 
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
-from nanobot.providers.base import ProviderCallContext, ProviderConversationState
+from nanobot.providers.base import LLMResponse, ProviderCallContext, ProviderConversationState
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
+    build_assistant_message,
     content_with_media_breadcrumbs,
     ensure_dir,
     estimate_prompt_tokens_chain,
@@ -747,6 +748,10 @@ class MemoryStore:
 # emergency hard cap against pathological provider output.
 _RAW_ARCHIVE_MAX_CHARS = 16_000   # fallback dump (LLM failed)
 _HISTORY_ENTRY_HARD_CAP = 64_000  # emergency cap in append_history
+_ARCHIVE_TOOL_RESULT = (
+    "Session archival does not execute tools. Use only the supplied conversation and "
+    "return the requested compact checkpoint now; do not call another tool."
+)
 
 
 class MemoryArchiver:
@@ -897,20 +902,86 @@ class MemoryArchiver:
                 )
                 return raw_fallback()
 
-        try:
+        async def request_archive(
+            messages: list[dict[str, Any]],
+            context: ProviderCallContext | None,
+        ) -> LLMResponse:
             with llm_usage_source("dream"):
-                response = await runtime.provider.chat_stream_with_retry(
+                return await runtime.provider.chat_stream_with_retry(
                     model=runtime.model,
-                    messages=request_messages,
+                    messages=messages,
                     tools=call_tools,
                     temperature=runtime.generation.temperature,
                     max_tokens=runtime.generation.max_tokens,
                     reasoning_effort=runtime.generation.reasoning_effort,
-                    provider_context=provider_context,
+                    provider_context=context,
                 )
+
+        try:
+            response = await request_archive(request_messages, provider_context)
         except Exception:
             logger.warning("Memory archive provider call failed, raw-dumping to history")
             return raw_fallback()
+        if response.has_tool_calls is True and response.should_execute_tools is True:
+            logger.info(
+                "Memory archive provider returned {} tool call(s); requesting checkpoint",
+                len(response.tool_calls),
+            )
+            assistant_message = build_assistant_message(
+                response.content,
+                tool_calls=[call.to_openai_tool_call() for call in response.tool_calls],
+                reasoning_content=response.reasoning_content,
+                thinking_blocks=response.thinking_blocks,
+            )
+            tool_messages = [
+                {
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "name": call.name,
+                    "content": _ARCHIVE_TOOL_RESULT,
+                }
+                for call in response.tool_calls
+            ]
+            recovery_messages = [
+                *request_messages,
+                assistant_message,
+                *tool_messages,
+            ]
+            recovery_state = None
+            if (
+                provider_context is not None
+                and response.provider_state is not None
+                and runtime.provider.can_resume_conversation_state(
+                    response.provider_state,
+                    runtime.model,
+                )
+            ):
+                recovery_state = response.provider_state.with_pending_messages([
+                    *response.provider_state.pending_messages,
+                    *tool_messages,
+                ])
+            elif provider_context is not None and provider_context.conversation_state is not None:
+                state = provider_context.conversation_state
+                recovery_state = state.with_pending_messages([
+                    *state.pending_messages,
+                    assistant_message,
+                    *tool_messages,
+                ])
+            recovery_context = provider_context
+            if recovery_state is not None and provider_context is not None:
+                recovery_context = ProviderCallContext(
+                    conversation_state=recovery_state,
+                    context_window_tokens=provider_context.context_window_tokens,
+                    session_id=provider_context.session_id,
+                    events=provider_context.events,
+                )
+            try:
+                response = await request_archive(recovery_messages, recovery_context)
+            except Exception:
+                logger.warning(
+                    "Memory archive tool-call recovery failed, raw-dumping to history"
+                )
+                return raw_fallback()
         if response.finish_reason in {"error", "length"}:
             logger.warning(
                 "Memory archive provider did not complete ({}), raw-dumping to history",
