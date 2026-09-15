@@ -950,9 +950,15 @@ class LLMProvider(ABC):
     def _error_response_from_exception(exc: Exception) -> LLMResponse:
         """Convert an unexpected exception while retaining retry metadata."""
         error_names = tuple(cls.__name__.lower() for cls in type(exc).__mro__)
+        detail = str(exc).strip() or type(exc).__name__
+        detail_lower = detail.lower()
         error_kind: str | None = None
         error_should_retry: bool | None = None
-        if any("timeout" in name for name in error_names):
+        if any("timeout" in name for name in error_names) or any(
+            marker in detail_lower for marker in ("timed out", "timeout")
+        ):
+            # Class name may be RuntimeError/APIError while the message carries
+            # the timeout (e.g. NVIDIA NIM ``timed out after 300s``).
             error_kind = "timeout"
             error_should_retry = True
         elif any(
@@ -992,7 +998,6 @@ class LLMProvider(ABC):
 
         raw_error_type = getattr(exc, "error_type", None)
         raw_error_code = getattr(exc, "error_code", None)
-        detail = str(exc).strip() or type(exc).__name__
         return LLMResponse(
             content=f"Error calling LLM: {detail}",
             finish_reason="error",

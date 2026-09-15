@@ -424,6 +424,52 @@ class TestFallbackWhenPrimaryRaises:
         factory.assert_called_once_with(_fallback("fallback-a"))
 
     @pytest.mark.asyncio
+    async def test_nim_style_timeout_message_triggers_fallback(self) -> None:
+        """NIM reports timeouts as RuntimeError('timed out after Ns'), not *TimeoutError."""
+        primary = _RaisingProvider("primary", RuntimeError("timed out after 300s"))
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
+    @pytest.mark.asyncio
+    async def test_timeout_with_should_retry_false_still_fails_over(self) -> None:
+        """x-should-retry:false must not block failover for timeout responses."""
+        primary = _FakeProvider(
+            "primary",
+            _make_response(
+                "Error calling LLM: timed out after 300s",
+                finish_reason="error",
+                error_kind="timeout",
+                error_should_retry=False,
+            ),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+
+        assert FallbackProvider._should_fallback(primary._response) is True
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
+    @pytest.mark.asyncio
     async def test_primary_exception_triggers_fallback(self) -> None:
         """A primary whose chat() raises must not abort failover.
 
