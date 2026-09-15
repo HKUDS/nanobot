@@ -319,7 +319,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
             requested_model = body.get("model")
             text, media_paths = _parse_json_content(body)
             session_id = body.get("session_id")
-    except ValueError as e:
+    except (TypeError, ValueError) as e:
         return _error_json(400, str(e))
     except _FileSizeExceeded as e:
         return _error_json(413, str(e), err_type="invalid_request_error")
