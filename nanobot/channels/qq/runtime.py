@@ -678,7 +678,8 @@ class QQChannel(BaseChannel):
         # Inbound attachment URLs are attacker-influenceable (a compromised or
         # redirecting CDN can point at an internal address), so validate them
         # like outbound media and refuse redirects — matching napcat/dingtalk.
-        ok, err = validate_url_target(url)
+        # The guard resolves DNS synchronously; do not block the gateway loop.
+        ok, err = await asyncio.to_thread(validate_url_target, url)
         if not ok:
             self.logger.warning("inbound media URL blocked url={} err={}", url, err)
             return None

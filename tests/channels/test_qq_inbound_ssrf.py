@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import socket
+import threading
 from collections.abc import AsyncIterator
 
 import pytest
 
 pytest.importorskip("botpy")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_media_root(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.channels.qq.runtime.get_media_dir", lambda *_: tmp_path)
 
 
 def _make_channel():
@@ -61,6 +69,10 @@ class _FakeDownloadHttp:
     "http://10.0.0.1/attachment",
     "http://[::1]/attachment",
     "//127.0.0.1/attachment",
+    "http://[::ffff:127.0.0.1]/attachment",
+    "file:///etc/passwd",
+    "ftp://example.com/attachment",
+    "https:///missing-host",
 ])
 async def test_inbound_download_blocks_ssrf_target(url: str) -> None:
     """An inbound attachment URL resolving to an internal target is never fetched.
@@ -77,6 +89,26 @@ async def test_inbound_download_blocks_ssrf_target(url: str) -> None:
     )
 
     assert result is None
+    assert fake_http.get_calls == []
+
+
+@pytest.mark.asyncio
+async def test_inbound_validation_does_not_run_dns_on_the_event_loop(monkeypatch):
+    """The URL guard uses blocking getaddrinfo; keep it off the gateway loop."""
+    loop_thread = threading.get_ident()
+    validation_threads = []
+
+    def validate(_url):
+        validation_threads.append(threading.get_ident())
+        return False, "blocked"
+
+    monkeypatch.setattr("nanobot.channels.qq.runtime.validate_url_target", validate)
+    channel = _make_channel()
+    fake_http = _FakeDownloadHttp()
+    channel._http = fake_http
+
+    assert await channel._download_to_media_dir_chunked("https://example.com/file") is None
+    assert validation_threads and validation_threads != [loop_thread]
     assert fake_http.get_calls == []
 
 
@@ -135,3 +167,43 @@ async def test_inbound_download_saves_successful_attachment(
     assert validated_urls == ["https://example.com/attachment"]
     assert fake_http.get_calls[0][0] == validated_urls[0]
     assert fake_http.get_calls[0][1]["allow_redirects"] is False
+
+
+@pytest.mark.asyncio
+async def test_inbound_download_blocks_hostname_with_mixed_dns_answers(monkeypatch):
+    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", lambda *_: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+    ])
+    channel = _make_channel()
+    fake_http = _FakeDownloadHttp()
+    channel._http = fake_http
+    assert await channel._download_to_media_dir_chunked("https://cdn.example/file") is None
+    assert fake_http.get_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["size", "stream", "cancel"])
+async def test_inbound_download_cleans_partial_files(tmp_path, monkeypatch, failure):
+    monkeypatch.setattr("nanobot.channels.qq.runtime.validate_url_target", lambda _: (True, ""))
+
+    async def chunks(_self, _chunk_size):
+        yield b"partial content"
+        if failure == "size":
+            yield b"x" * (1024 * 1024)
+        elif failure == "stream":
+            raise OSError("stream disconnected")
+        else:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(_FakeDownloadContent, "iter_chunked", chunks)
+    channel = _make_channel()
+    channel.config.download_max_bytes = 1024 * 1024
+    channel._http = _FakeDownloadHttp()
+    download = channel._download_to_media_dir_chunked("https://example.com/file.bin")
+    if failure == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await download
+    else:
+        assert await download is None
+    assert list(tmp_path.iterdir()) == []
