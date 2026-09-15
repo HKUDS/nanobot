@@ -173,6 +173,29 @@ async def test_stream_default_is_false(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+async def test_stream_rejects_non_boolean_values(aiohttp_client) -> None:
+    """The OpenAI-compatible stream flag must be a JSON boolean."""
+    agent = MagicMock()
+    agent.process_direct = AsyncMock(return_value="normal reply")
+    agent.aclose = AsyncMock()
+
+    app = create_app(agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "hi"}], "stream": "false"},
+    )
+
+    assert resp.status == 400
+    body = await resp.json()
+    assert body["error"]["message"] == "stream must be a boolean"
+    agent.process_direct.assert_not_called()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_stream_sse_chunk_ids_are_consistent(aiohttp_client) -> None:
     """All SSE chunks in a single stream should share the same id."""
     agent = _make_streaming_agent(["A", "B", "C"])

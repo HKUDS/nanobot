@@ -315,7 +315,10 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
             if not isinstance(body, dict):
                 return _error_json(400, "Invalid JSON body")
             body = cast(dict[str, Any], body)
-            stream = body.get("stream", False)
+            stream_value = body.get("stream", False)
+            if not isinstance(stream_value, bool):
+                return _error_json(400, "stream must be a boolean")
+            stream = stream_value
             requested_model = body.get("model")
             text, media_paths = _parse_json_content(body)
             session_id = body.get("session_id")
