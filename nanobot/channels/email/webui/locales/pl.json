@@ -1,0 +1,160 @@
+{
+  "setup": {
+    "docsLabel": "Otwórz instrukcję konfiguracji poczty",
+    "officialLabel": "Otwórz poradnik haseł aplikacji",
+    "presetLabel": "Szybkie uzupełnianie",
+    "sections": {
+      "receiving": "Odbieranie poczty",
+      "sending": "Wysyłanie poczty"
+    },
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "Zezwól nanobotowi na odczyt i wysyłanie poczty",
+        "choices": {
+          "true": "Zezwolono",
+          "false": "Nie zezwolono"
+        }
+      },
+      "imapHost": {
+        "label": "Host IMAP",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "Nazwa użytkownika IMAP",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "Hasło IMAP",
+        "placeholder": "Hasło aplikacji"
+      },
+      "smtpHost": {
+        "label": "Host SMTP",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "Nazwa użytkownika SMTP",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "Hasło SMTP",
+        "placeholder": "Hasło aplikacji"
+      },
+      "imapPort": {
+        "label": "Port IMAP",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "Port SMTP",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "Adres nadawcy",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "Sprawdzaj pocztę co (sekundy)",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "Dozwoleni nadawcy",
+        "placeholder": "Adresy e-mail oddzielone przecinkami"
+      },
+      "verifyDkim": {
+        "label": "Weryfikuj DKIM",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "verifySpf": {
+        "label": "Weryfikuj SPF",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "imapMailbox": {
+        "label": "Skrzynka IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL dla IMAP",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS dla SMTP",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL dla SMTP",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Automatyczne odpowiedzi",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "markSeen": {
+        "label": "Oznaczaj jako przeczytane",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "postAction": {
+        "label": "Po przetworzeniu",
+        "choices": {
+          "delete": "Usuń",
+          "move": "Przenieś"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Przenieś do skrzynki"
+      },
+      "postActionExpunge": {
+        "label": "Trwale zastosuj działanie",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignoruj pominięte wiadomości",
+        "choices": {
+          "true": "Włączone",
+          "false": "Wyłączone"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Maksymalna długość treści"
+      },
+      "subjectPrefix": {
+        "label": "Przedrostek tematu odpowiedzi"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Dozwolone typy załączników"
+      },
+      "maxAttachmentSize": {
+        "label": "Maksymalny rozmiar załącznika"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Maksymalna liczba załączników"
+      }
+    }
+  }
+}
