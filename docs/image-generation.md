@@ -80,7 +80,7 @@ Both camelCase and snake_case config keys are accepted, but docs use camelCase t
 
 ### OpenRouter
 
-OpenRouter uses a chat-completions style image response. Configure:
+OpenRouter uses its native Image API. Configure:
 
 ```json
 {
@@ -94,7 +94,37 @@ OpenRouter uses a chat-completions style image response. Configure:
 }
 ```
 
-Use a model that supports image generation and image editing if you want reference-image edits.
+Nanobot sends image requests to:
+
+```text
+POST /api/v1/images
+```
+
+Each request has top-level `model` and `prompt` fields. Nanobot can also send
+these optional fields:
+
+- `defaultAspectRatio` becomes OpenRouter's `aspect_ratio` field.
+- Tier values such as `1K`, `2K`, and `4K` from `defaultImageSize` become
+  the `resolution` field.
+
+Nanobot sends an optional field only when the selected model lists the requested
+value in its `supported_parameters` metadata. A request may therefore include
+both fields, one field, or neither field. Explicit pixel sizes such as
+`2048x2048` are not converted to a tier such as `2K`. Nanobot sends the value
+only if the model advertises that exact value under `resolution`; otherwise, it
+omits the `resolution` field.
+
+OpenRouter exposes model capabilities at:
+
+```text
+GET /api/v1/images/models
+```
+
+Reference images are sent as native `input_references` entries. The response
+contains base64 images in `data[].b64_json`. Nanobot converts these images to
+local image data URLs and uses `media_type` when the response includes it.
+Supported parameters can differ by model and provider endpoint, so check the
+model metadata when choosing an aspect ratio or resolution.
 
 ### Custom (OpenAI-compatible)
 
