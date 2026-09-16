@@ -276,6 +276,46 @@ class TestTrailingWhitespaceStrip:
         assert "x = 2\ny = 3\n" == content
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    @pytest.mark.parametrize(
+        "before,old_text,new_text,expected",
+        [
+            ("return value\n", "return ", "yield ", "yield value\n"),
+            ("return value\n", "return ", "yield\t", "yield\tvalue\n"),
+            ("hello-world\n", "-", " ", "hello world\n"),
+            (
+                "return value\n", "return ", "ready = True  \nyield ",
+                "ready = True\nyield value\n",
+            ),
+        ],
+        ids=["space", "tab", "whitespace-only", "multiline"],
+    )
+    async def test_inline_replacement_preserves_separator(
+        self, tool, tmp_path, newline, before, old_text, new_text, expected,
+    ):
+        f = tmp_path / "inline.py"
+        f.write_bytes(before.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(
+            path=str(f), old_text=old_text.replace("\n", newline),
+            new_text=new_text.replace("\n", newline),
+        )
+        assert "Patch applied:" in result
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    async def test_replace_all_cleans_only_actual_line_endings(self, tool, tmp_path, newline):
+        f = tmp_path / "mixed.txt"
+        f.write_bytes("old value\nold \nold    \nold ".replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(
+            path=str(f), old_text="old ", new_text="new ", replace_all=True,
+        )
+        assert "Patch applied:" in result
+        # Preserve existing suffix whitespace; only clean the replacement's line endings.
+        expected = "new value\nnew\nnew   \nnew"
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
+
+    @pytest.mark.asyncio
     async def test_preserves_trailing_whitespace_in_markdown(self, tool, tmp_path):
         f = tmp_path / "doc.md"
         f.write_text("# Title\n", encoding="utf-8")

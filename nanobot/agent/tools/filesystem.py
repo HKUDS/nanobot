@@ -894,9 +894,13 @@ class EditFileTool(_FsTool):
         )
 
     @staticmethod
-    def _strip_trailing_ws(text: str) -> str:
-        """Strip trailing whitespace from each line."""
-        return "\n".join(line.rstrip() for line in text.split("\n"))
+    def _strip_trailing_ws(text: str, *, preserve_last_line: bool = False) -> str:
+        """Strip line-ending whitespace, except a final fragment that continues inline."""
+        lines = text.split("\n")
+        return "\n".join(
+            line if preserve_last_line and i == len(lines) - 1 else line.rstrip()
+            for i, line in enumerate(lines)
+        )
 
     def _format_summary(
         self, resolved_path: Path, before: str, after: str, *,
@@ -996,10 +1000,6 @@ class EditFileTool(_FsTool):
 
             norm_new = new_text.replace("\r\n", "\n")
 
-            # Trailing whitespace stripping (skip markdown to preserve double-space line breaks)
-            if fp.suffix.lower() not in self._MARKDOWN_EXTS:
-                norm_new = self._strip_trailing_ws(norm_new)
-
             if replace_all:
                 selected = matches
             elif occurrence is not None:
@@ -1030,7 +1030,18 @@ class EditFileTool(_FsTool):
                 )
             new_content = content
             for match in reversed(selected):
-                replacement = _preserve_quote_style(norm_old, match.text, norm_new)
+                replacement = norm_new
+                # Preserve separator whitespace when the remaining line has content.
+                # Markdown keeps all trailing whitespace for hard line breaks.
+                if fp.suffix.lower() not in self._MARKDOWN_EXTS:
+                    line_end = content.find("\n", match.end)
+                    if line_end == -1:
+                        line_end = len(content)
+                    replacement = self._strip_trailing_ws(
+                        replacement,
+                        preserve_last_line=bool(content[match.end:line_end].strip()),
+                    )
+                replacement = _preserve_quote_style(norm_old, match.text, replacement)
                 replacement = _reindent_like_match(norm_old, match.text, replacement)
 
                 # Only consume the trailing newline when deleting complete lines;
