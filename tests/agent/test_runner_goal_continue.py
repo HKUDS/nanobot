@@ -135,9 +135,9 @@ async def test_runner_respects_max_iterations_with_continuation():
 
 
 @pytest.mark.asyncio
-async def test_runner_continuation_not_limited_by_injection_cycle_cap():
+async def test_runner_continuation_is_governed_by_max_iterations():
     """Caller-requested continuation is governed by max_iterations."""
-    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
@@ -145,7 +145,7 @@ async def test_runner_continuation_not_limited_by_injection_cycle_cap():
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
-    max_iterations = _MAX_INJECTION_CYCLES + 3
+    max_iterations = 8
 
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
