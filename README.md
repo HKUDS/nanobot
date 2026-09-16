@@ -269,7 +269,7 @@ The screenshots below use example conversations, illustrative token counts, and 
 
 <p align="center">
   <a href="./images/nanobot_webui-source.png">
-    <img src="./images/nanobot_webui.png" alt="nanobot WebUI preview with model, project, Apps, Skills, and Automations controls" width="900">
+    <img src="./images/nanobot_webui.png" alt="nanobot WebUI conversation with sidebar topics, expanded agent activity, an inline diff, and composer controls" width="900">
   </a>
 </p>
 
@@ -313,10 +313,10 @@ Use Apps to connect MCP servers, enable Agent Plugins, and manage local CLI App 
 
 ### Let recurring work run on a schedule
 
-Ask for an automation from the topic that should receive its results. Review the message, schedule, linked chat, and run history in Automations; pause or edit it as your needs change. Local triggers let a script start a saved task on demand.
+Ask for an automation from the topic that should receive its results. Use **Tasks** to review and manage schedules, or **Calendar** to scan completed and upcoming runs by date. Local triggers let a script start a saved task on demand.
 
 <p align="center">
-  <img src="./images/nanobot-automations.png" alt="The Automations view with example recurring tasks, a selected daily brief, its schedule, linked chat, and management controls" width="900">
+  <img src="./images/nanobot-automations.png" alt="The Automations calendar with completed and upcoming recurring tasks arranged by date" width="900">
 </p>
 
 Keep the gateway running for scheduled delivery. [Explore Automations →](./docs/automations.md)
