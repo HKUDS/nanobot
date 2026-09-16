@@ -1831,7 +1831,9 @@ class OpenAICompatProvider(LLMProvider):
         error_kind: str | None = None
         error_name = e.__class__.__name__.lower()
         error_text = str(e).lower()
-        if "timeout" in error_name or "timed out" in error_text or "timeout" in error_text:
+        if "timeout" in error_name or (
+            status_code not in {400, 404, 422} and "timed out" in error_text
+        ):
             error_kind = "timeout"
         elif "connection" in error_name:
             error_kind = "connection"

@@ -72,6 +72,32 @@ def test_base_error_response_marks_timeout_from_message() -> None:
     assert "timed out after 600s" in (response.content or "")
 
 
+@pytest.mark.parametrize("detail", ["Unsupported parameter: timeout", "timeout must be positive"])
+def test_parameter_named_timeout_is_not_a_timeout(detail: str) -> None:
+    error = RuntimeError(detail)
+
+    for response in (
+        LLMProvider._error_response_from_exception(error),
+        OpenAICompatProvider._handle_error(error),
+    ):
+        assert response.error_kind is None
+        assert response.error_should_retry is not True
+
+
+@pytest.mark.parametrize("status", [400, 404, 422])
+def test_client_error_status_overrides_timeout_message(status: int) -> None:
+    error = RuntimeError("validator timed out while checking invalid input")
+    error.response = _fake_response(status_code=status)
+
+    for response in (
+        LLMProvider._error_response_from_exception(error),
+        OpenAICompatProvider._handle_error(error),
+    ):
+        assert response.error_status_code == status
+        assert response.error_kind is None
+        assert response.error_should_retry is not True
+
+
 def test_anthropic_handle_error_extracts_structured_metadata() -> None:
     class FakeStatusError(Exception):
         pass
