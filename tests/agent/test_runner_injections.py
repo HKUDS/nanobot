@@ -1611,10 +1611,13 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path):
 
     run_task = asyncio.create_task(loop.run())
     await asyncio.wait_for(first_started.wait(), timeout=2)
-    while loop.bus.inbound_size:
-        await asyncio.sleep(0)
 
     session_key = "cli:c"
+    for _ in range(200):
+        pending = loop._pending_queues.get(session_key)
+        if pending is not None and pending.qsize() == len(followups):
+            break
+        await asyncio.sleep(0.01)
     assert len(loop._active_tasks[session_key]) == 1
     assert loop._pending_queues[session_key].qsize() == len(followups)
 
@@ -1674,8 +1677,12 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(t
             chat_id="c",
             content=content,
         ))
-    while loop.bus.inbound_size:
-        await asyncio.sleep(0)
+    for _ in range(200):
+        pending = loop._pending_queues.get("cli:c")
+        if pending is not None and pending.qsize() == len(followups):
+            break
+        await asyncio.sleep(0.01)
+    assert loop._pending_queues["cli:c"].qsize() == len(followups)
 
     release_first_request.set()
     await asyncio.wait_for(second_request_started.wait(), timeout=2)
