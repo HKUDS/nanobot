@@ -572,6 +572,45 @@ class TestCompactIdleSession:
             get_tool_definitions=MagicMock(return_value=[]),
         )
 
+    async def test_partial_raw_write_does_not_advance_checkpoint(
+        self, real_consolidator, store, runtime, mock_provider, monkeypatch
+    ):
+        runtime = replace(runtime, context_window_tokens=1_000)
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:partial-raw")
+        session.add_message("user", "x " * 20_000 + "TAIL_MARKER")
+        expected = store._format_messages(session.messages)
+        sessions.save(session)
+        append = store._append_history_record
+        writes = 0
+
+        def fail_second(content, *, session_key=None):
+            nonlocal writes
+            writes += 1
+            if writes == 2:
+                raise OSError("disk full")
+            return append(content, session_key=session_key)
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(store, "_append_history_record", fail_second)
+            with pytest.raises(OSError, match="disk full"):
+                await real_consolidator.compact_idle_session(session.key, runtime=runtime)
+
+        sessions.invalidate(session.key)
+        unchanged = sessions.get_or_create(session.key)
+        assert unchanged.last_archived == 0
+        assert unchanged.messages == session.messages
+        partial_cursor = store.get_latest_cursor()
+        assert partial_cursor == 1
+
+        await real_consolidator.compact_idle_session(session.key, runtime=runtime)
+
+        entries = MemoryStore(store.workspace).read_unprocessed_history(partial_cursor)
+        assert "".join(entry["content"].split("\n", 1)[1] for entry in entries) == expected
+        sessions.invalidate(session.key)
+        assert sessions.get_or_create(session.key).last_archived == 1
+        mock_provider.chat_stream_with_retry.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_archives_full_tail_preserves_messages_and_replays_checkpoint(
         self, real_consolidator, mock_provider, runtime
@@ -1515,7 +1554,25 @@ class TestCompactIdleSession:
 
 
 class TestRawArchiveTruncation:
-    """raw_archive() must cap entry size to avoid bloating history.jsonl."""
+    """raw_archive() keeps complete journal content with bounded individual entries."""
+
+    @pytest.mark.parametrize("boundary", ["A ", "\n\n", "<think>PRIVATE</think>"])
+    def test_raw_chunks_preserve_sanitized_boundaries(self, store, boundary):
+        from nanobot.utils.helpers import strip_think
+
+        message = {"role": "assistant", "content": ""}
+        prefix_len = len(store._format_messages([{**message, "content": "x"}])) - 1
+        message["content"] = "x" * (16_000 - prefix_len - 2) + boundary + "PUBLIC_TAIL"
+        expected = strip_think(store._format_messages([message]))
+
+        store.raw_archive([message])
+
+        # Reload the real journal, rather than observing append call arguments.
+        entries = MemoryStore(store.workspace).read_unprocessed_history(since_cursor=0)
+        joined = "".join(entry["content"].split("\n", 1)[1] for entry in entries)
+        assert joined == expected
+        assert "PRIVATE" not in joined
+        assert "PUBLIC_TAIL" in joined
 
     def test_raw_archive_truncates_large_content(self, store):
         """Large messages should be truncated to _RAW_ARCHIVE_MAX_CHARS."""
@@ -1578,6 +1635,19 @@ class TestRawArchiveTruncation:
         store.raw_archive(messages, max_chars=100)
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries[0]["content"]) < 200
+
+    @pytest.mark.parametrize("limit", [100, 100_000])
+    def test_raw_chunks_keep_tail_with_custom_limit(self, store, limit):
+        messages = [{"role": "user", "content": "x " * 40_000 + "TAIL_MARKER"}]
+        expected = store._format_messages(messages)
+
+        checkpoint = store.raw_archive(messages, max_chars=limit, session_key="cli:chunks")
+
+        entries = MemoryStore(store.workspace).read_unprocessed_history(since_cursor=0)
+        assert "".join(entry["content"].split("\n", 1)[1] for entry in entries) == expected
+        assert all(len(entry["content"]) <= _HISTORY_ENTRY_HARD_CAP for entry in entries)
+        assert all(entry["session_key"] == "cli:chunks" for entry in entries)
+        assert checkpoint == store._build_raw_checkpoint(messages, max_chars=limit)
 
 
 class TestArchivePersistence:
