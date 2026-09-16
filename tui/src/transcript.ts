@@ -10,6 +10,7 @@ import {
   TextAttributes,
   TextRenderable,
   type CliRenderer,
+  type MarkdownOptions,
   type TextChunk,
   type TreeSitterClient,
 } from "@opentui/core"
@@ -67,6 +68,11 @@ const ACTIVITY_PREVIEW_LINES = 4
 // additional visible frames. Paint the first token immediately, then coalesce
 // subsequent deltas to the renderer cadence.
 const STREAM_FLUSH_MS = 32
+// Content setters synchronously parse and build native nodes, including final
+// snapshots. Grow large updates across event-loop turns to leave room for input.
+const MARKDOWN_CHUNK_SIZE = 512
+const RENDER_BATCH_BUDGET_MS = 4
+const HISTORY_BATCH_SIZE = 16
 const CODE_RAIL_INDENT = 2
 
 export interface UserMessageMedia {
@@ -135,6 +141,13 @@ export class Transcript {
   private navigationTimer: ReturnType<typeof setTimeout> | null = null
   private pendingStream = ""
   private streamTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly markdownUpdates = new Map<MarkdownRenderable, {
+    content: string
+    streaming: boolean
+  }>()
+  private markdownDrain: ReturnType<typeof setImmediate> | null = null
+  private renderingPaused = false
+  private historyGeneration = 0
   private codeRailColor: RGBA
 
   constructor(
@@ -227,9 +240,11 @@ export class Transcript {
   }
 
   reset(header: TranscriptHeader): void {
+    this.historyGeneration += 1
     if (this.navigationTimer) clearTimeout(this.navigationTimer)
     this.navigationTimer = null
     this.clearStreamTimer()
+    this.clearMarkdownUpdates()
     this.pendingStream = ""
     for (const child of [...this.root.getChildren()]) {
       this.root.remove(child)
@@ -253,8 +268,11 @@ export class Transcript {
     this.emitNavigation()
   }
 
-  history(messages: HistoryMessage[]): void {
-    for (const message of messages) {
+  async history(messages: HistoryMessage[]): Promise<void> {
+    const generation = this.historyGeneration
+    let started = performance.now()
+    for (const [index, message] of messages.entries()) {
+      if (generation !== this.historyGeneration) return
       if (message.compaction) this.compaction(message.compaction)
       else if (message.role === "user") {
         this.user(message.content, message.turnId, message.media)
@@ -262,16 +280,23 @@ export class Transcript {
       else if (message.role === "assistant") this.assistant(message.content)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
       else this.progress(message.content, message.toolEvents)
+      if ((index + 1) % HISTORY_BATCH_SIZE === 0 || performance.now() - started >= RENDER_BATCH_BUDGET_MS) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        started = performance.now()
+      }
     }
-    this.finishActivity()
+    if (generation === this.historyGeneration) this.finishActivity()
   }
 
   async prependHistory(messages: HistoryMessage[]): Promise<void> {
     if (messages.length === 0) return
     const previousTop = this.root.scrollTop
     const previousHeight = this.root.scrollHeight
+    const generation = this.historyGeneration
+    let started = performance.now()
     let index = 1 // Keep the launch header first.
     for (const message of messages) {
+      if (generation !== this.historyGeneration) return
       if (message.compaction) {
         if (this.compaction(message.compaction, index)) index += 1
       } else if (message.role === "user") {
@@ -291,10 +316,20 @@ export class Transcript {
             }))
           : message.toolEvents || []
         this.updateActivity(activity, message.content, events)
+        activity.events.clear()
+      }
+      if (index % HISTORY_BATCH_SIZE === 0 || performance.now() - started >= RENDER_BATCH_BUDGET_MS) {
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        started = performance.now()
       }
     }
+    while (generation === this.historyGeneration && this.markdownUpdates.size) {
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+    if (generation !== this.historyGeneration) return
     this.renderer.requestRender()
     await this.renderer.idle()
+    if (generation !== this.historyGeneration) return
     this.root.scrollTop = previousTop + Math.max(0, this.root.scrollHeight - previousHeight)
   }
 
@@ -370,7 +405,7 @@ export class Transcript {
     }
     if (!this.live.content && !this.pendingStream) {
       this.live.content = delta
-      this.live.markdown.content = renderLatexAsUnicode(delta)
+      this.updateMarkdown(this.live.markdown, delta, true)
       return
     }
     this.pendingStream += delta
@@ -379,13 +414,13 @@ export class Transcript {
   }
 
   finishStream(fallback = ""): void {
-    this.flushStream()
+    this.clearStreamTimer()
     if (this.live) {
-      const content = fallback || this.live.content
+      const content = fallback || this.live.content + this.pendingStream
+      this.pendingStream = ""
       // Finalize the retained Markdown node in place. This preserves scroll
       // anchors and avoids the one-frame jump caused by replacing the row.
-      this.live.markdown.content = renderLatexAsUnicode(content)
-      this.live.markdown.streaming = false
+      this.updateMarkdown(this.live.markdown, content, false)
       this.live = null
     } else if (fallback.trim()) {
       this.assistant(fallback)
@@ -397,7 +432,7 @@ export class Transcript {
     this.clearStreamTimer()
     this.pendingStream = ""
     this.live.content = content
-    this.live.markdown.content = renderLatexAsUnicode(content)
+    this.updateMarkdown(this.live.markdown, content, true)
   }
 
   progress(content: string, events: ToolProgressEvent[] = []): string {
@@ -417,6 +452,8 @@ export class Transcript {
   }
 
   finishActivity(): void {
+    // Closed groups are displayed from their projected lines, not raw tool payloads.
+    this.activity?.events.clear()
     this.activity = null
   }
 
@@ -442,8 +479,10 @@ export class Transcript {
   }
 
   destroy(): void {
+    this.historyGeneration += 1
     if (this.navigationTimer) clearTimeout(this.navigationTimer)
     this.clearStreamTimer()
+    this.clearMarkdownUpdates()
     this.pendingStream = ""
     this.live = null
     this.activity = null
@@ -459,7 +498,64 @@ export class Transcript {
     if (!this.live || !this.pendingStream) return
     this.live.content += this.pendingStream
     this.pendingStream = ""
-    this.live.markdown.content = renderLatexAsUnicode(this.live.content)
+    this.updateMarkdown(this.live.markdown, this.live.content, true)
+  }
+
+  setRenderingPaused(paused: boolean): void {
+    this.renderingPaused = paused
+    if (!paused) this.scheduleMarkdownDrain()
+  }
+
+  private updateMarkdown(markdown: MarkdownRenderable, content: string, streaming: boolean): void {
+    const update = { content: renderLatexAsUnicode(content), streaming }
+    this.markdownUpdates.set(markdown, update)
+    if (!this.renderingPaused) this.applyMarkdownChunk(markdown, update)
+    this.scheduleMarkdownDrain()
+  }
+
+  private applyMarkdownChunk(
+    markdown: MarkdownRenderable,
+    update: { content: string; streaming: boolean },
+  ): void {
+    if (markdown.isDestroyed) {
+      this.markdownUpdates.delete(markdown)
+      return
+    }
+    const previous = markdown.content
+    const offset = update.content.startsWith(previous) ? previous.length : 0
+    let end = Math.min(update.content.length, offset + MARKDOWN_CHUNK_SIZE)
+    if (
+      end < update.content.length
+      && update.content.charCodeAt(end - 1) >= 0xD800
+      && update.content.charCodeAt(end - 1) <= 0xDBFF
+      && update.content.charCodeAt(end) >= 0xDC00
+      && update.content.charCodeAt(end) <= 0xDFFF
+    ) end -= 1
+    markdown.content = update.content.slice(0, end)
+    if (end === update.content.length) {
+      markdown.streaming = update.streaming
+      this.markdownUpdates.delete(markdown)
+    }
+  }
+
+  private scheduleMarkdownDrain(): void {
+    if (this.markdownDrain || this.renderingPaused || !this.markdownUpdates.size) return
+    this.markdownDrain = setImmediate(() => {
+      this.markdownDrain = null
+      if (this.renderingPaused) return
+      const started = performance.now()
+      for (const [markdown, update] of this.markdownUpdates) {
+        this.applyMarkdownChunk(markdown, update)
+        if (performance.now() - started >= RENDER_BATCH_BUDGET_MS) break
+      }
+      this.scheduleMarkdownDrain()
+    })
+  }
+
+  private clearMarkdownUpdates(): void {
+    if (this.markdownDrain) clearImmediate(this.markdownDrain)
+    this.markdownDrain = null
+    this.markdownUpdates.clear()
   }
 
   private clearStreamTimer(): void {
@@ -701,7 +797,9 @@ export class Transcript {
     const render = code.render.bind(code)
     code.render = (buffer, deltaTime) => {
       render(buffer, deltaTime)
-      for (let row = 0; row < code.height; row += 1) {
+      const start = Math.max(0, -code.screenY)
+      const end = Math.min(code.height, buffer.height - code.screenY)
+      for (let row = start; row < end; row += 1) {
         buffer.drawText(
           "│",
           code.screenX - CODE_RAIL_INDENT,
@@ -714,23 +812,25 @@ export class Transcript {
   }
 
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
+    const renderNode: NonNullable<MarkdownOptions["renderNode"]> = (token, context) => {
+      if (token.type !== "code") return undefined
+      const code = context.defaultRender()
+      if (!(code instanceof CodeRenderable)) return code
+      return this.decorateCodeBlock(code)
+    }
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
-      content: renderLatexAsUnicode(content),
+      content: "",
       width: "auto",
       minWidth: 0,
       flexGrow: 1,
       flexShrink: 1,
       fg: this.theme.text,
       syntaxStyle: this.theme.syntax,
-      streaming,
-      internalBlockMode: "top-level",
-      renderNode: (token, context) => {
-        if (token.type !== "code") return undefined
-        const code = context.defaultRender()
-        if (!(code instanceof CodeRenderable)) return code
-        return this.decorateCodeBlock(code)
-      },
+      streaming: true,
+      internalBlockMode: "coalesced",
+      // Only fenced code is customized; ordinary Markdown can share a text buffer.
+      renderNode: Object.assign(renderNode, { codeBlockOnly: true }),
       tableOptions: {
         style: "columns",
         widthMode: "full",
@@ -740,6 +840,7 @@ export class Transcript {
       treeSitterClient: this.treeSitterClient,
     })
     this.markdown.add(markdown)
+    this.updateMarkdown(markdown, content, streaming)
     return markdown
   }
 

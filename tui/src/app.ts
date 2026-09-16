@@ -196,6 +196,8 @@ const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
+const EVENT_BATCH_SIZE = 64
+const EVENT_BATCH_BUDGET_MS = 4
 const SESSION_REFRESH_INTERVAL_MS = 1_000
 const LOCAL_COMMANDS: TuiCommand[] = [
   {
@@ -525,6 +527,9 @@ export class NanobotTui {
   private historyLoadingOlder = false
   private attachedOnce = false
   private pendingEvents: InboundEvent[] | null = null
+  private eventQueue: Array<InboundEvent | (() => void)> = []
+  private eventDrain: ReturnType<typeof setImmediate> | null = null
+  private followUpPending = false
   private hydrationId = 0
   private ready = false
   private shimmerFrame = 0
@@ -665,7 +670,7 @@ export class NanobotTui {
         project_path: options.workspace,
         access_mode: options.access.toLocaleLowerCase().includes("full") ? "full" : "restricted",
       },
-      onEvent: (event) => this.accept(event),
+      onEvent: (event) => this.enqueueEvent(event),
       onStatus: (status, detail, info) => this.handleStatus(status, detail, info),
     })
 
@@ -924,6 +929,7 @@ export class NanobotTui {
   private deferSubmit(): void {
     if (this.submitPending) return
     this.submitPending = true
+    this.transcript.setRenderingPaused(true)
     const generation = ++this.submitGeneration
     setTimeout(() => setTimeout(() => this.flushSubmit(generation), 0), 0)
   }
@@ -932,8 +938,12 @@ export class NanobotTui {
     if (!this.submitPending || generation !== this.submitGeneration) return
     this.submitPending = false
     this.submitGeneration += 1
-    if (this.composer.isDestroyed) return
-    this.submit()
+    try {
+      if (!this.composer.isDestroyed) this.submit()
+    } finally {
+      this.transcript.setRenderingPaused(false)
+      this.scheduleEventDrain()
+    }
   }
 
   private submit(): void {
@@ -1086,6 +1096,50 @@ export class NanobotTui {
         typeof event.started_at === "number" ? event.started_at * 1000 : undefined,
       )
     }
+  }
+
+  private enqueueEvent(event: InboundEvent): void {
+    if (this.quitting) return
+    if (event.event === "attached") {
+      this.clearEventQueue()
+      this.accept(event)
+      return
+    }
+    this.eventQueue.push(event)
+    this.scheduleEventDrain()
+  }
+
+  private scheduleEventDrain(): void {
+    if (
+      this.eventDrain || this.quitting || this.submitPending
+      || this.pendingEvents || !this.eventQueue.length
+    ) return
+    this.eventDrain = setImmediate(() => {
+      this.eventDrain = null
+      const started = performance.now()
+      let processed = 0
+      // Yield between output batches so terminal input can run. Keep queued
+      // output paused until an IME-delayed submit has read the composer.
+      while (!this.submitPending && !this.quitting && processed < this.eventQueue.length) {
+        const event = this.eventQueue[processed++]!
+        if (typeof event === "function") event()
+        else this.accept(event)
+        if (processed >= EVENT_BATCH_SIZE || performance.now() - started >= EVENT_BATCH_BUDGET_MS) break
+      }
+      this.eventQueue.splice(0, processed)
+      this.scheduleEventDrain()
+      if (!this.eventQueue.length && this.followUpPending) {
+        this.followUpPending = false
+        this.sendNextFollowUp()
+      }
+    })
+  }
+
+  private clearEventQueue(): void {
+    if (this.eventDrain) clearImmediate(this.eventDrain)
+    this.eventDrain = null
+    this.eventQueue = []
+    this.followUpPending = false
   }
 
   accept(event: InboundEvent): void {
@@ -1357,7 +1411,8 @@ export class NanobotTui {
         if (hydrationId !== this.hydrationId) return
         this.historyBeforeCursor = history.beforeCursor
         this.historyHasMore = history.hasMoreBefore
-        this.transcript.history(history.messages)
+        await this.transcript.history(history.messages)
+        if (this.quitting || hydrationId !== this.hydrationId) return
         this.restorePromptHistory(history.messages)
         const reversedHistory = [...history.messages].reverse()
         const lastUser = reversedHistory.find((message) => message.role === "user")
@@ -1366,10 +1421,10 @@ export class NanobotTui {
         if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
       }
     } catch (error) {
-      if (hydrationId !== this.hydrationId) return
+      if (this.quitting || hydrationId !== this.hydrationId) return
       this.transcript.notice(error instanceof Error ? error.message : String(error), true)
     } finally {
-      if (hydrationId !== this.hydrationId) return
+      if (this.quitting || hydrationId !== this.hydrationId) return
       this.ready = true
       if (!this.activeTurn) {
         this.status.content = this.readyStatus()
@@ -1380,7 +1435,8 @@ export class NanobotTui {
   private flushPendingEvents(): void {
     const events = this.pendingEvents
     this.pendingEvents = null
-    for (const event of events || []) this.accept(event)
+    if (events?.length) this.eventQueue = [...events, ...this.eventQueue]
+    this.scheduleEventDrain()
   }
 
   private clearRecoveryState(): void {
@@ -1497,6 +1553,18 @@ export class NanobotTui {
     // Invalid frames do not mean the transport is unavailable. Keep the last
     // accurate user-facing state unless the protocol supplied connection diagnostics.
     if (status === "error" && !info) return
+    this.ready = false
+    // Render already-received output before the disconnect notice, but block
+    // submissions immediately when the transport becomes unavailable.
+    if (this.eventQueue.length) {
+      this.eventQueue.push(() => this.applyStatus(status, info))
+      this.scheduleEventDrain()
+      return
+    }
+    this.applyStatus(status, info)
+  }
+
+  private applyStatus(status: ConnectionStatus, info?: ConnectionStatusInfo): void {
     this.connectionMessage = connectionStatusText(status, info)
     if (this.options.desktopGatewayId && status === "error") {
       this.connectionMessage = "Desktop disconnected or incompatible · exit and run nanobot to reconnect"
@@ -1596,6 +1664,11 @@ export class NanobotTui {
 
   private sendNextFollowUp(): void {
     if (!this.ready || this.activeTurn || this.quitting) return
+    // Hydration may have queued an active-turn snapshot for this session.
+    if (this.eventQueue.length) {
+      this.followUpPending = true
+      return
+    }
     const prompt = this.promptQueue.takeFollowUp()
     if (!prompt) return
     this.syncQueuePreview()
@@ -2936,6 +3009,7 @@ export class NanobotTui {
       )
       if (hydrationId !== this.hydrationId || chatId !== this.client.activeChatId) return
       await this.transcript.prependHistory(history.messages)
+      if (this.quitting || hydrationId !== this.hydrationId || chatId !== this.client.activeChatId) return
       this.restorePromptHistory(history.messages, true)
       this.historyBeforeCursor = history.beforeCursor
       this.historyHasMore = history.hasMoreBefore
@@ -2977,6 +3051,7 @@ export class NanobotTui {
 
   private handleDestroy = (): void => {
     this.quitting = true
+    this.clearEventQueue()
     this.usageRequest?.abort()
     this.clipboardPasteGeneration += 1
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
