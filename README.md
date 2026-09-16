@@ -269,7 +269,7 @@ The screenshots below use example conversations, illustrative token counts, and 
 
 <p align="center">
   <a href="./images/nanobot_webui-source.png">
-    <img src="./images/nanobot_webui.png" alt="nanobot WebUI conversation with sidebar topics, expanded agent activity, an inline diff, and composer controls" width="900">
+    <img src="./images/nanobot_webui.png" alt="nanobot WebUI new-topic screen with the hero composer, workspace access, project, and model controls" width="900">
   </a>
 </p>
 
