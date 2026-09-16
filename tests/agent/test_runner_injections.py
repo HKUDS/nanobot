@@ -1512,80 +1512,46 @@ async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_pending_queue_full_falls_back_to_queued_task(tmp_path):
-    """QueueFull should preserve the message by dispatching a queued task."""
-    from nanobot.bus.events import InboundMessage
+async def test_busy_session_burst_preserves_fifo(tmp_path):
+    """Later messages must not bypass older follow-ups when one session is busy."""
+    from nanobot.bus.events import InboundMessage, OutboundMessage
 
     loop = _make_loop(tmp_path)
-    dispatched = asyncio.Event()
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    all_processed = asyncio.Event()
+    processed: list[str] = []
+    followups = [f"follow-up-{index}" for index in range(40)]
 
-    async def _dispatch(_msg):
-        dispatched.set()
+    async def _process_message(msg, **_kwargs):
+        processed.append(msg.content)
+        if msg.content == "initial":
+            first_started.set()
+            await release_first.wait()
+        if len(processed) == len(followups) + 1:
+            all_processed.set()
+        return OutboundMessage(channel="cli", chat_id="c", content=msg.content)
 
-    loop._dispatch = AsyncMock(side_effect=_dispatch)  # type: ignore[method-assign]
-
-    pending = asyncio.Queue(maxsize=1)
-    pending.put_nowait(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="already queued"))
-    loop._pending_queues["cli:c"] = pending
-
-    run_task = asyncio.create_task(loop.run())
-    msg = InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up")
-    await loop.bus.publish_inbound(msg)
-
-    await asyncio.wait_for(dispatched.wait(), timeout=2)
-
-    loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
-
-    assert loop._dispatch.await_count == 1
-    dispatched_msg = loop._dispatch.await_args.args[0]
-    assert dispatched_msg.content == "follow-up"
-    assert pending.qsize() == 1
-
-
-@pytest.mark.asyncio
-async def test_pending_queue_overflow_keeps_websocket_followup_durable(tmp_path):
-    """Fallback dispatch must not acknowledge a WebUI message before it commits."""
-    from nanobot.bus.events import InboundMessage
-    from nanobot.session.manager import Session
-    from nanobot.session.recovery import pending_followups
-
-    loop = _make_loop(tmp_path)
-    dispatched = asyncio.Event()
-    release_dispatch = asyncio.Event()
-
-    async def _dispatch(_msg):
-        dispatched.set()
-        await release_dispatch.wait()
-
-    loop._dispatch = AsyncMock(side_effect=_dispatch)  # type: ignore[method-assign]
-    session = Session(key="websocket:c")
-    loop.sessions.get_or_create.return_value = session
-    pending = asyncio.Queue(maxsize=1)
-    pending.put_nowait(
-        InboundMessage(channel="websocket", sender_id="u", chat_id="c", content="already queued")
-    )
-    loop._pending_queues["websocket:c"] = pending
-
+    loop._process_message = _process_message  # type: ignore[method-assign]
     run_task = asyncio.create_task(loop.run())
     await loop.bus.publish_inbound(
-        InboundMessage(
-            channel="websocket",
-            sender_id="u",
-            chat_id="c",
-            content="durable follow-up",
-            metadata={"webui": True},
-        )
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="initial")
     )
-    await asyncio.wait_for(dispatched.wait(), timeout=2)
+    await asyncio.wait_for(first_started.wait(), timeout=2)
 
-    assert [message.content for message in pending_followups(session)] == ["durable follow-up"]
-    dispatched_msg = loop._dispatch.await_args.args[0]
-    assert dispatched_msg.metadata["_recovery_followup_id"]
+    for content in followups:
+        await loop.bus.publish_inbound(
+            InboundMessage(channel="cli", sender_id="u", chat_id="c", content=content)
+        )
+    while loop.bus.inbound_size:
+        await asyncio.sleep(0)
 
-    release_dispatch.set()
+    release_first.set()
+    await asyncio.wait_for(all_processed.wait(), timeout=5)
     loop.stop()
     await asyncio.wait_for(run_task, timeout=2)
+
+    assert processed == ["initial", *followups]
 
 
 @pytest.mark.asyncio

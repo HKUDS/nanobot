@@ -1357,20 +1357,12 @@ class AgentLoop:
                             },
                         )
                         self.sessions.save(session)
-                    try:
-                        self._pending_queues[effective_key].put_nowait(pending_msg)
-                    except asyncio.QueueFull:
-                        logger.warning(
-                            "Pending queue full for session {}, falling back to queued task",
-                            effective_key,
-                        )
-                        msg = pending_msg
-                    else:
-                        logger.info(
-                            "Routed follow-up message to pending queue for session {}",
-                            effective_key,
-                        )
-                        continue
+                    self._pending_queues[effective_key].put_nowait(pending_msg)
+                    logger.info(
+                        "Routed follow-up message to pending queue for session {}",
+                        effective_key,
+                    )
+                    continue
                 # Compute the effective session key before dispatching
                 # This ensures /stop command can find tasks correctly when unified session is enabled
                 task = asyncio.create_task(self._dispatch(msg))
@@ -1418,7 +1410,11 @@ class AgentLoop:
             async with lock, gate:
                 # Only the task that owns the session lock may publish the
                 # active mid-turn injection queue for this session.
-                pending = asyncio.Queue(maxsize=20)
+                # The global inbound bus is already unbounded. Keep the session queue
+                # unbounded too so every message has one FIFO path; a bounded queue
+                # would need a second dispatch path whose lock waiters can overtake
+                # older messages left here.
+                pending = asyncio.Queue()
                 self._pending_queues[session_key] = pending
                 try:
                     delivery = self.turn_delivery_factory.create(
