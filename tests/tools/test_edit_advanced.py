@@ -168,6 +168,29 @@ class TestIndentationPreservation:
             "        return 1\n"
         )
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+    @pytest.mark.parametrize("ending", ["", "\n"], ids=["no-request-newline", "request-newline"])
+    @pytest.mark.parametrize(
+        "tail", ["\nnext_step()\n", "\n", ""],
+        ids=["followed-by-code", "terminated-eof", "unterminated-eof"],
+    )
+    async def test_trim_fallback_preserves_indentation_and_line_endings(
+        self, tool, tmp_path, newline, ending, tail,
+    ):
+        f = tmp_path / "indent.py"
+        content = "if ready:\n    x = 1\n    y = 2" + tail
+        f.write_bytes(content.replace("\n", newline).encode("utf-8"))
+        result = await tool.execute(
+            path=str(f),
+            old_text=("x = 1\ny = 2" + ending).replace("\n", newline),
+            new_text=("x = 3\ny = 4" + ending).replace("\n", newline),
+        )
+        assert "Patch applied:" in result
+        expected = "if ready:\n    x = 3\n    y = 4" + (tail or ending)
+        assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
+        compile(f.read_text(encoding="utf-8"), str(f), "exec")
+
 
 # ---------------------------------------------------------------------------
 # Failure diagnostics
@@ -221,7 +244,8 @@ class TestAdvancedReplaceAll:
         return EditFileTool(workspace=tmp_path)
 
     @pytest.mark.asyncio
-    async def test_replace_all_preserves_each_match_indentation(self, tool, tmp_path):
+    @pytest.mark.parametrize("ending", ["", "\n"], ids=["no-request-newline", "request-newline"])
+    async def test_replace_all_preserves_each_match_indentation(self, tool, tmp_path, ending):
         f = tmp_path / "indent_multi.py"
         f.write_text(
             "if a:\n"
@@ -234,8 +258,8 @@ class TestAdvancedReplaceAll:
         )
         result = await tool.execute(
             path=str(f),
-            old_text="def foo():\n    pass",
-            new_text="def bar():\n    return 1",
+            old_text="def foo():\n    pass" + ending,
+            new_text="def bar():\n    return 1" + ending,
             replace_all=True,
         )
         assert "Patch applied:" in result
@@ -249,13 +273,14 @@ class TestAdvancedReplaceAll:
         )
 
     @pytest.mark.asyncio
-    async def test_trim_and_quote_fallback_match_succeeds(self, tool, tmp_path):
+    @pytest.mark.parametrize("ending", ["", "\n"], ids=["no-request-newline", "request-newline"])
+    async def test_trim_and_quote_fallback_match_succeeds(self, tool, tmp_path, ending):
         f = tmp_path / "quote_indent.py"
         f.write_text("    message = “hello”\n", encoding="utf-8")
         result = await tool.execute(
             path=str(f),
-            old_text='message = "hello"',
-            new_text='message = "goodbye"',
+            old_text='message = "hello"' + ending,
+            new_text='message = "goodbye"' + ending,
         )
         assert "Patch applied:" in result
         assert f.read_text(encoding="utf-8") == "    message = “goodbye”\n"
