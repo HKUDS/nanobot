@@ -184,6 +184,17 @@ async def test_oauth_preset_is_one_click_configured_after_token_storage(
     row = next(item for item in healthy["presets"] if item["name"] == "xmind")
     assert row["runtime_status"] == "connected"
 
+    await MCPOAuthStorage("xmind", cfg.url).clear_tokens()
+    refresh_failed = mcp_presets_payload(runtime_status={"xmind": "failed"})
+    row = next(item for item in refresh_failed["presets"] if item["name"] == "xmind")
+    assert row["configured"] is False
+    assert row["status"] == "authorization_required"
+    assert row["runtime_status"] == "failed"
+
+    stale_connected = mcp_presets_payload(runtime_status={"xmind": "connected"})
+    row = next(item for item in stale_connected["presets"] if item["name"] == "xmind")
+    assert "runtime_status" not in row
+
     mcp_presets_action("remove", {"name": ["xmind"]})
     assert await MCPOAuthStorage("xmind", cfg.url).get_tokens() is None
 

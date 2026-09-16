@@ -26,7 +26,7 @@ import {
   promptTop,
 } from "@/components/thread/promptNavigation";
 import { cn } from "@/lib/utils";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 export interface ThreadViewportHandle {
   jumpToUserPrompt: (promptId: string) => void;
@@ -39,6 +39,7 @@ interface ThreadViewportProps {
   isStreaming: boolean;
   /** Optimistic or canonical start time for the active turn, in unix seconds. */
   runStartedAt?: number | null;
+  retryStatus?: RetryStatus | null;
   composer?: ReactNode;
   emptyState?: ReactNode;
   scrollToBottomSignal?: number;
@@ -55,12 +56,15 @@ interface ThreadViewportProps {
   loadingOlder?: boolean;
   userMessageOffset?: number;
   onLoadOlder?: () => Promise<void> | void;
+  traceDetailScope?: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onQuoteSelection?: (text: string) => void;
 }
 
 const NEAR_BOTTOM_PX = 48;
+const PROMPT_TOP_INSET_PX = 48;
 const HISTORY_PREFETCH_MIN_PX = 160;
 const HISTORY_PREFETCH_MAX_PX = 480;
 const DEFAULT_SCROLL_BUTTON_BOTTOM_PX = 192;
@@ -70,7 +74,7 @@ const SOFT_KEYBOARD_MIN_INSET_PX = 80;
 const SESSION_HANDOFF_EXIT_DURATION_MS = 80;
 const SESSION_HANDOFF_ENTER_DURATION_MS = 140;
 const SESSION_HANDOFF_OPACITY = 0.82;
-export const INITIAL_HISTORY_WINDOW = 160;
+export const INITIAL_HISTORY_WINDOW = 120;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
 interface HistoryScrollAnchor {
@@ -79,6 +83,11 @@ interface HistoryScrollAnchor {
 }
 
 const THREAD_DISPLAY_UNIT_SELECTOR = "[data-thread-display-unit]";
+
+function promptTopInset(scroller: HTMLElement): number {
+  const padding = Number.parseFloat(getComputedStyle(scroller).paddingTop);
+  return Number.isFinite(padding) ? padding : PROMPT_TOP_INSET_PX;
+}
 
 function historyPrefetchDistance(scroller: HTMLElement): number {
   return Math.min(
@@ -221,6 +230,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   temporary = false,
   isStreaming,
   runStartedAt = null,
+  retryStatus = null,
   composer,
   emptyState,
   scrollToBottomSignal = 0,
@@ -237,6 +247,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   loadingOlder = false,
   userMessageOffset = 0,
   onLoadOlder,
+  traceDetailScope = null,
+  onLoadTraceDetails,
   onOpenFilePreview,
   onForkFromMessage,
   onQuoteSelection,
@@ -291,7 +303,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           promptTop: prompt
             ? Math.min(
                 maxScrollTop,
-                Math.max(0, promptTop(scrollEl, prompt) - 16),
+                Math.max(0, promptTop(scrollEl, prompt) - promptTopInset(scrollEl)),
               )
             : null,
         };
@@ -471,7 +483,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     threadMotionRef.current?.navigateHistoryTo(
       Math.min(
         maxScrollTop,
-        Math.max(0, promptTop(scrollEl, prompt) - 16),
+        Math.max(0, promptTop(scrollEl, prompt) - promptTopInset(scrollEl)),
       ),
     );
     return true;
@@ -865,24 +877,27 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-message-region"
               className={cn(
                 "thread-message-viewport thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
-                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-3 sm:px-4",
+                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-[var(--thread-prompt-inset,3rem)] sm:px-4",
                 "[overflow-anchor:none] [scrollbar-width:none]",
                 "[&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               )}
             >
-              <div ref={messageContentRef} className="mx-auto w-full max-w-[49.5rem]">
+              <div ref={messageContentRef} className="mx-auto w-full max-w-[var(--content-column-width)]">
                 <ThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}
                   isStreaming={isStreaming}
                   activeTurnId={activeTurnId}
                   runStartedAt={runStartedAt}
+                  retryStatus={retryStatus}
                   hiddenUserMessageCount={hiddenUserMessageCount}
                   cliApps={cliApps}
                   mcpPresets={mcpPresets}
                   slashCommands={slashCommands}
                   forkBoundaryMessageCount={visibleForkBoundaryMessageCount}
+                  traceDetailScope={traceDetailScope}
+                  onLoadTraceDetails={onLoadTraceDetails}
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromMessage={onForkFromMessage}
                   onQuoteSelection={onQuoteSelection}
@@ -958,11 +973,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         </div>
         {!hasMessages ? <div ref={bottomRef} aria-hidden className="h-px" /> : null}
       </div>
-
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-3 bg-gradient-to-b from-background to-transparent"
-      />
 
       {hasMessages ? (
         <PromptRail

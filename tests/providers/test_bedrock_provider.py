@@ -241,6 +241,21 @@ def test_parse_response_maps_text_tools_reasoning_usage_and_stop_reason() -> Non
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_retries_eof_without_stop_reason() -> None:
+    client = FakeClient(stream_events=[
+        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "partial summary"}}},
+    ])
+    provider = BedrockProvider(region="us-east-1", client=client)
+    provider._CHAT_RETRY_DELAYS = (0,)
+
+    result = await provider.chat_stream_with_retry([{"role": "user", "content": "summarize"}])
+
+    assert result.finish_reason == "error"
+    assert result.error_kind == "connection"
+    assert len(client.stream_calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_aggregates_text_tool_use_and_usage() -> None:
     client = FakeClient(stream_events=[
         {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "he"}}},

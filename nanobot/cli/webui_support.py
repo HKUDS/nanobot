@@ -1,7 +1,7 @@
 """Shared WebUI setup, URL, health, and browser helpers."""
 
 import os
-import subprocess
+import shutil
 import sys
 import time
 import webbrowser
@@ -48,9 +48,9 @@ __all__ = [
     "_open_webui_browser",
     "_prepare_webui_bundle_for_gateway",
     "_print_foreground_port_conflict",
+    "_print_webui_manual_access",
     "_print_webui_foreground_lifecycle",
     "_resolve_webui_config_path",
-    "_run_quick_start_for_webui",
     "_tcp_endpoint_reachable",
     "_validate_gateway_startup",
     "_warn_webui_bind_scope",
@@ -64,19 +64,81 @@ __all__ = [
 
 console = Console()
 
+_TEXT_ONLY_BROWSERS = frozenset({"elinks", "links", "links2", "lynx", "w3m"})
+
 
 def _launch_browser(url: str) -> bool:
     """Open *url* and request a foreground browser window."""
     if sys.platform == "darwin":
-        result = subprocess.run(
-            ["open", url],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return result.returncode == 0
+        return _launch_macos_browser(url)
+    if sys.platform == "win32":
+        from nanobot.cli.windows_browser import launch_browser
+
+        return launch_browser(url)
     return bool(webbrowser.open(url, new=2, autoraise=True))
+
+
+def _text_only_browser_name() -> str | None:
+    """Return the configured text browser name when it cannot run the WebUI."""
+    if sys.platform in {"darwin", "win32"}:
+        return None
+
+    try:
+        browser = webbrowser.get()
+    except webbrowser.Error:
+        return None
+
+    command = str(getattr(browser, "name", "") or "").strip()
+    if not command:
+        return None
+
+    import shlex
+
+    try:
+        executable = Path(shlex.split(command)[0])
+    except (IndexError, ValueError):
+        return None
+
+    names = {executable.name.lower()}
+    resolved_executable = Path(shutil.which(str(executable)) or executable)
+    try:
+        names.add(resolved_executable.resolve(strict=False).name.lower())
+    except OSError:
+        pass
+    return next((name for name in names if name in _TEXT_ONLY_BROWSERS), None)
+
+
+def _launch_macos_browser(url: str) -> bool:
+    """Deliver URLs through Launch Services, never a credential-bearing argv."""
+    import ctypes
+
+    try:
+        foundation = ctypes.CDLL(
+            "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+        )
+        services = ctypes.CDLL("/System/Library/Frameworks/CoreServices.framework/CoreServices")
+        foundation.CFURLCreateWithBytes.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32, ctypes.c_void_p,
+        ]
+        foundation.CFURLCreateWithBytes.restype = ctypes.c_void_p
+        foundation.CFRelease.argtypes = [ctypes.c_void_p]
+        foundation.CFRelease.restype = None
+        services.LSOpenCFURLRef.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        services.LSOpenCFURLRef.restype = ctypes.c_int32
+        encoded = url.encode("utf-8")
+        url_ref = foundation.CFURLCreateWithBytes(None, encoded, len(encoded), 0x08000100, None)
+        if not url_ref:
+            return False
+        try:
+            # HTTP URLs reach the preferred browser in a GURL Apple event, not
+            # through `open <url>` or a BROWSER command's process arguments.
+            return services.LSOpenCFURLRef(url_ref, None) == 0
+        finally:
+            foundation.CFRelease(url_ref)
+    except (OSError, AttributeError, UnicodeError):
+        # Callers may display exception text. Keep URLs out of error output and
+        # never retry with a subprocess/controller that can expose credentials.
+        return False
 
 
 def _confirm_webui_action(message: str, *, yes: bool) -> None:
@@ -181,8 +243,8 @@ def _validate_gateway_startup(config: Config) -> str | None:
             )
             console.print(
                 Text(
-                    f"If prompted, enter the configured channels.websocket.{secret_key} "
-                    f"value (see {config_path}).",
+                    f"If prompted, enter the WebUI password from "
+                    f"channels.websocket.{secret_key} in {config_path}.",
                     style="dim",
                 )
             )
@@ -281,27 +343,29 @@ def _ensure_local_webui_channel(
     *,
     port: int | None,
     yes: bool,
-) -> tuple[bool, bool]:
+) -> bool:
     """Enable the local WebUI channel with safe localhost defaults."""
     from nanobot.channels.websocket.runtime import WebSocketConfig
 
     current: Any = getattr(config.channels, "websocket", None) or {}
     model = WebSocketConfig.model_validate(current)
     changed = False
-    generated_secret = False
 
     needs_enable = not model.enabled
     needs_port = port is not None and model.port != port
     needs_secret = not model.token_issue_secret.strip() and not model.token.strip()
     if not needs_enable and not needs_port and not needs_secret:
-        return False, False
+        return False
 
     target_port = port if port is not None else model.port
     console.print()
     console.print("[bold]Local WebUI setup[/bold]")
     console.print(f"  URL: [cyan]http://127.0.0.1:{target_port}[/cyan]")
     console.print("  Bind: [cyan]127.0.0.1 only[/cyan] (not exposed to your LAN)")
-    console.print("  Auth: generated WebUI bootstrap secret stored in config")
+    if needs_secret:
+        console.print("  WebUI password: will be generated and stored in config")
+    else:
+        console.print("  WebUI password: already stored in config")
     console.print(
         "  LAN access requires an explicit host change plus a WebUI password in config."
     )
@@ -324,10 +388,9 @@ def _ensure_local_webui_channel(
 
         model.token_issue_secret = secrets.token_urlsafe(32)
         changed = True
-        generated_secret = True
 
     setattr(config.channels, "websocket", model.model_dump(by_alias=True, exclude_none=True))
-    return changed, generated_secret
+    return changed
 
 
 def _warn_webui_bind_scope(config: Config) -> None:
@@ -436,18 +499,57 @@ def _print_foreground_port_conflict(
     )
 
 
-def _open_webui_browser(url: str, *, wait: bool = True) -> None:
+def _open_webui_browser(url: str, *, wait: bool = True) -> bool:
     """Open the WebUI in the user's default browser, with a copyable fallback."""
     if wait:
         _wait_for_webui(url)
     display_url = _webui_display_url(url)
+    text_browser = _text_only_browser_name()
+    if text_browser:
+        console.print(
+            f"[yellow]The configured browser ({escape(text_browser)}) cannot run the WebUI "
+            "because it does not support JavaScript.[/yellow]"
+        )
+        return False
     try:
         if _launch_browser(url):
             console.print(f"[green]✓[/green] Opened WebUI: [cyan]{display_url}[/cyan]")
+            return True
         else:
-            console.print(f"[yellow]Could not open browser; visit {display_url}[/yellow]")
+            console.print("[yellow]Could not open a browser automatically.[/yellow]")
     except Exception as exc:
-        console.print(f"[yellow]Could not open browser ({exc}); visit {display_url}[/yellow]")
+        console.print(f"[yellow]Could not open a browser automatically ({escape(str(exc))}).[/yellow]")
+    return False
+
+
+def _print_webui_manual_access(config: Config, config_path: Path, url: str) -> None:
+    """Print a complete local or SSH-tunnel browser handoff without exposing credentials."""
+    from urllib.parse import urlparse
+
+    browser_url = url.split("/#/", 1)[0]
+    parsed = urlparse(browser_url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    tunnel_host = _host_for_local_browser(parsed.hostname or "127.0.0.1")
+    tunnel_url = f"{parsed.scheme}://127.0.0.1:{port}"
+    ws_cfg = _webui_config_dict(config)
+    password_key = (
+        "tokenIssueSecret" if str(ws_cfg.get("tokenIssueSecret") or "").strip() else "token"
+    )
+
+    console.print()
+    console.print("[bold]Open the WebUI manually[/bold]")
+    console.print(f"  WebUI: [cyan]{browser_url}[/cyan]")
+    console.print(
+        "  WebUI password: "
+        f"[cyan]channels.websocket.{password_key}[/cyan] in [cyan]{config_path}[/cyan]"
+    )
+    console.print()
+    console.print("If nanobot is running on another machine, create an SSH tunnel from yours:")
+    console.print(
+        f"  [cyan]ssh -N -L {port}:{tunnel_host}:{port} <user>@<server>[/cyan]"
+    )
+    console.print("Replace [cyan]<user>[/cyan] and [cyan]<server>[/cyan] and keep the tunnel open.")
+    console.print(f"Then open [cyan]{tunnel_url}[/cyan] on your computer.")
 
 
 def _print_webui_foreground_lifecycle(*, attached: bool) -> None:
@@ -574,43 +676,3 @@ def _gateway_instance_command(
         workspace_path = str(Path(workspace).expanduser().resolve(strict=False))
         parts.extend(["--workspace", workspace_path])
     return " ".join(shlex.quote(part) for part in parts)
-
-
-def _run_quick_start_for_webui(
-    config: Config,
-    *,
-    yes: bool,
-    config_path: Path,
-) -> Config:
-    """Offer the existing Quick Start flow when provider setup is missing."""
-    if yes:
-        console.print(
-            "[red]Error: provider/model setup is incomplete, and --yes cannot answer "
-            "provider credentials.[/red]"
-        )
-        console.print("Complete provider/model setup:")
-        _print_model_setup_steps(config_path)
-        raise typer.Exit(1)
-
-    console.print()
-    console.print("[yellow]Model provider setup is not ready.[/yellow]")
-    console.print(
-        "Quick Start will ask for provider, API key/base URL, model, and WebUI password."
-    )
-    _confirm_webui_action("Run Quick Start now?", yes=False)
-
-    from nanobot.cli.onboard import run_quick_start_onboard
-
-    try:
-        result = run_quick_start_onboard(config)
-    except RuntimeError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        console.print(
-            "[yellow]Run `nanobot onboard --wizard` "
-            "after installing wizard dependencies.[/yellow]"
-        )
-        raise typer.Exit(1) from exc
-    if not result.should_save:
-        console.print("[yellow]Quick Start cancelled. No changes were saved.[/yellow]")
-        raise typer.Exit(1)
-    return result.config

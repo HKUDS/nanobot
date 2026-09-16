@@ -48,11 +48,12 @@ class _DummyTask:
 
 
 class _FakeAsyncClient:
-    def __init__(self, homeserver, user, store_path, config) -> None:
+    def __init__(self, homeserver, user, store_path, config, proxy=None) -> None:
         self.homeserver = homeserver
         self.user = user
         self.store_path = store_path
         self.config = config
+        self.proxy = proxy
         self.user_id: str | None = None
         self.access_token: str | None = None
         self.device_id: str | None = None
@@ -326,11 +327,15 @@ async def test_start_skips_load_store_when_device_id_missing(
         "nanobot.channels.matrix.runtime.asyncio.create_task", _fake_create_task
     )
 
-    channel = MatrixChannel(_make_config(device_id="", e2ee_enabled=True), MessageBus())
+    channel = MatrixChannel(
+        _make_config(device_id="", e2ee_enabled=True, proxy="127.0.0.1:7890"),
+        MessageBus(),
+    )
     await channel.start()
 
     assert len(clients) == 1
     assert clients[0].config.encryption_enabled is True
+    assert clients[0].proxy == "http://127.0.0.1:7890"
     assert clients[0].load_store_called is False
     assert len(clients[0].callbacks) == 3
     assert clients[0].to_device_callbacks == []

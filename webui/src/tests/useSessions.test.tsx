@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionTitle, useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -60,10 +61,40 @@ function wrap(
 }
 
 describe("useSessions", () => {
+  it("coalesces a burst across tasks and preserves unchanged session identities", async () => {
+    const row = { key: "websocket:burst", channel: "websocket", chatId: "burst",
+      createdAt: "2026-09-08", updatedAt: "2026-09-08", preview: "Stable" };
+    vi.mocked(api.listSessions).mockImplementation(async () => [{ ...row }]);
+    const client = fakeClient();
+    const { result, unmount } = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+    const original = result.current.sessions;
+    vi.useFakeTimers();
+    try {
+      for (let index = 0; index < 20; index++) {
+        await act(async () => {
+          client.emitSessionUpdate("burst");
+          await vi.advanceTimersByTimeAsync(10);
+        });
+      }
+      expect(api.listSessions).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+      expect(api.listSessions).toHaveBeenCalledTimes(2);
+      expect(result.current.sessions).toBe(original);
+      client.emitSessionUpdate("burst");
+      unmount();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(api.listSessions).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   beforeEach(() => {
     vi.mocked(api.listSessions).mockReset();
     vi.mocked(api.deleteSession).mockReset();
     vi.mocked(api.fetchWebuiThread).mockReset();
+    webuiThreadCache.clear();
   });
 
   it("does not use low-information greetings as fallback session titles", () => {
@@ -266,8 +297,8 @@ describe("useSessions", () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(api.listSessions).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+    expect(result.current.loading).toBe(false);
   });
 
   it("runs one trailing refresh when an update arrives during a session request", async () => {
@@ -537,6 +568,70 @@ describe("useSessions", () => {
     expect(result.current.messages[2]!.content).toBe("summary");
   });
 
+  it("shows a cached transcript immediately while revalidating it", async () => {
+    const cached = {
+      schemaVersion: 3,
+      revision: "rev-cached",
+      messages: [
+        { id: "a1", role: "assistant" as const, content: "cached answer", createdAt: 1 },
+      ],
+    };
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(cached);
+
+    const first = renderHook(() => useSessionHistory("websocket:cached"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    first.unmount();
+
+    vi.mocked(api.fetchWebuiThread).mockImplementationOnce(() => new Promise(() => {}));
+    const second = renderHook(() => useSessionHistory("websocket:cached"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    expect(second.result.current.loading).toBe(false);
+    expect(second.result.current.messages[0]?.content).toBe("cached answer");
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith(
+      "tok",
+      "websocket:cached",
+      expect.objectContaining({
+        limit: 40,
+        direction: "latest",
+        revision: "rev-cached",
+        cached,
+      }),
+    );
+    second.unmount();
+  });
+
+  it("keeps rendered history visible when its LRU entry was evicted before refresh", async () => {
+    const loaded = {
+      schemaVersion: 3,
+      revision: "rev-loaded",
+      messages: [
+        { id: "a1", role: "assistant" as const, content: "still visible", createdAt: 1 },
+      ],
+    };
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce(loaded)
+      .mockImplementationOnce(() => new Promise(() => {}));
+
+    const { result, unmount } = renderHook(
+      () => useSessionHistory("websocket:evicted"),
+      { wrapper: wrap(fakeClient()) },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.messages[0]?.content).toBe("still visible");
+
+    webuiThreadCache.delete("websocket:evicted");
+    act(() => result.current.refresh());
+    await waitFor(() => expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2));
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.messages[0]?.content).toBe("still visible");
+    unmount();
+  });
+
   it("flags transcript ending with a trace row as pending", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,
@@ -756,7 +851,7 @@ describe("useSessions", () => {
       "tok",
       "websocket:paged",
       expect.objectContaining({
-        limit: 80,
+        limit: 40,
         direction: "latest",
         signal: expect.any(AbortSignal),
       }),

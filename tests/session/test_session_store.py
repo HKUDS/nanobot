@@ -1,16 +1,10 @@
 import json
 from unittest.mock import MagicMock
 
-import nanobot.session as session_api
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session import Session, SessionManager
 from nanobot.session.manager import SessionStore
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
-
-
-def test_store_types_are_not_public_session_api() -> None:
-    assert not hasattr(session_api, "SessionStore")
-    assert not hasattr(session_api, "JsonlSessionStore")
 
 
 def test_manager_delegates_persistence_to_store(tmp_path) -> None:

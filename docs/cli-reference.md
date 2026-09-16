@@ -33,6 +33,67 @@ python -m nanobot --version
 
 `python -m nanobot ...` is useful when the package is installed but the `nanobot` script is not on `PATH`.
 
+### Coexisting with Nanobot Desktop
+
+The Python package and Nanobot Desktop keep separate runtimes, configuration,
+workspaces, and state. When a running Desktop release publishes its private
+terminal-access descriptor, an interactive bare `nanobot` or `nanobot webui`
+asks which installation to use after authenticating a ready Desktop target.
+Use `Up`/`Down` to highlight an installation and `Enter` to confirm.
+`Ctrl+C` cancels with exit code 130 without attaching to Desktop or starting a Python backend.
+If Desktop is absent, busy, unavailable, or cannot be authenticated, the command
+reports the current Python executable and continues normally. A virtual
+environment's executable is shown without resolving it to its base interpreter.
+
+Choosing Desktop for `nanobot webui` opens its already-running browser workbench
+and exits; closing the browser never stops the Desktop gateway. Choosing Desktop
+for bare `nanobot` opens the terminal UI against that same running backend when
+the Desktop host, gateway and terminal client support terminal protocol 1. Older
+versions fail explicitly with update guidance. Use explicit `nanobot agent` for
+the original Python terminal UI.
+After Desktop is selected, a disconnect or incompatible reply ends that invocation
+with an error; it never silently switches to Python or launches a replacement.
+On macOS, browser URLs are delivered through native Launch Services rather than
+command-line arguments. A failed native handoff does not fall back to `open` or
+a `BROWSER` command, keeping bootstrap credentials out of launcher arguments.
+
+On Windows, the shared browser launcher uses a private HTML redirect rather than
+passing a credential-bearing URL to a browser command. A short-lived, windowless
+Python helper receives the URL over an anonymous pipe, opens the redirect through
+the system's HTTP association, and attempts file cleanup after two minutes. The calling
+CLI can exit immediately after the launch acknowledgement; this helper does not
+start, stop, or keep a gateway alive. It does not honor `BROWSER` overrides.
+Redirects are stored in the current user's Windows Local AppData known folder,
+under `NanobotBrowserHandoff-v1`, with an explicit current-user-only protected ACL.
+An ACL-enforcing local filesystem and a non-reparse storage path are required;
+unsafe existing storage or failed browser handoff fails without raw-URL fallback.
+Abnormal termination can leave a private redirect behind. Later invocations retry
+cleanup of verified redirect files older than ten minutes, excluding active files;
+cleanup is not a guarantee of physical erasure or secrecy from same-user programs
+or administrators. No Python/Desktop settings, credentials, or history are imported
+between installations.
+
+Any explicit subcommand or option—including `nanobot agent`,
+`nanobot webui --no-open`, config/workspace selectors, help, version, completion,
+and gateway lifecycle commands—keeps its existing Python meaning and never opens
+the Desktop picker. Target choices are not remembered, and Desktop settings are
+not copied into the Python installation.
+
+Desktop terminal credentials are short-lived WebSocket/API tokens obtained through
+the authenticated current-user rendezvous. The TUI receives them through a bounded
+anonymous pipe, not command arguments, environment variables or temporary files.
+Its environment contains only a trusted resolver command and public instance IDs.
+The resolver verifies the selected Desktop and gateway again for every credential
+refresh. The gateway identity is also checked before any WebSocket mutation. This
+mode does not acquire a gateway lifecycle lease: client exit leaves Desktop running,
+and disconnect never automatically reconnects or replays an uncertain task.
+
+Desktop-only distributions use the narrow `nanobot-desktop-tui` entrypoint inside
+their existing private runtime; it is not a replacement for the full Python CLI.
+They must ship this engine entrypoint and a matching terminal client together.
+The client cache can be kept inside Desktop's data root without reading or writing
+the separate Python installation's config. No additional system Python is needed.
+
 ## Common Patterns
 
 Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:
@@ -129,7 +190,9 @@ The default `--theme auto` mode paints first with the terminal's default backgro
 
 `Enter` sends the current message. While nanobot is working, `Enter` sends immediately, `Tab` waits until the current response is finished, and `Option+Up` on macOS (`Alt+Up` on Windows/Linux) returns the latest waiting message to the composer. Press `Shift+Enter` to add a newline; `Ctrl+J` is the universal fallback when a terminal cannot distinguish modified Enter keys. `Alt+Enter` and `Ctrl+Enter` are also accepted when distinguishable. Use `Up`/`Down` at the composer edge to recall prompts from the current saved session. Large pastes appear as a compact placeholder in the composer but are sent unchanged. Type `/` to discover nanobot commands and terminal navigation in one palette, or type `@` to complete installed apps, configured MCP servers, and saved sessions. Use the arrow keys to choose an item and `Tab` to complete it. `/sessions` opens a searchable conversation picker, `/new-chat` preserves the current conversation and starts another one, and `/branch` forks from a completed reply. `/diff` opens a read-only unified diff for the newest turn; use `Left`/`Right` to switch edits and `Esc` to close it. The core `/new` command retains its cross-channel behavior and resets the current chat. `Ctrl+C` copies a selection, stops a running turn, clears a non-empty composer, or exits when idle. Use `PageUp`/`PageDown` to scroll, `Ctrl+Home`/`Ctrl+End` to jump to the transcript edges, and `Ctrl+O` to expand or collapse long tool traces. When you leave the bottom, the TUI shows a scrollbar and a `Ctrl+End` hint until you return. The footer reports provider token/cache usage when available. Selections copy through OSC 52 when the terminal supports it. The transcript reflows when the terminal is resized, and exiting restores the previous screen.
 
-Packaged releases fetch a version-matched, checksummed terminal archive for macOS (Apple Silicon and Intel), Linux (x64 and ARM64), or Windows x64 on first use. The cache keeps the executable together with its licenses, third-party notices, source offer, relinking instructions, and corresponding TUI source. Windows ARM64 currently falls back to the classic prompt because the Bun runtime disables the FFI required by OpenTUI on that platform. Set `NANOBOT_TUI_NO_DOWNLOAD=1` or pass `--classic` to keep the Python-only path. A local source install requires Bun and runs its own `tui/` source while the original checkout remains available; it never silently falls back to a release binary.
+Platform wheels bundle the matching native terminal executable for macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (x64 and ARM64), and Windows x64. The x64 runtime requires SSE4.2. Its licenses, third-party notices, source offer, relinking instructions, and corresponding TUI source are installed alongside it in `nanobot/tui/bin/`. The launcher uses this bundled executable without downloading from GitHub or requiring Bun.
+
+Source-distribution builds do not contain a native executable; where supported, their launcher can still fetch the version-matched GitHub release archive. `NANOBOT_TUI_NO_DOWNLOAD=1` disables that fallback, not the bundled TUI. Use `--classic` to explicitly select the Python prompt. Windows ARM64 and musl-based Linux (such as Alpine) do not have a supported native TUI wheel; use the classic prompt or WebUI. In particular, Windows ARM64 cannot run OpenTUI because Bun disables the required FFI there. A local editable source install requires Bun and runs its own `tui/` source while the original checkout remains available; it never silently falls back to a release binary.
 
 Non-interactive input/output, `--logs`, and `--no-markdown` automatically retain the classic prompt so existing scripts and diagnostic workflows do not acquire terminal control sequences or silently ignore their options.
 

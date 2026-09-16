@@ -301,6 +301,7 @@ class MatrixConfig(Base):
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
     streaming: bool = False
+    proxy: str | None = None
 
 
 class MatrixChannel(BaseChannel):
@@ -356,10 +357,14 @@ class MatrixChannel(BaseChannel):
         # Replace ':' with '_' to produce a Windows-safe filename
         safe_store_name = self.config.user_id.replace(":", "_") + f"_{self.config.device_id}.db"
 
+        proxy = self.config.proxy.strip() if self.config.proxy else ""
+        if proxy and "://" not in proxy:
+            proxy = f"http://{proxy}"
         self.client = AsyncClient(
             homeserver=self.config.homeserver,
             user=self.config.user_id,
             store_path=str(self.store_path),
+            proxy=proxy or None,
             config=AsyncClientConfig(
                 store_sync_tokens=True,
                 encryption_enabled=self.config.e2ee_enabled,

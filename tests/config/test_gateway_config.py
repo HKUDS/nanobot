@@ -15,15 +15,6 @@ def test_gateway_restart_mode_rejects_unknown_value():
         GatewayConfig(restart_mode="service")
 
 
-def test_heartbeat_ignores_removed_retention_limit():
-    config = Config.model_validate(
-        {"gateway": {"heartbeat": {"keepRecentMessages": 8}}}
-    )
-
-    heartbeat = config.model_dump(by_alias=True)["gateway"]["heartbeat"]
-    assert "keepRecentMessages" not in heartbeat
-
-
 def test_direct_delivery_accepts_camel_case_and_normalizes_path():
     config = Config.model_validate({
         "gateway": {

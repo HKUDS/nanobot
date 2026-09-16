@@ -69,7 +69,7 @@ def test_explicit_message_limit_still_starts_at_user_turn() -> None:
 @pytest.mark.asyncio
 async def test_process_message_hands_complete_replay_to_runner(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path, context_window_tokens=32_768)
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="ok", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -87,7 +87,7 @@ async def test_process_message_hands_complete_replay_to_runner(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_runner_checkpoint_keeps_current_user_as_replay_boundary(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path, context_window_tokens=8_000)
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="ok", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -110,7 +110,7 @@ async def test_runner_checkpoint_keeps_current_user_as_replay_boundary(tmp_path:
     )
 
     assert result is not None
-    sent_messages = loop.provider.chat_with_retry.await_args.kwargs["messages"]
+    sent_messages = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
     sent_text = "\n".join(str(message.get("content")) for message in sent_messages)
     assert "new question" in sent_text
     assert [message["role"] for message in sent_messages] == ["system", "user", "user"]

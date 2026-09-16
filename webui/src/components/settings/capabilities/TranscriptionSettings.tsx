@@ -1,3 +1,5 @@
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -48,6 +50,8 @@ export function transcriptionFormFromPayload(payload: SettingsPayload): Transcri
 }
 
 export function TranscriptionSettings({
+  embedded = false,
+  error,
   settings,
   form,
   dirty,
@@ -60,6 +64,8 @@ export function TranscriptionSettings({
   isRestarting,
   requiresRestartPending,
 }: {
+  embedded?: boolean;
+  error?: string;
   settings: SettingsPayload;
   form: TranscriptionSettingsUpdate;
   dirty: boolean;
@@ -73,6 +79,7 @@ export function TranscriptionSettings({
   requiresRestartPending: boolean;
 }) {
   const { t } = useTranslation();
+  useAutoSave(form, dirty, saving, onSave, !embedded);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const transcription = settings.transcription ?? DEFAULT_TRANSCRIPTION_SETTINGS;
   const selectedProvider =
@@ -82,8 +89,9 @@ export function TranscriptionSettings({
 
   return (
     <section>
-      <SettingsSectionTitle>{tx("settings.sections.voiceInput", "Voice input")}</SettingsSectionTitle>
+      {!embedded ? <SettingsSectionTitle>{tx("settings.sections.voiceInput", "Voice input")}</SettingsSectionTitle> : null}
       <SettingsGroup>
+        {!embedded ? (
         <SettingsRow
           title={tx("settings.rows.transcription", "Transcription")}
           description={tx("settings.help.transcription", "Transcribe microphone input before sending it. Chat channel voice messages use the same settings.")}
@@ -95,6 +103,8 @@ export function TranscriptionSettings({
             label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
           />
         </SettingsRow>
+        ) : null}
+        {embedded || form.enabled ? <>
         <SettingsRow title={tx("settings.rows.transcriptionProvider", "Provider")}>
           <ProviderPicker
             providers={transcription.providers}
@@ -123,27 +133,28 @@ export function TranscriptionSettings({
         </SettingsRow>
         <SettingsRow
           title={tx("settings.rows.transcriptionModel", "Model")}
-          description={tx("settings.help.transcriptionModel", "Leave as the resolved default unless your provider needs a custom model id.")}
+          description={tx("settings.help.transcriptionModel", "Keep the default model unless your provider requires a specific model ID.")}
         >
           <Input
             value={form.model}
             onChange={(event) => onChangeForm((prev) => ({ ...prev, model: event.target.value }))}
-            className="h-8 w-[min(300px,70vw)] rounded-full text-[13px]"
+            className="h-9 w-full rounded-full text-end text-[13px]"
           />
         </SettingsRow>
         <SettingsRow
           title={tx("settings.rows.transcriptionLanguage", "Language")}
-          description={tx("settings.help.transcriptionLanguage", "Optional ISO-639 hint such as en, zh, ja, or ko.")}
+          description={tx("settings.help.transcriptionLanguage", "Optional language code, such as en for English, zh for Chinese, ja for Japanese, or ko for Korean.")}
         >
           <Input
             value={form.language}
             onChange={(event) => onChangeForm((prev) => ({ ...prev, language: event.target.value }))}
             placeholder={tx("settings.voice.languageAuto", "Auto")}
-            className="h-8 w-[min(180px,60vw)] rounded-full text-[13px]"
+            className="h-9 w-full rounded-full text-end text-[13px]"
           />
         </SettingsRow>
+        <SettingsAdvancedOptions>
         <SettingsRow title={tx("settings.rows.voiceLimits", "Limits")}>
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="grid w-full gap-2">
             <NumberInput
               value={form.maxDurationSec}
               min={1}
@@ -160,12 +171,17 @@ export function TranscriptionSettings({
             />
           </div>
         </SettingsRow>
+        </SettingsAdvancedOptions>
+        </> : null}
         <RestartSettingsFooter
+          error={Boolean(error)}
+          message={error}
+          autoSave
           dirty={dirty}
           saving={saving}
-          pendingRestart={requiresRestartPending}
-          dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
-          pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}
+          pendingRestart={!embedded && requiresRestartPending}
+          dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart nanobot to apply them.")}
+          pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart to apply changes.")}
           onSave={onSave}
           onRestart={onRestart}
           isRestarting={isRestarting}

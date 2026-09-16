@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import os
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
@@ -27,6 +26,7 @@ from nanobot.agent.context_governance import (
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.events import NO_EVENTS, EventSink
 from nanobot.llm_usage.context import (
     LLMUsageSource,
     bind_llm_usage_source,
@@ -59,7 +59,6 @@ from nanobot.utils.runtime import (
 )
 
 ContinuationCallback = Callable[[], str | None]
-RetryWaitCallback = Callable[[str], Awaitable[None]]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[..., Awaitable[Iterable[Any] | None]]
 
@@ -103,19 +102,17 @@ class AgentRunSpec:
     concurrent_tools: bool = False
     workspace: Path | None = None
     session_key: str | None = None
-    context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
-    retry_wait_callback: RetryWaitCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     consolidate_history: HistoryConsolidator | None = None
     consolidate_provider_compaction: ProviderCompactionConsolidator | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
-    llm_timeout_s: float | None = None
     continuation_callback: ContinuationCallback | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
     llm_usage_source: LLMUsageSource | None = None
+    events: EventSink = NO_EVENTS
 
 
 @dataclass(slots=True)
@@ -126,8 +123,12 @@ class AgentRunResult:
     messages: list[dict[str, Any]]
     tools_used: list[str] = field(default_factory=list)
     usage: LLMUsage | None = None
+    # One entry per runner-visible model round. Recovery dispatches needed to
+    # produce that round's response are folded into the same usage value.
+    round_usages: list[LLMUsage] = field(default_factory=list)
     stop_reason: str = "completed"
     error: str | None = None
+    failure_error_kind: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
     # Terminal tail to emit when the preceding final-content prefix was already streamed.
@@ -392,7 +393,9 @@ class AgentRunner:
         final_content: str | None = None
         tools_used: list[str] = []
         usage: LLMUsage | None = None
+        round_usages: list[LLMUsage] = []
         error: str | None = None
+        failure_error_kind: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
@@ -420,13 +423,13 @@ class AgentRunner:
             session_key=spec.session_key,
             max_tool_result_chars=spec.max_tool_result_chars,
             context_window_tokens=spec.runtime.context_window_tokens,
-            context_block_limit=spec.context_block_limit,
             max_tokens=spec.runtime.generation.max_tokens,
         )
         request_state = ModelRequestState(
             config=governance_config,
             conversation=conversation_state,
             compaction=compaction,
+            events=spec.events,
         )
 
         for iteration in range(spec.max_iterations):
@@ -442,7 +445,7 @@ class AgentRunner:
                 if request_state.compaction is not None
                 else messages
             )
-            response = await self._request_model(
+            response, raw_usage = await self._request_model(
                 spec,
                 request_messages,
                 hook,
@@ -468,7 +471,7 @@ class AgentRunner:
                 response.content,
             )
             response.content = cleaned_content
-            raw_usage = self._record_request_usage(spec, request_state, response)
+            round_usages.append(raw_usage)
             context.usage = raw_usage
             usage = self._merge_usage(usage, raw_usage)
             if reasoning_text and not context.streamed_reasoning:
@@ -514,6 +517,8 @@ class AgentRunner:
                     workspace_violation_counts=workspace_violation_counts,
                     hook=hook,
                     context=context,
+                    model_messages=messages_for_model,
+                    compacted_tool_results=request_state.compacted_tool_results,
                 )
                 tool_events.extend(new_events)
                 tools_used.extend(
@@ -614,6 +619,7 @@ class AgentRunner:
                     transcript=messages,
                 )
                 retry_usage = self._record_request_usage(spec, request_state, response)
+                round_usages.append(retry_usage)
                 usage = self._merge_usage(usage, retry_usage)
                 raw_usage = self._merge_usage(raw_usage, retry_usage)
                 context.response = response
@@ -726,6 +732,7 @@ class AgentRunner:
                     had_injections = True
                     length_recovery_parts.clear()
                     continue
+                failure_error_kind = LLMProvider.public_error_kind(response)
                 break
             if is_blank_text(clean):
                 final_content = EMPTY_FINAL_RESPONSE_MESSAGE
@@ -801,6 +808,7 @@ class AgentRunner:
                     messages,
                     usage,
                     request_state=request_state,
+                    round_usages=round_usages,
                 )
             if terminal_content is None:
                 terminal_content = self._max_iterations_fallback(spec)
@@ -819,8 +827,10 @@ class AgentRunner:
             messages=messages,
             tools_used=tools_used,
             usage=usage,
+            round_usages=round_usages,
             stop_reason=stop_reason,
             error=error,
+            failure_error_kind=failure_error_kind,
             tool_events=tool_events,
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,
@@ -845,7 +855,6 @@ class AgentRunner:
             "tools": tools,
             "model": spec.runtime.model,
             "retry_mode": spec.provider_retry_mode,
-            "on_retry_wait": spec.retry_wait_callback,
         }
         generation = spec.runtime.generation
         kwargs["temperature"] = generation.temperature
@@ -863,8 +872,7 @@ class AgentRunner:
         request_state: ModelRequestState,
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
-    ) -> LLMResponse:
-        timeout_s = self._resolve_llm_timeout_s(spec)
+    ) -> tuple[LLMResponse, LLMUsage]:
         tool_definitions = spec.tools.get_definitions()
         messages, provider_context = await self.context_governor.prepare_request(
             request_state,
@@ -982,44 +990,19 @@ class AgentRunner:
                 on_stream_recover=_stream_recover,
             )
         else:
-            coro = spec.runtime.provider.chat_with_retry(
+            coro = spec.runtime.provider.chat_stream_with_retry(
                 **kwargs,
                 provider_context=provider_context,
             )
 
-        # Streaming requests also have provider-level idle timeouts
-        # (NANOBOT_STREAM_IDLE_TIMEOUT_S), but a stream that keeps producing
-        # very slow deltas can still run forever. Use a more generous wall-clock
-        # timeout for streaming while preserving NANOBOT_LLM_TIMEOUT_S=0 as an
-        # opt-out for all LLM wall-clock timeouts.
-        outer_timeout_s = (
-            max(300.0, timeout_s * 2)
-            if wants_streaming and timeout_s is not None
-            else timeout_s
-        )
+        # Providers bound the wait for each stream event, including reasoning and tool deltas.
         request_started_at = time.perf_counter()
         try:
-            response = (
-                await coro if outer_timeout_s is None
-                else await asyncio.wait_for(coro, timeout=outer_timeout_s)
-            )
+            response = await coro
         except asyncio.CancelledError:
             _pause_generation()
             await _close_native_reasoning()
             raise
-        except asyncio.TimeoutError:
-            if outer_timeout_s is None:
-                response = LLMResponse(
-                    content="Error calling LLM: stream stalled",
-                    finish_reason="error",
-                    error_kind="timeout",
-                )
-            else:
-                response = LLMResponse(
-                    content=f"Error calling LLM: timed out after {outer_timeout_s:g}s",
-                    finish_reason="error",
-                    error_kind="timeout",
-                )
         _pause_generation()
         await _close_native_reasoning()
         if first_output_at is not None:
@@ -1032,6 +1015,7 @@ class AgentRunner:
             current_request_boundary=(len(transcript) if transcript is not None else None),
         )
         request_state.provider_compaction_applied |= response.provider_compaction_applied
+        round_usage = self._record_request_usage(spec, request_state, response)
         # chat_stream_with_retry may recover internally, so only fail unfinished
         # hosted calls after the provider returns its final error response.
         if response.finish_reason == "error":
@@ -1058,12 +1042,13 @@ class AgentRunner:
             retry_messages = self._malformed_tool_call_retry_messages(
                 messages, response.content,
             )
-            return await self._request_model(
+            retry_response, retry_usage = await self._request_model(
                 spec, retry_messages, hook, context,
                 request_state=request_state,
                 malformed_retry=True,
                 transcript=None,
             )
+            return retry_response, round_usage + retry_usage
         if (
             all_dropped
             and original_finish_reason in ("tool_calls", "function_call")
@@ -1075,12 +1060,18 @@ class AgentRunner:
             fallback_messages = self._malformed_tool_call_retry_messages(
                 messages, response.content,
             )
-            return await self._request_no_tools(
+            fallback_response = await self._request_no_tools(
                 spec,
                 fallback_messages,
                 request_state=request_state,
             )
-        return response
+            fallback_usage = self._record_request_usage(
+                spec,
+                request_state,
+                fallback_response,
+            )
+            return fallback_response, round_usage + fallback_usage
+        return response, round_usage
 
     @staticmethod
     def _drop_malformed_tool_calls(
@@ -1177,6 +1168,7 @@ class AgentRunner:
         usage: LLMUsage | None,
         *,
         request_state: ModelRequestState,
+        round_usages: list[LLMUsage],
     ) -> tuple[str | None, LLMUsage | None]:
         compaction = request_state.compaction
         request_messages = (
@@ -1200,6 +1192,7 @@ class AgentRunner:
             return None, usage
 
         raw_usage = self._record_request_usage(spec, request_state, response)
+        round_usages.append(raw_usage)
         usage = self._merge_usage(usage, raw_usage)
         if response.finish_reason == "error" or response.has_tool_calls:
             logger.warning(
@@ -1242,23 +1235,10 @@ class AgentRunner:
             messages,
             tools=None,
         )
-        coro = spec.runtime.provider.chat_with_retry(
+        response = await spec.runtime.provider.chat_stream_with_retry(
             **kwargs,
             provider_context=provider_context,
         )
-        timeout_s = self._resolve_llm_timeout_s(spec)
-        try:
-            response = (
-                await coro
-                if timeout_s is None
-                else await asyncio.wait_for(coro, timeout=timeout_s)
-            )
-        except asyncio.TimeoutError:
-            response = LLMResponse(
-                content=f"Error calling LLM: timed out after {timeout_s:g}s",
-                finish_reason="error",
-                error_kind="timeout",
-            )
         await self.context_governor.summarize_provider_compaction(
             request_state,
             response,
@@ -1266,21 +1246,6 @@ class AgentRunner:
         )
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
-
-    @staticmethod
-    def _resolve_llm_timeout_s(spec: AgentRunSpec) -> float | None:
-        """Resolve the wall-clock limit shared by every model request path."""
-        timeout_s = spec.llm_timeout_s
-        if timeout_s is None:
-            # Default to a finite timeout to avoid per-session lock starvation when an LLM
-            # request hangs indefinitely (e.g. gateway/network stall).
-            # Set NANOBOT_LLM_TIMEOUT_S=0 to disable.
-            raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
-            try:
-                timeout_s = float(raw)
-            except (TypeError, ValueError):
-                timeout_s = 300.0
-        return timeout_s if timeout_s > 0 else None
 
     @staticmethod
     def _budget_exhausted_finalization_messages(
@@ -1309,7 +1274,7 @@ class AgentRunner:
         response: LLMResponse,
         *,
         tool_definitions: list[dict[str, Any]] | None,
-    ) -> LLMUsage | None:
+    ) -> LLMUsage:
         usage = response.usage
         if response.finish_reason == "error":
             if usage is None or usage.total_tokens == 0:
@@ -1331,7 +1296,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         state: ModelRequestState,
         response: LLMResponse,
-    ) -> LLMUsage | None:
+    ) -> LLMUsage:
         assert state.messages is not None
         state.usage = self._usage_or_estimate(
             spec,

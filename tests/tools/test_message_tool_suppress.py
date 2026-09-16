@@ -12,6 +12,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.utils.progress_events import output_events
 
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
@@ -40,7 +41,7 @@ class TestMessageToolSuppressLogic:
             LLMResponse(content="", tool_calls=[tool_call]),
             LLMResponse(content="Done", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         sent: list[OutboundMessage] = []
@@ -65,7 +66,7 @@ class TestMessageToolSuppressLogic:
             LLMResponse(content="", tool_calls=[tool_call]),
             LLMResponse(content="I've sent the email.", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         sent: list[OutboundMessage] = []
@@ -84,7 +85,7 @@ class TestMessageToolSuppressLogic:
     @pytest.mark.asyncio
     async def test_not_suppress_when_no_message_tool_used(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
-        loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Hello!", tool_calls=[]))
+        loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Hello!", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Hi")
@@ -104,7 +105,7 @@ class TestMessageToolSuppressLogic:
             LLMResponse(content="", tool_calls=[tool_call]),
             LLMResponse(content="Heartbeat summary", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         mt = loop.tools.get("message")
@@ -137,7 +138,7 @@ class TestMessageToolSuppressLogic:
             LLMResponse(content="", tool_calls=[]),
             LLMResponse(content="", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         sent: list[OutboundMessage] = []
@@ -169,7 +170,7 @@ class TestMessageToolSuppressLogic:
             ),
             LLMResponse(content="Done", tool_calls=[]),
         ])
-        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.tools.execute = AsyncMock(return_value="ok")
 
@@ -181,7 +182,7 @@ class TestMessageToolSuppressLogic:
         result = await loop._run_agent_loop(
             TranscriptInput(history=[], current_message=None),
             runtime=loop.llm_runtime(),
-            on_progress=on_progress,
+            events=output_events(on_progress=on_progress),
         )
 
         assert result.final_content == "Done"

@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.3.0"
+version = "0.3.5"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -48,6 +48,7 @@ dependencies = [
     "tiktoken>=0.12.0,<1.0.0",
     "jinja2>=3.1.0,<4.0.0",
     "dulwich>=0.22.0,<1.0.0",
+    "rapidfuzz>=3.14.6,<4.0.0",
     "pyyaml>=6.0,<7.0.0",
     "filelock>=3.25.2",
     "watchfiles>=1.1.1,<2.0.0",
@@ -108,6 +109,7 @@ dev = [
 
 [project.scripts]
 nanobot = "nanobot.cli.entry:main"
+nanobot-desktop-tui = "nanobot.cli.desktop_tui:main"
 
 # Third-party tool plugins register here.  Built-in tools are discovered
 # automatically via pkgutil scanning in ToolLoader.discover().

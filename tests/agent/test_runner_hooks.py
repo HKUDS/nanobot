@@ -23,7 +23,7 @@ async def test_runner_calls_hooks_in_order():
     call_count = {"n": 0}
     events: list[tuple] = []
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -32,7 +32,7 @@ async def test_runner_calls_hooks_in_order():
             )
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
@@ -254,14 +254,14 @@ async def test_runner_passes_cache_read_tokens_to_hook_context():
             assert context.usage is not None
             captured_usage.append(context.usage)
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(
             content="done",
             tool_calls=[],
             usage=LLMUsage.reported(input_tokens=200, output_tokens=20, cache_read_tokens=150),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -293,10 +293,10 @@ async def test_runner_estimates_usage_when_provider_omits_usage(monkeypatch):
             assert context.usage is not None
             captured_usage.append(context.usage)
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = [{"type": "function", "function": {"name": "lookup"}}]
     monkeypatch.setattr(
@@ -327,7 +327,7 @@ async def test_runner_calls_run_level_hooks_on_success():
     provider = MagicMock(spec=LLMProvider)
     events: list[tuple] = []
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         events.append(("request_messages", list(kwargs["messages"])))
         return LLMResponse(
             content="done",
@@ -335,7 +335,7 @@ async def test_runner_calls_run_level_hooks_on_success():
             usage=LLMUsage.reported(input_tokens=3, output_tokens=2),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -395,7 +395,7 @@ async def test_runner_run_level_context_is_detached_snapshot():
     call_count = {"n": 0}
     request_messages: list[list[dict]] = []
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         call_count["n"] += 1
         request_messages.append([dict(msg) for msg in kwargs["messages"]])
         if call_count["n"] == 1:
@@ -405,7 +405,7 @@ async def test_runner_run_level_context_is_detached_snapshot():
             )
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
@@ -448,10 +448,10 @@ async def test_runner_calls_on_error_for_model_error_result():
     provider = MagicMock(spec=LLMProvider)
     events: list[tuple] = []
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(content="model failed", finish_reason="error", tool_calls=[])
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -496,10 +496,10 @@ async def test_runner_calls_on_error_and_finally_for_unhandled_exception():
     provider = MagicMock(spec=LLMProvider)
     events: list[tuple] = []
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         raise RuntimeError("provider exploded")
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -546,10 +546,10 @@ async def test_runner_preserves_original_exception_when_finally_hook_fails():
 
     provider = MagicMock(spec=LLMProvider)
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         raise RuntimeError("provider exploded")
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -579,10 +579,10 @@ async def test_runner_does_not_report_cancellation_as_error():
     provider = MagicMock(spec=LLMProvider)
     events: list[tuple] = []
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         raise asyncio.CancelledError()
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -630,10 +630,10 @@ async def test_runner_preserves_cancellation_when_finally_hook_fails():
 
     provider = MagicMock(spec=LLMProvider)
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         raise asyncio.CancelledError()
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 

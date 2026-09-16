@@ -105,13 +105,13 @@ async def _run_optional_tool_response(response: LLMResponse):
     provider = MagicMock()
     calls = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             return response
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = ToolRegistry()
     shared_events: list[str] = []
     tools.register(_DelayTool(
@@ -288,7 +288,7 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
     call_count = {"n": 0}
     captured_second_call: list[dict] = []
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -306,7 +306,7 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
         captured_second_call[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = ToolRegistry()
     shared_events: list[str] = []
     tools.register(_DelayTool(
@@ -429,7 +429,7 @@ async def test_runner_rejects_openai_responses_array_arguments_without_executing
 @pytest.mark.asyncio
 async def test_runner_returns_legacy_entry_point_error_to_model(tmp_path):
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="working",
             tool_calls=[ToolCallRequest(id="call_1", name="legacy_plugin", arguments={})],
@@ -456,7 +456,7 @@ async def test_runner_returns_legacy_entry_point_error_to_model(tmp_path):
 @pytest.mark.asyncio
 async def test_runner_preserves_structured_plugin_success_that_starts_with_error(tmp_path):
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="working",
             tool_calls=[
@@ -491,7 +491,7 @@ async def test_runner_blocks_repeated_external_fetches():
     captured_final_call: list[dict] = []
     call_count = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] <= 3:
             return LLMResponse(
@@ -502,7 +502,7 @@ async def test_runner_blocks_repeated_external_fetches():
         captured_final_call[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="page content")

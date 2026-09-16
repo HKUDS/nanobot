@@ -24,7 +24,6 @@ def _make_loop(
     provider.generation = GenerationSettings(max_tokens=max_tokens)
     provider.estimate_prompt_tokens.return_value = (estimated_tokens, "test-counter")
     _response = LLMResponse(content="ok", tool_calls=[])
-    provider.chat_with_retry = AsyncMock(return_value=_response)
     provider.chat_stream_with_retry = AsyncMock(return_value=_response)
 
     loop = AgentLoop(
@@ -33,9 +32,6 @@ def _make_loop(
         workspace=tmp_path,
         model="test-model",
         context_window_tokens=context_window_tokens,
-        # These tests isolate Memory consolidation; Runner request fitting is
-        # covered separately with realistic context windows.
-        context_block_limit=10_000,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator._SAFETY_BUFFER = 0
@@ -44,9 +40,9 @@ def _make_loop(
 
 @pytest.mark.asyncio
 async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=2_000)
-    loop.context_block_limit = 500
-    loop.provider.generation = GenerationSettings(max_tokens=100)
+    loop = _make_loop(
+        tmp_path, estimated_tokens=100, context_window_tokens=1_624, max_tokens=100,
+    )
     loop.provider.can_resume_conversation_state.return_value = False
     loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
 
@@ -67,7 +63,7 @@ async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> No
         return 100, "test-counter"
 
     loop.provider.estimate_prompt_tokens.side_effect = estimate
-    loop.provider.chat_with_retry = AsyncMock(side_effect=[
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content="Current checkpoint.", tool_calls=[]),
         LLMResponse(content="done", tool_calls=[]),
     ])
@@ -75,8 +71,8 @@ async def test_runner_pressure_commits_summary_and_current_delta(tmp_path) -> No
     result = await loop.process_direct("continue the task", session_key="cli:test")
 
     assert result.content == "done"
-    assert loop.provider.chat_with_retry.await_count == 2
-    model_request = loop.provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+    assert loop.provider.chat_stream_with_retry.await_count == 2
+    model_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
     assert "Current checkpoint." in model_request[0]["content"]
     assert model_request[1]["content"] == SUMMARY_CONTINUATION_TEXT
     assert model_request[2]["content"] == "continue the task"
@@ -113,7 +109,7 @@ async def test_native_provider_compaction_commits_portable_terminal_checkpoint(
         payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
     )
     loop.provider.can_resume_conversation_state.return_value = True
-    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="done",
         provider_state=compacted_state,
         provider_compaction_applied=True,

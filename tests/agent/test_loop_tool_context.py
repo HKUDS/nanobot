@@ -110,7 +110,7 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
     provider = MagicMock()
     calls = {"n": 0}
 
-    async def chat_with_retry(**_kwargs):
+    async def chat_stream_with_retry(**_kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             return LLMResponse(
@@ -119,7 +119,7 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
             )
         return LLMResponse(content="done", tool_calls=[])
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     provider.get_default_model.return_value = "test-model"
 
     loop = AgentLoop(

@@ -10,10 +10,8 @@ from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     goal_state_ws_blob,
     parse_goal_state,
-    runner_wall_llm_timeout_s,
     sustained_goal_active,
 )
-from nanobot.session.manager import SessionManager
 
 
 def test_runtime_lines_empty_when_no_metadata():
@@ -144,25 +142,3 @@ def test_explicit_goal_requested_only_reads_command_metadata():
     assert explicit_goal_requested({}) is False
     message_meta = {"original_command": "/goal", "goal_requested": True}
     assert explicit_goal_requested(message_meta) is True
-
-
-def test_runner_wall_llm_timeout_uses_metadata_override(tmp_path):
-    sm = SessionManager(tmp_path)
-    assert (
-        runner_wall_llm_timeout_s(
-            sm,
-            "cli:test",
-            metadata={GOAL_STATE_KEY: {"status": "active", "objective": "x"}},
-        )
-        == 0.0
-    )
-    assert runner_wall_llm_timeout_s(sm, "cli:test", metadata={}) is None
-
-
-def test_runner_wall_llm_timeout_reads_session_when_metadata_missing(tmp_path):
-    sm = SessionManager(tmp_path)
-    sess = sm.get_or_create("c:d")
-    sess.metadata = {GOAL_STATE_KEY: {"status": "active", "objective": "z"}}
-    assert runner_wall_llm_timeout_s(sm, "c:d") == 0.0
-    sess.metadata = {}
-    assert runner_wall_llm_timeout_s(sm, "c:d") is None

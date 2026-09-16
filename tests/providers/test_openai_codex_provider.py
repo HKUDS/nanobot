@@ -211,7 +211,10 @@ async def test_codex_request_honors_stream_idle_timeout_env(monkeypatch) -> None
     seen: dict[str, int] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, request=request)
+        return httpx.Response(
+            200, request=request,
+            text='data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        )
 
     def fake_client(
         *,
@@ -236,7 +239,10 @@ async def test_codex_request_uses_configured_proxy(monkeypatch) -> None:
     proxy = "http://127.0.0.1:23458"
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, request=request)
+        return httpx.Response(
+            200, request=request,
+            text='data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        )
 
     def fake_client(
         *,
@@ -512,7 +518,8 @@ async def test_codex_diagnostic_log_omits_prompt_content(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_codex_retry_uses_structured_timeout_metadata(monkeypatch) -> None:
+@pytest.mark.parametrize("error", [httpx.ReadTimeout(""), ConnectionError("stream ended early")])
+async def test_codex_retry_uses_structured_transient_error_metadata(monkeypatch, error) -> None:
     calls = 0
     delays: list[float] = []
 
@@ -522,7 +529,7 @@ async def test_codex_retry_uses_structured_timeout_metadata(monkeypatch) -> None
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise httpx.ReadTimeout("")
+            raise error
         return provider_base.LLMResponse(content="ok")
 
     async def fake_sleep(delay: float) -> None:

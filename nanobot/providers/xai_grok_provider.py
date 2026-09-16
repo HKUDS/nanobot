@@ -599,7 +599,7 @@ def _xai_error_response(exc: Exception) -> LLMResponse:
     if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
         error_kind = "timeout"
         should_retry = True if should_retry is None else should_retry
-    elif isinstance(exc, (httpx.NetworkError, httpx.TransportError)):
+    elif isinstance(exc, (ConnectionError, httpx.NetworkError, httpx.TransportError)):
         error_kind = "connection"
         should_retry = True if should_retry is None else should_retry
     elif isinstance(exc, _XAIHTTPError):

@@ -13,6 +13,12 @@ import {
 import { cn } from "@/lib/utils";
 import type { SessionHandle } from "@/lib/types";
 
+const controlsClassName = cn(
+  "pointer-events-auto flex items-center gap-0.5 rounded-compact bg-background p-px empty:hidden",
+  "[&_button]:h-7 [&_button]:w-7 [&_button>svg]:h-3.5 [&_button>svg]:w-3.5",
+  "forced-colors:bg-[Canvas] forced-colors:outline forced-colors:outline-1 forced-colors:outline-[ButtonText]",
+);
+
 interface ThreadHeaderProps {
   title: string;
   handle?: SessionHandle | null;
@@ -56,11 +62,18 @@ export function ThreadHeader({
     <div
       data-testid="thread-header"
       className={cn(
-        "relative z-30 flex items-center justify-between gap-3 px-3 py-1",
+        "pointer-events-none inset-x-0 top-0 z-30 flex shrink-0 items-center justify-between gap-3 px-3 py-1",
+        "[position:var(--thread-header-position,absolute)]",
         minimal && "h-11",
       )}
     >
-      <div className="relative flex min-w-0 items-center gap-2">
+      <div
+        className={cn(
+          controlsClassName,
+          "relative min-w-0",
+          hideSidebarToggleForHostChrome && (minimal || hideTitle) && !handle && "lg:hidden",
+        )}
+      >
         {!hideSidebarToggle ? (
           <Button
             variant="ghost"
@@ -91,12 +104,12 @@ export function ThreadHeader({
         ) : null}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className={cn(controlsClassName, "ml-auto shrink-0")}>
         {sessionInfoAction}
         {promptNavigatorAction}
         {actions}
         {onTemporaryChatEnabledChange ? (
-          <TooltipProvider delayDuration={700} skipDelayDuration={0}>
+          <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -151,10 +164,6 @@ export function ThreadHeader({
           />
         ) : null}
       </div>
-
-      {!minimal ? (
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-4" />
-      ) : null}
     </div>
   );
 }

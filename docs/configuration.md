@@ -65,7 +65,7 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 | Enable image generation | `tools.imageGeneration.enabled`, `tools.imageGeneration.provider`, `tools.imageGeneration.model`, matching provider credentials | Enable Image Generation in the WebUI and send one image request | [Image Generation](#image-generation) |
 | Add external tools through MCP | `tools.mcpServers.<name>` | Start `nanobot gateway --verbose` and check startup/tool logs | [MCP](#mcp-model-context-protocol) |
 | Tighten tool and network safety | `tools.restrictToWorkspace`, `tools.exec.sandbox`, `tools.ssrfWhitelist`, `channels.*.allowFrom` | Run the same workflow through the channel or CLI you plan to expose | [Security](#security), [Pairing](#pairing) |
-| Tune request timeouts or process concurrency | `NANOBOT_LLM_TIMEOUT_S`, `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
+| Tune request timeouts or process concurrency | `NANOBOT_STREAM_IDLE_TIMEOUT_S`, `NANOBOT_MAX_CONCURRENT_REQUESTS` | Start nanobot from the same environment and inspect startup/runtime logs | [Runtime Environment Variables](#runtime-environment-variables) |
 | Run multiple isolated bots | separate `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Use the same explicit paths with `nanobot status`, `agent`, `webui`, `gateway`, and `serve` | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
 | Observe model calls | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` environment variables | Run one model call, then check the matching Langfuse project | [Langfuse Observability](#langfuse-observability) |
 
@@ -189,9 +189,9 @@ These variables are process-level switches. Set them in the same terminal, servi
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NANOBOT_MAX_CONCURRENT_REQUESTS` | Unlimited | Maximum concurrently running inbound agent requests. Set a positive integer to apply a cap; unset, `0`, or a negative value means unlimited. |
-| `NANOBOT_LLM_TIMEOUT_S` | `300` | Wall-clock timeout, in seconds. Ordinary requests use this value; streaming requests use the greater of 300 seconds or twice this value. Set `0` to disable. Sustained-goal turns bypass this wall-clock cap. |
-| `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Streaming idle timeout, in seconds, used by streaming providers. Invalid or non-positive values are ignored; values above `3600` are clamped. |
-| `NANOBOT_OPENAI_COMPAT_TIMEOUT_S` | `120` | HTTP request timeout, in seconds, for OpenAI-compatible providers. Invalid or non-positive values are ignored. |
+| `NANOBOT_LLM_TIMEOUT_S` | Unused | Model calls use streaming idle timeouts instead of a fixed total duration. Use `NANOBOT_STREAM_IDLE_TIMEOUT_S` to control stalled requests. |
+| `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Maximum idle wait, in seconds, for model streams, including internal tasks such as Dream, memory archiving, title generation, and Heartbeat evaluation. Each stream event renews the wait, including reasoning and tool-call deltas. Invalid or non-positive values are ignored; values above `3600` are clamped. |
+| `NANOBOT_OPENAI_COMPAT_TIMEOUT_S` | `120` | HTTP request timeout, in seconds, for direct non-streaming OpenAI-compatible provider calls. Streaming calls use `NANOBOT_STREAM_IDLE_TIMEOUT_S`. Invalid or non-positive values are ignored. |
 | `NANOBOT_WORKSPACE_SANDBOX_ENFORCED` | unset | Marks that an external workspace sandbox is already enforced. Truthy values (`1`, `true`, `yes`, `on`, `enabled`) use `NANOBOT_WORKSPACE_SANDBOX_PROVIDER` as the label; any other non-false value is treated as the provider name. |
 | `NANOBOT_WORKSPACE_SANDBOX_PROVIDER` | `unknown` | Display label for the external workspace sandbox when `NANOBOT_WORKSPACE_SANDBOX_ENFORCED` is truthy, for example `macos_app_sandbox` or `bwrap`. |
 | `NANOBOT_SANDBOX_ENFORCED` | unset | Legacy compatibility alias for `NANOBOT_WORKSPACE_SANDBOX_ENFORCED`. |
@@ -1904,11 +1904,26 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 }
 ```
 
+**AnySearch** (key-optional, anonymous quota):
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "anysearch"
+      }
+    }
+  }
+}
+```
+
+AnySearch works out of the box with no key, via its anonymous quota (lower rate limits). Set `apiKey` (or `ANYSEARCH_API_KEY`) from [anysearch.com](https://anysearch.com/console/api-keys) to lift rate limits. It also offers vertical-domain search and full-page URL content extraction.
+
 #### `tools.web.search`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `searxng`, `duckduckgo` |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `anysearch`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for API-backed search providers |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
@@ -2077,7 +2092,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 ## Security
 
 > [!TIP]
-> For production deployments, set both `"restrictToWorkspace": true` and `"tools.exec.sandbox": "bwrap"` in your config. `restrictToWorkspace` enables nanobot's application-level workspace guards; `tools.exec.sandbox` provides process-level isolation for shell commands.
+> For production deployments, set both `"restrictToWorkspace": true` and `"tools.exec.sandbox"` (`"bwrap"` on Linux, `"seatbelt"` on macOS) in your config. `restrictToWorkspace` enables nanobot's application-level workspace guards; `tools.exec.sandbox` provides process-level isolation for shell commands.
 
 For API keys, tokens, and other secrets, see [Environment Variables for Secrets](#environment-variables-for-secrets) — avoid storing them directly in `config.json`.
 
@@ -2095,13 +2110,13 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, enables nanobot's application-level workspace guards for workspace-aware tools. File tools resolve paths under the active workspace; selected internal roots can be added as read-only or explicitly write-enabled roots, and media uploads are read-only by default. Shell execution rejects workspace-external `working_dir` values and applies best-effort command path checks, but this is not an OS sandbox. |
 | `tools.maxSessionMessagesPerMinute` | `6` | Maximum messages one source session may send during any rolling 60-second window. Additional sends are rejected to stop runaway agent loops. |
-| `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables workspace restriction for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). Not available on macOS or Windows (bwrap depends on Linux kernel namespaces). |
+| `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. `"bwrap"` (Linux) or `"seatbelt"` (macOS) restricts filesystem access to the workspace (read-write), media (read-only), required system paths and configured extra binds. The workspace's parent is denied except for allowed roots; keep secrets outside the workspace and binds. Automatically enables workspace restriction for file tools. `"bwrap"` requires bubblewrap (`apt install bubblewrap`; pre-installed in Docker). `"seatbelt"` uses macOS `sandbox-exec(1)`; it sets `HOME` and `TMPDIR` to the workspace rather than sharing host temporary directories. Use `mktemp "$TMPDIR/job.XXXXXX"` for macOS shell scratch files. Neither backend restricts network access. Windows logs a warning and runs commands without OS sandboxing. |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
 | `tools.exec.pathPrepend` | `""` | Extra directories to prepend to `PATH` when running shell commands. Use this when configured tools should win executable lookup precedence, such as a Python virtual environment's `bin` or `Scripts` directory. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
-| `tools.exec.sandboxRoBinds` | `[]` | Extra absolute paths to read-only bind into the `"bwrap"` sandbox with `--ro-bind-try`, such as `/home/user/.local/bin` or `/home/user/.cargo/bin` when those paths are also in `pathPrepend`/`pathAppend`. These roots are also accepted by the shell absolute-path guard only while bwrap is active. Bind only directories whose contents are safe for agent commands to read; paths equal to or containing the active workspace are ignored so they cannot uncover its masked parent directory. |
-| `tools.exec.sandboxRwBinds` | `[]` | Extra absolute paths to read-write bind into the `"bwrap"` sandbox with `--bind-try`, for trusted tool caches or scratch directories. Use sparingly: paths listed here are intentionally writable by shell commands inside the sandbox. Paths equal to or containing the active workspace are ignored. |
+| `tools.exec.sandboxRoBinds` | `[]` | Extra absolute paths to expose read-only inside the exec sandbox (`--ro-bind-try` for `"bwrap"`, an SBPL `file-read*` rule for `"seatbelt"`), such as `/home/user/.local/bin` or `/home/user/.cargo/bin` when those paths are also in `pathPrepend`/`pathAppend`. These roots are also accepted by the shell absolute-path guard only while a sandbox is active. Bind only directories whose contents are safe for agent commands to read; paths equal to or containing the active workspace are ignored so they cannot uncover its masked parent directory. |
+| `tools.exec.sandboxRwBinds` | `[]` | Extra absolute paths to expose read-write inside the exec sandbox (`--bind-try` for `"bwrap"`, an SBPL `file-read* file-write*` rule for `"seatbelt"`), for trusted tool caches or scratch directories. Use sparingly: paths listed here are intentionally writable by shell commands inside the sandbox. Paths equal to or containing the active workspace are ignored. |
 | `tools.webuiAllowRemotePackageInstall` | `false` | When `false`, the WebUI can install missing optional packages only from a browser opened on the same machine as nanobot. Set to `true` only when a trusted remote admin is allowed to install Python packages into this nanobot environment. |
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |

@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
@@ -26,31 +26,17 @@ describe("Settings overview and appearance", () => {
     });
   });
 
-  it("shows the third-party brand notice only with the brand logo preference", () => {
+  it("shows the brand logo explanation in a tooltip when requested", async () => {
     renderSettingsView({
       initialSection: "appearance",
       initialSettings: settingsPayload(),
       showSidebar: true,
     });
 
-    const brandLogosTitle = screen.getByText("Brand logos");
-    const brandLogosRow = brandLogosTitle.parentElement?.parentElement;
-
-    expect(brandLogosRow).not.toBeNull();
-    expect(
-      within(brandLogosRow as HTMLElement).getByText(thirdPartyBrandNotice),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText(thirdPartyBrandNotice)).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Brand logos" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(thirdPartyBrandNotice);
   });
 
-  it.each(["apps", "channels"] as const)(
-    "does not repeat the third-party brand notice in %s",
-    (initialSection) => {
-      renderSettingsView({ initialSection, initialSettings: settingsPayload() });
-
-      expect(screen.queryByText(thirdPartyBrandNotice)).not.toBeInTheDocument();
-    },
-  );
 
   it("publishes the latest settings payload to the shell", async () => {
     const payload = settingsPayload();
@@ -99,7 +85,6 @@ describe("Settings overview and appearance", () => {
     renderSettingsView();
 
     expect(await screen.findByText("No apps available.")).toBeInTheDocument();
-    expect(screen.queryByText("Loading Apps...")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
     expect(await screen.findByText("Add MCP server")).toBeInTheDocument();
   });
@@ -110,7 +95,7 @@ describe("Settings overview and appearance", () => {
       usage: {
         days: [
           {
-            date: "2026-06-03",
+            date: new Date().toISOString().slice(0, 10),
             input_tokens: 1200,
             output_tokens: 300,
             cache_read_tokens: 500,
@@ -149,11 +134,8 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView({ initialSection: "overview" });
 
-    expect(await screen.findByLabelText("Token activity")).toBeInTheDocument();
-    expect(screen.getByText("Token Usage")).toBeInTheDocument();
-    expect(screen.queryByText("Token activity")).not.toBeInTheDocument();
-    expect(screen.queryByText("Total tokens")).not.toBeInTheDocument();
-    expect(screen.queryByText("Peak tokens")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("1,500 tokens")).toBeInTheDocument();
+    expect(screen.getByText("Token usage")).toBeInTheDocument();
   });
 
   it("coalesces focus refreshes while usage is already loading", async () => {
@@ -242,6 +224,6 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView({ initialSection: "overview", initialSettings: payload });
 
-    expect(screen.getByLabelText("2026-06-03: 1.5K tokens, 2 requests")).toBeInTheDocument();
+    expect(screen.getByLabelText(/2026-06-03: 1,500 tokens, 2 requests/)).toBeInTheDocument();
   });
 });

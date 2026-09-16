@@ -1,26 +1,15 @@
 {
-  "description": "Gunakan nanobot dari channel dan DM Mattermost.",
-  "requirements": "URL server Mattermost, token bot, dan akses channel",
   "setup": {
     "docsLabel": "Buka panduan Mattermost",
     "officialLabel": "Buka panduan bot Mattermost",
-    "tryIt": "Sebut bot di channel Mattermost atau kirim pesan langsung.",
-    "summary": "Mattermost terhubung melalui akun bot di server dan menerima pesan channel serta pesan langsung.",
-    "steps": [
-      "Buat akun bot Mattermost dan salin token aksesnya.",
-      "Masukkan URL server dan berikan akses ke tim serta channel tujuan.",
-      "Simpan dan aktifkan Mattermost, lalu sebut bot atau kirim DM."
-    ],
     "fields": {
       "serverUrl": {
         "label": "URL server",
-        "placeholder": "https://mattermost.example.com",
-        "help": "Gunakan URL dasar workspace Mattermost."
+        "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "Token bot",
-        "placeholder": "Token bot Mattermost",
-        "help": "Buat dari akun bot Mattermost."
+        "placeholder": "Token bot Mattermost"
       },
       "teamId": {
         "label": "ID tim",
@@ -29,7 +18,7 @@
       "groupPolicy": {
         "label": "Perilaku kanal",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
@@ -37,7 +26,7 @@
       "groupPolicyInThread": {
         "label": "Perilaku thread",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan (tanpa sebutan)",
           "allowlist": "Daftar izin"
         }
@@ -45,6 +34,78 @@
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
         "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "allowFromMatchMode": {
+        "label": "Pencocokan pengguna",
+        "choices": {
+          "email": "Surel",
+          "id": "ID Pengguna",
+          "username": "Nama pengguna"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Saluran yang diizinkan"
+      },
+      "replyInThread": {
+        "label": "Balas di thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Sertakan konteks thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Batas konteks thread"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "doneEmoji": {
+        "label": "Selesai emoji"
+      },
+      "sendProgress": {
+        "label": "Kirim kemajuan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "sendToolHints": {
+        "label": "Kirim petunjuk alat",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_enabled": {
+        "label": "Aktifkan pesan langsung",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "dm_policy": {
+        "label": "Akses pesan langsung",
+        "choices": {
+          "allowlist": "Daftar yang diizinkan",
+          "open": "Buka"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Mengizinkan pengguna pesan langsung"
       }
     }
   }

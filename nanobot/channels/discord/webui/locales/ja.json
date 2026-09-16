@@ -1,26 +1,15 @@
 {
-  "description": "Discord サーバーと DM から nanobot を利用します。",
-  "requirements": "Discord ボットトークン、権限、ゲートウェイ",
   "setup": {
     "docsLabel": "Discord 設定ガイドを開く",
     "officialLabel": "Discord ポータルを開く",
-    "tryIt": "サーバーでボットをメンションするか、DM を送信します。",
-    "summary": "有効化すると Discord 対応がオンになります。ボットトークンとサーバー権限が必要です。",
-    "steps": [
-      "Discord Developer Portal でボットを作成し、トークンをコピーします。",
-      "メッセージの読み書きとスラッシュコマンド権限を付けてサーバーに招待します。",
-      "保存して Discord を有効にし、メンションまたは DM を送信します。"
-    ],
     "fields": {
       "token": {
         "label": "ボットトークン",
-        "placeholder": "Discord ボットトークン",
-        "help": "Discord Developer Portal の Bot ページで作成します。"
+        "placeholder": "Discord ボットトークン"
       },
       "allowChannels": {
         "label": "許可するチャンネル",
-        "placeholder": "チャンネル ID（カンマ区切り）",
-        "help": "空欄の場合、ボットが読めるすべてのチャンネルを許可します。"
+        "placeholder": "チャンネル ID（カンマ区切り）"
       },
       "groupPolicy": {
         "label": "グループでの動作",
@@ -33,6 +22,34 @@
       "allowFrom": {
         "label": "許可するユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ"
+      },
+      "proxyUsername": {
+        "label": "プロキシのユーザー名"
+      },
+      "proxyPassword": {
+        "label": "プロキシパスワード"
+      },
+      "intents": {
+        "label": "ゲートウェイの意図"
+      },
+      "readReceiptEmoji": {
+        "label": "絵文字を読む"
+      },
+      "workingEmoji": {
+        "label": "働く絵文字"
+      },
+      "workingEmojiDelay": {
+        "label": "絵文字の動作遅延"
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
       }
     }
   }

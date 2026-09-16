@@ -151,7 +151,8 @@ def workspaces_payload(
     *,
     default_workspace: Path,
     default_restrict_to_workspace: bool,
-    controls_available: bool,
+    can_change_project: bool,
+    can_use_full_access: bool,
     folder_picker_available: bool = False,
 ) -> dict[str, Any]:
     default_access_mode = read_webui_default_access_mode()
@@ -169,8 +170,8 @@ def workspaces_payload(
         "default_access_mode": default_access_mode,
         "default_scope": default_scope.payload(),
         "controls": {
-            "can_change_project": controls_available,
-            "can_use_full_access": controls_available,
+            "can_change_project": can_change_project,
+            "can_use_full_access": can_use_full_access,
             "can_pick_folder": folder_picker_available,
         },
     }
@@ -254,13 +255,15 @@ class WebUIWorkspaceController:
     def payload(
         self,
         *,
-        controls_available: bool,
+        can_change_project: bool,
+        can_use_full_access: bool,
         folder_picker_available: bool = False,
     ) -> dict[str, Any]:
         return workspaces_payload(
             default_workspace=self._default_workspace,
             default_restrict_to_workspace=self._default_restrict_to_workspace,
-            controls_available=controls_available,
+            can_change_project=can_change_project,
+            can_use_full_access=can_use_full_access,
             folder_picker_available=folder_picker_available,
         )
 
@@ -269,7 +272,8 @@ class WebUIWorkspaceController:
         envelope: dict[str, Any],
         *,
         session_key: str | None,
-        controls_available: bool,
+        can_change_project: bool,
+        can_use_full_access: bool,
     ) -> WorkspaceScope:
         current = self.scope_for_session_key(session_key) if session_key else self.default_scope()
         raw = envelope.get(WORKSPACE_SCOPE_METADATA_KEY)
@@ -282,20 +286,37 @@ class WebUIWorkspaceController:
                 default_restrict_to_workspace=self._default_restrict_to_workspace,
                 source_channel=_WEBUI_SCOPE_CHANNEL,
             )
-        if not controls_available and not _scope_change_is_non_escalating(current, scope):
-            raise WorkspaceScopeError("workspace controls are localhost-only", status=403)
+        if not can_change_project and not _scope_change_is_non_escalating(current, scope):
+            raise WorkspaceScopeError(
+                "project selection is unavailable for this connection",
+                status=403,
+            )
+        if (
+            not can_use_full_access
+            and scope.access_mode == "full"
+            and (
+                current.access_mode != "full"
+                or scope.project_path != current.project_path
+            )
+        ):
+            raise WorkspaceScopeError(
+                "full workspace access is unavailable for this connection",
+                status=403,
+            )
         return scope
 
     def scope_for_new_chat(
         self,
         envelope: dict[str, Any],
         *,
-        controls_available: bool,
+        can_change_project: bool,
+        can_use_full_access: bool,
     ) -> WorkspaceScope:
         return self.scope_from_envelope(
             envelope,
             session_key=None,
-            controls_available=controls_available,
+            can_change_project=can_change_project,
+            can_use_full_access=can_use_full_access,
         )
 
     def scope_for_set_request(
@@ -304,14 +325,16 @@ class WebUIWorkspaceController:
         *,
         chat_id: str,
         chat_running: bool,
-        controls_available: bool,
+        can_change_project: bool,
+        can_use_full_access: bool,
     ) -> WorkspaceScope:
         if chat_running:
             raise WorkspaceScopeError("chat_running", status=409)
         return self.scope_from_envelope(
             envelope,
             session_key=webui_session_key(chat_id),
-            controls_available=controls_available,
+            can_change_project=can_change_project,
+            can_use_full_access=can_use_full_access,
         )
 
     def scope_for_message(
@@ -320,12 +343,14 @@ class WebUIWorkspaceController:
         *,
         chat_id: str,
         chat_running: bool,
-        controls_available: bool,
+        can_change_project: bool,
+        can_use_full_access: bool,
     ) -> WorkspaceScope:
         scope = self.scope_from_envelope(
             envelope,
             session_key=webui_session_key(chat_id),
-            controls_available=controls_available,
+            can_change_project=can_change_project,
+            can_use_full_access=can_use_full_access,
         )
         if (
             WORKSPACE_SCOPE_METADATA_KEY in envelope

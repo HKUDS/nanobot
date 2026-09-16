@@ -151,6 +151,7 @@ class TestConvertMessages:
         assert items[0]["role"] == "assistant"
         assert items[0]["content"][0]["type"] == "output_text"
         assert items[0]["content"][0]["text"] == "I'll help"
+        assert "id" not in items[0]
 
     def test_preserves_deepseek_reasoning_content(self):
         _, items = convert_messages([
@@ -167,7 +168,6 @@ class TestConvertMessages:
                 "role": "assistant",
                 "content": [{"type": "output_text", "text": "answer"}],
                 "status": "completed",
-                "id": "msg_0",
             },
         ]
 
@@ -212,7 +212,7 @@ class TestConvertMessages:
         }])
         assert items[0]["type"] == "function_call"
         assert items[0]["call_id"] == "call_abc"
-        assert items[0]["id"] == "fc_1"
+        assert "id" not in items[0]
         assert items[0]["name"] == "get_weather"
         assert items[0]["arguments"] == '{"city": "SF"}'
 
@@ -228,58 +228,32 @@ class TestConvertMessages:
 
         assert json.loads(items[0]["arguments"]) == {"path": "foo.txt"}
 
-    def test_duplicate_response_item_ids_are_made_unique(self):
-        """Codex rejects replayed Responses input items with duplicate ids."""
+    def test_discards_provider_item_ids_without_changing_call_ids(self):
         _, items = convert_messages([
             {
                 "role": "assistant",
                 "content": None,
                 "tool_calls": [{
-                    "id": "call_a|rs_same",
-                    "function": {"name": "first", "arguments": "{}"},
+                    "id": "call_1|fc_1",
+                    "function": {"name": "get_weather", "arguments": "{}"},
                 }],
             },
-            {"role": "tool", "tool_call_id": "call_a|rs_same", "content": "ok"},
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{
-                    "id": "call_b|rs_same",
-                    "function": {"name": "second", "arguments": "{}"},
-                }],
-            },
-            {"role": "tool", "tool_call_id": "call_b|rs_same", "content": "ok"},
+            {"role": "tool", "tool_call_id": "call_1|fc_1", "content": "ok"},
         ])
-        function_call_ids = [
-            item["id"] for item in items if item.get("type") == "function_call"
-        ]
-        assert function_call_ids == ["rs_same", "rs_same_2"]
-        assert len(function_call_ids) == len(set(function_call_ids))
 
-    def test_fallback_response_item_ids_are_unique_with_multiple_tool_calls(self):
-        _, items = convert_messages([{
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {"id": "call_a", "function": {"name": "first", "arguments": "{}"}},
-                {"id": "call_b", "function": {"name": "second", "arguments": "{}"}},
-            ],
-        }])
-        function_call_ids = [
-            item["id"] for item in items if item.get("type") == "function_call"
-        ]
-        assert function_call_ids == ["fc_0", "fc_0_2"]
-        assert len(function_call_ids) == len(set(function_call_ids))
+        assert all("id" not in item for item in items)
+        assert items[0]["call_id"] == "call_1"
+        assert items[1]["call_id"] == "call_1"
 
     def test_assistant_with_tool_calls_no_id(self):
-        """Fallback IDs when tool_call.id is missing."""
+        """Fallback call IDs still work when tool_call.id is missing."""
         _, items = convert_messages([{
             "role": "assistant",
             "content": None,
             "tool_calls": [{"function": {"name": "f1", "arguments": "{}"}}],
         }])
         assert items[0]["call_id"] == "call_0"
-        assert items[0]["id"].startswith("fc_")
+        assert "id" not in items[0]
 
     def test_tool_message(self):
         _, items = convert_messages([{
@@ -753,6 +727,36 @@ class TestParseResponseOutput:
 
 
 class TestResponsesConversationState:
+    def test_replayed_reasoning_items_omit_unsupported_status(self):
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=[{"role": "user", "content": "previous"}],
+            output_items=[{
+                "type": "reasoning",
+                "id": "rs_1",
+                "status": None,
+                "encrypted_content": "opaque",
+            }],
+        ).with_pending_messages([
+            {"role": "user", "content": "continue"},
+        ])
+
+        _, items, replayed = prepare_responses_input(
+            [{"role": "user", "content": "current"}],
+            state=state,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is True
+        reasoning_item = next(
+            item for item in items
+            if item.get("type") == "reasoning"
+        )
+        assert "status" not in reasoning_item
+        assert reasoning_item["encrypted_content"] == "opaque"
+
     def test_server_compaction_prunes_superseded_prefix(self):
         state = build_responses_state(
             provider="openai:test",
@@ -851,6 +855,46 @@ class TestResponsesConversationState:
         assert "pending_messages=1" in log_text
         assert "dropped_items=2" in log_text
         assert secret not in log_text
+
+    def test_fresh_and_pending_conversions_omit_item_ids(self):
+        pending_messages = [{
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1|fc_1",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }],
+        }]
+
+        _, fresh_items, replayed = prepare_responses_input(
+            pending_messages,
+            state=None,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is False
+        assert fresh_items[0]["call_id"] == "call_1"
+        assert "id" not in fresh_items[0]
+
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=[{"role": "user", "content": "previous"}],
+            output_items=[{"type": "message", "id": "msg_previous"}],
+        ).with_pending_messages(pending_messages)
+
+        _, items, replayed = prepare_responses_input(
+            [{"role": "user", "content": "current"}],
+            state=state,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is True
+        assert items[1]["id"] == "msg_previous"
+        assert items[2]["call_id"] == "call_1"
+        assert "id" not in items[2]
 
     def test_replays_exact_items_then_only_pending_and_new_messages(self):
         prior_items = [
@@ -976,6 +1020,14 @@ class _SseResponse:
 
 
 class TestConsumeSse:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
+    async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
+        response = _SseResponse([{"type": event_type, "delta": "partial"}])
+
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sse_with_reasoning(response)
+
     @pytest.mark.asyncio
     async def test_legacy_consume_sse_returns_three_tuple(self):
         response = _SseResponse([
@@ -1296,7 +1348,8 @@ class TestConsumeSse:
             },
         ])
 
-        await consume_sse_with_reasoning(response, capture=capture)
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sse_with_reasoning(response, capture=capture)
 
         assert capture.completed is False
 
@@ -1509,6 +1562,15 @@ class TestConsumeSse:
 
 
 class TestConsumeSdkStream:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
+    async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
+        async def stream():
+            yield SimpleNamespace(type=event_type, delta="partial")
+
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sdk_stream(stream())
+
     @pytest.mark.asyncio
     async def test_text_stream(self):
         ev1 = MagicMock(type="response.output_text.delta", delta="Hello")
@@ -1985,6 +2047,10 @@ class TestConsumeSdkStream:
             MagicMock(type="response.reasoning_text.delta", delta="step 1 "),
             MagicMock(type="response.reasoning_text.delta", delta="step 2"),
             MagicMock(type="response.reasoning_text.done", text="step 1 step 2"),
+            SimpleNamespace(
+                type="response.completed",
+                response=SimpleNamespace(status="completed", usage=None, output=[]),
+            ),
         ]
         emitted: list[str] = []
 

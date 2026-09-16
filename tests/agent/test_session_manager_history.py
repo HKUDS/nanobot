@@ -157,7 +157,7 @@ def test_orphan_trim_with_last_archived():
     assert all(m.get("role") != "tool" or m["tool_call_id"].startswith("new_") for m in history)
 
 
-def test_get_history_replays_recent_messages_after_full_archive():
+def test_get_history_does_not_replay_messages_after_full_archive():
     session = Session(key="test:fully-archived")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"u{i}"})
@@ -166,19 +166,10 @@ def test_get_history_replays_recent_messages_after_full_archive():
 
     history = session.get_history(max_messages=100)
 
-    assert [message["content"] for message in history] == [
-        "u6",
-        "a6",
-        "u7",
-        "a7",
-        "u8",
-        "a8",
-        "u9",
-        "a9",
-    ]
+    assert history == []
 
 
-def test_get_history_extends_archived_replay_to_preceding_user():
+def test_get_history_does_not_restore_archived_user_turn():
     session = Session(key="test:archived-tool-turn")
     session.messages.extend(
         [
@@ -195,12 +186,11 @@ def test_get_history_extends_archived_replay_to_preceding_user():
 
     history = session.get_history(max_messages=100)
 
-    assert history[0]["content"] == "run tools"
-    assert history[-1]["content"] == "done"
-    _assert_no_orphans(history)
+    assert history == []
+    assert len(session.messages) > 8
 
 
-def test_archived_tool_turn_can_extend_past_message_cap():
+def test_archived_tool_turn_stays_out_of_replay():
     session = Session(key="test:long-archived-tool-turn")
     session.messages.extend(
         [
@@ -216,10 +206,8 @@ def test_archived_tool_turn_can_extend_past_message_cap():
 
     history = session.get_history(max_messages=120)
 
-    assert len(history) > 120
-    assert history[0]["content"] == "run many tools"
-    assert history[-1]["content"] == "done"
-    _assert_no_orphans(history)
+    assert history == []
+    assert len(session.messages) > 8
 
 
 # --- Edge: no tool messages at all ---

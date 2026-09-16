@@ -128,6 +128,7 @@ export function renderSettingsView(
       | "overview"
       | "appearance"
       | "apps"
+      | "skills"
       | "channels"
       | "automations"
       | "advanced"
@@ -137,9 +138,12 @@ export function renderSettingsView(
       | "runtime";
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
+    mainNavigationExpanded?: boolean;
     onBackToChat?: () => void;
     onSettingsChange?: (payload: SettingsPayload) => void;
+    onStartAutomationChat?: React.ComponentProps<typeof SettingsView>["onStartAutomationChat"];
     onNativeEngineRestart?: () => Promise<string>;
+    onRestart?: () => void;
   } = {},
 ) {
   render(
@@ -149,11 +153,14 @@ export function renderSettingsView(
         initialSection={options.initialSection ?? "apps"}
         initialSettings={options.initialSettings}
         showSidebar={options.showSidebar}
+        mainNavigationExpanded={options.mainNavigationExpanded}
         onToggleTheme={() => {}}
         onBackToChat={options.onBackToChat ?? (() => {})}
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}
+        onStartAutomationChat={options.onStartAutomationChat}
         onNativeEngineRestart={options.onNativeEngineRestart}
+        onRestart={options.onRestart}
       />
     </ClientProvider>,
   );

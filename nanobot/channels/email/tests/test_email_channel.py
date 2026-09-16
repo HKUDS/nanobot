@@ -8,7 +8,10 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
 from nanobot.channels.email.runtime import EmailChannel, EmailConfig
+from nanobot.channels.manager import ChannelManager
+from nanobot.config.schema import Config
 
 
 def _make_config(**overrides) -> EmailConfig:
@@ -37,17 +40,33 @@ def _make_raw_email(
     from_addr: str = "alice@example.com",
     subject: str = "Hello",
     body: str = "This is the body.",
-    auth_results: str | None = None,
+    auth_results: str | list[str] | None = None,
 ) -> bytes:
     msg = EmailMessage()
     msg["From"] = from_addr
     msg["To"] = "bot@example.com"
     msg["Subject"] = subject
     msg["Message-ID"] = "<m1@example.com>"
-    if auth_results:
+    if isinstance(auth_results, str):
         msg["Authentication-Results"] = auth_results
+    elif auth_results:
+        for auth_result in auth_results:
+            msg["Authentication-Results"] = auth_result
     msg.set_content(body)
     return msg.as_bytes()
+
+
+def test_email_only_enables_final_reply_delivery() -> None:
+    manager = ChannelManager.__new__(ChannelManager)
+    manager.config = Config.model_validate({"channels": {"email": {"enabled": True}}})
+    manager.bus = MessageBus()
+
+    channel = manager._build_channel("email", EmailChannel, {"enabled": True})
+
+    assert channel.send_progress is False
+    assert channel.send_tool_hints is False
+    assert channel.supports_streaming is False
+    assert type(channel).send_reasoning_delta is BaseChannel.send_reasoning_delta
 
 
 def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
@@ -664,6 +683,24 @@ def test_validate_config_requires_move_mailbox_for_move_post_action() -> None:
     assert channel._validate_config() is False
 
 
+def test_validate_config_requires_trusted_authserv_ids_when_verification_enabled() -> None:
+    channel = EmailChannel(
+        _make_config(verify_dkim=True, verify_spf=True, trusted_authserv_ids=[]),
+        MessageBus(),
+    )
+    assert channel._validate_config() is False
+
+
+def test_email_config_normalizes_trusted_authserv_ids() -> None:
+    config = _make_config(
+        trusted_authserv_ids=[" MX.Google.COM. ", "mx.google.com"],
+    )
+    assert config.trusted_authserv_ids == ["mx.google.com"]
+
+    with pytest.raises(ValueError, match="invalid trusted Authentication-Results authserv-id"):
+        _make_config(trusted_authserv_ids=["*"])
+
+
 def test_extract_text_body_falls_back_to_html() -> None:
     msg = EmailMessage()
     msg["From"] = "alice@example.com"
@@ -1019,7 +1056,11 @@ def test_spoofed_email_rejected_when_verify_enabled(monkeypatch) -> None:
     fake = _make_fake_imap(raw)
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
-    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    cfg = _make_config(
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.example.com"],
+    )
     channel = EmailChannel(cfg, MessageBus())
     items, _ = channel._fetch_new_messages()
 
@@ -1036,7 +1077,11 @@ def test_email_with_valid_auth_results_accepted(monkeypatch) -> None:
     fake = _make_fake_imap(raw)
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
-    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    cfg = _make_config(
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.example.com"],
+    )
     channel = EmailChannel(cfg, MessageBus())
     items, _ = channel._fetch_new_messages()
 
@@ -1055,11 +1100,142 @@ def test_email_with_partial_auth_rejected(monkeypatch) -> None:
     fake = _make_fake_imap(raw)
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
-    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    cfg = _make_config(
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.example.com"],
+    )
     channel = EmailChannel(cfg, MessageBus())
     items, _ = channel._fetch_new_messages()
 
     assert len(items) == 0, "Email with dkim=fail should be rejected"
+
+
+def test_forged_authentication_results_cannot_override_trusted_failure(monkeypatch) -> None:
+    raw = _make_raw_email(
+        from_addr="owner@example.com",
+        subject="Forged authentication",
+        body="Malicious payload",
+        auth_results=[
+            "mx.receiver.example; spf=fail smtp.mailfrom=attacker.example; "
+            "dkim=fail header.d=attacker.example",
+            "mx.attacker.example; spf=pass smtp.mailfrom=owner@example.com; "
+            "dkim=pass header.d=example.com",
+        ],
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allow_from=["owner@example.com"],
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert items == []
+
+
+def test_duplicate_header_with_trusted_id_is_rejected(monkeypatch) -> None:
+    raw = _make_raw_email(
+        from_addr="owner@example.com",
+        subject="Forged trusted producer",
+        body="Malicious payload",
+        auth_results=[
+            "mx.receiver.example; spf=fail smtp.mailfrom=attacker.example; "
+            "dkim=fail header.d=attacker.example",
+            "mx.receiver.example; spf=pass smtp.mailfrom=owner@example.com; "
+            "dkim=pass header.d=example.com",
+        ],
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allow_from=["owner@example.com"],
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert items == []
+
+
+def test_pass_text_in_authentication_result_comment_is_not_a_verdict() -> None:
+    from email import policy
+    from email.parser import BytesParser
+
+    msg = EmailMessage()
+    msg["From"] = "owner@example.com"
+    msg["Authentication-Results"] = (
+        "mx.receiver.example; spf=fail (spf=pass smtp.mailfrom=owner@example.com) "
+        "smtp.mailfrom=attacker.example; "
+        "dkim=fail reason=\"dkim=pass header.d=example.com\" header.d=attacker.example"
+    )
+    msg.set_content("malicious")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg.as_bytes())
+    channel = EmailChannel(
+        _make_config(trusted_authserv_ids=["mx.receiver.example"]),
+        MessageBus(),
+    )
+
+    assert channel._check_authentication_results(parsed, "owner@example.com") == (False, False)
+
+
+def test_trusted_pass_for_unrelated_domain_is_rejected(monkeypatch) -> None:
+    raw = _make_raw_email(
+        from_addr="owner@example.com",
+        subject="Unaligned authentication",
+        body="Malicious payload",
+        auth_results=(
+            "mx.receiver.example; spf=pass smtp.mailfrom=attacker.example; "
+            "dkim=pass header.d=attacker.example; "
+            "dmarc=fail header.from=example.com"
+        ),
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allow_from=["owner@example.com"],
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert items == []
+
+
+def test_trusted_relaxed_domain_alignment_accepts_legitimate_subdomain_auth(monkeypatch) -> None:
+    raw = _make_raw_email(
+        from_addr="alice@example.com",
+        subject="Aligned authentication",
+        body="Legitimate payload",
+        auth_results=(
+            "mx.receiver.example; spf=pass smtp.mailfrom=bounce.mail.example.com; "
+            "dkim=pass header.d=mail.example.com"
+        ),
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allow_from=["alice@example.com"],
+        verify_dkim=True,
+        verify_spf=True,
+        trusted_authserv_ids=["mx.receiver.example"],
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["sender"] == "alice@example.com"
 
 
 def test_backward_compat_verify_disabled(monkeypatch) -> None:
@@ -1092,7 +1268,7 @@ def test_email_content_tagged_with_email_context(monkeypatch) -> None:
 
 
 def test_check_authentication_results_method() -> None:
-    """Unit test for the _check_authentication_results static method."""
+    """Unit test for trusted, aligned Authentication-Results parsing."""
     from email import policy
     from email.parser import BytesParser
 
@@ -1101,7 +1277,11 @@ def test_check_authentication_results_method() -> None:
     msg_no_auth["From"] = "alice@example.com"
     msg_no_auth.set_content("test")
     parsed = BytesParser(policy=policy.default).parsebytes(msg_no_auth.as_bytes())
-    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    channel = EmailChannel(
+        _make_config(trusted_authserv_ids=["mx.google.com"]),
+        MessageBus(),
+    )
+    spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
     assert spf is False
     assert dkim is False
 
@@ -1113,7 +1293,7 @@ def test_check_authentication_results_method() -> None:
     )
     msg_both.set_content("test")
     parsed = BytesParser(policy=policy.default).parsebytes(msg_both.as_bytes())
-    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
     assert spf is True
     assert dkim is True
 
@@ -1125,7 +1305,7 @@ def test_check_authentication_results_method() -> None:
     )
     msg_spf_only.set_content("test")
     parsed = BytesParser(policy=policy.default).parsebytes(msg_spf_only.as_bytes())
-    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
     assert spf is True
     assert dkim is False
 
@@ -1137,7 +1317,7 @@ def test_check_authentication_results_method() -> None:
     )
     msg_dkim_only.set_content("test")
     parsed = BytesParser(policy=policy.default).parsebytes(msg_dkim_only.as_bytes())
-    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
     assert spf is False
     assert dkim is True
 

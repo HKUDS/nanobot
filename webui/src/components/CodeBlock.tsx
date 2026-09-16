@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -138,7 +138,7 @@ function CodeTextBlock({
   className?: string;
   renderText?: (value: string) => ReactNode;
 }) {
-  const lines = code.split("\n");
+  const lines = showLineNumbers ? code.split("\n") : [];
   return (
     <pre
       className={cn(
@@ -184,19 +184,20 @@ export function CodeBlock({
 }: CodeBlockProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const renderAnsi = useMemo(() => shouldRenderAnsi(language, code), [language, code]);
+  const plainCode = useMemo(() => renderAnsi ? stripAnsi(code) : code, [renderAnsi, code]);
   const isDark = useThemeValue() === "dark";
   const hasChrome = chrome === "default";
-  const renderAnsi = shouldRenderAnsi(language, code);
   const syntaxLanguage = normalizeCodeLanguage(language);
   const copyLabel = copied ? t("code.copied") : t("code.copyAria");
 
   const onCopy = useCallback(() => {
-    void copyTextToClipboard(renderAnsi ? stripAnsi(code) : code).then((ok) => {
+    void copyTextToClipboard(plainCode).then((ok) => {
       if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 1_500);
     });
-  }, [code, renderAnsi]);
+  }, [plainCode]);
 
   return (
     <div

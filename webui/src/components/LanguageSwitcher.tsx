@@ -1,60 +1,35 @@
-import { Globe } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { setAppLanguage } from "@/i18n";
-import {
-  currentLocale,
-} from "@/i18n";
-import {
-  localeOption,
-  supportedLocales,
-  type SupportedLocale,
-} from "@/i18n/config";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { currentLocale, setAppLanguage } from "@/i18n";
+import { supportedLocales, type SupportedLocale } from "@/i18n/config";
+import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-export function LanguageSwitcher() {
+export function LanguageSwitcher({ className }: { className?: string }) {
   const { t } = useTranslation();
-  const locale = currentLocale();
-  const selected = localeOption(locale);
-
+  const [pointerFocus, setPointerFocus] = useState(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={t("sidebar.language.ariaLabel")}
-          className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-        >
-          <Globe className="h-3.5 w-3.5" />
-          <span className="max-w-[7rem] truncate">{selected.nativeLabel}</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuLabel>{t("sidebar.language.label")}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuRadioGroup
-          value={locale}
-          onValueChange={(value) => {
-            void setAppLanguage(value as SupportedLocale);
-          }}
-        >
-          {supportedLocales.map((option) => (
-            <DropdownMenuRadioItem key={option.code} value={option.code}>
-              {option.nativeLabel}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Select value={currentLocale()} onValueChange={(value) => { void setAppLanguage(value as SupportedLocale); }}>
+      <SelectTrigger
+        className={cn("min-w-40 rounded-full", pointerFocus && "focus-visible:ring-0", className)}
+        aria-label={t("sidebar.language.ariaLabel")}
+        onPointerDown={() => setPointerFocus(true)}
+        onKeyDown={() => setPointerFocus(false)}
+        onBlur={() => setPointerFocus(false)}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent
+        onPointerUpCapture={() => setPointerFocus(true)}
+        onPointerDownOutside={() => setPointerFocus(true)}
+        onKeyDownCapture={() => setPointerFocus(false)}
+        onEscapeKeyDown={() => setPointerFocus(false)}
+      >
+        {supportedLocales.map((option) => (
+          <SelectItem key={option.code} value={option.code}>{option.nativeLabel}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

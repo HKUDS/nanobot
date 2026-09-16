@@ -27,7 +27,7 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
-from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 from nanobot.utils.helpers import (
@@ -42,7 +42,6 @@ from nanobot.utils.helpers import (
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 SESSION_CACHE_MAX_SIZE = 128
-MIN_COMPACTED_REPLAY_MESSAGES = 8
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
@@ -321,6 +320,27 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
+    def commit_summary_checkpoint(
+        self,
+        summary: str,
+        *,
+        insert_at: int | None = None,
+        last_active: datetime | None = None,
+    ) -> None:
+        """Replace replay before a hidden boundary while preserving the transcript."""
+        boundary = len(self.messages) if insert_at is None else insert_at
+        self.messages.insert(boundary, {
+            "role": "user",
+            "content": SUMMARY_CONTINUATION_TEXT,
+            HIDDEN_HISTORY_META: True,
+            "timestamp": datetime.now().isoformat(),
+        })
+        self.metadata["_last_summary"] = {
+            "text": summary,
+            "last_active": (last_active or self.updated_at).isoformat(),
+        }
+        self.last_archived = boundary
+
     def get_history(
         self,
         max_messages: int = 0,
@@ -331,39 +351,19 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Return recent replayable messages for LLM input.
 
-        A committed in-turn checkpoint replaces its old prefix with the stored
+        A committed summary checkpoint replaces its old prefix with the stored
         summary and resumes replay at a hidden continuation marker. A positive
         ``max_messages`` applies an additional caller-owned count limit.
         """
-        replay_start = self.last_archived
-        resumes_from_checkpoint = (
-            replay_start < len(self.messages)
-            and is_hidden_history_message(self.messages[replay_start])
-            and self.messages[replay_start].get("content") == SUMMARY_CONTINUATION_TEXT
-        )
-        if replay_start and not resumes_from_checkpoint:
-            recent_start = recent_message_start_index(
-                self.messages,
-                MIN_COMPACTED_REPLAY_MESSAGES,
-                extend_to_user=True,
-            )
-            replay_start = min(replay_start, recent_start)
-
-        replayable = self.messages[replay_start:]
+        replayable = self.messages[self.last_archived:]
         if max_messages <= 0:
             start_idx = 0
         else:
-            unarchived_count = len(self.messages) - self.last_archived
-            if replay_start < self.last_archived and unarchived_count < max_messages:
-                # The archived replay suffix can exceed the nominal count when one
-                # tool-heavy turn spans the boundary. Preserve that complete turn.
-                start_idx = 0
-            else:
-                start_idx = recent_message_start_index(
-                    replayable,
-                    max_messages,
-                    extend_to_user=extend_to_user,
-                )
+            start_idx = recent_message_start_index(
+                replayable,
+                max_messages,
+                extend_to_user=extend_to_user,
+            )
         sliced = replayable[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive

@@ -29,7 +29,7 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
-    provider.chat_with_retry = AsyncMock(
+    provider.chat_stream_with_retry = AsyncMock(
         side_effect=[LLMResponse(content=response, usage=None) for response in responses]
     )
     return AgentLoop(
@@ -55,7 +55,7 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     await loop._process_message(_message(key, "first question"))
     await loop._process_message(_message(key, "second question"))
 
-    calls = loop.provider.chat_with_retry.await_args_list
+    calls = loop.provider.chat_stream_with_retry.await_args_list
     assert "private durable memory" not in str(calls[0].kwargs["messages"])
     tool_names = {item["function"]["name"] for item in calls[0].kwargs["tools"]}
     assert "read_session" in tool_names
@@ -101,7 +101,7 @@ async def test_missing_required_session_cannot_fall_back_to_disk(tmp_path) -> No
     with pytest.raises(RuntimeError, match="required session is not active"):
         await loop._process_message(_message(key, "stale private message"))
 
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
     assert loop.sessions.read_session_file(key) is None
 
 
@@ -120,7 +120,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
         while loop.sessions.get_cached(key) is not None or key in loop._discarding_sessions:
             await asyncio.sleep(0)
 
-    loop.provider.chat_with_retry = AsyncMock(side_effect=block_provider)
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=block_provider)
     monkeypatch.setattr(loop, "aclose", AsyncMock())
     terminate_exec_sessions = AsyncMock(return_value=1)
     monkeypatch.setattr(

@@ -4,7 +4,9 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { cn } from "@/lib/utils";
 
-const TooltipProvider = TooltipPrimitive.Provider;
+function TooltipProvider(props: Omit<React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Provider>, "delayDuration" | "skipDelayDuration">) {
+  return <TooltipPrimitive.Provider {...props} delayDuration={500} skipDelayDuration={0} />;
+}
 const Tooltip = TooltipPrimitive.Root;
 const TooltipTrigger = TooltipPrimitive.Trigger;
 

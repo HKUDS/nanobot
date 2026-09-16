@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { isNativeRuntime } from "@/lib/runtime";
 import type { NanobotFeatureInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -47,11 +48,13 @@ export function CapabilityInstallNotice({
 
 export function NanobotFeatureInstallDialog({
   feature,
+  installOnly = false,
   installing,
   onOpenChange,
   onConfirm,
 }: {
   feature: NanobotFeatureInfo | null;
+  installOnly?: boolean;
   installing: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (feature: NanobotFeatureInfo) => void | Promise<void>;
@@ -71,11 +74,17 @@ export function NanobotFeatureInstallDialog({
             {tx("settings.nanobotFeatures.installConfirmTitle", "Install support for {{name}}?", { name })}
           </DialogTitle>
           <DialogDescription className="mt-3 max-w-[20rem] text-center text-[14px] leading-6 text-muted-foreground">
-            {tx(
-              "settings.nanobotFeatures.installConfirmDescription",
-              "nanobot will add what {{name}} needs, then turn it on. Continue?",
-              { name },
-            )}
+            {installOnly
+              ? tx(
+                "settings.nanobotFeatures.installOnlyConfirmDescription",
+                "nanobot will install what {{name}} needs. You can connect it after installation.",
+                { name },
+              )
+              : tx(
+                "settings.nanobotFeatures.installConfirmDescription",
+                "nanobot will add what {{name}} needs, then turn it on. Continue?",
+                { name },
+              )}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="mt-7 !grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -84,7 +93,7 @@ export function NanobotFeatureInstallDialog({
             variant="ghost"
             onClick={() => onOpenChange(false)}
             disabled={installing}
-            className="h-11 w-full min-w-0 bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none hover:bg-muted"
+            className="h-11 w-full min-w-0 bg-muted/70 px-5 text-[15px] font-semibold text-foreground shadow-none settings-hover"
           >
             {tx("settings.automations.cancel", "Cancel")}
           </Button>
@@ -95,7 +104,9 @@ export function NanobotFeatureInstallDialog({
             className="h-11 w-full min-w-0 !whitespace-normal px-5 text-center text-[15px] font-semibold"
           >
             {installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
-            {tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
+            {installOnly
+              ? tx("settings.nanobotFeatures.installOnlyConfirmAction", "Install support")
+              : tx("settings.nanobotFeatures.installConfirmAction", "Install and enable")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -116,6 +127,8 @@ export function DismissibleStatusMessage({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
     <div
+      role={isError ? "alert" : "status"}
+      aria-atomic="true"
       className={cn(
         "flex items-center justify-between gap-3 rounded-control border py-2.5 pl-4 pr-2 text-[13px]",
         isError
@@ -133,7 +146,7 @@ export function DismissibleStatusMessage({
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
           isError
             ? "text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
-            : "text-muted-foreground/70 hover:bg-muted hover:text-foreground",
+            : "text-muted-foreground/70 settings-hover hover:text-foreground",
         )}
       >
         <X className="h-3.5 w-3.5" aria-hidden />
@@ -153,16 +166,16 @@ export function RestartRequiredNotice({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-3 rounded-control border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
-      <span>{message}</span>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
+      <span role="status">{message}</span>
       {onRestart ? (
         <Button
           type="button"
           size="sm"
-          variant="outline"
+          variant="ghost"
           onClick={onRestart}
           disabled={isRestarting}
-          className="h-8 rounded-full bg-background/80 px-3 text-[12px] font-semibold"
+          className="h-8 rounded-full px-2 text-[12px] font-medium text-muted-foreground hover:text-foreground"
         >
           {isRestarting ? (
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -178,7 +191,7 @@ export function RestartRequiredNotice({
 
 export function SettingsSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mb-2 px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
+    <h2 className="settings-section-title select-none text-[13px] font-semibold tracking-[-0.01em] text-foreground/85">
       {children}
     </h2>
   );
@@ -187,7 +200,7 @@ export function SettingsSectionTitle({ children }: { children: ReactNode }) {
 export function SettingsGroup({ children }: { children: ReactNode }) {
   return (
     <div className="overflow-hidden rounded-panel bg-settings-surface">
-      <div className="divide-y divide-border/45">{children}</div>
+      {children}
     </div>
   );
 }
@@ -197,21 +210,18 @@ export function SettingsRow({
   description,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   description?: string;
   children?: ReactNode;
 }) {
   return (
-    <div className="flex min-h-[62px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className="settings-row rounded-xl transition-colors settings-hover focus-within:bg-sidebar-accent/60">
       <div className="min-w-0">
-        <div className="text-[14px] font-medium leading-5 text-foreground">{title}</div>
-        {description ? (
-          <div className="mt-0.5 max-w-[28rem] text-[12px] leading-5 text-muted-foreground">
-            {description}
-          </div>
-        ) : null}
+        <div className="select-none text-[14px] font-medium leading-5 text-foreground">
+          {description ? <SettingsHint description={description}>{title}</SettingsHint> : title}
+        </div>
       </div>
-      {children ? <div className="min-w-0 sm:ml-6 sm:shrink-0">{children}</div> : null}
+      {children ? <div className="settings-control">{children}</div> : null}
     </div>
   );
 }
@@ -235,6 +245,9 @@ export function ReadOnlyRow({
 }
 
 export function RestartSettingsFooter({
+  saveLabel,
+  error = false,
+  autoSave = false,
   dirty,
   saving,
   pendingRestart,
@@ -247,6 +260,9 @@ export function RestartSettingsFooter({
   onReset,
   isRestarting,
 }: {
+  saveLabel?: string;
+  error?: boolean;
+  autoSave?: boolean;
   dirty: boolean;
   saving: boolean;
   pendingRestart: boolean;
@@ -269,22 +285,27 @@ export function RestartSettingsFooter({
     ? tx("app.system.restartingEngine", "Restarting engine...")
     : t("app.system.restarting");
   const statusMessage =
-    message ??
+    (saving ? t("settings.actions.saving") : undefined) ?? message ??
     (pendingRestart && !dirty
-      ? pendingMessage ?? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
+      ? pendingMessage ?? tx("settings.status.savedRestartApply", "Saved. Restart to apply changes.")
       : dirty
-        ? dirtyMessage ?? t("settings.status.unsaved")
+        ? autoSave
+          ? error ? undefined : t("settings.actions.saving")
+          : dirtyMessage ?? t("settings.status.unsaved")
         : undefined);
-  const statusTone = disabled ? "danger" : dirty || pendingRestart ? "accent" : undefined;
+  const statusTone = error || disabled ? "danger" : dirty || pendingRestart ? "accent" : undefined;
+
+  if (autoSave && !statusMessage && !pendingRestart) return null;
 
   return (
-    <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-      <div className="min-w-0 text-[13px] leading-5 text-muted-foreground">
+    <div className={cn("settings-footer", autoSave && "settings-footer-auto")}>
+      <div role={error ? "alert" : "status"} className="min-w-0 text-[13px] leading-5 text-muted-foreground">
         <SettingsStatusMessage tone={statusTone}>{statusMessage}</SettingsStatusMessage>
       </div>
       <div className="flex w-full shrink-0 flex-wrap justify-end gap-2 sm:w-auto">
         {pendingRestart && !dirty && onRestart ? (
           <Button
+            type="button"
             size="sm"
             variant="ghost"
             onClick={onRestart}
@@ -299,8 +320,9 @@ export function RestartSettingsFooter({
             {isRestarting ? restartingLabel : restartLabel}
           </Button>
         ) : null}
-        {onReset ? (
+        {onReset && !autoSave ? (
           <Button
+            type="button"
             size="sm"
             variant="ghost"
             onClick={onReset}
@@ -310,15 +332,16 @@ export function RestartSettingsFooter({
             {t("settings.actions.cancel")}
           </Button>
         ) : null}
-        <Button
+        {!autoSave ? <Button
+            type="button"
           size="sm"
           variant="outline"
           onClick={onSave}
           disabled={!dirty || disabled || saving}
           className="rounded-full"
         >
-          {saving ? t("settings.actions.saving") : t("settings.actions.save")}
-        </Button>
+          {saving ? t("settings.actions.saving") : saveLabel ?? t("settings.actions.save")}
+        </Button> : null}
       </div>
     </div>
   );
@@ -366,7 +389,7 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex max-w-[260px] items-center rounded-full px-2.5 py-1 text-[12px] font-medium",
+        "inline-flex max-w-[260px] select-none items-center rounded-full px-2.5 py-1 text-[12px] font-medium",
         tone === "success" && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
         tone === "warning" && "bg-amber-500/10 text-amber-700 dark:text-amber-300",
         tone === "neutral" && "bg-muted text-muted-foreground",
@@ -391,7 +414,7 @@ export function NumberInput({
   suffix?: string;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="relative w-full">
       <Input
         type="number"
         min={min}
@@ -401,9 +424,9 @@ export function NumberInput({
           const parsed = Number(event.target.value);
           if (Number.isFinite(parsed)) onChange(parsed);
         }}
-        className="h-8 w-24 max-w-full rounded-full text-[13px]"
+        className={cn("h-9 w-full rounded-full text-[13px]", suffix && "pr-12")}
       />
-      {suffix ? <span className="text-[12px] text-muted-foreground">{suffix}</span> : null}
+      {suffix ? <span className="pointer-events-none absolute inset-y-0 right-3 flex select-none items-center text-[12px] text-muted-foreground">{suffix}</span> : null}
     </div>
   );
 }

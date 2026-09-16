@@ -1,24 +1,14 @@
 {
-  "description": "Sử dụng nanobot từ tin nhắn Signal.",
-  "requirements": "Dịch vụ HTTP signal-cli, số điện thoại và danh sách cho phép",
   "setup": {
     "docsLabel": "Mở hướng dẫn Signal",
     "officialLabel": "Mở hướng dẫn signal-cli",
-    "tryIt": "Gửi tin nhắn riêng Signal đến số đã liên kết.",
-    "summary": "Signal kết nối qua dịch vụ HTTP signal-cli đã liên kết với một số Signal.",
-    "steps": [
-      "Cài signal-cli-rest-api và liên kết hoặc đăng ký một số Signal.",
-      "Nhập host, cổng và số điện thoại đã liên kết.",
-      "Lưu và bật Signal, sau đó gửi tin nhắn riêng thử."
-    ],
     "fields": {
       "phoneNumber": {
         "label": "Số điện thoại",
-        "placeholder": "+1234567890",
-        "help": "Dùng số Signal đã đăng ký với signal-cli."
+        "placeholder": "+1234567890"
       },
       "daemonHost": {
-        "label": "Host dịch vụ",
+        "label": "Máy chủ dịch vụ",
         "placeholder": "localhost"
       },
       "daemonPort": {
@@ -26,12 +16,53 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Tin nhắn riêng được phép",
+        "label": "Người được phép gửi tin nhắn riêng",
         "placeholder": "Số điện thoại hoặc UUID"
       },
       "group_allowFrom": {
         "label": "Nhóm được phép",
         "placeholder": "ID nhóm"
+      },
+      "groupMessageBufferSize": {
+        "label": "Nhóm tin nhắn ngữ cảnh"
+      },
+      "attachmentsDir": {
+        "label": "Thư mục đính kèm"
+      },
+      "dm_enabled": {
+        "label": "Bật tin nhắn trực tiếp",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "dm_policy": {
+        "label": "Truy cập tin nhắn trực tiếp",
+        "choices": {
+          "allowlist": "Danh sách cho phép",
+          "open": "Mở"
+        }
+      },
+      "group_enabled": {
+        "label": "Bật nhóm",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "group_policy": {
+        "label": "Truy cập nhóm",
+        "choices": {
+          "allowlist": "Danh sách cho phép",
+          "open": "Mở"
+        }
+      },
+      "group_requireMention": {
+        "label": "Yêu cầu đề cập trong nhóm",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
       }
     }
   }

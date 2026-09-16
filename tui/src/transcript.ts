@@ -1,5 +1,7 @@
+import { acceptsCompactionPhase } from "../../packages/client-events/notifications"
 import {
   BoxRenderable,
+  CodeRenderable,
   MarkdownRenderable,
   RGBA,
   ScrollBoxRenderable,
@@ -13,6 +15,7 @@ import {
 } from "@opentui/core"
 
 import type {
+  ContextCompaction,
   FileEditEvent,
   HistoryMessage,
   MediaAttachment,
@@ -64,6 +67,7 @@ const ACTIVITY_PREVIEW_LINES = 4
 // additional visible frames. Paint the first token immediately, then coalesce
 // subsequent deltas to the renderer cadence.
 const STREAM_FLUSH_MS = 32
+const CODE_RAIL_INDENT = 2
 
 export interface UserMessageMedia {
   kind?: MediaAttachment["kind"]
@@ -101,18 +105,6 @@ function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProj
   return { imageLabels, attachmentNames }
 }
 
-export function userMessageText(
-  content: string,
-  media: readonly UserMessageMedia[] = [],
-  displayContent?: string,
-): string {
-  const { imageLabels, attachmentNames } = projectUserMessage(media)
-  return [
-    displayContent ?? [content, imageLabels.join(" ")].filter(Boolean).join(" "),
-    attachmentNames.length ? `Attachments: ${attachmentNames.join(", ")}` : "",
-  ].filter(Boolean).join("\n")
-}
-
 /** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
   readonly root: ScrollBoxRenderable
@@ -124,6 +116,10 @@ export class Transcript {
   }> = []
   private readonly markdown = new Set<MarkdownRenderable>()
   private readonly activities = new Set<Activity>()
+  private readonly compactions = new Map<string, {
+    phase: ContextCompaction["phase"]
+    text: TextRenderable
+  }>()
   private readonly frames = new Set<BoxRenderable>()
   private readonly userRows = new Set<BoxRenderable>()
   private readonly userMessages = new Set<{
@@ -139,6 +135,7 @@ export class Transcript {
   private navigationTimer: ReturnType<typeof setTimeout> | null = null
   private pendingStream = ""
   private streamTimer: ReturnType<typeof setTimeout> | null = null
+  private codeRailColor: RGBA
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -147,6 +144,7 @@ export class Transcript {
     private readonly onNavigationChange?: (state: TranscriptNavigation) => void,
     private readonly workspace = "",
   ) {
+    this.codeRailColor = RGBA.fromHex(theme.border)
     this.root = new ScrollBoxRenderable(renderer, {
       id: "nanobot-tui-transcript",
       width: "100%",
@@ -175,7 +173,11 @@ export class Transcript {
   setTheme(theme: TranscriptTheme): void {
     const previousSyntax = this.theme.syntax
     this.theme = theme
+    this.codeRailColor = RGBA.fromHex(theme.border)
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
+    for (const { text, phase } of this.compactions.values()) {
+      text.fg = phase === "failed" ? theme.error : theme.muted
+    }
     for (const message of this.userMessages) {
       message.renderable.content = this.userMessageContent(
         message.content,
@@ -183,7 +185,10 @@ export class Transcript {
         message.displayContent,
       )
     }
-    for (const renderable of this.markdown) renderable.syntaxStyle = theme.syntax
+    for (const renderable of this.markdown) {
+      renderable.fg = theme.text
+      renderable.syntaxStyle = theme.syntax
+    }
     for (const frame of this.frames) frame.borderColor = theme.border
     for (const row of this.userRows) {
       row.backgroundColor = theme.userBackground
@@ -235,6 +240,7 @@ export class Transcript {
     this.styledText.length = 0
     this.markdown.clear()
     this.activities.clear()
+    this.compactions.clear()
     this.frames.clear()
     this.userRows.clear()
     this.userMessages.clear()
@@ -249,7 +255,8 @@ export class Transcript {
 
   history(messages: HistoryMessage[]): void {
     for (const message of messages) {
-      if (message.role === "user") {
+      if (message.compaction) this.compaction(message.compaction)
+      else if (message.role === "user") {
         this.user(message.content, message.turnId, message.media)
       }
       else if (message.role === "assistant") this.assistant(message.content)
@@ -265,7 +272,9 @@ export class Transcript {
     const previousHeight = this.root.scrollHeight
     let index = 1 // Keep the launch header first.
     for (const message of messages) {
-      if (message.role === "user") {
+      if (message.compaction) {
+        if (this.compaction(message.compaction, index)) index += 1
+      } else if (message.role === "user") {
         if (message.turnId && this.userTurnIds.has(message.turnId)) continue
         this.writeUser(message.content, message.media, index++)
         if (message.turnId) this.userTurnIds.add(message.turnId)
@@ -318,6 +327,36 @@ export class Transcript {
     this.noteOutput()
     this.finishActivity()
     this.writeRole(error ? "×" : "·", content, error ? "error" : "muted")
+  }
+
+  compaction(compaction: ContextCompaction, index?: number): boolean {
+    let entry = this.compactions.get(compaction.id)
+    // Hydration can replay a terminal state before an already queued start event.
+    if (!acceptsCompactionPhase(entry?.phase, compaction.phase)) return false
+    const added = !entry
+    if (index === undefined) {
+      this.noteOutput()
+      if (added) this.finishActivity()
+    }
+    if (!entry) {
+      const row = this.createRow("compaction")
+      const text = this.createText("", "muted", false, "compaction-status")
+      row.add(text)
+      this.root.add(row, index)
+      this.wrote = true
+      entry = { phase: compaction.phase, text }
+      this.compactions.set(compaction.id, entry)
+    }
+    entry.phase = compaction.phase
+    entry.text.content = compaction.phase === "started"
+      ? "  ≋ Compacting conversation…"
+      : compaction.phase === "succeeded"
+        ? "  ✓ Conversation compacted"
+        : compaction.phase === "cancelled"
+          ? "  · Conversation compaction cancelled"
+          : "  × Could not compact conversation"
+    entry.text.fg = compaction.phase === "failed" ? this.theme.error : this.theme.muted
+    return added
   }
 
   stream(delta: string): void {
@@ -408,6 +447,7 @@ export class Transcript {
     this.pendingStream = ""
     this.live = null
     this.activity = null
+    this.compactions.clear()
     this.frames.clear()
     this.userRows.clear()
     this.userMessages.clear()
@@ -656,6 +696,23 @@ export class Transcript {
     return new StyledText(chunks)
   }
 
+  private decorateCodeBlock(code: CodeRenderable): CodeRenderable {
+    code.marginLeft = CODE_RAIL_INDENT
+    const render = code.render.bind(code)
+    code.render = (buffer, deltaTime) => {
+      render(buffer, deltaTime)
+      for (let row = 0; row < code.height; row += 1) {
+        buffer.drawText(
+          "│",
+          code.screenX - CODE_RAIL_INDENT,
+          code.screenY + row,
+          this.codeRailColor,
+        )
+      }
+    }
+    return code
+  }
+
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
@@ -664,9 +721,16 @@ export class Transcript {
       minWidth: 0,
       flexGrow: 1,
       flexShrink: 1,
+      fg: this.theme.text,
       syntaxStyle: this.theme.syntax,
       streaming,
       internalBlockMode: "top-level",
+      renderNode: (token, context) => {
+        if (token.type !== "code") return undefined
+        const code = context.defaultRender()
+        if (!(code instanceof CodeRenderable)) return code
+        return this.decorateCodeBlock(code)
+      },
       tableOptions: {
         style: "columns",
         widthMode: "full",

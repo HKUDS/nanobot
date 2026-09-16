@@ -1,17 +1,8 @@
 {
-  "description": "Use nanobot from WhatsApp conversations.",
-  "requirements": "WhatsApp connection setup and gateway",
   "setup": {
     "primaryAction": "Connect WhatsApp",
     "docsLabel": "Open WhatsApp setup",
     "officialLabel": "Open WhatsApp help",
-    "tryIt": "After terminal login finishes, send a WhatsApp DM to the connected account.",
-    "summary": "WhatsApp is connected by scanning a QR code from the account that should run the bot.",
-    "steps": [
-      "Run the WhatsApp login command shown below.",
-      "Scan the QR code in the terminal with WhatsApp on your phone.",
-      "Return here after login, enable WhatsApp, then send a direct test message."
-    ],
     "fields": {
       "allowFrom": {
         "label": "Allowed contacts",
@@ -24,7 +15,22 @@
           "open": "All messages",
           "allowlist": "Allowlist"
         }
+      },
+      "proxy": {
+        "label": "Network proxy",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp linking QR code",
+    "scanTitle": "Link WhatsApp",
+    "scanDescription": "In WhatsApp, open Linked devices, choose Link a device, then scan this code.",
+    "waiting": "Waiting for WhatsApp…",
+    "connected": "WhatsApp is connected.",
+    "stopped": "The WhatsApp connection attempt stopped. Start again to get a new code.",
+    "connecting": "Connecting…",
+    "scanAgain": "Link another account",
+    "connect": "Link WhatsApp"
   }
 }

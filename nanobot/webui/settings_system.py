@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -32,6 +33,7 @@ from nanobot.webui.settings_contracts import (
     query_first,
     query_first_alias,
 )
+from nanobot.webui.settings_runtime import runtime_config_payload
 
 if TYPE_CHECKING:
     from nanobot.webui.settings_services import WebUISettingsServices
@@ -43,6 +45,7 @@ SettingsOperation = Callable[..., Any]
 
 @dataclass(frozen=True)
 class SystemSettingsOperations:
+    update_runtime_config: SettingsOperation
     cli_apps_payload: SettingsOperation
     cli_apps_action: SettingsOperation
     nanobot_features_payload: SettingsOperation
@@ -62,6 +65,7 @@ class SystemSettingsOperations:
 
 
 class SystemSettingsPayload(TypedDict):
+    runtime_config: dict[str, Any]
     runtime: dict[str, Any]
     usage: dict[str, Any]
     advanced: dict[str, Any]
@@ -106,6 +110,7 @@ def system_settings_payload(
         workspace=config.workspace_path,
     )
     return {
+        "runtime_config": runtime_config_payload(config),
         "runtime": {
             "config_path": str(config_path.expanduser()),
             "workspace_path": str(config.workspace_path),
@@ -261,6 +266,8 @@ def coerce_channel_value(
         allowed = None
 
     if kind in {"string", "secret"}:
+        if kind == "secret" and raw_value is None:
+            return ""
         value = raw_value.strip() if isinstance(raw_value, str) else str(raw_value)
         if kind == "secret" and not value:
             return _SKIP_FIELD
@@ -286,6 +293,25 @@ def coerce_channel_value(
             return int(raw_value)
         except (TypeError, ValueError) as exc:
             raise WebUISettingsError(f"'{raw_key}' must be a number") from exc
+
+    if kind == "float":
+        if raw_value in (None, ""):
+            return _SKIP_FIELD
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise WebUISettingsError(f"'{raw_key}' must be a number") from exc
+
+    if kind == "json":
+        if raw_value in (None, ""):
+            return _SKIP_FIELD
+        try:
+            value = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+        except (TypeError, ValueError) as exc:
+            raise WebUISettingsError(f"'{raw_key}' must be valid JSON") from exc
+        if not isinstance(value, dict):
+            raise WebUISettingsError(f"'{raw_key}' must be a JSON object")
+        return cast(dict[str, Any], value)
 
     if kind == "bool":
         if isinstance(raw_value, bool):
@@ -362,6 +388,24 @@ class SystemSettingsHandler:
         self.logger = logger
         self._channel_connectors: dict[str, Any] = {}
 
+    async def close(self) -> None:
+        """Release channel-owned setup sessions during gateway shutdown."""
+        connectors = tuple(self._channel_connectors.items())
+        self._channel_connectors.clear()
+        for channel_name, connector in connectors:
+            close = getattr(connector, "close", None)
+            if not callable(close):
+                continue
+            try:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                self.logger.exception(
+                    "failed to close {} WebUI connector",
+                    channel_name,
+                )
+
     async def handle(
         self,
         action: str,
@@ -371,6 +415,22 @@ class SystemSettingsHandler:
         channel_name: str | None = None,
         connect_action: str | None = None,
     ) -> SettingsRouteResult:
+        if action == "runtime-config-update":
+            values = (request.payload or {}).get("values")
+            if not isinstance(values, dict):
+                return SettingsRouteResult.failure(400, "Runtime settings must be an object")
+            try:
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
+                    operations.update_runtime_config,
+                    values,
+                    local_browser=request.local_browser,
+                )
+            except WebUISettingsError as exc:
+                return SettingsRouteResult.failure(exc.status, exc.message)
+            return SettingsRouteResult.success(
+                payload, decorate_restart=True, restart_section="runtime",
+            )
         if action == "cli-list":
             return await self._cli_apps(request, operations)
         if action.startswith("cli-"):
@@ -504,6 +564,11 @@ class SystemSettingsHandler:
         action: str,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
+        install_only = (
+            action == "enable"
+            and (query_first(request.query, "install_only") or "").strip().lower()
+            in {"1", "true", "yes"}
+        )
         try:
             payload = await asyncio.to_thread(
                 self._nanobot_features_action,
@@ -526,12 +591,13 @@ class SystemSettingsHandler:
                     action,
                 )
             return SettingsRouteResult.failure(status, message)
-        payload = await self._apply_feature_runtime_change(
-            action,
-            request.query,
-            payload,
-            operations,
-        )
+        if not install_only:
+            payload = await self._apply_feature_runtime_change(
+                action,
+                request.query,
+                payload,
+                operations,
+            )
         payload = self._with_channel_runtime_status(payload, operations)
         return SettingsRouteResult.success(
             payload,

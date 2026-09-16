@@ -301,7 +301,7 @@ def _partition_styles(
 class SignalDMConfig(Base):
     """Signal DM policy configuration."""
 
-    enabled: bool = False
+    enabled: bool = True
     policy: str = "allowlist"  # "open" or "allowlist"
     allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers/UUIDs
 
