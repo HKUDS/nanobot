@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
@@ -93,7 +94,10 @@ class SpawnTool(Tool):
         origin_channel = request_ctx.channel
         origin_chat_id = request_ctx.chat_id
         session_key = request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
-        method = self._manager.run_inline if wait else self._manager.spawn
+        method = (
+            self._manager.run_inline if wait
+            else partial(self._manager.spawn, origin_turn_id=request_ctx.turn_id)
+        )
         return await method(
             task=task,
             runtime=request_ctx.runtime,

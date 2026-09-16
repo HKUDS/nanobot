@@ -154,7 +154,7 @@ class SubagentManager:
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         # Background tasks that still owe the parent session a completion message,
-        # mapped to their originating user message. Inline subagents are deliberately
+        # mapped to their originating turn (or legacy transport message). Inline tasks are
         # excluded because their result returns directly to the caller.
         self._pending_announcements: dict[str, str | None] = {}
 
@@ -240,6 +240,7 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         runtime: LLMRuntime | None = None,
+        origin_turn_id: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         if runtime is None:
@@ -276,7 +277,7 @@ class SubagentManager:
             )
         )
         self._running_tasks[task_id] = bg_task
-        self._pending_announcements[task_id] = origin_message_id
+        self._pending_announcements[task_id] = origin_turn_id or origin_message_id
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
 
@@ -507,11 +508,11 @@ class SubagentManager:
         # Retire this task before counting. There is no await before the count,
         # so concurrently completing tasks observe a stable 1 -> 0 progression
         # instead of both claiming that the other task is still pending.
-        self._pending_announcements.pop(task_id, None)
+        origin_group = self._pending_announcements.pop(task_id, origin_message_id)
         remaining_count = self._running_sibling_count(
             session_key,
             task_id,
-            origin_message_id,
+            origin_group,
         )
         pending_notice = ""
         if remaining_count:
@@ -561,19 +562,17 @@ class SubagentManager:
         self,
         session_key: str | None,
         task_id: str,
-        origin_message_id: str | None,
+        origin_group: str | None,
     ) -> int:
-        if not session_key:
+        # Without an identity, old work in the same session is not necessarily a sibling.
+        if not session_key or not origin_group:
             return 0
         return sum(
             1
             for sibling_id in self._session_tasks.get(session_key, set())
             if sibling_id != task_id
             and sibling_id in self._pending_announcements
-            and (
-                origin_message_id is None
-                or self._pending_announcements[sibling_id] == origin_message_id
-            )
+            and self._pending_announcements[sibling_id] == origin_group
             and sibling_id in self._running_tasks
             and not self._running_tasks[sibling_id].done()
         )
