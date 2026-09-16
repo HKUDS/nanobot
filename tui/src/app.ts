@@ -929,7 +929,6 @@ export class NanobotTui {
   private deferSubmit(): void {
     if (this.submitPending) return
     this.submitPending = true
-    this.transcript.setRenderingPaused(true)
     const generation = ++this.submitGeneration
     setTimeout(() => setTimeout(() => this.flushSubmit(generation), 0), 0)
   }
@@ -941,7 +940,6 @@ export class NanobotTui {
     try {
       if (!this.composer.isDestroyed) this.submit()
     } finally {
-      this.transcript.setRenderingPaused(false)
       this.scheduleEventDrain()
     }
   }
@@ -1411,8 +1409,7 @@ export class NanobotTui {
         if (hydrationId !== this.hydrationId) return
         this.historyBeforeCursor = history.beforeCursor
         this.historyHasMore = history.hasMoreBefore
-        await this.transcript.history(history.messages)
-        if (this.quitting || hydrationId !== this.hydrationId) return
+        this.transcript.history(history.messages)
         this.restorePromptHistory(history.messages)
         const reversedHistory = [...history.messages].reverse()
         const lastUser = reversedHistory.find((message) => message.role === "user")
@@ -1421,10 +1418,10 @@ export class NanobotTui {
         if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
       }
     } catch (error) {
-      if (this.quitting || hydrationId !== this.hydrationId) return
+      if (hydrationId !== this.hydrationId) return
       this.transcript.notice(error instanceof Error ? error.message : String(error), true)
     } finally {
-      if (this.quitting || hydrationId !== this.hydrationId) return
+      if (hydrationId !== this.hydrationId) return
       this.ready = true
       if (!this.activeTurn) {
         this.status.content = this.readyStatus()
@@ -3009,7 +3006,6 @@ export class NanobotTui {
       )
       if (hydrationId !== this.hydrationId || chatId !== this.client.activeChatId) return
       await this.transcript.prependHistory(history.messages)
-      if (this.quitting || hydrationId !== this.hydrationId || chatId !== this.client.activeChatId) return
       this.restorePromptHistory(history.messages, true)
       this.historyBeforeCursor = history.beforeCursor
       this.historyHasMore = history.hasMoreBefore

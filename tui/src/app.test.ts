@@ -2129,7 +2129,7 @@ describe("NanobotTui layout", () => {
     ].join("\n")
     const transcript = (app as unknown as { transcript: Transcript }).transcript
 
-    await transcript.history([{ role: "assistant", content: response }])
+    transcript.history([{ role: "assistant", content: response }])
     await setup.flush()
 
     const codeLine = setup.captureSpans().lines.find((line) => (
@@ -2494,209 +2494,8 @@ describe("NanobotTui layout", () => {
     expect(markdown?.content).toBe("first")
 
     app.accept({ event: "stream_end", chat_id: "chat" })
-    await waitUntil(() => markdown?.streaming === false)
     expect(markdown?.content).toBe(`first${" token".repeat(1_000)}`)
     expect(markdown?.streaming).toBe(false)
-  })
-
-  test("yields while completing large Markdown without splitting Unicode characters", async () => {
-    setup = await createRenderer({ width: 80, height: 20, screenMode: "alternate-screen" })
-    const app = mount(setup)
-    const transcript = (app as unknown as { transcript: Transcript }).transcript
-    const internals = transcript as unknown as {
-      live: { markdown: { content: string; streaming: boolean } }
-      applyMarkdownChunk(markdown: { content: string }, update: unknown): void
-    }
-    const chunks: string[] = []
-    const apply = internals.applyMarkdownChunk.bind(transcript)
-    internals.applyMarkdownChunk = (markdown, update) => {
-      apply(markdown, update)
-      chunks.push(markdown.content)
-    }
-    app.accept({ event: "delta", chat_id: "chat", text: "first" })
-    const markdown = internals.live.markdown
-    const answer = `first${"中".repeat(506)}😀\n\n${"paragraph\n\n".repeat(200)}`
-    app.accept({ event: "stream_end", chat_id: "chat", text: answer })
-    expect(markdown.content.length).toBeLessThan(answer.length)
-    await waitUntil(() => !markdown.streaming)
-
-    expect(markdown.content).toBe(answer)
-    expect(chunks.length).toBeGreaterThan(2)
-    expect(chunks.every((chunk) => !/[\uD800-\uDBFF]$/u.test(chunk))).toBe(true)
-  })
-
-  test("pauses pending Markdown while the composer waits for an IME submit", async () => {
-    const sent: string[] = []
-    setup = await createRenderer({ width: 80, height: 20, screenMode: "alternate-screen" })
-    const app = mount(setup, sent)
-    app.accept({ event: "attached", chat_id: "chat" })
-    await Bun.sleep(1)
-    const ui = app as unknown as {
-      composer: TextareaRenderable
-      transcript: { live: { markdown: { content: string; streaming: boolean } } }
-    }
-    app.accept({ event: "delta", chat_id: "chat", text: "first" })
-    const markdown = ui.transcript.live.markdown
-    ui.composer.setText("你")
-    ui.composer.submit()
-    app.accept({ event: "stream_end", chat_id: "chat", text: "large answer\n\n".repeat(200) })
-    expect(markdown.content).toBe("first")
-    setTimeout(() => {
-      expect(markdown.content).toBe("first")
-      ui.composer.setText("你好")
-    }, 0)
-    await waitUntil(() => sent.length === 1 && !markdown.streaming)
-
-    expect(sent).toEqual(["你好"])
-    expect(markdown.content).toBe("large answer\n\n".repeat(200))
-  })
-
-  test("supersedes pending Markdown with canonical content and cancels it on reset", async () => {
-    setup = await createRenderer({ width: 80, height: 20, screenMode: "alternate-screen" })
-    const app = mount(setup)
-    const transcript = (app as unknown as { transcript: Transcript }).transcript
-    const internals = transcript as unknown as {
-      live: { markdown: { content: string; streaming: boolean; isDestroyed: boolean } }
-      markdownUpdates: Map<unknown, unknown>
-    }
-    transcript.stream("old draft\n\n".repeat(200))
-    const markdown = internals.live.markdown
-    transcript.reconcileStream("canonical\n\n".repeat(200))
-    transcript.finishStream("final answer")
-    await waitUntil(() => !markdown.streaming)
-    expect(markdown.content).toBe("final answer")
-
-    transcript.stream("pending\n\n".repeat(200))
-    const pending = internals.live.markdown
-    expect(internals.markdownUpdates.size).toBeGreaterThan(0)
-    transcript.reset(options)
-    await Bun.sleep(20)
-    expect(pending.isDestroyed).toBe(true)
-    expect(internals.markdownUpdates.size).toBe(0)
-  })
-
-  test("coalesces ordinary Markdown while keeping fenced code and tables separate", async () => {
-    setup = await createRenderer({ width: 80, height: 20, screenMode: "alternate-screen" })
-    const app = mount(setup)
-    const transcript = (app as unknown as { transcript: Transcript }).transcript
-    const internals = transcript as unknown as {
-      live: { markdown: { streaming: boolean; getChildren(): unknown[] } }
-    }
-    transcript.stream("# Title\n\n")
-    const markdown = internals.live.markdown
-    transcript.finishStream([
-      "paragraph\n\n".repeat(100),
-      "```text\ncode\n```\n\n",
-      "| A | B |\n| --- | --- |\n| C | D |\n",
-    ].join(""))
-    await waitUntil(() => !markdown.streaming)
-
-    expect(markdown.getChildren().length).toBeLessThan(10)
-  })
-
-  test("releases completed activity payloads while preserving expanded tool history", async () => {
-    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
-    const app = mount(setup)
-    const transcript = (app as unknown as { transcript: Transcript }).transcript
-    const internals = transcript as unknown as {
-      activity: { events: Map<string, unknown>; lines: string[]; text: { plainText: string } }
-    }
-    for (let index = 0; index < 8; index += 1) {
-      transcript.progress("", [{
-        phase: "start", call_id: `read-${index}`, name: "read_file",
-        arguments: { path: `file-${index}.txt` },
-      }])
-      transcript.progress("", [{
-        phase: "end", call_id: `read-${index}`, name: "read_file",
-        result: { output: "large payload".repeat(1_000) },
-      }])
-    }
-    const activity = internals.activity
-    expect(activity.events.size).toBe(8)
-    transcript.finishActivity()
-    expect(activity.events.size).toBe(0)
-    expect(transcript.toggleActivityDetails()).toBe(true)
-    expect(activity.text.plainText).toContain("✓ Read  file-0.txt")
-    expect(activity.text.plainText).toContain("✓ Read  file-7.txt")
-  })
-
-  for (const method of ["history", "prependHistory"] as const) {
-    test(`${method} completes all history rows in order across batches`, async () => {
-      setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
-      const transcript = (mount(setup) as unknown as { transcript: Transcript }).transcript
-      const messages = Array.from({ length: 120 }, (_, index) => ({
-        role: "user" as const, content: `history ${index}`, turnId: `turn-${index}`,
-      }))
-      const pending = transcript[method](messages)
-      let rowsAtYield = 0
-      setImmediate(() => { rowsAtYield = transcript.root.getChildren().length })
-      await pending
-
-      expect(rowsAtYield).toBeGreaterThan(1)
-      expect(rowsAtYield).toBeLessThan(121)
-      const rows = transcript.root.getChildren().slice(1)
-      expect(rows.map((row) => (row.getChildren()[1] as TextRenderable).plainText))
-        .toEqual(messages.map((message) => message.content))
-    })
-
-    test(`${method} yields between rows and stops when the session resets`, async () => {
-      setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
-      const transcript = (mount(setup) as unknown as { transcript: Transcript }).transcript
-      const messages = Array.from({ length: 120 }, (_, index) => ({
-        role: "user" as const, content: `history ${index}`, turnId: `turn-${index}`,
-      }))
-      const pending = transcript[method](messages)
-      expect(transcript.root.getChildren().length).toBeLessThan(messages.length)
-      transcript.reset(options)
-      transcript.user("new session", "new-turn")
-      await pending
-      await setup.flush()
-
-      expect(transcript.root.getChildren().length).toBe(2)
-      expect(setup.captureCharFrame()).toContain("new session")
-      expect(setup.captureCharFrame()).not.toContain("history")
-    })
-  }
-
-  test("anchors earlier history only after its large Markdown finishes projecting", async () => {
-    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
-    const transcript = (mount(setup) as unknown as { transcript: Transcript }).transcript
-    await transcript.history(Array.from({ length: 20 }, (_, index) => ({
-      role: "user" as const, content: `recent ${index}`,
-    })))
-    await setup.flush()
-    transcript.root.scrollTop = 0
-    const previousHeight = transcript.root.scrollHeight
-    const content = "Earlier paragraph\n\n".repeat(200)
-    await transcript.prependHistory([{ role: "assistant", content }])
-    const internals = transcript as unknown as {
-      markdown: Set<{ content: string; streaming: boolean }>
-      markdownUpdates: Map<unknown, unknown>
-    }
-
-    expect(internals.markdownUpdates.size).toBe(0)
-    expect([...internals.markdown].some((item) => item.content === content && !item.streaming)).toBe(true)
-    expect(transcript.root.scrollTop).toBe(transcript.root.scrollHeight - previousHeight)
-  })
-
-  test("draws code rails only within the terminal viewport", async () => {
-    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
-    const transcript = (mount(setup) as unknown as { transcript: Transcript }).transcript
-    transcript.assistant(`\`\`\`text\n${"code line\n".repeat(300)}\`\`\``)
-    const internals = transcript as unknown as { markdownUpdates: Map<unknown, unknown> }
-    await waitUntil(() => !internals.markdownUpdates.size)
-    await setup.flush()
-    let rails = 0
-    const buffer = setup.renderer.nextRenderBuffer
-    const drawText = buffer.drawText.bind(buffer)
-    buffer.drawText = (...args) => {
-      if (args[0] === "│") rails += 1
-      return drawText(...args)
-    }
-    await setup.renderOnce()
-
-    expect(rails).toBeGreaterThan(0)
-    expect(rails).toBeLessThanOrEqual(setup.renderer.height)
   })
 
   test("copies full-screen selections through OSC 52", async () => {
@@ -3193,7 +2992,7 @@ describe("NanobotTui layout", () => {
       transcript: Transcript
       palette: { error: string }
     }
-    await ui.transcript.history([
+    ui.transcript.history([
       { role: "activity", content: "", compaction: { id: "recent", phase: "succeeded" } },
       { role: "assistant", content: "Recent answer" },
     ])
