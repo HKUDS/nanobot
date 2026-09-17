@@ -2024,7 +2024,7 @@ class TelegramChannel(BaseChannel):
                     "metadata": metadata,
                     "session_key": session_key,
                 }
-                self._start_typing(str_chat_id)
+                self._start_typing(str_chat_id, getattr(message, "message_thread_id", None))
                 await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
@@ -2035,7 +2035,7 @@ class TelegramChannel(BaseChannel):
             return
 
         # Start typing indicator before processing
-        self._start_typing(str_chat_id)
+        self._start_typing(str_chat_id, getattr(message, "message_thread_id", None))
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Forward to the message bus
@@ -2064,11 +2064,13 @@ class TelegramChannel(BaseChannel):
         finally:
             self._media_group_tasks.pop(key, None)
 
-    def _start_typing(self, chat_id: str) -> None:
-        """Start sending 'typing...' indicator for a chat."""
+    def _start_typing(self, chat_id: str, message_thread_id: int | None = None) -> None:
+        """Start sending 'typing...' indicator for a chat, scoped to a topic when set."""
         # Cancel any existing typing task for this chat
         self._stop_typing(chat_id)
-        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+        self._typing_tasks[chat_id] = asyncio.create_task(
+            self._typing_loop(chat_id, message_thread_id),
+        )
 
     def _stop_typing(self, chat_id: str) -> None:
         """Stop the typing indicator for a chat."""
@@ -2102,12 +2104,19 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             self.logger.debug("reaction removal failed: {}", e)
 
-    async def _typing_loop(self, chat_id: str) -> None:
+    async def _typing_loop(self, chat_id: str, message_thread_id: int | None = None) -> None:
         """Repeatedly send 'typing' action until cancelled."""
         try:
             with suppress(asyncio.CancelledError):
                 while self._app:
-                    await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
+                    thread_kwargs: dict[str, int] = (
+                        {"message_thread_id": message_thread_id}
+                        if message_thread_id is not None
+                        else {}
+                    )
+                    await self._app.bot.send_chat_action(
+                        chat_id=int(chat_id), action="typing", **thread_kwargs,
+                    )
                     await asyncio.sleep(4)
         except Exception as e:
             self.logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
@@ -2215,7 +2224,9 @@ class TelegramChannel(BaseChannel):
             with suppress(Exception):
                 await query_message.edit_reply_markup(reply_markup=None)
         self.logger.debug("Inline button tap from {}: {}", sender_id, button_label)
-        self._start_typing(str(chat_id))
+        self._start_typing(
+            str(chat_id), getattr(query_message, "message_thread_id", None),
+        )
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str(chat_id),
