@@ -29,7 +29,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
-from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -352,8 +352,9 @@ class Session:
         """Return recent replayable messages for LLM input.
 
         A committed summary checkpoint replaces its old prefix with the stored
-        summary and resumes replay at a hidden continuation marker. A positive
-        ``max_messages`` applies an additional caller-owned count limit.
+        summary and resumes replay after its hidden boundary marker. The marker
+        is not a user request and must not resume an old task on the next turn.
+        A positive ``max_messages`` applies an additional caller-owned count limit.
         """
         replayable = self.messages[self.last_archived:]
         if max_messages <= 0:
@@ -383,7 +384,7 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for message in sliced:
-            if message.get("_command"):
+            if message.get("_command") or is_summary_checkpoint(message):
                 continue
             has_persisted_runtime_context = isinstance(
                 message.get(RUNTIME_CONTEXT_HISTORY_META),

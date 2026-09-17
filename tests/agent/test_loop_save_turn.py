@@ -558,7 +558,6 @@ def test_save_turn_commits_summary_boundary_without_rewriting_raw_history() -> N
         "Current working-memory checkpoint."
     )
     assert [message["content"] for message in session.get_history()] == [
-        SUMMARY_CONTINUATION_TEXT,
         "",
         "full current result",
         "done",

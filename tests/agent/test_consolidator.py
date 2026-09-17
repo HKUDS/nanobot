@@ -25,7 +25,6 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import Session
-from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -640,7 +639,7 @@ class TestCompactIdleSession:
         assert reloaded.last_archived == 40
         assert reloaded.provider_state is None
         visible = reloaded.get_history(max_messages=40)
-        assert [m["content"] for m in visible] == [SUMMARY_CONTINUATION_TEXT]
+        assert visible == []
         meta = reloaded.metadata.get("_last_summary")
         assert meta is not None
         assert meta["text"] == "Summary of old conversation."
@@ -720,7 +719,7 @@ class TestCompactIdleSession:
         assert len(store.read_unprocessed_history(since_cursor=0)) == 1
         reloaded = sessions.get_or_create("cli:short")
         assert reloaded.last_archived == 2
-        assert [message["content"] for message in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
+        assert reloaded.get_history() == []
 
     @pytest.mark.asyncio
     async def test_idle_compaction_with_no_new_messages_is_noop(
@@ -783,7 +782,7 @@ class TestCompactIdleSession:
             contents = [message.get("content", "") for message in sent["messages"]]
             assert "Archived conversation summary." in contents[0]
             assert "question-0" not in contents
-            assert contents[1:-1] == [SUMMARY_CONTINUATION_TEXT]
+            assert contents[1:-1] == []
             assert "Next question" in contents[-1]
         finally:
             await loop.aclose()
@@ -866,7 +865,6 @@ class TestCompactIdleSession:
         assert latest_build["session_summary"]["text"] == "First replacement checkpoint."
         latest_messages = mock_provider.chat_stream_with_retry.await_args_list[-1].kwargs["messages"]
         assert [message["content"] for message in latest_messages[1:-1]] == [
-            SUMMARY_CONTINUATION_TEXT,
             "second user",
             "second assistant",
         ]
@@ -987,7 +985,7 @@ class TestCompactIdleSession:
         assert reloaded.provider_state is None
         assert reloaded.get_history()[-1]["content"] == "late assistant"
         assert [m["content"] for m in reloaded.get_history()] == [
-            SUMMARY_CONTINUATION_TEXT, "late user", "late assistant",
+            "late user", "late assistant",
         ]
 
     @pytest.mark.asyncio
@@ -1124,7 +1122,7 @@ class TestCompactIdleSession:
         assert reloaded.metadata["_last_summary"]["text"] == result
         assert real_consolidator.store.read_unprocessed_history(0) == []
         assert reloaded.last_archived == 20
-        assert [m["content"] for m in reloaded.get_history()] == [SUMMARY_CONTINUATION_TEXT]
+        assert reloaded.get_history() == []
         mock_provider.chat_stream_with_retry.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1155,7 +1153,7 @@ class TestCompactIdleSession:
         assert reloaded.messages[:-1] == session.messages
         assert reloaded.last_archived == 22
         assert reloaded.metadata["_last_summary"]["text"] == result
-        assert [m["content"] for m in reloaded.get_history(max_messages=20)] == [SUMMARY_CONTINUATION_TEXT]
+        assert reloaded.get_history(max_messages=20) == []
 
     @pytest.mark.asyncio
     async def test_respects_last_archived(
@@ -1217,7 +1215,7 @@ class TestCompactIdleSession:
         reloaded = sessions.get_or_create("cli:noncontiguous")
         assert len(reloaded.messages) == 26
         assert reloaded.last_archived == 25
-        assert [m["content"] for m in reloaded.get_history(max_messages=25)] == [SUMMARY_CONTINUATION_TEXT]
+        assert reloaded.get_history(max_messages=25) == []
 
         # Both the first question and the final tool-heavy exchange are summarized.
         archived_call = mock_provider.chat_stream_with_retry.call_args
