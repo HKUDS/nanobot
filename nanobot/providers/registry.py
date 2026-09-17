@@ -329,6 +329,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.novita.ai/openai",
     ),
 
+    # IO Intelligence (io.net): OpenAI-compatible gateway, model names keep org prefix
+    ProviderSpec(
+        name="ionet",
+        keywords=("ionet",),
+        env_key="IONET_API_KEY",
+        display_name="IO Intelligence",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="intelligence.io.solutions",
+        default_api_base="https://api.intelligence.io.solutions/api/v1",
+    ),
+
     # VolcEngine (火山引擎): OpenAI-compatible gateway, pay-per-use models
     ProviderSpec(
         name="volcengine",

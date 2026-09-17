@@ -190,6 +190,41 @@ Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models)
 to choose a currently available model. The WebUI can also load that catalog
 after the Eden AI API key is saved under **Settings → Models**.
 
+### IO Intelligence Gateway
+
+[IO Intelligence](https://io.net) (by io.net) exposes an OpenAI-compatible
+chat-completions endpoint at `https://api.intelligence.io.solutions/api/v1`. Configure
+the built-in `ionet` provider and use the full `org/model` identifier from the
+[IO Intelligence model catalog](https://api.intelligence.io.solutions/api/v1/models):
+
+```json
+{
+  "providers": {
+    "ionet": {
+      "apiKey": "${IONET_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "ionet",
+      "model": "meta-llama/Llama-3.3-70B-Instruct",
+      "maxTokens": 8192,
+      "contextWindowTokens": 128000
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Nanobot sends the model ID unchanged, including its `org/name` prefix. API keys are
+issued by the [io.net cloud console](https://cloud.io.net). The model catalog is
+public — the WebUI can also load it after the API key is saved under
+**Settings → Models**.
+
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
