@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -16,7 +17,7 @@ def _runtime(_session: Session | None = None):
 def _make_session(
     key: str = "cli:test",
     messages: list | None = None,
-    last_consolidated: int = 0,
+    last_archived: int = 0,
     updated_at: datetime | None = None,
     metadata: dict | None = None,
 ) -> Session:
@@ -25,8 +26,8 @@ def _make_session(
         key=key,
         messages=messages or [],
         metadata=metadata or {},
-        last_consolidated=last_consolidated,
     )
+    session.last_archived = last_archived
     if updated_at is not None:
         session.updated_at = updated_at
     return session
@@ -176,33 +177,6 @@ class TestIsExpired:
 
 
 # ---------------------------------------------------------------------------
-# _format_summary
-# ---------------------------------------------------------------------------
-
-
-class TestFormatSummary:
-    """Test AutoCompact._format_summary static method."""
-
-    def test_contains_isoformat_timestamp(self):
-        """Output should contain last_active as isoformat."""
-        last_active = datetime(2026, 5, 13, 14, 30, 0)
-        result = AutoCompact._format_summary("Some text", last_active)
-        assert "2026-05-13T14:30:00" in result
-
-    def test_contains_summary_text(self):
-        """Output should contain the provided text verbatim."""
-        last_active = datetime(2026, 1, 1)
-        result = AutoCompact._format_summary("User discussed Python.", last_active)
-        assert "User discussed Python." in result
-
-    def test_output_starts_with_label(self):
-        """Output should start with the standard prefix."""
-        last_active = datetime(2026, 1, 1)
-        result = AutoCompact._format_summary("text", last_active)
-        assert result.startswith("Previous conversation summary (last active ")
-
-
-# ---------------------------------------------------------------------------
 # check_expired
 # ---------------------------------------------------------------------------
 
@@ -294,7 +268,7 @@ class TestCheckExpired:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:old",
             runtime=admitted,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            events=NO_EVENTS,
         )
 
     @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
@@ -435,7 +409,7 @@ class TestCheckExpired:
         last_active = datetime(2026, 1, 1, 10, 0, 0)
         session = _make_session("cli:done", updated_at=last_active)
         _add_turns(session, 2)
-        session.last_consolidated = len(session.messages)
+        session.last_archived = len(session.messages)
         mock_sm.list_sessions.return_value = [
             {"key": "cli:done", "updated_at": last_active.isoformat()},
         ]
@@ -469,8 +443,38 @@ class TestArchiveDelegates:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:test",
             runtime=runtime,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            events=NO_EVENTS,
         )
+
+    @pytest.mark.asyncio
+    async def test_forwards_timeout_compaction_events_with_session_key(self):
+        sessions = MagicMock(spec=SessionManager)
+        consolidator = MagicMock()
+        observed: list[tuple[str, ContextCompactionEvent]] = []
+
+        def bind(key: str):
+            async def publish(event: ContextCompactionEvent) -> None:
+                observed.append((key, event))
+            return EventSink(publish)
+
+        async def compact(key: str, **kwargs):
+            event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
+            await kwargs["events"].emit(event)
+            return "Summary."
+
+        consolidator.compact_idle_session = AsyncMock(side_effect=compact)
+        ac = AutoCompact(
+            sessions=sessions,
+            consolidator=consolidator,
+            session_ttl_minutes=15,
+            bind_events=bind,
+        )
+
+        await ac._archive("cli:test", runtime=_runtime())
+
+        assert len(observed) == 1
+        assert observed[0][0] == "cli:test"
+        assert observed[0][1].phase == "started"
 
     @pytest.mark.asyncio
     async def test_dream_session_is_ignored(self):
@@ -498,7 +502,7 @@ class TestArchiveDelegates:
 
         entry = ac._summaries.get("cli:test")
         assert entry is not None
-        assert entry[0] == "Hello."
+        assert entry["text"] == "Hello."
 
     @pytest.mark.asyncio
     async def test_no_summary_when_compact_returns_empty(self):
@@ -577,21 +581,29 @@ class TestPrepareSession:
         ac = _make_autocompact()
         session = _make_session()
         last_active = datetime(2026, 5, 13, 14, 0, 0)
-        ac._summaries["cli:test"] = ("Hot summary.", last_active)
+        ac._summaries["cli:test"] = {
+            "text": "Hot summary.",
+            "last_active": last_active.isoformat(),
+        }
 
         result_session, summary = ac.prepare_session(session, "cli:test")
 
         assert result_session is session
         assert summary is not None
-        assert "Hot summary." in summary
-        assert "Previous conversation summary" in summary
+        assert summary == {
+            "text": "Hot summary.",
+            "last_active": last_active.isoformat(),
+        }
 
     def test_hot_path_pops_summary_one_shot(self):
         """Hot path should pop the summary (one-shot; second call returns None)."""
         ac = _make_autocompact()
         session = _make_session()
         last_active = datetime(2026, 1, 1)
-        ac._summaries["cli:test"] = ("One-shot.", last_active)
+        ac._summaries["cli:test"] = {
+            "text": "One-shot.",
+            "last_active": last_active.isoformat(),
+        }
 
         _, summary1 = ac.prepare_session(session, "cli:test")
         assert summary1 is not None
@@ -614,7 +626,7 @@ class TestPrepareSession:
 
         assert result_session is session
         assert summary is not None
-        assert "Cold summary." in summary
+        assert summary["text"] == "Cold summary."
 
     def test_cold_path_tolerates_malformed_last_active(self):
         """A malformed persisted last_active must not raise on the turn path.
@@ -637,8 +649,10 @@ class TestPrepareSession:
 
         assert result_session is session
         assert summary is not None
-        assert "Cold summary." in summary
-        assert fallback.isoformat() in summary
+        assert summary == {
+            "text": "Cold summary.",
+            "last_active": fallback.isoformat(),
+        }
 
     def test_cold_path_tolerates_missing_last_active(self):
         """A _last_summary dict without last_active must not raise."""
@@ -653,8 +667,10 @@ class TestPrepareSession:
 
         assert result_session is session
         assert summary is not None
-        assert "Cold summary." in summary
-        assert fallback.isoformat() in summary
+        assert summary == {
+            "text": "Cold summary.",
+            "last_active": fallback.isoformat(),
+        }
 
     def test_cold_path_missing_text_returns_none(self):
         """A _last_summary without a non-empty string text yields no summary."""
@@ -685,7 +701,10 @@ class TestPrepareSession:
         ac.sessions = mock_sm
         key = "dream:20260602-155256"
         ac._archiving.add(key)
-        ac._summaries[key] = ("Hot summary.", datetime(2026, 6, 2, 15, 52, 56))
+        ac._summaries[key] = {
+            "text": "Hot summary.",
+            "last_active": "2026-06-02T15:52:56",
+        }
         session = _make_session(
             key=key,
             updated_at=datetime.now() - timedelta(minutes=20),
@@ -725,8 +744,12 @@ class TestPrepareSession:
             },
         })
         last_active = datetime(2026, 5, 13, 14, 0, 0)
-        ac._summaries["cli:test"] = ("Hot summary.", last_active)
+        ac._summaries["cli:test"] = {
+            "text": "Hot summary.",
+            "last_active": last_active.isoformat(),
+        }
 
         _, summary = ac.prepare_session(session, "cli:test")
-        assert "Hot summary." in summary
+        assert summary is not None
+        assert summary["text"] == "Hot summary."
         # After hot path pops, cold path would kick in on next call

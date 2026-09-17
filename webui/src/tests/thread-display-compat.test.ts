@@ -9,6 +9,15 @@ import type { UIMessage } from "@/lib/types";
 
 const STARTED_AT = Date.UTC(2026, 6, 25, 12, 34, 0);
 
+it("reuses completed historical rows across streaming updates and recalculates changed start times", () => {
+  const prompt: UIMessage = { id: "u", role: "user", content: "hello", createdAt: 100 };
+  const answer: UIMessage = { id: "a", role: "assistant", content: "world", latencyMs: 50, createdAt: 120 };
+  const first = projectWebuiThreadMessages([prompt, answer]);
+  const second = projectWebuiThreadMessages([prompt, answer, { id: "next", role: "user", content: "next", createdAt: 200 }]);
+  expect(second[1]).toBe(first[1]);
+  expect(projectWebuiThreadMessages([{ ...prompt, createdAt: 200 }, answer])[1].completedAt).toBe(250);
+});
+
 function message(
   role: UIMessage["role"],
   overrides: Partial<Omit<UIMessage, "role">> = {},
@@ -66,6 +75,26 @@ describe("normalizeLegacyLongTaskMessages", () => {
 });
 
 describe("projectWebuiThreadMessages", () => {
+  it("marks only fixed replies belonging to a compact command turn", () => {
+    const rows = [
+      message("user", { content: " /COMPACT ", turnId: "compact" }),
+      message("assistant", { content: "Nothing to compact.", turnId: "compact" }),
+      message("assistant", {
+        content: "Unable to compact context. Check the logs and try again.", turnId: "compact",
+      }),
+      message("assistant", { content: "Nothing to compact.", turnId: "unrelated" }),
+      message("assistant", { content: "Nothing to compact." }),
+      message("assistant", { content: "Nothing to compact.", turnId: "compact", isStreaming: true }),
+      message("assistant", { content: "Quoted: Nothing to compact.", turnId: "compact" }),
+    ];
+    const projected = projectWebuiThreadMessages(rows);
+    expect(projected.map(({ compactReply }) => compactReply)).toEqual([
+      undefined, "empty", "failed", undefined, undefined, undefined, undefined,
+    ]);
+    expect(projected.map(({ content }) => content)).toEqual(rows.map(({ content }) => content));
+    expect(projectWebuiThreadMessages(projected)).toEqual(projected);
+  });
+
   it("derives replayed completion time from the matching user turn", () => {
     const firstOutputAt = STARTED_AT + 5_000;
     const latencyMs = 13_000;

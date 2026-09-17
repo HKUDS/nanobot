@@ -76,6 +76,31 @@ def test_guard_allow_patterns_block_single_ampersand_chained_segment():
     assert "allowlist" in result.lower()
 
 
+def test_guard_allow_patterns_block_newline_chained_segment():
+    """A newline separates commands, so each line must match on its own."""
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted\s*.*"])
+
+    result = tool._guard_command("echo allowlisted\ntouch /tmp/evil", "/tmp")
+    assert result is not None
+    assert "allowlist" in result.lower()
+
+
+def test_guard_newline_chained_segment_still_hits_deny_patterns():
+    """An allowlisted first line does not exempt a denied later line."""
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted\s*.*"])
+
+    result = tool._guard_command("echo allowlisted\nrm -rf /", "/tmp")
+    assert result is not None
+    assert "deny pattern filter" in result.lower()
+
+
+def test_split_shell_segments_keep_line_continuation_intact():
+    """A backslash-escaped newline continues one command, not a new segment."""
+    assert ExecTool._split_shell_segments("echo allowlisted \\\nextra") == [
+        "echo allowlisted \\\nextra"
+    ]
+
+
 def test_guard_allow_patterns_preserve_trailing_background_operator():
     tool = ExecTool(allow_patterns=[r"echo\s+allowlisted"])
 

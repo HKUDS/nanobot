@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
+from filelock import FileLock
+
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
 
@@ -16,11 +18,14 @@ _WEBUI_OAUTH_MAX_FLOWS = 8
 
 
 class WebUISettingsConfig:
-    """Instance-scoped config access with serialized read-modify-write operations."""
+    """Path-scoped config access with process-safe read-modify-write operations."""
 
     def __init__(self, config_path: Path) -> None:
         self.path = config_path.expanduser().resolve(strict=False)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        lock_path = self.path.with_suffix(f"{self.path.suffix}.lock")
+        self._file_lock = FileLock(str(lock_path))
 
     def load(self) -> Config:
         """Load this gateway's config without consulting the process-global path."""
@@ -28,16 +33,16 @@ class WebUISettingsConfig:
             return load_config(self.path)
 
     def update(self, mutation: Callable[[Config], _T]) -> _T:
-        """Apply and atomically persist one in-process read-modify-write operation."""
-        with self._lock:
+        """Apply and atomically persist one path-scoped read-modify-write operation."""
+        with self._lock, self._file_lock:
             config = load_config(self.path)
             result = mutation(config)
             save_config(config, self.path)
             return result
 
     def run_serialized(self, operation: Callable[[Path], _T]) -> _T:
-        """Run a path-aware read-modify-write operation under the instance lock."""
-        with self._lock:
+        """Run a path-aware read-modify-write operation under the config-file lock."""
+        with self._lock, self._file_lock:
             return operation(self.path)
 
 
@@ -113,12 +118,22 @@ class WebUISettingsServices:
 
     config: WebUISettingsConfig
     oauth_flows: WebUIOAuthFlowRegistry
+    rename_model_preset: Callable[[str, str], int] | None = None
+    refresh_runtime_config: Callable[[], None] | None = None
 
     @classmethod
-    def create(cls, config_path: Path) -> WebUISettingsServices:
+    def create(
+        cls,
+        config_path: Path,
+        *,
+        rename_model_preset: Callable[[str, str], int] | None = None,
+        refresh_runtime_config: Callable[[], None] | None = None,
+    ) -> WebUISettingsServices:
         return cls(
             config=WebUISettingsConfig(config_path),
             oauth_flows=WebUIOAuthFlowRegistry(),
+            rename_model_preset=rename_model_preset,
+            refresh_runtime_config=refresh_runtime_config,
         )
 
     def read(

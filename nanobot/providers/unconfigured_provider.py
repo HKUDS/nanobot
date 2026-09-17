@@ -11,7 +11,7 @@ class UnconfiguredProvider(LLMProvider):
     """Keep the gateway available for settings before a model is configured."""
 
     def __init__(self, default_model: str) -> None:
-        super().__init__()
+        super().__init__(provider_name="unconfigured")
         self._default_model = default_model
 
     async def chat(

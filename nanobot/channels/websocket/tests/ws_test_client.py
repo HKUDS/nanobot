@@ -202,12 +202,6 @@ class WsTestClient:
         assert msg.event == "delta", f"Expected 'delta' event, got '{msg.event}'"
         return msg
 
-    async def recv_stream_end(self, timeout: float = 10.0) -> WsMessage:
-        """Receive and validate a 'stream_end' event."""
-        msg = await self.recv(timeout)
-        assert msg.event == "stream_end", f"Expected 'stream_end' event, got '{msg.event}'"
-        return msg
-
     async def collect_stream(self, timeout: float = 10.0) -> list[WsMessage]:
         """Collect all deltas and the final stream_end into a list."""
         messages: list[WsMessage] = []
@@ -231,10 +225,6 @@ class WsTestClient:
     async def send_json(self, data: dict[str, Any]) -> None:
         """Send a JSON frame."""
         await self.ws.send(json.dumps(data, ensure_ascii=False))
-
-    async def send_content(self, content: str) -> None:
-        """Send content in the preferred JSON format ``{"content": ...}``."""
-        await self.send_json({"content": content})
 
     # -- Connection introspection -----------------------------------------
 

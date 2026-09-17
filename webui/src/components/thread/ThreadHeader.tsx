@@ -3,6 +3,7 @@ import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import {
   Tooltip,
   TooltipContent,
@@ -10,15 +11,22 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import type { SessionHandle } from "@/lib/types";
+
+const controlsClassName = cn(
+  "pointer-events-auto flex items-center gap-0.5 rounded-compact bg-background p-px empty:hidden",
+  "[&_button]:h-7 [&_button]:w-7 [&_button>svg]:h-3.5 [&_button>svg]:w-3.5",
+  "forced-colors:bg-[Canvas] forced-colors:outline forced-colors:outline-1 forced-colors:outline-[ButtonText]",
+);
 
 interface ThreadHeaderProps {
   title: string;
+  handle?: SessionHandle | null;
   onToggleSidebar: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
   hideSidebarToggleForHostChrome?: boolean;
   hideSidebarToggle?: boolean;
-  hostChromeTitleInset?: boolean;
   hideThemeButton?: boolean;
   hideTitle?: boolean;
   actions?: ReactNode;
@@ -32,12 +40,12 @@ interface ThreadHeaderProps {
 
 export function ThreadHeader({
   title,
+  handle = null,
   onToggleSidebar,
   theme,
   onToggleTheme,
   hideSidebarToggleForHostChrome = false,
   hideSidebarToggle = false,
-  hostChromeTitleInset = false,
   hideThemeButton = false,
   hideTitle = false,
   actions,
@@ -54,12 +62,18 @@ export function ThreadHeader({
     <div
       data-testid="thread-header"
       className={cn(
-        "relative z-30 flex items-center justify-between gap-3 px-3 py-2",
+        "pointer-events-none inset-x-0 top-0 z-30 flex shrink-0 items-center justify-between gap-3 px-3 py-1",
+        "[position:var(--thread-header-position,absolute)]",
         minimal && "h-11",
-        !minimal && hostChromeTitleInset && "lg:pl-[128px]",
       )}
     >
-      <div className="relative flex min-w-0 items-center gap-2">
+      <div
+        className={cn(
+          controlsClassName,
+          "relative min-w-0",
+          hideSidebarToggleForHostChrome && (minimal || hideTitle) && !handle && "lg:hidden",
+        )}
+      >
         {!hideSidebarToggle ? (
           <Button
             variant="ghost"
@@ -79,14 +93,23 @@ export function ThreadHeader({
             <span className="max-w-[min(60vw,32rem)] truncate">{title}</span>
           </div>
         ) : null}
+        {handle ? (
+          <span
+            className="flex shrink-0 items-center rounded-md px-1.5 py-1 text-[12px] font-medium"
+          >
+            <SessionHandleLabel id={handle.id}>
+              @{handle.name}
+            </SessionHandleLabel>
+          </span>
+        ) : null}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-1">
+      <div className={cn(controlsClassName, "ml-auto shrink-0")}>
         {sessionInfoAction}
         {promptNavigatorAction}
         {actions}
         {onTemporaryChatEnabledChange ? (
-          <TooltipProvider delayDuration={700} skipDelayDuration={0}>
+          <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -141,10 +164,6 @@ export function ThreadHeader({
           />
         ) : null}
       </div>
-
-      {!minimal ? (
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-4" />
-      ) : null}
     </div>
   );
 }

@@ -120,12 +120,25 @@ describe("channelSetup", () => {
       webui: "webui/index.ts",
     }), "zh-CN");
 
-    expect(setup.summary).toBe("钉钉需要 Stream 模式的应用凭据。");
-    expect(setup.steps[0]).toBe("创建或选择一个已启用 Stream 模式的钉钉应用。");
+    expect(setup.docsLabel).toBe("打开钉钉配置指南");
+    expect(setup.officialLabel).toBe("打开钉钉开发者后台");
     expect(setup.fields).toContainEqual(expect.objectContaining({
       key: "channels.dingtalk.allowFrom",
       label: "允许的用户",
     }));
+  });
+
+  it("loads custom setup section labels from the channel-owned locale", () => {
+    const setup = channelSetup(feature({
+      name: "email",
+      display_name: "Email",
+      webui: "webui/index.ts",
+    }));
+
+    expect(setup.sectionLabels).toEqual({
+      receiving: "Receiving mail",
+      sending: "Sending mail",
+    });
   });
 });
 

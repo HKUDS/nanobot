@@ -3,17 +3,21 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://discord.com/favicon.ico",
     displayName: "Discord",
     initials: "DC",
     color: "#5865F2",
-    logoUrl: "https://discord.com/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("discord"),
       fields: [
-        { key: "channels.discord.token" },
-        { key: "channels.discord.allowChannels" },
-        { key: "channels.discord.groupPolicy" },
+        { key: "channels.discord.token", section: "credentials" },
+        { key: "channels.discord.proxy", section: "connection" },
+        { key: "channels.discord.proxyUsername", section: "connection" },
+        { key: "channels.discord.proxyPassword", section: "connection" },
+        { key: "channels.discord.allowFrom", section: "access" },
+        { key: "channels.discord.allowChannels", section: "access" },
+        { key: "channels.discord.groupPolicy", section: "behavior" },
       ],
     },
   },

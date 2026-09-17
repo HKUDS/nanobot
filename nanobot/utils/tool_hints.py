@@ -104,6 +104,10 @@ def _fmt_known(tc: ToolCallRequest, fmt: ToolFormat, max_length: int = 40) -> st
         val = abbreviate_path(val, max_len=max_length)
     elif fmt[3]:  # is_command
         val = _abbreviate_command(val, max_len=max_length)
+    elif len(val) > max_length:
+        # Plain values (grep patterns, search queries, ...) have no path or
+        # command structure to fold, so fall back to a hard truncation.
+        val = val[:max_length - 1] + "\u2026"
     return fmt[1].format(val)
 
 

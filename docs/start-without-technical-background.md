@@ -160,4 +160,4 @@ Run:
 nanobot webui
 ```
 
-Leave that terminal open while you use nanobot. To stop it, return to the terminal and press `Ctrl+C`. Use `nanobot webui --background` only after the normal foreground start and model setup work; then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
+Leave that launcher open while you use nanobot. Pressing `Ctrl+C` disconnects it; the shared gateway stops when it was the last local WebUI or TUI client. After the normal foreground start and model setup work, use `nanobot gateway --background` when you want the gateway to stay online with no clients; then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.

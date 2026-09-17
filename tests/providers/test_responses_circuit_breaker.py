@@ -11,6 +11,7 @@ from nanobot.providers.openai_compat_provider import (
     OpenAICompatProvider,
 )
 from nanobot.providers.openai_responses.state import build_responses_state
+from nanobot.providers.registry import find_by_name
 
 
 @pytest.fixture()
@@ -30,30 +31,28 @@ def test_responses_api_available_by_default(provider):
     assert provider._should_use_responses_api("gpt-5", None) is True
 
 
-def test_deepseek_v4_flash_uses_responses_by_model(provider):
-    provider._spec = type("Spec", (), {
-        "name": "deepseek",
-        "responses_models": ("deepseek-v4-flash",),
-        "strip_model_prefix": False,
-        "strip_model_prefixes": (),
-    })()
+@pytest.mark.parametrize(
+    "model",
+    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+)
+def test_deepseek_v4_models_use_responses_by_model(provider, model):
+    provider._spec = find_by_name("deepseek")
     provider._effective_base = "https://api.deepseek.com"
-    provider.default_model = "deepseek-v4-flash"
+    provider.default_model = model
 
-    assert provider._should_use_responses_api("deepseek-v4-flash", None) is True
-    assert provider._should_use_responses_api("deepseek-v4-pro", None) is False
+    assert provider._should_use_responses_api(model, None) is True
+    assert provider._should_use_responses_api("deepseek-chat", None) is False
 
 
-def test_deepseek_v4_flash_matches_provider_prefixed_model(provider):
-    provider._spec = type("Spec", (), {
-        "name": "deepseek",
-        "responses_models": ("deepseek-v4-flash",),
-        "strip_model_prefix": False,
-        "strip_model_prefixes": (),
-    })()
+@pytest.mark.parametrize(
+    "model",
+    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+)
+def test_deepseek_v4_models_match_provider_prefixed_model(provider, model):
+    provider._spec = find_by_name("deepseek")
     provider._effective_base = "https://api.deepseek.com"
 
-    assert provider._should_use_responses_api("deepseek/deepseek-v4-flash", None) is True
+    assert provider._should_use_responses_api(f"deepseek/{model}", None) is True
 
 
 def test_direct_openai_enables_server_compaction(provider):

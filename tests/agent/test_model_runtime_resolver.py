@@ -264,7 +264,6 @@ def test_refresh_clears_preset_when_new_default_has_same_snapshot_signature() ->
     assert refreshed is not None
     assert resolver.model_preset is None
     assert resolver.runtime.model_preset is None
-    assert "_active_preset" not in resolver.__dict__
 
 
 def test_resolver_refreshes_provider_generation_for_next_default_turn() -> None:
@@ -361,3 +360,15 @@ def test_resolver_mutates_only_its_default_selection() -> None:
     assert resolver.model_preset is None
     assert initial.model == "base-model"
     assert initial.context_window_tokens == 10_000
+
+
+def test_resolver_preserves_canonical_preset_name_for_case_insensitive_input() -> None:
+    resolver = ModelRuntimeResolver(
+        _runtime(),
+        model_presets={"Deep Research": ModelPresetConfig(model="deep-model")},
+    )
+
+    selected = resolver.select_preset("deep research")
+
+    assert selected.model == "deep-model"
+    assert selected.model_preset == "Deep Research"

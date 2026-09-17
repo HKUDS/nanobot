@@ -7,10 +7,10 @@ from typing import Any, Protocol, cast
 
 import httpx
 from pydantic import Field
+from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
-from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown  # pyright: ignore[reportMissingTypeStubs]
 
@@ -21,6 +21,11 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.pairing import is_approved
+from nanobot.security.network import (
+    PinnedDNSAsyncTransport,
+    httpx_env_proxy_mounts,
+    validate_url_target,
+)
 from nanobot.utils.helpers import safe_filename, split_message
 
 
@@ -64,7 +69,6 @@ class SlackConfig(Base):
     webhook_path: str = "/slack/events"
     bot_token: str = ""
     app_token: str = ""
-    user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
@@ -78,6 +82,7 @@ class SlackConfig(Base):
     # instead of every message). No effect for "mention"/"open" policies.
     group_require_mention: bool = False
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
+    proxy: str | None = None
 
 
 SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
@@ -87,6 +92,13 @@ SLACK_DOWNLOAD_TIMEOUT = 30.0
 # to websockets.connect — see slack_sdk.socket_mode.websockets.SocketModeClient.connect.
 SLACK_SOCKET_CONNECT_TIMEOUT_S = 45.0
 _HTML_DOWNLOAD_PREFIXES = (b"<!doctype html", b"<html")
+
+
+async def _validate_slack_download_request(request: httpx.Request) -> None:
+    """Validate every Slack file request, including redirects, before transport."""
+    ok, error = validate_url_target(str(request.url))
+    if not ok:
+        raise httpx.RequestError(f"unsafe Slack file URL: {error}", request=request)
 
 
 class SlackChannel(BaseChannel):
@@ -133,10 +145,15 @@ class SlackChannel(BaseChannel):
 
         self._running = True
 
-        self._web_client = AsyncWebClient(token=self.config.bot_token)
+        proxy = self.config.proxy.strip() if self.config.proxy else ""
+        if proxy and "://" not in proxy:
+            proxy = f"http://{proxy}"
+        proxy = proxy or None
+        self._web_client = AsyncWebClient(token=self.config.bot_token, proxy=proxy)
         self._socket_client = SocketModeClient(
             app_token=self.config.app_token,
             web_client=self._web_client,
+            proxy=proxy,
         )
 
         self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)
@@ -562,7 +579,25 @@ class SlackChannel(BaseChannel):
         filename = safe_filename(f"{file_id}_{name}")
         path = Path(get_media_dir("slack")) / filename
         try:
-            async with httpx.AsyncClient(timeout=SLACK_DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=SLACK_DOWNLOAD_TIMEOUT,
+                follow_redirects=True,
+                transport=PinnedDNSAsyncTransport(),
+                mounts=(
+                    {
+                        "all://": httpx.AsyncHTTPTransport(
+                            proxy=httpx.Proxy(
+                                self.config.proxy
+                                if "://" in self.config.proxy
+                                else f"http://{self.config.proxy}"
+                            )
+                        )
+                    }
+                    if self.config.proxy
+                    else httpx_env_proxy_mounts()
+                ),
+                event_hooks={"request": [_validate_slack_download_request]},
+            ) as client:
                 response = await client.get(
                     url,
                     headers={"Authorization": f"Bearer {self.config.bot_token}"},

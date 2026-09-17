@@ -3,14 +3,29 @@ import json
 import pytest
 
 from nanobot.config.errors import ConfigLoadError
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_config, resolve_config_env_vars
 from nanobot.config.schema import ApiConfig
 
 
 def test_load_config_missing_file_uses_defaults(tmp_path) -> None:
-    config = load_config(tmp_path / "missing.json")
+    config_path = tmp_path / "instance" / "missing.json"
+    config = load_config(config_path)
 
     assert config.agents.defaults.model
+    assert config.runtime_data_dir == config_path.parent
+
+
+def test_env_resolution_preserves_config_runtime_data_dir(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "instance" / "config.json"
+    config_path.parent.mkdir()
+    config_path.write_text('{"providers": {"openai": {"apiKey": "${TEST_API_KEY}"}}}')
+    monkeypatch.setenv("TEST_API_KEY", "resolved")
+
+    config = resolve_config_env_vars(load_config(config_path), config_path=config_path)
+
+    assert config.runtime_data_dir == config_path.parent
 
 
 def test_load_config_reports_malformed_environment_safely(

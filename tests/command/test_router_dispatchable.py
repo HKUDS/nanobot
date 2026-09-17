@@ -49,6 +49,7 @@ class TestIsDispatchableCommand:
         assert router.is_dispatchable_command("/goal migrate the database")
         assert router.is_dispatchable_command("/pairing list")
         assert router.is_dispatchable_command("/pairing approve CODE")
+        assert router.is_dispatchable_command("/__shell pwd")
 
     def test_priority_commands_not_matched(self, router: CommandRouter) -> None:
         # Priority commands are NOT in the dispatchable tiers — they are
@@ -59,6 +60,7 @@ class TestIsDispatchableCommand:
     def test_regular_text_not_matched(self, router: CommandRouter) -> None:
         assert not router.is_dispatchable_command("hello")
         assert not router.is_dispatchable_command("what is 2+2?")
+        assert not router.is_dispatchable_command("!important is still ordinary text")
         assert not router.is_dispatchable_command("")
 
     def test_case_insensitive(self, router: CommandRouter) -> None:
@@ -86,6 +88,7 @@ class TestIsDispatchableCommand:
         ("/goal", False),
         ("/goal migrate the database", True),
         ("regular prompt", True),
+        ("!pwd", True),
     ],
 )
 def test_builtin_command_agent_turn_lifecycle(content: str, expected: bool) -> None:
@@ -107,7 +110,7 @@ class TestMidTurnCommandDispatchedDirectly:
         loop = MagicMock()
         loop.sessions = MagicMock()
         loop.sessions.get_or_create = MagicMock(return_value=MagicMock(
-            messages=[], last_consolidated=0, clear=MagicMock(),
+            messages=[], last_archived=0, clear=MagicMock(),
         ))
         loop.sessions.save = MagicMock()
         loop.sessions.invalidate = MagicMock()

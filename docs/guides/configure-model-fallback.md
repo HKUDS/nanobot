@@ -32,16 +32,14 @@ with ones you control:
 ```json
 {
   "modelPresets": {
-    "fast": {
-      "label": "Fast",
+    "Fast": {
       "provider": "primary-provider",
       "model": "primary-model-id",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
     },
-    "deep": {
-      "label": "Deep",
+    "Deep": {
       "provider": "fallback-provider",
       "model": "fallback-model-id",
       "maxTokens": 4096,
@@ -51,8 +49,8 @@ with ones you control:
   },
   "agents": {
     "defaults": {
-      "modelPreset": "fast",
-      "fallbackModels": ["deep"]
+      "modelPreset": "Fast",
+      "fallbackModels": ["Deep"]
     }
   }
 }
@@ -69,7 +67,7 @@ for common providers.
   how much context can fit.
 - Put cheaper or faster fallbacks before expensive ones when acceptable.
 - Use `/model <preset>` for runtime switching without editing config.
-- Keep labels human-readable for WebUI model lists.
+- Keep preset names human-readable; the same name appears in the WebUI and `/model`.
 
 ## Security notes
 

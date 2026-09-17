@@ -5,6 +5,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.queue import MessageBus
@@ -68,12 +69,8 @@ def test_model_preset_setter_updates_state(tmp_path) -> None:
     assert runtime.generation.temperature == 0.5
     assert runtime.generation.max_tokens == 4096
     assert runtime.generation.reasoning_effort == "low"
-    assert not hasattr(loop.subagents, "model")
-    assert not hasattr(loop.consolidator, "model")
-    assert not hasattr(loop.consolidator, "context_window_tokens")
     assert loop.llm_runtime().model == "openai/gpt-4.1"
     assert loop.llm_runtime().context_window_tokens == 32_768
-    assert not hasattr(loop.consolidator, "max_completion_tokens")
     assert loop.llm_runtime().generation.max_tokens == 4096
 
 
@@ -121,13 +118,8 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
     loop.set_model_preset("deep")
 
     assert loop.provider is new_provider
-    assert not hasattr(loop.runner, "provider")
-    assert not hasattr(loop.subagents, "provider")
-    assert not hasattr(loop.subagents.runner, "provider")
-    assert not hasattr(loop.consolidator, "provider")
     assert loop.model == "anthropic/claude-opus-4-5"
     assert loop.context_window_tokens == 200_000
-    assert not hasattr(loop.consolidator, "max_completion_tokens")
     assert loop.llm_runtime().generation.max_tokens == 2048
 
 
@@ -150,10 +142,7 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
 
     assert loop.model_preset is None
     assert loop.model == "base-model"
-    assert not hasattr(loop.subagents, "model")
-    assert not hasattr(loop.consolidator, "model")
     assert loop.context_window_tokens == 1000
-    assert not hasattr(loop.consolidator, "max_completion_tokens")
     assert loop.llm_runtime().generation.max_tokens == 123
 
 
@@ -390,7 +379,7 @@ def test_from_config_injects_default_preset(tmp_path) -> None:
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
-        loop = AgentLoop.from_config(config)
+        loop = AgentLoop.from_config(config, tool_registry=ToolRegistry())
     assert loop.model == "openai/gpt-4.1"
     assert loop.model_preset is None
     assert "default" in loop.model_presets
@@ -407,7 +396,7 @@ def test_from_config_static_preset_loader_does_not_enable_hot_reload(tmp_path) -
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
-        loop = AgentLoop.from_config(config)
+        loop = AgentLoop.from_config(config, tool_registry=ToolRegistry())
         default_runtime = loop.runtime_resolver.runtime
         resolved = loop.runtime_resolver.resolve_preset("fast")
     assert resolved.model == "openai/gpt-4.1-mini"

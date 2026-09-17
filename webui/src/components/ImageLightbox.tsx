@@ -120,7 +120,7 @@ export function ImageLightbox({
               alt={current.name ?? ""}
               decoding="async"
               draggable={false}
-              className="max-h-[92vh] max-w-[94vw] select-none rounded-[6px] object-contain shadow-2xl"
+              className="max-h-[92vh] max-w-[94vw] select-none rounded-compact object-contain shadow-2xl"
             />
           </div>
 

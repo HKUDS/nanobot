@@ -21,12 +21,19 @@ export function ReasoningRow({
     ? t("message.reasoningStreaming", { defaultValue: "Thinking…" })
     : t("message.reasoning", { defaultValue: "Thinking" });
   const preview = compactReasoningPreview(text) || fallback;
+  // CSS ellipsis still lays out the full string, including the animated copy.
+  const truncated = preview.length > 512;
+  const label = truncated
+    ? preview.slice(0, 512).replace(/[\uD800-\uDBFF]$/, "") + "…"
+    : preview;
   return (
     <ActivityStep
       marker={<ReasoningMarker streaming={streaming} />}
       active={streaming}
+      animateLabel={!truncated}
       tone={streaming ? "active" : "success"}
-      label={preview}
+      label={label}
+      tooltipContent={preview}
       labelClassName="italic text-muted-foreground/78"
       contentClassName="overflow-hidden"
       className={className}

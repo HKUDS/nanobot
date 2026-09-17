@@ -34,6 +34,17 @@ def test_delete_session_returns_false_when_missing(tmp_path: Path) -> None:
     assert sm.delete_session("nope:none") is False
 
 
+def test_delete_session_notifies_process_local_state_observer(tmp_path: Path) -> None:
+    sm = _seed(tmp_path, "websocket:abc")
+    deleted_keys: list[str] = []
+    sm.set_delete_observer(deleted_keys.append)
+
+    assert sm.delete_session("websocket:abc") is True
+    assert sm.delete_session("websocket:missing") is False
+
+    assert deleted_keys == ["websocket:abc", "websocket:missing"]
+
+
 def test_read_session_file_returns_metadata_and_messages(tmp_path: Path) -> None:
     sm = _seed(tmp_path, "telegram:abc")
     data = sm.read_session_file("telegram:abc")

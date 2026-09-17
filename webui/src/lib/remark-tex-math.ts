@@ -1,4 +1,5 @@
 import type { Root } from "mdast";
+import { factorySpace } from "micromark-factory-space";
 import type { Code, Construct, Effects, Extension, State, Token } from "micromark-util-types";
 import type { Plugin } from "unified";
 import type {} from "micromark-extension-math";
@@ -30,6 +31,11 @@ const texMathSyntax: Extension = {
       tokenize: tokenizeTexMathFlow,
       concrete: true,
       name: "texMathFlow",
+    },
+    [DOLLAR]: {
+      tokenize: tokenizeDollarMathFlow,
+      concrete: true,
+      name: "dollarMathFlow",
     },
   },
   text: {
@@ -79,6 +85,11 @@ function isMathSignal(code: Code): boolean {
 
 const texMathFlowClose: Construct = {
   tokenize: tokenizeTexMathFlowClose,
+  partial: true,
+};
+
+const dollarMathFlowClose: Construct = {
+  tokenize: tokenizeDollarMathFlowClose,
   partial: true,
 };
 
@@ -202,6 +213,18 @@ function tokenizeTexMathText(effects: Effects, ok: State, nok: State): State {
 }
 
 function tokenizeTexMathFlow(effects: Effects, ok: State, nok: State): State {
+  return tokenizeMathFlow(effects, ok, nok, LEFT_BRACKET, BACKSLASH, texMathFlowClose);
+}
+
+// Treat text after an opening $$ as formula content, not Markdown fence metadata.
+function tokenizeDollarMathFlow(effects: Effects, ok: State, nok: State): State {
+  return tokenizeMathFlow(effects, ok, nok, DOLLAR, DOLLAR, dollarMathFlowClose);
+}
+
+function tokenizeMathFlow(
+  effects: Effects, ok: State, nok: State,
+  openingTail: number, closingStart: number, closing: Construct,
+): State {
   return start;
 
   function start(code: Code): State | undefined {
@@ -213,12 +236,18 @@ function tokenizeTexMathFlow(effects: Effects, ok: State, nok: State): State {
   }
 
   function open(code: Code): State | undefined {
-    if (code !== LEFT_BRACKET) return nok(code);
+    if (code !== openingTail) return nok(code);
 
     effects.consume(code);
     effects.exit("mathFlowFenceSequence");
     effects.exit("mathFlowFence");
-    return contentStart;
+    return afterOpen;
+  }
+
+  function afterOpen(code: Code): State | undefined {
+    // Leave longer dollar fences to remark-math.
+    if (openingTail === DOLLAR && code === DOLLAR) return nok(code);
+    return contentStart(code);
   }
 
   function contentStart(code: Code): State | undefined {
@@ -231,8 +260,8 @@ function tokenizeTexMathFlow(effects: Effects, ok: State, nok: State): State {
       return contentStart;
     }
 
-    if (code === BACKSLASH) {
-      return effects.attempt(texMathFlowClose, done, contentStartAfterBackslash)(code);
+    if (code === closingStart) {
+      return effects.attempt(closing, done, contentStartAfterDelimiter)(code);
     }
 
     effects.enter("mathFlowValue");
@@ -253,16 +282,22 @@ function tokenizeTexMathFlow(effects: Effects, ok: State, nok: State): State {
       return contentStart;
     }
 
-    if (code === BACKSLASH) {
+    if (code === closingStart) {
       effects.exit("mathFlowValue");
-      return effects.attempt(texMathFlowClose, done, contentStartAfterBackslash)(code);
+      return effects.attempt(closing, done, contentStartAfterDelimiter)(code);
     }
 
+    effects.consume(code);
+    return openingTail === DOLLAR && code === BACKSLASH ? escaped : content;
+  }
+
+  function escaped(code: Code): State | undefined {
+    if (code === null || isLineEnding(code)) return content(code);
     effects.consume(code);
     return content;
   }
 
-  function contentStartAfterBackslash(code: Code): State | undefined {
+  function contentStartAfterDelimiter(code: Code): State | undefined {
     effects.enter("mathFlowValue");
     effects.consume(code);
     return content;
@@ -270,11 +305,25 @@ function tokenizeTexMathFlow(effects: Effects, ok: State, nok: State): State {
 
   function done(code: Code): State | undefined {
     effects.exit("mathFlow");
+    if (openingTail === DOLLAR) return factorySpace(effects, afterClose, "whitespace")(code);
     return ok(code);
+  }
+
+  function afterClose(code: Code): State | undefined {
+    // Inline formulas followed by prose belong to remark-math's text tokenizer.
+    return code === null || isLineEnding(code) ? ok(code) : nok(code);
   }
 }
 
 function tokenizeTexMathFlowClose(effects: Effects, ok: State, nok: State): State {
+  return tokenizeMathFlowClose(effects, ok, nok, RIGHT_BRACKET);
+}
+
+function tokenizeDollarMathFlowClose(effects: Effects, ok: State, nok: State): State {
+  return tokenizeMathFlowClose(effects, ok, nok, DOLLAR);
+}
+
+function tokenizeMathFlowClose(effects: Effects, ok: State, nok: State, tail: number): State {
   return start;
 
   function start(code: Code): State | undefined {
@@ -285,7 +334,7 @@ function tokenizeTexMathFlowClose(effects: Effects, ok: State, nok: State): Stat
   }
 
   function close(code: Code): State | undefined {
-    if (code !== RIGHT_BRACKET) return nok(code);
+    if (code !== tail) return nok(code);
 
     effects.consume(code);
     effects.exit("mathFlowFenceSequence");

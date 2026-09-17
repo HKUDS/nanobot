@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -257,6 +257,18 @@ if DISCORD_AVAILABLE:
 
         async def send_outbound(self, msg: OutboundMessage) -> None:
             """Send a nanobot outbound message using Discord transport rules."""
+            compaction = msg.event if isinstance(msg.event, ContextCompactionEvent) else None
+            # A compaction's outcome replaces its own start notice in place, so
+            # the lifecycle stays visible as one message instead of two (#5719).
+            # Without a stored notice (restart, edit refused) it is sent as usual.
+            if compaction is not None and compaction.phase != "started":
+                notice = self._channel._compaction_notices.pop(
+                    (msg.chat_id, compaction.compaction_id),
+                    None,
+                )
+                if notice is not None and await self._edit_compaction_notice(notice, msg.content or ""):
+                    return
+
             channel_id = int(msg.chat_id)
 
             channel = self._channel._known_channels.get(msg.chat_id) or self.get_channel(channel_id)
@@ -290,7 +302,24 @@ if DISCORD_AVAILABLE:
                 if index == 0 and reference is not None and not sent_media:
                     kwargs["reference"] = reference
                     kwargs["allowed_mentions"] = mention_settings
-                await messageable_channel.send(**kwargs)
+                sent = await messageable_channel.send(**kwargs)
+                if compaction is not None and compaction.phase == "started" and index == 0:
+                    self._channel._remember_compaction_notice(
+                        msg.chat_id,
+                        compaction.compaction_id,
+                        sent,
+                    )
+
+        async def _edit_compaction_notice(self, notice: discord.Message, content: str) -> bool:
+            """Replace a start notice's text with the outcome; False when Discord refused."""
+            if not content:
+                return False
+            try:
+                await notice.edit(content=content)
+            except Exception as e:
+                self._channel.logger.warning("compaction notice edit failed, sending instead: {}", e)
+                return False
+            return True
 
         async def _send_file(
             self,
@@ -394,6 +423,7 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_user_id: str | None = None
         self._pending_reactions: dict[str, Any] = {}  # chat_id -> message object
+        self._compaction_notices: dict[tuple[str, str], discord.Message] = {}
         self._working_emoji_tasks: dict[str, asyncio.Task[None]] = {}
         self._stream_bufs: dict[str, _StreamBuf] = {}
         self._known_channels: dict[str, Any] = {}
@@ -434,10 +464,13 @@ class DiscordChannel(BaseChannel):
                     "proxy_password must be set; ignoring partial credentials",
                 )
 
+            proxy = self.config.proxy
+            if proxy and "://" not in proxy:
+                proxy = f"http://{proxy}"
             self._client = DiscordBotClient(
                 self,
                 intents=intents,
-                proxy=self.config.proxy,
+                proxy=proxy,
                 proxy_auth=proxy_auth,
             )
         except Exception:
@@ -463,6 +496,15 @@ class DiscordChannel(BaseChannel):
         """Stop the Discord channel."""
         self._running = False
         await self._reset_runtime_state(close_client=True)
+
+    def _remember_compaction_notice(
+        self,
+        chat_id: str,
+        compaction_id: str,
+        message: discord.Message,
+    ) -> None:
+        """Keep a start notice until its matching outcome consumes it."""
+        self._compaction_notices[(chat_id, compaction_id)] = message
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Discord using discord.py."""
@@ -831,6 +873,7 @@ class DiscordChannel(BaseChannel):
     async def _reset_runtime_state(self, close_client: bool) -> None:
         """Reset client and typing state."""
         await self._cancel_all_typing()
+        self._compaction_notices.clear()
         self._stream_bufs.clear()
         self._known_channels.clear()
         if close_client and self._client is not None and not self._client.is_closed():

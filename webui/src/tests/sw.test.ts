@@ -7,7 +7,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const SW_SCRIPT = readFileSync(resolve(process.cwd(), "public/sw.js"), "utf8");
 
 const ORIGIN = "https://nanobot.test";
-const CACHE_NAME = "nanobot-static-v1";
+const CACHE_NAME = "nanobot-static-v2";
+const ICON_CACHE_NAME = "nanobot-icons-v1";
+const ICON_CACHE_LIMIT = 128;
 
 /** Minimal Cache-compatible in-memory store with SW-style URL normalization. */
 class FakeCacheStore {
@@ -42,6 +44,7 @@ class FakeCacheStore {
 
 interface LoadedSw {
   store: FakeCacheStore;
+  iconStore: FakeCacheStore;
   deletedCacheNames: string[];
   fetchMock: ReturnType<typeof vi.fn>;
   skipWaitingMock: ReturnType<typeof vi.fn>;
@@ -62,13 +65,37 @@ function loadSw(): LoadedSw {
     },
   };
   const store = new FakeCacheStore();
+  const iconStore = new FakeCacheStore();
+  const stores = new Map<string, FakeCacheStore>([
+    [CACHE_NAME, store],
+    [ICON_CACHE_NAME, iconStore],
+  ]);
   const deletedCacheNames: string[] = [];
   const caches = {
-    open: vi.fn(async () => store),
-    match: vi.fn((input: Request | string) => store.match(input)),
-    keys: vi.fn(async () => [CACHE_NAME, "nanobot-static-v0"]),
+    open: vi.fn(async (name: string) => {
+      const existing = stores.get(name);
+      if (existing) return existing;
+      const created = new FakeCacheStore();
+      stores.set(name, created);
+      return created;
+    }),
+    match: vi.fn(async (input: Request | string) => {
+      for (const cache of stores.values()) {
+        const response = await cache.match(input);
+        if (response) return response;
+      }
+      return undefined;
+    }),
+    keys: vi.fn(async () => [
+      CACHE_NAME,
+      ICON_CACHE_NAME,
+      "nanobot-static-v1",
+      "nanobot-icons-v0",
+      "other-app-cache",
+    ]),
     delete: vi.fn(async (name: string) => {
       deletedCacheNames.push(name);
+      stores.delete(name);
       return true;
     }),
   };
@@ -91,7 +118,15 @@ function loadSw(): LoadedSw {
     }
   };
 
-  return { store, deletedCacheNames, fetchMock, skipWaitingMock, claimMock, fire };
+  return {
+    store,
+    iconStore,
+    deletedCacheNames,
+    fetchMock,
+    skipWaitingMock,
+    claimMock,
+    fire,
+  };
 }
 
 function indexHtml(assetPaths: string[]): Response {
@@ -113,6 +148,18 @@ function fetchEvent(url: string) {
   return { event, respondWith };
 }
 
+function imageRequest(url: string): Request {
+  const request = new Request(url);
+  Object.defineProperty(request, "destination", { value: "image" });
+  return request;
+}
+
+function opaqueImageResponse(body = "icon bytes"): Response {
+  const response = new Response(body);
+  Object.defineProperty(response, "type", { value: "opaque" });
+  return response;
+}
+
 describe("service worker", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -126,6 +173,7 @@ describe("service worker", () => {
     expect(sw.skipWaitingMock).toHaveBeenCalledTimes(1);
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/manifest.json`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/asset-manifest.json`)).toBe(true);
   });
 
   it("removes stale cache names and prunes unreferenced static entries on activate", async () => {
@@ -135,22 +183,32 @@ describe("service worker", () => {
     await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js", "/assets/index-v2.css"]));
     await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v2.css`, new Response("v2 css"));
+    await sw.store.put(`${ORIGIN}/assets/lazy-v2.js`, new Response("lazy v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v1.js`, new Response("v1"));
     await sw.store.put(`${ORIGIN}/assets/index-v1.css`, new Response("v1 css"));
+    await sw.store.put(`${ORIGIN}/asset-manifest.json`, new Response(JSON.stringify({
+      "src/main.tsx": {
+        file: "assets/index-v2.js",
+        css: ["assets/index-v2.css"],
+      },
+      "src/lazy.tsx": { file: "assets/lazy-v2.js", isDynamicEntry: true },
+    })));
 
     await sw.fire("activate");
 
-    expect(sw.deletedCacheNames).toEqual(["nanobot-static-v0"]);
+    expect(sw.deletedCacheNames).toEqual(["nanobot-static-v1", "nanobot-icons-v0"]);
     expect(sw.claimMock).toHaveBeenCalledTimes(1);
     expect(sw.store.entries.has(`${ORIGIN}/`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/manifest.json`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/asset-manifest.json`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.js`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v2.css`)).toBe(true);
+    expect(sw.store.entries.has(`${ORIGIN}/assets/lazy-v2.js`)).toBe(true);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.js`)).toBe(false);
     expect(sw.store.entries.has(`${ORIGIN}/assets/index-v1.css`)).toBe(false);
   });
 
-  it("does not intercept API, auth, WebSocket, or WebUI endpoint requests", async () => {
+  it("does not intercept dynamic or unknown endpoint requests", async () => {
     const sw = loadSw();
     const paths = [
       "/api/v1/models",
@@ -160,6 +218,8 @@ describe("service worker", () => {
       "/api/chat/completions",
       "/webui/bootstrap",
       "/webui/session/list",
+      "/custom-token",
+      "/mcp-oauth/callback",
     ];
 
     for (const path of paths) {
@@ -170,7 +230,7 @@ describe("service worker", () => {
     expect(sw.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("does not intercept non-GET or cross-origin requests", async () => {
+  it("does not intercept non-GET or unrelated cross-origin requests", async () => {
     const sw = loadSw();
 
     const { respondWith: post } = fetchEvent(`${ORIGIN}/api/v1/models`);
@@ -185,6 +245,61 @@ describe("service worker", () => {
     });
     expect(cross).not.toHaveBeenCalled();
     expect(sw.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://favicon.im/openai.com?larger=true",
+    "https://www.google.com/s2/favicons?domain=openai.com&sz=64",
+    "https://icons.duckduckgo.com/ip3/openai.com.ico",
+    "https://telegram.org/favicon.ico",
+  ])("caches public icon requests across page loads: %s", async (iconUrl) => {
+    const sw = loadSw();
+    sw.fetchMock.mockResolvedValue(opaqueImageResponse());
+
+    const first = { request: imageRequest(iconUrl), respondWith: vi.fn() };
+    await sw.fire("fetch", first);
+    await first.respondWith.mock.calls[0][0];
+
+    const second = { request: imageRequest(iconUrl), respondWith: vi.fn() };
+    await sw.fire("fetch", second);
+    await second.respondWith.mock.calls[0][0];
+
+    expect(sw.fetchMock).toHaveBeenCalledTimes(1);
+    expect(sw.iconStore.entries.has(iconUrl)).toBe(true);
+  });
+
+  it("leaves arbitrary remote images outside the icon cache", async () => {
+    const sw = loadSw();
+    const request = imageRequest("https://media.example.test/private-photo.png");
+    const event = { request, respondWith: vi.fn() };
+
+    await sw.fire("fetch", event);
+
+    expect(event.respondWith).not.toHaveBeenCalled();
+    expect(sw.fetchMock).not.toHaveBeenCalled();
+    expect(sw.iconStore.entries.size).toBe(0);
+  });
+
+  it("bounds the public icon cache and keeps the newest entry", async () => {
+    const sw = loadSw();
+    const oldestUrl = "https://www.google.com/s2/favicons?domain=oldest.test&sz=64";
+    await sw.iconStore.put(oldestUrl, opaqueImageResponse("oldest"));
+    for (let index = 1; index < ICON_CACHE_LIMIT; index += 1) {
+      await sw.iconStore.put(
+        `https://www.google.com/s2/favicons?domain=icon-${index}.test&sz=64`,
+        opaqueImageResponse(String(index)),
+      );
+    }
+    const newestUrl = "https://icons.duckduckgo.com/ip3/newest.test.ico";
+    sw.fetchMock.mockResolvedValue(opaqueImageResponse("newest"));
+    const event = { request: imageRequest(newestUrl), respondWith: vi.fn() };
+
+    await sw.fire("fetch", event);
+    await event.respondWith.mock.calls[0][0];
+
+    expect(sw.iconStore.entries.size).toBe(ICON_CACHE_LIMIT);
+    expect(sw.iconStore.entries.has(oldestUrl)).toBe(false);
+    expect(sw.iconStore.entries.has(newestUrl)).toBe(true);
   });
 
   it("serves cached static assets without touching the network", async () => {
@@ -218,6 +333,30 @@ describe("service worker", () => {
     expect(sw.store.entries.has(assetUrl)).toBe(true);
   });
 
+  it.each(["private", "no-cache", "no-store"])(
+    "does not cache a %s response even under the static asset prefix",
+    async (cacheControl) => {
+      const sw = loadSw();
+      const tokenUrl = `${ORIGIN}/assets/custom-token`;
+      const originalRequest = new Request(tokenUrl);
+      sw.fetchMock.mockResolvedValue(
+        new Response('{"token":"short-lived"}', {
+          headers: {
+            "Cache-Control": cacheControl,
+            "Content-Type": "application/json",
+          },
+        }),
+      );
+
+      const event = { request: originalRequest, respondWith: vi.fn() };
+      await sw.fire("fetch", event);
+
+      const response = (await event.respondWith.mock.calls[0][0]) as Response;
+      expect(await response.json()).toEqual({ token: "short-lived" });
+      expect(sw.store.entries.has(tokenUrl)).toBe(false);
+    },
+  );
+
   it("keeps un-hashed brand assets on the network-first path", async () => {
     const sw = loadSw();
     const iconUrl = `${ORIGIN}/brand/nanobot_icon_192.png`;
@@ -233,6 +372,31 @@ describe("service worker", () => {
     // future icon swap reaches installed clients.
     expect(sw.fetchMock).toHaveBeenCalledWith(originalRequest);
     expect(sw.store.entries.has(iconUrl)).toBe(true);
+  });
+
+  it("clones network responses before yielding their body to the browser", async () => {
+    const sw = loadSw();
+    const request = new Request(`${ORIGIN}/brand/nanobot_icon_192.png`);
+    let browserOwnsBody = false;
+    let clonedBeforeBrowser = false;
+    const response = {
+      ok: true,
+      clone: vi.fn(() => {
+        clonedBeforeBrowser = !browserOwnsBody;
+        return new Response("cached png bytes");
+      }),
+    } as unknown as Response;
+    sw.fetchMock.mockResolvedValue(response);
+    const respondWith = vi.fn((pending: Promise<Response>) => {
+      void pending.then(() => {
+        browserOwnsBody = true;
+      });
+    });
+
+    await sw.fire("fetch", { request, respondWith });
+
+    expect(clonedBeforeBrowser).toBe(true);
+    expect(response.clone).toHaveBeenCalledTimes(1);
   });
 
   it("serves navigation network-first, prunes on shell refresh, and falls back when offline", async () => {
@@ -255,7 +419,15 @@ describe("service worker", () => {
     // Online: network response wins, refreshes the cached shell, and prunes
     // entries the new index.html no longer references.
     const freshShell = indexHtml(["/assets/index-v3.js"]);
-    sw.fetchMock.mockResolvedValue(freshShell);
+    sw.fetchMock.mockImplementation((input: Request | string) => {
+      const url = new URL(typeof input === "string" ? input : input.url, ORIGIN);
+      if (url.pathname === "/asset-manifest.json") {
+        return Promise.resolve(new Response(JSON.stringify({
+          "src/main.tsx": { file: "assets/index-v3.js" },
+        })));
+      }
+      return Promise.resolve(freshShell.clone());
+    });
     const onlineEvent = {
       request: new Request(`${ORIGIN}/`),
       respondWith: vi.fn(),

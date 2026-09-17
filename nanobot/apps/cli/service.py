@@ -1029,6 +1029,7 @@ class CliAppManager:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            env=self._subprocess_env(),
         )
         logger.info("CLI Apps: command exited with code {}: {}", result.returncode, command)
         output = (result.stderr or result.stdout or "").strip()

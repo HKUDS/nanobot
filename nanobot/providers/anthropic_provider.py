@@ -17,6 +17,7 @@ from loguru import logger
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    LLMUsage,
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
@@ -90,8 +91,10 @@ class AnthropicProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "claude-sonnet-4-6",
         extra_headers: dict[str, str] | None = None,
+        *,
+        provider_name: str = "anthropic",
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
@@ -689,24 +692,25 @@ class AnthropicProvider(LLMProvider):
         stop_map = {"tool_use": "tool_calls", "end_turn": "stop", "max_tokens": "length"}
         finish_reason = stop_map.get(response.stop_reason or "", response.stop_reason or "stop")
 
-        usage: dict[str, int] = {}
+        usage: LLMUsage | None = None
         if response.usage:
-            input_tokens = response.usage.input_tokens
-            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-            total_prompt_tokens = input_tokens + cache_creation + cache_read
-            usage = {
-                "prompt_tokens": total_prompt_tokens,
-                "completion_tokens": response.usage.output_tokens,
-                "total_tokens": total_prompt_tokens + response.usage.output_tokens,
-            }
-            for attr in ("cache_creation_input_tokens", "cache_read_input_tokens"):
-                val = getattr(response.usage, attr, 0)
-                if val:
-                    usage[attr] = val
-            # Normalize to cached_tokens for downstream consistency.
-            if cache_read:
-                usage["cached_tokens"] = cache_read
+            cache_write_raw = getattr(
+                response.usage,
+                "cache_creation_input_tokens",
+                None,
+            )
+            cache_read_raw = getattr(response.usage, "cache_read_input_tokens", None)
+            cache_write = int(cache_write_raw) if cache_write_raw is not None else None
+            cache_read = int(cache_read_raw) if cache_read_raw is not None else None
+            logical_input = int(response.usage.input_tokens) + (cache_write or 0) + (
+                cache_read or 0
+            )
+            usage = LLMUsage.reported(
+                input_tokens=logical_input,
+                output_tokens=int(response.usage.output_tokens),
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
+            )
 
         return LLMResponse(
             content="".join(content_parts) or None,
@@ -780,69 +784,73 @@ class AnthropicProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         idle_timeout_s = resolve_stream_idle_timeout_s()
+        kwargs["timeout"] = idle_timeout_s
         try:
             async with self._client.messages.stream(**kwargs) as stream:
-                if on_content_delta or on_thinking_delta or on_tool_call_delta:
-                    # Idle timeout must track *any* SSE chunk (thinking_delta,
-                    # tool JSON deltas, etc.), not only text_stream tokens.
-                    # Otherwise extended thinking can stall text_stream for minutes
-                    # while the connection is healthy (e.g. MiniMax Anthropic).
-                    tool_blocks: dict[int, dict[str, str]] = {}
-                    while True:
-                        try:
-                            chunk = await asyncio.wait_for(
-                                stream.__anext__(),
-                                timeout=idle_timeout_s,
-                            )
-                        except StopAsyncIteration:
-                            break
-                        if chunk.type == "content_block_start":
-                            block = getattr(chunk, "content_block", None)
-                            if getattr(block, "type", None) == "tool_use":
-                                index = int(getattr(chunk, "index", 0) or 0)
-                                state = {
-                                    "call_id": str(getattr(block, "id", "") or ""),
-                                    "name": str(getattr(block, "name", "") or ""),
-                                }
-                                tool_blocks[index] = state
-                                if on_tool_call_delta:
-                                    await on_tool_call_delta({
-                                        "index": index,
-                                        **state,
-                                        "arguments_delta": "",
-                                    })
-                        elif (
-                            chunk.type == "content_block_delta"
-                            and getattr(chunk.delta, "type", None) == "thinking_delta"
-                        ):
-                            piece = getattr(chunk.delta, "thinking", None) or ""
-                            if piece and on_thinking_delta:
-                                await on_thinking_delta(piece)
-                        elif (
-                            chunk.type == "content_block_delta"
-                            and getattr(chunk.delta, "type", None) == "text_delta"
-                        ):
-                            text = getattr(chunk.delta, "text", None) or ""
-                            if text and on_content_delta:
-                                await on_content_delta(text)
-                        elif (
-                            chunk.type == "content_block_delta"
-                            and getattr(chunk.delta, "type", None) == "input_json_delta"
-                        ):
-                            partial = getattr(chunk.delta, "partial_json", None) or ""
-                            if partial and on_tool_call_delta:
-                                index = int(getattr(chunk, "index", 0) or 0)
-                                state = tool_blocks.get(index, {})
+                # Idle timeout must track *any* SSE chunk (thinking_delta,
+                # tool JSON deltas, etc.), not only text_stream tokens.
+                # Otherwise extended thinking can stall text_stream for minutes
+                # while the connection is healthy (e.g. MiniMax Anthropic).
+                # Drain the whole stream with per-chunk idle waits so the
+                # timeout measures inactivity, not total generation time: a
+                # long but continuously-active stream must never be killed.
+                # The SDK accumulates the final message snapshot during
+                # iteration, so get_final_message() below returns instantly.
+                tool_blocks: dict[int, dict[str, str]] = {}
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            stream.__anext__(),
+                            timeout=idle_timeout_s,
+                        )
+                    except StopAsyncIteration:
+                        break
+                    if chunk.type == "content_block_start":
+                        block = getattr(chunk, "content_block", None)
+                        if getattr(block, "type", None) == "tool_use":
+                            index = int(getattr(chunk, "index", 0) or 0)
+                            state = {
+                                "call_id": str(getattr(block, "id", "") or ""),
+                                "name": str(getattr(block, "name", "") or ""),
+                            }
+                            tool_blocks[index] = state
+                            if on_tool_call_delta:
                                 await on_tool_call_delta({
                                     "index": index,
-                                    "call_id": state.get("call_id", ""),
-                                    "name": state.get("name", ""),
-                                    "arguments_delta": partial,
+                                    **state,
+                                    "arguments_delta": "",
                                 })
-                response = await asyncio.wait_for(
-                    stream.get_final_message(),
-                    timeout=idle_timeout_s,
-                )
+                    elif (
+                        chunk.type == "content_block_delta"
+                        and getattr(chunk.delta, "type", None) == "thinking_delta"
+                    ):
+                        piece = getattr(chunk.delta, "thinking", None) or ""
+                        if piece and on_thinking_delta:
+                            await on_thinking_delta(piece)
+                    elif (
+                        chunk.type == "content_block_delta"
+                        and getattr(chunk.delta, "type", None) == "text_delta"
+                    ):
+                        text = getattr(chunk.delta, "text", None) or ""
+                        if text and on_content_delta:
+                            await on_content_delta(text)
+                    elif (
+                        chunk.type == "content_block_delta"
+                        and getattr(chunk.delta, "type", None) == "input_json_delta"
+                    ):
+                        partial = getattr(chunk.delta, "partial_json", None) or ""
+                        if partial and on_tool_call_delta:
+                            index = int(getattr(chunk, "index", 0) or 0)
+                            state = tool_blocks.get(index, {})
+                            await on_tool_call_delta({
+                                "index": index,
+                                "call_id": state.get("call_id", ""),
+                                "name": state.get("name", ""),
+                                "arguments_delta": partial,
+                            })
+                response = await stream.get_final_message()
+                if not response.stop_reason:
+                    raise ConnectionError("Model stream ended before a stop reason was received")
             return self._parse_response(response)
         except asyncio.TimeoutError:
             return LLMResponse(

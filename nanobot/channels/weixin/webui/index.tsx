@@ -1,12 +1,21 @@
+import { lazy } from "react";
+
 import type { ChannelUiContribution } from "@/channel-plugins/types";
 import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
-import { WeixinConnectFlow } from "./WeixinConnectFlow";
 import {
   WEIXIN_ADVANCED_FIELD_KEYS,
   WEIXIN_PRIMARY_FIELD_KEYS,
-  WeixinPanel,
-} from "./WeixinPanel";
+} from "./presentation";
+
+const WeixinPanel = lazy(() =>
+  import("./WeixinPanel").then(({ WeixinPanel: component }) => ({ default: component })),
+);
+const WeixinConnectFlow = lazy(() =>
+  import("./WeixinConnectFlow").then(({ WeixinConnectFlow: component }) => ({
+    default: component,
+  })),
+);
 
 export default {
   Panel: WeixinPanel,
@@ -16,10 +25,10 @@ export default {
     wechat: {},
   },
   presentation: {
+    logoUrl: "https://weixin.qq.com/favicon.ico",
     displayName: "WeChat",
     initials: "WX",
     color: "#07C160",
-    logoUrl: "https://weixin.qq.com/favicon.ico",
     setup: {
       mode: "connect",
       command: "nanobot channels login weixin",

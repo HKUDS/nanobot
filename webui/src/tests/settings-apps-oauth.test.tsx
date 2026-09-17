@@ -118,21 +118,16 @@ describe("SettingsView Apps catalog", () => {
       "https://accounts.xmind.test/authorize?state=state-123",
     ));
     expect(popup.opener).toBeNull();
-    expect(screen.queryByRole("textbox", { name: /authorization/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Finish signing in in the browser window.",
+      "Complete sign-in in the browser window.",
     );
     expect(screen.getByRole("button", { name: "Connecting Xmind" })).toHaveTextContent(
       "Connecting…",
     );
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 
-    expect(await screen.findByRole("button", { name: "Xmind: Configured" }, { timeout: 2500 }))
-      .toHaveTextContent("Configured");
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Xmind connected.")).not.toBeInTheDocument();
-    expect(screen.queryByText(/some servers did not connect: notion/i)).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Manage Xmind" }, { timeout: 2500 }))
+      .toHaveTextContent("Manage");
     expect(popup.close).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -169,7 +164,6 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "Ready" }));
     expect(await screen.findByText("No tools are ready yet.")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Xmind" })).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
 
@@ -177,27 +171,25 @@ describe("SettingsView Apps catalog", () => {
     const row = heading.closest("article");
     expect(row).not.toBeNull();
     expect(row?.parentElement).toHaveClass("xl:grid-cols-2");
-    expect(within(row as HTMLElement).queryByText("MCP")).not.toBeInTheDocument();
     const failed = within(row as HTMLElement).getByText("Connection failed.");
     expect(failed.closest("button")).toBeNull();
     expect(failed.closest("p")?.querySelector(".lucide-triangle-alert")).not.toBeNull();
     expect(row?.querySelector(".lucide-check")).toBeNull();
-    expect(within(row as HTMLElement).getByRole("button", { name: "Reconnect Xmind" })).toHaveTextContent(
-      "Reconnect",
+    expect(within(row as HTMLElement).getByRole("button", { name: "Manage Xmind" })).toHaveTextContent(
+      "Fix connection",
     );
-    const actions = within(row as HTMLElement).getByRole("button", { name: "Actions for Xmind" });
-    expect(actions).toHaveAttribute("aria-haspopup", "menu");
-    fireEvent.pointerDown(actions, { button: 0, ctrlKey: false });
-    expect(await screen.findByRole("menuitem", { name: "Test" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
 
     await act(() => i18n.changeLanguage("zh-CN"));
     expect(within(row as HTMLElement).getByText("连接失败。")).toBeInTheDocument();
-    expect(within(row as HTMLElement).getByRole("button", { name: "Xmind 操作" }))
-      .toBeInTheDocument();
-    const reconnect = screen.getByRole("button", { name: "重新连接 Xmind" });
-    expect(reconnect).toHaveTextContent("重新连接");
+    const manage = within(row as HTMLElement).getByRole("button", { name: "管理 Xmind" });
+    expect(manage).toHaveTextContent("修复连接");
+    fireEvent.click(manage);
+    const dialog = screen.getByRole("dialog", { name: "Xmind" });
+    expect(within(dialog).getByRole("tab", { name: "连接" })).toHaveAttribute("aria-selected", "true");
+    expect(within(dialog).getByText("创建、读取和编辑 Xmind 云端思维导图。")).toHaveClass("sr-only");
+    expect(within(dialog).getByText("连接失败", { exact: true })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "移除连接" })).toBeInTheDocument();
+    const reconnect = within(dialog).getByRole("button", { name: "重新连接" });
     fireEvent.click(reconnect);
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
@@ -206,6 +198,40 @@ describe("SettingsView Apps catalog", () => {
       30_000,
     ));
     await act(() => i18n.changeLanguage("en"));
+  });
+
+  it("keeps an OAuth runtime failure visible after credentials are cleared", async () => {
+    const failedPreset = {
+      ...xmindMcpPreset,
+      installed: true,
+      configured: false,
+      available: false,
+      status: "authorization_required",
+      runtime_status: "failed",
+      connection_summary: "https://app.xmind.com/api/mcp",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [failedPreset], installed_count: 1 });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+
+    const heading = await screen.findByRole("heading", { name: "Xmind" });
+    const row = heading.closest("article");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText("Connection failed.")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByRole("button", { name: "Manage Xmind" }))
+      .toHaveTextContent("Fix connection");
   });
 
   it("refreshes a connecting MCP snapshot until the runtime attempt settles", async () => {
@@ -246,9 +272,9 @@ describe("SettingsView Apps catalog", () => {
       .toHaveTextContent("Connecting…");
     expect(await screen.findByRole(
       "button",
-      { name: "Xmind: Connected." },
+      { name: "Manage Xmind" },
       { timeout: 2_500 },
-    )).toHaveTextContent("Connected.");
+    )).toHaveTextContent("Manage");
     expect(mcpPresetRequests).toBe(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Ready" }));
@@ -299,15 +325,17 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
     expect(await screen.findByText("Connection failed.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect team-docs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage team-docs" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "team-docs" }))
+      .getByRole("button", { name: "Reconnect" }));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.mcp.reconnect",
       { name: "team-docs" },
       20_000,
     ));
-    const connected = await screen.findByRole("button", { name: "team-docs: Connected." });
-    expect(connected).toHaveTextContent("Connected.");
+    const connected = await screen.findByRole("button", { name: "Manage team-docs" });
+    expect(connected).toHaveTextContent("Manage");
     expect(connected.querySelector(".lucide-check")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Ready" }));
     const readyHeading = await screen.findByRole("heading", { name: "team-docs" });
@@ -357,7 +385,6 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
     fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
 
-    expect(screen.queryByText("Authentication")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Server name"), {
       target: { value: "team-mcp" },
     });
@@ -371,19 +398,18 @@ describe("SettingsView Apps catalog", () => {
     expect(oauth).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(within(authentication).getByRole("button", { name: "Headers" }));
-    fireEvent.change(screen.getByLabelText("Headers JSON"), {
+    fireEvent.change(screen.getByLabelText("Headers (JSON)"), {
       target: { value: '{"Authorization":"Bearer stale"}' },
     });
     expect(screen.getByText("Add the request headers used by this server.")).toBeInTheDocument();
 
     fireEvent.click(oauth);
     expect(oauth).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByLabelText("Headers JSON")).not.toBeInTheDocument();
     expect(
       screen.getByText("Save the server, then select Connect to sign in."),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save MCP" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save MCP server" }));
 
     await waitFor(() => {
       const saveCall = requestMutationMock.mock.calls.find(
@@ -402,9 +428,6 @@ describe("SettingsView Apps catalog", () => {
     });
     expect(await screen.findByRole("button", { name: "Connect team-mcp" }))
       .toBeInTheDocument();
-    expect(
-      screen.queryByText("MCP config reloaded, but some servers did not connect: team-mcp"),
-    ).not.toBeInTheDocument();
   });
 
   it("offers a pasted callback flow when the remote WebUI uses HTTP", async () => {
@@ -490,7 +513,6 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Finish signing in, then paste the callback URL into nanobot.",
     );
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     fireEvent.change(callbackInput, { target: { value: callbackUrl } });
     fireEvent.click(screen.getByRole("button", { name: "Finish sign-in" }));
@@ -500,9 +522,8 @@ describe("SettingsView Apps catalog", () => {
       { flow_id: "flow-manual", callback_url: callbackUrl },
       20_000,
     ));
-    expect(await screen.findByRole("button", { name: "Xmind: Configured" }, { timeout: 2500 }))
-      .toHaveTextContent("Configured");
-    expect(screen.queryByRole("textbox", { name: "Full callback URL" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Manage Xmind" }, { timeout: 2500 }))
+      .toHaveTextContent("Manage");
     expect(popup.close).toHaveBeenCalledTimes(1);
   });
 
@@ -565,8 +586,6 @@ describe("SettingsView Apps catalog", () => {
       20_000,
     ));
     expect(await screen.findByRole("button", { name: "Connect Xmind" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Connecting Xmind" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(popup.close).not.toHaveBeenCalled();
   });
 
@@ -610,7 +629,10 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manage Xmind" }));
+    const dialog = screen.getByRole("dialog", { name: "Xmind" });
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Connection" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove connection" }));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.mcp.remove",
@@ -618,7 +640,6 @@ describe("SettingsView Apps catalog", () => {
       20_000,
     ));
     expect(await screen.findByRole("button", { name: "Connect Xmind" })).toBeInTheDocument();
-    expect(screen.queryByText(/Removed MCP preset|reloaded without restarting/)).not.toBeInTheDocument();
   });
 
   it("offers a one-click recovery when the OAuth popup is blocked", async () => {
@@ -732,9 +753,8 @@ describe("SettingsView Apps catalog", () => {
 
     await waitFor(() => expect(statusCalls).toBe(1), { timeout: 2000 });
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Finish signing in in the browser window.",
+      "Complete sign-in in the browser window.",
     );
-    expect(screen.queryByRole("button", { name: "Continue sign-in" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 

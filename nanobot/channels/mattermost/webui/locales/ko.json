@@ -1,30 +1,19 @@
 {
-  "description": "Mattermost 채널과 DM에서 nanobot을 사용합니다.",
-  "requirements": "Mattermost 서버 URL, 봇 토큰 및 채널 접근 권한",
   "setup": {
     "docsLabel": "Mattermost 설정 가이드 열기",
     "officialLabel": "Mattermost 봇 가이드 열기",
-    "tryIt": "Mattermost 채널에서 봇을 멘션하거나 DM을 보내세요.",
-    "summary": "Mattermost는 서버의 봇 계정으로 연결해 채널과 DM을 수신합니다.",
-    "steps": [
-      "Mattermost 봇 계정을 만들고 액세스 토큰을 복사하세요.",
-      "서버 URL을 입력하고 대상 팀과 채널 접근 권한을 부여하세요.",
-      "저장하고 Mattermost를 활성화한 다음 봇을 멘션하거나 DM을 보내세요."
-    ],
     "fields": {
       "serverUrl": {
         "label": "서버 URL",
-        "placeholder": "https://mattermost.example.com",
-        "help": "Mattermost 워크스페이스 기본 URL을 사용하세요."
+        "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "봇 토큰",
-        "placeholder": "Mattermost 봇 토큰",
-        "help": "Mattermost 봇 계정에서 생성하세요."
+        "placeholder": "Mattermost 봇 토큰"
       },
       "teamId": {
         "label": "팀 ID",
-        "placeholder": "선택적 팀 ID"
+        "placeholder": "팀 ID(선택 사항)"
       },
       "groupPolicy": {
         "label": "채널 동작",
@@ -38,13 +27,85 @@
         "label": "스레드 동작",
         "choices": {
           "mention": "멘션만",
-          "open": "모든 메시지 (언급 불필요)",
+          "open": "모든 메시지(멘션 불필요)",
           "allowlist": "허용 목록"
         }
       },
       "allowFrom": {
         "label": "허용된 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "allowFromMatchMode": {
+        "label": "사용자 매칭",
+        "choices": {
+          "email": "이메일",
+          "id": "사용자 ID",
+          "username": "사용자 이름"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "허용된 채널"
+      },
+      "replyInThread": {
+        "label": "스레드로 답장하기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "includeThreadContext": {
+        "label": "스레드 컨텍스트 포함",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "threadContextLimit": {
+        "label": "스레드 컨텍스트 제한"
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "reactEmoji": {
+        "label": "이모티콘 읽기"
+      },
+      "doneEmoji": {
+        "label": "이모티콘 완료"
+      },
+      "sendProgress": {
+        "label": "진행 상황 보내기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "sendToolHints": {
+        "label": "도구 힌트 보내기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "dm_enabled": {
+        "label": "다이렉트 메시지 활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "dm_policy": {
+        "label": "다이렉트 메시지 액세스",
+        "choices": {
+          "allowlist": "허용 목록",
+          "open": "열기"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "허용된 직접 메시지 사용자"
       }
     }
   }

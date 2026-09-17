@@ -290,16 +290,40 @@ def test_exec_extract_absolute_paths_captures_home_paths() -> None:
 
 
 def test_exec_extract_absolute_paths_captures_paths_after_equals() -> None:
-    cmd = "curl --output=/etc/passwd --config=~/.nanobot/config.json"
+    cmd = "curl --output=/etc/passwd --config=~/.nanobot/config.json --user-home=~root"
     paths = ExecTool._extract_absolute_paths(cmd)
     assert "/etc/passwd" in paths
     assert "~/.nanobot/config.json" in paths
+    assert "~root" in paths
 
 
 def test_exec_extract_absolute_paths_does_not_capture_query_tilde() -> None:
     cmd = 'python query.py --query \'{job=~"app"}\''
     paths = ExecTool._extract_absolute_paths(cmd)
     assert not any(p.startswith("~") for p in paths)
+
+
+def test_exec_extract_absolute_paths_captures_bare_and_named_user_home_paths() -> None:
+    paths = ExecTool._extract_absolute_paths("cd ~ && cat ~root/.bashrc")
+    assert "~" in paths
+    assert "~root/.bashrc" in paths
+
+
+def test_exec_extract_absolute_paths_captures_tilde_after_shell_operators() -> None:
+    paths = ExecTool._extract_absolute_paths(
+        "cat <~root/.bashrc;~root/bin/tool|~daemon/bin/tool"
+    )
+    assert "~root/.bashrc" in paths
+    assert paths.count("~root/bin/tool") == 1
+    assert "~daemon/bin/tool" in paths
+
+
+def test_exec_extract_absolute_paths_captures_tilde_assignment_components() -> None:
+    paths = ExecTool._extract_absolute_paths(
+        "HOME=~ PATH=bin:~root/bin curl --config=~"
+    )
+    assert "~" in paths
+    assert "~root/bin" in paths
 
 
 def test_exec_extract_absolute_paths_captures_quoted_paths() -> None:
@@ -319,9 +343,60 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
     assert "hard policy boundary" in error
 
 
+def test_exec_guard_blocks_bare_tilde_cwd_escape(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cd ~ && cat secret.txt", str(tmp_path))
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+
+
+def test_exec_guard_blocks_named_user_home_path(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat ~root/.bashrc", str(tmp_path))
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <~root/.bashrc",
+        "cat ~-/.bashrc",
+        "cat ~+1/.bashrc",
+        "cat ~-1/.bashrc",
+    ],
+)
+def test_exec_guard_blocks_home_paths_with_special_shell_contexts(
+    tmp_path, command: str
+) -> None:
+    error = ExecTool(restrict_to_workspace=True)._guard_command(command, str(tmp_path))
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+
+
+def test_exec_guard_allows_current_directory_tilde(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    assert tool._guard_command("cat ~+/file.txt", str(tmp_path)) is None
+
+
 def test_exec_guard_blocks_equals_home_path_outside_workspace(tmp_path) -> None:
     tool = ExecTool(restrict_to_workspace=True)
     error = tool._guard_command("cat --config=~/.nanobot/config.json", str(tmp_path))
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+
+
+def test_exec_guard_blocks_equals_named_user_home_path(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat --config=~root/.bashrc", str(tmp_path))
     assert error is not None
     assert error.startswith(
         "Error: Command blocked by safety guard (path outside working dir)"

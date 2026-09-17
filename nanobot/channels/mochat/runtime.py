@@ -277,7 +277,7 @@ class MochatChannel(BaseChannel):
         self.config: MochatConfig = config
         self._http: httpx.AsyncClient | None = None
         self._socket: Any = None
-        self._ws_connected = self._ws_ready = False
+        self._ws_ready = False
 
         self._state_dir = get_runtime_subdir("mochat")
         self._cursor_path = self._state_dir / "session_cursors.json"
@@ -346,7 +346,7 @@ class MochatChannel(BaseChannel):
         if self._http:
             await self._http.aclose()
             self._http = None
-        self._ws_connected = self._ws_ready = False
+        self._ws_ready = False
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send outbound message to session or panel."""
@@ -422,7 +422,7 @@ class MochatChannel(BaseChannel):
         )
 
         async def connect() -> None:
-            self._ws_connected, self._ws_ready = True, False
+            self._ws_ready = False
             self.logger.info("websocket connected")
             subscribed = await self._subscribe_all()
             self._ws_ready = subscribed
@@ -431,7 +431,7 @@ class MochatChannel(BaseChannel):
         async def disconnect() -> None:
             if not self._running:
                 return
-            self._ws_connected = self._ws_ready = False
+            self._ws_ready = False
             self.logger.warning("websocket disconnected")
             await self._ensure_fallback_workers()
 

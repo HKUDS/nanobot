@@ -1,26 +1,15 @@
 {
-  "description": "Sử dụng nanobot từ các cuộc trò chuyện QQ.",
-  "requirements": "Thông tin xác thực bot QQ và gateway",
   "setup": {
     "docsLabel": "Mở hướng dẫn QQ",
     "officialLabel": "Mở bảng điều khiển bot QQ",
-    "tryIt": "Gửi tin nhắn thử riêng hoặc nhóm từ QQ.",
-    "summary": "QQ dùng thông tin xác thực bot chính thức và kết nối WebSocket lâu dài.",
-    "steps": [
-      "Tạo bot trên QQ Open Platform và sao chép App ID cùng Secret.",
-      "Chọn định dạng tin nhắn và danh sách người gửi tùy chọn.",
-      "Lưu và bật QQ, sau đó gửi tin nhắn thử riêng hoặc nhóm."
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
-        "placeholder": "App ID bot QQ",
-        "help": "Sao chép từ QQ Open Platform."
+        "placeholder": "App ID bot QQ"
       },
       "secret": {
         "label": "Secret",
-        "placeholder": "••••••",
-        "help": "Lưu trước khi rời trang thông tin xác thực QQ."
+        "placeholder": "••••••"
       },
       "allowFrom": {
         "label": "Người dùng được phép",
@@ -32,6 +21,18 @@
           "plain": "Văn bản thuần",
           "markdown": "Markdown"
         }
+      },
+      "ackMessage": {
+        "label": "Thông báo xác nhận"
+      },
+      "mediaDir": {
+        "label": "Thư mục phương tiện"
+      },
+      "downloadChunkSize": {
+        "label": "Kích thước khối tải xuống"
+      },
+      "downloadMaxBytes": {
+        "label": "Kích thước tải xuống tối đa"
       }
     }
   }

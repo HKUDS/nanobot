@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import rehypeKatex from "rehype-katex";
 import { Check, Globe2 } from "lucide-react";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -35,7 +34,6 @@ import { browserSafeFaviconUrls } from "@/lib/provider-brand";
 import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
 
-import "katex/dist/katex.min.css";
 import "streamdown/styles.css";
 
 interface MarkdownTextRendererProps {
@@ -285,8 +283,23 @@ const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkCjkStrongBoundaries,
   remarkSafeHtmlSubset,
 ];
-const rehypePlugins: NonNullable<StreamdownProps["rehypePlugins"]> = [rehypeKatex];
+type MathPlugin = typeof import("@/lib/markdown-math").default;
+let loadedMathPlugin: MathPlugin | undefined;
+let mathPluginPromise: Promise<MathPlugin> | undefined;
 
+function loadMathPlugin(): Promise<MathPlugin> {
+  return mathPluginPromise ??= import("@/lib/markdown-math").then((module) => {
+    loadedMathPlugin = module.default;
+    return module.default;
+  }).catch((error) => {
+    mathPluginPromise = undefined;
+    throw error;
+  });
+}
+
+// Remend mistakes math comparisons like `j<i` for incomplete HTML and truncates
+// the remaining text. HTML is handled by remarkSafeHtmlSubset, not raw rendering.
+const REMEND_OPTIONS = { htmlTags: false } as const;
 const DIRECT_LINKS = { enabled: false } as const;
 const SAFE_MARKDOWN_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
 
@@ -450,7 +463,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
     >
       <span
         className={cn(
-          "relative grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-[4px]",
+          "relative grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark",
           "border border-border/65 bg-background text-muted-foreground",
         )}
         aria-hidden
@@ -459,7 +472,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
           <img
             src={favicon}
             alt=""
-            className="h-3 w-3 rounded-[2px] object-contain"
+            className="h-3 w-3 rounded-mark object-contain"
             decoding="async"
             loading="lazy"
             referrerPolicy="no-referrer"
@@ -519,6 +532,20 @@ export default function MarkdownTextRenderer({
   onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
+  const [mathPlugin, setMathPlugin] = useState(() => loadedMathPlugin);
+  const needsMath = /\$|\\[([]/.test(children);
+  useEffect(() => {
+    if (!needsMath || mathPlugin) return;
+    let cancelled = false;
+    void loadMathPlugin().then((plugin) => {
+      if (!cancelled) setMathPlugin(() => plugin);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [needsMath, mathPlugin]);
+  const rehypePlugins = useMemo<NonNullable<StreamdownProps["rehypePlugins"]>>(
+    () => needsMath && mathPlugin ? [mathPlugin] : [],
+    [needsMath, mathPlugin],
+  );
   const components = useMemo<Components>(
     () => ({
       code({ className: cls, children: kids, node: _node, ...props }) {
@@ -745,7 +772,7 @@ export default function MarkdownTextRenderer({
       },
       mark({ children: markdownChildren }) {
         return (
-          <mark className="rounded-[5px] bg-yellow-200/75 px-1 py-0.5 text-inherit dark:bg-yellow-300/25">
+          <mark className="rounded-compact bg-yellow-200/75 px-1 py-0.5 text-inherit dark:bg-yellow-300/25">
             {markdownChildren}
           </mark>
         );
@@ -795,8 +822,10 @@ export default function MarkdownTextRenderer({
 
   return (
     <Streamdown
+      key={needsMath && mathPlugin ? "math" : "text"}
       mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
+      remend={REMEND_OPTIONS}
       isAnimating={false}
       animated={false}
       linkSafety={DIRECT_LINKS}

@@ -147,10 +147,10 @@ def prepare_save_boundary(ctx: TurnContext) -> None:
     if ctx.session is not None:
         clear_internal_continuation_state(ctx.session.metadata)
 
+    assert ctx.transcript_input is not None
     ctx.save_skip = _save_skip_for_turn(
         message_metadata=ctx.msg.metadata,
-        initial_message_count=len(ctx.initial_messages),
-        history_count=len(ctx.history),
+        initial_message_count=ctx.transcript_input.message_count,
         input_persisted_early=ctx.input_persisted_early,
     )
 
@@ -185,7 +185,6 @@ def _save_skip_for_turn(
     *,
     message_metadata: Mapping[str, Any] | None,
     initial_message_count: int,
-    history_count: int,
     input_persisted_early: bool,
 ) -> int:
     """Return the persisted-message append boundary for this turn."""
@@ -193,10 +192,7 @@ def _save_skip_for_turn(
         return initial_message_count
     if internal_continuation_inbound(message_metadata):
         return initial_message_count
-    # build_messages may merge the current message into a same-role history tail.
-    # Runner-appended messages start at initial_message_count in either shape.
-    has_standalone_current = initial_message_count > 1 + history_count
-    if has_standalone_current and not input_persisted_early:
+    if not input_persisted_early:
         return initial_message_count - 1
     return initial_message_count
 

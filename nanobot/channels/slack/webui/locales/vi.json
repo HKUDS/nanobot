@@ -1,29 +1,18 @@
 {
-  "description": "Sử dụng nanobot trong không gian Slack.",
-  "requirements": "Token ứng dụng Slack, token bot và cài đặt vào workspace",
   "setup": {
     "docsLabel": "Mở hướng dẫn Slack",
     "officialLabel": "Mở ứng dụng Slack",
-    "tryIt": "Nhắc ứng dụng Slack hoặc gửi tin nhắn riêng.",
-    "summary": "Slack mặc định dùng Socket Mode nên cần cả token ứng dụng và token bot.",
-    "steps": [
-      "Tạo ứng dụng Slack từ manifest được cung cấp và bật Socket Mode.",
-      "Cài ứng dụng vào workspace rồi sao chép token ứng dụng và bot.",
-      "Lưu và bật Slack, sau đó nhắc ứng dụng hoặc gửi tin nhắn riêng."
-    ],
     "actions": {
-      "slack-manifest": "Sao chép manifest"
+      "slack-manifest": "Sao chép bản khai ứng dụng"
     },
     "fields": {
       "appToken": {
         "label": "Token ứng dụng",
-        "placeholder": "xapp-...",
-        "help": "Tạo từ Socket Mode của Slack."
+        "placeholder": "xapp-..."
       },
       "botToken": {
         "label": "Token bot",
-        "placeholder": "xoxb-...",
-        "help": "Dùng token bot sau khi cài ứng dụng Slack."
+        "placeholder": "xoxb-..."
       },
       "groupPolicy": {
         "label": "Hành vi trong nhóm",
@@ -32,6 +21,72 @@
           "open": "Mọi tin nhắn",
           "allowlist": "Danh sách cho phép"
         }
+      },
+      "mode": {
+        "label": "Chế độ kết nối",
+        "choices": {
+          "socket": "Chế độ ổ cắm"
+        }
+      },
+      "webhookPath": {
+        "label": "Đường dẫn webhook"
+      },
+      "replyInThread": {
+        "label": "Trả lời trong chủ đề",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "reactEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "doneEmoji": {
+        "label": "biểu tượng cảm xúc xong"
+      },
+      "includeThreadContext": {
+        "label": "Bao gồm bối cảnh chủ đề",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Giới hạn bối cảnh của chủ đề"
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép"
+      },
+      "groupAllowFrom": {
+        "label": "Các kênh được phép"
+      },
+      "groupRequireMention": {
+        "label": "Yêu cầu đề cập trong các kênh",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "dm_enabled": {
+        "label": "Bật tin nhắn trực tiếp",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "dm_policy": {
+        "label": "Truy cập tin nhắn trực tiếp",
+        "choices": {
+          "allowlist": "Danh sách cho phép",
+          "open": "Mở"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Cho phép người dùng nhắn tin trực tiếp"
+      },
+      "proxy": {
+        "label": "Proxy mạng",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

@@ -10,7 +10,8 @@ from mcp.shared.auth import OAuthToken
 
 from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
-from nanobot.config.loader import load_config
+from nanobot.config.loader import load_config, save_config
+from nanobot.config.schema import Config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
@@ -182,6 +183,17 @@ async def test_oauth_preset_is_one_click_configured_after_token_storage(
     healthy = mcp_presets_payload(runtime_status={"xmind": "connected"})
     row = next(item for item in healthy["presets"] if item["name"] == "xmind")
     assert row["runtime_status"] == "connected"
+
+    await MCPOAuthStorage("xmind", cfg.url).clear_tokens()
+    refresh_failed = mcp_presets_payload(runtime_status={"xmind": "failed"})
+    row = next(item for item in refresh_failed["presets"] if item["name"] == "xmind")
+    assert row["configured"] is False
+    assert row["status"] == "authorization_required"
+    assert row["runtime_status"] == "failed"
+
+    stale_connected = mcp_presets_payload(runtime_status={"xmind": "connected"})
+    row = next(item for item in stale_connected["presets"] if item["name"] == "xmind")
+    assert "runtime_status" not in row
 
     mcp_presets_action("remove", {"name": ["xmind"]})
     assert await MCPOAuthStorage("xmind", cfg.url).get_tokens() is None
@@ -454,6 +466,46 @@ def test_test_mcp_preset_connects_and_reports_tools(
     assert payload["last_action"]["tool_names"] == ["mcp_playwright_browser_navigate"]
 
 
+def test_test_mcp_preset_inspects_tools_outside_the_enabled_allowlist(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    mcp_presets_action("enable", {"name": ["playwright"]})
+    config = load_config()
+    config.tools.mcp_servers["playwright"].enabled_tools = [
+        "mcp_playwright_browser_navigate",
+    ]
+    save_config(config)
+
+    class FakeStack:
+        async def aclose(self) -> None:
+            return None
+
+    async def fake_connect(servers, registry):
+        assert servers["playwright"].enabled_tools == ["*"]
+
+        class FakeTool:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def to_schema(self):
+                return {"name": self.name, "description": "", "parameters": {}}
+
+        for index in range(20):
+            registry.register(FakeTool(f"mcp_playwright_tool_{index:02d}"))
+        return {"playwright": FakeStack()}
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)
+
+    payload = asyncio.run(mcp_presets_test_action({"name": ["playwright"]}))
+
+    assert payload["last_action"]["tool_count"] == 20
+    assert len(payload["last_action"]["tool_names"]) == 20
+    row = next(item for item in payload["presets"] if item["name"] == "playwright")
+    assert row["enabled_tools"] == ["mcp_playwright_browser_navigate"]
+
+
 def test_test_mcp_preset_scrubs_connection_errors(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -682,3 +734,29 @@ def test_normalize_mcp_preset_mentions_accepts_configured_custom_server(
     ])
 
     assert payload == [{"name": "docs", "display_name": "Docs", "transport": "streamableHttp"}]
+
+
+def test_normalize_mcp_mentions_uses_explicit_gateway_config(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    default_path = tmp_path / "default.json"
+    config_path = tmp_path / "gateway.json"
+    save_config(Config(), default_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", default_path)
+    custom_mcp_action(
+        "custom",
+        {
+            "name": ["gateway-docs"],
+            "transport": ["streamableHttp"],
+            "url": ["https://example.com/mcp"],
+        },
+        config_path=config_path,
+    )
+
+    payload = normalize_mcp_preset_mentions(
+        [{"name": "gateway-docs", "display_name": "Gateway docs"}],
+        config_path=config_path,
+    )
+
+    assert payload == [{"name": "gateway-docs", "display_name": "Gateway docs"}]

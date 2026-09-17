@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,15 +15,15 @@ from nanobot.agent.hook import (
     CompositeHook,
 )
 from nanobot.agent.progress_hook import AgentProgressHook
+from nanobot.events import NO_EVENTS, EventSink
 
 
 @dataclass(slots=True)
 class AgentTurnHookSpec:
     """Inputs needed to build the hook chain for one agent turn."""
 
-    on_progress: Callable[..., Awaitable[None]] | None = None
-    on_stream: Callable[[str], Awaitable[None]] | None = None
-    on_stream_end: Callable[..., Awaitable[None]] | None = None
+    events: EventSink = NO_EVENTS
+    streaming: bool = False
     channel: str = "cli"
     chat_id: str = "direct"
     message_id: str | None = None
@@ -32,7 +31,6 @@ class AgentTurnHookSpec:
     session_key: str | None = None
     workspace: Path | None = None
     tool_hint_max_length: int = 40
-    on_iteration: Callable[[int], None] | None = None
     registered_hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     turn_hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     registered_hooks: list[AgentHook] = field(default_factory=list)
@@ -45,18 +43,16 @@ class AgentTurnHookSpec:
 def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
     """Build the hook chain used by ``AgentRunner`` for one turn."""
     progress_hook = AgentProgressHook(
-        on_progress=spec.on_progress,
-        on_stream=spec.on_stream,
-        on_stream_end=spec.on_stream_end,
+        events=spec.events,
+        streaming=spec.streaming,
         session_key=spec.session_key,
         tool_hint_max_length=spec.tool_hint_max_length,
-        on_iteration=spec.on_iteration,
     )
     if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:
         return progress_hook
 
     turn_context = AgentTurnHookContext(
-        on_progress=spec.on_progress,
+        events=spec.events,
         workspace=spec.workspace,
         channel=spec.channel,
         chat_id=spec.chat_id,

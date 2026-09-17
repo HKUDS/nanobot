@@ -55,6 +55,14 @@ def no_qr_poll_delay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(weixin_mod, "asyncio", AsyncioProxy())
 
 
+@pytest.fixture(autouse=True)
+def isolate_config_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep mocked QR credentials out of the user's real config file."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+
 def test_make_headers_includes_route_tag_when_configured() -> None:
     bus = MessageBus()
     channel = WeixinChannel(

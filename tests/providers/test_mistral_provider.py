@@ -353,3 +353,26 @@ def test_mistral_tool_call_ids_get_normalized() -> None:
     assert len(assistant_id) == 9
     assert assistant_id.isalnum()
     assert assistant_id == tool_id
+
+
+def test_mistral_preserves_text_with_tool_call_history() -> None:
+    p = _mistral_provider()
+    messages = [
+        {"role": "user", "content": "check"},
+        {
+            "role": "assistant",
+            "content": "I will inspect it.",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+    ]
+
+    sanitized = p._sanitize_messages(messages)
+
+    assert sanitized[1]["content"] == "I will inspect it."

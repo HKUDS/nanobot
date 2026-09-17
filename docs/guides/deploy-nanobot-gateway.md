@@ -37,18 +37,20 @@ nanobot gateway
 For WebUI background usage:
 
 ```bash
-nanobot webui --background
+nanobot gateway --background
 nanobot gateway status
 nanobot gateway logs
 ```
+
+Open the configured WebUI URL in a browser, or run `nanobot webui` as a foreground client.
 
 ## Production notes
 
 - Docker Compose is the most repeatable Linux container path.
 - systemd user services are useful for Linux user-level gateway deployments.
 - macOS LaunchAgent keeps the gateway alive after login.
-- Persist config, workspace, sessions, memory files, channel login state, and
-  generated artifacts.
+- Persist the active config directory's `sessions/` folder together with the workspace
+  (including `.nanobot/workspace-id`), memory files, channel login state, and generated artifacts.
 - Restart the gateway after editing `config.json`.
 
 ## Security notes
