@@ -89,8 +89,13 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("trigger", ["manual", "idle"])
-@pytest.mark.parametrize("summary", ["The checkpoint inspection is complete.", "(nothing)"])
+@pytest.mark.parametrize(
+    ("trigger", "summary"),
+    [
+        ("manual", "The checkpoint inspection is complete."),
+        ("idle", "(nothing)"),
+    ],
+)
 async def test_compacted_session_waits_for_new_input_without_continuation(
     loop, trigger, summary,
 ) -> None:

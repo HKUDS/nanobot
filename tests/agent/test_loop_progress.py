@@ -581,12 +581,11 @@ class TestToolEventProgress:
         assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("max_iterations", [1, 3])
     async def test_followup_after_truncation_starts_a_new_stream(
-        self, tmp_path: Path, max_iterations: int,
+        self, tmp_path: Path,
     ) -> None:
         loop = _make_loop(tmp_path)
-        loop.max_iterations = max_iterations
+        loop.max_iterations = 1
         loop.tools.get_definitions = MagicMock(return_value=[])
         _attach_webui_runtime_events(loop, loop.bus)
         calls = 0

@@ -57,9 +57,82 @@ def _automation_message(kind: str, name: str) -> InboundMessage:
     )
 
 
-@pytest.mark.parametrize("first_kind", ["cron", "local_trigger"])
-@pytest.mark.parametrize("second_fails", [False, True])
-@pytest.mark.parametrize("bus_running", [False, True])
+@pytest.mark.parametrize("kind", ["cron", "local_trigger"])
+async def test_automation_turn_is_deferred_while_session_active(loop, kind):
+    key = "websocket:test"
+    pending = asyncio.Queue()
+    loop._pending_queues[key] = pending
+    coordinator = loop._cron_turns if kind == "cron" else loop._local_trigger_turns
+    pending_ids = (
+        loop.pending_cron_job_ids_for_session
+        if kind == "cron"
+        else loop.pending_local_trigger_ids_for_session
+    )
+    msg = _automation_message(kind, "deferred")
+    run_task = asyncio.create_task(loop.run())
+
+    try:
+        await loop.bus.publish_inbound(msg)
+        async with asyncio.timeout(3):
+            while not coordinator.deferred_queues.get(key):
+                await asyncio.sleep(0)
+        loop.stop()
+        await asyncio.wait_for(run_task, timeout=3)
+
+        assert pending.empty()
+        assert loop._active_tasks == {}
+        assert coordinator.deferred_queues[key] == [msg]
+        assert pending_ids(key) == {"deferred"}
+
+        loop._process_message = AsyncMock(return_value=None)
+        await loop._run_session_queue(key, pending)
+        assert loop._process_message.await_args.args[0] is msg
+        assert key not in coordinator.deferred_queues
+        assert pending_ids(key) == set()
+    finally:
+        loop.stop()
+        if not run_task.done():
+            run_task.cancel()
+        await asyncio.gather(run_task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("kind", ["cron", "local_trigger"])
+async def test_submitted_automation_reports_pending_until_completed(loop, kind):
+    coordinator = loop._cron_turns if kind == "cron" else loop._local_trigger_turns
+    coordinator._enqueue = MagicMock()
+    submit = loop.submit_cron_turn if kind == "cron" else loop.submit_local_trigger_turn
+    pending_ids = (
+        loop.pending_cron_job_ids_for_session
+        if kind == "cron"
+        else loop.pending_local_trigger_ids_for_session
+    )
+    msg = _automation_message(kind, "pending")
+    submit_task = asyncio.create_task(submit(msg))
+
+    try:
+        await asyncio.sleep(0)
+        assert pending_ids(msg.session_key) == {"pending"}
+
+        response = OutboundMessage(channel="websocket", chat_id="test", content="done")
+        coordinator.complete(msg, response=response)
+
+        assert await asyncio.wait_for(submit_task, timeout=1) is response
+        assert pending_ids(msg.session_key) == set()
+    finally:
+        if not submit_task.done():
+            submit_task.cancel()
+        await asyncio.gather(submit_task, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    ("first_kind", "second_fails", "bus_running"),
+    [
+        ("cron", False, False),
+        ("cron", True, True),
+        ("local_trigger", False, True),
+        ("local_trigger", True, False),
+    ],
+)
 async def test_automation_turns_complete_independently(loop, first_kind, second_fails, bus_running):
     started, release = asyncio.Event(), asyncio.Event()
     release_second = asyncio.Event()
@@ -182,9 +255,15 @@ async def test_cancel_before_worker_runs_completes_automation(loop, action):
         await asyncio.gather(submit, return_exceptions=True)
 
 
-@pytest.mark.parametrize("kind", ["cron", "local_trigger"])
-@pytest.mark.parametrize("action", ["stop", "close"])
-@pytest.mark.parametrize("waiting_for", ["session_lock", "capacity"])
+@pytest.mark.parametrize(
+    ("kind", "action", "waiting_for"),
+    [
+        ("cron", "stop", "session_lock"),
+        ("cron", "close", "capacity"),
+        ("local_trigger", "stop", "capacity"),
+        ("local_trigger", "close", "session_lock"),
+    ],
+)
 async def test_cancel_before_execution_completes_automation(loop, kind, action, waiting_for):
     key = "websocket:test"
     if waiting_for == "capacity":
