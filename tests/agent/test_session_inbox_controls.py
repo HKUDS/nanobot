@@ -182,6 +182,37 @@ async def test_cancel_before_worker_runs_completes_automation(loop, action):
         await asyncio.gather(submit, return_exceptions=True)
 
 
+@pytest.mark.parametrize("kind", ["cron", "local_trigger"])
+@pytest.mark.parametrize("action", ["stop", "close"])
+@pytest.mark.parametrize("waiting_for", ["session_lock", "capacity"])
+async def test_cancel_before_execution_completes_automation(loop, kind, action, waiting_for):
+    key = "websocket:test"
+    if waiting_for == "capacity":
+        blocker = loop._concurrency_gate = asyncio.Semaphore(1)
+    else:
+        blocker = loop._get_session_lock(key)
+    await blocker.acquire()
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unused"))
+    submit_turn = loop.submit_cron_turn if kind == "cron" else loop.submit_local_trigger_turn
+    submitted = asyncio.create_task(submit_turn(_automation_message(kind, "waiting")))
+    try:
+        async with asyncio.timeout(3):
+            while key not in loop._pending_queues or not loop._pending_queues[key].empty():
+                await asyncio.sleep(0)
+        if action == "stop":
+            await loop._cancel_active_tasks(key)
+        else:
+            await loop.aclose()
+        with pytest.raises(AutomationTurnError, match="CancelledError"):
+            await asyncio.wait_for(asyncio.shield(submitted), timeout=1)
+        loop.provider.chat_stream_with_retry.assert_not_awaited()
+    finally:
+        blocker.release()
+        if not submitted.done():
+            submitted.cancel()
+        await asyncio.gather(submitted, return_exceptions=True)
+
+
 @pytest.mark.parametrize("bus_running", [False, True])
 async def test_ingress_sources_share_one_session_worker(loop, bus_running):
     started, release = asyncio.Event(), asyncio.Event()

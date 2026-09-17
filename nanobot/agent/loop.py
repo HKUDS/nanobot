@@ -1425,7 +1425,9 @@ class AgentLoop:
                         self._deferred_automation_turns.pop(session_key)
                 try:
                     await self._dispatch_one(msg, pending)
-                except asyncio.CancelledError:
+                except asyncio.CancelledError as exc:
+                    for coordinator in self._automation_turn_coordinators:
+                        coordinator.complete(msg, error=exc)
                     raise
                 except Exception:
                     logger.exception(
@@ -1515,8 +1517,6 @@ class AgentLoop:
                     for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
                 except asyncio.CancelledError:
-                    for coordinator in self._automation_turn_coordinators:
-                        coordinator.complete(msg, error=asyncio.CancelledError())
                     logger.info("Task cancelled for session {}", session_key)
                     try:
                         await delivery.abort_stream()
