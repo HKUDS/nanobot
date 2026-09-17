@@ -266,6 +266,163 @@ async def test_openrouter_uses_native_images_endpoint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openrouter_capability_lookup_failure_allows_request() -> None:
+    raw_b64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
+    model = "openai/gpt-5.4-image-2"
+    fake = FakeClient(
+        FakeResponse({"data": [{"b64_json": raw_b64, "media_type": "image/png"}]}),
+        get_response=FakeResponse({"error": "lookup failed"}, status_code=500),
+    )
+    client = OpenRouterImageGenerationClient(api_key="sk-or-test", client=fake)  # type: ignore[arg-type]
+
+    response = await client.generate(
+        prompt="draw",
+        model=model,
+        aspect_ratio="16:9",
+        image_size="2K",
+    )
+
+    assert response.images == [PNG_DATA_URL]
+    assert fake.get_calls[0]["url"] == "https://openrouter.ai/api/v1/images/models"
+    body = fake.calls[0]["json"]
+    assert body["model"] == model
+    assert "aspect_ratio" not in body
+    assert "resolution" not in body
+
+
+@pytest.mark.asyncio
+async def test_openrouter_missing_or_malformed_supported_parameters_omits_optional_fields() -> None:
+    raw_b64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
+    model = "openai/gpt-5.4-image-2"
+    fake = FakeClient(
+        FakeResponse({"data": [{"b64_json": raw_b64, "media_type": "image/png"}]}),
+        get_response=FakeResponse({"data": [{"id": model}]}),
+    )
+    client = OpenRouterImageGenerationClient(api_key="sk-or-test", client=fake)  # type: ignore[arg-type]
+
+    await client.generate(
+        prompt="draw",
+        model=model,
+        aspect_ratio="16:9",
+        image_size="2K",
+    )
+
+    body = fake.calls[0]["json"]
+    assert "aspect_ratio" not in body
+    assert "resolution" not in body
+
+    fake = FakeClient(
+        FakeResponse({"data": [{"b64_json": raw_b64, "media_type": "image/png"}]}),
+        get_response=FakeResponse(
+            {
+                "data": [
+                    {
+                        "id": model,
+                        "supported_parameters": {
+                            "aspect_ratio": {"values": "not-a-list"},
+                            "resolution": {"values": {"bad": "shape"}},
+                        },
+                    }
+                ]
+            }
+        ),
+    )
+    client = OpenRouterImageGenerationClient(api_key="sk-or-test", client=fake)  # type: ignore[arg-type]
+
+    await client.generate(
+        prompt="draw",
+        model=model,
+        aspect_ratio="16:9",
+        image_size="2K",
+    )
+
+    body = fake.calls[0]["json"]
+    assert "aspect_ratio" not in body
+    assert "resolution" not in body
+
+
+@pytest.mark.asyncio
+async def test_openrouter_unsupported_optional_fields_are_dropped() -> None:
+    raw_b64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
+    model = "openai/gpt-5.4-image-2"
+    fake = FakeClient(
+        FakeResponse({"data": [{"b64_json": raw_b64, "media_type": "image/png"}]}),
+        get_response=FakeResponse(
+            {
+                "data": [
+                    {
+                        "id": model,
+                        "supported_parameters": {
+                            "aspect_ratio": {"values": ["1:1"]},
+                            "resolution": {"values": ["1K"]},
+                        },
+                    }
+                ]
+            }
+        ),
+    )
+    client = OpenRouterImageGenerationClient(api_key="sk-or-test", client=fake)  # type: ignore[arg-type]
+
+    await client.generate(
+        prompt="draw",
+        model=model,
+        aspect_ratio="16:9",
+        image_size="2K",
+    )
+
+    body = fake.calls[0]["json"]
+    assert "aspect_ratio" not in body
+    assert "resolution" not in body
+
+
+@pytest.mark.asyncio
+async def test_openrouter_headers_and_jpeg_response_are_native() -> None:
+    raw_b64 = base64.b64encode(JPEG_BYTES).decode("ascii")
+    model = "openai/gpt-5.4-image-2"
+    fake = FakeClient(
+        FakeResponse({"data": [{"b64_json": raw_b64, "media_type": "image/jpeg"}]}),
+        get_response=FakeResponse(
+            {
+                "data": [
+                    {
+                        "id": model,
+                        "supported_parameters": {
+                            "aspect_ratio": {"values": ["16:9"]},
+                            "resolution": {"values": ["2K"]},
+                        },
+                    }
+                ]
+            }
+        ),
+    )
+    client = OpenRouterImageGenerationClient(
+        api_key="sk-or-test",
+        extra_headers={
+            "X-Test": "1",
+            "HTTP-Referer": "https://example.com",
+            "X-OpenRouter-Title": "custom-title",
+        },
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(
+        prompt="draw",
+        model=model,
+        aspect_ratio="16:9",
+        image_size="2K",
+    )
+
+    assert response.images == [f"data:image/jpeg;base64,{raw_b64}"]
+    headers = fake.calls[0]["headers"]
+    assert headers["Authorization"] == "Bearer sk-or-test"
+    assert headers["Content-Type"] == "application/json"
+    assert headers["HTTP-Referer"] == "https://example.com"
+    assert headers["X-OpenRouter-Title"] == "custom-title"
+    assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
+    assert headers["X-Test"] == "1"
+
+
+@pytest.mark.asyncio
 async def test_openrouter_image_generation_requires_images() -> None:
     fake = FakeClient(
         FakeResponse({"data": []}),
