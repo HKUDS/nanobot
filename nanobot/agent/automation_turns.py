@@ -58,6 +58,10 @@ class AutomationTurnCoordinator:
         self._waiters: dict[str, asyncio.Future[OutboundMessage | None]] = {}
         self._pending_messages_by_turn_id: dict[str, InboundMessage] = {}
 
+    def owns_turn(self, msg: InboundMessage) -> bool:
+        """Whether this message requires an independent automation completion."""
+        return bool(self._turn_id(msg))
+
     async def submit(self, msg: InboundMessage) -> OutboundMessage | None:
         """Submit an automation turn and wait for its session response."""
         turn_id = self._turn_id(msg)

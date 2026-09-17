@@ -531,6 +531,55 @@ async def test_injected_followup_starts_new_length_recovery_chain():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("max_iterations", [1, 3])
+async def test_followup_interrupts_truncated_answer_before_next_request(max_iterations):
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    queue = asyncio.Queue()
+    requests = []
+    endings = []
+
+    class StreamingHook(AgentHook):
+        def wants_streaming(self) -> bool:
+            return True
+
+        async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+            endings.append((resuming, context.stream_continues_current_message))
+
+    async def chat_stream_with_retry(*, messages, on_content_delta=None, **kwargs):
+        requests.append([dict(message) for message in messages])
+        if len(requests) == 1:
+            queue.put_nowait({"role": "user", "content": "Never mind. What is 2+2?"})
+            if on_content_delta is not None:
+                await on_content_delta("Unfinished old answer: ")
+            return LLMResponse(content="Unfinished old answer: ", finish_reason="length")
+        return LLMResponse(content="4", finish_reason="stop")
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "old question"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=max_iterations,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=StreamingHook(),
+        injection_callback=_make_injection_callback(queue),
+    ))
+
+    assert result.final_content == "4"
+    assert len(requests) == 2
+    assert endings[0] == (True, False)
+    second_request = "\n".join(str(message.get("content", "")) for message in requests[1])
+    assert "Never mind. What is 2+2?" in second_request
+    assert "Continue the same response from its exact endpoint" not in second_request
+
+
+@pytest.mark.asyncio
 async def test_checkpoint2_preserves_final_response_in_history_before_followup():
     """A follow-up injected after a final answer must still see that answer in history."""
     from nanobot.agent.runner import AgentRunner
@@ -1577,6 +1626,111 @@ async def test_pending_queue_snapshot_excludes_messages_arriving_during_conversi
     assert "first snapshot" in first_request
     assert "next snapshot" not in first_request
     assert "next snapshot" in second_request
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_conversion", [False, True])
+async def test_pending_snapshot_rolls_back_before_later_arrivals(tmp_path, cancel_conversion):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="answer"))
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    pending = asyncio.Queue()
+    contents = ["before", "bad", "after"]
+    for content in contents:
+        pending.put_nowait(InboundMessage(
+            channel="cli", sender_id="u", chat_id="c", content=content,
+        ))
+    failed = False
+
+    async def context_provider(request):
+        nonlocal failed
+        if request.original_user_text == "bad" and not failed:
+            failed = True
+            pending.put_nowait(InboundMessage(
+                channel="cli", sender_id="u", chat_id="c", content="later arrival",
+            ))
+            if cancel_conversion:
+                raise asyncio.CancelledError
+            raise RuntimeError("context lookup temporarily unavailable")
+        return None
+
+    loop.register_runtime_context_provider(context_provider)
+    runtime = loop.llm_runtime()
+    try:
+        run = loop._run_agent_loop(
+            TranscriptInput(history=[{"role": "user", "content": "root"}], current_message=None),
+            runtime=runtime,
+            request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
+            pending_queue=pending,
+        )
+        if cancel_conversion:
+            with pytest.raises(asyncio.CancelledError):
+                await run
+            assert [pending.get_nowait().content for _ in range(pending.qsize())] == [
+                *contents, "later arrival",
+            ]
+        else:
+            result = await run
+            user_content = [
+                message["content"] for message in result.messages if message["role"] == "user"
+            ]
+            assert user_content == ["root", *contents, "later arrival"]
+            assert pending.empty()
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
+async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.bus.runtime_events import TurnCompleted
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    completions = []
+    loop.bus.subscribe(completions.append, TurnCompleted)
+    calls = 0
+
+    async def chat(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            for content in ["before", "bad", "after"]:
+                await loop._dispatch(InboundMessage(
+                    channel="cli", sender_id="u", chat_id="c", content=content,
+                ))
+        return LLMResponse(content="answer", finish_reason="stop")
+
+    async def context_provider(request):
+        if request.original_user_text == "bad":
+            raise RuntimeError("context unavailable")
+        return None
+
+    provider.chat_stream_with_retry = chat
+    loop.register_runtime_context_provider(context_provider)
+    try:
+        await loop._dispatch(InboundMessage(
+            channel="cli", sender_id="u", chat_id="c", content="root",
+        ))
+        loop.sessions.invalidate("cli:c")
+        history = loop.sessions.get_or_create("cli:c").messages
+        assert [message["content"] for message in history if message["role"] == "user"] == [
+            "root", "before", "after",
+        ]
+        assert sum(event.outcome == "failed" for event in completions) == 1
+        assert "cli:c" not in loop._pending_queues
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio

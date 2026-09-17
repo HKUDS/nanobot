@@ -370,6 +370,7 @@ class AgentRunner:
         # Segments from one uninterrupted length-recovery chain. Tool work or
         # injected user input starts a new logical answer and clears the chain.
         length_recovery_parts: list[str] = []
+        pending_length_segment: tuple[AgentHookContext, str] | None = None
         had_injections = False
         injection_cycles = 0
         pending_stream_content: str | None = None
@@ -397,6 +398,20 @@ class AgentRunner:
             events=spec.events,
         )
 
+        async def end_length_segment(*, interrupted: bool) -> None:
+            nonlocal pending_length_segment
+            if pending_length_segment is None:
+                return
+            segment_context, segment_content = pending_length_segment
+            pending_length_segment = None
+            if interrupted:
+                length_recovery_parts.clear()
+            else:
+                messages.append(build_length_recovery_message(segment_content))
+            if hook.wants_streaming():
+                segment_context.stream_continues_current_message = not interrupted
+                await hook.on_stream_end(segment_context, resuming=True)
+
         for iteration in range(spec.max_iterations):
             # The session inbox cuts a finite snapshot before every model call.
             # This includes follow-ups that arrived before the first request and
@@ -410,6 +425,7 @@ class AgentRunner:
             )
             if drained_before_request:
                 had_injections = True
+            await end_length_segment(interrupted=drained_before_request)
             context = AgentHookContext(
                 iteration=iteration,
                 messages=messages,
@@ -610,9 +626,6 @@ class AgentRunner:
                         len(length_recovery_parts),
                         _MAX_LENGTH_RECOVERIES,
                     )
-                    if hook.wants_streaming():
-                        context.stream_continues_current_message = True
-                        await hook.on_stream_end(context, resuming=True)
                     messages.append(conversation_state.project_response_message(
                         build_assistant_message(
                             clean,
@@ -621,7 +634,9 @@ class AgentRunner:
                         ),
                         response,
                     ))
-                    messages.append(build_length_recovery_message(clean or ""))
+                    # The next input snapshot decides whether to continue this
+                    # answer or close its stream before answering a new question.
+                    pending_length_segment = (context, clean or "")
                     await hook.after_iteration(context)
                     continue
 
@@ -782,6 +797,7 @@ class AgentRunner:
                 )
                 if drained_after_max_iterations:
                     had_injections = True
+                await end_length_segment(interrupted=drained_after_max_iterations)
                 terminal_content, usage = await self._try_finalize_after_max_iterations(
                     spec,
                     hook,
@@ -790,6 +806,8 @@ class AgentRunner:
                     request_state=request_state,
                     round_usages=round_usages,
                 )
+            else:
+                await end_length_segment(interrupted=False)
             if terminal_content is None:
                 terminal_content = self._max_iterations_fallback(spec)
             if length_recovery_parts:

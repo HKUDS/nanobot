@@ -222,6 +222,94 @@ async def test_stop_completes_a_compact_command_waiting_for_the_session_lock(loo
 
 
 @pytest.mark.asyncio
+async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
+    key = "cli:test"
+    started = asyncio.Event()
+    release = asyncio.Event()
+    requests = []
+    compacted_history = []
+    compact = loop.consolidator.compact_idle_session
+
+    async def capture_compaction(*args, **kwargs):
+        compacted_history.extend(
+            dict(message) for message in loop.sessions.get_or_create(key).messages
+        )
+        return await compact(*args, **kwargs)
+
+    loop.consolidator.compact_idle_session = capture_compaction
+
+    async def chat(*, messages, **kwargs):
+        requests.append([dict(message) for message in messages])
+        if len(requests) == 1:
+            started.set()
+            await release.wait()
+        return LLMResponse(content="answer", finish_reason="stop")
+
+    loop.provider.chat_stream_with_retry = chat
+    task = asyncio.create_task(loop._dispatch(InboundMessage(
+        channel="cli", sender_id="u", chat_id="test", content="initial question",
+    )))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        await loop._dispatch(InboundMessage(
+            channel="cli", sender_id="u", chat_id="test", content="before compaction",
+        ))
+        command = InboundMessage(channel="cli", sender_id="u", chat_id="test", content="/compact")
+        await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
+        await loop._dispatch(InboundMessage(
+            channel="cli", sender_id="u", chat_id="test", content="after compaction",
+        ))
+        release.set()
+        await asyncio.wait_for(task, timeout=5)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert [message["content"] for message in compacted_history if message["role"] == "user"] == [
+        "initial question", "before compaction",
+    ]
+    assert all("/compact" != message.get("content") for request in requests for message in request)
+    assert "after compaction" in str(requests[-1])
+    events = [loop.bus.outbound.get_nowait().event for _ in range(loop.bus.outbound_size)]
+    assert [event.phase for event in events if isinstance(event, ContextCompactionEvent)] == [
+        "started", "succeeded",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stop_completes_compact_queued_behind_an_active_turn(loop) -> None:
+    key = "websocket:test"
+    started = asyncio.Event()
+
+    async def chat(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    loop.provider.chat_stream_with_retry = chat
+    completions = []
+    loop.bus.subscribe(completions.append, TurnCompleted)
+    task = asyncio.create_task(loop._dispatch(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="question",
+    )))
+    loop._track_active_task(key, task)
+    await asyncio.wait_for(started.wait(), timeout=5)
+    command = InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="/compact",
+        metadata={"webui_turn_id": "queued-compact"},
+    )
+    await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
+    await cmd_stop(CommandContext(msg=command, session=None, key=key, raw="/stop", loop=loop))
+
+    assert task.cancelled()
+    assert sum(
+        event.context.metadata.get("webui_turn_id") == "queued-compact" for event in completions
+    ) == 1
+    assert key not in loop._pending_queues
+
+
+@pytest.mark.asyncio
 async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
     key = "websocket:test"
     session = loop.sessions.get_or_create(key)

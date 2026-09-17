@@ -1,0 +1,221 @@
+"""Independent turns and internal controls retain their session inbox semantics."""
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from nanobot.agent.automation_turns import AutomationTurnError
+from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import current_request_context
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
+from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.runtime_context import public_history_messages
+from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
+from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.recovery import PENDING_FOLLOWUPS_KEY
+from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
+
+
+@pytest.fixture
+async def loop(tmp_path):
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=100)
+    provider.can_resume_conversation_state.return_value = False
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    agent = AgentLoop(
+        bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+    )
+    agent.tools.get_definitions = MagicMock(return_value=[])
+    try:
+        yield agent
+    finally:
+        await agent.aclose()
+
+
+def _automation_message(kind: str, name: str) -> InboundMessage:
+    metadata = (
+        {
+            CRON_TRIGGER_META: {"job_id": name, "run_id": name, "persist_content": name},
+            CRON_DEFER_UNTIL_IDLE_META: True,
+        }
+        if kind == "cron"
+        else {
+            LOCAL_TRIGGER_META: {
+                "trigger_id": name, "delivery_id": name, "persist_content": name,
+            },
+        }
+    )
+    return InboundMessage(
+        channel="websocket", sender_id=kind, chat_id="test", content=name, metadata=metadata,
+    )
+
+
+@pytest.mark.parametrize("first_kind", ["cron", "local_trigger"])
+@pytest.mark.parametrize("second_fails", [False, True])
+async def test_startup_automation_turns_complete_independently(loop, first_kind, second_fails):
+    started, release = asyncio.Event(), asyncio.Event()
+    release_second = asyncio.Event()
+    senders = []
+
+    async def chat(**kwargs):
+        senders.append(current_request_context().sender_id)
+        if len(senders) == 1:
+            started.set()
+            await release.wait()
+            return LLMResponse(content="first response")
+        await release_second.wait()
+        if second_fails:
+            raise RuntimeError("second task failed")
+        return LLMResponse(content="second response")
+
+    loop.provider.chat_stream_with_retry = chat
+    second_kind = "local_trigger" if first_kind == "cron" else "cron"
+    submit = {"cron": loop.submit_cron_turn, "local_trigger": loop.submit_local_trigger_turn}
+    first = asyncio.create_task(submit[first_kind](_automation_message(first_kind, "first")))
+    tasks = [first]
+    try:
+        await asyncio.wait_for(started.wait(), timeout=3)
+        second = asyncio.create_task(submit[second_kind](_automation_message(second_kind, "second")))
+        tasks.append(second)
+        await asyncio.sleep(0)
+        assert not second.done()
+        release.set()
+        first_response = await asyncio.wait_for(first, timeout=3)
+        assert first_response.content == "first response"
+        assert not second.done()
+        release_second.set()
+        if second_fails:
+            with pytest.raises(AutomationTurnError, match="second task failed"):
+                await asyncio.wait_for(second, timeout=3)
+        else:
+            second_response = await asyncio.wait_for(second, timeout=3)
+            assert second_response.content == "second response"
+        assert senders == [first_kind, second_kind]
+        assert loop.pending_cron_job_ids_for_session("websocket:test") == set()
+        assert loop.pending_local_trigger_ids_for_session("websocket:test") == set()
+        loop.sessions.invalidate("websocket:test")
+        session = loop.sessions.get_or_create("websocket:test")
+        user_rows = [message for message in session.messages if message["role"] == "user"]
+        assert [message[AUTOMATION_HISTORY_META]["kind"] for message in user_rows] == [
+            first_kind, second_kind,
+        ]
+        assert PENDING_FOLLOWUPS_KEY not in session.metadata
+    finally:
+        release.set()
+        release_second.set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_cancelled_session_completes_queued_automation_waiters(loop):
+    started = asyncio.Event()
+
+    async def chat(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    loop.provider.chat_stream_with_retry = chat
+    worker = asyncio.create_task(loop._dispatch(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="user request",
+    )))
+    tasks = [worker]
+    try:
+        await asyncio.wait_for(started.wait(), timeout=3)
+        cron = asyncio.create_task(loop.submit_cron_turn(_automation_message("cron", "cron")))
+        trigger = asyncio.create_task(loop.submit_local_trigger_turn(
+            _automation_message("local_trigger", "trigger"),
+        ))
+        tasks.extend([cron, trigger])
+        await asyncio.sleep(0)
+        assert loop._pending_queues["websocket:test"].qsize() == 2
+        worker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await worker
+        for task in (cron, trigger):
+            with pytest.raises(AutomationTurnError, match="CancelledError"):
+                await asyncio.wait_for(task, timeout=3)
+        assert "websocket:test" not in loop._pending_queues
+        assert loop.pending_cron_job_ids_for_session("websocket:test") == set()
+        assert loop.pending_local_trigger_ids_for_session("websocket:test") == set()
+        session = loop.sessions.get_or_create("websocket:test")
+        assert PENDING_FOLLOWUPS_KEY not in session.metadata
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_stop_before_startup_worker_runs_completes_automation(loop):
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unused"))
+    submit = asyncio.create_task(loop.submit_cron_turn(_automation_message("cron", "queued")))
+    try:
+        await asyncio.sleep(0)
+        assert "websocket:test" in loop._pending_queues
+        await loop._cancel_active_tasks("websocket:test")
+        with pytest.raises(AutomationTurnError, match="CancelledError"):
+            await asyncio.wait_for(submit, timeout=3)
+        loop.provider.chat_stream_with_retry.assert_not_awaited()
+        assert "websocket:test" not in loop._pending_queues
+        assert loop.pending_cron_job_ids_for_session("websocket:test") == set()
+    finally:
+        if not submit.done():
+            submit.cancel()
+        await asyncio.gather(submit, return_exceptions=True)
+
+
+@pytest.mark.parametrize("complete_on_followup", [False, True])
+async def test_goal_continuation_after_followup_keeps_control_identity(loop, complete_on_followup):
+    loop.max_iterations = 1
+    loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
+    loop.tools.execute = AsyncMock(return_value="ok")
+    session = loop.sessions.get_or_create("cli:test")
+    session.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Finish the long goal"}
+    loop.sessions.save(session)
+    requests = []
+
+    async def chat(*, messages, **kwargs):
+        requests.append([dict(message) for message in messages])
+        if len(requests) == 1:
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="cli", sender_id="u", chat_id="test", content="Inspect file B first",
+            ))
+            async with asyncio.timeout(3):
+                while loop._pending_queues["cli:test"].empty():
+                    await asyncio.sleep(0)
+        elif complete_on_followup or len(requests) == 3:
+            session.metadata[GOAL_STATE_KEY]["status"] = "complete"
+            return LLMResponse(content="done")
+        return LLMResponse(
+            content="working", finish_reason="tool_calls",
+            tool_calls=[ToolCallRequest(id=f"call-{len(requests)}", name="noop", arguments={})],
+        )
+
+    loop.provider.chat_stream_with_retry = chat
+    run_task = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="cli", sender_id="u", chat_id="test", content="Start the goal",
+        ))
+        async with asyncio.timeout(5):
+            while not requests or "cli:test" in loop._pending_queues:
+                await asyncio.sleep(0.01)
+        assert len(requests) == (2 if complete_on_followup else 3)
+        continuation_text = "Continue the active sustained goal after the previous turn"
+        assert continuation_text not in str(requests[1])
+        if not complete_on_followup:
+            assert continuation_text in str(requests[2])
+        loop.sessions.invalidate("cli:test")
+        history = public_history_messages(loop.sessions.get_or_create("cli:test").messages)
+        assert [message["content"] for message in history if message["role"] == "user"] == [
+            "Start the goal", "Inspect file B first",
+        ]
+    finally:
+        loop.stop()
+        await asyncio.wait_for(run_task, timeout=3)

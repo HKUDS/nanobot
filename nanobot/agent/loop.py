@@ -73,7 +73,7 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
-from nanobot.session.goal_state import goal_state_runtime_lines
+from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
@@ -406,13 +406,13 @@ class AgentLoop:
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
             publish_inbound=self.bus.publish_inbound,
-            dispatch=self._dispatch,
+            dispatch=partial(self._dispatch, wait_for_worker=False),
             is_running=lambda: self._running,
             deferred_queues=self._deferred_automation_turns,
         )
         self._local_trigger_turns = LocalTriggerTurnCoordinator(
             publish_inbound=self.bus.publish_inbound,
-            dispatch=self._dispatch,
+            dispatch=partial(self._dispatch, wait_for_worker=False),
             is_running=lambda: self._running,
             deferred_queues=self._deferred_automation_turns,
         )
@@ -870,11 +870,17 @@ class AgentLoop:
 
         Returns the total number of cancelled tasks, subagents, and exec sessions.
         """
+        pending = self._pending_queues.get(key)
         tasks = tuple(self._active_tasks.pop(key, set()))
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             with suppress(asyncio.CancelledError, Exception):
                 await t
+        if tasks and pending is not None and self._pending_queues.get(key) is pending:
+            # A task cancelled before its first step never enters the worker's
+            # cleanup handler. Only reclaim that worker's original inbox.
+            self._pending_queues.pop(key, None)
+            await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
         sub_cancelled = await self.subagents.cancel_by_session(key)
         exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
         return cancelled + sub_cancelled + exec_cancelled
@@ -898,6 +904,16 @@ class AgentLoop:
         if self._unified_session and not msg.session_key_override:
             return UNIFIED_SESSION_KEY
         return msg.session_key
+
+    def _can_inject_message(self, msg: InboundMessage) -> bool:
+        """Keep independent turns and controls out of user-input batches."""
+        if turn_continuation.internal_continuation_inbound(msg.metadata) or any(
+            coordinator.owns_turn(msg) for _, coordinator in self._automation_turn_coordinators
+        ):
+            return False
+        return msg.channel == "system" or not self.commands.is_dispatchable_command(
+            msg.content.strip()
+        )
 
     def _idle_events(
         self,
@@ -1064,7 +1080,25 @@ class AgentLoop:
                     row[PENDING_FOLLOWUP_ID_KEY] = followup_id
                 return row
 
-            return [await _to_user_message(pending_msg) for pending_msg in pending_messages]
+            consumed = 0
+            try:
+                converted: list[dict[str, Any]] = []
+                for pending_msg in pending_messages:
+                    # Independent turns are FIFO barriers. Their worker path
+                    # owns completion, command dispatch, and control metadata.
+                    if not self._can_inject_message(pending_msg):
+                        break
+                    converted.append(await _to_user_message(pending_msg))
+                consumed = len(converted)
+                return converted
+            finally:
+                # Commit only a successfully converted prefix. On failure or
+                # cancellation, return the whole snapshot ahead of later arrivals.
+                unconsumed = pending_messages[consumed:]
+                if unconsumed:
+                    later = [pending_queue.get_nowait() for _ in range(pending_queue.qsize())]
+                    for pending_msg in [*unconsumed, *later]:
+                        pending_queue.put_nowait(pending_msg)
 
         terminal_wait_deadline: float | None = None
 
@@ -1373,6 +1407,8 @@ class AgentLoop:
         msg: InboundMessage,
     ) -> InboundMessage:
         """Persist a recoverable WebUI follow-up before adding it to the inbox."""
+        if not self._can_inject_message(msg):
+            return msg
         session = self.sessions.get_or_create(session_key)
         followup_id = record_pending_followup(session, msg)
         if followup_id is None:
@@ -1387,8 +1423,8 @@ class AgentLoop:
         self.sessions.save(session)
         return pending_msg
 
-    async def _dispatch(self, msg: InboundMessage) -> None:
-        """Submit one direct caller message through the per-session FIFO."""
+    async def _dispatch(self, msg: InboundMessage, *, wait_for_worker: bool = True) -> None:
+        """Enqueue a message, optionally awaiting a newly created session worker."""
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
@@ -1401,7 +1437,13 @@ class AgentLoop:
         new_pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
         new_pending.put_nowait(msg)
         self._pending_queues[session_key] = new_pending
-        await self._run_session_queue(session_key, new_pending)
+        if wait_for_worker:
+            await self._run_session_queue(session_key, new_pending)
+        else:
+            # Automation callers await their own completion, not every later
+            # turn handled by this worker. Session cancellation still owns it.
+            task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
+            self._track_active_task(session_key, task)
 
     async def _run_session_queue(
         self,
@@ -1424,12 +1466,33 @@ class AgentLoop:
                         "Session worker failed one message for {}; continuing FIFO",
                         session_key,
                     )
+        except asyncio.CancelledError as exc:
+            await self._cancel_pending_messages(session_key, pending, exc)
+            raise
         finally:
             owns_queue = self._pending_queues.get(session_key) is pending
             if owns_queue:
                 self._pending_queues.pop(session_key, None)
             if owns_queue and self._running and session_key not in self._discarding_sessions:
                 await self._publish_next_deferred_automation_turn(session_key)
+
+    async def _cancel_pending_messages(
+        self,
+        session_key: str,
+        pending: asyncio.Queue[InboundMessage],
+        error: asyncio.CancelledError,
+    ) -> None:
+        """Complete queued independent turns after their session worker stops."""
+        while not pending.empty():
+            msg = pending.get_nowait()
+            for _, coordinator in self._automation_turn_coordinators:
+                coordinator.complete(msg, error=error)
+            if (
+                msg.channel != "system"
+                and normalize_command_text(msg.content).lower() == "/compact"
+            ):
+                delivery = self.turn_delivery_factory.unrouted(msg, session_key)
+                await delivery.complete(None, publish_completion=True)
 
     async def _dispatch_one(
         self,
@@ -1460,6 +1523,12 @@ class AgentLoop:
         completion_published = False
         try:
             async with lock, gate:
+                # A preceding user turn may have completed or blocked the goal
+                # while its older continuation was still waiting in the inbox.
+                if turn_continuation.internal_continuation_inbound(msg.metadata) and not (
+                    sustained_goal_active(self.sessions.get_or_create(session_key).metadata)
+                ):
+                    return
                 try:
                     delivery = self.turn_delivery_factory.create(
                         msg,

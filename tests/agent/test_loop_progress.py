@@ -580,6 +580,55 @@ class TestToolEventProgress:
         assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_iterations", [1, 3])
+    async def test_followup_after_truncation_starts_a_new_stream(
+        self, tmp_path: Path, max_iterations: int,
+    ) -> None:
+        loop = _make_loop(tmp_path)
+        loop.max_iterations = max_iterations
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        _attach_webui_runtime_events(loop, loop.bus)
+        calls = 0
+
+        async def chat(*, on_content_delta=None, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                await on_content_delta("old partial")
+                await loop._dispatch(InboundMessage(
+                    channel="websocket", sender_id="u", chat_id="test", content="new question",
+                ))
+                return LLMResponse(content="old partial", finish_reason="length")
+            if on_content_delta is not None:
+                await on_content_delta("new answer")
+            return LLMResponse(content="new answer", finish_reason="stop")
+
+        loop.provider.chat_stream_with_retry = chat
+        try:
+            await loop._dispatch(InboundMessage(
+                channel="websocket", sender_id="u", chat_id="test", content="old question",
+                metadata={"_wants_stream": True},
+            ))
+            outbound = [loop.bus.outbound.get_nowait() for _ in range(loop.bus.outbound_size)]
+            deltas = [
+                message.event for message in outbound if isinstance(message.event, StreamDeltaEvent)
+            ]
+            endings = [
+                message.event for message in outbound if isinstance(message.event, StreamEndEvent)
+            ]
+            assert [event.content for event in deltas] == ["old partial", "new answer"]
+            assert deltas[0].stream_id != deltas[1].stream_id
+            assert [(event.resuming, event.merge_next) for event in endings] == [
+                (True, False), (False, False),
+            ]
+            assert [
+                message.content for message in outbound
+                if isinstance(message.event, StreamedResponseEvent)
+            ] == ["new answer"]
+        finally:
+            await loop.aclose()
+
+    @pytest.mark.asyncio
     async def test_length_recovery_streams_non_delta_terminal_segment(
         self,
         tmp_path: Path,
