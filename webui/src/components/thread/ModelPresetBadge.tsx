@@ -134,13 +134,13 @@ export function ModelPresetBadge({
   const fallbackDisplayLabel = fallbackPreset?.name
     || fallbackModelName?.trim().split(/[/:]/).pop()
     || null;
-  const displayLabel = fallbackDisplayLabel || label;
+  const displayLabel = needsSetup ? label : fallbackDisplayLabel || label;
   const displayModelDetail = fallbackPreset
     ? fallbackPreset.model
     : fallbackModelName || modelDetail;
   const displayProvider = fallbackPreset?.provider
     || (fallbackModelName ? inferProviderFromModelName(fallbackModelName) : provider);
-  const tooltipLabel = [...new Set([
+  const tooltipLabel = needsSetup ? label : [...new Set([
     displayLabel,
     displayModelDetail,
     fallbackModelName ? null : providerLabel,
@@ -285,7 +285,7 @@ export function ModelPresetBadge({
       provider={displayProvider}
       needsSetup={needsSetup}
       needsAttention={needsSetup && attentionRequest > 0}
-      fallbackModelName={fallbackModelName}
+      fallbackModelName={needsSetup ? null : fallbackModelName}
       isHero={isHero}
     />
   );
