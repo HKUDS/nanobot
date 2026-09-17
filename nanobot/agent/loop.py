@@ -23,7 +23,6 @@ from loguru import logger
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
-from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver, TranscriptInput
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
@@ -405,20 +404,16 @@ class AgentLoop:
         self._preserve_inflight_turns_on_shutdown = False
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
-            publish_inbound=self.bus.publish_inbound,
-            dispatch=partial(self._dispatch, wait_for_worker=False),
-            is_running=lambda: self._running,
+            enqueue=self._enqueue_session_message,
             deferred_queues=self._deferred_automation_turns,
         )
         self._local_trigger_turns = LocalTriggerTurnCoordinator(
-            publish_inbound=self.bus.publish_inbound,
-            dispatch=partial(self._dispatch, wait_for_worker=False),
-            is_running=lambda: self._running,
+            enqueue=self._enqueue_session_message,
             deferred_queues=self._deferred_automation_turns,
         )
         self._automation_turn_coordinators = (
-            ("cron", self._cron_turns),
-            ("local trigger", self._local_trigger_turns),
+            self._cron_turns,
+            self._local_trigger_turns,
         )
         # NANOBOT_MAX_CONCURRENT_REQUESTS: unset or <=0 means unlimited.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "0"))
@@ -662,13 +657,6 @@ class AgentLoop:
     def pending_local_trigger_ids_for_session(self, session_key: str) -> set[str]:
         return self._local_trigger_turns.pending_trigger_ids_for_session(session_key)
 
-    async def _publish_next_deferred_automation_turn(self, session_key: str) -> None:
-        await publish_next_deferred_turn(
-            deferred_queues=self._deferred_automation_turns,
-            publish_inbound=self.bus.publish_inbound,
-            session_key=session_key,
-        )
-
     def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -782,10 +770,7 @@ class AgentLoop:
         """Dispatch a command directly from the run() loop and publish the result."""
         if normalize_command_text(raw).lower() == "/compact":
             # Compaction must wait for the active turn to commit its session.
-            task = asyncio.create_task(self._dispatch(msg))
-            self._track_active_task(key, task)
-            # Enter dispatch's cancellation handler before consuming a queued /stop.
-            await asyncio.sleep(0)
+            self._enqueue_session_message(msg)
             return
 
         async def dispatch_and_publish() -> None:
@@ -908,7 +893,7 @@ class AgentLoop:
     def _can_inject_message(self, msg: InboundMessage) -> bool:
         """Keep independent turns and controls out of user-input batches."""
         if turn_continuation.internal_continuation_inbound(msg.metadata) or any(
-            coordinator.owns_turn(msg) for _, coordinator in self._automation_turn_coordinators
+            coordinator.owns_turn(msg) for coordinator in self._automation_turn_coordinators
         ):
             return False
         return msg.channel == "system" or not self.commands.is_dispatchable_command(
@@ -1329,22 +1314,6 @@ class AgentLoop:
                         self.commands.dispatch_priority,
                     )
                     continue
-                deferred = False
-                for label, coordinator in self._automation_turn_coordinators:
-                    if coordinator.defer_if_active(
-                        msg,
-                        session_key=effective_key,
-                        active_session_keys=self._pending_queues.keys(),
-                    ):
-                        logger.info(
-                            "Deferred {} turn for active session {}",
-                            label,
-                            effective_key,
-                        )
-                        deferred = True
-                        break
-                if deferred:
-                    continue
                 routed_msg = msg
                 if effective_key != msg.session_key:
                     routed_msg = dataclasses.replace(
@@ -1374,20 +1343,7 @@ class AgentLoop:
                             self.commands.dispatch,
                         )
                         continue
-                    pending_msg = self._journal_pending_message(effective_key, routed_msg)
-                    self._pending_queues[effective_key].put_nowait(pending_msg)
-                    logger.info(
-                        "Routed follow-up message to pending queue for session {}",
-                        effective_key,
-                    )
-                    continue
-                # Install the queue before scheduling its worker. Every later
-                # message now has one FIFO path even if this task has not run yet.
-                pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
-                pending.put_nowait(routed_msg)
-                self._pending_queues[effective_key] = pending
-                task = asyncio.create_task(self._run_session_queue(effective_key, pending))
-                self._track_active_task(effective_key, task)
+                self._enqueue_session_message(routed_msg)
         finally:
             await self.aclose()
 
@@ -1423,11 +1379,19 @@ class AgentLoop:
         self.sessions.save(session)
         return pending_msg
 
-    async def _dispatch(self, msg: InboundMessage, *, wait_for_worker: bool = True) -> None:
-        """Enqueue a message, optionally awaiting a newly created session worker."""
+    def _enqueue_session_message(self, msg: InboundMessage) -> None:
+        """Admit session work without waiting for its execution or result."""
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
+
+        for coordinator in self._automation_turn_coordinators:
+            if coordinator.defer_if_active(
+                msg,
+                session_key=session_key,
+                active_session_keys=self._pending_queues.keys(),
+            ):
+                return
 
         pending = self._pending_queues.get(session_key)
         if pending is not None:
@@ -1437,13 +1401,8 @@ class AgentLoop:
         new_pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
         new_pending.put_nowait(msg)
         self._pending_queues[session_key] = new_pending
-        if wait_for_worker:
-            await self._run_session_queue(session_key, new_pending)
-        else:
-            # Automation callers await their own completion, not every later
-            # turn handled by this worker. Session cancellation still owns it.
-            task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
-            self._track_active_task(session_key, task)
+        task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
+        self._track_active_task(session_key, task)
 
     async def _run_session_queue(
         self,
@@ -1456,7 +1415,14 @@ class AgentLoop:
                 try:
                     msg = pending.get_nowait()
                 except asyncio.QueueEmpty:
-                    break
+                    # Idle-only automation follows all accepted user input on
+                    # this same worker, including before the bus loop starts.
+                    deferred = self._deferred_automation_turns.get(session_key)
+                    if not deferred:
+                        break
+                    msg = deferred.pop(0)
+                    if not deferred:
+                        self._deferred_automation_turns.pop(session_key)
                 try:
                     await self._dispatch_one(msg, pending)
                 except asyncio.CancelledError:
@@ -1473,8 +1439,6 @@ class AgentLoop:
             owns_queue = self._pending_queues.get(session_key) is pending
             if owns_queue:
                 self._pending_queues.pop(session_key, None)
-            if owns_queue and self._running and session_key not in self._discarding_sessions:
-                await self._publish_next_deferred_automation_turn(session_key)
 
     async def _cancel_pending_messages(
         self,
@@ -1483,9 +1447,11 @@ class AgentLoop:
         error: asyncio.CancelledError,
     ) -> None:
         """Complete queued independent turns after their session worker stops."""
+        for msg in self._deferred_automation_turns.pop(session_key, []):
+            pending.put_nowait(msg)
         while not pending.empty():
             msg = pending.get_nowait()
-            for _, coordinator in self._automation_turn_coordinators:
+            for coordinator in self._automation_turn_coordinators:
                 coordinator.complete(msg, error=error)
             if (
                 msg.channel != "system"
@@ -1546,10 +1512,10 @@ class AgentLoop:
                         publish_completion=not continuing,
                     )
                     completion_published = not continuing
-                    for _, coordinator in self._automation_turn_coordinators:
+                    for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
                 except asyncio.CancelledError:
-                    for _, coordinator in self._automation_turn_coordinators:
+                    for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=asyncio.CancelledError())
                     logger.info("Task cancelled for session {}", session_key)
                     try:
@@ -1593,7 +1559,7 @@ class AgentLoop:
                             msg.metadata
                         )
                     )
-                    for _, coordinator in self._automation_turn_coordinators:
+                    for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=exc)
                 finally:
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
@@ -1630,9 +1596,14 @@ class AgentLoop:
     async def _aclose_unlocked(self) -> None:
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})
+        current_task = asyncio.current_task()
+        pending_queues = {
+            key: self._pending_queues[key]
+            for key, tasks in active_task_groups.items()
+            if key in self._pending_queues and any(task is not current_task for task in tasks)
+        }
         active_tasks = tuple({task for tasks in active_task_groups.values() for task in tasks})
         active_task_groups.clear()
-        current_task = asyncio.current_task()
         active_tasks = tuple(task for task in active_tasks if task is not current_task)
         for task in active_tasks:
             if not task.done():
@@ -1640,6 +1611,10 @@ class AgentLoop:
         try:
             if active_tasks:
                 await asyncio.gather(*active_tasks, return_exceptions=True)
+            for key, pending in pending_queues.items():
+                if self._pending_queues.get(key) is pending:
+                    self._pending_queues.pop(key)
+                    await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
         except BaseException as exc:

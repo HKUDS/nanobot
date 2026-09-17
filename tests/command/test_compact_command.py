@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import run_session
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
@@ -155,7 +156,7 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
 
-    await loop._dispatch(InboundMessage(
+    await run_session(loop, InboundMessage(
         channel="websocket", sender_id="user", chat_id="test", content="/compact",
         metadata={"webui_turn_id": "compact-turn"},
     ))
@@ -246,17 +247,17 @@ async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
         return LLMResponse(content="answer", finish_reason="stop")
 
     loop.provider.chat_stream_with_retry = chat
-    task = asyncio.create_task(loop._dispatch(InboundMessage(
+    task = asyncio.create_task(run_session(loop, InboundMessage(
         channel="cli", sender_id="u", chat_id="test", content="initial question",
     )))
     try:
         await asyncio.wait_for(started.wait(), timeout=5)
-        await loop._dispatch(InboundMessage(
+        loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="before compaction",
         ))
         command = InboundMessage(channel="cli", sender_id="u", chat_id="test", content="/compact")
         await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
-        await loop._dispatch(InboundMessage(
+        loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="after compaction",
         ))
         release.set()
@@ -290,10 +291,10 @@ async def test_stop_completes_compact_queued_behind_an_active_turn(loop) -> None
     loop.provider.chat_stream_with_retry = chat
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
-    task = asyncio.create_task(loop._dispatch(InboundMessage(
+    loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="question",
-    )))
-    loop._track_active_task(key, task)
+    ))
+    task = next(iter(loop._active_tasks[key]))
     await asyncio.wait_for(started.wait(), timeout=5)
     command = InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="/compact",
@@ -329,8 +330,8 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
         channel="websocket", sender_id="user", chat_id="test", content="/compact",
         metadata={"webui_turn_id": "compact-turn"},
     )
-    task = asyncio.create_task(loop._dispatch(msg))
-    loop._track_active_task(key, task)
+    loop._enqueue_session_message(msg)
+    task = next(iter(loop._active_tasks[key]))
     await asyncio.wait_for(entered.wait(), timeout=5)
 
     reply = await cmd_stop(CommandContext(

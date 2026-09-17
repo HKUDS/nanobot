@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import time
-from contextvars import ContextVar, Token
 from datetime import datetime
 from typing import Any
 
@@ -17,6 +16,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.cron.service import CronService
+from nanobot.cron.session_turns import is_cron_turn
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 
@@ -60,7 +60,6 @@ class CronTool(Tool):
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
         self._cron = cron_service
         self._default_timezone = default_timezone
-        self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
@@ -84,14 +83,6 @@ class CronTool(Tool):
             raw_key if ctx.session_key == UNIFIED_SESSION_KEY else (ctx.session_key or "")
         )
         return session_key, ctx.channel or "", ctx.chat_id or "", dict(ctx.metadata or {})
-
-    def set_cron_context(self, active: bool) -> Token[bool]:
-        """Mark whether the tool is executing inside a cron job callback."""
-        return self._in_cron_context.set(active)
-
-    def reset_cron_context(self, token: Token[bool]) -> None:
-        """Restore previous cron context."""
-        self._in_cron_context.reset(token)
 
     @staticmethod
     def _validate_timezone(tz: str) -> str | None:
@@ -146,7 +137,8 @@ class CronTool(Tool):
         job_id: str | None = None,
     ) -> str:
         if action == "add":
-            if self._in_cron_context.get():
+            request = current_request_context()
+            if request is not None and is_cron_turn(request.metadata):
                 return ToolResult.error("Error: cannot schedule new jobs from within a cron job execution")
             return self._add_job(name, message, every_seconds, cron_expr, tz, at)
         elif action == "list":

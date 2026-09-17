@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
+from agent.session_helpers import run_session
 from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
@@ -1511,7 +1512,7 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
-    await loop._dispatch(InboundMessage(
+    await run_session(loop, InboundMessage(
         channel="feishu",
         sender_id="u1",
         chat_id="c-stream",
@@ -1573,7 +1574,7 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
-    await loop._dispatch(InboundMessage(
+    await run_session(loop, InboundMessage(
         channel="websocket",
         sender_id="u1",
         chat_id="c-auto",

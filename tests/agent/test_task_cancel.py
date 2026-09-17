@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import run_session
 from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
@@ -271,7 +272,7 @@ class TestDispatch:
         loop._process_message = AsyncMock(
             return_value=OutboundMessage(channel="test", chat_id="c1", content="hi")
         )
-        await loop._dispatch(msg)
+        await run_session(loop, msg)
         out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert out.content == "hi"
 
@@ -300,7 +301,7 @@ class TestDispatch:
 
         loop._process_message = fake_process
 
-        await loop._dispatch(msg)
+        await run_session(loop, msg)
         first = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         second = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
 
@@ -332,9 +333,9 @@ class TestDispatch:
         msg1 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="a")
         msg2 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="b")
 
-        t1 = asyncio.create_task(loop._dispatch(msg1))
+        t1 = asyncio.create_task(run_session(loop, msg1))
         await asyncio.wait_for(first_started.wait(), timeout=1.0)
-        t2 = asyncio.create_task(loop._dispatch(msg2))
+        t2 = asyncio.create_task(run_session(loop, msg2))
         await asyncio.sleep(0)
         assert order == ["start-a"]
 

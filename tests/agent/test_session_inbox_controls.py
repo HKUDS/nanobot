@@ -5,11 +5,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import run_session
 from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import current_request_context
-from nanobot.bus.events import InboundMessage
+from nanobot.agent.tools.cron import CronTool
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.cron.service import CronService
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
 from nanobot.runtime_context import public_history_messages
@@ -56,7 +59,8 @@ def _automation_message(kind: str, name: str) -> InboundMessage:
 
 @pytest.mark.parametrize("first_kind", ["cron", "local_trigger"])
 @pytest.mark.parametrize("second_fails", [False, True])
-async def test_startup_automation_turns_complete_independently(loop, first_kind, second_fails):
+@pytest.mark.parametrize("bus_running", [False, True])
+async def test_automation_turns_complete_independently(loop, first_kind, second_fails, bus_running):
     started, release = asyncio.Event(), asyncio.Event()
     release_second = asyncio.Event()
     senders = []
@@ -75,8 +79,12 @@ async def test_startup_automation_turns_complete_independently(loop, first_kind,
     loop.provider.chat_stream_with_retry = chat
     second_kind = "local_trigger" if first_kind == "cron" else "cron"
     submit = {"cron": loop.submit_cron_turn, "local_trigger": loop.submit_local_trigger_turn}
+    tasks = []
+    if bus_running:
+        tasks.append(asyncio.create_task(loop.run()))
+        await asyncio.sleep(0)
     first = asyncio.create_task(submit[first_kind](_automation_message(first_kind, "first")))
-    tasks = [first]
+    tasks.append(first)
     try:
         await asyncio.wait_for(started.wait(), timeout=3)
         second = asyncio.create_task(submit[second_kind](_automation_message(second_kind, "second")))
@@ -121,7 +129,7 @@ async def test_cancelled_session_completes_queued_automation_waiters(loop):
         await asyncio.Event().wait()
 
     loop.provider.chat_stream_with_retry = chat
-    worker = asyncio.create_task(loop._dispatch(InboundMessage(
+    worker = asyncio.create_task(run_session(loop, InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="user request",
     )))
     tasks = [worker]
@@ -133,7 +141,7 @@ async def test_cancelled_session_completes_queued_automation_waiters(loop):
         ))
         tasks.extend([cron, trigger])
         await asyncio.sleep(0)
-        assert loop._pending_queues["websocket:test"].qsize() == 2
+        assert len(loop._deferred_automation_turns["websocket:test"]) == 2
         worker.cancel()
         with pytest.raises(asyncio.CancelledError):
             await worker
@@ -152,13 +160,17 @@ async def test_cancelled_session_completes_queued_automation_waiters(loop):
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def test_stop_before_startup_worker_runs_completes_automation(loop):
+@pytest.mark.parametrize("action", ["stop", "close"])
+async def test_cancel_before_worker_runs_completes_automation(loop, action):
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unused"))
     submit = asyncio.create_task(loop.submit_cron_turn(_automation_message("cron", "queued")))
     try:
         await asyncio.sleep(0)
         assert "websocket:test" in loop._pending_queues
-        await loop._cancel_active_tasks("websocket:test")
+        if action == "stop":
+            await loop._cancel_active_tasks("websocket:test")
+        else:
+            await loop.aclose()
         with pytest.raises(AutomationTurnError, match="CancelledError"):
             await asyncio.wait_for(submit, timeout=3)
         loop.provider.chat_stream_with_retry.assert_not_awaited()
@@ -168,6 +180,116 @@ async def test_stop_before_startup_worker_runs_completes_automation(loop):
         if not submit.done():
             submit.cancel()
         await asyncio.gather(submit, return_exceptions=True)
+
+
+@pytest.mark.parametrize("bus_running", [False, True])
+async def test_ingress_sources_share_one_session_worker(loop, bus_running):
+    started, release = asyncio.Event(), asyncio.Event()
+    handled = []
+    workers = []
+    key = "websocket:test"
+
+    async def process(msg, **kwargs):
+        handled.append(msg.content)
+        workers.append(asyncio.current_task())
+        if msg.content == "first":
+            started.set()
+            await release.wait()
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=msg.content)
+
+    loop._process_message = process
+    tasks = []
+    if bus_running:
+        tasks.append(asyncio.create_task(loop.run()))
+    try:
+        first = InboundMessage(channel="websocket", sender_id="u", chat_id="test", content="first")
+        if bus_running:
+            await loop.bus.publish_inbound(first)
+        else:
+            loop._enqueue_session_message(first)
+        await asyncio.wait_for(started.wait(), timeout=3)
+        cron = asyncio.create_task(loop.submit_cron_turn(_automation_message("cron", "cron")))
+        trigger = asyncio.create_task(loop.submit_local_trigger_turn(
+            _automation_message("local_trigger", "trigger"),
+        ))
+        tasks.extend([cron, trigger])
+        await asyncio.sleep(0)
+        second = InboundMessage(channel="websocket", sender_id="u", chat_id="test", content="second")
+        if bus_running:
+            await loop.bus.publish_inbound(second)
+            async with asyncio.timeout(3):
+                while loop._pending_queues[key].empty():
+                    await asyncio.sleep(0)
+        else:
+            loop._enqueue_session_message(second)
+        compact = InboundMessage(channel="websocket", sender_id="u", chat_id="test", content="/compact")
+        await loop._dispatch_command_inline(compact, key, compact.content, loop.commands.dispatch)
+        assert len(loop._active_tasks[key]) == 1
+        release.set()
+        results = await asyncio.wait_for(asyncio.gather(cron, trigger), timeout=3)
+        assert [result.content for result in results] == ["cron", "trigger"]
+        assert handled == ["first", "second", "/compact", "cron", "trigger"]
+        assert len(set(workers)) == 1
+        assert loop.bus.inbound_size == 0
+        assert key not in loop._pending_queues
+        assert key not in loop._deferred_automation_turns
+    finally:
+        release.set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize("start_with_cron", [False, True])
+async def test_cron_restriction_follows_the_current_turn(loop, tmp_path, start_with_cron):
+    cron = CronService(tmp_path / "jobs.json")
+    tool = CronTool(cron)
+    started, release = asyncio.Event(), asyncio.Event()
+    attempts = []
+    workers = []
+
+    async def chat(**kwargs):
+        workers.append(asyncio.current_task())
+        result = await tool.execute(action="add", message="reminder", every_seconds=60)
+        attempts.append(result)
+        if len(attempts) == 1:
+            started.set()
+            await release.wait()
+        return LLMResponse(content="done")
+
+    loop.provider.chat_stream_with_retry = chat
+    if start_with_cron:
+        first = asyncio.create_task(loop.submit_cron_turn(_automation_message("cron", "first")))
+    else:
+        first = asyncio.create_task(run_session(loop, InboundMessage(
+            channel="websocket", sender_id="u", chat_id="test", content="first",
+        )))
+    tasks = [first]
+    try:
+        await asyncio.wait_for(started.wait(), timeout=3)
+        if not start_with_cron:
+            tasks.append(asyncio.create_task(loop.submit_cron_turn(
+                _automation_message("cron", "cron"),
+            )))
+        tasks.append(asyncio.create_task(loop.submit_local_trigger_turn(
+            _automation_message("local_trigger", "trigger"),
+        )))
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=3)
+        assert [result.startswith("Created job") for result in attempts] == (
+            [False, True] if start_with_cron else [True, False, True]
+        )
+        blocked = attempts[0 if start_with_cron else 1]
+        assert blocked == "Error: cannot schedule new jobs from within a cron job execution"
+        assert len(set(workers)) == 1
+    finally:
+        release.set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @pytest.mark.parametrize("complete_on_followup", [False, True])

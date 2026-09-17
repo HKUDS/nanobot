@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runner_helpers import make_run_spec
-from nanobot.agent.automation_turns import publish_next_deferred_turn
+from agent.session_helpers import run_session
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
@@ -1100,7 +1100,7 @@ async def test_no_injections_flag_is_false_by_default():
 
 @pytest.mark.asyncio
 async def test_pending_queue_cleanup_on_dispatch(tmp_path):
-    """_pending_queues should be cleaned up after _dispatch completes."""
+    """The session worker removes its inbox after processing all messages."""
     loop = _make_loop(tmp_path)
 
     async def chat_stream_with_retry(**kwargs):
@@ -1114,7 +1114,7 @@ async def test_pending_queue_cleanup_on_dispatch(tmp_path):
     # The queue should not exist before dispatch
     assert msg.session_key not in loop._pending_queues
 
-    await loop._dispatch(msg)
+    await run_session(loop, msg)
 
     # The queue should be cleaned up after dispatch
     assert msg.session_key not in loop._pending_queues
@@ -1132,7 +1132,7 @@ async def test_direct_dispatch_joins_active_session_queue_without_waiting_for_lo
     active_pending = asyncio.Queue()
     loop._pending_queues[session_key] = active_pending
 
-    await loop._dispatch(
+    loop._enqueue_session_message(
         InboundMessage(channel="cli", sender_id="u", chat_id="c", content="queued")
     )
 
@@ -1149,7 +1149,6 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
     loop = _make_loop(tmp_path)
     loop._unified_session = True
-    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
 
     pending = asyncio.Queue(maxsize=20)
     loop._pending_queues[UNIFIED_SESSION_KEY] = pending
@@ -1163,7 +1162,7 @@ async def test_followup_routed_to_pending_queue(tmp_path):
     loop.stop()
     await asyncio.wait_for(run_task, timeout=2)
 
-    assert loop._dispatch.await_count == 0
+    assert loop._active_tasks == {}
     assert queued_msg.content == "follow-up"
     assert queued_msg.session_key == UNIFIED_SESSION_KEY
 
@@ -1176,7 +1175,6 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
     admission = MagicMock()
     admission.admit = AsyncMock(return_value=True)
     loop = _make_loop(tmp_path, recovery_admission=admission)
-    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
 
     session_key = "websocket:chat"
     pending = asyncio.Queue(maxsize=20)
@@ -1210,7 +1208,6 @@ async def test_unified_websocket_followup_admits_effective_session(tmp_path):
     admission.admit = AsyncMock(return_value=True)
     loop = _make_loop(tmp_path, recovery_admission=admission)
     loop._unified_session = True
-    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
 
     pending = asyncio.Queue(maxsize=20)
     loop._pending_queues[UNIFIED_SESSION_KEY] = pending
@@ -1239,7 +1236,6 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
     from nanobot.bus.events import InboundMessage
 
     loop = _make_loop(tmp_path)
-    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
     route_policy = MagicMock(side_effect=lambda _msg, _key, route: route)
     loop.turn_delivery_factory.route_policy = route_policy
 
@@ -1267,7 +1263,7 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
     await asyncio.wait_for(run_task, timeout=2)
 
     assert queued_msg is msg
-    assert loop._dispatch.await_count == 0
+    assert loop._active_tasks == {}
     route_policy.assert_not_called()
 
 
@@ -1281,7 +1277,6 @@ async def test_cron_turn_deferred_while_session_active(tmp_path):
     )
 
     loop = _make_loop(tmp_path)
-    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
 
     session_key = "websocket:chat-1"
     pending = asyncio.Queue(maxsize=20)
@@ -1310,17 +1305,13 @@ async def test_cron_turn_deferred_while_session_active(tmp_path):
     await asyncio.wait_for(run_task, timeout=2)
 
     assert pending.empty()
-    assert loop._dispatch.await_count == 0
+    assert loop._active_tasks == {}
     assert loop._cron_turns.deferred_queues[session_key] == [msg]
     assert loop.pending_cron_job_ids_for_session(session_key) == {"job-1"}
 
-    await publish_next_deferred_turn(
-        deferred_queues=loop._cron_turns.deferred_queues,
-        publish_inbound=loop.bus.publish_inbound,
-        session_key=session_key,
-    )
-    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
-    assert queued is msg
+    loop._process_message = AsyncMock(return_value=None)
+    await loop._run_session_queue(session_key, pending)
+    assert loop._process_message.await_args.args[0] is msg
     assert session_key not in loop._cron_turns.deferred_queues
     assert loop.pending_cron_job_ids_for_session(session_key) == set()
 
@@ -1332,7 +1323,6 @@ async def test_local_trigger_turn_deferred_while_session_active(tmp_path):
     from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
     loop = _make_loop(tmp_path)
-    loop._dispatch = AsyncMock()  # type: ignore[method-assign]
 
     session_key = "websocket:chat-1"
     pending = asyncio.Queue(maxsize=20)
@@ -1364,17 +1354,13 @@ async def test_local_trigger_turn_deferred_while_session_active(tmp_path):
     await asyncio.wait_for(run_task, timeout=2)
 
     assert pending.empty()
-    assert loop._dispatch.await_count == 0
+    assert loop._active_tasks == {}
     assert loop._local_trigger_turns.deferred_queues[session_key] == [msg]
     assert loop.pending_local_trigger_ids_for_session(session_key) == {"trg_123"}
 
-    assert await publish_next_deferred_turn(
-        deferred_queues=loop._local_trigger_turns.deferred_queues,
-        publish_inbound=loop.bus.publish_inbound,
-        session_key=session_key,
-    ) is True
-    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
-    assert queued is msg
+    loop._process_message = AsyncMock(return_value=None)
+    await loop._run_session_queue(session_key, pending)
+    assert loop._process_message.await_args.args[0] is msg
     assert session_key not in loop._local_trigger_turns.deferred_queues
     assert loop.pending_local_trigger_ids_for_session(session_key) == set()
 
@@ -1386,7 +1372,7 @@ async def test_submitted_cron_turn_reports_pending_until_completed(tmp_path):
     from nanobot.cron.session_turns import CRON_TRIGGER_META
 
     loop = _make_loop(tmp_path)
-    loop._running = True
+    loop._cron_turns._enqueue = MagicMock()
 
     session_key = "websocket:chat-1"
     msg = InboundMessage(
@@ -1399,9 +1385,7 @@ async def test_submitted_cron_turn_reports_pending_until_completed(tmp_path):
     )
 
     submit_task = asyncio.create_task(loop.submit_cron_turn(msg))
-    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
-
-    assert queued is msg
+    await asyncio.sleep(0)
     assert loop.pending_cron_job_ids_for_session(session_key) == {"job-1"}
 
     response = OutboundMessage(
@@ -1422,7 +1406,7 @@ async def test_submitted_local_trigger_turn_reports_pending_until_completed(tmp_
     from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
     loop = _make_loop(tmp_path)
-    loop._running = True
+    loop._local_trigger_turns._enqueue = MagicMock()
 
     session_key = "websocket:chat-1"
     msg = InboundMessage(
@@ -1441,9 +1425,7 @@ async def test_submitted_local_trigger_turn_reports_pending_until_completed(tmp_
     )
 
     submit_task = asyncio.create_task(loop.submit_local_trigger_turn(msg))
-    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
-
-    assert queued is msg
+    await asyncio.sleep(0)
     assert loop.pending_local_trigger_ids_for_session(session_key) == {"trg_123"}
 
     response = OutboundMessage(
@@ -1465,7 +1447,7 @@ async def test_local_trigger_turn_cancellation_reports_agent_failure(tmp_path):
     from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
     loop = _make_loop(tmp_path)
-    loop._running = True
+    loop._local_trigger_turns._enqueue = MagicMock()
 
     session_key = "websocket:chat-1"
     msg = InboundMessage(
@@ -1484,7 +1466,7 @@ async def test_local_trigger_turn_cancellation_reports_agent_failure(tmp_path):
     )
 
     submit_task = asyncio.create_task(loop.submit_local_trigger_turn(msg))
-    assert await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5) is msg
+    await asyncio.sleep(0)
 
     loop._local_trigger_turns.complete(msg, error=asyncio.CancelledError())
 
@@ -1706,7 +1688,7 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
         calls += 1
         if calls == 1:
             for content in ["before", "bad", "after"]:
-                await loop._dispatch(InboundMessage(
+                loop._enqueue_session_message(InboundMessage(
                     channel="cli", sender_id="u", chat_id="c", content=content,
                 ))
         return LLMResponse(content="answer", finish_reason="stop")
@@ -1719,7 +1701,7 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
     provider.chat_stream_with_retry = chat
     loop.register_runtime_context_provider(context_provider)
     try:
-        await loop._dispatch(InboundMessage(
+        await run_session(loop, InboundMessage(
             channel="cli", sender_id="u", chat_id="c", content="root",
         ))
         loop.sessions.invalidate("cli:c")
