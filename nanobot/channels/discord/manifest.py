@@ -19,6 +19,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "workingEmoji": field(default="🔧"),
         "workingEmojiDelay": field("float", default=2.0),
         "streaming": field("bool", default=True),
+        "replyToMessage": field("bool", default=False),
     },
     required=(required("token"),),
     official_url="https://discord.com/developers/applications",

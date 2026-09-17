@@ -298,7 +298,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "allowFrom": ["YOUR_USER_ID"],
       "allowChannels": [],
       "groupPolicy": "mention",
-      "streaming": true
+      "streaming": true,
+      "replyToMessage": false
     }
   }
 }
@@ -311,6 +312,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 > - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session.
 > `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass. Discord threads under an allowed parent channel are also allowed; for Forum channels, allowing the parent Forum channel allows all threads/posts in that forum.
 > `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies.
+> `replyToMessage` defaults to `false`. Enable it to use Discord's native reply UI for responses.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator

@@ -50,6 +50,13 @@
           "true": "켜기",
           "false": "끄기"
         }
+      },
+      "replyToMessage": {
+        "label": "메시지에 답장",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
       }
     }
   }

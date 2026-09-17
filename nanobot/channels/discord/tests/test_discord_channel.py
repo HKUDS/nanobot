@@ -728,6 +728,13 @@ def test_supports_streaming_enabled_by_default() -> None:
     assert channel.supports_streaming is True
 
 
+def test_reply_to_message_is_disabled_by_default() -> None:
+    config = DiscordConfig(enabled=True, allow_from=["*"])
+
+    assert config.reply_to_message is False
+    assert config.model_dump(by_alias=True)["replyToMessage"] is False
+
+
 @pytest.mark.asyncio
 async def test_send_delta_streams_by_editing_message(monkeypatch) -> None:
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -747,6 +754,24 @@ async def test_send_delta_streams_by_editing_message(monkeypatch) -> None:
     assert target.sent_payloads[0] == {"content": "hel"}
     assert target.sent_messages[0].edits == [{"content": "hello"}, {"content": "hello"}]
     assert owner._stream_bufs == {}
+
+
+@pytest.mark.asyncio
+async def test_send_delta_replies_to_triggering_message_when_enabled() -> None:
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], reply_to_message=True),
+        MessageBus(),
+    )
+    client = _FakeDiscordClient(owner, intents=None)
+    owner._client = client
+    owner._running = True
+    target = _FakeChannel(channel_id=123)
+    client.channels[123] = target
+
+    await owner.send_delta("123", "hello", {"message_id": "789"}, stream_id="s1")
+
+    assert target.sent_payloads[0]["reference"].id == 789
+    assert target.sent_payloads[0]["allowed_mentions"].replied_user is False
 
 
 @pytest.mark.asyncio
@@ -1080,6 +1105,79 @@ async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_pa
     assert target.sent_payloads[0]["reference"].id == 55
     assert target.sent_payloads[1]["content"] == "a" * 2000
     assert target.sent_payloads[2]["content"] == "a" * 100
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_replies_to_triggering_message_when_enabled() -> None:
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], reply_to_message=True),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="hello",
+            metadata={"message_id": "789"},
+        )
+    )
+
+    assert target.sent_payloads[0]["reference"].id == 789
+    assert target.sent_payloads[0]["allowed_mentions"].replied_user is False
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_explicit_reply_takes_precedence() -> None:
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], reply_to_message=True),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="hello",
+            reply_to="55",
+            metadata={"message_id": "789"},
+        )
+    )
+
+    assert target.sent_payloads[0]["reference"].id == 55
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_replies_on_first_successful_attachment(tmp_path) -> None:
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], reply_to_message=True),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+    missing_file = tmp_path / "missing.txt"
+    valid_file = tmp_path / "valid.txt"
+    valid_file.write_text("hi")
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="",
+            media=[str(missing_file), str(valid_file)],
+            metadata={"message_id": "789"},
+        )
+    )
+
+    assert target.sent_payloads[0]["file_name"] == "valid.txt"
+    assert target.sent_payloads[0]["reference"].id == 789
 
 
 @pytest.mark.asyncio

@@ -50,6 +50,13 @@
           "true": "encendido",
           "false": "Apagado"
         }
+      },
+      "replyToMessage": {
+        "label": "Responder al mensaje",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
       }
     }
   }
