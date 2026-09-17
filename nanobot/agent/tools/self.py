@@ -103,7 +103,7 @@ class MyTool(Tool):
         "request",  # current message routing metadata
     })
 
-    _REQUEST_FIELDS = ("channel", "chat_id", "sender_id")
+    _REQUEST_FIELDS = ("channel", "chat_id", "sender_id", "topic_id")
 
     _DENIED_ATTRS = frozenset({
         "__class__", "__dict__", "__bases__", "__subclasses__", "__mro__",
@@ -159,7 +159,8 @@ class MyTool(Tool):
             "- set (key, value): change config or store notes in your scratchpad. "
             "Scratchpad keys persist across turns but not restarts.\n"
             "Current routing metadata is available read-only via request.channel, "
-            "request.chat_id, and request.sender_id.\n"
+            "request.chat_id, request.sender_id, and request.topic_id "
+            "(topic_id is present only when the chat has a topic/thread).\n"
             "Use model_preset for session-scoped model or context changes; direct "
             "model/context_window_tokens writes are disabled during active sessions.\n"
             "Note: web_config and exec_config are readable but read-only.\n"
@@ -194,7 +195,8 @@ class MyTool(Tool):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check/set. Examples: 'max_iterations', 'workspace', 'provider_retry_mode'. "
-                    "Use 'request.channel', 'request.chat_id', or 'request.sender_id' for current routing metadata. "
+                    "Use 'request.channel', 'request.chat_id', 'request.sender_id', or "
+                    "'request.topic_id' for current routing metadata. "
                     "Use 'model_preset' to switch named model presets. For check without key, shows all config values.",
                 },
                 "value": {"description": "New value (for set). Type must match target (int for max_iterations/context_window_tokens, str for model/model_preset)."},
@@ -397,15 +399,19 @@ class MyTool(Tool):
             request_ctx = current_request_context()
             if request_ctx is None:
                 return ToolResult.error("Error: current request context is unavailable")
-            request_values: dict[str, str | None] = {
+            request_values: dict[str, str | int | None] = {
                 "channel": request_ctx.channel,
                 "chat_id": request_ctx.chat_id,
                 "sender_id": request_ctx.sender_id,
             }
+            if request_ctx.topic_id is not None:
+                request_values["topic_id"] = request_ctx.topic_id
             if key == "request":
                 return self._format_value(request_values, key)
             field = key.removeprefix("request.")
             if field not in self._REQUEST_FIELDS:
+                return ToolResult.error(f"Error: '{key}' not found")
+            if field not in request_values:
                 return ToolResult.error(f"Error: '{key}' not found")
             return self._format_value(request_values[field], key)
         if "." not in key:

@@ -158,10 +158,10 @@ async def test_default_allow_set_and_public_parameter_schema_are_unchanged(
                 "type": "string",
                 "description": (
                     "Dot-path for check/set. Examples: 'max_iterations', 'workspace', "
-                    "'provider_retry_mode'. Use 'request.channel', 'request.chat_id', or "
-                    "'request.sender_id' for current routing metadata. Use 'model_preset' "
-                    "to switch named model presets. For check without key, shows all "
-                    "config values."
+                    "'provider_retry_mode'. Use 'request.channel', 'request.chat_id', "
+                    "'request.sender_id', or 'request.topic_id' for current routing "
+                    "metadata. Use 'model_preset' to switch named model presets. "
+                    "For check without key, shows all config values."
                 ),
             },
             "value": {

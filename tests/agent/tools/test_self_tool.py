@@ -1102,10 +1102,31 @@ class TestRequestContext:
             assert await tool.execute(action="check", key="request.sender_id") == (
                 "request.sender_id: 'ou_user456'"
             )
+            assert await tool.execute(action="check", key="request.topic_id") == (
+                "Error: 'request.topic_id' not found"
+            )
             summary = await tool.execute(action="check")
 
         assert "oc_abc123" not in summary
         assert "ou_user456" not in summary
+
+    @pytest.mark.asyncio
+    async def test_check_exposes_topic_id_only_when_present(self):
+        tool = _make_tool()
+        ctx = RequestContext(
+            channel="telegram",
+            chat_id="-100123",
+            sender_id="ou_user456",
+            topic_id=42,
+        )
+
+        with request_context(ctx):
+            assert await tool.execute(action="check", key="request.topic_id") == (
+                "request.topic_id: 42"
+            )
+            summary = await tool.execute(action="check", key="request")
+
+        assert "'topic_id': 42" in summary
 
     @pytest.mark.asyncio
     async def test_request_routing_metadata_is_read_only(self):
