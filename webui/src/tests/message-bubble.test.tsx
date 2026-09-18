@@ -868,7 +868,7 @@ describe("MessageBubble", () => {
     expect(visibleFooter).toHaveClass("mt-2", "min-h-8", "opacity-100");
   });
 
-  it("omits hidden footer space for an intermediate assistant answer", () => {
+  it("omits footer space when an active answer is no longer the tail", () => {
     const message: UIMessage = {
       id: "a-intermediate",
       role: "assistant",
@@ -880,7 +880,7 @@ describe("MessageBubble", () => {
       <MessageBubble
         message={message}
         isTurnStreaming
-        isTerminalAssistantSlice={false}
+        isThreadTail={false}
       />,
     );
 

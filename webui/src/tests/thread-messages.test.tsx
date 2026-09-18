@@ -1532,7 +1532,7 @@ describe("ThreadMessages", () => {
       .closest<HTMLElement>("[data-thread-display-unit]")!;
     expect(firstAnswer.querySelector("[data-assistant-footer]")).not.toBeInTheDocument();
     expect(finalAnswer.querySelector("[data-assistant-footer]"))
-      .toHaveAttribute("data-state", "visible");
+      .toHaveAttribute("data-state", "reserved");
     expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
 

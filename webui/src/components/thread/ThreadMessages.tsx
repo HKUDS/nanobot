@@ -143,6 +143,14 @@ export function ThreadMessages({
           unit.type === "message" && unit.message.role === "assistant" && forkFlags[index]
             ? nextUserIndex
             : undefined;
+        const unitTurnStreaming = unit.type === "activity"
+          ? liveActivityClusterIndices.has(index)
+          : isStreaming && (
+              unit.message.turnId && activeTurnId !== null
+                ? unit.message.turnId === activeTurnId
+                : index > currentTurnStartIndex
+            );
+        const isThreadTail = index === units.length - 1;
         if (
           unit.type === "message"
           && unit.message.role === "user"
@@ -158,15 +166,8 @@ export function ThreadMessages({
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             deferOffscreenRender={deferOffscreenRender}
-            isTurnStreaming={
-              unit.type === "activity"
-                ? liveActivityClusterIndices.has(index)
-                : isStreaming && (
-                    unit.message.turnId && activeTurnId !== null
-                      ? unit.message.turnId === activeTurnId
-                      : index > currentTurnStartIndex
-                  )
-            }
+            isTurnStreaming={unitTurnStreaming}
+            isThreadTail={isThreadTail}
             retryStatus={
               unit.type === "activity" && liveActivityClusterIndices.has(index)
                 ? retryStatus
@@ -256,6 +257,7 @@ interface ThreadDisplayUnitProps {
   hasBodyBelow: boolean;
   deferOffscreenRender: boolean;
   isTurnStreaming: boolean;
+  isThreadTail: boolean;
   retryStatus: RetryStatus | null;
   forkIndex?: number;
   showForkBoundary: boolean;
@@ -278,6 +280,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   hasBodyBelow,
   deferOffscreenRender,
   isTurnStreaming,
+  isThreadTail,
   retryStatus,
   forkIndex,
   showForkBoundary,
@@ -343,8 +346,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           <MessageBubble
             message={unit.message}
             isTurnStreaming={isTurnStreaming}
+            isThreadTail={isThreadTail}
             temporary={temporary}
-            isTerminalAssistantSlice={forkIndex !== undefined}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
@@ -369,6 +372,7 @@ function threadDisplayUnitPropsEqual(
     && previous.hasBodyBelow === next.hasBodyBelow
     && previous.deferOffscreenRender === next.deferOffscreenRender
     && previous.isTurnStreaming === next.isTurnStreaming
+    && previous.isThreadTail === next.isThreadTail
     && previous.retryStatus === next.retryStatus
     && previous.forkIndex === next.forkIndex
     && previous.showForkBoundary === next.showForkBoundary
