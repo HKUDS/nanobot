@@ -12,6 +12,7 @@ if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
     from nanobot.agent.tools.context import ToolContext
+    from nanobot.providers.base import ToolCallRequest
     from nanobot.runtime_context import RuntimeContextProvider
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
@@ -222,6 +223,13 @@ class Tool(ABC):
     def runtime_context_provider(self) -> RuntimeContextProvider | None:
         """Return optional per-turn prompt context owned by this tool."""
         return None
+
+    async def preflight_tool_calls(
+        self,
+        calls: list[ToolCallRequest],
+    ) -> dict[str, ToolResult]:
+        """Return call-ID keyed errors that must prevent execution for this batch."""
+        return {}
 
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any:

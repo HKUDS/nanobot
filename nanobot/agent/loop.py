@@ -293,6 +293,7 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        openrouter_provider_config: ProviderConfig | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -348,6 +349,7 @@ class AgentLoop:
         self.tools_config = _tc
         self.web_config = _tc.web
         self.exec_config = _tc.exec
+        self._openrouter_provider_config = openrouter_provider_config
         self._image_generation_provider_configs = dict(image_generation_provider_configs or {})
         if (
             image_generation_provider_config is not None
@@ -381,6 +383,7 @@ class AgentLoop:
             workspace=workspace,
             bus=bus,
             tools_config=_tc,
+            openrouter_provider_config=openrouter_provider_config,
             max_tool_result_chars=self.max_tool_result_chars,
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
@@ -478,6 +481,10 @@ class AgentLoop:
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
         provider_snapshot_loader = extra.pop("provider_snapshot_loader", None)
+        openrouter_provider_config = extra.pop(
+            "openrouter_provider_config",
+            config.providers.openrouter,
+        )
         preset_snapshot_loader = extra.pop("preset_snapshot_loader", None) or preset_helpers.make_preset_snapshot_loader(
             config,
             provider_snapshot_loader,
@@ -505,6 +512,7 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             dream_model_preset=defaults.dream.model_override,
             restart_mode=config.gateway.restart_mode,
+            openrouter_provider_config=openrouter_provider_config,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
             tool_registry=tool_registry,
@@ -621,6 +629,7 @@ class AgentLoop:
             sessions=self.sessions,
             provider_snapshot_loader=provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,
+            openrouter_provider_config=self._openrouter_provider_config,
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_control=AgentRuntimeControl(self),

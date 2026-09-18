@@ -16,10 +16,11 @@ from nanobot.agent.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import RequestContext, ToolContext
+    from nanobot.providers.base import ToolCallRequest
 
 _SKIP_MODULES = frozenset({
     "base", "schema", "registry", "context", "loader", "config",
-    "file_state", "sandbox", "mcp", "__init__", "runtime_control",
+    "file_state", "jev_guard", "sandbox", "mcp", "__init__", "runtime_control",
 })
 
 
@@ -176,6 +177,12 @@ class _LegacyErrorPrefixTool(Tool):
 
     def to_schema(self) -> dict[str, Any]:
         return self._wrapped.to_schema()
+
+    async def preflight_tool_calls(
+        self,
+        calls: list[ToolCallRequest],
+    ) -> dict[str, ToolResult]:
+        return await self._wrapped.preflight_tool_calls(calls)
 
     async def execute(self, **kwargs: Any) -> Any:
         result = await self._wrapped.execute(**kwargs)

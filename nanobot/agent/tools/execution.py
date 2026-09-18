@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import replace
 from functools import cache
 from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import ToolCallRequest
@@ -77,6 +79,7 @@ async def execute_tool_calls(
             and isinstance(message.get("content"), str)
             and message["tool_call_id"] not in (compacted_tool_results or ())
         }
+    preflight_errors = await _preflight_tool_calls(tools, tool_calls)
     tool_results: list[tuple[Any, dict[str, str]]] = []
     for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
         if concurrent and len(batch) > 1:
@@ -89,6 +92,7 @@ async def execute_tool_calls(
                     hook,
                     context,
                     read_results,
+                    preflight_errors,
                 )
                 for tool_call in batch
             ))
@@ -103,12 +107,75 @@ async def execute_tool_calls(
                     hook,
                     context,
                     read_results,
+                    preflight_errors,
                 )
                 tool_results.append(result)
 
     results = [result for result, _event in tool_results]
     events = [event for _result, event in tool_results]
     return results, events
+
+
+async def _preflight_tool_calls(
+    tools: ToolRegistry,
+    tool_calls: list[ToolCallRequest],
+) -> dict[str, ToolResult]:
+    """Run each tool's batch preflight before any call in the model response executes."""
+    get_tool = cast(Callable[[str], Any] | None, getattr(tools, "get", None))
+    if not callable(get_tool):
+        return {}
+
+    prepare_call = cast(
+        Callable[[str, Any], object] | None,
+        getattr(tools, "prepare_call", None),
+    )
+    grouped: dict[str, list[ToolCallRequest]] = {}
+    grouped_tools: dict[str, Tool] = {}
+    for tool_call in tool_calls:
+        tool = get_tool(tool_call.name)
+        if not isinstance(tool, Tool):
+            continue
+        prepared_call = tool_call
+        if callable(prepare_call):
+            prepared = prepare_call(tool_call.name, tool_call.arguments)
+            if not isinstance(prepared, tuple):
+                continue
+            prepared_tuple = cast(tuple[object, ...], prepared)
+            if len(prepared_tuple) != 3:
+                continue
+            prepared_tool, params, prep_error = cast(
+                tuple[Any, Any, str | None],
+                prepared_tuple,
+            )
+            if prep_error or not isinstance(prepared_tool, Tool):
+                continue
+            tool = prepared_tool
+            prepared_call = replace(tool_call, arguments=params)
+        grouped.setdefault(tool_call.name, []).append(prepared_call)
+        grouped_tools[tool_call.name] = tool
+
+    errors: dict[str, ToolResult] = {}
+    for name, calls in grouped.items():
+        tool = grouped_tools[name]
+        try:
+            guarded = await tool.preflight_tool_calls(calls)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Tool {} batch preflight failed", name)
+            failure = ToolResult.error(
+                f"Error: {name} preflight failed ({type(exc).__name__}: {exc})"
+            )
+            errors.update({call.id: failure for call in calls})
+            continue
+
+        call_ids = {call.id for call in calls}
+        for call_id, error in guarded.items():
+            if call_id not in call_ids:
+                logger.warning("Tool {} preflight returned unknown call ID {}", name, call_id)
+                continue
+            errors[call_id] = error
+    return errors
 
 
 async def _execute_tool_call(
@@ -119,7 +186,15 @@ async def _execute_tool_call(
     hook: AgentHook,
     context: AgentHookContext,
     read_results: Callable[[], dict[str, str]],
+    preflight_errors: dict[str, ToolResult],
 ) -> tuple[Any, dict[str, str]]:
+    if preflight_error := preflight_errors.get(tool_call.id):
+        return preflight_error, {
+            "name": tool_call.name,
+            "status": "error",
+            "detail": _event_detail("preflight_blocked: ", preflight_error),
+        }
+
     lookup_error = repeated_external_lookup_error(
         tool_call.name,
         tool_call.arguments,

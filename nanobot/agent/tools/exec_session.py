@@ -4,21 +4,30 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import sys
 import time
 import uuid
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext, current_request_session_key
+from nanobot.agent.tools.jev_guard import (
+    JevShellGuard,
+    ShellCommandReview,
+    preflight_shell_reviews,
+)
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
+
+if TYPE_CHECKING:
+    from nanobot.providers.base import ToolCallRequest
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -28,6 +37,7 @@ MAX_WAIT_FOR_MS = 600_000
 DEFAULT_MAX_OUTPUT_CHARS = 10_000
 MAX_OUTPUT_CHARS = 50_000
 OUTPUT_DRAIN_GRACE_S = 0.1
+MAX_JEV_STDIN_HISTORY_CHARS = 4096
 
 
 @dataclass(slots=True)
@@ -52,6 +62,12 @@ class ExecSessionInfo:
     remaining_s: float
     returncode: int | None
     owner_session_key: str | None = None
+    submitted_command: str | None = None
+    shell_cwd: str | None = None
+    shell_program: str | None = None
+    login: bool = False
+    stdin_history: str = ""
+    stdin_history_truncated: bool = False
 
 
 class _BoundedOutputBuffer:
@@ -125,11 +141,21 @@ class _ExecSession:
         timeout: int | None,
         owner_session_key: str | None = None,
         process_tree: bool = False,
+        submitted_command: str | None = None,
+        shell_cwd: str | None = None,
+        shell_program: str | None = None,
+        login: bool = False,
     ) -> None:
         self.session_id = session_id
         self.process = process
         self.command = command
         self.cwd = cwd
+        self.submitted_command = submitted_command or command
+        self.shell_cwd = shell_cwd or cwd
+        self.shell_program = shell_program
+        self.login = login
+        self.stdin_history = ""
+        self.stdin_history_truncated = False
         self.owner_session_key = owner_session_key
         self._process_tree = process_tree
         self.started_at = time.monotonic()
@@ -167,6 +193,10 @@ class _ExecSession:
         try:
             self.process.stdin.write(chars.encode("utf-8"))
             await self.process.stdin.drain()
+            history = self.stdin_history + chars
+            if len(history) > MAX_JEV_STDIN_HISTORY_CHARS:
+                self.stdin_history_truncated = True
+            self.stdin_history = history[-MAX_JEV_STDIN_HISTORY_CHARS:]
         except (BrokenPipeError, ConnectionResetError):
             return "session stdin is closed"
         return None
@@ -289,6 +319,8 @@ class ExecSessionManager:
         yield_time_ms: int,
         max_output_chars: int,
         owner_session_key: str | None = None,
+        submitted_command: str | None = None,
+        shell_cwd: str | None = None,
     ) -> tuple[str, _SessionPoll]:
         async with self._lock:
             if self._closed:
@@ -306,6 +338,10 @@ class ExecSessionManager:
                 timeout=timeout,
                 owner_session_key=owner_session_key,
                 process_tree=True,
+                submitted_command=submitted_command,
+                shell_cwd=shell_cwd,
+                shell_program=shell_program,
+                login=login,
             )
             self._sessions[session_id] = session
 
@@ -357,24 +393,54 @@ class ExecSessionManager:
                 self._sessions.pop(session_id, None)
         return poll
 
+    async def get_info(
+        self,
+        session_id: str,
+        *,
+        owner_session_key: str | None = None,
+    ) -> ExecSessionInfo:
+        """Return review context for one caller-owned session."""
+        async with self._lock:
+            await self._cleanup_locked()
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise KeyError(session_id)
+            if session.owner_session_key and session.owner_session_key != owner_session_key:
+                raise KeyError(session_id)
+            return self._session_info(session_id, session, time.monotonic())
+
     async def list(self, *, owner_session_key: str | None = None) -> list[ExecSessionInfo]:
         async with self._lock:
             await self._cleanup_locked()
             now = time.monotonic()
             return [
-                ExecSessionInfo(
-                    session_id=session_id,
-                    command=session.command,
-                    cwd=session.cwd,
-                    elapsed_s=max(0.0, now - session.started_at),
-                    idle_s=max(0.0, now - session.last_access),
-                    remaining_s=max(0.0, session.deadline - now),
-                    returncode=session.process.returncode,
-                    owner_session_key=session.owner_session_key,
-                )
+                self._session_info(session_id, session, now)
                 for session_id, session in sorted(self._sessions.items())
                 if session.owner_session_key == owner_session_key
             ]
+
+    @staticmethod
+    def _session_info(
+        session_id: str,
+        session: _ExecSession,
+        now: float,
+    ) -> ExecSessionInfo:
+        return ExecSessionInfo(
+            session_id=session_id,
+            command=session.command,
+            cwd=session.cwd,
+            elapsed_s=max(0.0, now - session.started_at),
+            idle_s=max(0.0, now - session.last_access),
+            remaining_s=max(0.0, session.deadline - now),
+            returncode=session.process.returncode,
+            owner_session_key=session.owner_session_key,
+            submitted_command=session.submitted_command,
+            shell_cwd=session.shell_cwd,
+            shell_program=session.shell_program,
+            login=session.login,
+            stdin_history=session.stdin_history,
+            stdin_history_truncated=session.stdin_history_truncated,
+        )
 
     async def close_all(self) -> int:
         """Terminate and remove all active sessions during shutdown."""
@@ -549,12 +615,26 @@ class ExecSessionTool(Tool):
         self,
         *,
         manager: ExecSessionManager | None = None,
+        jev_guard: JevShellGuard | None = None,
+        jev_threshold: float = 0.5,
+        jev_on_error: Literal["block", "allow"] = "block",
     ) -> None:
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
+        self._jev_guard = jev_guard
+        self._jev_threshold = jev_threshold
+        self._jev_on_error: Literal["block", "allow"] = jev_on_error
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        return cls(manager=ctx.exec_session_manager)
+        from nanobot.agent.tools.shell import create_jev_shell_guard
+
+        jev_guard, jev_threshold, jev_on_error = create_jev_shell_guard(ctx)
+        return cls(
+            manager=ctx.exec_session_manager,
+            jev_guard=jev_guard,
+            jev_threshold=jev_threshold,
+            jev_on_error=jev_on_error,
+        )
 
     @property
     def exclusive(self) -> bool:
@@ -567,6 +647,84 @@ class ExecSessionTool(Tool):
     @property
     def description(self) -> str:
         return "Manage a session returned by exec."
+
+    async def preflight_tool_calls(
+        self,
+        calls: list[ToolCallRequest],
+    ) -> dict[str, ToolResult]:
+        """Review input and EOF before they can affect a running process."""
+        if self._jev_guard is None:
+            return {}
+
+        reviews: list[ShellCommandReview] = []
+        local_errors: dict[str, ToolResult] = {}
+        session_contexts: dict[str, ExecSessionInfo] = {}
+        session_histories: dict[str, str] = {}
+        session_history_truncated: dict[str, bool] = {}
+        for call in calls:
+            if not isinstance(call.arguments, dict):
+                continue
+            params = self.cast_params(cast(dict[str, Any], call.arguments))
+            if self.validate_params(params):
+                continue
+            session_id = params.get("session_id")
+            chars = params.get("input")
+            close_stdin = params.get("close_stdin") is True
+            if not isinstance(session_id, str):
+                continue
+            input_text = chars if isinstance(chars, str) else ""
+            if not input_text and not close_stdin:
+                continue
+            info = session_contexts.get(session_id)
+            if info is None:
+                try:
+                    info = await self._manager.get_info(
+                        session_id,
+                        owner_session_key=current_request_session_key(),
+                    )
+                except KeyError:
+                    # The normal execution path returns the existing not-found error.
+                    continue
+                session_contexts[session_id] = info
+                session_histories[session_id] = info.stdin_history
+                session_history_truncated[session_id] = info.stdin_history_truncated
+            input_history = session_histories[session_id]
+            if session_history_truncated[session_id]:
+                local_errors[call.id] = ToolResult.error(
+                    "Error: exec_session input blocked because earlier stdin exceeded the "
+                    f"{MAX_JEV_STDIN_HISTORY_CHARS}-character Jev review context. Start a new "
+                    "exec session so the safeguard can review complete input context."
+                )
+                continue
+            reviews.append(ShellCommandReview(
+                call_id=call.id,
+                command=input_text or "<close stdin>",
+                shell=(
+                    info.shell_program
+                    or ("PowerShell" if sys.platform == "win32" else "Bash")
+                ),
+                working_dir=info.shell_cwd or info.cwd,
+                tool="exec_session",
+                login=info.login,
+                persistent_session=True,
+                close_stdin=close_stdin,
+                session_command=info.submitted_command or info.command,
+                session_input_history=input_history or None,
+            ))
+            history = input_history + input_text
+            if len(history) > MAX_JEV_STDIN_HISTORY_CHARS:
+                session_history_truncated[session_id] = True
+            session_histories[session_id] = history[-MAX_JEV_STDIN_HISTORY_CHARS:]
+
+        if not reviews:
+            return local_errors
+        remote_errors = await preflight_shell_reviews(
+            self._jev_guard,
+            reviews,
+            threshold=self._jev_threshold,
+            on_error=self._jev_on_error,
+        )
+        return {**local_errors, **remote_errors}
 
     async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
