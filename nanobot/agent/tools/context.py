@@ -31,7 +31,6 @@ class RequestContext:
     """Per-request context injected into tools at message-processing time."""
     channel: str
     chat_id: str
-    topic_id: str | int | None = None
     message_id: str | None = None
     session_key: str | None = None
     original_user_text: str | None = None
@@ -41,6 +40,7 @@ class RequestContext:
     turn_id: str | None = None
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
+    topic_id: str | int | None = None
 
 
 @runtime_checkable

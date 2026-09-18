@@ -23,6 +23,7 @@ from nanobot.channels.telegram.runtime import (
     TelegramChannel,
     TelegramConfig,
     _markdown_to_telegram_html,
+    _rich_message_payload,
     _split_telegram_markdown,
     _StreamBuf,
     _telegram_command_text,
@@ -205,6 +206,35 @@ def _assert_code_blocks_render_balanced(chunks: list[str]) -> None:
     for chunk in chunks:
         html = _markdown_to_telegram_html(chunk)
         assert html.count("<pre><code>") == html.count("</code></pre>")
+
+
+def test_rich_message_payload_hard_breaks_single_newlines() -> None:
+    content = "one\ntwo\n\nthree"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "one  \ntwo\n\nthree"}
+
+
+def test_rich_message_payload_skips_fenced_code() -> None:
+    content = "intro\n```py\na\nb\n```\n\ntail"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "intro  \n```py\na\nb\n```\n\ntail"}
+
+
+def test_rich_message_payload_skips_long_fences_and_blank_lines() -> None:
+    content = "a\n````py\nx\n````\n\nb\n"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "a  \n````py\nx\n````\n\nb\n"}
+
+
+def test_rich_message_payload_single_line_untouched() -> None:
+    assert _rich_message_payload("# head") == {"markdown": "# head"}
+    assert _rich_message_payload("") == {"markdown": ""}
 
 
 def test_split_telegram_markdown_inside_code_block_moves_before_fence() -> None:
@@ -1014,7 +1044,7 @@ async def test_send_delta_rich_draft_rejection_falls_back_to_legacy_preview() ->
     assert channel._app.bot.do_api_request.call_args.args[0] == "sendRichMessageDraft"
     rich_kwargs = channel._app.bot.do_api_request.call_args.kwargs["api_kwargs"]
     assert rich_kwargs["draft_id"] == 17
-    assert rich_kwargs["rich_message"] == {"markdown": "# head\nbody"}
+    assert rich_kwargs["rich_message"] == {"markdown": "# head  \nbody"}
     assert channel._app.bot.sent_messages[0]["text"] == "head\nbody"
     assert channel._stream_bufs["123"].message_id == 1
     assert channel._stream_bufs["123"].draft_id is None

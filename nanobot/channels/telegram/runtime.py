@@ -185,6 +185,47 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
     return chunks
 
 
+def _rich_message_payload(content: str) -> dict[str, str]:
+    """Build the rich_message payload, turning soft breaks into hard breaks.
+
+    Single newlines outside fenced code blocks get two trailing spaces so
+    Telegram renders them as line breaks; paragraph breaks are left alone.
+    """
+    if not content:
+        return {"markdown": content}
+
+    lines = content.split("\n")
+    out: list[str] = []
+    fence_len = 0
+
+    for index, line in enumerate(lines):
+        if fence_len:
+            out.append(line)
+            bare = line.strip()
+            if bare and set(bare) <= {"`"} and len(bare) >= fence_len:
+                fence_len = 0
+            continue
+
+        bare = line.lstrip()
+        backticks = len(bare) - len(bare.lstrip("`"))
+        if backticks >= 3:
+            fence_len = backticks
+            out.append(line)
+            continue
+
+        if (
+            index + 1 < len(lines)
+            and lines[index + 1]
+            and line
+            and not line.endswith("  ")
+        ):
+            out.append(line + "  ")
+        else:
+            out.append(line)
+
+    return {"markdown": "\n".join(out)}
+
+
 def _escape_telegram_html(text: str) -> str:
     """Escape text for Telegram HTML parse mode."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -891,10 +932,6 @@ class TelegramChannel(BaseChannel):
     def _rich_streaming_enabled(self) -> bool:
         return self.config.rich_messages and not self._rich_send_disabled
 
-    @staticmethod
-    def _rich_message_payload(content: str) -> dict[str, str]:
-        return {"markdown": content}
-
     def _mark_rich_unavailable(self, exc: Exception, operation: str) -> bool:
         if not self._is_rich_capability_error(exc):
             return False
@@ -916,7 +953,7 @@ class TelegramChannel(BaseChannel):
 
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
         }
         if reply_params is not None:
             # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
@@ -975,7 +1012,7 @@ class TelegramChannel(BaseChannel):
         payload: dict[str, Any] = {
             "chat_id": chat_id,
             "draft_id": draft_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
             **thread_kwargs,
         }
         try:
@@ -1010,7 +1047,7 @@ class TelegramChannel(BaseChannel):
         app = self._require_app()
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
             **thread_kwargs,
         }
         try:
