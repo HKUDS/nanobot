@@ -66,6 +66,8 @@ interface MessageBubbleProps {
   temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
   showCopyAction?: boolean;
+  /** Whether this is the final assistant text slice before the next user turn. */
+  isTerminalAssistantSlice?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
@@ -330,6 +332,7 @@ export function MessageBubble({
   isTurnStreaming = false,
   temporary = false,
   showCopyAction = true,
+  isTerminalAssistantSlice = true,
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
@@ -491,14 +494,18 @@ export function MessageBubble({
     && (!empty || hasReasoning || media.length > 0);
   const showAssistantTimestamp =
     assistantTimestampLabel.length > 0
-    && (!empty || hasReasoning || media.length > 0);
+    && (!empty || hasReasoning || media.length > 0)
+    && (!isTurnStreaming || isTerminalAssistantSlice);
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
   const showAssistantFooterRow =
     showCopyButton || showForkButton || showAssistantTimestamp;
-  const showAssistantFooterSlot =
+  const hasAssistantFooterContent =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
+  const showAssistantFooterSlot =
+    hasAssistantFooterContent
+    && (showAssistantFooterRow || isTerminalAssistantSlice);
   return (
     <div className="w-full text-[15px]" style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (

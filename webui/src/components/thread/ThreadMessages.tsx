@@ -344,6 +344,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             message={unit.message}
             isTurnStreaming={isTurnStreaming}
             temporary={temporary}
+            isTerminalAssistantSlice={forkIndex !== undefined}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}

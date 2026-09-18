@@ -868,6 +868,25 @@ describe("MessageBubble", () => {
     expect(visibleFooter).toHaveClass("mt-2", "min-h-8", "opacity-100");
   });
 
+  it("omits hidden footer space for an intermediate assistant answer", () => {
+    const message: UIMessage = {
+      id: "a-intermediate",
+      role: "assistant",
+      content: "I will keep working.",
+      createdAt: Date.now(),
+    };
+
+    const { container } = render(
+      <MessageBubble
+        message={message}
+        isTurnStreaming
+        isTerminalAssistantSlice={false}
+      />,
+    );
+
+    expect(container.querySelector("[data-assistant-footer]")).not.toBeInTheDocument();
+  });
+
   it("does not show copy when showCopyAction is false", () => {
     const message: UIMessage = {
       id: "a-mid",
