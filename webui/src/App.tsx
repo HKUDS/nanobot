@@ -1171,6 +1171,7 @@ function Shell({
   const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
     chatId: string;
@@ -1275,12 +1276,17 @@ function Shell({
 
   useEffect(() => {
     let cancelled = false;
+    const requestGeneration = settingsRefreshGenerationRef.current;
     fetchSettings(getToken())
       .then((payload) => {
-        if (!cancelled) setSettingsSnapshot(payload);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(payload);
+        }
       })
       .catch(() => {
-        if (!cancelled) setSettingsSnapshot(null);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -2184,7 +2190,8 @@ function Shell({
   }, [client, navigate]);
 
   useEffect(() => {
-    return client.onStatus((status) => {
+    let cancelled = false;
+    const unsubscribe = client.onStatus((status) => {
       const startedAt = (() => {
         try {
           return Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
@@ -2205,11 +2212,25 @@ function Shell({
       } catch {
         // ignore storage errors
       }
+      const refreshGeneration = ++settingsRefreshGenerationRef.current;
       setIsRestarting(false);
       setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
       window.setTimeout(() => setRestartToast(null), 3_500);
+      void fetchSettings(getToken())
+        .then((payload) => {
+          if (!cancelled && refreshGeneration === settingsRefreshGenerationRef.current) {
+            setSettingsSnapshot(payload);
+          }
+        })
+        .catch(() => {
+          // The WebSocket can reconnect before the HTTP endpoint is ready.
+        });
     });
-  }, [client, t]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [client, getToken, t]);
 
   const onTurnEnd = useDeferredTitleRefresh(
     temporaryChatActive ? null : activePaneSession,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { imageGenerationFormFromPayload } from "@/components/settings/capabilities/ImageGenerationSettings";
@@ -90,6 +90,10 @@ export function useSettingsController({
   const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
     EMPTY_PENDING_RESTART_SECTIONS,
   );
+  const previousInitialSettingsRef = useRef(initialSettings);
+  const latestInitialSettingsRef = useRef(initialSettings);
+  latestInitialSettingsRef.current = initialSettings;
+  const restartRefreshRef = useRef<SettingsPayload | null>(null);
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
   const modelState = useModelSettingsState(initialSettings);
   const {
@@ -196,12 +200,29 @@ export function useSettingsController({
   }, [applyPayload, initialSettings, settings]);
 
   useEffect(() => {
+    const previous = previousInitialSettingsRef.current;
+    previousInitialSettingsRef.current = initialSettings;
+    if (previous?.requires_restart && !initialSettings?.requires_restart) {
+      restartRefreshRef.current = initialSettings;
+    } else if (restartRefreshRef.current !== initialSettings) {
+      restartRefreshRef.current = null;
+    }
+    const shouldApplyRestartedSettings =
+      restartRefreshRef.current === initialSettings && settings?.requires_restart === true;
+    if (!shouldApplyRestartedSettings || !initialSettings) {
+      return;
+    }
+    applyPayload(initialSettings);
+  }, [applyPayload, initialSettings, settings]);
+
+  useEffect(() => {
     let cancelled = false;
     const showLoading = settings === null;
+    const requestInitialSettings = latestInitialSettingsRef.current;
     if (showLoading) setLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
-        if (!cancelled) {
+        if (!cancelled && latestInitialSettingsRef.current === requestInitialSettings) {
           applyPayload(payload);
           setError(null);
         }
