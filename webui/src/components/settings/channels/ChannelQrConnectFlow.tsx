@@ -184,12 +184,15 @@ export function ChannelQrConnectFlow({
         ...(force ? { force: true } : {}),
       });
       setConnect(payload);
+      if (payload.nanobot_features) {
+        onFeaturesUpdate(payload.nanobot_features);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [channelName, client, startParams]);
+  }, [channelName, client, startParams, onFeaturesUpdate]);
 
   useEffect(() => {
     const requested = Boolean(connectRequestId && connectRequestId !== handledRequestId.current);

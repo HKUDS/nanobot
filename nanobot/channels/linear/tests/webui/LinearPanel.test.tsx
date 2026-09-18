@@ -348,6 +348,23 @@ describe("Linear channel UI", () => {
     expect(screen.queryByText("Authorization stopped.")).not.toBeInTheDocument();
   });
 
+  it("updates the running status when an existing installation connects without OAuth", async () => {
+    const feature = savedFeature();
+    mockFeature(feature);
+    requestMutationMock.mockResolvedValueOnce({
+      session_id: "", status: "succeeded",
+      nanobot_features: {
+        features: [{ ...feature, enabled: true, running: true, runtime_status: "running" }],
+        enabled_count: 1,
+      },
+    });
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Linear" }));
+    expect(await within(screen.getByRole("dialog")).findByText("Connected", { exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect another workspace" })).toBeEnabled();
+  });
+
   it("does not mark saved credentials or a failed runtime as connected", async () => {
     mockFeature({ ...savedFeature(), enabled: true, configured: true, runtime_status: "failed",
       runtime_error: "Linear channel failed to start" });
