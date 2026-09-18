@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
+from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
@@ -621,6 +622,27 @@ async def test_compaction_uses_temporary_progress_and_a_persistent_outcome(
     ))
     assert client.activities[-1]["content"] == {"type": "response", "body": "Done"}
     assert len({activity["activity_id"] for activity in client.activities}) == len(client.activities)
+
+
+async def test_idle_compaction_does_not_reactivate_a_completed_agent_session(tmp_path: Path) -> None:
+    channel, client = _runtime(tmp_path)
+    await channel._process_webhook("delivery-1", _agent_webhook())  # pyright: ignore[reportPrivateUsage]
+    inbound = await channel.bus.consume_inbound()
+    factory = TurnDeliveryFactory(channel.bus)
+    session_metadata: dict[str, Any] = {}
+    factory.create(inbound, inbound.session_key).remember_session_route(session_metadata)
+    await channel.send(OutboundMessage(
+        channel="linear", chat_id=inbound.chat_id, content="Done", metadata=inbound.metadata,
+    ))
+    activity_count = len(client.activities)
+
+    idle_events = factory.session_events(inbound.session_key, session_metadata)
+    for phase in ("started", "succeeded"):
+        await idle_events.emit(ContextCompactionEvent(compaction_id="idle-1", phase=phase))
+        await channel.send(await channel.bus.consume_outbound())
+
+    assert len(client.activities) == activity_count
+    assert client.activities[-1]["content"] == {"type": "response", "body": "Done"}
 
 
 def test_revocation_removes_workspace_installation(tmp_path: Path) -> None:

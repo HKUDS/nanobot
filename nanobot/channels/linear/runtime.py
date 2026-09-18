@@ -92,6 +92,10 @@ class LinearChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
         if isinstance(event, ContextCompactionEvent):
+            # Idle notifications have no originating Linear turn. Sending a thought
+            # through the cached route would reactivate an already completed session.
+            if _linear_route(msg.metadata) is None:
+                return
             await self._create_activity(
                 msg.chat_id,
                 msg.metadata,
