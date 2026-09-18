@@ -128,6 +128,47 @@ async def _archive(
 
 
 class TestTurnTranscriptSummary:
+    @pytest.mark.parametrize("outcome", ["summary", "empty", "error", "oversized"])
+    async def test_nonpersistent_checkpoint_never_writes_memory(
+        self, consolidator, mock_provider, store, runtime, outcome,
+    ):
+        runtime = replace(runtime, context_window_tokens=16_000)
+        text = "private transcript" if outcome != "oversized" else "private " * 20_000
+        accepted = [{"role": "user", "content": text}]
+        if outcome == "error":
+            mock_provider.chat_stream_with_retry.side_effect = RuntimeError("offline")
+        else:
+            mock_provider.chat_stream_with_retry.return_value = LLMResponse(
+                content="private summary" if outcome == "summary" else "",
+            )
+        append = MagicMock(wraps=store.append_history)
+        raw_archive = MagicMock(wraps=store.raw_archive)
+        store.append_history = append
+        store.raw_archive = raw_archive
+
+        summary = await consolidator.summarize_transcript(
+            accepted, None, runtime=runtime, session_key="internal:private", tools=[],
+            persist=False,
+        )
+
+        assert summary
+        assert "private" in summary
+        append.assert_not_called()
+        raw_archive.assert_not_called()
+        assert not store.history_file.exists()
+
+    async def test_nonpersistent_native_compaction_does_not_archive(
+        self, consolidator, mock_provider, store, runtime,
+    ):
+        mock_provider.can_resume_conversation_state.return_value = True
+        mock_provider.chat_stream_with_retry.return_value = LLMResponse(content="private summary")
+        result = await consolidator.summarize_provider_compaction(
+            _provider_state(), [{"role": "user", "content": "private transcript"}], None,
+            runtime=runtime, session_key="internal:private", tools=[], persist=False,
+        )
+        assert result
+        assert not store.history_file.exists()
+
     @pytest.mark.parametrize("summary", ["replacement checkpoint", "(nothing)"])
     async def test_uses_exact_accepted_prefix_and_existing_archiver(
         self,

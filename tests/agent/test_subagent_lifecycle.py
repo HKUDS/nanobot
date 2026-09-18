@@ -14,7 +14,6 @@ from nanobot.agent.subagent import (
     SubagentStatus,
     _SubagentHook,
 )
-from nanobot.agent.tools.context import current_request_context
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMUsage
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -66,21 +65,26 @@ async def _drain_subagent_tasks(sm: SubagentManager) -> None:
 
 
 @pytest.mark.asyncio
-async def test_close_cancels_tasks_before_closing_exec_sessions(tmp_path):
+async def test_close_waits_for_child_session_cleanup(tmp_path):
     sm = _manager(tmp_path)
-    task = asyncio.create_task(asyncio.Event().wait())
+    started = asyncio.Event()
+    cleaned = asyncio.Event()
+
+    async def session_work():
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            cleaned.set()
+
+    task = asyncio.create_task(session_work())
     sm._running_tasks["t1"] = task
-
-    async def close_exec_sessions() -> int:
-        assert task.done()
-        return 0
-
-    sm._exec_session_manager.close_all = AsyncMock(side_effect=close_exec_sessions)
-
+    await started.wait()
     await sm.close()
 
     assert task.cancelled()
-    sm._exec_session_manager.close_all.assert_awaited_once()
+    assert cleaned.is_set()
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +135,7 @@ class TestLegacyCompatibility:
                 max_tool_result_chars=16_000,
                 model="legacy-model",
             )
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+        sm._execute_session = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
         provider.generation = GenerationSettings(temperature=0.8, max_tokens=512)
@@ -140,7 +144,7 @@ class TestLegacyCompatibility:
             await sm.spawn("legacy task")
         await _drain_subagent_tasks(sm)
 
-        runtime = sm.runner.run.await_args.args[0].runtime
+        runtime = sm._execute_session.await_args.args[0].runtime
         assert runtime.provider is provider
         assert runtime.model == "legacy-model"
         assert runtime.generation == GenerationSettings(0.8, 512, None)
@@ -152,7 +156,7 @@ class TestLegacyCompatibility:
         provider.generation = GenerationSettings(temperature=0.3, max_tokens=1024)
         with pytest.warns(DeprecationWarning, match="set_provider"):
             sm.set_provider(provider, "replacement-model")
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+        sm._execute_session = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
 
@@ -160,7 +164,7 @@ class TestLegacyCompatibility:
             await sm.spawn("legacy task")
         await _drain_subagent_tasks(sm)
 
-        runtime = sm.runner.run.await_args.args[0].runtime
+        runtime = sm._execute_session.await_args.args[0].runtime
         assert runtime.provider is provider
         assert runtime.model == "replacement-model"
 
@@ -181,7 +185,7 @@ class TestSpawn:
     @pytest.mark.asyncio
     async def test_returns_string_with_task_id(self, tmp_path):
         sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+        sm._execute_session = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
         result = await sm.spawn("do something", runtime=_runtime())
@@ -195,7 +199,7 @@ class TestSpawn:
         async def _slow_run(spec):
             await block.wait()
             return AgentRunResult(final_content="done", messages=[], stop_reason="completed")
-        sm.runner.run = _slow_run
+        sm._execute_session = _slow_run
 
         await sm.spawn("task", runtime=_runtime(), session_key="s1")
         assert len(sm._running_tasks) == 1
@@ -207,7 +211,7 @@ class TestSpawn:
     @pytest.mark.asyncio
     async def test_creates_status(self, tmp_path):
         sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+        sm._execute_session = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
         await sm.spawn("my task", runtime=_runtime())
@@ -222,7 +226,7 @@ class TestSpawn:
         async def _slow_run(spec):
             await block.wait()
             return AgentRunResult(final_content="done", messages=[], stop_reason="completed")
-        sm.runner.run = _slow_run
+        sm._execute_session = _slow_run
 
         await sm.spawn("task", runtime=_runtime(), session_key="s1")
         assert "s1" in sm._session_tasks
@@ -239,7 +243,7 @@ class TestSpawn:
         async def _slow_run(spec):
             await block.wait()
             return AgentRunResult(final_content="done", messages=[], stop_reason="completed")
-        sm.runner.run = _slow_run
+        sm._execute_session = _slow_run
 
         await sm.spawn("task", runtime=_runtime())
         assert len(sm._session_tasks) == 0
@@ -254,7 +258,7 @@ class TestSpawn:
         async def _slow_run(spec):
             await block.wait()
             return AgentRunResult(final_content="done", messages=[], stop_reason="completed")
-        sm.runner.run = _slow_run
+        sm._execute_session = _slow_run
 
         long_label_source = "A" * 50
         await sm.spawn(long_label_source, runtime=_runtime(), session_key="s1")
@@ -271,7 +275,7 @@ class TestSpawn:
         async def _slow_run(spec):
             await block.wait()
             return AgentRunResult(final_content="done", messages=[], stop_reason="completed")
-        sm.runner.run = _slow_run
+        sm._execute_session = _slow_run
 
         await sm.spawn(
             "task", runtime=_runtime(), label="Custom Label", session_key="s1"
@@ -285,7 +289,7 @@ class TestSpawn:
     @pytest.mark.asyncio
     async def test_cleanup_callback_removes_all_entries(self, tmp_path):
         sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+        sm._execute_session = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
         await sm.spawn("task", runtime=_runtime(), session_key="s1")
@@ -304,8 +308,6 @@ class TestSpawn:
 
         async def observe(spec):
             seen["spec_runtime"] = spec.runtime
-            request_ctx = current_request_context()
-            seen["context_runtime"] = request_ctx.runtime if request_ctx else None
             entered.set()
             await release.wait()
             return AgentRunResult(
@@ -314,7 +316,7 @@ class TestSpawn:
                 stop_reason="completed",
             )
 
-        sm.runner.run = observe
+        sm._execute_session = observe
         await sm.spawn("task", runtime=runtime, session_key="s1")
         runtime.provider.generation = GenerationSettings(
             temperature=0.9,
@@ -323,7 +325,6 @@ class TestSpawn:
         await asyncio.wait_for(entered.wait(), timeout=1)
 
         assert seen["spec_runtime"] is runtime
-        assert seen["context_runtime"] is runtime
         assert runtime.generation.temperature == 0.2
 
         release.set()
@@ -339,7 +340,7 @@ class TestRunSubagent:
     @pytest.mark.asyncio
     async def test_successful_run(self, tmp_path):
         sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+        sm._execute_session = AsyncMock(return_value=AgentRunResult(
             final_content="Task done!", messages=[], stop_reason="completed",
         ))
         with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
@@ -355,7 +356,7 @@ class TestRunSubagent:
     @pytest.mark.asyncio
     async def test_exception_run(self, tmp_path):
         sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(side_effect=RuntimeError("LLM down"))
+        sm._execute_session = AsyncMock(side_effect=RuntimeError("LLM down"))
         status = SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic())
         with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
             await sm._run_subagent(
@@ -369,7 +370,7 @@ class TestRunSubagent:
     @pytest.mark.asyncio
     async def test_status_updated_on_success(self, tmp_path):
         sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+        sm._execute_session = AsyncMock(return_value=AgentRunResult(
             final_content="ok", messages=[], stop_reason="completed",
         ))
         status = SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic())
@@ -486,7 +487,7 @@ class TestCancelBySession:
         async def _slow_run(spec):
             await block.wait()
             return AgentRunResult(final_content="done", messages=[], stop_reason="completed")
-        sm.runner.run = _slow_run
+        sm._execute_session = _slow_run
 
         runtime = _runtime()
         await sm.spawn("task1", runtime=runtime, session_key="s1")
@@ -511,14 +512,14 @@ class TestCancelBySession:
         queued_entered = asyncio.Event()
 
         async def _blocked_run(spec):
-            task = spec.initial_messages[-1]["content"]
+            task = spec.task
             if task == "active":
                 active_entered.set()
             else:
                 queued_entered.set()
             await asyncio.Event().wait()
 
-        sm.runner.run = _blocked_run
+        sm._execute_session = _blocked_run
         runtime = _runtime()
         await sm.spawn("active", runtime=runtime, session_key="s1")
         await asyncio.wait_for(active_entered.wait(), timeout=1.0)
@@ -536,7 +537,7 @@ class TestCancelBySession:
     @pytest.mark.asyncio
     async def test_already_done_not_counted(self, tmp_path):
         sm = _manager(tmp_path)
-        sm.runner.run = AsyncMock(return_value=AgentRunResult(
+        sm._execute_session = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
         await sm.spawn("task1", runtime=_runtime(), session_key="s1")
@@ -564,7 +565,7 @@ class TestRunningCounts:
         async def _slow_run(spec):
             await block.wait()
             return AgentRunResult(final_content="done", messages=[], stop_reason="completed")
-        sm.runner.run = _slow_run
+        sm._execute_session = _slow_run
 
         runtime = _runtime()
         await sm.spawn("t1", runtime=runtime, session_key="s1")
