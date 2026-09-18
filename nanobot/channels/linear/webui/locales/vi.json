@@ -66,6 +66,9 @@
     "connecting": "Đang kết nối...",
     "reconnect": "Kết nối workspace khác",
     "connect": "Kết nối Linear",
-    "openLinear": "Tiếp tục trong Linear"
+    "openLinear": "Tiếp tục trong Linear",
+    "createApp": "Tạo ứng dụng Linear điền sẵn",
+    "savePublicUrl": "Lưu URL công khai để tạo ứng dụng Linear điền sẵn.",
+    "saveBeforeConnect": "Lưu thông tin xác thực ứng dụng trước khi cấp quyền cho không gian làm việc."
   }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import http.client
@@ -8,20 +9,27 @@ import socket
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Literal
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
+    ProgressEvent,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.linear import connect as linear_connect
 from nanobot.channels.linear.client import LinearApiError, LinearClient
 from nanobot.channels.linear.config import LinearConfig, validate_public_base_url
 from nanobot.channels.linear.oauth import OAUTH_FLOWS, authorization_url
 from nanobot.channels.linear.runtime import LinearChannel
-from nanobot.channels.linear.server import acquire_http_server
+from nanobot.channels.linear.server import LinearServerLease, acquire_http_server
 from nanobot.channels.linear.state import LinearInstallation, LinearStateStore
 
 
@@ -241,6 +249,59 @@ def test_oauth_callback_completes_only_registered_state(tmp_path: Path) -> None:
     finally:
         OAUTH_FLOWS.remove(flow)
         lease.close()
+
+
+@pytest.mark.parametrize("concurrent", [False, True])
+async def test_successful_authorization_survives_repeated_polls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, concurrent: bool,
+) -> None:
+    state = LinearStateStore(tmp_path / "linear.sqlite3")
+    lease = Mock(spec=LinearServerLease)
+
+    async def exchange_code(_code: str, _verifier: str) -> LinearInstallation:
+        await asyncio.sleep(0)
+        installation = _installation()
+        state.save_installation(installation)
+        return installation
+
+    client = Mock(spec=LinearClient)
+    client.exchange_code = AsyncMock(side_effect=exchange_code)
+    client.close = AsyncMock()
+    monkeypatch.setattr(linear_connect, "_load_linear_config", _config)
+    monkeypatch.setattr(linear_connect, "LinearStateStore", lambda: state)
+    monkeypatch.setattr(linear_connect, "LinearClient", lambda *_args: client)
+    monkeypatch.setattr(linear_connect, "acquire_http_server", lambda *_args: lease)
+    store = linear_connect.LinearConnectStore()
+    started_at = time.monotonic()
+    started = await store.handle("start", {})
+    session_id = started["session_id"]
+    query = {"session_id": [session_id]}
+    oauth_state = parse_qs(urlparse(started["authorization_url"]).query)["state"][0]
+    try:
+        assert OAUTH_FLOWS.complete(oauth_state, code="authorization-code", error=None)
+        if concurrent:
+            first, repeated = await asyncio.gather(
+                store.handle("poll", query), store.handle("poll", query),
+            )
+        else:
+            first = await store.handle("poll", query)
+            repeated = await store.handle("poll", query)
+        assert first["status"] == "succeeded"
+        assert repeated == first
+        assert (await store.handle("poll", query)) == first
+        assert state.has_installations("client-id")
+        client.exchange_code.assert_awaited_once()
+        lease.close.assert_called_once()
+        assert (await store.handle("poll", {"session_id": ["unknown"]}))["status"] == "expired"
+
+        monkeypatch.setattr(
+            linear_connect, "time",
+            SimpleNamespace(monotonic=lambda: started_at + linear_connect.FLOW_TTL_SECONDS + 10),
+        )
+        assert (await store.handle("poll", query))["status"] == "expired"
+        assert state.has_installations("client-id")
+    finally:
+        await store.cancel(session_id)
 
 
 @pytest.mark.asyncio
@@ -520,6 +581,46 @@ async def test_outbound_response_and_tool_progress_use_native_activity_shapes(
     assert client.activities[1]["activity_id"] == activity_id
     assert client.activities[2]["content"]["type"] == "action"
     assert client.activities[2]["content"]["action"] == "linear_get_issue"
+
+
+@pytest.mark.parametrize("include_start", [True, False])
+@pytest.mark.parametrize("phase", ["succeeded", "failed", "cancelled"])
+async def test_compaction_uses_temporary_progress_and_a_persistent_outcome(
+    tmp_path: Path,
+    include_start: bool,
+    phase: Literal["succeeded", "failed", "cancelled"],
+) -> None:
+    channel, client = _runtime(tmp_path)
+    metadata: dict[str, Any] = {
+        "linear": {"organization_id": "org-1", "agent_session_id": "session-1"},
+    }
+    if include_start:
+        await channel.send(outbound_message_for_event(
+            channel="linear",
+            chat_id="session-1",
+            metadata=metadata,
+            event=ContextCompactionEvent(compaction_id="compaction-1", phase="started"),
+        ))
+        assert client.activities[0]["content"] == {
+            "type": "thought", "body": "Compressing context\u2026",
+        }
+        assert client.activities[0]["ephemeral"] is True
+
+    outcome = outbound_message_for_event(
+        channel="linear",
+        chat_id="session-1",
+        metadata=metadata,
+        event=ContextCompactionEvent(compaction_id="compaction-1", phase=phase),
+    )
+    await channel.send(outcome)
+    assert client.activities[-1]["content"] == {"type": "thought", "body": outcome.content}
+    assert client.activities[-1]["ephemeral"] is False
+
+    await channel.send(OutboundMessage(
+        channel="linear", chat_id="session-1", content="Done", metadata=outcome.metadata,
+    ))
+    assert client.activities[-1]["content"] == {"type": "response", "body": "Done"}
+    assert len({activity["activity_id"] for activity in client.activities}) == len(client.activities)
 
 
 def test_revocation_removes_workspace_installation(tmp_path: Path) -> None:

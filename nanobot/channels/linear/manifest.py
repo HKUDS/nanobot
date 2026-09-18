@@ -7,6 +7,7 @@ from nanobot.channels.linear.validation import validate
 from nanobot.channels.plugin import ChannelPlugin
 
 SETUP_SPEC = ChannelSetupSpec(
+    official_url="https://linear.app/settings/api/applications/new",
     fields={
         "clientId": field(),
         "clientSecret": field("secret"),

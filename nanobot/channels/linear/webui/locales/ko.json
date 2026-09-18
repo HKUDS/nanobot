@@ -66,6 +66,9 @@
     "connecting": "연결 중...",
     "reconnect": "다른 워크스페이스 연결",
     "connect": "Linear 연결",
-    "openLinear": "Linear에서 계속"
+    "openLinear": "Linear에서 계속",
+    "createApp": "미리 입력된 Linear 앱 만들기",
+    "savePublicUrl": "공개 URL을 저장하면 미리 입력된 Linear 앱을 만들 수 있습니다.",
+    "saveBeforeConnect": "워크스페이스를 승인하기 전에 앱 자격 증명을 저장하세요."
   }
 }

@@ -27,9 +27,6 @@ class LinearConfig(Base):
     webhook_path: str = DEFAULT_WEBHOOK_PATH
     oauth_callback_path: str = DEFAULT_OAUTH_CALLBACK_PATH
     allow_from: list[str] = Field(default_factory=list)
-    send_progress: bool = True
-    send_tool_hints: bool = True
-    show_reasoning: bool = True
 
     @field_validator("webhook_path", "oauth_callback_path")
     @classmethod

@@ -28,6 +28,7 @@ class LinearConnectSession:
     state: LinearStateStore
     server: LinearServerLease
     completion_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    result: dict[str, str] | None = None
 
 
 class LinearConnectStore:
@@ -96,6 +97,8 @@ class LinearConnectStore:
         async with session.completion_lock:
             if self._sessions.get(session_id) is not session:
                 return _terminal(session_id, "cancelled", "Linear authorization cancelled.")
+            if session.result is not None:
+                return dict(session.result)
             flow = session.flow
             if time.monotonic() >= flow.deadline:
                 await self._close_session(session_id)
@@ -125,14 +128,18 @@ class LinearConnectStore:
                 )
             finally:
                 await client.close()
-            await self._close_session(session_id)
-            return {
+            session.result = {
                 "session_id": session_id,
                 "status": "succeeded",
                 "message": "Linear is connected.",
                 "organization_id": installation.organization_id,
                 "organization_name": installation.organization_name,
             }
+            # A browser may miss the first successful poll while switching tabs.
+            # Retain its result until the session expires, but release the callback listener.
+            OAUTH_FLOWS.remove(flow)
+            await asyncio.to_thread(session.server.close)
+            return dict(session.result)
 
     async def cancel(self, session_id: str) -> dict[str, Any]:
         session = self._sessions.get(session_id)

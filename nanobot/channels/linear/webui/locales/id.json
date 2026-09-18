@@ -66,6 +66,9 @@
     "connecting": "Menghubungkan...",
     "reconnect": "Hubungkan workspace lain",
     "connect": "Hubungkan Linear",
-    "openLinear": "Lanjutkan di Linear"
+    "openLinear": "Lanjutkan di Linear",
+    "createApp": "Buat aplikasi Linear yang sudah diisi",
+    "savePublicUrl": "Simpan URL publik untuk membuat aplikasi Linear yang sudah diisi.",
+    "saveBeforeConnect": "Simpan kredensial aplikasi sebelum mengotorisasi ruang kerja."
   }
 }

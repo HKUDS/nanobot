@@ -66,6 +66,9 @@
     "connecting": "Conectando...",
     "reconnect": "Conectar otro espacio de trabajo",
     "connect": "Conectar Linear",
-    "openLinear": "Continuar en Linear"
+    "openLinear": "Continuar en Linear",
+    "createApp": "Crear app de Linear preconfigurada",
+    "savePublicUrl": "Guarda la URL pública para crear una app de Linear preconfigurada.",
+    "saveBeforeConnect": "Guarda las credenciales de la app antes de autorizar un espacio de trabajo."
   }
 }

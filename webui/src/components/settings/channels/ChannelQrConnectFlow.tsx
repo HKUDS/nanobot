@@ -51,6 +51,7 @@ export function ChannelQrConnectFlow({
   renderPending,
   resolveMessage,
   suppressSucceeded = false,
+  onActiveChange,
 }: {
   token: string;
   channelName: string;
@@ -66,6 +67,7 @@ export function ChannelQrConnectFlow({
   renderPending?: (context: ChannelQrConnectPendingContext) => ReactNode;
   resolveMessage?: (payload: ChannelConnectPayload) => string | undefined;
   suppressSucceeded?: boolean;
+  onActiveChange?: (active: boolean) => void;
 }) {
   const { client } = useClient();
   const pageVisible = usePageVisibility();
@@ -82,6 +84,9 @@ export function ChannelQrConnectFlow({
   const pending = connect?.status === "pending";
   const succeeded = connect?.status === "succeeded";
   const canStart = !pending && !busy;
+  useEffect(() => {
+    onActiveChange?.(pending || busy);
+  }, [pending, busy, onActiveChange]);
   const pollingPaused = Boolean(connect && pausePolling?.(connect));
   const displayMessage = connect
     ? resolveMessage?.(connect) ?? (connect.message ? channelValidationMessage(connect.message, t) : undefined)

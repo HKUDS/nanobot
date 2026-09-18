@@ -3,14 +3,14 @@ import { lazy } from "react";
 import type { ChannelUiContribution } from "@/channel-plugins/types";
 import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
-const LinearConnectFlow = lazy(() =>
-  import("./LinearConnectFlow").then(({ LinearConnectFlow: component }) => ({
+const LinearPanel = lazy(() =>
+  import("./LinearPanel").then(({ LinearPanel: component }) => ({
     default: component,
   })),
 );
 
 export default {
-  ConnectFlow: LinearConnectFlow,
+  Panel: LinearPanel,
   presentation: {
     displayName: "Linear",
     initials: "LI",

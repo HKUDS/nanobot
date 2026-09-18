@@ -131,8 +131,9 @@ In the new Linear app's settings, copy these values:
 | Webhook signing secret | **Webhook signing secret** |
 
 Return to **Settings → Channels → Linear**, paste all three values, and select
-**Save settings** again. A successful validation lists the complete webhook and
-OAuth callback URLs.
+**Save settings** again. **Connect Linear** becomes available once the required
+settings are saved. Listener settings, callback paths, and allowed users are in
+**Advanced**; setup guides are in the dialog's **Help** menu.
 
 Treat the Client Secret and Webhook signing secret like passwords. They belong
 only in the nanobot configuration and the Linear application settings.

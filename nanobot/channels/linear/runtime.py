@@ -9,7 +9,7 @@ from contextlib import suppress
 from typing import Any, cast
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent, RetryWaitEvent, outbound_event_from_message
+from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent, RetryWaitEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.linear.client import LinearApiError, LinearClient
@@ -42,9 +42,6 @@ class LinearChannel(BaseChannel):
         self._server: LinearServerLease | None = None
         self._reasoning: dict[tuple[str, str], list[str]] = {}
         self._routes: dict[str, dict[str, Any]] = {}
-
-    def progress_transport_defaults(self) -> tuple[bool, bool] | None:
-        return self.config.send_progress, self.config.send_tool_hints
 
     async def start(self) -> None:
         self.config.validate_runtime()
@@ -93,7 +90,16 @@ class LinearChannel(BaseChannel):
         return f"Linear channel failed to start: {error}"
 
     async def send(self, msg: OutboundMessage) -> None:
-        event = outbound_event_from_message(msg)
+        event = msg.event
+        if isinstance(event, ContextCompactionEvent):
+            await self._create_activity(
+                msg.chat_id,
+                msg.metadata,
+                {"type": "thought", "body": msg.content},
+                key=f"compaction:{event.compaction_id}:{event.phase}",
+                ephemeral=event.phase == "started",
+            )
+            return
         if isinstance(event, ProgressEvent):
             if event.tool_events:
                 for item in event.tool_events:

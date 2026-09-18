@@ -66,6 +66,9 @@
     "connecting": "接続しています...",
     "reconnect": "別のワークスペースを接続",
     "connect": "Linear に接続",
-    "openLinear": "Linear で続行"
+    "openLinear": "Linear で続行",
+    "createApp": "入力済みの Linear アプリを作成",
+    "savePublicUrl": "公開 URL を保存すると、入力済みの Linear アプリを作成できます。",
+    "saveBeforeConnect": "ワークスペースを認証する前にアプリの認証情報を保存してください。"
   }
 }
