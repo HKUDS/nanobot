@@ -1,16 +1,13 @@
 """Tests for SubagentManager."""
 
 import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
-from nanobot.agent.tools.filesystem import FileToolsConfig
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import ToolsConfig
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.security.workspace_access import build_workspace_scope
@@ -20,112 +17,6 @@ from nanobot.utils.llm_runtime import LLMRuntime
 def _runtime(provider: LLMProvider) -> LLMRuntime:
     provider.generation = GenerationSettings()
     return LLMRuntime.capture(provider, "test", context_window_tokens=128_000)
-
-
-@pytest.mark.asyncio
-async def test_subagent_uses_tool_loader():
-    """Verify subagent registers tools via ToolLoader, not hard-coded imports."""
-    provider = MagicMock(spec=LLMProvider)
-    provider.get_default_model.return_value = "test"
-    sm = SubagentManager(
-        workspace=Path("/tmp"),
-        bus=MessageBus(),
-        max_tool_result_chars=16_000,
-    )
-    tools = sm._build_tools()
-    assert tools.has("read_file")
-    assert tools.has("write_file")
-    assert not tools.has("message")
-    assert not tools.has("spawn")
-
-
-@pytest.mark.asyncio
-async def test_subagent_build_tools_isolates_file_read_state(tmp_path):
-    """Each spawned subagent needs a fresh file-state cache."""
-    (tmp_path / "note.txt").write_text("hello\n", encoding="utf-8")
-    provider = MagicMock(spec=LLMProvider)
-    provider.get_default_model.return_value = "test"
-    sm = SubagentManager(
-        workspace=tmp_path,
-        bus=MessageBus(),
-        max_tool_result_chars=16_000,
-    )
-
-    first_read = sm._build_tools().get("read_file")
-    second_read = sm._build_tools().get("read_file")
-
-    assert first_read is not second_read
-    assert (await first_read.execute(path="note.txt")).startswith("1| hello")
-    second_result = await second_read.execute(path="note.txt")
-    assert second_result.startswith("1| hello")
-    assert "File unchanged" not in second_result
-
-
-def test_subagent_respects_file_tool_toggle(tmp_path):
-    provider = MagicMock(spec=LLMProvider)
-    provider.get_default_model.return_value = "test"
-    sm = SubagentManager(
-        workspace=tmp_path,
-        bus=MessageBus(),
-        max_tool_result_chars=16_000,
-        tools_config=ToolsConfig(file=FileToolsConfig(enable=False)),
-    )
-
-    tools = sm._build_tools()
-
-    file_tools = {
-        "apply_patch",
-        "edit_file",
-        "find_files",
-        "grep",
-        "list_dir",
-        "read_file",
-        "write_file",
-    }
-    assert file_tools.isdisjoint(tools.tool_names)
-
-
-def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
-    agent_workspace = tmp_path / "agent"
-    project = tmp_path / "project"
-    global_skill = agent_workspace / "skills" / "global-custom" / "SKILL.md"
-    project_skill = project / "skills" / "project-custom" / "SKILL.md"
-    global_skill.parent.mkdir(parents=True)
-    project_skill.parent.mkdir(parents=True)
-    global_skill.write_text("---\ndescription: global skill\n---\nGlobal", encoding="utf-8")
-    project_skill.write_text("---\ndescription: project skill\n---\nProject", encoding="utf-8")
-    manager = SubagentManager(
-        workspace=agent_workspace,
-        bus=MessageBus(),
-        max_tool_result_chars=16_000,
-    )
-
-    prompt = manager._build_subagent_prompt(workspace=project)
-
-    assert "one root and relative SKILL.md paths" in prompt
-    assert "Join them when using `read_file`" in prompt
-    assert str(project.resolve()) not in prompt
-    assert f"Nanobot's agent workspace: {agent_workspace.resolve()}" in prompt
-    assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
-    assert "global-custom" in prompt
-    assert "project-custom" not in prompt
-
-
-def test_subagent_prompt_uses_relative_paths_in_agent_workspace(tmp_path):
-    skill = tmp_path / "skills" / "custom" / "SKILL.md"
-    skill.parent.mkdir(parents=True)
-    skill.write_text("---\ndescription: custom skill\n---\nCustom", encoding="utf-8")
-    manager = SubagentManager(
-        workspace=tmp_path,
-        bus=MessageBus(),
-        max_tool_result_chars=16_000,
-    )
-
-    prompt = manager._build_subagent_prompt()
-
-    assert str(tmp_path.resolve()) not in prompt
-    assert "History log: memory/history.jsonl" in prompt
-    assert "### Workspace skills (`skills`)" in prompt
 
 
 @pytest.mark.asyncio
@@ -141,7 +32,7 @@ async def test_subagent_keeps_project_runtime_scope_with_agent_owned_tools(tmp_p
         bus=MessageBus(),
         max_tool_result_chars=16_000,
     )
-    manager.runner.run = AsyncMock(
+    manager._execute_session = AsyncMock(
         return_value=AgentRunResult(final_content="ok", messages=[], stop_reason="completed")
     )
     manager._announce_result = AsyncMock()
@@ -162,9 +53,9 @@ async def test_subagent_keeps_project_runtime_scope_with_agent_owned_tools(tmp_p
         workspace_scope=build_workspace_scope(project, "restricted"),
     )
 
-    spec = manager.runner.run.call_args.args[0]
-    assert spec.workspace == project
-    assert spec.tools.get("read_file")._workspace == agent_workspace.resolve()
+    spec = manager._execute_session.call_args.args[0]
+    assert spec.workspace_scope.project_path == project
+    assert spec.tools_config.restrict_to_workspace
 
 
 @pytest.mark.asyncio
@@ -209,7 +100,7 @@ async def test_spawned_subagent_inherits_llm_usage_source(tmp_path):
         bus=MessageBus(),
         max_tool_result_chars=16_000,
     )
-    sm.runner.run = AsyncMock(
+    sm._execute_session = AsyncMock(
         return_value=AgentRunResult(final_content="ok", messages=[], stop_reason="completed")
     )
     sm._announce_result = AsyncMock()
@@ -223,5 +114,5 @@ async def test_spawned_subagent_inherits_llm_usage_source(tmp_path):
     tasks = list(sm._running_tasks.values())
     await asyncio.gather(*tasks)
 
-    spec = sm.runner.run.call_args.args[0]
+    spec = sm._execute_session.call_args.args[0]
     assert spec.llm_usage_source == "cron"

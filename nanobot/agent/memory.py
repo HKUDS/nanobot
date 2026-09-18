@@ -804,9 +804,13 @@ class MemoryArchiver:
         session_key: str,
         previous_summary: str | None,
         max_tokens: int,
+        persist: bool = True,
     ) -> str:
-        """Persist the failed chunk and return a bounded replacement checkpoint."""
-        raw = self.store.raw_archive(messages, session_key=session_key)
+        """Return a bounded raw checkpoint, archiving the chunk only when requested."""
+        raw = (
+            self.store.raw_archive(messages, session_key=session_key)
+            if persist else self.store._build_raw_checkpoint(messages)
+        )
         return self._combine_raw_checkpoint(
             raw,
             previous_summary=previous_summary,
@@ -857,8 +861,9 @@ class MemoryArchiver:
         input_token_budget: int | None = None,
         fallback_max_tokens: int | None = None,
         provider_state: ProviderConversationState | None = None,
+        persist: bool = True,
     ) -> str | None:
-        """Append the archive prompt to H and persist its summary."""
+        """Summarize H, optionally persisting the summary or raw fallback."""
         if not source_messages:
             return None
 
@@ -872,6 +877,7 @@ class MemoryArchiver:
                     if fallback_max_tokens is not None
                     else runtime.generation.max_tokens
                 ),
+                persist=persist,
             )
 
         prompt = render_template(
@@ -944,7 +950,7 @@ class MemoryArchiver:
             except Exception:
                 phase = "provider call" if attempt == 0 else "tool-call recovery"
                 logger.warning(
-                    "Memory archive {} failed, raw-dumping to history",
+                    "Memory archive {} failed, using raw checkpoint",
                     phase,
                 )
                 return raw_fallback()
@@ -996,22 +1002,22 @@ class MemoryArchiver:
         assert response is not None
         if response.finish_reason in {"error", "length"}:
             logger.warning(
-                "Memory archive provider did not complete ({}), raw-dumping to history",
+                "Memory archive provider did not complete ({}), using raw checkpoint",
                 response.finish_reason,
             )
             return raw_fallback()
         if response.has_tool_calls is True:
-            logger.warning("Memory archive provider returned tool calls, raw-dumping to history")
+            logger.warning("Memory archive provider returned tool calls, using raw checkpoint")
             return raw_fallback()
         summary = response.content
         if not summary or not summary.strip():
-            logger.warning("Memory archive provider returned no summary, raw-dumping to history")
+            logger.warning("Memory archive provider returned no summary, using raw checkpoint")
             return raw_fallback()
         summary = self.store._normalize_history_entry(summary)
         if not summary:
             logger.warning("Memory archive provider summary was not safe to replay, raw-dumping")
             return raw_fallback()
-        if summary != "(nothing)":
+        if persist and summary != "(nothing)":
             self.store.append_history(summary, session_key=session_key)
         return summary
 
@@ -1131,6 +1137,7 @@ class Consolidator:
         session_key: str,
         tools: list[dict[str, Any]],
         provider_state: ProviderConversationState | None = None,
+        persist: bool = True,
     ) -> str | None:
         """Summarize the exact transcript prefix already accepted by the model."""
         source_messages = [
@@ -1158,6 +1165,7 @@ class Consolidator:
             input_token_budget=input_token_budget,
             fallback_max_tokens=max(1, checkpoint_tokens),
             provider_state=provider_state,
+            persist=persist,
         )
         if summary is None:
             return None
@@ -1172,6 +1180,7 @@ class Consolidator:
         runtime: LLMRuntime,
         session_key: str,
         tools: list[dict[str, Any]],
+        persist: bool = True,
     ) -> str | None:
         """Prompt a native compacted state without replaying its raw history."""
         return await self.summarize_transcript(
@@ -1181,6 +1190,7 @@ class Consolidator:
             session_key=session_key,
             tools=tools,
             provider_state=state,
+            persist=persist,
         )
 
     @staticmethod

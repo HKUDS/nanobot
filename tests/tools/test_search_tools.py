@@ -8,18 +8,18 @@ import re
 import threading
 import time
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
 from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
-from nanobot.providers.base import GenerationSettings
+from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
     default_workspace_scope,
@@ -773,23 +773,21 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
-    mgr = SubagentManager(
-        workspace=tmp_path,
-        bus=bus,
-        max_tool_result_chars=4096,
-    )
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, max_tool_result_chars=4096)
+    mgr = loop.subagents
     captured: dict[str, list[str]] = {}
 
     async def fake_run(spec):
         captured["tool_names"] = spec.tools.tool_names
-        return SimpleNamespace(
+        return AgentRunResult(
             stop_reason="ok",
             final_content="done",
+            messages=[],
             tool_events=[],
             error=None,
         )
 
-    mgr.runner.run = fake_run
+    loop.runner.run = fake_run
     mgr._announce_result = AsyncMock()
 
     status = SubagentStatus(task_id="sub-1", label="label", task_description="search task", started_at=time.monotonic())
@@ -806,7 +804,8 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
     assert "grep" in captured["tool_names"]
 
 
-def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
     bus = MessageBus()
     skills_dir = tmp_path / "skills"
     (skills_dir / "alpha").mkdir(parents=True)
@@ -821,7 +820,13 @@ def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
         disabled_skills=["alpha"],
     )
 
-    prompt = mgr._build_subagent_prompt()
+    provider = MagicMock()
+    provider.generation = GenerationSettings()
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    await mgr.run_inline(
+        "inspect", runtime=LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
+    )
+    prompt = provider.chat_stream_with_retry.await_args.kwargs["messages"][0]["content"]
 
     assert "alpha" not in prompt
     assert "beta" in prompt

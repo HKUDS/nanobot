@@ -23,12 +23,13 @@ from loguru import logger
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.agent.child_sessions import run_child_session
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver, TranscriptInput
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
-from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
+from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec, CheckpointCallback
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -53,7 +54,7 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.command.router import normalize_command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
-from nanobot.llm_usage.context import source_from_request
+from nanobot.llm_usage.context import LLMUsageSource, source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
@@ -66,6 +67,7 @@ from nanobot.runtime_context import (
     runtime_context_blocks_from_metadata,
 )
 from nanobot.security.workspace_access import (
+    WorkspaceScope,
     WorkspaceScopeResolver,
     bind_workspace_scope,
     reset_workspace_scope,
@@ -163,6 +165,7 @@ class TurnContext:
     provider_compaction_applied: bool = False
 
     ephemeral: bool = False
+    enable_compaction: bool = True
     run_extra_hooks_for_ephemeral: bool = False
     hooks: list[AgentHook] = field(default_factory=list)
     hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
@@ -386,6 +389,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
+            run_session=partial(run_child_session, self),
         )
         self._unified_session = unified_session
         self._running = False
@@ -949,6 +953,13 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
         request_context: RequestContext | None = None,
         provider_state: ProviderConversationState | None = None,
+        enable_compaction: bool | None = None,
+        workspace_scope: WorkspaceScope | None = None,
+        run_hook: AgentHook | None = None,
+        checkpoint_callback: CheckpointCallback | None = None,
+        max_iterations: int | None = None,
+        finalize_on_max_iterations: bool | None = None,
+        usage_source: LLMUsageSource | None = None,
     ) -> AgentRunResult:
         """Run the agent iteration loop.
 
@@ -960,6 +971,8 @@ class AgentLoop:
         Returns the complete result produced by ``AgentRunner``.
         """
         self._sync_subagent_runtime_limits()
+        compact = not ephemeral if enable_compaction is None else enable_compaction
+        compact = compact and session is not None and session.policy.enable_compaction
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
@@ -976,6 +989,8 @@ class AgentLoop:
                     self._PROVIDER_STATE_CHECKPOINT_VERSION
                 )
             self._set_runtime_checkpoint(session, public_payload)
+            if checkpoint_callback is not None:
+                await checkpoint_callback(public_payload)
 
         async def _drain_pending(
             *,
@@ -1126,7 +1141,7 @@ class AgentLoop:
         )
         active_session_key = session.key if session else request_ctx.session_key
         request_metadata = request_ctx.metadata
-        effective_scope = self.workspace_scopes.for_turn(
+        effective_scope = workspace_scope or self.workspace_scopes.for_turn(
             channel=request_ctx.channel,
             message_metadata=request_metadata,
             session_metadata=session.metadata if session is not None else None,
@@ -1135,7 +1150,7 @@ class AgentLoop:
             self.context.build_transcript,
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
-            include_memory=session.policy.persist if session is not None else True,
+            include_memory=session.policy.include_memory if session is not None else True,
         )
         if request_context is None:
             request_ctx = dataclasses.replace(
@@ -1163,7 +1178,7 @@ class AgentLoop:
         try:
             for scope in turn_scopes or ():
                 turn_scope_stack.enter_context(scope)
-            hook = build_agent_turn_hook(AgentTurnHookSpec(
+            hook = run_hook or build_agent_turn_hook(AgentTurnHookSpec(
                 events=events,
                 streaming=streaming,
                 channel=request_ctx.channel,
@@ -1185,7 +1200,7 @@ class AgentLoop:
                 initial_messages=None,
                 tools=effective_tools,
                 runtime=runtime,
-                max_iterations=self.max_iterations,
+                max_iterations=self.max_iterations if max_iterations is None else max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 transcript_input=transcript_input,
                 transcript_builder=transcript_builder,
@@ -1201,8 +1216,9 @@ class AgentLoop:
                         runtime=runtime,
                         session_key=session.key,
                         tools=effective_tools.get_definitions(),
+                        persist=session.policy.persist,
                     )
-                    if session is not None and not ephemeral
+                    if session is not None and compact
                     else None
                 ),
                 consolidate_provider_compaction=(
@@ -1211,20 +1227,25 @@ class AgentLoop:
                         runtime=runtime,
                         session_key=session.key,
                         tools=effective_tools.get_definitions(),
+                        persist=session.policy.persist,
                     )
-                    if session is not None and not ephemeral
+                    if session is not None and compact
                     else None
                 ),
                 injection_callback=_drain_pending,
                 terminal_injection_callback=_wait_for_pending,
                 continuation_callback=_goal_continue,
-                finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
-                    pending_queue_available=pending_queue is not None and session is not None,
-                    session_metadata=session_metadata,
-                    message_metadata=request_metadata,
+                finalize_on_max_iterations=(
+                    finalize_on_max_iterations
+                    if finalize_on_max_iterations is not None
+                    else turn_continuation.should_finalize_on_max_iterations(
+                        pending_queue_available=pending_queue is not None and session is not None,
+                        session_metadata=session_metadata,
+                        message_metadata=request_metadata,
+                    )
                 ),
                 provider_state=provider_state,
-                llm_usage_source=source_from_request(
+                llm_usage_source=usage_source or source_from_request(
                     active_session_key,
                     channel=request_ctx.channel,
                     metadata=request_metadata,
@@ -1236,7 +1257,7 @@ class AgentLoop:
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
             reset_file_states(file_state_token)
-        if session is not None and not ephemeral:
+        if session is not None and (not ephemeral or not session.policy.persist):
             session.provider_state = result.provider_state
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
@@ -1707,6 +1728,7 @@ class AgentLoop:
             on_runtime_admitted=on_runtime_admitted,
             pending_queue=pending_queue,
             ephemeral=ephemeral,
+            enable_compaction=not ephemeral,
             run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
             hooks=list(hooks or []),
             hook_factories=list(hook_factories or []),
@@ -2041,6 +2063,7 @@ class AgentLoop:
                 session=ctx.session,
                 pending_queue=ctx.pending_queue,
                 ephemeral=ctx.ephemeral,
+                enable_compaction=ctx.enable_compaction,
                 run_extra_hooks_for_ephemeral=ctx.run_extra_hooks_for_ephemeral,
                 hooks=ctx.hooks,
                 hook_factories=ctx.hook_factories,
@@ -2097,8 +2120,7 @@ class AgentLoop:
             input_persisted_early=ctx.input_persisted_early,
         )
         if (
-            not ctx.ephemeral
-            and ctx.provider_compaction_applied
+            ctx.provider_compaction_applied
             and ctx.summary_checkpoint is not None
         ):
             # The next request must rebuild from the portable checkpoint;
