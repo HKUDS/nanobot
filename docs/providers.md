@@ -190,6 +190,45 @@ Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models)
 to choose a currently available model. The WebUI can also load that catalog
 after the Eden AI API key is saved under **Settings → Models**.
 
+### aimlapi.com Gateway
+
+[aimlapi.com](https://aimlapi.com) exposes an OpenAI-compatible chat-completions
+endpoint at `https://api.aimlapi.com/v1`. Configure the built-in `aimlapi`
+provider and use the full `vendor/model` identifier from its catalog:
+
+```json
+{
+  "providers": {
+    "aimlapi": {
+      "apiKey": "${AIMLAPI_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "aimlapi",
+      "model": "openai/gpt-5",
+      "maxTokens": 8192
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Nanobot sends the model ID unchanged, including its vendor prefix, and passes
+`reasoning_effort` as the normal top-level Chat Completions parameter. Other
+valid IDs include `anthropic/claude-sonnet-4-6` and `google/gemini-3.1-pro-preview`.
+The public catalog at `https://api.aimlapi.com/v1/models` lists the current IDs;
+entries with `"type": "openai/chat-completions"` are the chat models. The WebUI
+can also load that catalog after the API key is saved under **Settings → Models**.
+
+Note that `https://api.aimlapi.com/v1/models` answers `200` for any credential,
+including an invalid one, so a successful model list does not prove the key
+works. The first chat completion is what verifies it.
+
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
