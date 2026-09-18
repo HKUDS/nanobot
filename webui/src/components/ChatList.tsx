@@ -1048,9 +1048,9 @@ export const ChatList = memo(function ChatList({
                             >
                             <DropdownMenuTrigger
                               className={cn(
-                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
-                                "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
-                                "focus-visible:opacity-100 data-[state=open]:opacity-100",
+                                "pointer-events-none inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
+                                "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:pointer-events-auto group-hover:opacity-100",
+                                "focus-visible:pointer-events-auto focus-visible:opacity-100 data-[state=open]:pointer-events-auto data-[state=open]:opacity-100",
                               )}
                               aria-label={t("chat.actions", { title })}
                             >
