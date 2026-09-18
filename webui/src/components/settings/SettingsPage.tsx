@@ -111,6 +111,7 @@ export function SettingsPage({
     closeProviderOAuthFlow,
     completeProviderOAuthResponse,
     createCustomProvider,
+    deleteProvider,
     customMcpForm,
     editingProviderKeys,
     error,
@@ -401,6 +402,7 @@ export function SettingsPage({
               }
               onSaveProvider={saveProvider}
               onCreateCustomProvider={createCustomProvider}
+              onDeleteProvider={deleteProvider}
               onProviderOAuthLogin={(provider) => runProviderOAuth(provider, "login")}
               onProviderOAuthLogout={(provider) => runProviderOAuth(provider, "logout")}
             />
