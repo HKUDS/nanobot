@@ -188,6 +188,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   ovms: brand("openvino.ai", "#0071C5", "OV"),
   qianfan: brand("cloud.baidu.com", "#2932E1", "QF"),
   searxng: brand("searxng.org", "#3050FF", "SX"),
+  sensenova: brand("sensenova.cn", "#0052D9", "SN"),
   siliconflow: brand("siliconflow.cn", "#111827", "SF"),
   skywork: brand("skywork.ai", "#5B5BF6", "SW"),
   stepfun: brand("stepfun.com", "#2F6BFF", "SF", [
