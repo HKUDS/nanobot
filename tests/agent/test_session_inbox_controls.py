@@ -18,7 +18,7 @@ from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequ
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
-from nanobot.session.recovery import PENDING_FOLLOWUPS_KEY
+from nanobot.session.recovery import PENDING_FOLLOWUPS_KEY, pending_followups
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
 
@@ -231,6 +231,66 @@ async def test_cancelled_session_completes_queued_automation_waiters(loop):
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize("followup_still_queued", [True, False])
+async def test_explicit_cancel_discards_webui_followup_recovery_journal(
+    loop,
+    followup_still_queued,
+):
+    started = asyncio.Event()
+
+    async def chat(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    loop.provider.chat_stream_with_retry = chat
+    key = "websocket:test"
+    loop._enqueue_session_message(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="first",
+        metadata={"webui": True},
+    ))
+    await asyncio.wait_for(started.wait(), timeout=3)
+    loop._enqueue_session_message(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="cancel me",
+        metadata={"webui": True},
+    ))
+
+    if not followup_still_queued:
+        consumed = loop._pending_queues[key].get_nowait()
+        assert consumed.content == "cancel me"
+    session = loop.sessions.get_or_create(key)
+    assert [message.content for message in pending_followups(session)] == ["cancel me"]
+
+    await loop._cancel_active_tasks(key)
+
+    assert pending_followups(loop.sessions.get_or_create(key)) == []
+
+
+async def test_shutdown_preserves_webui_followup_recovery_journal(loop):
+    started = asyncio.Event()
+
+    async def chat(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    loop.provider.chat_stream_with_retry = chat
+    key = "websocket:test"
+    loop._enqueue_session_message(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="first",
+        metadata={"webui": True},
+    ))
+    await asyncio.wait_for(started.wait(), timeout=3)
+    loop._enqueue_session_message(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="recover me",
+        metadata={"webui": True},
+    ))
+
+    loop.preserve_inflight_turns_on_shutdown()
+    await loop.aclose()
+
+    session = loop.sessions.get_or_create(key)
+    assert [message.content for message in pending_followups(session)] == ["recover me"]
 
 
 @pytest.mark.parametrize("action", ["stop", "close"])

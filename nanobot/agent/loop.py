@@ -85,6 +85,7 @@ from nanobot.session.recovery import (
     RECOVERY_INBOUND_METADATA_KEY,
     RecoveryAdmission,
     acknowledge_pending_followups,
+    pending_followups,
     record_pending_followup,
     restore_pending_interruption,
     restore_runtime_checkpoint,
@@ -855,6 +856,19 @@ class AgentLoop:
 
         Returns the total number of cancelled tasks, subagents, and exec sessions.
         """
+        journal_session = self.sessions.get_cached(key) or self.sessions.read_session_snapshot(key)
+        journaled_followup_ids = (
+            tuple(
+                followup_id
+                for followup in pending_followups(journal_session)
+                if isinstance(
+                    followup_id := followup.metadata.get(PENDING_FOLLOWUP_ID_KEY),
+                    str,
+                )
+            )
+            if journal_session is not None
+            else ()
+        )
         pending = self._pending_queues.get(key)
         tasks = tuple(self._active_tasks.pop(key, set()))
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
@@ -866,6 +880,13 @@ class AgentLoop:
             # cleanup handler. Only reclaim that worker's original inbox.
             self._pending_queues.pop(key, None)
             await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
+        if journaled_followup_ids and journal_session is not None:
+            # Explicit session cancellation owns the follow-ups accepted before
+            # it began. Gateway shutdown uses aclose() directly and keeps this
+            # journal intact for startup recovery.
+            current_session = self.sessions.get_cached(key) or journal_session
+            acknowledge_pending_followups(current_session, journaled_followup_ids)
+            self.sessions.save(current_session)
         sub_cancelled = await self.subagents.cancel_by_session(key)
         exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
         return cancelled + sub_cancelled + exec_cancelled
