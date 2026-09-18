@@ -295,6 +295,27 @@ async def test_stop_is_safe_after_partial_start(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stop_cancels_pending_reaction_work() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    started = asyncio.Event()
+
+    async def delayed_reaction() -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(delayed_reaction())
+    channel._working_emoji_tasks["123"] = task
+    channel._pending_reactions["123"] = object()
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+
+    await channel.stop()
+
+    assert task.cancelled()
+    assert channel._working_emoji_tasks == {}
+    assert channel._pending_reactions == {}
+
+
+@pytest.mark.asyncio
 async def test_on_message_ignores_self_messages() -> None:
     # Self-loop guard: messages from this bot's own account must be dropped (#3217).
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())

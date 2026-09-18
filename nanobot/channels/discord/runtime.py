@@ -870,9 +870,20 @@ class DiscordChannel(BaseChannel):
         for channel_id in channel_ids:
             await self._stop_typing(channel_id)
 
+    async def _cancel_all_reactions(self) -> None:
+        """Stop delayed reactions and release their retained messages."""
+        tasks = tuple(self._working_emoji_tasks.values())
+        self._working_emoji_tasks.clear()
+        self._pending_reactions.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _reset_runtime_state(self, close_client: bool) -> None:
-        """Reset client and typing state."""
+        """Reset client and transient runtime state."""
         await self._cancel_all_typing()
+        await self._cancel_all_reactions()
         self._compaction_notices.clear()
         self._stream_bufs.clear()
         self._known_channels.clear()
