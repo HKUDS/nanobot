@@ -81,8 +81,16 @@ class _FakeAttachment:
 
 class _FakePartialMessage:
     # Lightweight stand-in for Discord partial message references used in replies.
-    def __init__(self, message_id: int) -> None:
+    def __init__(self, message_id: int, channel_id: int) -> None:
         self.id = message_id
+        self.channel_id = channel_id
+
+    def to_reference(self, *, fail_if_not_exists: bool = True) -> discord.MessageReference:
+        return discord.MessageReference(
+            message_id=self.id,
+            channel_id=self.channel_id,
+            fail_if_not_exists=fail_if_not_exists,
+        )
 
 
 class _FakeSentMessage:
@@ -125,7 +133,7 @@ class _FakeChannel:
         return message
 
     def get_partial_message(self, message_id: int) -> _FakePartialMessage:
-        return _FakePartialMessage(message_id)
+        return _FakePartialMessage(message_id, self.id)
 
     def typing(self):
         channel = self
@@ -770,7 +778,9 @@ async def test_send_delta_replies_to_triggering_message_when_enabled() -> None:
 
     await owner.send_delta("123", "hello", {"message_id": "789"}, stream_id="s1")
 
-    assert target.sent_payloads[0]["reference"].id == 789
+    reference = target.sent_payloads[0]["reference"]
+    assert reference.message_id == 789
+    assert reference.to_dict()["fail_if_not_exists"] is False
     assert target.sent_payloads[0]["allowed_mentions"].replied_user is False
 
 
@@ -1102,7 +1112,7 @@ async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_pa
 
     assert len(target.sent_payloads) == 3
     assert target.sent_payloads[0]["file_name"] == "demo.txt"
-    assert target.sent_payloads[0]["reference"].id == 55
+    assert target.sent_payloads[0]["reference"].message_id == 55
     assert target.sent_payloads[1]["content"] == "a" * 2000
     assert target.sent_payloads[2]["content"] == "a" * 100
 
@@ -1126,7 +1136,9 @@ async def test_client_send_outbound_replies_to_triggering_message_when_enabled()
         )
     )
 
-    assert target.sent_payloads[0]["reference"].id == 789
+    reference = target.sent_payloads[0]["reference"]
+    assert reference.message_id == 789
+    assert reference.to_dict()["fail_if_not_exists"] is False
     assert target.sent_payloads[0]["allowed_mentions"].replied_user is False
 
 
@@ -1150,7 +1162,9 @@ async def test_client_send_outbound_explicit_reply_takes_precedence() -> None:
         )
     )
 
-    assert target.sent_payloads[0]["reference"].id == 55
+    reference = target.sent_payloads[0]["reference"]
+    assert reference.message_id == 55
+    assert reference.to_dict()["fail_if_not_exists"] is True
 
 
 @pytest.mark.asyncio
@@ -1177,7 +1191,7 @@ async def test_client_send_outbound_replies_on_first_successful_attachment(tmp_p
     )
 
     assert target.sent_payloads[0]["file_name"] == "valid.txt"
-    assert target.sent_payloads[0]["reference"].id == 789
+    assert target.sent_payloads[0]["reference"].message_id == 789
 
 
 @pytest.mark.asyncio

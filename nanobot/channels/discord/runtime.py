@@ -285,6 +285,7 @@ if DISCORD_AVAILABLE:
             reference, mention_settings = self._channel._build_reply_context(
                 messageable_channel,
                 reply_to,
+                fail_if_not_exists=msg.reply_to is not None,
             )
             sent_media = False
             failed_media: list[str] = []
@@ -331,7 +332,7 @@ if DISCORD_AVAILABLE:
             channel: Messageable,
             file_path: str,
             *,
-            reference: discord.PartialMessage | None,
+            reference: discord.MessageReference | None,
             mention_settings: discord.AllowedMentions,
         ) -> bool:
             """Send a file attachment via discord.py."""
@@ -419,7 +420,9 @@ class DiscordChannel(BaseChannel):
         self,
         channel: Messageable,
         reply_to: str | None,
-    ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
+        *,
+        fail_if_not_exists: bool,
+    ) -> tuple[discord.MessageReference | None, discord.AllowedMentions]:
         """Build a native Discord reply without pinging the replied-to user."""
         mention_settings = discord.AllowedMentions(replied_user=False)
         if not reply_to:
@@ -430,7 +433,8 @@ class DiscordChannel(BaseChannel):
             self.logger.warning("Invalid reply target: {}", reply_to)
             return None, mention_settings
 
-        return cast(Any, channel).get_partial_message(message_id), mention_settings
+        partial = cast(Any, channel).get_partial_message(message_id)
+        return partial.to_reference(fail_if_not_exists=fail_if_not_exists), mention_settings
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
@@ -594,7 +598,11 @@ class DiscordChannel(BaseChannel):
         if buf.message is None:
             try:
                 reply_to = self._reply_target(metadata)
-                reference, mention_settings = self._build_reply_context(target, reply_to)
+                reference, mention_settings = self._build_reply_context(
+                    target,
+                    reply_to,
+                    fail_if_not_exists=False,
+                )
                 kwargs: dict[str, Any] = {"content": buf.text}
                 if reference is not None:
                     kwargs["reference"] = reference
