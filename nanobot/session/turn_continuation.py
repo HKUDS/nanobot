@@ -43,6 +43,15 @@ def internal_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
     return bool(metadata and metadata.get(INTERNAL_CONTINUATION_META) is True)
 
 
+def sustained_goal_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
+    """True only for an internal continuation owned by sustained-goal policy."""
+    return bool(
+        internal_continuation_inbound(metadata)
+        and metadata
+        and metadata.get(INTERNAL_CONTINUATION_KIND_META) == _GOAL_CONTINUATION_KIND
+    )
+
+
 def internal_continuation_pending(metadata: Mapping[str, Any] | None) -> bool:
     """True when the current turn scheduled an invisible continuation slice."""
     return bool(metadata and metadata.get(INTERNAL_CONTINUATION_PENDING_META) is True)

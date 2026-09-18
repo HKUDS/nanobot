@@ -1493,7 +1493,7 @@ class AgentLoop:
             async with lock, gate:
                 # A preceding user turn may have completed or blocked the goal
                 # while its older continuation was still waiting in the inbox.
-                if turn_continuation.internal_continuation_inbound(msg.metadata) and not (
+                if turn_continuation.sustained_goal_continuation_inbound(msg.metadata) and not (
                     sustained_goal_active(self.sessions.get_or_create(session_key).metadata)
                 ):
                     return
