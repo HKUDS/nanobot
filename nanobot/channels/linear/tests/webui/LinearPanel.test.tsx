@@ -9,6 +9,7 @@ import {
   screen,
   settingsPayload,
   waitFor,
+  within,
 } from "@/tests/settings-test-utils";
 
 import { linearManifestUrl } from "../../webui/manifest";
@@ -84,7 +85,7 @@ describe("Linear channel UI", () => {
     expect(manifest.webhook?.resourceTypes).not.toContain("Comment");
   });
 
-  it("saves a public URL before OAuth credentials and reveals the app manifest", async () => {
+  it("automatically saves a public URL before OAuth credentials and reveals the app button", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -130,7 +131,7 @@ describe("Linear channel UI", () => {
     fireEvent.change(await screen.findByPlaceholderText("https://nanobot.example.com"), {
       target: { value: "https://nanobot.example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Save/ }));
+    expect(screen.queryByRole("button", { name: /^Save/ })).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(requestMutationMock).toHaveBeenCalledWith(
@@ -174,7 +175,6 @@ describe("Linear channel UI", () => {
       target: { value: "3980" },
     });
     expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /^Save/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled());
     const params = requestMutationMock.mock.calls[0][1] as { values: Record<string, unknown> };
     expect(params.values["channels.linear.port"]).toBe("3980");
@@ -190,12 +190,104 @@ describe("Linear channel UI", () => {
     fireEvent.change(await screen.findByRole("textbox", { name: "OAuth client ID" }), {
       target: { value: "replacement-client" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Save/ }));
+    fireEvent.blur(screen.getByRole("textbox", { name: "OAuth client ID" }));
     expect(await screen.findByText("Unable to save settings")).toBeVisible();
     expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toHaveValue("replacement-client");
     expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
+    await new Promise((resolve) => setTimeout(resolve, 750));
     expect(requestMutationMock).toHaveBeenCalledTimes(1);
     expect(requestMutationMock.mock.calls[0][1]).not.toHaveProperty("enable");
+  });
+
+  it("waits for a secret field to blur before saving its replacement", async () => {
+    const feature = savedFeature();
+    mockFeature(feature);
+    requestMutationMock.mockResolvedValueOnce({
+      saved: true, nanobot_features: { features: [feature], enabled_count: 0 },
+    });
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    const input = screen.getByLabelText("OAuth client secret", { exact: true });
+    fireEvent.change(input, { target: { value: "replacement-secret" } });
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.blur(input);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    const params = requestMutationMock.mock.calls[0][1] as { values: Record<string, unknown> };
+    expect(params.values["channels.linear.clientSecret"]).toBe("replacement-secret");
+    expect(params.values).not.toHaveProperty("channels.linear.webhookSigningSecret");
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(input).toHaveAttribute("placeholder", "Saved secret");
+  });
+
+  it("removes both saved secrets with one action while keeping the public URL and client ID", async () => {
+    const feature = savedFeature();
+    mockFeature(feature);
+    const secretKeys = ["channels.linear.clientSecret", "channels.linear.webhookSigningSecret"];
+    requestMutationMock.mockResolvedValueOnce({
+      saved: true, nanobot_features: {
+        features: [{ ...feature, configured_fields: feature.configured_fields?.filter(
+          (key) => !secretKeys.includes(key),
+        ) }], enabled_count: 0,
+      },
+    });
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    expect(screen.getAllByRole("button", { name: "Remove saved credentials" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Remove saved credentials" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    const params = requestMutationMock.mock.calls[0][1] as { values: Record<string, unknown> };
+    for (const key of secretKeys) expect(params.values[key]).toBeNull();
+    expect(params.values["channels.linear.clientId"]).toBe("client-id");
+    expect(params.values["channels.linear.publicBaseUrl"]).toBe("https://nanobot.example.com");
+    await waitFor(() => expect(screen.queryByRole("button", {
+      name: "Remove saved credentials",
+    })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
+  });
+
+  it("flushes the draft on close and waits for one in-flight save", async () => {
+    const feature = savedFeature();
+    mockFeature(feature);
+    let finishSave: ((value: unknown) => void) | undefined;
+    requestMutationMock.mockImplementationOnce(() => new Promise((resolve) => { finishSave = resolve; }));
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "OAuth client ID" }), {
+      target: { value: "replacement-client" },
+    });
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    expect(dialog).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    finishSave?.({ saved: true, nanobot_features: { features: [{
+      ...feature, config_values: { ...feature.config_values, "channels.linear.clientId": "replacement-client" },
+    }], enabled_count: 0 } });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("keeps the dialog and draft after a failed close save and allows retry", async () => {
+    const feature = savedFeature();
+    mockFeature(feature);
+    requestMutationMock.mockRejectedValueOnce(new Error("Connection lost"));
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "OAuth client ID" }), {
+      target: { value: "replacement-client" },
+    });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close", exact: true }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Connection lost");
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toHaveValue("replacement-client");
+    requestMutationMock.mockResolvedValueOnce({ saved: true, nanobot_features: { features: [{
+      ...feature, config_values: { ...feature.config_values, "channels.linear.clientId": "replacement-client" },
+    }], enabled_count: 0 } });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled());
+    expect(requestMutationMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("shows the OAuth handoff and cancels a pending authorization", async () => {
@@ -211,7 +303,7 @@ describe("Linear channel UI", () => {
       "href", "https://linear.app/oauth/authorize?client_id=test",
     );
     expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /^Save/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Remove saved credentials" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(await screen.findByText("Authorization stopped.")).toBeVisible();
@@ -219,6 +311,51 @@ describe("Linear channel UI", () => {
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.connect.cancel", { channel: "linear", session_id: "linear-oauth" }, 20_000,
     );
+  });
+
+  it("restores a running connection on reopen without starting OAuth", async () => {
+    mockFeature({ ...savedFeature(), enabled: true, running: true, runtime_status: "running" });
+    renderSettingsView({ initialSection: "channels" });
+    const open = await screen.findByRole("button", { name: "View Linear settings" });
+    fireEvent.click(open);
+    expect(within(screen.getByRole("dialog")).getByText("Connected", { exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect another workspace" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Connect Linear" })).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close", exact: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(open);
+    expect(within(screen.getByRole("dialog")).getByText("Connected", { exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect another workspace" })).toBeEnabled();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("starts another workspace authorization directly and preserves the connection on cancel", async () => {
+    mockFeature({ ...savedFeature(), enabled: true, running: true, runtime_status: "running" });
+    requestMutationMock
+      .mockResolvedValueOnce({ session_id: "another-workspace", status: "pending",
+        qr_url: "https://linear.app/oauth/authorize?client_id=test" })
+      .mockResolvedValueOnce({ session_id: "another-workspace", status: "cancelled" });
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect another workspace" }));
+    expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.channel.connect.start", { channel: "linear", force: true }, 150_000,
+    );
+    expect(await screen.findByRole("link", { name: "Continue in Linear" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("button", { name: "Connect another workspace" })).toBeEnabled();
+    expect(within(screen.getByRole("dialog")).getByText("Connected", { exact: true })).toBeVisible();
+    expect(screen.queryByText("Authorization stopped.")).not.toBeInTheDocument();
+  });
+
+  it("does not mark saved credentials or a failed runtime as connected", async () => {
+    mockFeature({ ...savedFeature(), enabled: true, configured: true, runtime_status: "failed",
+      runtime_error: "Linear channel failed to start" });
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    expect(within(screen.getByRole("dialog")).queryByText("Connected", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("Linear channel failed to start")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled();
   });
 });
 

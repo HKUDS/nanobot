@@ -35,7 +35,7 @@ Prepare these four things:
 |---|---|
 | Working nanobot | `nanobot agent -m "Hello"` returns a response |
 | Linear access | Permission to create a private OAuth app; a workspace admin must approve its installation |
-| Public HTTPS origin | A stable address such as `https://nanobot.example.com` |
+| Public HTTPS origin | A reachable address such as `https://nanobot.example.com`; use a fixed hostname for ongoing use |
 | Local route | The public address forwards to nanobot's Linear listener, which defaults to port `3979` |
 
 The public address is an **origin**, not a complete endpoint. Enter
@@ -56,11 +56,11 @@ The four network fields have different jobs:
 The native Linear Agent transport requires a webhook; there is no polling mode.
 The OAuth callback also needs to reach the same nanobot instance.
 
-You do **not** need a public IP address. A reverse proxy or HTTPS tunnel can
-forward a public hostname to `127.0.0.1:3979`. Cloudflare Tunnel, Tailscale
-Funnel, Caddy, nginx, and similar tools can all provide this route. Use a stable
-hostname for normal use: if the hostname changes, you must update both URLs in
-the Linear app.
+You do **not** need a public IP address when using an HTTPS tunnel such as
+Cloudflare Tunnel or Tailscale Funnel. On a publicly reachable server, Caddy,
+nginx, or another reverse proxy can provide HTTPS and forward requests to
+`127.0.0.1:3979`. Use a stable hostname for normal use: if the hostname changes,
+update **Public HTTPS URL** in nanobot and both registered URLs in the Linear app.
 
 Choose the simplest option that matches your deployment:
 
@@ -69,7 +69,7 @@ Choose the simplest option that matches your deployment:
 | Home server, laptop, or a network behind NAT | A named HTTPS tunnel with a fixed hostname |
 | VPS with a domain and existing HTTPS proxy | Add a reverse-proxy route to `127.0.0.1:3979` |
 | Docker or Kubernetes | Route the ingress or proxy to the container's port `3979`; keep the public URL on the ingress |
-| Short local test | A temporary HTTPS tunnel works, but you must recreate or edit the Linear app when its hostname changes |
+| Short local test | A temporary HTTPS tunnel works; update nanobot's public URL and the app's callback and webhook URLs whenever its hostname changes |
 
 With the default paths, the route must preserve these two requests:
 
@@ -84,18 +84,37 @@ network. Containers and separate reverse-proxy hosts may require `0.0.0.0`.
 The Linear listener serves plain HTTP locally; terminate HTTPS at the proxy or
 tunnel instead of exposing port `3979` directly to the internet.
 
+### Temporary HTTPS for a local test
+
+Install [cloudflared](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/),
+then run it in a separate terminal:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3979
+```
+
+Use the printed `https://<random-name>.trycloudflare.com` origin as **Public
+HTTPS URL** in the setup below. Keep the tunnel running throughout authorization
+and testing. The listener starts when you select **Connect Linear**, so a 502
+before that step can mean the local listener has not started yet.
+
+[Quick Tunnels](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
+are intended for testing and generate a new hostname on restart. Update the
+nanobot public URL and the Linear app's Redirect URI and Webhook URL before
+continuing with a new hostname.
+
 ## Recommended setup in the WebUI
 
 Keep `nanobot webui` running throughout the setup.
 
-### 1. Save the public address
+### 1. Enter the public address
 
 1. Open **Settings → Channels → Linear**.
-2. Enter your stable origin in **Public HTTPS URL**, for example
+2. Enter your public origin in **Public HTTPS URL**, for example
    `https://nanobot.example.com`.
-3. Leave the three OAuth credential fields empty for now.
-4. Select **Save settings**. nanobot saves the partial configuration and shows
-   **Create prefilled Linear app**.
+3. Leave the three credential fields empty for now.
+4. Wait for **Settings saved.** The **Create prefilled Linear app** button
+   becomes available after the partial configuration is saved automatically.
 
 Saving a partial configuration at this point is expected. You will create the
 credentials in the next step.
@@ -130,10 +149,17 @@ In the new Linear app's settings, copy these values:
 | Client Secret | **OAuth client secret** |
 | Webhook signing secret | **Webhook signing secret** |
 
-Return to **Settings → Channels → Linear**, paste all three values, and select
-**Save settings** again. **Connect Linear** becomes available once the required
-settings are saved. Listener settings, callback paths, and allowed users are in
-**Advanced**; setup guides are in the dialog's **Help** menu.
+Return to **Settings → Channels → Linear** and paste all three values. Ordinary
+fields save automatically after a short pause; secret fields save when you leave
+the field. Wait for **Settings saved.** before entering the next credential.
+**Connect Linear** becomes available once the required settings are saved.
+Listener settings, callback paths, and allowed users are in **Advanced**; setup
+guides are in the dialog's **Help** menu.
+
+Closing the dialog waits for pending edits to save. If saving fails, the dialog
+keeps your input and offers **Retry**. **Remove saved credentials** clears both
+the client secret and webhook signing secret while keeping the client ID and
+public URL.
 
 Treat the Client Secret and Webhook signing secret like passwords. They belong
 only in the nanobot configuration and the Linear application settings.
@@ -143,11 +169,13 @@ only in the nanobot configuration and the Linear application settings.
 1. Select **Connect Linear**.
 2. Open the displayed authorization link, or scan the QR code.
 3. Choose the workspace and approve the installation as a workspace admin.
-4. Return to nanobot and wait for **Linear is connected**.
+4. Return to nanobot and wait for the **Connected** badge.
 
 nanobot enables the channel automatically after authorization. The gateway must
-remain running so Linear can deliver webhooks. To replace an authorization, use
-the reconnect action and approve it again.
+remain running so Linear can deliver webhooks. Reopening the panel shows the
+running connection immediately, without another authorization attempt.
+To replace an authorization, select
+**Connect another workspace** and authorize the same workspace again.
 
 The pre-filled manifest creates a private app for the current workspace. A
 distributable OAuth app can authorize additional workspaces; nanobot stores and
@@ -181,6 +209,9 @@ The setup is complete when all of these checks pass:
 - While the channel is running, opening
   `http://127.0.0.1:3979/linear/health` on the nanobot machine returns
   `{"ok":true}`. Use your configured host and port if you changed them.
+- Opening `https://nanobot.example.com/linear/health` through the public route
+  also returns `{"ok":true}`. Substitute your actual public origin. This checks
+  tunnel or proxy reachability; the task checks below verify the Linear connection.
 - A new comment with an explicit @mention creates an Agent Session and receives
   a response.
 - A normal issue comment without an @mention does nothing.
@@ -235,7 +266,9 @@ workspace-scoped access and refresh tokens.
   OAuth Client ID.
 - `Linear-Delivery` IDs are deduplicated.
 - Verified events are committed to a local SQLite queue before nanobot returns
-  HTTP 200. Pending work resumes after a restart.
+  HTTP 200. Queued webhook deliveries that have not yet been dispatched are
+  retried after a restart. This does not guarantee resumption of an interrupted
+  agent turn.
 - Access and rotating refresh tokens are stored in the Linear channel state
   database, not in `config.json` or the browser.
 - OAuth revocation removes the affected workspace installation locally.
@@ -248,10 +281,12 @@ secret.
 
 | Symptom | What to check |
 |---|---|
-| **Create prefilled Linear app** is missing | Enter only the public HTTPS origin in **Public HTTPS URL**, then select **Save settings**. |
-| Linear rejects the callback or webhook URL | Use a stable public `https://` hostname. Do not use HTTP, localhost, a private IP, or a path in **Public HTTPS URL**. |
+| **Create prefilled Linear app** is disabled | Enter only the public HTTPS origin in **Public HTTPS URL** and wait for automatic saving to finish. If saving fails, correct the address or select **Retry**. |
+| Linear rejects the callback or webhook URL | Use a public `https://` hostname. Do not use HTTP, localhost, a private IP, or a path in **Public HTTPS URL**. |
+| The tunnel URL changed | Update **Public HTTPS URL** in nanobot and the Redirect URI and Webhook URL in the Linear app, then start **Connect Linear** again. |
+| Public health returns 502 | Start **Connect Linear** or enable the connected channel. Check local health first, then confirm the tunnel or proxy targets the same listener port. |
 | OAuth opens but cannot finish | Keep `nanobot webui` running. Confirm the proxy forwards `/linear/oauth/callback` to the configured listen host and port. Then start **Connect Linear** again. |
-| OAuth finishes in Linear but nanobot keeps waiting | The callback reached a different nanobot process or URL. Compare the app's Redirect URI with the callback URL shown by nanobot. |
+| OAuth finishes in Linear but nanobot keeps waiting | Keep the nanobot connection dialog open. Confirm the Redirect URI reaches the same nanobot process, and inspect gateway logs for callback or token exchange errors. |
 | The local health URL does not load | Start **Connect Linear** or enable the connected channel, then check the configured listen host and port. |
 | An @mention gets no response | Confirm `AgentSessionEvent` is subscribed, the Client ID and signing secret match the same app, and the workspace authorization has not been revoked. Run `nanobot gateway logs` for the exact error. |
 | The first @mention returns a pairing code | Approve it in the WebUI pairing dialog, then repeat the prompt in the same Agent Session. Alternatively, configure a narrow **Allowed Linear users** list. |

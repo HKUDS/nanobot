@@ -25,6 +25,7 @@ export type ChannelPluginPanelProps = {
   showBrandLogos: boolean;
   onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
 };
 
 export type ChannelPluginConnectFlowProps = {

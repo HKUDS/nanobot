@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -8,11 +9,16 @@ import type { ChannelPluginConnectFlowProps } from "@/channel-plugins/types";
 
 export function LinearConnectFlow({
   token,
+  feature,
   idleLabel,
   connectRequestId,
   onFeaturesUpdate,
   onActiveChange,
-}: ChannelPluginConnectFlowProps & { onActiveChange?: (active: boolean) => void }) {
+  renderActions,
+}: ChannelPluginConnectFlowProps & {
+  onActiveChange?: (active: boolean) => void;
+  renderActions?: (connectButton: ReactNode) => ReactNode;
+}) {
   const { t } = useTranslation();
   const tx = channelTranslator(t, "linear");
 
@@ -24,8 +30,11 @@ export function LinearConnectFlow({
         idleLabel={idleLabel}
         connectRequestId={connectRequestId}
         forceOnRepeat
+        connected={feature.runtime_status === "running"}
+        suppressSucceeded={feature.runtime_status === "running"}
         onFeaturesUpdate={onFeaturesUpdate}
         onActiveChange={onActiveChange}
+        renderActions={renderActions}
         labels={{
           qrAlt: tx("custom.qrAlt", "Linear authorization QR code"),
           scanTitle: tx("custom.authorizeTitle", "Authorize in Linear"),

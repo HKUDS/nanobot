@@ -10,7 +10,7 @@
       "이 nanobot 인스턴스를 안정적인 HTTPS URL로 공개하세요(터널을 사용할 수 있습니다).",
       "Linear에서 read, write, app:mentionable 범위가 있는 비공개 OAuth 앱을 만드세요. app:assignable은 추가하지 마세요.",
       "생성된 URL로 앱 webhook을 AgentSessionEvent, PermissionChange, OAuthAuthorization에 구독하세요.",
-      "설정을 저장하고 OAuth로 워크스페이스를 연결한 다음 이슈에서 앱을 @멘션하세요."
+      "앱 인증 정보를 입력하고 자동 저장이 완료되면 OAuth로 워크스페이스를 연결한 후 이슈에서 앱을 @멘션하세요."
     ],
     "fields": {
       "clientId": {
@@ -68,7 +68,9 @@
     "connect": "Linear 연결",
     "openLinear": "Linear에서 계속",
     "createApp": "미리 입력된 Linear 앱 만들기",
-    "savePublicUrl": "공개 URL을 저장하면 미리 입력된 Linear 앱을 만들 수 있습니다.",
-    "saveBeforeConnect": "워크스페이스를 승인하기 전에 앱 자격 증명을 저장하세요."
+    "savePublicUrl": "공개 HTTPS URL을 입력하면 미리 채워진 Linear 앱을 만들 수 있습니다.",
+    "saveBeforeConnect": "앱 인증 정보를 입력하고 자동 저장이 완료된 후 연결하세요.",
+    "removeCredentials": "저장된 인증 정보 삭제",
+    "retrySave": "다시 시도"
   }
 }

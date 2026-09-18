@@ -43,6 +43,7 @@ export function ChannelQrConnectFlow({
   idleLabel,
   connectRequestId,
   forceOnRepeat = false,
+  connected = false,
   autoStart = false,
   minimalPending = false,
   labels,
@@ -52,6 +53,7 @@ export function ChannelQrConnectFlow({
   resolveMessage,
   suppressSucceeded = false,
   onActiveChange,
+  renderActions,
 }: {
   token: string;
   channelName: string;
@@ -59,6 +61,7 @@ export function ChannelQrConnectFlow({
   idleLabel?: string;
   connectRequestId?: number;
   forceOnRepeat?: boolean;
+  connected?: boolean;
   autoStart?: boolean;
   minimalPending?: boolean;
   labels: ChannelQrConnectLabels;
@@ -68,6 +71,7 @@ export function ChannelQrConnectFlow({
   resolveMessage?: (payload: ChannelConnectPayload) => string | undefined;
   suppressSucceeded?: boolean;
   onActiveChange?: (active: boolean) => void;
+  renderActions?: (connectButton: ReactNode) => ReactNode;
 }) {
   const { client } = useClient();
   const pageVisible = usePageVisibility();
@@ -82,7 +86,7 @@ export function ChannelQrConnectFlow({
   const pollInFlight = useRef(false);
 
   const pending = connect?.status === "pending";
-  const succeeded = connect?.status === "succeeded";
+  const succeeded = !pending && (connected || connect?.status === "succeeded");
   const canStart = !pending && !busy;
   useEffect(() => {
     onActiveChange?.(pending || busy);
@@ -248,6 +252,10 @@ export function ChannelQrConnectFlow({
     }
   };
 
+  const renderActionRow = renderActions ?? ((connectButton: ReactNode) => (
+    <div className="flex flex-wrap justify-end gap-2">{connectButton}</div>
+  ));
+
   return (
     <div className="mt-3 space-y-3">
       {autoStart && busy && !connect ? (
@@ -320,7 +328,8 @@ export function ChannelQrConnectFlow({
         </div>
       ) : null}
 
-      {connect && ["expired", "failed", "cancelled"].includes(connect.status) ? (
+      {connect && ["expired", "failed", "cancelled"].includes(connect.status)
+        && !(connected && connect.status === "cancelled") ? (
         <div className="rounded-control border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
           {displayMessage || labels.stopped}
         </div>
@@ -332,7 +341,7 @@ export function ChannelQrConnectFlow({
         </div>
       ) : null}
 
-      {!pending && !(autoStart && busy && !connect) ? <div className="flex flex-wrap justify-end gap-2">
+      {!pending && !(autoStart && busy && !connect) ? renderActionRow(
         <Button
           type="button"
           size="sm"
@@ -352,7 +361,7 @@ export function ChannelQrConnectFlow({
               ? labels.scanAgain
               : idleLabel ?? labels.connect}
         </Button>
-      </div> : null}
+      ) : null}
     </div>
   );
 }

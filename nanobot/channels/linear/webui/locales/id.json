@@ -10,7 +10,7 @@
       "Ekspos instans nanobot ini melalui URL HTTPS yang stabil (tunnel dapat digunakan).",
       "Buat aplikasi OAuth privat di Linear dengan scope read, write, dan app:mentionable. Jangan tambahkan app:assignable.",
       "Daftarkan webhook aplikasi untuk AgentSessionEvent, PermissionChange, dan OAuthAuthorization menggunakan URL yang dibuat.",
-      "Simpan pengaturan, hubungkan workspace melalui OAuth, lalu @mention aplikasi pada issue."
+      "Masukkan kredensial aplikasi, tunggu hingga tersimpan otomatis, hubungkan ruang kerja dengan OAuth, lalu sebut aplikasi dengan @ dalam issue."
     ],
     "fields": {
       "clientId": {
@@ -68,7 +68,9 @@
     "connect": "Hubungkan Linear",
     "openLinear": "Lanjutkan di Linear",
     "createApp": "Buat aplikasi Linear yang sudah diisi",
-    "savePublicUrl": "Simpan URL publik untuk membuat aplikasi Linear yang sudah diisi.",
-    "saveBeforeConnect": "Simpan kredensial aplikasi sebelum mengotorisasi ruang kerja."
+    "savePublicUrl": "Masukkan URL HTTPS publik untuk membuat aplikasi Linear yang sudah terisi.",
+    "saveBeforeConnect": "Masukkan kredensial aplikasi dan tunggu hingga tersimpan sebelum menghubungkan.",
+    "removeCredentials": "Hapus kredensial tersimpan",
+    "retrySave": "Coba lagi"
   }
 }

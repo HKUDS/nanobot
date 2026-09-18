@@ -10,7 +10,7 @@
       "Expose this nanobot instance through a stable HTTPS URL (a tunnel is fine).",
       "Create a private OAuth app in Linear with read, write, and app:mentionable scopes. Do not add app:assignable.",
       "Subscribe the app webhook to AgentSessionEvent, PermissionChange, and OAuthAuthorization using the generated webhook URL.",
-      "Save settings, connect the workspace with OAuth, then @mention the app on an issue."
+      "Enter the app credentials, wait for them to save automatically, connect the workspace with OAuth, then @mention the app on an issue."
     ],
     "fields": {
       "clientId": {
@@ -68,7 +68,9 @@
     "connect": "Connect Linear",
     "openLinear": "Continue in Linear",
     "createApp": "Create prefilled Linear app",
-    "savePublicUrl": "Save the public URL to create a prefilled Linear app.",
-    "saveBeforeConnect": "Save the app credentials before authorizing a workspace."
+    "savePublicUrl": "Enter a public HTTPS URL to create a prefilled Linear app.",
+    "saveBeforeConnect": "Enter the app credentials and wait for them to save before connecting.",
+    "removeCredentials": "Remove saved credentials",
+    "retrySave": "Retry"
   }
 }

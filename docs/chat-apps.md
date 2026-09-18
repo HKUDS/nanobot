@@ -106,7 +106,7 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
 | **Signal** | signal-cli daemon + phone number |
-| **Linear** | Private OAuth app + public HTTPS callback URL |
+| **Linear** | Private OAuth app + public HTTPS callback and webhook URLs |
 
 <details id="linear">
 <summary><b>Linear</b></summary>
@@ -116,15 +116,17 @@ by explicitly mentioning the installed nanobot app in an issue. Follow-up prompt
 inside that Agent Session continue the same nanobot session without another
 mention. Ordinary issue comments do not invoke nanobot.
 
-The native Agent API is webhook-based. Linear must reach a stable HTTPS URL, but
-the machine running nanobot does not need its own public IP address: a reverse
-proxy, Cloudflare Tunnel, Tailscale Funnel, or another HTTPS tunnel can forward
-the public URL to nanobot's local listener.
+The native Agent API is webhook-based. Linear must reach a public HTTPS URL.
+An HTTPS tunnel can forward requests to nanobot's local listener without a public
+IP; a publicly reachable server can use a reverse proxy. Use a fixed hostname for
+ongoing use. Temporary tunnels also work for testing, but a hostname change
+requires updating nanobot's public URL and the app's callback and webhook URLs.
 
-The recommended setup is **Settings → Channels → Linear**. Save the public URL
-first to reveal a prefilled private OAuth app link, create the app, copy its Client
-ID, Client Secret, and Webhook Signing Secret back into nanobot, save again, then
-choose **Connect Linear**. OAuth requests only `read`, `write`, and
+The recommended setup is **Settings → Channels → Linear**. Enter the public URL
+and wait for automatic saving, select **Create prefilled Linear app**, create the
+app, then copy its Client ID, Client Secret, and Webhook Signing Secret back into
+nanobot. Leave each secret field to save it. Once the settings are saved, choose
+**Connect Linear**. OAuth requests only `read`, `write`, and
 `app:mentionable`; it deliberately does not request `app:assignable` so a new task
 must begin with an @mention.
 

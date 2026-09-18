@@ -10,7 +10,7 @@
       "Công khai phiên bản nanobot này qua URL HTTPS ổn định (có thể dùng tunnel).",
       "Tạo ứng dụng OAuth riêng tư trong Linear với các scope read, write và app:mentionable. Không thêm app:assignable.",
       "Đăng ký webhook của ứng dụng cho AgentSessionEvent, PermissionChange và OAuthAuthorization bằng URL được tạo.",
-      "Lưu cài đặt, kết nối workspace qua OAuth, rồi @mention ứng dụng trong một issue."
+      "Nhập thông tin xác thực của ứng dụng, chờ lưu tự động, kết nối không gian làm việc bằng OAuth, rồi nhắc đến ứng dụng bằng @ trong issue."
     ],
     "fields": {
       "clientId": {
@@ -68,7 +68,9 @@
     "connect": "Kết nối Linear",
     "openLinear": "Tiếp tục trong Linear",
     "createApp": "Tạo ứng dụng Linear điền sẵn",
-    "savePublicUrl": "Lưu URL công khai để tạo ứng dụng Linear điền sẵn.",
-    "saveBeforeConnect": "Lưu thông tin xác thực ứng dụng trước khi cấp quyền cho không gian làm việc."
+    "savePublicUrl": "Nhập URL HTTPS công khai để tạo ứng dụng Linear được điền sẵn.",
+    "saveBeforeConnect": "Nhập thông tin xác thực của ứng dụng và chờ lưu xong trước khi kết nối.",
+    "removeCredentials": "Xóa thông tin xác thực đã lưu",
+    "retrySave": "Thử lại"
   }
 }

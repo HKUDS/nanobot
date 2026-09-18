@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useState } from "react";
-import { ChevronDown, ExternalLink, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, ExternalLink, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
@@ -17,6 +17,8 @@ import {
   localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
 import { Button } from "@/components/ui/button";
+import { channelValidationStatusClass } from "@/components/settings/channels/ChannelValidationProgress";
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { configureChannel } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
@@ -34,6 +36,7 @@ export function LinearPanel({
   actionKey,
   showBrandLogos,
   onFeaturesUpdate,
+  onBeforeCloseChange,
 }: ChannelPluginPanelProps) {
   const { client } = useClient();
   const { t, i18n } = useTranslation();
@@ -58,6 +61,8 @@ export function LinearPanel({
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const advancedPanelId = useId();
 
   useEffect(() => {
@@ -72,6 +77,11 @@ export function LinearPanel({
   const dirty = clearedSecrets.size > 0 || editableFields.some(
     (field) => fieldValues[field.key] !== savedValues[field.key],
   );
+  const secretFields = editableFields.filter((field) => field.secret);
+  const touchedSecret = secretFields.some((field) =>
+    touchedFields.has(field.key) && Boolean(fieldValues[field.key]?.trim()),
+  );
+  const hasSavedSecrets = secretFields.some((field) => configuredFields.has(field.key));
   const manifestDirty = [PUBLIC_BASE_URL_KEY, WEBHOOK_PATH_KEY, CALLBACK_PATH_KEY].some(
     (key) => fieldValues[key] !== savedValues[key],
   );
@@ -90,32 +100,74 @@ export function LinearPanel({
   const setFieldValue = (key: string, value: string) => {
     setFieldValues((current) => ({ ...current, [key]: value }));
     setTouchedFields((current) => new Set(current).add(key));
+    setClearedSecrets((current) => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
     setNotice(null);
+    setSaved(false);
   };
 
-  const saveSettings = async () => {
-    if (busy || connecting) return;
-    setSaving(true);
+  const saveSettings = useCallback(async (): Promise<boolean> => {
+    if (savePromiseRef.current) return savePromiseRef.current;
+    if (!dirty) return true;
+    if (busy || connecting) return false;
+    const save = (async () => {
+      setSaving(true);
+      setSaved(false);
+      setNotice(null);
+      try {
+        const payload = await configureChannel(
+          client,
+          feature.name,
+          channelValuesForSubmit(editableFields, fieldValues, touchedFields, clearedSecrets),
+        );
+        setTouchedFields(new Set());
+        setClearedSecrets(new Set());
+        setVisibleSecrets({});
+        setFieldValues((current) => Object.fromEntries(
+          editableFields.map((field) => [field.key, field.secret ? "" : current[field.key] ?? ""]),
+        ));
+        if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
+        setSaved(true);
+        return true;
+      } catch (err) {
+        setNotice((err as Error).message);
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    })();
+    savePromiseRef.current = save;
+    const result = await save;
+    if (savePromiseRef.current === save) savePromiseRef.current = null;
+    return result;
+  }, [busy, connecting, dirty, client, feature.name, editableFields, fieldValues,
+    touchedFields, clearedSecrets, onFeaturesUpdate]);
+
+  useAutoSave(
+    { fieldValues, clearedSecrets: [...clearedSecrets] },
+    dirty,
+    busy || connecting,
+    () => void saveSettings(),
+    !touchedSecret && !notice,
+  );
+
+  useEffect(() => {
+    onBeforeCloseChange?.(dirty ? saveSettings : null);
+    return () => onBeforeCloseChange?.(null);
+  }, [dirty, saveSettings, onBeforeCloseChange]);
+
+  const removeSavedCredentials = () => {
+    setClearedSecrets(new Set(secretFields.map((field) => field.key)));
+    setFieldValues((current) => ({
+      ...current,
+      ...Object.fromEntries(secretFields.map((field) => [field.key, ""])),
+    }));
     setNotice(null);
-    try {
-      const payload = await configureChannel(
-        client,
-        feature.name,
-        channelValuesForSubmit(editableFields, fieldValues, touchedFields, clearedSecrets),
-      );
-      if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
-      setTouchedFields(new Set());
-      setClearedSecrets(new Set());
-      setVisibleSecrets({});
-      setFieldValues((current) => Object.fromEntries(
-        editableFields.map((field) => [field.key, field.secret ? "" : current[field.key] ?? ""]),
-      ));
-      setNotice(t("settings.channels.savedSettings", { defaultValue: "Settings saved." }));
-    } catch (err) {
-      setNotice((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
+    setSaved(false);
   };
 
   const formProps = {
@@ -124,18 +176,10 @@ export function LinearPanel({
     visibleSecrets,
     clearedSecrets,
     onChange: setFieldValue,
+    onFieldBlur: () => { void saveSettings(); },
     onToggleSecret: (key: string) => {
       setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }));
     },
-    onClearSecret: (key: string, clear: boolean) => {
-      setClearedSecrets((current) => {
-        const next = new Set(current);
-        if (clear) next.add(key);
-        else next.delete(key);
-        return next;
-      });
-    },
-    showSecretActions: true,
     disabled: busy || connecting,
     compact: true,
   };
@@ -149,6 +193,24 @@ export function LinearPanel({
         <div className="flex flex-wrap items-center justify-between gap-3 pe-20">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <h3 className="sr-only">{displayName}</h3>
+          {feature.runtime_status === "running" ? (
+            <span role="status" className={cn(
+              "ms-auto inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium",
+              channelValidationStatusClass("connected"),
+            )}>
+              <Check className="h-3.5 w-3.5" aria-hidden />
+              {t("settings.channels.validation.connected", { defaultValue: "Connected" })}
+            </span>
+          ) : null}
+          <span role="status" aria-live="polite" aria-atomic="true" className={cn(
+            "ms-auto inline-flex items-center gap-1.5 text-[11px] text-muted-foreground",
+            !saving && !saved && "sr-only",
+          )}>
+            {saving ? <><Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden />
+              {t("settings.actions.saving", { defaultValue: "Saving" })}</> : saved ? <>
+              <Check className="h-3 w-3" aria-hidden />
+              {t("settings.channels.savedSettings", { defaultValue: "Settings saved." })}</> : null}
+          </span>
           <button type="button"
             className="inline-flex min-h-8 items-center gap-1.5 rounded px-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-offset-2"
             aria-expanded={advancedOpen} aria-controls={advancedPanelId}
@@ -162,40 +224,62 @@ export function LinearPanel({
         </div>
         <ChannelRuntimeError message={feature.runtime_error} />
         <CredentialForm {...formProps} fields={fields.filter((field) => field.key === PUBLIC_BASE_URL_KEY)} />
-        <div className="text-[12px] leading-5 text-muted-foreground">
-          {manifestUrl && !manifestDirty ? (
-            <a href={manifestUrl} target="_blank" rel="noreferrer"
-              className="inline-flex min-h-8 items-center gap-1.5 rounded text-foreground underline decoration-border underline-offset-4">
-              {tx("custom.createApp", "Create prefilled Linear app")}
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-            </a>
-          ) : tx("custom.savePublicUrl", "Save the public URL to create a prefilled Linear app.")}
-        </div>
+        {!manifestUrl || manifestDirty ? (
+          <p className="text-[12px] leading-5 text-muted-foreground">
+            {tx("custom.savePublicUrl", "Enter a public HTTPS URL to create a prefilled Linear app.")}
+          </p>
+        ) : null}
         <CredentialForm {...formProps} fields={fields.filter((field) => field.key !== PUBLIC_BASE_URL_KEY)} />
         <div id={advancedPanelId} hidden={!advancedOpen}>
           <CredentialForm {...formProps} fields={advancedFields} />
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <Button type="submit" size="sm" variant="secondary" disabled={busy || connecting}
-            className="h-10 rounded-full px-3 text-[12px] font-semibold sm:h-9">
-            {saving ? <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
-            {t("settings.actions.save", { defaultValue: "Save settings" })}
-          </Button>
-        </div>
-        <div role="status" aria-live="polite" className={cn(
-          "rounded-control bg-muted/55 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground",
-          !notice && "sr-only",
-        )}>{notice ?? ""}</div>
+        {notice ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-muted/55 px-3 py-2.5 text-[12px] leading-5">
+            <p role="alert">{notice}</p>
+            <Button type="submit" variant="secondary" size="sm" disabled={busy || connecting}
+              className="min-h-10 rounded-full text-[12px]">
+              {tx("custom.retrySave", "Retry")}
+            </Button>
+          </div>
+        ) : null}
       </form>
-      <fieldset disabled={busy || dirty || !credentialsSaved} className="min-w-0">
-        <legend className="sr-only">{tx("custom.authorizeTitle", "Authorize in Linear")}</legend>
-        <LinearConnectFlow token={token} feature={feature}
-          idleLabel={tx("custom.connect", "Connect Linear")} onFeaturesUpdate={onFeaturesUpdate}
-          onActiveChange={setConnecting} />
-      </fieldset>
+      <LinearConnectFlow token={token} feature={feature}
+        idleLabel={tx("custom.connect", "Connect Linear")} onFeaturesUpdate={onFeaturesUpdate}
+        onActiveChange={setConnecting}
+        renderActions={(connectButton) => (
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <div className="me-auto min-w-0 max-w-full">
+              {manifestUrl && !manifestDirty ? (
+                <Button asChild variant="secondary" size="sm"
+                  className="h-auto min-h-10 max-w-full gap-2 whitespace-normal rounded-full px-4 py-2 text-[12px]">
+                  <a href={manifestUrl} target="_blank" rel="noreferrer">
+                    {tx("custom.createApp", "Create prefilled Linear app")}
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  </a>
+                </Button>
+              ) : (
+                <Button variant="secondary" size="sm" disabled
+                  className="h-auto min-h-10 max-w-full whitespace-normal rounded-full px-4 py-2 text-[12px]">
+                  {tx("custom.createApp", "Create prefilled Linear app")}
+                </Button>
+              )}
+            </div>
+            {hasSavedSecrets ? (
+              <Button type="button" variant="ghost" size="sm" disabled={busy || connecting}
+                className="h-auto min-h-10 whitespace-normal rounded-full text-[12px] text-muted-foreground"
+                onClick={removeSavedCredentials}>
+                {tx("custom.removeCredentials", "Remove saved credentials")}
+              </Button>
+            ) : null}
+            <fieldset disabled={busy || dirty || !credentialsSaved} className="min-w-0 sm:col-start-3">
+              <legend className="sr-only">{tx("custom.authorizeTitle", "Authorize in Linear")}</legend>
+              {connectButton}
+            </fieldset>
+          </div>
+        )} />
       {dirty || !credentialsSaved ? (
         <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
-          {tx("custom.saveBeforeConnect", "Save the app credentials before authorizing a workspace.")}
+          {tx("custom.saveBeforeConnect", "Enter the app credentials and wait for them to save before connecting.")}
         </p>
       ) : null}
     </aside>
