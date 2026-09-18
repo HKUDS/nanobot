@@ -1077,6 +1077,7 @@ describe("App layout", () => {
       "/api/settings": () => {
         if (!restartCompleted) return pendingSettings;
         refreshedSettingsRequests += 1;
+        if (refreshedSettingsRequests === 1) throw new Error("gateway is still starting");
         return refreshedSettingsReady.then(() => refreshedSettings);
       },
     });
@@ -1093,7 +1094,7 @@ describe("App layout", () => {
       for (const handler of statusHandlers) handler("open");
     });
 
-    await waitFor(() => expect(refreshedSettingsRequests).toBeGreaterThan(0));
+    await waitFor(() => expect(refreshedSettingsRequests).toBeGreaterThan(1));
     await act(async () => {
       releaseRefreshedSettings();
       await refreshedSettingsReady;

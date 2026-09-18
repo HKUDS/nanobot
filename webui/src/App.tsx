@@ -2191,6 +2191,19 @@ function Shell({
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: number | undefined;
+    const refreshSettings = (generation: number, attempt = 0): void => {
+      void fetchSettings(getToken())
+        .then((payload) => {
+          if (!cancelled && generation === settingsRefreshGenerationRef.current) {
+            setSettingsSnapshot(payload);
+          }
+        })
+        .catch(() => {
+          if (cancelled || generation !== settingsRefreshGenerationRef.current || attempt >= 3) return;
+          retryTimer = window.setTimeout(() => refreshSettings(generation, attempt + 1), 250);
+        });
+    };
     const unsubscribe = client.onStatus((status) => {
       const startedAt = (() => {
         try {
@@ -2216,19 +2229,12 @@ function Shell({
       setIsRestarting(false);
       setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
       window.setTimeout(() => setRestartToast(null), 3_500);
-      void fetchSettings(getToken())
-        .then((payload) => {
-          if (!cancelled && refreshGeneration === settingsRefreshGenerationRef.current) {
-            setSettingsSnapshot(payload);
-          }
-        })
-        .catch(() => {
-          // The WebSocket can reconnect before the HTTP endpoint is ready.
-        });
+      refreshSettings(refreshGeneration);
     });
     return () => {
       cancelled = true;
       unsubscribe();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [client, getToken, t]);
 
