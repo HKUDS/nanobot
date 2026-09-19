@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from nanobot.agent.hook import AgentHookContext
+from nanobot.agent.tools.base import ToolResult
 from nanobot.bus.outbound_events import (
     FileEditEvent,
     ProgressEvent,
@@ -113,6 +114,13 @@ def tool_event_result_extras(result: Any) -> tuple[list[Any], list[Any]]:
     return files, embeds
 
 
+def tool_event_result_data(result: Any) -> dict[str, Any] | None:
+    """Return structured UI data without changing the model-facing tool result."""
+    if isinstance(result, ToolResult):
+        return result.data
+    return None
+
+
 def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     count = min(len(context.tool_calls), len(context.tool_results), len(context.tool_events))
@@ -123,6 +131,7 @@ def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str
         status = event.get("status")
         phase = "end" if status == "ok" else "error"
         files, embeds = tool_event_result_extras(result)
+        data = tool_event_result_data(result)
         payload = {
             "version": 1,
             "phase": phase,
@@ -134,6 +143,8 @@ def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str
             "files": files,
             "embeds": embeds,
         }
+        if data is not None:
+            payload["data"] = data
         if phase == "error":
             if isinstance(result, str) and result.strip():
                 payload["error"] = result.strip()
