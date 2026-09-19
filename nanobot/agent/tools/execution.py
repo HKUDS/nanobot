@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from contextlib import nullcontext
 from functools import cache
 from typing import Any, cast
@@ -18,11 +18,6 @@ from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
 )
-
-ToolBatchCompletedCallback = Callable[
-    [list[ToolCallRequest], list[Any]],
-    Awaitable[None],
-]
 
 _RETRY_HINT = "\n\n[Analyze the error above and try a different approach.]"
 # SSRF is a hard security block at the tool boundary, but the agent turn
@@ -67,7 +62,6 @@ async def execute_tool_calls(
     workspace_violation_counts: dict[str, int],
     hook: AgentHook,
     context: AgentHookContext,
-    on_batch_completed: ToolBatchCompletedCallback | None = None,
     model_messages: list[dict[str, Any]] | None = None,
     compacted_tool_results: set[str] | None = None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
@@ -85,9 +79,8 @@ async def execute_tool_calls(
         }
     tool_results: list[tuple[Any, dict[str, str]]] = []
     for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
-        batch_results: list[tuple[Any, dict[str, str]]] = []
         if concurrent and len(batch) > 1:
-            batch_results.extend(await asyncio.gather(*(
+            batch_results = await asyncio.gather(*(
                 _execute_tool_call(
                     tools,
                     tool_call,
@@ -98,7 +91,8 @@ async def execute_tool_calls(
                     read_results,
                 )
                 for tool_call in batch
-            )))
+            ))
+            tool_results.extend(batch_results)
         else:
             for tool_call in batch:
                 result = await _execute_tool_call(
@@ -110,14 +104,7 @@ async def execute_tool_calls(
                     context,
                     read_results,
                 )
-                batch_results.append(result)
-
-        tool_results.extend(batch_results)
-        if on_batch_completed is not None:
-            await on_batch_completed(
-                batch,
-                [result for result, _event in batch_results],
-            )
+                tool_results.append(result)
 
     results = [result for result, _event in tool_results]
     events = [event for _result, event in tool_results]

@@ -22,6 +22,7 @@ from nanobot.session.recovery import (
     record_pending_followup,
 )
 from nanobot.webui import session_list_index, transcript
+from nanobot.webui.session_projection import WebUISessionProjection
 
 
 def _persist(manager: SessionManager, session: Session) -> None:
@@ -347,10 +348,23 @@ async def test_uncertain_tool_is_never_replayed(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_partial_tool_checkpoint_preserves_completed_result(tmp_path: Path) -> None:
+@pytest.mark.parametrize("sidecar", [False, True], ids=["inline", "sidecar"])
+@pytest.mark.parametrize("saved_prefix", [False, True], ids=["checkpoint-only", "overlap"])
+async def test_partial_tool_checkpoint_preserves_completed_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sidecar: bool,
+    saved_prefix: bool,
+) -> None:
+    webui_dir = tmp_path / "webui"
+    webui_dir.mkdir()
+    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(transcript, "get_webui_dir", lambda: webui_dir)
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:chat")
     session.messages.append({"role": "user", "content": "finish both"})
+    session.metadata[PENDING_USER_TURN_KEY] = True
+    _persist(sessions, session)
     session.provider_state = ProviderConversationState(
         kind="openai_responses",
         provider="openai:test",
@@ -381,7 +395,20 @@ async def test_partial_tool_checkpoint_preserves_completed_result(tmp_path: Path
             {"id": "call-2", "function": {"name": "write_file"}}
         ],
     }
-    _persist(sessions, session)
+    checkpoint = session.metadata[RUNTIME_CHECKPOINT_KEY]
+    if saved_prefix:
+        session.messages.extend([
+            checkpoint["assistant_message"],
+            *checkpoint["completed_tool_results"],
+        ])
+        # Commit the prefix before writing the independent runtime sidecar.
+        session.metadata.pop(RUNTIME_CHECKPOINT_KEY)
+        _persist(sessions, session)
+        session.metadata[RUNTIME_CHECKPOINT_KEY] = checkpoint
+    if sidecar:
+        sessions.save_runtime_checkpoint(session)
+    else:
+        _persist(sessions, session)
 
     coordinator, bus, restarted = _coordinator(tmp_path)
     await coordinator.scan()
@@ -401,6 +428,25 @@ async def test_partial_tool_checkpoint_preserves_completed_result(tmp_path: Path
     assert tool_rows[1]["_recovery_interrupted"] is True
     assert "interrupted" in tool_rows[1]["content"].lower()
     assert restored.provider_state is None
+
+    # WebUI discovery and attach read the restored state, not raw checkpoint data.
+    rows = session_list_index.list_webui_sessions(restarted)
+    assert [row["key"] for row in rows] == ["websocket:chat"]
+    assert rows[0]["recovery_state"]["reason"] == "tool_state_unknown"
+    projection = WebUISessionProjection(restarted).attach_fields("websocket:chat")
+    assert projection["recovery_state"]["status"] == "awaiting_user"
+    assert RUNTIME_CHECKPOINT_KEY not in projection
+
+    coordinator2, bus2, restarted2 = _coordinator(tmp_path)
+    await coordinator2.scan()
+    assert bus2.inbound.empty()
+    assert restarted2.get_or_create("websocket:chat").messages == restored.messages
+    # Only an explicit Continue queues a model continuation, never tool execution.
+    await coordinator2.handle_action(
+        "continue", {"chat_id": "chat", "recovery_id": state["recovery_id"]},
+    )
+    assert bus2.inbound.get_nowait().session_key_override == "websocket:chat"
+    assert bus2.inbound.empty()
 
 
 @pytest.mark.asyncio
