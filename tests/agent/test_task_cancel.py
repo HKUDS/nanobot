@@ -177,6 +177,40 @@ class TestBackgroundTaskTracking:
         mock_logger.opt.assert_not_called()
 
 
+    @pytest.mark.asyncio
+    async def test_shutdown_drains_background_failure_and_logs_it_once(self, monkeypatch):
+        loop, _bus = _make_loop()
+        loop.subagents.close = AsyncMock()
+        loop._exec_session_manager.close_all = AsyncMock()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        failure = RuntimeError("failure while draining")
+
+        async def fail_later():
+            started.set()
+            await release.wait()
+            raise failure
+
+        loop.schedule_background(fail_later())
+        await started.wait()
+        closing = asyncio.create_task(loop.aclose())
+        try:
+            await asyncio.sleep(0)
+            assert not closing.done()
+            loop.subagents.close.assert_not_awaited()
+        finally:
+            release.set()
+            await closing
+
+        assert not loop._background_tasks
+        mock_logger.opt.assert_called_once_with(exception=failure)
+        mock_logger.opt.return_value.error.assert_called_once()
+        loop.subagents.close.assert_awaited_once()
+        loop._exec_session_manager.close_all.assert_awaited_once()
+
+
 class TestHandleStop:
     @pytest.mark.asyncio
     async def test_stop_no_active_task(self):
