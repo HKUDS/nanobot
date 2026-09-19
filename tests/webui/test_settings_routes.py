@@ -60,6 +60,45 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
+async def test_nanobot_update_requires_auth_local_permission_and_websocket(tmp_path, monkeypatch):
+    router = _router(config_path=tmp_path / "config.json")
+    path = "/api/settings/nanobot-update/start"
+    request = SimpleNamespace(path=path, headers=Headers())
+    response = await router.dispatch(None, request, path)
+    assert response.status_code == 405
+    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    assert response.status_code == 403
+    unauthorized = _router(authorized=False, config_path=tmp_path / "config.json")
+    response = await unauthorized.dispatch(None, _mutation_request(path, {}), path)
+    assert response.status_code == 401
+    monkeypatch.setattr(router._system, "allow_feature_package_install", lambda _: True)
+    response = await router.dispatch(None, _mutation_request(path, {"dev": "true"}), path)
+    assert response.status_code == 400
+    router._runtime_surface = "native"
+    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_nanobot_update_reports_completion_and_restart_after_reconnect(tmp_path, monkeypatch):
+    router = _router(config_path=tmp_path / "config.json")
+    monkeypatch.setattr(router._system, "allow_feature_package_install", lambda _: True)
+    monkeypatch.setattr("nanobot.webui.update_service.update_installation", lambda **kwargs: {
+        "version": "0.3.5", "source": "pypi", "requires_restart": True,
+    })
+    path = "/api/settings/nanobot-update/start"
+    response = await router.dispatch(None, _mutation_request(path, {}), path)
+    assert json.loads(response.body)["state"] == "running"
+    await router._system._updates.close()
+    path = "/api/settings/nanobot-update"
+    response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
+    payload = json.loads(response.body)
+    assert payload["state"] == "succeeded"
+    assert payload["requires_restart"] is True
+    assert "runtime" in payload["restart_required_sections"]
+
+
+@pytest.mark.asyncio
 async def test_close_releases_channel_connectors() -> None:
     router = _router()
     closed = False

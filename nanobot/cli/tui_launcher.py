@@ -6,7 +6,6 @@ import hashlib
 import io
 import os
 import platform
-import shutil
 import subprocess
 import time
 import urllib.error
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot import __version__
+from nanobot.bun import BunUnavailableError, bun_environment, ensure_bun
 from nanobot.cli.process_identity import named_executable
 from nanobot.cli.runtime_config import _model_display
 from nanobot.cli.webui_support import (
@@ -187,12 +187,10 @@ def resolve_tui_command(*, data_dir: Path | None = None) -> list[str]:
     asset = f"nanobot-tui-{system}-{machine}{suffix}"
     source_dir = _source_checkout_tui_dir()
     if source_dir is not None:
-        bun = shutil.which("bun")
-        if not bun:
-            raise TuiUnavailableError(
-                "this source checkout requires Bun to run its matching TUI; "
-                "install Bun, then run `nanobot agent` again"
-            )
+        try:
+            bun = ensure_bun()
+        except BunUnavailableError as exc:
+            raise TuiUnavailableError(str(exc)) from exc
         return _resolve_source_tui_command(source_dir, bun, data_dir=data_dir)
 
     packaged = Path(__file__).resolve().parents[1] / "tui" / "bin" / asset
@@ -229,13 +227,15 @@ def _resolve_source_tui_command(
 ) -> list[str]:
     dependency = source_dir / "node_modules" / "@opentui" / "core"
     try:
-        install = subprocess.run(
-            [bun, "install", "--frozen-lockfile"],
-            cwd=source_dir,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with bun_environment(bun) as env:
+            install = subprocess.run(
+                [bun, "install", "--frozen-lockfile"],
+                cwd=source_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
     except OSError as exc:
         raise TuiUnavailableError(f"could not install TUI dependencies: {exc}") from exc
     if install.returncode != 0 or not dependency.is_dir():

@@ -593,7 +593,16 @@
       "checking": "Checking...",
       "checkForUpdates": "Check for updates",
       "upToDate": "You're up to date",
-      "updateAvailable": "Update available v{{version}}"
+      "updateAvailable": "Update available v{{version}}",
+      "updateTitle": "Update nanobot",
+      "updateDescription": "Install the latest stable release. Restart nanobot after installation.",
+      "updateAdvanced": "Advanced options",
+      "updateDev": "Install from source",
+      "updateDevDescription": "Use the development version. Requires Git; Bun is downloaded automatically when needed. Existing source checkouts keep their current branch.",
+      "updateAction": "Install latest release",
+      "updateDevAction": "Install development version",
+      "updateSuccess": "Installed v{{version}}. Restart nanobot to apply the update.",
+      "updateLocalOnly": "Open WebUI on the server's localhost, or enable remote package installation to update here."
     },
     "mcp": {
       "allCategories": "All categories",

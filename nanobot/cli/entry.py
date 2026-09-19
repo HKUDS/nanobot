@@ -79,6 +79,15 @@ def main() -> None:
     dispatch_args = ["agent", *agent_args] if agent_args is not None else raw_args
     set_cli_process_identity(dispatch_args)
     _configure_windows_console()
+    if not shell_completion and raw_args[:1] == ["update"]:
+        import typer
+
+        from nanobot.cli.update import update
+
+        update_app = typer.Typer(add_completion=False)
+        update_app.command()(update)
+        typer.main.get_command(update_app).main(args=raw_args[1:], prog_name="nanobot update")
+        return
     if not shell_completion and not raw_args:
         from nanobot.cli.desktop_target import dispatch_bare_desktop_target
 

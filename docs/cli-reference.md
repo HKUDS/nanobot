@@ -7,6 +7,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Goal | Command | Notes |
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
+| Update the current install | `nanobot update` | Latest PyPI release; `--dev` explicitly selects source |
 | Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
 | Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
@@ -95,6 +96,35 @@ The client cache can be kept inside Desktop's data root without reading or writi
 the separate Python installation's config. No additional system Python is needed.
 
 ## Common Patterns
+
+### Updating
+
+```bash
+nanobot update --check       # Check PyPI without changing the installation
+nanobot update               # Install the latest stable PyPI release
+nanobot update --dev         # Update source, prepare TUI dependencies, and build WebUI
+```
+
+`--update-dev` is an alias for `--dev`. Updates target the current Python environment
+and leave already-satisfying dependencies installed. Missing pip is handled through
+the existing uv/ensurepip fallback; no separate package manager is required.
+Configuration, workspace files, and chat history are not replaced.
+
+Source updates require Git. Existing editable checkouts keep their current branch
+and fast-forward to its upstream; local changes, detached HEADs, and divergent branches
+must be resolved manually. A package install switches to an editable checkout under
+`~/.nanobot/src/` on the official `main` branch. Bun is downloaded into
+`~/.nanobot/tools/bun/` when the pinned version is unavailable, with SHA-256 verification.
+Node is not required. `nanobot update` switches a source install back to the PyPI release.
+
+WebUI exposes the same actions under **Settings → About → Update nanobot**. Source
+installation is opt-in under **Advanced options**. The existing remote package-install
+permission also governs updates. Browser refreshes do not cancel an in-progress update.
+Restart nanobot after completion. Stop active tasks before updating; this is an in-place
+update, not a transactional deployment, and a failed installation may need to be retried.
+On Windows, if another nanobot process locks installation files, stop that process
+and retry with `python -m nanobot update` (add `--dev` for source).
+Containers must be rebuilt and redeployed; Desktop is updated through its host application.
 
 Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:
 

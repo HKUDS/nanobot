@@ -356,13 +356,16 @@ def test_source_checkout_does_not_fall_back_to_a_release_tui_without_bun(
         "nanobot.cli.tui_launcher._source_checkout_tui_dir",
         lambda: source_dir,
     )
-    monkeypatch.setattr("nanobot.cli.tui_launcher.shutil.which", lambda _name: None)
+    def unavailable():
+        raise tui_launcher.BunUnavailableError("Bun download failed")
+
+    monkeypatch.setattr(tui_launcher, "ensure_bun", unavailable)
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher._download_release_tui",
         lambda _asset: pytest.fail("a source checkout must not download a release TUI"),
     )
 
-    with pytest.raises(TuiUnavailableError, match="source checkout requires Bun"):
+    with pytest.raises(TuiUnavailableError, match="Bun download failed"):
         resolve_tui_command()
 
 
@@ -539,6 +542,7 @@ def test_source_checkout_refreshes_locked_tui_dependencies(
     source_dir.mkdir()
     (source_dir / "node_modules" / "@opentui" / "core").mkdir(parents=True)
     bun = str(tmp_path / "bun")
+    Path(bun).write_bytes(b"runtime")
 
     def install(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert command == [bun, "install", "--frozen-lockfile"]
@@ -563,13 +567,15 @@ def test_source_checkout_fails_when_locked_dependencies_cannot_be_refreshed(
 ) -> None:
     source_dir = tmp_path / "tui"
     source_dir.mkdir()
+    bun = tmp_path / "bun"
+    bun.write_bytes(b"runtime")
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher.subprocess.run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, "", "lockfile mismatch"),
     )
 
     with pytest.raises(TuiUnavailableError, match="lockfile mismatch"):
-        _resolve_source_tui_command(source_dir, "bun")
+        _resolve_source_tui_command(source_dir, str(bun))
 
 
 def test_release_tui_is_verified_and_cached(

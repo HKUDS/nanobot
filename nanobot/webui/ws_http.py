@@ -201,6 +201,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.cli_app.test": "/api/settings/cli-apps/test",
     "settings.feature.enable": "/api/settings/nanobot-features/enable",
     "settings.feature.disable": "/api/settings/nanobot-features/disable",
+    "settings.nanobot.update": "/api/settings/nanobot-update/start",
     "settings.channel.validate": "/api/settings/channels/validate",
     "settings.channel.configure": "/api/settings/channels/configure",
     "settings.pairing.approve": "/api/settings/pairing/approve",

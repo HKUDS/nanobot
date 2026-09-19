@@ -325,7 +325,9 @@ export function SettingsPage({
           />
         );
       case "about":
-        return <AboutSettings currentVersion={settings.version?.current} />;
+        return <AboutSettings currentVersion={settings.version?.current}
+          onUpdateInstalled={controller.markUpdateInstalled}
+          nativeHost={(settings.surface ?? settings.runtime_surface) === "native"} />;
       case "appearance":
         return (
           <AppearanceSettings

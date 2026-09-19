@@ -117,7 +117,7 @@ nanobot-desktop-tui = "nanobot.cli.desktop_tui:main"
 # my_plugin = "my_package.plugins:MyTool"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "filelock>=3.25.2"]
 build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
