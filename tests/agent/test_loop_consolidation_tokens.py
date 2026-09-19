@@ -3,12 +3,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.runner import AgentRunResult
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import (
     GenerationSettings,
     LLMResponse,
     ProviderConversationState,
 )
+from nanobot.providers.input_usage import InputSnapshot, InputUsage
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 
@@ -36,6 +38,32 @@ def _make_loop(
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.consolidator._SAFETY_BUFFER = 0
     return loop
+
+
+async def test_loop_carries_single_input_receipt_separately_from_total_usage(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=8192)
+    session = loop.sessions.get_or_create("cli:receipt")
+    snapshot = InputSnapshot.from_chat_request("live-provider", {
+        "messages": [{"role": "user", "content": "old input"}],
+    })
+    old_receipt = InputUsage(snapshot, 9000)
+    new_receipt = InputUsage(snapshot, 100)
+    session.input_usage = old_receipt
+    session.metadata["_last_usage"] = {"input_tokens": 999999}
+    observed = []
+
+    async def run(spec):
+        observed.append(spec.input_usage)
+        messages = spec.transcript_builder(spec.transcript_input)
+        return AgentRunResult(
+            final_content="done", messages=[*messages, {"role": "assistant", "content": "done"}],
+            input_usage=new_receipt,
+        )
+
+    loop.runner.run = run
+    await loop.process_direct("next", session_key=session.key)
+    assert observed == [old_receipt]
+    assert session.input_usage is new_receipt
 
 
 @pytest.mark.asyncio

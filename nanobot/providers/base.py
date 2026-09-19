@@ -15,11 +15,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
+from uuid import uuid4
 
 import json_repair
 from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink, RetryStatusEvent, RetryWaitEvent
+from nanobot.providers.input_usage import InputSnapshot
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
 if TYPE_CHECKING:
@@ -593,6 +595,8 @@ class LLMResponse:
     error_code: str | None = None  # Provider/code semantic, e.g. rate_limit_exceeded.
     error_retry_after_s: float | None = None
     error_should_retry: bool | None = None
+    # Leaf attribution; routing wrappers preserve it rather than relabel it.
+    input_snapshot: InputSnapshot | None = field(default=None, repr=False)
 
     @property
     def has_tool_calls(self) -> bool:
@@ -709,6 +713,24 @@ class LLMProvider(ABC):
         self.provider_name = provider_name
         self.generation: GenerationSettings = GenerationSettings()
         self._llm_call_observer: LLMCallObserver | None = None
+        self._input_usage_scope = uuid4().hex
+
+    def input_snapshot(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str,
+        *,
+        max_tokens: int,
+        temperature: float,
+        reasoning_effort: str | None,
+    ) -> InputSnapshot | None:
+        """Describe the next input only if its concrete representation is known.
+
+        Unknown providers and stateful transports fail closed. Implementations
+        must also stamp responses at the actual leaf dispatch, after routing.
+        """
+        return None
 
     def set_llm_call_observer(self, observer: LLMCallObserver | None) -> None:
         """Attach a fail-open observer for each physical retry-managed call."""

@@ -23,6 +23,7 @@ from nanobot.providers.base import (
     RetryEventCallback,
     RetryStatusCallback,
 )
+from nanobot.providers.input_usage import InputSnapshot
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
@@ -120,6 +121,25 @@ class FallbackProvider(LLMProvider):
     """
 
     supports_stream_recover_callback = True
+
+    def input_snapshot(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str,
+        *,
+        max_tokens: int,
+        temperature: float,
+        reasoning_effort: str | None,
+    ) -> InputSnapshot | None:
+        # Only the primary candidate is known before dispatch. A fallback's
+        # receipt keeps its leaf identity, never becoming a primary floor.
+        if not self._primary_available():
+            return None
+        return self._primary.input_snapshot(
+            messages, tools, model, max_tokens=max_tokens,
+            temperature=temperature, reasoning_effort=reasoning_effort,
+        )
 
     def __init__(
         self,

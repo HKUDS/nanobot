@@ -23,6 +23,7 @@ from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir, get_runtime_subdir
 from nanobot.providers.base import ProviderConversationState
+from nanobot.providers.input_usage import InputUsage
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
@@ -285,6 +286,9 @@ class Session:
     last_consolidated: int = 0
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
+    # Advisory live-process measurement. Never serialized or copied into forks;
+    # restart/config rebuild intentionally requires a fresh provider measurement.
+    input_usage: InputUsage | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):
@@ -480,6 +484,7 @@ class Session:
         self.messages = []
         self.last_archived = 0
         self.provider_state = None
+        self.input_usage = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
 

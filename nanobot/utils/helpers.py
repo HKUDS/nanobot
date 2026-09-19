@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMUsage
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
-_TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
+_TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[tuple[str, bool], int]]] = {}
 _T = TypeVar("_T")
 
 
@@ -102,15 +102,21 @@ def sanitize_surrogates_deep(value: Any) -> Any:
     return value
 
 
-@lru_cache(maxsize=1)
-def _get_token_encoding() -> Any:
+@lru_cache(maxsize=16)
+def _get_token_encoding(model: str | None = None) -> Any:
+    if model:
+        try:
+            return tiktoken.encoding_for_model(model.rsplit("/", 1)[-1])
+        except KeyError:
+            pass
+    # Preserve the existing approximation for unknown/non-OpenAI models.
     return tiktoken.get_encoding("cl100k_base")
 
 
 def _cache_tools_token_count(
     tools_id: int,
     fingerprint: tuple[int, ...],
-    counts: dict[bool, int],
+    counts: dict[tuple[str, bool], int],
 ) -> None:
     if (
         tools_id not in _TOOLS_TOKEN_CACHE
@@ -131,8 +137,9 @@ def _estimate_tools_tokens(
     tools_id = id(tools)
     fingerprint = tuple(id(tool) for tool in tools)
     cached = _TOOLS_TOKEN_CACHE.get(tools_id)
+    count_key = (str(getattr(enc, "name", id(enc))), leading_separator)
     if cached and cached[0] == fingerprint:
-        token_count = cached[1].get(leading_separator)
+        token_count = cached[1].get(count_key)
         if token_count is not None:
             return token_count
         counts = cached[1]
@@ -143,7 +150,7 @@ def _estimate_tools_tokens(
     if leading_separator:
         rendered = "\n" + rendered
     token_count = len(enc.encode(rendered))
-    counts[leading_separator] = token_count
+    counts[count_key] = token_count
     _cache_tools_token_count(tools_id, fingerprint, counts)
     return token_count
 
@@ -719,6 +726,8 @@ def build_assistant_message(
 def _estimate_prompt_tokens_with_source(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    *,
+    model: str | None = None,
 ) -> tuple[int, str]:
     """Estimate prompt tokens and identify the counter used.
 
@@ -754,7 +763,7 @@ def _estimate_prompt_tokens_with_source(
     message_payload = "\n".join(parts)
     per_message_overhead = len(messages) * 4
     try:
-        enc = _get_token_encoding()
+        enc = _get_token_encoding(model) if model else _get_token_encoding()
         tool_tokens = (
             _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
         )
@@ -774,9 +783,11 @@ def _estimate_prompt_tokens_with_source(
 def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    *,
+    model: str | None = None,
 ) -> int:
     """Estimate prompt tokens with tiktoken and a conservative byte fallback."""
-    estimated, _ = _estimate_prompt_tokens_with_source(messages, tools)
+    estimated, _ = _estimate_prompt_tokens_with_source(messages, tools, model=model)
     return estimated
 
 
@@ -832,7 +843,7 @@ def estimate_prompt_tokens_chain(
             tokens, source = cast(tuple[object, object], provider_counter(messages, tools, model))
             if isinstance(tokens, (int, float)) and tokens > 0:
                 return int(tokens), str(source or "provider_counter")
-    estimated, source = _estimate_prompt_tokens_with_source(messages, tools)
+    estimated, source = _estimate_prompt_tokens_with_source(messages, tools, model=model)
     if estimated > 0:
         return int(estimated), source
     return 0, "none"
