@@ -22,9 +22,11 @@ from nanobot.cron.types import (
     CronJobState,
     CronPayload,
     CronRunRecord,
+    CronRunResult,
     CronSchedule,
     CronStore,
 )
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 from nanobot.utils.run_records import (
     write_run_record as write_automation_run_record,
 )
@@ -115,8 +117,21 @@ def _disable_malformed_legacy_job(job: CronJob) -> None:
     logger.warning("Cron: disabled malformed legacy job '{}' ({}): {}", job.name, job.id, reason)
 
 
+def _persistable_origin_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Return a detached JSON-safe routing snapshot for a cron payload."""
+    snapshot: dict[str, Any] = {}
+    for key, value in metadata.items():
+        if key == RUNTIME_CONTEXT_INPUT_META:
+            continue
+        try:
+            snapshot[key] = json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
+        except (TypeError, ValueError, RecursionError):
+            continue
+    return snapshot
+
+
 def _normalize_agent_turn_job(job: CronJob) -> bool:
-    """Migrate legacy user cron payloads into session-bound payloads.
+    """Make routing metadata persistable and migrate legacy user cron payloads.
 
     Pre-bound user cron jobs stored their delivery target in ``channel``/``to``.
     Normal user-created legacy jobs always have those fields; if they are
@@ -124,8 +139,12 @@ def _normalize_agent_turn_job(job: CronJob) -> bool:
     a runtime legacy execution path.
     """
     payload = job.payload
+    origin_metadata = _persistable_origin_metadata(payload.origin_metadata)
+    changed = origin_metadata != payload.origin_metadata
+    payload.origin_metadata = origin_metadata
+
     if payload.kind != "agent_turn" or not _has_legacy_delivery_context(payload):
-        return False
+        return changed
 
     if not payload.channel or not payload.to:
         _disable_malformed_legacy_job(job)
@@ -135,7 +154,7 @@ def _normalize_agent_turn_job(job: CronJob) -> bool:
     payload.origin_channel = payload.origin_channel or payload.channel
     payload.origin_chat_id = payload.origin_chat_id or payload.to
     if not payload.origin_metadata:
-        payload.origin_metadata = dict(payload.channel_meta or {})
+        payload.origin_metadata = _persistable_origin_metadata(payload.channel_meta or {})
 
     payload.deliver = False
     payload.channel = None
@@ -158,7 +177,7 @@ class CronService:
     def __init__(
         self,
         store_path: Path,
-        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
+        on_job: Callable[[CronJob], Coroutine[Any, Any, str | CronRunResult | None]] | None = None,
         max_sleep_ms: int = 300_000,  # 5 minutes
     ):
         self.store_path = store_path
@@ -395,6 +414,7 @@ class CronService:
                                 "status": r.status,
                                 "durationMs": r.duration_ms,
                                 "error": r.error,
+                                "runId": r.run_id,
                             }
                             for r in j.state.run_history
                         ],
@@ -499,6 +519,11 @@ class CronService:
 
     def _arm_timer(self) -> None:
         """Schedule the next timer tick."""
+        # The timer task also owns the agent callback. Store edits during a
+        # callback must not cancel it or start another tick for the same due
+        # job. The final execution rearms after persisting its result.
+        if self._active_executions:
+            return
         if self._timer_task:
             self._timer_task.cancel()
 
@@ -544,7 +569,16 @@ class CronService:
                 if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
             ]
 
-            for job in due_jobs:
+            for candidate in due_jobs:
+                # Earlier callbacks may delete, disable, or reschedule later jobs.
+                job = self.get_job(candidate.id)
+                if (
+                    job is None
+                    or not job.enabled
+                    or not job.state.next_run_at_ms
+                    or job.state.next_run_at_ms > _now_ms()
+                ):
+                    continue
                 await self._execute_job(job)
 
             self._save_store()
@@ -568,10 +602,11 @@ class CronService:
         """Execute a single job."""
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        result: str | CronRunResult | None = None
 
         try:
             if self.on_job:
-                await self.on_job(job)
+                result = await self.on_job(job)
 
             job.state.last_status = "ok"
             job.state.last_error = None
@@ -602,6 +637,7 @@ class CronService:
             status=job.state.last_status,
             duration_ms=end_ms - start_ms,
             error=job.state.last_error,
+            run_id=result.run_id if isinstance(result, CronRunResult) else None,
         ))
         job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
 
@@ -718,6 +754,18 @@ class CronService:
         logger.info("Cron: registered system job '{}' ({})", job.name, job.id)
         return job
 
+    def remove_system_job(self, job_id: str) -> bool:
+        """Remove a protected system job during startup reconciliation."""
+        store = self._require_store()
+        before = len(store.jobs)
+        store.jobs = [j for j in store.jobs if j.id != job_id]
+        removed = len(store.jobs) < before
+        if removed:
+            self._save_store()
+            self._arm_timer()
+            logger.info("Cron: removed system job {}", job_id)
+        return removed
+
     def remove_job(self, job_id: str) -> Literal["removed", "protected", "not_found"]:
         """Remove a job by ID, unless it is a protected system job."""
         store = self._require_store()
@@ -779,6 +827,7 @@ class CronService:
 
         For ``channel`` and ``to``, pass an explicit value (including ``None``)
         to update; omit (sentinel ``...``) to leave unchanged.
+        Preserve the next occurrence unless the schedule actually changes.
         """
         store = self._require_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
@@ -787,6 +836,7 @@ class CronService:
         if job.payload.kind == "system_event":
             return "protected"
 
+        schedule_changed = schedule is not None and schedule != job.schedule
         if schedule is not None:
             _validate_schedule_for_add(schedule)
             job.schedule = schedule
@@ -806,10 +856,10 @@ class CronService:
         self._enforce_agent_binding(job)
 
         job.updated_at_ms = _now_ms()
-        if job.enabled:
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
-        else:
+        if not job.enabled:
             job.state.next_run_at_ms = None
+        elif schedule_changed:
+            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
 
         if self._should_persist_store():
             self._save_store()

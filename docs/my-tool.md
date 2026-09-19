@@ -4,11 +4,11 @@ Let the agent sense and adjust its own runtime state — like asking a coworker 
 
 ## Why You Need It
 
-Normal tools let the agent operate on the outside world (read/write files, search code). But the agent knows nothing about itself — it doesn't know which model it's running on, how many iterations are left, or how many tokens it has consumed.
+Normal tools let the agent operate on the outside world (read/write files, search code). But the agent knows nothing about itself — it doesn't know which model it's running on, which workspace it can access, or which runtime limits apply.
 
 My tool fills this gap. With it, the agent can:
 
-- **Know who it is**: What model am I using? Where is my workspace? How many iterations remain?
+- **Know who it is**: What model am I using? Where is my workspace? What is my per-turn iteration limit?
 - **Adapt on the fly**: Complex task? Expand the context window. Simple chat? Switch to a faster model.
 - **Remember across turns**: Store notes in your scratchpad that persist into the next conversation turn.
 
@@ -44,7 +44,6 @@ my(action="check")
 #   workspace: PosixPath('/tmp/workspace')
 #   provider_retry_mode: 'standard'
 #   max_tool_result_chars: 16000
-#   _current_iteration: 3
 #   _last_usage: {'prompt_tokens': 45000, 'completion_tokens': 8000}
 #   Note: prompt_tokens is cumulative across all turns, not current context window occupancy.
 ```
@@ -68,7 +67,7 @@ my(action="check", key="web_config.enable")
 |----------|-----|
 | "What model are you using?" | `check("model")` |
 | "Which model preset is active?" | `check("model_preset")` |
-| "How many more tool calls can you make?" | `check("max_iterations")` minus `check("_current_iteration")` |
+| "What is the per-turn iteration limit?" | `check("max_iterations")` |
 | "How many tokens has this conversation used?" | `check("_last_usage")` — cumulative across all turns |
 | "Where is your working directory?" | `check("workspace")` |
 | "Show me your full config" | `check()` |
@@ -205,7 +204,6 @@ Can be checked but not set:
 | Subagent manager | `subagents` | Observable, but replacing breaks the system |
 | Execution config | `exec_config` | Can check sandbox/enable status, cannot change it |
 | Web config | `web_config` | Can check enable status, cannot change it |
-| Iteration counter | `_current_iteration` | Updated by runner only |
 
 ### Sensitive field protection
 

@@ -110,7 +110,7 @@ class TestMidTurnCommandDispatchedDirectly:
         loop = MagicMock()
         loop.sessions = MagicMock()
         loop.sessions.get_or_create = MagicMock(return_value=MagicMock(
-            messages=[], last_consolidated=0, clear=MagicMock(),
+            messages=[], last_archived=0, clear=MagicMock(),
         ))
         loop.sessions.save = MagicMock()
         loop.sessions.invalidate = MagicMock()

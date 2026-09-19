@@ -10,10 +10,10 @@ from nanobot.config.loader import save_config
 from nanobot.config.schema import Config
 
 
-def test_telegram_setup_exposes_proxy_as_an_optional_secret() -> None:
+def test_telegram_setup_exposes_proxy_as_an_optional_field() -> None:
     proxy = SETUP_SPEC.fields["proxy"]
 
-    assert proxy.kind == "secret"
+    assert proxy.kind == "string"
     assert "proxy" not in SETUP_SPEC.simple_required_fields
 
 
@@ -56,6 +56,38 @@ def test_get_me_builds_http_client_with_explicit_proxy(
         "trust_env": False,
     }
     assert captured["url"] == f"https://api.telegram.org/bot{token}/getMe"
+
+
+def test_get_me_normalizes_proxy_without_a_scheme(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"ok": True, "result": {"id": 42}}
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def get(self, _url: str) -> FakeResponse:
+            return FakeResponse()
+
+    monkeypatch.setattr(telegram_validation.httpx, "Client", FakeClient)
+
+    telegram_validation._get_me("123456:abcdefghijklmnopqrstuvwxyz", "127.0.0.1:7890")
+
+    assert captured["proxy"] == "http://127.0.0.1:7890"
 
 
 def test_validate_telegram_bad_token_is_invalid(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -279,7 +311,7 @@ def test_validate_telegram_uses_proxy_submitted_with_new_token(
     assert captured == {"token": token, "proxy": proxy}
 
 
-@pytest.mark.parametrize("proxy", ["127.0.0.1:7890", "http://[", "http://localhost:not-a-port"])
+@pytest.mark.parametrize("proxy", ["http://[", "http://localhost:not-a-port"])
 def test_validate_telegram_rejects_invalid_proxy_without_trying_token(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

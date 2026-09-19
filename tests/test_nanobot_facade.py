@@ -30,12 +30,12 @@ from nanobot.nanobot import (
     StreamEvent,
     StreamEventType,
 )
+from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     RuntimeContextBlock,
     append_runtime_context,
 )
-from nanobot.session.manager import FILE_MAX_MESSAGES
 from nanobot.utils.llm_runtime import runtime_from_provider_snapshot
 
 
@@ -311,7 +311,7 @@ async def test_run_exposes_attributes_to_context_provider_without_persisting_the
     from nanobot.providers.base import LLMResponse
 
     provider = _fake_provider("test-model")
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="done",
         tool_calls=[],
     ))
@@ -358,7 +358,7 @@ async def test_persisted_turn_callback_is_best_effort_and_reads_display_safe_ses
     from nanobot.providers.base import LLMResponse
 
     provider = _fake_provider("test-model")
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="saved reply",
         tool_calls=[],
     ))
@@ -454,7 +454,7 @@ async def test_ephemeral_run_does_not_invoke_persisted_turn_callback(tmp_path):
     from nanobot.providers.base import LLMResponse
 
     provider = _fake_provider("test-model")
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="temporary",
         tool_calls=[],
     ))
@@ -470,13 +470,6 @@ async def test_ephemeral_run_does_not_invoke_persisted_turn_callback(tmp_path):
     await bot.run("hi", session_key="sdk:ephemeral", ephemeral=True)
 
     assert seen == []
-
-
-def test_runtime_client_does_not_expose_generic_event_subscription():
-    from nanobot.sdk.clients import RuntimeClient
-
-    assert hasattr(RuntimeClient, "on_session_turn_persisted")
-    assert not hasattr(RuntimeClient, "subscribe")
 
 
 def test_import_from_top_level():
@@ -602,7 +595,7 @@ async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
     result = await bot.run("hi")
     assert result.tools_used == []
     assert result.messages == []
-    assert result.usage == {}
+    assert result.usage is None
     assert result.stop_reason is None
     assert result.error is None
 
@@ -623,7 +616,7 @@ async def test_run_populates_observability_fields(tmp_path):
             ],
             final_content="done",
             tools_used=["read_file"],
-            usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            usage=LLMUsage.reported(input_tokens=10, output_tokens=2),
             stop_reason="completed",
             error=None,
             tool_events=[{"tool": "read_file", "status": "ok"}],
@@ -642,7 +635,7 @@ async def test_run_populates_observability_fields(tmp_path):
 
     assert result.content == "done"
     assert result.tools_used == ["read_file"]
-    assert result.usage == {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+    assert result.usage == LLMUsage.reported(input_tokens=10, output_tokens=2)
     assert result.stop_reason == "completed"
     assert result.error is None
     assert result.metadata == {"latency_ms": 42}
@@ -656,10 +649,10 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
 
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="done",
         tool_calls=[],
-        usage={"total_tokens": 3},
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
     ))
     bot = Nanobot(AgentLoop(
         bus=MessageBus(),
@@ -671,8 +664,7 @@ async def test_run_ephemeral_still_captures_runner_observability(tmp_path):
     result = await bot.run("hi", ephemeral=True)
 
     assert result.content == "done"
-    assert result.usage["total_tokens"] == 3
-    assert result.usage["provider_tokens"] == 3
+    assert result.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
 
 
 @pytest.mark.asyncio
@@ -743,7 +735,6 @@ async def test_run_model_overrides_can_overlap_without_default_mutation(tmp_path
 
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
-    assert not hasattr(bot, "_runtime_overrides")
     original_runtime = bot._loop.runtime_resolver.runtime
     active_runs: list[tuple[str, str]] = []
     first_entered = asyncio.Event()
@@ -825,7 +816,6 @@ async def test_run_model_override_is_per_run_without_default_mutation(tmp_path):
 
     async def fake_process_direct(message, *, session_key, hooks, runtime):
         assert runtime is override_runtime
-        assert not hasattr(bot._loop.runner, "provider")
         assert runtime.model == "openai/gpt-4.1-mini"
         assert runtime.context_window_tokens == 4096
         assert bot._loop.runtime_resolver.runtime is original_runtime
@@ -841,7 +831,6 @@ async def test_run_model_override_is_per_run_without_default_mutation(tmp_path):
         model_preset=None,
         config=bot._config,
     )
-    assert not hasattr(bot._loop.runner, "provider")
     assert bot._loop.runtime_resolver.runtime is original_runtime
 
 
@@ -1054,7 +1043,7 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
             ],
             final_content="done",
             tools_used=["read_file"],
-            usage={"total_tokens": 9},
+            usage=LLMUsage.reported(input_tokens=9, output_tokens=0),
             stop_reason="completed",
         )
         for hook in hooks:
@@ -1074,7 +1063,7 @@ async def test_run_streamed_wait_returns_full_result_without_consuming_events(tm
 
     assert result.content == "done"
     assert result.tools_used == ["read_file"]
-    assert result.usage == {"total_tokens": 9}
+    assert result.usage == LLMUsage.reported(input_tokens=9, output_tokens=0)
     assert result.stop_reason == "completed"
     assert result.metadata == {"latency_ms": 5}
 
@@ -1398,13 +1387,13 @@ async def test_sdk_capture_prefers_run_level_snapshot():
     await hook.after_run(AgentRunHookContext(
         messages=final_messages,
         tools_used=["read_file"],
-        usage={"total_tokens": 3},
+        usage=LLMUsage.reported(input_tokens=3, output_tokens=0),
         stop_reason="completed",
     ))
 
     assert hook.tools_used == ["read_file"]
     assert hook.messages == final_messages
-    assert hook.usage == {"total_tokens": 3}
+    assert hook.usage == LLMUsage.reported(input_tokens=3, output_tokens=0)
     assert hook.stop_reason == "completed"
 
 
@@ -1413,7 +1402,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     bot._loop.process_direct = AsyncMock()
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
 
     snapshot = await bot.sessions.ingest(
         "sdk:history",
@@ -1443,7 +1431,6 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     assert snapshot.messages[0]["source"] == "longmemeval"
     assert snapshot.messages[1]["source"] == "longmemeval"
     bot._loop.process_direct.assert_not_called()
-    bot._loop.consolidator.maybe_consolidate_by_tokens.assert_not_called()
 
     reloaded = bot.sessions.get("sdk:history")
     assert reloaded is not None
@@ -1451,7 +1438,7 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_sessions_ingest_archives_overflow_at_persistence_boundary(tmp_path):
+async def test_sessions_ingest_preserves_full_transcript(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
 
@@ -1459,16 +1446,14 @@ async def test_sessions_ingest_archives_overflow_at_persistence_boundary(tmp_pat
         "sdk:overflow",
         [
             {"role": "user", "content": f"message-{index}"}
-            for index in range(FILE_MAX_MESSAGES + 1)
+            for index in range(2_001)
         ],
     )
 
-    assert len(snapshot.messages) == FILE_MAX_MESSAGES
-    assert snapshot.messages[0]["content"] == "message-1"
-    history = bot.memory.read_history(session_key="sdk:overflow")
-    assert len(history) == 1
-    assert "[RAW] 1 messages" in history[0]["content"]
-    assert "message-0" in history[0]["content"]
+    assert len(snapshot.messages) == 2_001
+    assert snapshot.messages[0]["content"] == "message-0"
+    assert snapshot.messages[-1]["content"] == "message-2000"
+    assert bot.memory.read_history(session_key="sdk:overflow") == []
 
 
 @pytest.mark.asyncio
@@ -1638,12 +1623,13 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     runtime = bot._loop.llm_runtime()
     bot._loop.runtime_for_session = MagicMock(return_value=runtime)  # type: ignore[method-assign]
 
-    bot._loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
+    compact_session = AsyncMock()
+    bot._loop.consolidator.compact_idle_session = compact_session
     snapshot = await bot.runtime.compact_session("sdk:history")
     assert snapshot.key == "sdk:history"
-    assert (
-        bot._loop.consolidator.maybe_consolidate_by_tokens.await_args.kwargs["runtime"]
-        is runtime
+    compact_session.assert_awaited_once_with(
+        "sdk:history",
+        runtime=runtime,
     )
     assert bot.runtime.model == bot._loop.model
     assert bot.runtime.workspace == tmp_path

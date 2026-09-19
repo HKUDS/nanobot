@@ -1,17 +1,8 @@
 {
-  "description": "WhatsApp の会話から nanobot を利用します。",
-  "requirements": "WhatsApp 接続設定とゲートウェイ",
   "setup": {
     "primaryAction": "WhatsApp に接続",
     "docsLabel": "WhatsApp 設定ガイドを開く",
     "officialLabel": "WhatsApp ヘルプを開く",
-    "tryIt": "ターミナルでのログイン後、接続したアカウントに WhatsApp の DM を送信します。",
-    "summary": "ボットを動かす WhatsApp アカウントで QR コードを読み取って接続します。",
-    "steps": [
-      "下に表示された WhatsApp ログインコマンドを実行します。",
-      "スマートフォンの WhatsApp でターミナルの QR コードを読み取ります。",
-      "ログイン後に戻り、WhatsApp を有効にして DM でテストします。"
-    ],
     "fields": {
       "allowFrom": {
         "label": "許可する連絡先",
@@ -24,7 +15,22 @@
           "open": "すべてのメッセージ",
           "allowlist": "許可リスト"
         }
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp リンク用 QR コード",
+    "scanTitle": "WhatsApp をリンク",
+    "scanDescription": "WhatsApp でリンク済みデバイスを開き、デバイスをリンクを選んでこのコードを読み取ります。",
+    "waiting": "WhatsApp を待機中…",
+    "connected": "WhatsApp に接続しました。",
+    "stopped": "接続が停止しました。新しいコードを取得するには再開してください。",
+    "connecting": "接続中…",
+    "scanAgain": "別のアカウントをリンク",
+    "connect": "WhatsApp をリンク"
   }
 }

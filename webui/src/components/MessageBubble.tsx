@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
@@ -25,6 +27,7 @@ import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
 import {
   Tooltip,
@@ -34,7 +37,10 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
+import {
+  fmtDateTime,
+  formatMessageEndTime,
+} from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
 import { sessionHandleColor } from "@/lib/session-handle";
@@ -298,9 +304,9 @@ function IncomingSessionMessage({
         </div>
       </div>
       {createdAtLabel || showCopyAction ? (
-        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <TooltipProvider>
           <div
-            className="mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
+            className="message-actions mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
           >
             {showCopyAction ? <MessageCopyButton content={message.content} /> : null}
             {createdAtLabel ? (
@@ -339,6 +345,10 @@ export function MessageBubble({
     () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
     [mcpPresets, message.mcpPresets],
   );
+
+  if (message.kind === "compaction" && message.compaction) {
+    return <ContextCompactionNotice compaction={message.compaction} />;
+  }
 
   if (message.kind === "trace") {
     return <TraceGroup message={message} />;
@@ -414,7 +424,7 @@ export function MessageBubble({
           </p>
         ) : null}
         {showDeliveryStatus || showCreatedAt || (hasText && showCopyAction) ? (
-          <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+          <TooltipProvider>
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
               {showCreatedAt ? (
                 <MessageTimestamp
@@ -437,7 +447,12 @@ export function MessageBubble({
     );
   }
 
-  const empty = message.content.trim().length === 0;
+  const assistantContent = message.compactReply === "empty"
+    ? t("thread.compaction.empty")
+    : message.compactReply === "failed"
+      ? t("thread.compaction.failed")
+      : message.content;
+  const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
@@ -479,7 +494,8 @@ export function MessageBubble({
     && (!empty || hasReasoning || media.length > 0);
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
-  const showAssistantFooterRow = showCopyButton || showForkButton || showAssistantTimestamp;
+  const showAssistantFooterRow =
+    showCopyButton || showForkButton || showAssistantTimestamp;
   const showAssistantFooterSlot =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
@@ -503,20 +519,20 @@ export function MessageBubble({
               preserveStreamingLayout
               onOpenFilePreview={onOpenFilePreview}
             >
-              {message.content}
+              {assistantContent}
             </MarkdownText>
           </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
         </>
       )}
       {showAssistantFooterSlot ? (
-        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <TooltipProvider>
           <div
             data-assistant-footer
             data-state={showAssistantFooterRow ? "visible" : "reserved"}
             aria-hidden={showAssistantFooterRow ? undefined : true}
             className={cn(
-              "mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
+              "message-actions mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
               "transition-opacity duration-300 ease-out motion-reduce:transition-none",
               showAssistantFooterRow
                 ? "opacity-100"
@@ -524,7 +540,7 @@ export function MessageBubble({
             )}
           >
             {showCopyButton ? (
-              <MessageCopyButton content={message.content} />
+              <MessageCopyButton content={assistantContent} />
             ) : null}
             {showForkButton ? (
               <Tooltip>
@@ -576,7 +592,6 @@ function UserQuotedContext({ text, label }: { text: string; label: string }) {
         "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",
       )}
       aria-label={label}
-      title={text}
     >
       <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
       <p className="min-w-0 line-clamp-3 whitespace-pre-wrap text-[13px]/[1.45] [overflow-wrap:anywhere]">
@@ -874,8 +889,8 @@ export function StreamingLabelSheen({
       <span
         data-sheen-text={active ? sheenText : undefined}
         className={cn(
-          "block w-fit max-w-full truncate font-medium leading-normal",
-          active ? "streaming-text-sheen" : "text-muted-foreground",
+          "block w-fit max-w-full truncate pr-0.5 font-medium leading-normal",
+          active ? "streaming-text-sheen after:pr-0.5" : "text-muted-foreground",
         )}
       >
         {children}
@@ -890,7 +905,7 @@ interface ReasoningBubbleProps {
   hasBodyBelow: boolean;
 }
 
-export function ReasoningBubble({
+function ReasoningBubble({
   text,
   streaming,
   hasBodyBelow,
@@ -916,21 +931,28 @@ interface TraceGroupProps {
  * collapsed because tool traces are supporting evidence, not the answer.
  * A single click expands the exact calls when the user wants details.
  */
-export function TraceGroup({ message }: TraceGroupProps) {
+function TraceGroup({ message }: TraceGroupProps) {
   const { t } = useTranslation();
   const lines = message.traces ?? [message.content];
   const count = lines.length;
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const releaseContent = useCallback(() => setHasOpened(false), []);
+  const contentId = useId();
   return (
     <div className="w-full">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) setHasOpened(true);
+          setOpen((value) => !value);
+        }}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
           "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
         )}
         aria-expanded={open}
+        aria-controls={contentId}
       >
         <Wrench className="h-3.5 w-3.5" aria-hidden />
         <span className="font-medium">
@@ -941,17 +963,14 @@ export function TraceGroup({ message }: TraceGroupProps) {
         <ChevronRight
           aria-hidden
           className={cn(
-            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
+            "ml-auto h-3.5 w-3.5 transition-transform duration-200 motion-reduce:transition-none",
             open && "rotate-90",
           )}
         />
       </button>
-      {open && (
-        <ul
-          className={cn(
-            "mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3",
-            "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-          )}
+      <DisclosureContent id={contentId} open={open} onExitComplete={releaseContent}>
+        {hasOpened && <ul
+          className="mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3"
         >
           {lines.map((line, i) => (
             <li
@@ -961,8 +980,8 @@ export function TraceGroup({ message }: TraceGroupProps) {
               {line}
             </li>
           ))}
-        </ul>
-      )}
+        </ul>}
+      </DisclosureContent>
     </div>
   );
 }

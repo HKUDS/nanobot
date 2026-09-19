@@ -124,7 +124,7 @@ export function logoFallbackUrls(logoUrl: string | null | undefined): string[] {
   return urls;
 }
 
-export const PROVIDER_BRAND_ALIASES: Record<string, string> = {
+const PROVIDER_BRAND_ALIASES: Record<string, string> = {
   brave_search: "brave",
   byteplus_coding_plan: "byteplus",
   mimo: "xiaomi_mimo",
@@ -137,7 +137,7 @@ export const PROVIDER_BRAND_ALIASES: Record<string, string> = {
   volcengine_coding_plan: "volcengine",
 };
 
-export const PROVIDER_LABEL_ALIASES: Record<string, string> = {
+const PROVIDER_LABEL_ALIASES: Record<string, string> = {
   brave_search: "Brave Search",
   byteplus_coding_plan: "BytePlus",
   minimaxAnthropic: "MiniMax",

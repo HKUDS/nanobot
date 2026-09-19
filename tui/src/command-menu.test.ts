@@ -93,6 +93,32 @@ describe("CommandMenu", () => {
     })
   })
 
+  test("discovers and completes the local exit action", async () => {
+    setup = await createTestRenderer({ width: 60, height: 12, screenMode: "alternate-screen" })
+    const menu = new CommandMenu(setup.renderer, {
+      text: "#FFFFFF",
+      muted: "#999999",
+      border: "#555555",
+    })
+    setup.renderer.root.add(menu.root)
+    menu.setCommands([], [{
+      command: "/exit",
+      title: "Exit",
+      description: "Close this terminal UI",
+      action: "exit",
+    }])
+
+    menu.update("/ex")
+    await setup.renderOnce()
+
+    expect(setup.captureCharFrame()).toContain("/exit")
+    expect(menu.completion("/ex")).toBe("/exit")
+    expect(menu.resolve("/exit")).toMatchObject({
+      source: "tui",
+      command: { action: "exit" },
+    })
+  })
+
   test("resolves argument-sensitive command lifecycles", () => {
     const goal: SlashCommand = {
       command: "/goal",

@@ -1,17 +1,8 @@
 {
-  "description": "WeChat の会話から nanobot を利用します。",
-  "requirements": "WeChat チャンネル設定とゲートウェイ",
   "setup": {
     "primaryAction": "WeChat に接続",
     "docsLabel": "WeChat 設定ガイドを開く",
     "officialLabel": "WeChat を開く",
-    "tryIt": "QR ログイン後、接続したアカウントに WeChat の DM を送信します。",
-    "summary": "WeChat は QR コードでログインし、アカウント状態をローカルに保存します。",
-    "steps": [
-      "接続をクリックし、スマートフォンの WeChat で QR コードを読み取ります。",
-      "WeChat がメッセージを受信する間、ローカルゲートウェイを起動しておきます。",
-      "DM でテストし、アカウントの接続を確認します。"
-    ],
     "fields": {
       "allowFrom": {
         "label": "許可するユーザー",
@@ -21,27 +12,54 @@
         "label": "トークン",
         "placeholder": "QR ログインで保存"
       },
-      "sendProgress": { "label": "進捗を送信" },
-      "sendToolHints": { "label": "ツールのヒントを送信" },
-      "streaming": { "label": "ストリーミング API を使用" },
-      "replyProgressMessages": { "label": "構造化された進捗を送信" },
-      "replyProgressMaxMessages": { "label": "構造化進捗の上限" },
-      "contextMessageBudget": { "label": "コンテキストのメッセージ予算" },
-      "blockStreaming": { "label": "応答をブロック単位で送信" },
-      "blockStreamingMinChars": { "label": "最小ブロックサイズ" },
-      "blockStreamingMaxMessages": { "label": "ブロックメッセージの上限" },
-      "baseUrl": { "label": "API URL" },
-      "cdnBaseUrl": { "label": "CDN URL" },
-      "routeTag": { "label": "ルートタグ" },
-      "stateDir": { "label": "状態ディレクトリ" },
-      "pollTimeout": { "label": "ポーリングタイムアウト" }
+      "sendProgress": {
+        "label": "進捗を送信"
+      },
+      "sendToolHints": {
+        "label": "ツールの動作概要を送信"
+      },
+      "streaming": {
+        "label": "ストリーミング API を使用"
+      },
+      "replyProgressMessages": {
+        "label": "構造化された進捗を送信"
+      },
+      "replyProgressMaxMessages": {
+        "label": "構造化進捗の上限"
+      },
+      "contextMessageBudget": {
+        "label": "コンテキストに含めるメッセージ数の上限"
+      },
+      "blockStreaming": {
+        "label": "応答をブロック単位で送信"
+      },
+      "blockStreamingMinChars": {
+        "label": "1 ブロックの最小文字数"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "ブロックメッセージの上限"
+      },
+      "baseUrl": {
+        "label": "API URL"
+      },
+      "cdnBaseUrl": {
+        "label": "CDN URL"
+      },
+      "routeTag": {
+        "label": "ルートタグ"
+      },
+      "stateDir": {
+        "label": "状態ディレクトリ"
+      },
+      "pollTimeout": {
+        "label": "ポーリングのタイムアウト（秒）"
+      }
     }
   },
   "custom": {
     "qrAlt": "WeChat ログイン QR コード",
     "scanTitle": "WeChat でスキャン",
-    "scanDescription": "スマートフォンの WeChat でスキャンしてください。ログイン後、nanobot が状態をローカルに保存します。",
-    "waiting": "WeChat のスキャンを待っています...",
+    "waiting": "WeChat で QR コードを読み取ってください…",
     "connected": "WeChat に接続しました。",
     "stopped": "WeChat ログインを停止しました。",
     "connecting": "接続中...",

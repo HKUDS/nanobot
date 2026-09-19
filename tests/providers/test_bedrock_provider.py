@@ -229,12 +229,30 @@ def test_parse_response_maps_text_tools_reasoning_usage_and_stop_reason() -> Non
 
     assert result.content == "hello"
     assert result.finish_reason == "tool_calls"
-    assert result.usage["prompt_tokens"] == 10
-    assert result.usage["cached_tokens"] == 2
+    assert result.usage is not None
+    assert result.usage.input_tokens == 12
+    assert result.usage.output_tokens == 5
+    assert result.usage.cache_read_tokens == 2
+    assert result.usage.cache_write_tokens is None
     assert result.reasoning_content == "think"
     assert result.thinking_blocks == [{"type": "thinking", "thinking": "think", "signature": "sig"}]
     assert result.tool_calls[0].id == "t1"
     assert result.tool_calls[0].arguments == {"q": "x"}
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_retries_eof_without_stop_reason() -> None:
+    client = FakeClient(stream_events=[
+        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "partial summary"}}},
+    ])
+    provider = BedrockProvider(region="us-east-1", client=client)
+    provider._CHAT_RETRY_DELAYS = (0,)
+
+    result = await provider.chat_stream_with_retry([{"role": "user", "content": "summarize"}])
+
+    assert result.finish_reason == "error"
+    assert result.error_kind == "connection"
+    assert len(client.stream_calls) == 2
 
 
 @pytest.mark.asyncio
@@ -276,13 +294,58 @@ async def test_chat_stream_aggregates_text_tool_use_and_usage() -> None:
     assert deltas == ["he", "llo"]
     assert result.content == "hello"
     assert result.finish_reason == "tool_calls"
-    assert result.usage == {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7}
+    assert result.usage is not None
+    assert result.usage.input_tokens == 3
+    assert result.usage.output_tokens == 4
+    assert result.usage.total_tokens == 7
     assert result.tool_calls[0].name == "search"
     assert result.tool_calls[0].arguments == {"q": "x"}
 
 
 async def _append_delta(deltas: list[str], text: str) -> None:
     deltas.append(text)
+
+
+@pytest.mark.parametrize(
+    ("wire_usage", "expected_read", "expected_write", "expected_input"),
+    [
+        ({"inputTokens": 5, "outputTokens": 1}, None, None, 5),
+        (
+            {
+                "inputTokens": 5,
+                "outputTokens": 1,
+                "cacheReadInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+            },
+            0,
+            0,
+            5,
+        ),
+        (
+            {
+                "inputTokens": 5,
+                "outputTokens": 1,
+                "cacheReadInputTokens": 7,
+                "cacheWriteInputTokens": 3,
+            },
+            7,
+            3,
+            15,
+        ),
+    ],
+)
+def test_bedrock_usage_preserves_cache_reporting_and_logical_input(
+    wire_usage: dict[str, int],
+    expected_read: int | None,
+    expected_write: int | None,
+    expected_input: int,
+) -> None:
+    usage = BedrockProvider._usage(wire_usage)
+
+    assert usage is not None
+    assert usage.cache_read_tokens == expected_read
+    assert usage.cache_write_tokens == expected_write
+    assert usage.input_tokens == expected_input
 
 
 @pytest.mark.asyncio

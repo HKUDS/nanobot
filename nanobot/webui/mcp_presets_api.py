@@ -984,7 +984,7 @@ def attach_mcp_runtime_status(
     payload: dict[str, Any],
     runtime_status: Mapping[str, str] | None,
 ) -> dict[str, Any]:
-    """Project safe, connection-attempt state onto configured MCP rows."""
+    """Project safe, connection-attempt state onto eligible installed MCP rows."""
     if runtime_status is None:
         return payload
     projected = dict(payload)
@@ -998,10 +998,15 @@ def attach_mcp_runtime_status(
         row = dict(cast(dict[str, Any], raw_row))
         name = row.get("name")
         status = runtime_status.get(name) if isinstance(name, str) else None
+        oauth_authorization_failed = (
+            status == "failed"
+            and row.get("auth") == "oauth"
+            and row.get("status") == "authorization_required"
+        )
         if (
             status in _MCP_RUNTIME_STATUSES
             and row.get("installed") is True
-            and row.get("configured") is True
+            and (row.get("configured") is True or oauth_authorization_failed)
         ):
             row["runtime_status"] = status
         else:

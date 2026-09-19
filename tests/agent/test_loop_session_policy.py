@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import run_session
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
@@ -29,8 +30,8 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
-    provider.chat_with_retry = AsyncMock(
-        side_effect=[LLMResponse(content=response, usage={}) for response in responses]
+    provider.chat_stream_with_retry = AsyncMock(
+        side_effect=[LLMResponse(content=response, usage=None) for response in responses]
     )
     return AgentLoop(
         bus=MessageBus(),
@@ -46,7 +47,6 @@ def _loop(tmp_path, responses: list[str], **kwargs) -> AgentLoop:
 async def test_transient_session_keeps_history_without_persisting_or_durable_tools(tmp_path) -> None:
     loop = _loop(tmp_path, ["first answer", "second answer"])
     loop.context.memory.write_memory("private durable memory")
-    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock()
     key = "websocket:transient-test"
     loop.sessions.get_or_create_transient(
         key,
@@ -56,7 +56,7 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     await loop._process_message(_message(key, "first question"))
     await loop._process_message(_message(key, "second question"))
 
-    calls = loop.provider.chat_with_retry.await_args_list
+    calls = loop.provider.chat_stream_with_retry.await_args_list
     assert "private durable memory" not in str(calls[0].kwargs["messages"])
     tool_names = {item["function"]["name"] for item in calls[0].kwargs["tools"]}
     assert "read_session" in tool_names
@@ -71,7 +71,6 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
         "assistant",
     ]
     assert loop.sessions.read_session_file(key) is None
-    loop.consolidator.maybe_consolidate_by_tokens.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -83,7 +82,7 @@ async def test_transient_session_stays_outside_unified_session(tmp_path) -> None
     key = "websocket:transient-unified"
     transient = loop.sessions.get_or_create_transient(key)
 
-    await loop._dispatch(_message(key, "private question"))
+    await run_session(loop, _message(key, "private question"))
 
     assert [message["content"] for message in transient.messages] == [
         "private question",
@@ -103,7 +102,7 @@ async def test_missing_required_session_cannot_fall_back_to_disk(tmp_path) -> No
     with pytest.raises(RuntimeError, match="required session is not active"):
         await loop._process_message(_message(key, "stale private message"))
 
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
     assert loop.sessions.read_session_file(key) is None
 
 
@@ -122,7 +121,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
         while loop.sessions.get_cached(key) is not None or key in loop._discarding_sessions:
             await asyncio.sleep(0)
 
-    loop.provider.chat_with_retry = AsyncMock(side_effect=block_provider)
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=block_provider)
     monkeypatch.setattr(loop, "aclose", AsyncMock())
     terminate_exec_sessions = AsyncMock(return_value=1)
     monkeypatch.setattr(

@@ -1,12 +1,14 @@
-"""Tests for sustained-goal continuation in AgentRunner.
+"""Tests for caller-controlled continuation in AgentRunner.
 
-When a goal_active_predicate returns True, the runner must not exit with
-stop_reason="completed" after a plain-text final response. Instead it should
-inject a continuation message and keep looping (similar to mid-turn injection).
+When the continuation callback returns a message, the runner must not exit with
+stop_reason="completed" after a plain-text final response. Instead it injects
+that message and keeps looping, similar to a mid-turn injection.
 """
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -18,14 +20,119 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
-@pytest.mark.asyncio
-async def test_runner_exits_normally_without_predicate():
-    """Baseline: no predicate, runner exits with completed on final text."""
+def _continue_goal() -> str:
+    return "Continue working toward the active sustained goal."
+
+
+@pytest.mark.parametrize("max_iterations", [1, 2, 20])
+async def test_idle_goal_budget_survives_internal_slices(max_iterations):
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.bus.events import InboundMessage
+    from nanobot.session.goal_state import GOAL_STATE_KEY
+    from nanobot.session.manager import Session
+    from nanobot.session.turn_continuation import (
+        MAX_GOAL_IDLE_CONTINUES,
+        idle_continuation_count,
+        maybe_continue_turn,
+    )
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Need your answer"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    session = Session("cli:idle")
+    session.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Make a plan"}
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="idle", content="make a plan")
+    pending = asyncio.Queue()
+    for _ in range(13):
+        result = await AgentRunner().run(make_run_spec(
+            provider, initial_messages=[{"role": "user", "content": msg.content}],
+            tools=tools, model="test", max_iterations=max_iterations,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            continuation_callback=_continue_goal,
+            max_idle_continues=MAX_GOAL_IDLE_CONTINUES,
+            idle_continues=idle_continuation_count(msg.metadata),
+            finalize_on_max_iterations=False,
+        ))
+        ctx = SimpleNamespace(
+            session=session, pending_queue=pending, msg=msg, stop_reason=result.stop_reason,
+            visible_run_started_at=None, all_messages=result.messages,
+            final_content=result.final_content, suppress_response=False, session_key=session.key,
+        )
+        if not await maybe_continue_turn(ctx, idle_continues=result.idle_continues):
+            break
+        msg = pending.get_nowait()
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "Need your answer"
+    assert provider.chat_stream_with_retry.await_count == 3
+    assert session.metadata[GOAL_STATE_KEY]["status"] == "active"
+    assert pending.empty()
+    assert idle_continuation_count({"_internal_idle_continues": 2}) == 0
+
+
+@pytest.mark.parametrize("result_text", ["found", "Error: lookup failed"])
+async def test_tool_execution_resets_idle_goal_budget(result_text):
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="all done", tool_calls=[], usage={},
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(id="call", name="lookup", arguments={})]),
+        *[LLMResponse(content="waiting") for _ in range(3)],
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=result_text)
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=[{"role": "user", "content": "work"}], tools=tools,
+        model="test", max_iterations=10, max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        continuation_callback=_continue_goal, max_idle_continues=2, idle_continues=2,
+    ))
+    assert result.stop_reason == "completed"
+    assert provider.chat_stream_with_retry.await_count == 4
+    assert result.idle_continues == 2
+    tools.execute.assert_awaited_once()
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+async def test_user_input_precedes_exhausted_idle_guard(terminal):
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="waiting"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    supplied = False
+
+    async def inject():
+        nonlocal supplied
+        # Simulate input that arrives after the first model response.
+        if not supplied and provider.chat_stream_with_retry.await_count == 1:
+            supplied = True
+            return [{"role": "user", "content": "new user instructions"}]
+        return []
+
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=[{"role": "user", "content": "work"}], tools=tools,
+        model="test", max_iterations=10, max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        continuation_callback=_continue_goal, max_idle_continues=2, idle_continues=2,
+        injection_callback=None if terminal else inject,
+        terminal_injection_callback=inject if terminal else None,
+    ))
+    assert supplied
+    assert result.stop_reason == "completed"
+    assert provider.chat_stream_with_retry.await_count == 4
+    assert any(m.get("content") == "new user instructions" for m in result.messages)
+
+
+@pytest.mark.asyncio
+async def test_runner_exits_normally_without_continuation_callback():
+    """Without a continuation request, final text completes the run."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="all done", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -44,13 +151,13 @@ async def test_runner_exits_normally_without_predicate():
 
 
 @pytest.mark.asyncio
-async def test_runner_exits_normally_with_inactive_goal():
-    """Predicate returns False, runner should exit normally."""
+async def test_runner_exits_normally_when_continuation_callback_returns_none():
+    """A callback returning None leaves the final response terminal."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="all done", tool_calls=[], usage={},
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="all done", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -62,7 +169,7 @@ async def test_runner_exits_normally_with_inactive_goal():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: False,
+        continuation_callback=lambda: None,
     ))
 
     assert result.stop_reason == "completed"
@@ -70,17 +177,19 @@ async def test_runner_exits_normally_with_inactive_goal():
 
 
 @pytest.mark.asyncio
-async def test_runner_forces_continue_when_goal_active():
-    """Predicate returns True on final text → runner injects continuation and loops.
+async def test_runner_continues_when_callback_returns_message():
+    """A callback result after final text is injected for the next iteration.
 
-    Without the goal predicate this would exit on the first iteration. How many
-    continuations are allowed is covered by the idle-budget tests below.
+    We set max_iterations=3 and let the provider return final text every time.
+    Without the fix this would exit on the first iteration with stop_reason
+    "completed". With the fix the runner is forced to continue until
+    max_iterations is hit.
     """
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -92,23 +201,25 @@ async def test_runner_forces_continue_when_goal_active():
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
+        continuation_callback=_continue_goal,
     ))
 
-    assert provider.chat_with_retry.await_count > 1
+    # Because the callback keeps returning a message, the runner should never
+    # naturally complete. It loops until max_iterations is exhausted.
+    assert result.stop_reason == "max_iterations"
     # The injected continuation message should be present in the message list.
     user_msgs = [m for m in result.messages if m.get("role") == "user"]
     assert any("active sustained goal" in str(m.get("content", "")) for m in user_msgs)
 
 
 @pytest.mark.asyncio
-async def test_runner_respects_max_iterations_even_with_active_goal():
-    """A single iteration with active goal still hits max_iterations."""
+async def test_runner_respects_max_iterations_with_continuation():
+    """A continuation request after one iteration still hits max_iterations."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -120,124 +231,48 @@ async def test_runner_respects_max_iterations_even_with_active_goal():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
+        continuation_callback=_continue_goal,
     ))
 
     assert result.stop_reason == "max_iterations"
 
 
 @pytest.mark.asyncio
-async def test_runner_keeps_answering_user_after_goal_idle_budget_is_spent():
-    """A spent idle budget silences the goal nudge only, never real user input."""
-    from nanobot.agent.runner import _MAX_GOAL_IDLE_CONTINUES, AgentRunner
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
-    ))
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    drains = {"n": 0}
-
-    async def inject_once_after_budget():
-        drains["n"] += 1
-        if drains["n"] == _MAX_GOAL_IDLE_CONTINUES + 1:
-            return [{"role": "user", "content": "actually, one more thing"}]
-        return []
-
-    runner = AgentRunner()
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=20,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
-        injection_callback=inject_once_after_budget,
-    ))
-
-    assert result.stop_reason == "completed"
-    user_msgs = [str(m.get("content", "")) for m in result.messages if m.get("role") == "user"]
-    assert any("actually, one more thing" in m for m in user_msgs)
-    # Idle budget, then the real injection, then the turn ends.
-    assert provider.chat_with_retry.await_count == _MAX_GOAL_IDLE_CONTINUES + 2
-
-
-@pytest.mark.asyncio
-async def test_runner_stops_goal_continue_after_consecutive_idle_responses():
-    """An idling goal must hand control back instead of nagging until the budget dies.
-
-    A goal that keeps answering in plain text is waiting for the user, not working.
-    The runner allows a bounded number of nudges, then finishes the turn normally.
-    """
-    from nanobot.agent.runner import _MAX_GOAL_IDLE_CONTINUES, AgentRunner
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="Still here whenever you're ready.", tool_calls=[], usage={},
-    ))
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    runner = AgentRunner()
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=20,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
-    ))
-
-    assert result.stop_reason == "completed"
-    assert result.final_content == "Still here whenever you're ready."
-    assert provider.chat_with_retry.await_count == _MAX_GOAL_IDLE_CONTINUES + 1
-
-
-@pytest.mark.asyncio
-async def test_runner_resets_goal_idle_streak_after_tool_use():
-    """Tool progress means the goal is working, so the nudge budget starts over."""
-    from nanobot.agent.runner import _MAX_GOAL_IDLE_CONTINUES, AgentRunner
-
-    idle = LLMResponse(content="Waiting on you.", tool_calls=[], usage={})
-    working = LLMResponse(
-        content="Checking.",
-        tool_calls=[ToolCallRequest(id="c1", name="list_dir", arguments={"path": "."})],
-        usage={},
-    )
-    # Idle up to the cap, do real work, then idle again: the streak must restart.
-    responses = [idle] * _MAX_GOAL_IDLE_CONTINUES + [working] + [idle] * 10
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(side_effect=responses)
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    tools.execute = AsyncMock(return_value="ok")
-
-    runner = AgentRunner()
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=20,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
-    ))
-
-    assert result.stop_reason == "completed"
-    # cap idle responses + 1 tool iteration + cap idle responses again + the one
-    # that finds the budget spent.
-    assert provider.chat_with_retry.await_count == 2 * _MAX_GOAL_IDLE_CONTINUES + 2
-
-
-@pytest.mark.asyncio
-async def test_runner_does_not_force_continue_on_error():
-    """Even with active goal, an LLM error should exit with stop_reason="error"."""
+async def test_runner_continuation_is_governed_by_max_iterations():
+    """Caller-requested continuation is governed by max_iterations."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content=None, tool_calls=[], usage={},
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="still working", tool_calls=[], usage=None,
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    max_iterations = 8
+
+    runner = AgentRunner()
+    result = await runner.run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=max_iterations,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        continuation_callback=_continue_goal,
+        finalize_on_max_iterations=False,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert provider.chat_stream_with_retry.await_count == max_iterations
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_continue_on_error():
+    """An LLM error remains terminal even when continuation is available."""
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content=None, tool_calls=[], usage=None,
         finish_reason="error",
     ))
     tools = MagicMock()
@@ -250,20 +285,20 @@ async def test_runner_does_not_force_continue_on_error():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
+        continuation_callback=_continue_goal,
     ))
 
     assert result.stop_reason == "error"
 
 
 @pytest.mark.asyncio
-async def test_runner_uses_custom_goal_continue_message():
-    """Custom goal_continue_message should be injected instead of the default."""
+async def test_runner_injects_continuation_callback_message():
+    """The callback result becomes the injected user message."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -277,8 +312,7 @@ async def test_runner_uses_custom_goal_continue_message():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
-        goal_continue_message=custom_msg,
+        continuation_callback=lambda: custom_msg,
     ))
 
     user_msgs = [m for m in result.messages if m.get("role") == "user"]
@@ -286,13 +320,13 @@ async def test_runner_uses_custom_goal_continue_message():
 
 
 @pytest.mark.asyncio
-async def test_runner_resolves_goal_continue_message_lazily():
+async def test_runner_resolves_continuation_callback_lazily():
     """The continuation text can depend on goal metadata created during the run."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working", tool_calls=[], usage={},
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -309,8 +343,7 @@ async def test_runner_resolves_goal_continue_message_lazily():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        goal_active_predicate=lambda: True,
-        goal_continue_message=dynamic_msg,
+        continuation_callback=dynamic_msg,
         finalize_on_max_iterations=False,
     ))
 

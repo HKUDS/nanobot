@@ -7,7 +7,7 @@ import { displayWebHost, formatCompactWebUrl, parseSafeActivityHttpUrl } from ".
 export type WebSearchStatus = "running" | "done" | "error";
 export type WebSearchTarget = "web" | "x";
 
-export interface WebSearchSource {
+interface WebSearchSource {
   title: string;
   href: string;
   host: string;

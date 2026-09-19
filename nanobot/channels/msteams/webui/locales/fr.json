@@ -1,26 +1,15 @@
 {
-  "description": "Utilisez nanobot depuis les conversations Microsoft Teams.",
-  "requirements": "Identifiants de l’application bot Azure et endpoint de rappel public",
   "setup": {
     "docsLabel": "Ouvrir le guide Teams",
     "officialLabel": "Ouvrir le portail développeur Teams",
-    "tryIt": "Installez l’application Teams et envoyez un message test.",
-    "summary": "Teams reçoit les messages via l’URL de rappel Bot Framework. Un endpoint HTTPS accessible est nécessaire en production.",
-    "steps": [
-      "Créez un bot Azure ou une application Teams et copiez l’App ID et le secret client.",
-      "Exposez le chemin de rappel en HTTPS et définissez-le comme endpoint de messagerie.",
-      "Enregistrez et activez Teams, puis installez l’application et envoyez un message test."
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
-        "placeholder": "Microsoft App ID",
-        "help": "Copiez-le depuis l’inscription du bot Azure ou de l’application Teams."
+        "placeholder": "Microsoft App ID"
       },
       "appPassword": {
         "label": "Secret client",
-        "placeholder": "••••••",
-        "help": "Créez un secret client pour l’application Microsoft."
+        "placeholder": "••••••"
       },
       "tenantId": {
         "label": "ID du locataire",
@@ -33,6 +22,52 @@
       "allowFrom": {
         "label": "Utilisateurs autorisés",
         "placeholder": "ID utilisateur Teams séparés par des virgules"
+      },
+      "host": {
+        "label": "Écouter l'hôte"
+      },
+      "port": {
+        "label": "Port d'écoute"
+      },
+      "replyInThread": {
+        "label": "Répondre dans le fil de discussion",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Réponse avec mention uniquement"
+      },
+      "validateInboundAuth": {
+        "label": "Valider les demandes entrantes",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "refTtlDays": {
+        "label": "Durée de vie des conversations"
+      },
+      "pruneWebChatRefs": {
+        "label": "Supprimer les conversations de chat Web",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Supprimer les conversations non personnelles",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Intervalle d'actualisation des conversations"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Hôtes de services de confiance"
       }
     }
   }

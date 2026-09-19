@@ -236,18 +236,54 @@ async def test_read_session_filters_by_query_and_returns_recent_matches(tmp_path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("query", [None, "", " "])
+async def test_read_session_accepts_unfiltered_query_forms(tmp_path, query):
+    manager = SessionManager(tmp_path)
+    _save_session(
+        manager,
+        "websocket:history",
+        title="History",
+        messages=[
+            {"role": "user", "content": "first visible message"},
+            {"role": "assistant", "content": "second visible message"},
+        ],
+    )
+
+    kwargs = {"session_key": "websocket:history"}
+    if query is not None:
+        kwargs["query"] = query
+    with _webui_request():
+        result = _decode(await ReadSessionTool(manager).execute(**kwargs))
+
+    assert result["query"] is None
+    assert [message["content"] for message in result["messages"]] == [
+        "first visible message",
+        "second visible message",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["*", ".*"])
+async def test_read_session_rejects_match_all_patterns_with_retry_guidance(tmp_path, query):
+    with _webui_request():
+        result = await ReadSessionTool(SessionManager(tmp_path)).execute(
+            session_key="websocket:history",
+            query=query,
+        )
+
+    assert result.is_error
+    assert "literal substring" in str(result)
+    assert "Omit query" in str(result)
+
+
+@pytest.mark.asyncio
 async def test_read_session_reports_invalid_requests(tmp_path):
     with _webui_request():
         missing = await ReadSessionTool(SessionManager(tmp_path)).execute(
             session_key="websocket:missing"
         )
-        blank_query = await ReadSessionTool(SessionManager(tmp_path)).execute(
-            session_key="websocket:history",
-            query=" ",
-        )
 
     assert missing.is_error and "session not found" in str(missing)
-    assert blank_query.is_error and "query must not be empty" in str(blank_query)
 
 
 @pytest.mark.asyncio

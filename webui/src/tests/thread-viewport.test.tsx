@@ -123,6 +123,25 @@ function stubResizeObserver() {
   };
 }
 
+function stubElementsFromPoint(resolve: () => Element[]) {
+  const descriptor = Object.getOwnPropertyDescriptor(document, "elementsFromPoint");
+  const mock = vi.fn(resolve);
+  Object.defineProperty(document, "elementsFromPoint", {
+    configurable: true,
+    value: mock,
+  });
+  return {
+    mock,
+    restore: () => {
+      if (descriptor) {
+        Object.defineProperty(document, "elementsFromPoint", descriptor);
+      } else {
+        Reflect.deleteProperty(document, "elementsFromPoint");
+      }
+    },
+  };
+}
+
 function makeLongMessages(count: number): UIMessage[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `m${index}`,
@@ -234,7 +253,7 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    const disclosure = screen.getByRole("button", { name: "Thought" });
+    const disclosure = screen.getByRole("button", { name: "Worked" });
     fireEvent.pointerDown(disclosure, { button: 0 });
     expect(takeUserControl).toHaveBeenCalledTimes(1);
 
@@ -259,7 +278,8 @@ describe("ThreadViewport", () => {
     const messageRegion = screen.getByTestId("thread-message-region");
     expect(messageRegion).toHaveClass("justify-start");
     expect(messageRegion).not.toHaveClass("justify-end");
-    expect(messageRegion).toHaveClass("pb-4");
+    expect(messageRegion).toHaveClass("thread-message-viewport");
+    expect(messageRegion).toHaveClass("pb-0");
     expect(messageRegion.className).not.toContain("5rem");
   });
 
@@ -283,6 +303,14 @@ describe("ThreadViewport", () => {
     );
 
     expect(screen.getByTestId("thread-message-region")).toHaveClass("min-w-0");
+  });
+
+  it("uses the shared content-column width for conversation messages", () => {
+    render(<ThreadViewport messages={messages} isStreaming={false} composer={<div>composer</div>} />);
+
+    expect(screen.getByTestId("thread-message-region").firstElementChild).toHaveClass(
+      "mx-auto", "w-full", "max-w-[var(--content-column-width)]",
+    );
   });
 
   it("top-aligns a short active turn while the agent is responding", () => {
@@ -316,7 +344,9 @@ describe("ThreadViewport", () => {
     expect(scroller).not.toContainElement(composerDock);
     expect(scroller.parentElement).toContainElement(composerDock);
     expect(composerDock).toHaveClass("relative");
+    expect(composerDock).toHaveClass("thread-composer-dock");
     expect(composerDock).not.toHaveClass("sticky");
+    expect(scroller.querySelector(".thread-message-end-gap")).toBeInTheDocument();
     expect(scroller.lastElementChild).toHaveClass("h-px", "shrink-0");
   });
 
@@ -542,7 +572,7 @@ describe("ThreadViewport", () => {
     });
     await flushAnimationFrame();
 
-    expect(jumpTo).toHaveBeenCalledWith(1404);
+    expect(jumpTo).toHaveBeenCalledWith(1372);
   });
 
   it("drives the camera from a message commit when canonical replay replaces the prompt DOM id", async () => {
@@ -1430,6 +1460,7 @@ describe("ThreadViewport", () => {
 
   it("renders only the tail window for long history by default", () => {
     const longMessages = makeLongMessages(300);
+    const firstVisible = longMessages.length - INITIAL_HISTORY_WINDOW;
 
     render(
       <ThreadViewport
@@ -1439,8 +1470,8 @@ describe("ThreadViewport", () => {
       />,
     );
 
-    expect(screen.queryByText("message 139")).not.toBeInTheDocument();
-    expect(screen.getByText("message 140")).toBeInTheDocument();
+    expect(screen.queryByText(`message ${firstVisible - 1}`)).not.toBeInTheDocument();
+    expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
     expect(screen.getByText("message 299")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load earlier messages" })).not.toBeInTheDocument();
   });
@@ -1475,6 +1506,112 @@ describe("ThreadViewport", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText(`message ${firstVisible}`)).toBeInTheDocument();
     expect(screen.getAllByText("message 299").length).toBeGreaterThan(0);
+  });
+
+  it("prefetches earlier history within half a viewport of the top", () => {
+    const expandedFirstVisible = 300 - INITIAL_HISTORY_WINDOW - HISTORY_WINDOW_INCREMENT;
+    const { container } = render(
+      <ThreadViewport
+        messages={makeLongMessages(300)}
+        isStreaming={false}
+        composer={<div />}
+      />,
+    );
+
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 301 },
+    });
+
+    act(() => {
+      dispatchUserScroll(scroller);
+    });
+    expect(
+      screen.queryByText(`message ${300 - INITIAL_HISTORY_WINDOW - 1}`),
+    ).not.toBeInTheDocument();
+
+    scroller.scrollTop = 250;
+    act(() => {
+      dispatchUserScroll(scroller);
+    });
+    expect(screen.getByText(`message ${expandedFirstVisible}`)).toBeInTheDocument();
+    expect(screen.queryByText(`message ${expandedFirstVisible - 1}`)).not.toBeInTheDocument();
+  });
+
+  it("keeps the first visible history item fixed while deferred rows materialize", () => {
+    const resizeObserver = stubResizeObserver();
+    let hitTarget: Element | null = null;
+    const hitTest = stubElementsFromPoint(() => hitTarget ? [hitTarget] : []);
+    try {
+      const { container } = render(
+        <ThreadViewport
+          messages={makeLongMessages(300)}
+          isStreaming={false}
+          composer={<div />}
+        />,
+      );
+
+      const scroller = getScroller(container);
+      let scrollHeight = 2_400;
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, get: () => scrollHeight },
+        clientHeight: { configurable: true, value: 600 },
+        scrollTop: { configurable: true, writable: true, value: 80 },
+        getBoundingClientRect: {
+          configurable: true,
+          value: () => DOMRect.fromRect({ y: 0, width: 800, height: 600 }),
+        },
+      });
+
+      const firstVisible = 300 - INITIAL_HISTORY_WINDOW;
+      const anchor = screen.getByText(`message ${firstVisible}`)
+        .closest<HTMLElement>("[data-thread-display-unit]");
+      expect(anchor).not.toBeNull();
+      hitTarget = anchor;
+      let anchorDocumentTop = 200;
+      Object.defineProperty(anchor, "getBoundingClientRect", {
+        configurable: true,
+        value: () => DOMRect.fromRect({
+          y: anchorDocumentTop - scroller.scrollTop,
+          width: 800,
+          height: 40,
+        }),
+      });
+
+      act(() => {
+        dispatchUserScroll(scroller);
+      });
+      expect(hitTest.mock).toHaveBeenCalled();
+
+      const replacement = anchor.cloneNode(true) as HTMLElement;
+      anchor.replaceWith(replacement);
+      anchorDocumentTop += 180;
+      scrollHeight += 180;
+      Object.defineProperty(replacement, "getBoundingClientRect", {
+        configurable: true,
+        value: () => DOMRect.fromRect({
+          y: anchorDocumentTop - scroller.scrollTop,
+          width: 800,
+          height: 40,
+        }),
+      });
+      const content = screen.getByTestId("thread-message-region").firstElementChild;
+      const observer = resizeObserver.observers.find((candidate) =>
+        content ? candidate.elements.includes(content) : false,
+      );
+      expect(observer).toBeDefined();
+      act(() => {
+        observer?.callback([], observer as unknown as ResizeObserver);
+      });
+
+      expect(scroller.scrollTop).toBe(260);
+      expect(replacement.getBoundingClientRect().top).toBe(120);
+    } finally {
+      hitTest.restore();
+      resizeObserver.restore();
+    }
   });
 
   it("automatically requests older transcript pages near the top", () => {
@@ -1543,7 +1680,7 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(targetPrompt);
 
-    expect(navigateTo).toHaveBeenCalledWith(1064);
+    expect(navigateTo).toHaveBeenCalledWith(1032);
   });
 
   it("renders markdown in prompt rail previews", async () => {
@@ -1694,6 +1831,54 @@ describe("ThreadViewport", () => {
     expect(screen.getByLabelText("User prompt navigation")).toBeInTheDocument();
   });
 
+  it.each([2, 3, 100])("keeps %i prompts navigable before a very long answer", async (count) => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockReturnValue("started");
+    const { promptEls, scroller } = await renderPromptRailViewport({
+      messages: makeLongMessages(count),
+    });
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1_000_000,
+    });
+    promptEls.forEach((el, index) => {
+      Object.defineProperty(el, "offsetTop", { configurable: true, value: index * 40 });
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    const markers = screen.getAllByRole("button", { name: /Jump to prompt:/ });
+    if (count < 30) {
+      expect(markers).toHaveLength(count);
+      markers.forEach((marker, index) => {
+        fireEvent.click(marker);
+        expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, index * 40 - 48));
+      });
+    } else {
+      expect(markers.length).toBeGreaterThan(1);
+      expect(markers.length).toBeLessThan(count);
+    }
+    fireEvent.click(markers[markers.length - 1]);
+    expect(navigateTo).toHaveBeenLastCalledWith(Math.max(0, (count - 1) * 40 - 48));
+  });
+
+  it("keeps prompt jumps aligned when the header changes between a row and an overlay", async () => {
+    const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
+      .mockReturnValue("started");
+    const { scroller } = await renderPromptRailViewport();
+    const marker = screen.getByRole("button", { name: "Jump to prompt: message 1" });
+
+    scroller.style.paddingTop = "16px";
+    fireEvent.click(marker);
+    expect(navigateTo).toHaveBeenLastCalledWith(344);
+
+    scroller.style.paddingTop = "48px";
+    fireEvent.click(marker);
+    expect(navigateTo).toHaveBeenLastCalledWith(312);
+  });
+
   it("buckets dense prompt rails without rendering every prompt as a marker", async () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
       .mockReturnValue("started");
@@ -1742,20 +1927,21 @@ describe("ThreadViewport", () => {
 
     fireEvent.click(promptMarkers[promptMarkers.length - 1]);
 
-    expect(navigateTo).toHaveBeenCalledWith(8894);
+    expect(navigateTo).toHaveBeenCalledWith(8862);
   });
 
   it("expands the window start to avoid cutting an agent activity cluster", () => {
     const clustered = makeLongMessages(200);
+    const boundary = clustered.length - INITIAL_HISTORY_WINDOW;
     clustered.splice(
-      38,
+      boundary - 2,
       3,
       {
         id: "r0",
         role: "assistant",
         content: "",
         reasoning: "first reasoning",
-        createdAt: 38,
+        createdAt: boundary - 2,
       },
       {
         id: "t0",
@@ -1763,14 +1949,14 @@ describe("ThreadViewport", () => {
         kind: "trace",
         content: "tool()",
         traces: ["tool()"],
-        createdAt: 39,
+        createdAt: boundary - 1,
       },
       {
         id: "r1",
         role: "assistant",
         content: "",
         reasoning: "second reasoning",
-        createdAt: 40,
+        createdAt: boundary,
       },
     );
 

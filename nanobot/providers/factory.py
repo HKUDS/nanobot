@@ -172,6 +172,7 @@ def _make_provider_core(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
+            provider_name=provider_name,
         )
     elif backend == "xai_grok":
         from nanobot.providers.xai_grok_provider import XAIGrokProvider
@@ -180,6 +181,7 @@ def _make_provider_core(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
+            provider_name=provider_name,
         )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
@@ -190,11 +192,12 @@ def _make_provider_core(
             api_key=p.api_key or "",
             api_base=p.api_base,
             default_model=model,
+            provider_name=provider_name,
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
-        provider = GitHubCopilotProvider(default_model=model)
+        provider = GitHubCopilotProvider(default_model=model, provider_name=provider_name)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
@@ -203,6 +206,7 @@ def _make_provider_core(
             api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
+            provider_name=provider_name,
         )
     elif backend == "bedrock":
         from nanobot.providers.bedrock_provider import BedrockProvider
@@ -214,6 +218,7 @@ def _make_provider_core(
             region=getattr(p, "region", None) if p else None,
             profile=getattr(p, "profile", None) if p else None,
             extra_body=p.extra_body if p else None,
+            provider_name=provider_name,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -228,6 +233,7 @@ def _make_provider_core(
             api_type=p.api_type if p and provider_name == "openai" else "auto",
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
+            provider_name=provider_name,
         )
 
     provider.generation = preset.to_generation_settings()

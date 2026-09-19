@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import type { ReactNode, Ref } from "react";
+import { useState, type ReactNode, type Ref } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -30,6 +30,8 @@ export function ThinkingReasoningShell({
   onToggle,
   onScroll,
 }: ThinkingReasoningShellProps) {
+  const [hasExpanded, setHasExpanded] = useState(expanded);
+  if (expanded && !hasExpanded) setHasExpanded(true);
   return (
     <div
       className="flex w-full max-w-[45rem] animate-in flex-col fade-in duration-300 motion-reduce:animate-none"
@@ -109,7 +111,7 @@ export function ThinkingReasoningShell({
               className="mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <div ref={contentRef} className="flex flex-col gap-0.5">
-                {children}
+                {hasExpanded ? children : null}
               </div>
             </div>
             {fadeTop ? (

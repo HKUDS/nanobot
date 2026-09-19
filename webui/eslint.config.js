@@ -13,7 +13,11 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["webui/src/**/*.{ts,tsx}", "nanobot/channels/*/webui/**/*.{ts,tsx}"],
+    files: [
+      "webui/src/**/*.{ts,tsx}",
+      "nanobot/channels/*/webui/**/*.{ts,tsx}",
+      "nanobot/channels/*/tests/webui/**/*.{ts,tsx}",
+    ],
     languageOptions: {
       ecmaVersion: 2020,
       globals: {

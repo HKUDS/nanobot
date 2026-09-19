@@ -31,6 +31,8 @@ _GOAL_CONTINUATION_KIND = "sustained_goal"
 _GOAL_CONTINUATION_SENDER = "system:continuation"
 _GOAL_CONTINUATION_ROUNDS_KEY = "_sustained_goal_continuation_rounds"
 _MAX_GOAL_CONTINUATION_ROUNDS = 12
+MAX_GOAL_IDLE_CONTINUES = 2
+_IDLE_CONTINUES_META = "_internal_idle_continues"
 _STRIPPED_INBOUND_META_KEYS = {
     INTERNAL_CONTINUATION_PENDING_META,
     "goal_requested",
@@ -43,9 +45,26 @@ def internal_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
     return bool(metadata and metadata.get(INTERNAL_CONTINUATION_META) is True)
 
 
+def sustained_goal_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
+    """True only for an internal continuation owned by sustained-goal policy."""
+    return bool(
+        internal_continuation_inbound(metadata)
+        and metadata
+        and metadata.get(INTERNAL_CONTINUATION_KIND_META) == _GOAL_CONTINUATION_KIND
+    )
+
+
 def internal_continuation_pending(metadata: Mapping[str, Any] | None) -> bool:
     """True when the current turn scheduled an invisible continuation slice."""
     return bool(metadata and metadata.get(INTERNAL_CONTINUATION_PENDING_META) is True)
+
+
+def idle_continuation_count(metadata: Mapping[str, Any] | None) -> int:
+    """Carry idle nudges across internal slices, never across fresh user turns."""
+    if not sustained_goal_continuation_inbound(metadata):
+        return 0
+    value = (metadata or {}).get(_IDLE_CONTINUES_META)
+    return max(0, value) if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def internal_continuation_run_started_at(metadata: Mapping[str, Any] | None) -> float | None:
@@ -104,7 +123,7 @@ def should_finalize_on_max_iterations(
     )
 
 
-async def maybe_continue_turn(ctx: TurnContext) -> bool:
+async def maybe_continue_turn(ctx: TurnContext, *, idle_continues: int = 0) -> bool:
     """Queue an internal continuation for *ctx* when policy allows it."""
     if ctx.session is None or ctx.pending_queue is None:
         return False
@@ -120,6 +139,7 @@ async def maybe_continue_turn(ctx: TurnContext) -> bool:
         ctx.msg.metadata,
         run_started_at=ctx.visible_run_started_at,
     )
+    metadata[_IDLE_CONTINUES_META] = max(0, idle_continues)
     content = _goal_continuation_prompt(ctx.session.metadata)
     messages = _strip_terminal_assistant(ctx.all_messages, ctx.final_content)
     _increment_goal_continuation_round(ctx.session.metadata)
@@ -147,10 +167,10 @@ def prepare_save_boundary(ctx: TurnContext) -> None:
     if ctx.session is not None:
         clear_internal_continuation_state(ctx.session.metadata)
 
+    assert ctx.transcript_input is not None
     ctx.save_skip = _save_skip_for_turn(
         message_metadata=ctx.msg.metadata,
-        initial_message_count=len(ctx.initial_messages),
-        history_count=len(ctx.history),
+        initial_message_count=ctx.transcript_input.message_count,
         input_persisted_early=ctx.input_persisted_early,
     )
 
@@ -185,7 +205,6 @@ def _save_skip_for_turn(
     *,
     message_metadata: Mapping[str, Any] | None,
     initial_message_count: int,
-    history_count: int,
     input_persisted_early: bool,
 ) -> int:
     """Return the persisted-message append boundary for this turn."""
@@ -193,10 +212,7 @@ def _save_skip_for_turn(
         return initial_message_count
     if internal_continuation_inbound(message_metadata):
         return initial_message_count
-    # build_messages may merge the current message into a same-role history tail.
-    # Runner-appended messages start at initial_message_count in either shape.
-    has_standalone_current = initial_message_count > 1 + history_count
-    if has_standalone_current and not input_persisted_early:
+    if not input_persisted_early:
         return initial_message_count - 1
     return initial_message_count
 

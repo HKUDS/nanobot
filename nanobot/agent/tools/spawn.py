@@ -73,6 +73,11 @@ class SpawnTool(Tool):
             "and use a dedicated subdirectory when helpful."
         )
 
+    @property
+    def concurrency_safe(self) -> bool:
+        """Each call owns its task state; the manager serializes capacity admission."""
+        return True
+
     async def execute(
         self,
         task: str,
@@ -82,14 +87,6 @@ class SpawnTool(Tool):
         **kwargs: Any,
     ) -> str:
         """Spawn a subagent to execute the given task."""
-        running = self._manager.get_running_count()
-        limit = self._manager.max_concurrent_subagents
-        if running >= limit:
-            return (
-                f"Cannot spawn subagent: concurrency limit reached "
-                f"({running}/{limit} running). Wait for a running subagent "
-                f"to complete before spawning a new one."
-            )
         request_ctx = current_request_context()
         if request_ctx is None or request_ctx.runtime is None:
             return ToolResult.error("Error: spawn requires an active model runtime")

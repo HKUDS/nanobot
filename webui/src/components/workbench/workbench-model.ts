@@ -12,7 +12,7 @@ export type {
 
 export const MAX_WORKBENCH_PANES = 4;
 
-export const WORKBENCH_LAYOUTS = [
+const WORKBENCH_LAYOUTS = [
   "columns",
   "rows",
   "grid",
@@ -72,9 +72,10 @@ function normalizeTab(value: unknown): WorkbenchTabState {
     ...requestedLayoutPaneKeys,
     ...paneKeys.filter((key) => !requestedLayoutPaneKeys.includes(key)),
   ];
+  const title = normalizeTitle(candidate.title);
   return {
-    explicit: candidate.explicit === true,
-    title: normalizeTitle(candidate.title),
+    explicit: candidate.explicit === true || title !== null,
+    title,
     paneKeys,
     layoutPaneKeys,
     layout: isLayout(candidate.layout) ? candidate.layout : "columns",
@@ -309,7 +310,9 @@ export function renameWorkbenchTab(
   const normalized = normalizeTitle(title);
   if (!normalized) return state;
   return updateTab(state, tabKey, (tab) => (
-    tab.title === normalized ? tab : { ...tab, title: normalized }
+    tab.title === normalized && tab.explicit
+      ? tab
+      : { ...tab, explicit: true, title: normalized }
   ));
 }
 

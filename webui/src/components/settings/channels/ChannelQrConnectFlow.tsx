@@ -1,6 +1,7 @@
+import { channelValidationMessage } from "./validationMessages";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { Check, Loader2, Network, RotateCcw } from "lucide-react";
+import { Check, Loader2, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -28,13 +29,6 @@ export type ChannelQrConnectLabels = {
   connect: string;
 };
 
-export type ChannelConnectStartOptions = {
-  domain?: string;
-  instanceId?: string;
-  mode?: "replace" | "create";
-  force?: boolean;
-};
-
 export type ChannelQrConnectPendingContext = {
   connect: ChannelConnectPayload;
   busy: boolean;
@@ -45,29 +39,39 @@ export type ChannelQrConnectPendingContext = {
 
 export function ChannelQrConnectFlow({
   channelName,
-  startOptions = {},
+  startParams = {},
   idleLabel,
   connectRequestId,
   forceOnRepeat = false,
+  connected = false,
+  autoStart = false,
+  minimalPending = false,
   labels,
   onFeaturesUpdate,
   pausePolling,
   renderPending,
   resolveMessage,
   suppressSucceeded = false,
+  onActiveChange,
+  renderActions,
 }: {
   token: string;
   channelName: string;
-  startOptions?: ChannelConnectStartOptions;
+  startParams?: Readonly<Record<string, string | boolean>>;
   idleLabel?: string;
   connectRequestId?: number;
   forceOnRepeat?: boolean;
+  connected?: boolean;
+  autoStart?: boolean;
+  minimalPending?: boolean;
   labels: ChannelQrConnectLabels;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   pausePolling?: (payload: ChannelConnectPayload) => boolean;
   renderPending?: (context: ChannelQrConnectPendingContext) => ReactNode;
   resolveMessage?: (payload: ChannelConnectPayload) => string | undefined;
   suppressSucceeded?: boolean;
+  onActiveChange?: (active: boolean) => void;
+  renderActions?: (connectButton: ReactNode) => ReactNode;
 }) {
   const { client } = useClient();
   const pageVisible = usePageVisibility();
@@ -77,19 +81,19 @@ export function ChannelQrConnectFlow({
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [handledRequestId, setHandledRequestId] = useState(0);
+  const handledRequestId = useRef(0);
+  const autoStarted = useRef(false);
   const pollInFlight = useRef(false);
-  const startDomain = startOptions.domain;
-  const startInstanceId = startOptions.instanceId;
-  const startMode = startOptions.mode;
-  const startForce = startOptions.force;
 
   const pending = connect?.status === "pending";
-  const succeeded = connect?.status === "succeeded";
+  const succeeded = !pending && (connected || connect?.status === "succeeded");
   const canStart = !pending && !busy;
+  useEffect(() => {
+    onActiveChange?.(pending || busy);
+  }, [pending, busy, onActiveChange]);
   const pollingPaused = Boolean(connect && pausePolling?.(connect));
   const displayMessage = connect
-    ? resolveMessage?.(connect) ?? connect.message
+    ? resolveMessage?.(connect) ?? (connect.message ? channelValidationMessage(connect.message, t) : undefined)
     : undefined;
 
   useEffect(() => {
@@ -176,24 +180,27 @@ export function ChannelQrConnectFlow({
     setError(null);
     try {
       const payload = await startChannelConnect(client, channelName, {
-        domain: startDomain,
-        instanceId: startInstanceId,
-        mode: startMode,
-        force: force || startForce,
+        ...startParams,
+        ...(force ? { force: true } : {}),
       });
       setConnect(payload);
+      if (payload.nanobot_features) {
+        onFeaturesUpdate(payload.nanobot_features);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [channelName, client, startDomain, startForce, startInstanceId, startMode]);
+  }, [channelName, client, startParams, onFeaturesUpdate]);
 
   useEffect(() => {
-    if (!connectRequestId || connectRequestId === handledRequestId) return;
-    setHandledRequestId(connectRequestId);
+    const requested = Boolean(connectRequestId && connectRequestId !== handledRequestId.current);
+    if (!requested && !(autoStart && !autoStarted.current)) return;
+    handledRequestId.current = connectRequestId ?? 0;
+    autoStarted.current = true;
     void start();
-  }, [connectRequestId, handledRequestId, start]);
+  }, [autoStart, connectRequestId, start]);
 
   const cancel = async () => {
     if (!connect?.session_id) {
@@ -248,9 +255,34 @@ export function ChannelQrConnectFlow({
     }
   };
 
+  const renderActionRow = renderActions ?? ((connectButton: ReactNode) => (
+    <div className="flex flex-wrap justify-end gap-2">{connectButton}</div>
+  ));
+
   return (
     <div className="mt-3 space-y-3">
-      {pending ? (
+      {autoStart && busy && !connect ? (
+        <div role="status" className="grid min-h-[228px] place-items-center">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+          <span className="sr-only">{labels.connecting}</span>
+        </div>
+      ) : null}
+      {pending && minimalPending ? (
+        <div className="flex min-h-[228px] flex-col items-center justify-center gap-4 py-4">
+          <div className="grid h-[196px] w-[196px] place-items-center rounded-control bg-background shadow-[inset_0_0_0_1px_oklch(0_0_0/0.1)] dark:shadow-[inset_0_0_0_1px_oklch(1_0_0/0.1)]">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt={labels.qrAlt}
+                className="h-[184px] w-[184px]"
+              />
+            ) : (
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+            )}
+          </div>
+          {renderPending?.({ connect, busy, poll: submitPoll })}
+        </div>
+      ) : pending ? (
         <div className="grid gap-4 rounded-control border border-border/70 p-4 sm:grid-cols-[auto_minmax(0,1fr)]">
           <div className="grid h-[196px] w-[196px] place-items-center rounded-control border border-border/60 bg-background">
             {qrDataUrl ? (
@@ -268,12 +300,12 @@ export function ChannelQrConnectFlow({
               {labels.scanTitle}
             </div>
             <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">
-              {labels.scanDescription}
+              {qrDataUrl ? labels.scanDescription : null}
             </p>
             {renderPending?.({ connect, busy, poll: submitPoll }) ?? (
               <div className="mt-3 flex items-center gap-2 text-[12px] text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                {labels.waiting}
+                {qrDataUrl ? labels.waiting : labels.connecting}
               </div>
             )}
             <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -299,7 +331,8 @@ export function ChannelQrConnectFlow({
         </div>
       ) : null}
 
-      {connect && ["expired", "failed", "cancelled"].includes(connect.status) ? (
+      {connect && ["expired", "failed", "cancelled"].includes(connect.status)
+        && !(connected && connect.status === "cancelled") ? (
         <div className="rounded-control border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
           {displayMessage || labels.stopped}
         </div>
@@ -311,12 +344,12 @@ export function ChannelQrConnectFlow({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap justify-end gap-2">
+      {!pending && !(autoStart && busy && !connect) ? renderActionRow(
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold hover:bg-muted/70"
+          className="h-8 rounded-full border-border/65 bg-background/80 px-3 text-[12px] font-semibold settings-hover"
           onClick={() => void start(forceOnRepeat && succeeded)}
           disabled={!canStart}
         >
@@ -324,16 +357,14 @@ export function ChannelQrConnectFlow({
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
           ) : succeeded ? (
             <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          ) : (
-            <Network className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          )}
+          ) : null}
           {pending
             ? labels.connecting
             : succeeded
               ? labels.scanAgain
               : idleLabel ?? labels.connect}
         </Button>
-      </div>
+      ) : null}
     </div>
   );
 }

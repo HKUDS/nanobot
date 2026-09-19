@@ -7,11 +7,13 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import uuid4
+
+from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import RequestContext, ToolContext, current_request_context
@@ -127,7 +129,7 @@ class SendSessionMessageTool(Tool):
         self._max_messages_per_minute = max_messages_per_minute
         self._schedule_later = schedule_later
         self._clock = clock or time.monotonic
-        self._sent_at: dict[str, deque[float]] = {}
+        self._sent_at: OrderedDict[str, deque[float]] = OrderedDict()
         self._pending_replies: dict[tuple[str, str], _PendingReply] = {}
         self._expiry_tasks: set[asyncio.Task[None]] = set()
         self._send_lock = asyncio.Lock()
@@ -240,8 +242,11 @@ class SendSessionMessageTool(Tool):
 
         async with self._send_lock:
             now = self._clock()
-            sent_at = self._sent_at.setdefault(source.session_key, deque())
             cutoff = now - _RATE_LIMIT_WINDOW_SECONDS
+            self._prune_expired_rate_limits(cutoff)
+            sent_at = self._sent_at.get(source.session_key)
+            if sent_at is None:
+                sent_at = deque[float]()
             while sent_at and sent_at[0] <= cutoff:
                 sent_at.popleft()
             if len(sent_at) >= self._max_messages_per_minute:
@@ -259,6 +264,8 @@ class SendSessionMessageTool(Tool):
                 input_role="user",
             ))
             sent_at.append(now)
+            self._sent_at[source.session_key] = sent_at
+            self._sent_at.move_to_end(source.session_key)
             self._cancel_pending_reply(reverse_wait_key)
             if timeout_seconds is not None:
                 self._cancel_pending_reply(wait_key)
@@ -270,6 +277,14 @@ class SendSessionMessageTool(Tool):
                 )
 
         return f"@{target.name}"
+
+    def _prune_expired_rate_limits(self, cutoff: float) -> None:
+        """Drop sources ordered by their most recent successful send."""
+        while self._sent_at:
+            _, sent_at = next(iter(self._sent_at.items()))
+            if sent_at[-1] > cutoff:
+                return
+            self._sent_at.popitem(last=False)
 
     @staticmethod
     def _validate_reply_timeout(
@@ -312,10 +327,19 @@ class SendSessionMessageTool(Tool):
         def expire() -> None:
             task = asyncio.create_task(self._expire_pending_reply(key, pending))
             self._expiry_tasks.add(task)
-            task.add_done_callback(self._expiry_tasks.discard)
+            task.add_done_callback(self._on_expiry_task_done)
 
         schedule = self._schedule_later or asyncio.get_running_loop().call_later
         pending.timer = schedule(float(timeout_seconds), expire)
+
+    def _on_expiry_task_done(self, task: asyncio.Task[None]) -> None:
+        self._expiry_tasks.discard(task)
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("Session reply timeout delivery failed")
 
     async def _expire_pending_reply(
         self,
