@@ -1791,6 +1791,173 @@ class TestCircuitBreaker:
         assert result.content == "fallback ok"
         assert len(primary.chat_calls) == 1
 
+    @pytest.mark.asyncio
+    async def test_half_open_allows_only_one_concurrent_probe(self) -> None:
+        primary = _FakeProvider("primary", _error_response())
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+        fb._primary_failures = 3
+        fb._primary_tripped_at = 100.0
+        primary_started = asyncio.Event()
+        release_primary = asyncio.Event()
+
+        async def blocked_primary(**kwargs: Any) -> LLMResponse:
+            primary.chat_calls.append(dict(kwargs))
+            primary_started.set()
+            await release_primary.wait()
+            return _error_response()
+
+        primary.chat = blocked_primary  # type: ignore[method-assign]
+        with patch("nanobot.providers.fallback_provider.time.monotonic", return_value=161.0):
+            probe = asyncio.create_task(fb.chat(messages=[{"role": "user", "content": "one"}]))
+            await primary_started.wait()
+            concurrent = asyncio.create_task(
+                fb.chat(messages=[{"role": "user", "content": "two"}])
+            )
+            await asyncio.sleep(0)
+
+            assert len(primary.chat_calls) == 1
+            assert (await concurrent).content == "fallback ok"
+
+            release_primary.set()
+            assert (await probe).content == "fallback ok"
+            assert fb._primary_probe_in_flight is False
+            assert fb._primary_tripped_at == 161.0
+
+            # A failed half-open probe reopens the circuit immediately.
+            assert (
+                await fb.chat(messages=[{"role": "user", "content": "three"}])
+            ).content == "fallback ok"
+
+        assert len(primary.chat_calls) == 1
+        assert len(fallback.chat_calls) == 3
+        assert factory.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_successful_half_open_probe_closes_circuit(self) -> None:
+        primary = _FakeProvider("primary", _make_response("primary ok"))
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=MagicMock(return_value=fallback),
+        )
+        fb._primary_tripped_at = 100.0
+
+        with patch("nanobot.providers.fallback_provider.time.monotonic", return_value=161.0):
+            first = await fb.chat(messages=[{"role": "user", "content": "one"}])
+            second = await fb.chat(messages=[{"role": "user", "content": "two"}])
+
+        assert first.content == second.content == "primary ok"
+        assert len(primary.chat_calls) == 2
+        assert fallback.chat_calls == []
+        assert fb._primary_tripped_at is None
+        assert fb._primary_probe_in_flight is False
+
+    @pytest.mark.asyncio
+    async def test_cancelled_half_open_probe_releases_reservation(self) -> None:
+        primary = _FakeProvider("primary")
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=MagicMock(return_value=_FakeProvider("fallback")),
+        )
+        fb._primary_tripped_at = 100.0
+        primary_started = asyncio.Event()
+
+        async def blocked_primary(**kwargs: Any) -> LLMResponse:
+            primary.chat_calls.append(dict(kwargs))
+            primary_started.set()
+            await asyncio.Event().wait()
+            return _make_response("unreachable")
+
+        primary.chat = blocked_primary  # type: ignore[method-assign]
+        with patch("nanobot.providers.fallback_provider.time.monotonic", return_value=161.0):
+            probe = asyncio.create_task(fb.chat(messages=[{"role": "user", "content": "one"}]))
+            await primary_started.wait()
+            probe.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await probe
+
+        assert fb._primary_probe_in_flight is False
+
+    @pytest.mark.asyncio
+    async def test_cancelled_half_open_stream_recovery_releases_reservation(self) -> None:
+        primary = _FakeProvider(
+            "primary",
+            _make_response("partial", finish_reason="error", error_kind="timeout"),
+        )
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=MagicMock(return_value=_FakeProvider("fallback")),
+        )
+        fb._primary_tripped_at = 100.0
+
+        async def cancel_recovery() -> None:
+            raise asyncio.CancelledError
+
+        with patch("nanobot.providers.fallback_provider.time.monotonic", return_value=161.0):
+            with pytest.raises(asyncio.CancelledError):
+                await fb.chat_stream(
+                    messages=[{"role": "user", "content": "one"}],
+                    on_content_delta=AsyncMock(),
+                    on_stream_recover=cancel_recovery,
+                )
+
+        assert fb._primary_probe_in_flight is False
+
+
+    @pytest.mark.asyncio
+    async def test_half_open_stream_recovery_error_releases_reservation(self) -> None:
+        primary = _FakeProvider(
+            "primary",
+            _make_response("partial", finish_reason="error", error_kind="timeout"),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=MagicMock(return_value=fallback),
+        )
+        fb._primary_tripped_at = 100.0
+        recovery_started = asyncio.Event()
+        release_recovery = asyncio.Event()
+
+        async def failed_recovery() -> None:
+            recovery_started.set()
+            await release_recovery.wait()
+            raise OSError("stream sink unavailable")
+
+        with patch("nanobot.providers.fallback_provider.time.monotonic", return_value=161.0):
+            probe = asyncio.create_task(fb.chat_stream(
+                messages=[{"role": "user", "content": "one"}],
+                on_content_delta=AsyncMock(),
+                on_stream_recover=failed_recovery,
+            ))
+            await recovery_started.wait()
+            concurrent = await fb.chat(messages=[{"role": "user", "content": "two"}])
+            assert concurrent.content == "fallback ok"
+            assert fb._primary_probe_in_flight is True
+            assert primary.chat_calls == []
+
+            release_recovery.set()
+            with pytest.raises(OSError, match="stream sink unavailable"):
+                await probe
+            assert fb._primary_probe_in_flight is False
+
+            primary._response = _make_response("primary recovered")
+            result = await fb.chat(messages=[{"role": "user", "content": "three"}])
+
+        assert result.content == "primary recovered"
+        assert len(primary.chat_calls) == len(primary.chat_stream_calls) == 1
+        assert len(fallback.chat_calls) == 1
+
 
 class TestGenerationForwarded:
     def test(self) -> None:
