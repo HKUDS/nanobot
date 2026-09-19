@@ -80,6 +80,23 @@ def test_loader_skips_abstract_entry_point_tools():
     assert "abstract_plugin" not in discovered
 
 
+def test_loader_logs_entry_point_load_error():
+    """Log the entry-point name when a plugin fails to load."""
+    mock_ep = MagicMock()
+    mock_ep.name = "broken_plugin"
+    mock_ep.load.side_effect = RuntimeError("boom")
+
+    with (
+        patch("nanobot.agent.tools.loader.entry_points", return_value=[mock_ep]),
+        patch("nanobot.agent.tools.loader.logger") as mock_logger,
+    ):
+        ToolLoader()._discover_plugins()
+
+    mock_logger.exception.assert_called_once_with(
+        "Failed to load tool plugin: {}", "broken_plugin"
+    )
+
+
 @pytest.mark.asyncio
 async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
     """Only adapt legacy plugin error strings; keep the wrapped tool API intact."""
