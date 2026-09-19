@@ -171,8 +171,8 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   kagi: brand("kagi.com", "#FFB319", "K"),
   keenable: brand("keenable.ai", "#0EA5E9", "K"),
   lm_studio: brand("lmstudio.ai", "#111827", "LM"),
-  longcat: brand("longcatai.org", "#4F8CFF", "LC", [
-    "https://www.longcatai.org/favicon.svg",
+  longcat: brand("longcat.ai", "#4F8CFF", "LC", [
+    "https://s3plus.meituan.net/aigc-media-resources/longcat/yeqian-logo.svg",
   ]),
   minimax: brand("minimax.io", "#111827", "MM"),
   mistral: brand("mistral.ai", "#FA520F", "M"),

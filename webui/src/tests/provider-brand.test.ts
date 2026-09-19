@@ -61,8 +61,16 @@ describe("provider brand logos", () => {
     expect(providerBrand("zhipu")?.initials).toBe("Z");
   });
 
-  it("uses official first-party assets for LongCat, Step Fun, and Xiaomi MIMO", () => {
-    expect(providerBrand("longcat")?.logoUrls[0]).toBe("https://www.longcatai.org/favicon.svg");
+  it("uses LongCat's official cat logo and official domain for every fallback", () => {
+    const logoUrl = "https://s3plus.meituan.net/aigc-media-resources/longcat/yeqian-logo.svg";
+    expect(providerBrand("longcat")?.logoUrl).toBe(logoUrl);
+    expect(providerBrand("longcat")?.logoUrls).toEqual([
+      logoUrl,
+      ...browserSafeFaviconUrls("longcat.ai"),
+    ]);
+  });
+
+  it("uses official first-party assets for Step Fun and Xiaomi MIMO", () => {
     expect(providerBrand("stepfun")?.logoUrls[0]).toBe("https://www.stepfun.com/step_favicon.svg");
     expect(providerBrand("xiaomi_mimo")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
     expect(providerBrand("mimo")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
