@@ -1281,7 +1281,7 @@ export function ProviderIcon({
       data-testid={`provider-logo-${provider}`}
       className={cn(
         "relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] text-[11px] font-semibold text-muted-foreground",
-        showLoadedLogo ? "bg-transparent" : "bg-muted",
+        showLoadedLogo ? "bg-white" : "bg-muted",
       )}
       aria-hidden
     >
@@ -1304,7 +1304,7 @@ export function ProviderIcon({
           referrerPolicy="no-referrer"
           draggable={false}
           className={cn(
-            "absolute h-full w-full object-contain transition-opacity duration-150 motion-reduce:transition-none",
+            "absolute h-7 w-7 object-contain transition-opacity duration-150 motion-reduce:transition-none",
             logoLoaded ? "opacity-100" : "opacity-0",
           )}
           onLoad={onLogoLoad}

@@ -15,7 +15,7 @@ describe("settings provider icons", () => {
   }
 
   it.each(["openai_codex", "anthropic", "deepseek", "gemini", "xai_grok"])(
-    "shows %s as a single full-size logo after loading",
+    "shows %s on a single white tile with a small inset after loading",
     (provider) => {
       const { container } = render(<ProviderIcon provider={provider} showBrandLogos />);
       const icon = container.firstElementChild!;
@@ -26,13 +26,13 @@ describe("settings provider icons", () => {
       expect(icon).toHaveClass("bg-muted");
       expect(fallback).toHaveTextContent(providerBrand(provider)!.initials);
       expect(fallback).toHaveClass("opacity-100");
-      expect(image).toHaveClass("h-full", "w-full", "object-contain", "opacity-0");
+      expect(image).toHaveClass("h-7", "w-7", "object-contain", "opacity-0");
       expect(image).toHaveAttribute("alt", "");
 
       fireEvent.load(image);
 
       expectFootprint(icon);
-      expect(icon).toHaveClass("bg-transparent");
+      expect(icon).toHaveClass("bg-white");
       expect(icon).not.toHaveClass("bg-muted");
       expect(icon).not.toHaveAttribute("style");
       expect(fallback).toHaveClass("opacity-0");
@@ -77,13 +77,15 @@ describe("settings provider icons", () => {
 
     rerender(<ProviderIcon provider="openai_codex" showBrandLogos />);
     expectFootprint(icon);
-    expect(icon).toHaveClass("bg-transparent");
+    expect(icon).toHaveClass("bg-white");
     expect(icon.querySelector("img")).toHaveClass("opacity-100");
   });
 
   it("uses the same footprint for unknown and custom providers", () => {
     const { container, rerender } = render(<ProviderIcon provider="custom" showBrandLogos />);
     expectFootprint(container.firstElementChild!);
+    expect(container.firstElementChild).toHaveClass("bg-muted");
+    expect(container.firstElementChild).not.toHaveClass("bg-white");
     expect(container.querySelector("img")).toBeNull();
     expect(container.querySelector("svg")).not.toBeNull();
 
