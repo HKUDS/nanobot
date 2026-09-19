@@ -3,6 +3,8 @@ export interface ProviderBrand {
   logoUrls: string[];
   color: string;
   initials: string;
+  /** The primary asset already includes its own background and safe area. */
+  logoLayout?: "tile";
 }
 
 function officialFaviconUrl(domain: string): string {
@@ -149,41 +151,51 @@ const PROVIDER_LABEL_ALIASES: Record<string, string> = {
 };
 
 const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
-  aihubmix: brand("aihubmix.com", "#111827", "AH"),
+  aihubmix: { ...brand("aihubmix.com", "#111827", "AH"), logoLayout: "tile" },
   ant_ling: brand("ant-ling.com", "#7C3AED", "AL"),
   anthropic: brand("anthropic.com", "#D97757", "A"),
   assemblyai: brand("assemblyai.com", "#111827", "AA"),
   atomic_chat: brand("atomic.chat", "#111827", "AC"),
   azure_openai: brand("azure.microsoft.com", "#0078D4", "AZ"),
-  bedrock: brand("aws.amazon.com", "#FF9900", "AWS"),
+  bedrock: { ...brand("aws.amazon.com", "#FF9900", "AWS"), logoLayout: "tile" },
   bocha: brand("bochaai.com", "#2563EB", "B"),
   brave: brand("brave.com", "#FB542B", "B"),
   byteplus: brand("byteplus.com", "#325CFF", "BP"),
   dashscope: brand("dashscope.aliyun.com", "#FF6A00", "DS"),
   deepseek: brand("deepseek.com", "#4D6BFE", "DS"),
   duckduckgo: brand("duckduckgo.com", "#DE5833", "DDG"),
-  exa: brand("exa.ai", "#5B5BF6", "E"),
+  exa: { ...brand("exa.ai", "#5B5BF6", "E"), logoLayout: "tile" },
   gemini: brand("gemini.google.com", "#4285F4", "G"),
   github_copilot: brand("github.com", "#24292F", "GH"),
-  groq: brand("groq.com", "#F55036", "GQ"),
+  groq: {
+    ...brand("groq.com", "#F55036", "GQ", ["https://groq.com/favicon.svg"]),
+    logoLayout: "tile",
+  },
   huggingface: brand("huggingface.co", "#FF9D00", "HF"),
   jina: brand("jina.ai", "#7C3AED", "J"),
   kagi: brand("kagi.com", "#FFB319", "K"),
   keenable: brand("keenable.ai", "#0EA5E9", "K"),
-  lm_studio: brand("lmstudio.ai", "#111827", "LM"),
+  lm_studio: { ...brand("lmstudio.ai", "#111827", "LM"), logoLayout: "tile" },
   longcat: brand("longcat.ai", "#4F8CFF", "LC", [
     "https://s3plus.meituan.net/aigc-media-resources/longcat/yeqian-logo.svg",
   ]),
-  minimax: brand("minimax.io", "#111827", "MM"),
+  minimax: { ...brand("minimax.io", "#111827", "MM"), logoLayout: "tile" },
   mistral: brand("mistral.ai", "#FA520F", "M"),
-  modelscope: brand("modelscope.cn", "#5B5BF6", "MS"),
-  moonshot: brand("moonshot.ai", "#111827", "MS"),
+  modelscope: { ...brand("modelscope.cn", "#5B5BF6", "MS"), logoLayout: "tile" },
+  moonshot: {
+    ...brand("moonshot.ai", "#111827", "MS", [
+      "https://statics.kimi.ai/moonshot-ai/favicon.ico",
+    ]),
+    logoLayout: "tile",
+  },
   novita: brand("novita.ai", "#7C3AED", "N"),
-  olostep: brand("olostep.com", "#111827", "O"),
+  olostep: { ...brand("olostep.com", "#111827", "O"), logoLayout: "tile" },
   nvidia: brand("nvidia.com", "#76B900", "NV"),
   ollama: brand("ollama.com", "#111827", "O"),
   openai: brand("openai.com", "#111827", "AI"),
-  openrouter: brand("openrouter.ai", "#111827", "OR"),
+  openrouter: brand("openrouter.ai", "#111827", "OR", [
+    "https://openrouter.ai/brand/logos/transparent/glyph/svg/glyph-grape.svg",
+  ]),
   orcarouter: brand("orcarouter.ai", "#111827", "OR"),
   ovms: brand("openvino.ai", "#0071C5", "OV"),
   qianfan: brand("cloud.baidu.com", "#2932E1", "QF"),
@@ -193,17 +205,21 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   stepfun: brand("stepfun.com", "#2F6BFF", "SF", [
     "https://www.stepfun.com/step_favicon.svg",
   ]),
-  tavily: brand("tavily.com", "#111827", "T"),
+  tavily: { ...brand("tavily.com", "#111827", "T"), logoLayout: "tile" },
   volcengine: brand("volcengine.com", "#1664FF", "VE"),
   vllm: brand("vllm.ai", "#2563EB", "VL"),
   xiaomi_mimo: brand("mimo.xiaomi.com", "#FF6900", "MI", [
     "https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg",
   ]),
   xai: brand("x.ai", "#111827", "xAI"),
-  zhipu: brand("z.ai", "#155EEF", "Z", [
-    "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-    "https://www.google.com/s2/favicons?domain=z.ai&sz=64",
-  ]),
+  zhipu: {
+    ...brand("z.ai", "#155EEF", "Z", [
+      "https://mintcdn.com/zhipu-32152247/B_E8wI-eiNa1QlPV/logo/dark.svg",
+      "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+      "https://www.google.com/s2/favicons?domain=z.ai&sz=64",
+    ]),
+    logoLayout: "tile",
+  },
 };
 
 export function providerBrand(provider: string | null | undefined): ProviderBrand | null {

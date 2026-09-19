@@ -55,7 +55,8 @@ describe("provider brand logos", () => {
   });
 
   it("keeps Zhipu on the current Z.ai brand domain", () => {
-    expect(providerBrand("zhipu")?.logoUrls[0]).toBe("https://z-cdn.chatglm.cn/z-ai/static/logo.svg");
+    expect(providerBrand("zhipu")?.logoUrls[0]).toBe("https://mintcdn.com/zhipu-32152247/B_E8wI-eiNa1QlPV/logo/dark.svg");
+    expect(providerBrand("zhipu")?.logoUrls).toContain("https://z-cdn.chatglm.cn/z-ai/static/logo.svg");
     expect(providerBrand("zhipu")?.logoUrls).toContain("https://www.google.com/s2/favicons?domain=z.ai&sz=64");
     expect(providerBrand("zhipu")?.logoUrls).toContain("https://z.ai/favicon.ico");
     expect(providerBrand("zhipu")?.initials).toBe("Z");
@@ -78,6 +79,7 @@ describe("provider brand logos", () => {
   });
 
   it("keeps OpenRouter voice settings on the first-party brand domain", () => {
+    expect(providerBrand("openrouter")?.logoUrl).toBe("https://openrouter.ai/brand/logos/transparent/glyph/svg/glyph-grape.svg");
     expect(providerBrand("openrouter")?.logoUrls).toContain("https://openrouter.ai/favicon.ico");
     expect(providerBrand("openrouter")?.initials).toBe("OR");
   });

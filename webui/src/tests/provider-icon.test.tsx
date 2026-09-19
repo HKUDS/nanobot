@@ -14,7 +14,7 @@ describe("settings provider icons", () => {
     expect(icon.className.split(/\s+/).some((value) => value.startsWith("border"))).toBe(false);
   }
 
-  it.each(["openai_codex", "anthropic", "deepseek", "gemini", "xai_grok", "longcat"])(
+  it.each(["openai_codex", "anthropic", "deepseek", "gemini", "xai_grok", "longcat", "openrouter"])(
     "shows %s on a single white tile with a small inset after loading",
     (provider) => {
       const { container } = render(<ProviderIcon provider={provider} showBrandLogos />);
@@ -26,7 +26,7 @@ describe("settings provider icons", () => {
       expect(icon).toHaveClass("bg-muted");
       expect(fallback).toHaveTextContent(providerBrand(provider)!.initials);
       expect(fallback).toHaveClass("opacity-100");
-      expect(image).toHaveClass("h-7", "w-7", "object-contain", "opacity-0");
+      expect(image).toHaveClass("h-6", "w-6", "object-contain", "opacity-0");
       expect(image).toHaveAttribute("alt", "");
 
       fireEvent.load(image);
@@ -38,6 +38,30 @@ describe("settings provider icons", () => {
       expect(fallback).toHaveClass("opacity-0");
       expect(image).toHaveClass("opacity-100");
       expect(image).not.toHaveClass("invert", "grayscale");
+    },
+  );
+
+  it.each(["aihubmix", "bedrock", "exa", "groq", "lm_studio", "minimax", "minimax_anthropic", "modelscope", "moonshot", "olostep", "tavily", "zhipu"])(
+    "does not double-frame %s's primary tile, but preserves unknown fallback assets",
+    (provider) => {
+      const { container } = render(<ProviderIcon provider={provider} showBrandLogos />);
+      const icon = container.firstElementChild!;
+      const image = icon.querySelector("img")!;
+      expectFootprint(icon);
+      expect(image).toHaveAttribute("src", providerBrand(provider)!.logoUrl);
+      expect(image).toHaveClass("h-8", "w-8", "object-contain", "opacity-0");
+
+      fireEvent.load(image);
+      expect(image).toHaveClass("opacity-100");
+      expect(icon).toHaveClass("bg-white");
+
+      fireEvent.error(image);
+      expect(image).toHaveAttribute("src", providerBrand(provider)!.logoUrls[1]);
+      expect(image).toHaveClass("h-6", "w-6", "object-contain", "opacity-0");
+      expect(icon).toHaveClass("bg-muted");
+      fireEvent.load(image);
+      expectFootprint(icon);
+      expect(image).toHaveClass("h-6", "w-6", "opacity-100");
     },
   );
 

@@ -1275,6 +1275,7 @@ export function ProviderIcon({
   const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
   const showRemoteLogo = showBrandLogos && Boolean(logoUrl);
   const showLoadedLogo = showRemoteLogo && logoLoaded;
+  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
 
   return (
     <span
@@ -1304,7 +1305,8 @@ export function ProviderIcon({
           referrerPolicy="no-referrer"
           draggable={false}
           className={cn(
-            "absolute h-7 w-7 object-contain transition-opacity duration-150 motion-reduce:transition-none",
+            "absolute object-contain transition-opacity duration-150 motion-reduce:transition-none",
+            isLogoTile ? "h-8 w-8" : "h-6 w-6",
             logoLoaded ? "opacity-100" : "opacity-0",
           )}
           onLoad={onLogoLoad}
