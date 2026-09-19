@@ -634,6 +634,12 @@ def _run_gateway(
             if channel == "cli":
                 return None
 
+            heartbeat_session_key = (
+                "heartbeat"
+                if hb_cfg.isolated_session
+                else _channel_session_key(channel, chat_id)
+            )
+
             prompt = (
                 _HEARTBEAT_PREAMBLE
                 + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
@@ -648,7 +654,7 @@ def _run_gateway(
                 await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
-                    session_key="heartbeat",
+                    session_key=heartbeat_session_key,
                     channel=channel,
                     chat_id=chat_id,
                     on_progress=_silent,
@@ -679,7 +685,9 @@ def _run_gateway(
                 logger.info("Heartbeat: completed, delivering response")
                 await _deliver_to_channel(
                     OutboundMessage(channel=channel, chat_id=chat_id, content=response),
-                    record=True,
+                    # An isolated run needs its proactive response mirrored into
+                    # the target session. A shared run already persisted it there.
+                    record=hb_cfg.isolated_session,
                 )
             else:
                 logger.info("Heartbeat: silenced by post-run evaluation")
