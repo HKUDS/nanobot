@@ -16,6 +16,7 @@ describe("settings provider icons", () => {
 
   it.each([
     "openai_codex", "anthropic", "deepseek", "gemini", "xai_grok", "longcat", "openrouter", "github_copilot",
+    "edenai", "opencode", "opencode_zen", "opencode_go", "kimi_coding",
   ])(
     "shows %s on a single white tile with a small inset after loading",
     (provider) => {

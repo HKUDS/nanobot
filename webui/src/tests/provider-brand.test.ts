@@ -9,6 +9,17 @@ import {
 } from "@/lib/provider-brand";
 
 describe("provider brand logos", () => {
+  it("covers Eden AI, OpenCode variants, and Kimi Coding with their official assets", () => {
+    expect(providerBrand("edenai")?.logoUrl).toContain("cdn.prod.website-files.com/");
+    expect(providerBrand("opencode")?.logoUrl).toBe("https://opencode.ai/favicon-96x96-v3.png");
+    expect(providerBrand("opencode_zen")).toBe(providerBrand("opencode"));
+    expect(providerBrand("opencode_go")).toBe(providerBrand("opencode"));
+    expect(providerBrand("kimi_coding")?.logoUrl).toBe(
+      "https://raw.githubusercontent.com/MoonshotAI/Branding-Guide/main/scenarios/04-k-only/k-only-light.svg",
+    );
+    expect(providerBrand("kimi_coding")).not.toBe(providerBrand("moonshot"));
+  });
+
   it("uses multiple favicon sources before falling back to initials", () => {
     expect(faviconUrls("z.ai")).toEqual([
       "https://z.ai/favicon.ico",

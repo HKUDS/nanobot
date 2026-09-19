@@ -133,6 +133,8 @@ const PROVIDER_BRAND_ALIASES: Record<string, string> = {
   minimaxAnthropic: "minimax",
   minimax_anthropic: "minimax",
   openai_codex: "openai",
+  opencode_zen: "opencode",
+  opencode_go: "opencode",
   "xai-grok": "xai",
   xai_grok: "xai",
   xiaomi: "xiaomi_mimo",
@@ -164,6 +166,9 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   dashscope: brand("dashscope.aliyun.com", "#FF6A00", "DS"),
   deepseek: brand("deepseek.com", "#4D6BFE", "DS"),
   duckduckgo: brand("duckduckgo.com", "#DE5833", "DDG"),
+  edenai: brand("edenai.co", "#080F35", "EA", [
+    "https://cdn.prod.website-files.com/61e7d259b7746e2d1df0b68d/6a63231f5c459827c2d18d7a_eden%20ai%20logo%20light.png",
+  ]),
   exa: { ...brand("exa.ai", "#5B5BF6", "E"), logoLayout: "tile" },
   gemini: brand("gemini.google.com", "#4285F4", "G"),
   github_copilot: brand("github.com", "#24292F", "GH", [
@@ -177,6 +182,9 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   jina: brand("jina.ai", "#7C3AED", "J"),
   kagi: brand("kagi.com", "#FFB319", "K"),
   keenable: brand("keenable.ai", "#0EA5E9", "K"),
+  kimi_coding: brand("kimi.com", "#1783FF", "K", [
+    "https://raw.githubusercontent.com/MoonshotAI/Branding-Guide/main/scenarios/04-k-only/k-only-light.svg",
+  ]),
   lm_studio: { ...brand("lmstudio.ai", "#111827", "LM"), logoLayout: "tile" },
   longcat: brand("longcat.ai", "#4F8CFF", "LC", [
     "https://s3plus.meituan.net/aigc-media-resources/longcat/yeqian-logo.svg",
@@ -195,6 +203,9 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   nvidia: brand("nvidia.com", "#76B900", "NV"),
   ollama: brand("ollama.com", "#111827", "O"),
   openai: brand("openai.com", "#111827", "AI"),
+  opencode: brand("opencode.ai", "#111827", "OC", [
+    "https://opencode.ai/favicon-96x96-v3.png",
+  ]),
   openrouter: brand("openrouter.ai", "#111827", "OR", [
     "https://openrouter.ai/brand/logos/transparent/glyph/svg/glyph-grape.svg",
   ]),
