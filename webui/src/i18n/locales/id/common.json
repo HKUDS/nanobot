@@ -472,6 +472,8 @@
       "searchPlaceholder": "Cari penyedia",
       "noMatches": "Tidak ada penyedia yang cocok.",
       "addOwnProvider": "Tambahkan penyedia model Anda sendiri",
+      "addProvider": "Tambahkan penyedia",
+      "backToProviders": "Kembali ke penyedia",
       "customProvider": "Penyedia khusus",
       "customProviderName": "Nama penyedia",
       "customProviderNamePlaceholder": "Penyedia model saya",

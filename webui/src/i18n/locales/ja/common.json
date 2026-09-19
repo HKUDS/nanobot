@@ -472,6 +472,8 @@
       "searchPlaceholder": "プロバイダーを検索",
       "noMatches": "一致するプロバイダーはありません。",
       "addOwnProvider": "独自のモデルプロバイダーを追加",
+      "addProvider": "プロバイダーを追加",
+      "backToProviders": "プロバイダー一覧に戻る",
       "customProvider": "カスタムプロバイダー",
       "customProviderName": "プロバイダー名",
       "customProviderNamePlaceholder": "マイモデルプロバイダー",

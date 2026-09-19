@@ -472,6 +472,8 @@
       "searchPlaceholder": "Tìm nhà cung cấp",
       "noMatches": "Không có nhà cung cấp phù hợp.",
       "addOwnProvider": "Thêm nhà cung cấp mô hình của bạn",
+      "addProvider": "Thêm nhà cung cấp",
+      "backToProviders": "Quay lại danh sách nhà cung cấp",
       "customProvider": "Nhà cung cấp tùy chỉnh",
       "customProviderName": "Tên nhà cung cấp",
       "customProviderNamePlaceholder": "Nhà cung cấp mô hình của tôi",
