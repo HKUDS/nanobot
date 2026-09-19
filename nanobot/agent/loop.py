@@ -721,6 +721,7 @@ class AgentLoop:
         return RequestContext(
             channel=ctx.delivery.route.channel,
             chat_id=ctx.delivery.route.chat_id,
+            topic_id=ctx.msg.metadata.get("message_thread_id"),
             message_id=ctx.msg.metadata.get("message_id"),
             session_key=ctx.session_key,
             original_user_text=ctx.original_user_text,
@@ -804,6 +805,7 @@ class AgentLoop:
             request_token = bind_request_context(RequestContext(
                 channel=ctx.msg.channel,
                 chat_id=ctx.msg.chat_id,
+                topic_id=metadata.get("message_thread_id"),
                 message_id=metadata.get("message_id"),
                 session_key=ctx.key,
                 original_user_text=f"!{ctx.args.strip()}",
@@ -1027,6 +1029,7 @@ class AgentLoop:
                     pending_request = RequestContext(
                         channel=pending_msg.channel,
                         chat_id=pending_msg.chat_id,
+                        topic_id=metadata.get("message_thread_id"),
                         message_id=metadata.get("message_id"),
                         session_key=active_session_key,
                         original_user_text=pending_msg.content,

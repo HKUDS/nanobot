@@ -185,6 +185,47 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
     return chunks
 
 
+def _rich_message_payload(content: str) -> dict[str, str]:
+    """Build the rich_message payload, turning soft breaks into hard breaks.
+
+    Single newlines outside fenced code blocks get two trailing spaces so
+    Telegram renders them as line breaks; paragraph breaks are left alone.
+    """
+    if not content:
+        return {"markdown": content}
+
+    lines = content.split("\n")
+    out: list[str] = []
+    fence_len = 0
+
+    for index, line in enumerate(lines):
+        if fence_len:
+            out.append(line)
+            bare = line.strip()
+            if bare and set(bare) <= {"`"} and len(bare) >= fence_len:
+                fence_len = 0
+            continue
+
+        bare = line.lstrip()
+        backticks = len(bare) - len(bare.lstrip("`"))
+        if backticks >= 3:
+            fence_len = backticks
+            out.append(line)
+            continue
+
+        if (
+            index + 1 < len(lines)
+            and lines[index + 1]
+            and line
+            and not line.endswith("  ")
+        ):
+            out.append(line + "  ")
+        else:
+            out.append(line)
+
+    return {"markdown": "\n".join(out)}
+
+
 def _escape_telegram_html(text: str) -> str:
     """Escape text for Telegram HTML parse mode."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -891,10 +932,6 @@ class TelegramChannel(BaseChannel):
     def _rich_streaming_enabled(self) -> bool:
         return self.config.rich_messages and not self._rich_send_disabled
 
-    @staticmethod
-    def _rich_message_payload(content: str) -> dict[str, str]:
-        return {"markdown": content}
-
     def _mark_rich_unavailable(self, exc: Exception, operation: str) -> bool:
         if not self._is_rich_capability_error(exc):
             return False
@@ -916,7 +953,7 @@ class TelegramChannel(BaseChannel):
 
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
         }
         if reply_params is not None:
             # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
@@ -975,7 +1012,7 @@ class TelegramChannel(BaseChannel):
         payload: dict[str, Any] = {
             "chat_id": chat_id,
             "draft_id": draft_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
             **thread_kwargs,
         }
         try:
@@ -1010,7 +1047,7 @@ class TelegramChannel(BaseChannel):
         app = self._require_app()
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
             **thread_kwargs,
         }
         try:
@@ -2024,7 +2061,7 @@ class TelegramChannel(BaseChannel):
                     "metadata": metadata,
                     "session_key": session_key,
                 }
-                self._start_typing(str_chat_id)
+                self._start_typing(str_chat_id, getattr(message, "message_thread_id", None))
                 await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
             buf = self._media_group_buffers[key]
             if content and content != "[empty message]":
@@ -2035,7 +2072,7 @@ class TelegramChannel(BaseChannel):
             return
 
         # Start typing indicator before processing
-        self._start_typing(str_chat_id)
+        self._start_typing(str_chat_id, getattr(message, "message_thread_id", None))
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
         # Forward to the message bus
@@ -2064,11 +2101,13 @@ class TelegramChannel(BaseChannel):
         finally:
             self._media_group_tasks.pop(key, None)
 
-    def _start_typing(self, chat_id: str) -> None:
-        """Start sending 'typing...' indicator for a chat."""
+    def _start_typing(self, chat_id: str, message_thread_id: int | None = None) -> None:
+        """Start sending 'typing...' indicator for a chat, scoped to a topic when set."""
         # Cancel any existing typing task for this chat
         self._stop_typing(chat_id)
-        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+        self._typing_tasks[chat_id] = asyncio.create_task(
+            self._typing_loop(chat_id, message_thread_id),
+        )
 
     def _stop_typing(self, chat_id: str) -> None:
         """Stop the typing indicator for a chat."""
@@ -2102,12 +2141,19 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             self.logger.debug("reaction removal failed: {}", e)
 
-    async def _typing_loop(self, chat_id: str) -> None:
+    async def _typing_loop(self, chat_id: str, message_thread_id: int | None = None) -> None:
         """Repeatedly send 'typing' action until cancelled."""
         try:
             with suppress(asyncio.CancelledError):
                 while self._app:
-                    await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
+                    thread_kwargs: dict[str, int] = (
+                        {"message_thread_id": message_thread_id}
+                        if message_thread_id is not None
+                        else {}
+                    )
+                    await self._app.bot.send_chat_action(
+                        chat_id=int(chat_id), action="typing", **thread_kwargs,
+                    )
                     await asyncio.sleep(4)
         except Exception as e:
             self.logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
@@ -2215,7 +2261,9 @@ class TelegramChannel(BaseChannel):
             with suppress(Exception):
                 await query_message.edit_reply_markup(reply_markup=None)
         self.logger.debug("Inline button tap from {}: {}", sender_id, button_label)
-        self._start_typing(str(chat_id))
+        self._start_typing(
+            str(chat_id), getattr(query_message, "message_thread_id", None),
+        )
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str(chat_id),
