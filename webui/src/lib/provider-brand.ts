@@ -201,7 +201,16 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   orcarouter: brand("orcarouter.ai", "#111827", "OR"),
   ovms: brand("openvino.ai", "#0071C5", "OV"),
   qianfan: brand("cloud.baidu.com", "#2932E1", "QF"),
-  searxng: brand("searxng.org", "#3050FF", "SX"),
+  // Its landing page redirects without an icon; favicon proxies return their own placeholder.
+  searxng: {
+    logoUrl: "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.svg",
+    logoUrls: [
+      "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.svg",
+      "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.png",
+    ],
+    color: "#3050FF",
+    initials: "SX",
+  },
   siliconflow: brand("siliconflow.cn", "#111827", "SF"),
   skywork: brand("skywork.ai", "#5B5BF6", "SW"),
   stepfun: brand("stepfun.com", "#2F6BFF", "SF", [
@@ -210,9 +219,12 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   tavily: { ...brand("tavily.com", "#111827", "T"), logoLayout: "tile" },
   volcengine: brand("volcengine.com", "#1664FF", "VE"),
   vllm: brand("vllm.ai", "#2563EB", "VL"),
-  xiaomi_mimo: brand("mimo.xiaomi.com", "#FF6900", "MI", [
-    "https://cdn.cnbj1.fds.api.mi-img.com/aife/mimo-blog-fe/doc_build/mimo.ico",
-  ]),
+  xiaomi_mimo: {
+    ...brand("mimo.xiaomi.com", "#FF6900", "MI", [
+      "https://cdn.cnbj1.fds.api.mi-img.com/aife/mimo-blog-fe/doc_build/mimo.ico",
+    ]),
+    logoLayout: "tile",
+  },
   xai: brand("x.ai", "#111827", "xAI"),
   zhipu: {
     ...brand("z.ai", "#155EEF", "Z", [

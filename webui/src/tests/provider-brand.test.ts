@@ -82,6 +82,15 @@ describe("provider brand logos", () => {
     expect(providerBrand("github_copilot")?.logoUrl).toBe("https://raw.githubusercontent.com/primer/octicons/main/icons/copilot-24.svg");
   });
 
+  it("never substitutes a favicon proxy's placeholder for SearXNG", () => {
+    const brand = providerBrand("searxng")!;
+    expect(brand.logoUrl).toBe(brand.logoUrls[0]);
+    expect(brand.logoUrls).toEqual([
+      "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.svg",
+      "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.png",
+    ]);
+  });
+
   it("keeps OpenRouter voice settings on the first-party brand domain", () => {
     expect(providerBrand("openrouter")?.logoUrl).toBe("https://openrouter.ai/brand/logos/transparent/glyph/svg/glyph-grape.svg");
     expect(providerBrand("openrouter")?.logoUrls).toContain("https://openrouter.ai/favicon.ico");

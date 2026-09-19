@@ -14,7 +14,9 @@ describe("settings provider icons", () => {
     expect(icon.className.split(/\s+/).some((value) => value.startsWith("border"))).toBe(false);
   }
 
-  it.each(["openai_codex", "anthropic", "deepseek", "gemini", "xai_grok", "longcat", "openrouter", "github_copilot", "xiaomi_mimo"])(
+  it.each([
+    "openai_codex", "anthropic", "deepseek", "gemini", "xai_grok", "longcat", "openrouter", "github_copilot",
+  ])(
     "shows %s on a single white tile with a small inset after loading",
     (provider) => {
       const { container } = render(<ProviderIcon provider={provider} showBrandLogos />);
@@ -41,7 +43,10 @@ describe("settings provider icons", () => {
     },
   );
 
-  it.each(["aihubmix", "bedrock", "exa", "groq", "lm_studio", "minimax", "minimax_anthropic", "modelscope", "moonshot", "olostep", "tavily", "zhipu"])(
+  it.each([
+    "aihubmix", "bedrock", "exa", "groq", "lm_studio", "minimax", "minimax_anthropic",
+    "modelscope", "moonshot", "olostep", "tavily", "xiaomi_mimo", "zhipu",
+  ])(
     "does not double-frame %s's primary tile, but preserves unknown fallback assets",
     (provider) => {
       const { container } = render(<ProviderIcon provider={provider} showBrandLogos />);
