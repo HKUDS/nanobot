@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" --max-warnings 0"
+    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" --max-warnings 0"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.4",

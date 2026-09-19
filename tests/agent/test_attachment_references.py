@@ -158,8 +158,9 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
         pending_queue=pending_queue,
     )
 
-    assert result.final_content == "answer-2"
+    assert result.final_content == "answer-1"
     assert result.had_injections is True
+    assert call_count == 1
     injected_user_content = [
         message["content"]
         for message in captured_messages[-1]

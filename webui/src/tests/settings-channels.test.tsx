@@ -369,6 +369,29 @@ describe("Settings channels", () => {
     expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("shows all channels by default when only the always-enabled WebUI is enabled", async () => {
+    const websocket = {
+      ...catalogFeature("websocket", true),
+      display_name: "nanobot WebUI",
+      capabilities: ["always_enabled"],
+    };
+    const disabled = catalogFeature("Disabled channel", false);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({ features: [websocket, disabled], enabled_count: 1 });
+      }
+      return jsonResponse({});
+    }));
+
+    renderSettingsView({ initialSection: "channels" });
+
+    expect(await screen.findByText("nanobot WebUI")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View Disabled channel settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("requires a restart before enabling newly installed channel support", async () => {
     const whatsappFeature = {
       name: "whatsapp",

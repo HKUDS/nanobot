@@ -50,6 +50,13 @@
           "true": "On",
           "false": "Off"
         }
+      },
+      "replyToMessage": {
+        "label": "Reply to message",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
       }
     }
   }

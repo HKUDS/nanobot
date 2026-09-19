@@ -1004,6 +1004,18 @@
   }
 }
 
+@layer components {
+  @media (prefers-reduced-motion: no-preference) {
+    .segmented-control-indicator[data-animate="true"] {
+      transition-property: transform, width;
+      transition-duration: 220ms, 160ms;
+      transition-timing-function:
+        cubic-bezier(0.2, 0.95, 0.25, 1.08),
+        cubic-bezier(0.2, 0, 0, 1);
+    }
+  }
+}
+
 /* Settings grid: 4px baseline; 720px frame; 12 columns / 24px gutter on
    desktop, 4 columns / 16px gutter on mobile. Rows share the same tracks. */
 @layer components {

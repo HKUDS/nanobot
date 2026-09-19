@@ -33,6 +33,13 @@
       },
       "downloadMaxBytes": {
         "label": "Maximum download size"
+      },
+      "showCompactionNotices": {
+        "label": "Compaction notices",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
       }
     }
   }

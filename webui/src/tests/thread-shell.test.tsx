@@ -1158,6 +1158,41 @@ describe("ThreadShell", () => {
     expect(screen.getByText("Default")).toBeInTheDocument();
   });
 
+  it.each([false, true])("hides unconfigured model details in setup tooltips (existing history: %s)", async (hasHistory) => {
+    const client = makeClient();
+    const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
+    settings.agent.has_api_key = false;
+    settings.providers = [{ name: "anthropic", label: "Anthropic", configured: false }];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("websocket%3Asetup-tooltip/webui-thread")) {
+        return Promise.resolve(httpJson(transcriptFromSimpleMessages(
+          hasHistory ? [{ role: "user", content: "Previous message" }] : [],
+        )));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    const onOpenModelSettings = vi.fn();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("setup-tooltip")}
+        title="Setup tooltip"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+        onOpenModelSettings={onOpenModelSettings}
+      />,
+      "anthropic/claude-opus-4-5",
+    ));
+
+    await screen.findByText(hasHistory ? "Previous message" : HERO_GREETING_PATTERN);
+    const badge = screen.getByRole("button", { name: "Choose your AI" });
+    fireEvent.focus(badge);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Choose your AI$/);
+    fireEvent.click(badge);
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("opens model settings directly without clearing the draft", async () => {
     const client = makeClient();
     const settings = modelSettings("openai-codex/gpt-5.1-codex", "openai_codex");

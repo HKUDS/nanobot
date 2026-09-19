@@ -146,7 +146,7 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_restart_intercepted_in_run_loop(self):
-        """Verify /restart is handled at the run-loop level, not inside _dispatch."""
+        """Verify /restart is handled at the run-loop level, without starting a session worker."""
         loop, bus = _make_loop()
         loop.restart_mode = "exec"
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
@@ -166,7 +166,7 @@ class TestRestartCommand:
             create_task=_capture_task,
         )
 
-        with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch, \
+        with patch.object(loop, "_enqueue_session_message", new_callable=MagicMock) as mock_dispatch, \
              patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
              patch("nanobot.command.builtin.os.execv"):
             await bus.publish_inbound(msg)
@@ -192,7 +192,7 @@ class TestRestartCommand:
         loop, bus = _make_loop()
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
 
-        with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch:
+        with patch.object(loop, "_enqueue_session_message", new_callable=MagicMock) as mock_dispatch:
             await bus.publish_inbound(msg)
 
             loop._running = True

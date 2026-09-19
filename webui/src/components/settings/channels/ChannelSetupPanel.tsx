@@ -107,6 +107,7 @@ export function ChannelSetupPanel({
           showBrandLogos={showBrandLogos}
           onAction={onAction}
           onFeaturesUpdate={onFeaturesUpdate}
+          onBeforeCloseChange={onBeforeCloseChange}
         />
       </Suspense>
     );

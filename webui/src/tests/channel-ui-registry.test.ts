@@ -13,6 +13,7 @@ import {
 describe("channel UI contributions", () => {
   it("selects channel-owned UI only through the backend manifest entry", () => {
     expect(channelUiContribution("feishu", "webui/index.tsx")?.Panel).toBeDefined();
+    expect(channelUiContribution("linear", "webui/index.tsx")?.Panel).toBeDefined();
     expect(channelUiContribution("weixin", "webui/index.tsx")?.ConnectFlow).toBeDefined();
     expect(channelUiContribution("feishu", undefined)).toBeUndefined();
     expect(channelUiContribution("feishu", "webui/missing.tsx")).toBeUndefined();
@@ -20,7 +21,7 @@ describe("channel UI contributions", () => {
 
     const registrations = registeredChannelUiContributions();
     const channels = registrations.map((entry) => entry.channel);
-    expect(channels).toEqual(expect.arrayContaining(["feishu", "weixin"]));
+    expect(channels).toEqual(expect.arrayContaining(["feishu", "linear", "weixin"]));
     expect(new Set(channels).size).toBe(channels.length);
     expect(registrations.every((entry) => /^webui\/index\.tsx?$/.test(entry.webui))).toBe(true);
     expect(channelUiContribution("slack", "webui/index.ts")?.presentation.displayName).toBe("Slack");

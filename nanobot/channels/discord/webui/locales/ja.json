@@ -50,6 +50,13 @@
           "true": "オン",
           "false": "オフ"
         }
+      },
+      "replyToMessage": {
+        "label": "メッセージに返信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
       }
     }
   }

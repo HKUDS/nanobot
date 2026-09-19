@@ -23,18 +23,12 @@ from loguru import logger
 from nanobot.agent import context as agent_context
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
-from nanobot.agent.automation_turns import publish_next_deferred_turn
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver, TranscriptInput
 from nanobot.agent.cron_turns import CronTurnCoordinator
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
-from nanobot.agent.runner import (
-    _MAX_INJECTIONS_PER_TURN,
-    AgentRunner,
-    AgentRunResult,
-    AgentRunSpec,
-)
+from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -78,7 +72,7 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
-from nanobot.session.goal_state import goal_state_runtime_lines
+from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
@@ -403,27 +397,23 @@ class AgentLoop:
         self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
-        # Per-session pending queues for mid-turn message injection.
-        # When a session has an active task, new messages for that session
-        # are routed here instead of creating a new task.
+        # A queue is installed before its single session worker is scheduled.
+        # It remains the only admission path until that worker atomically
+        # observes the queue empty and removes it.
         self._pending_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
         self._preserve_inflight_turns_on_shutdown = False
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
-            publish_inbound=self.bus.publish_inbound,
-            dispatch=self._dispatch,
-            is_running=lambda: self._running,
+            enqueue=self._enqueue_session_message,
             deferred_queues=self._deferred_automation_turns,
         )
         self._local_trigger_turns = LocalTriggerTurnCoordinator(
-            publish_inbound=self.bus.publish_inbound,
-            dispatch=self._dispatch,
-            is_running=lambda: self._running,
+            enqueue=self._enqueue_session_message,
             deferred_queues=self._deferred_automation_turns,
         )
         self._automation_turn_coordinators = (
-            ("cron", self._cron_turns),
-            ("local trigger", self._local_trigger_turns),
+            self._cron_turns,
+            self._local_trigger_turns,
         )
         # NANOBOT_MAX_CONCURRENT_REQUESTS: unset or <=0 means unlimited.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "0"))
@@ -667,13 +657,6 @@ class AgentLoop:
     def pending_local_trigger_ids_for_session(self, session_key: str) -> set[str]:
         return self._local_trigger_turns.pending_trigger_ids_for_session(session_key)
 
-    async def _publish_next_deferred_automation_turn(self, session_key: str) -> None:
-        await publish_next_deferred_turn(
-            deferred_queues=self._deferred_automation_turns,
-            publish_inbound=self.bus.publish_inbound,
-            session_key=session_key,
-        )
-
     def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -787,10 +770,7 @@ class AgentLoop:
         """Dispatch a command directly from the run() loop and publish the result."""
         if normalize_command_text(raw).lower() == "/compact":
             # Compaction must wait for the active turn to commit its session.
-            task = asyncio.create_task(self._dispatch(msg))
-            self._track_active_task(key, task)
-            # Enter dispatch's cancellation handler before consuming a queued /stop.
-            await asyncio.sleep(0)
+            self._enqueue_session_message(msg)
             return
 
         async def dispatch_and_publish() -> None:
@@ -875,11 +855,17 @@ class AgentLoop:
 
         Returns the total number of cancelled tasks, subagents, and exec sessions.
         """
+        pending = self._pending_queues.get(key)
         tasks = tuple(self._active_tasks.pop(key, set()))
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             with suppress(asyncio.CancelledError, Exception):
                 await t
+        if tasks and pending is not None and self._pending_queues.get(key) is pending:
+            # A task cancelled before its first step never enters the worker's
+            # cleanup handler. Only reclaim that worker's original inbox.
+            self._pending_queues.pop(key, None)
+            await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
         sub_cancelled = await self.subagents.cancel_by_session(key)
         exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
         return cancelled + sub_cancelled + exec_cancelled
@@ -903,6 +889,16 @@ class AgentLoop:
         if self._unified_session and not msg.session_key_override:
             return UNIFIED_SESSION_KEY
         return msg.session_key
+
+    def _can_inject_message(self, msg: InboundMessage) -> bool:
+        """Keep independent turns and controls out of user-input batches."""
+        if turn_continuation.internal_continuation_inbound(msg.metadata) or any(
+            coordinator.owns_turn(msg) for coordinator in self._automation_turn_coordinators
+        ):
+            return False
+        return msg.channel == "system" or not self.commands.is_dispatchable_command(
+            msg.content.strip()
+        )
 
     def _idle_events(
         self,
@@ -983,12 +979,24 @@ class AgentLoop:
 
         async def _drain_pending(
             *,
-            limit: int = _MAX_INJECTIONS_PER_TURN,
             first_msg: InboundMessage | None = None,
         ) -> list[dict[str, Any]]:
-            """Drain only messages that are already available."""
+            """Drain one atomic snapshot of messages already available."""
             if pending_queue is None:
                 return []
+
+            # Capture the boundary before converting any message. Conversion
+            # resolves runtime context and may await, so reading until QueueEmpty
+            # afterwards would let later arrivals leak into this model step.
+            pending_messages: list[InboundMessage] = []
+            if first_msg is not None:
+                pending_messages.append(first_msg)
+            snapshot_size = pending_queue.qsize()
+            for _ in range(snapshot_size):
+                try:
+                    pending_messages.append(pending_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
 
             async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
                 content = pending_msg.content
@@ -1057,27 +1065,33 @@ class AgentLoop:
                     row[PENDING_FOLLOWUP_ID_KEY] = followup_id
                 return row
 
-            items: list[dict[str, Any]] = []
-            if first_msg is not None:
-                items.append(await _to_user_message(first_msg))
-            while len(items) < limit:
-                try:
-                    items.append(await _to_user_message(pending_queue.get_nowait()))
-                except asyncio.QueueEmpty:
-                    break
-
-            return items
+            consumed = 0
+            try:
+                converted: list[dict[str, Any]] = []
+                for pending_msg in pending_messages:
+                    # Independent turns are FIFO barriers. Their worker path
+                    # owns completion, command dispatch, and control metadata.
+                    if not self._can_inject_message(pending_msg):
+                        break
+                    converted.append(await _to_user_message(pending_msg))
+                consumed = len(converted)
+                return converted
+            finally:
+                # Commit only a successfully converted prefix. On failure or
+                # cancellation, return the whole snapshot ahead of later arrivals.
+                unconsumed = pending_messages[consumed:]
+                if unconsumed:
+                    later = [pending_queue.get_nowait() for _ in range(pending_queue.qsize())]
+                    for pending_msg in [*unconsumed, *later]:
+                        pending_queue.put_nowait(pending_msg)
 
         terminal_wait_deadline: float | None = None
 
-        async def _wait_for_pending(
-            *,
-            limit: int = _MAX_INJECTIONS_PER_TURN,
-        ) -> list[dict[str, Any]]:
+        async def _wait_for_pending() -> list[dict[str, Any]]:
             """Wait for a pending result only when the runner is ready to exit."""
             nonlocal terminal_wait_deadline
 
-            items = await _drain_pending(limit=limit)
+            items = await _drain_pending()
             if (
                 items
                 or pending_queue is None
@@ -1102,7 +1116,7 @@ class AgentLoop:
                 )
                 return []
 
-            return await _drain_pending(limit=limit, first_msg=msg)
+            return await _drain_pending(first_msg=msg)
 
         request_ctx = request_context or RequestContext(
             channel="cli",
@@ -1300,22 +1314,6 @@ class AgentLoop:
                         self.commands.dispatch_priority,
                     )
                     continue
-                deferred = False
-                for label, coordinator in self._automation_turn_coordinators:
-                    if coordinator.defer_if_active(
-                        msg,
-                        session_key=effective_key,
-                        active_session_keys=self._pending_queues.keys(),
-                    ):
-                        logger.info(
-                            "Deferred {} turn for active session {}",
-                            label,
-                            effective_key,
-                        )
-                        deferred = True
-                        break
-                if deferred:
-                    continue
                 routed_msg = msg
                 if effective_key != msg.session_key:
                     routed_msg = dataclasses.replace(
@@ -1345,36 +1343,7 @@ class AgentLoop:
                             self.commands.dispatch,
                         )
                         continue
-                    pending_msg = routed_msg
-                    session = self.sessions.get_or_create(effective_key)
-                    followup_id = record_pending_followup(session, pending_msg)
-                    if followup_id is not None:
-                        pending_msg = dataclasses.replace(
-                            pending_msg,
-                            metadata={
-                                **pending_msg.metadata,
-                                PENDING_FOLLOWUP_ID_KEY: followup_id,
-                            },
-                        )
-                        self.sessions.save(session)
-                    try:
-                        self._pending_queues[effective_key].put_nowait(pending_msg)
-                    except asyncio.QueueFull:
-                        logger.warning(
-                            "Pending queue full for session {}, falling back to queued task",
-                            effective_key,
-                        )
-                        msg = pending_msg
-                    else:
-                        logger.info(
-                            "Routed follow-up message to pending queue for session {}",
-                            effective_key,
-                        )
-                        continue
-                # Compute the effective session key before dispatching
-                # This ensures /stop command can find tasks correctly when unified session is enabled
-                task = asyncio.create_task(self._dispatch(msg))
-                self._track_active_task(effective_key, task)
+                self._enqueue_session_message(routed_msg)
         finally:
             await self.aclose()
 
@@ -1388,11 +1357,118 @@ class AgentLoop:
         """
         self._preserve_inflight_turns_on_shutdown = True
 
-    async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message: per-session serial, cross-session concurrent."""
+    def _journal_pending_message(
+        self,
+        session_key: str,
+        msg: InboundMessage,
+    ) -> InboundMessage:
+        """Persist a recoverable WebUI follow-up before adding it to the inbox."""
+        if not self._can_inject_message(msg):
+            return msg
+        session = self.sessions.get_or_create(session_key)
+        followup_id = record_pending_followup(session, msg)
+        if followup_id is None:
+            return msg
+        pending_msg = dataclasses.replace(
+            msg,
+            metadata={
+                **msg.metadata,
+                PENDING_FOLLOWUP_ID_KEY: followup_id,
+            },
+        )
+        self.sessions.save(session)
+        return pending_msg
+
+    def _enqueue_session_message(self, msg: InboundMessage) -> None:
+        """Admit session work without waiting for its execution or result."""
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
+
+        for coordinator in self._automation_turn_coordinators:
+            if coordinator.defer_if_active(
+                msg,
+                session_key=session_key,
+                active_session_keys=self._pending_queues.keys(),
+            ):
+                return
+
+        pending = self._pending_queues.get(session_key)
+        if pending is not None:
+            pending.put_nowait(self._journal_pending_message(session_key, msg))
+            return
+
+        new_pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
+        new_pending.put_nowait(msg)
+        self._pending_queues[session_key] = new_pending
+        task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
+        self._track_active_task(session_key, task)
+
+    async def _run_session_queue(
+        self,
+        session_key: str,
+        pending: asyncio.Queue[InboundMessage],
+    ) -> None:
+        """Run the sole worker for a session until its inbox is empty."""
+        try:
+            while self._pending_queues.get(session_key) is pending:
+                try:
+                    msg = pending.get_nowait()
+                except asyncio.QueueEmpty:
+                    # Idle-only automation follows all accepted user input on
+                    # this same worker, including before the bus loop starts.
+                    deferred = self._deferred_automation_turns.get(session_key)
+                    if not deferred:
+                        break
+                    msg = deferred.pop(0)
+                    if not deferred:
+                        self._deferred_automation_turns.pop(session_key)
+                try:
+                    await self._dispatch_one(msg, pending)
+                except asyncio.CancelledError as exc:
+                    for coordinator in self._automation_turn_coordinators:
+                        coordinator.complete(msg, error=exc)
+                    raise
+                except Exception:
+                    logger.exception(
+                        "Session worker failed one message for {}; continuing FIFO",
+                        session_key,
+                    )
+        except asyncio.CancelledError as exc:
+            await self._cancel_pending_messages(session_key, pending, exc)
+            raise
+        finally:
+            owns_queue = self._pending_queues.get(session_key) is pending
+            if owns_queue:
+                self._pending_queues.pop(session_key, None)
+
+    async def _cancel_pending_messages(
+        self,
+        session_key: str,
+        pending: asyncio.Queue[InboundMessage],
+        error: asyncio.CancelledError,
+    ) -> None:
+        """Complete queued independent turns after their session worker stops."""
+        for msg in self._deferred_automation_turns.pop(session_key, []):
+            pending.put_nowait(msg)
+        while not pending.empty():
+            msg = pending.get_nowait()
+            for coordinator in self._automation_turn_coordinators:
+                coordinator.complete(msg, error=error)
+            if (
+                msg.channel != "system"
+                and normalize_command_text(msg.content).lower() == "/compact"
+            ):
+                delivery = self.turn_delivery_factory.unrouted(msg, session_key)
+                await delivery.complete(None, publish_completion=True)
+
+    async def _dispatch_one(
+        self,
+        msg: InboundMessage,
+        pending: asyncio.Queue[InboundMessage],
+    ) -> None:
+        """Process one root message while later inputs remain in its session inbox."""
+        session_key = self._effective_session_key(msg)
         recovery_task_registered = False
         recovery_admission = self._recovery_admission
         current_task: asyncio.Task[Any] | None = None
@@ -1412,14 +1488,15 @@ class AgentLoop:
         gate = self._concurrency_gate or nullcontext()
 
         delivery = self.turn_delivery_factory.unrouted(msg, session_key)
-        pending: asyncio.Queue[InboundMessage] | None = None
         completion_published = False
         try:
             async with lock, gate:
-                # Only the task that owns the session lock may publish the
-                # active mid-turn injection queue for this session.
-                pending = asyncio.Queue(maxsize=20)
-                self._pending_queues[session_key] = pending
+                # A preceding user turn may have completed or blocked the goal
+                # while its older continuation was still waiting in the inbox.
+                if turn_continuation.sustained_goal_continuation_inbound(msg.metadata) and not (
+                    sustained_goal_active(self.sessions.get_or_create(session_key).metadata)
+                ):
+                    return
                 try:
                     delivery = self.turn_delivery_factory.create(
                         msg,
@@ -1437,11 +1514,9 @@ class AgentLoop:
                         publish_completion=not continuing,
                     )
                     completion_published = not continuing
-                    for _, coordinator in self._automation_turn_coordinators:
+                    for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
                 except asyncio.CancelledError:
-                    for _, coordinator in self._automation_turn_coordinators:
-                        coordinator.complete(msg, error=asyncio.CancelledError())
                     logger.info("Task cancelled for session {}", session_key)
                     try:
                         await delivery.abort_stream()
@@ -1484,36 +1559,11 @@ class AgentLoop:
                             msg.metadata
                         )
                     )
-                    for _, coordinator in self._automation_turn_coordinators:
+                    for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=exc)
                 finally:
-                    # Drain any messages still in the pending queue and re-publish
-                    # them to the bus so they are processed as fresh inbound messages
-                    # rather than silently lost.  Only remove our own queue; a
-                    # later task waiting on the lock must not be able to steal
-                    # cleanup ownership.
-                    queue = None
-                    if self._pending_queues.get(session_key) is pending:
-                        queue = self._pending_queues.pop(session_key, None)
-                    else:
-                        queue = pending
-                    if queue is not None:
-                        leftover = 0
-                        while True:
-                            try:
-                                item = queue.get_nowait()
-                            except asyncio.QueueEmpty:
-                                break
-                            await self.bus.publish_inbound(item)
-                            leftover += 1
-                        if leftover:
-                            logger.info(
-                                "Re-published {} leftover message(s) to bus for session {}",
-                                leftover, session_key,
-                            )
                     if not turn_continuation.internal_continuation_pending(msg.metadata):
                         await delivery.idle()
-                    await self._publish_next_deferred_automation_turn(session_key)
         except asyncio.CancelledError:
             if not completion_published and normalize_command_text(msg.content).lower() == "/compact":
                 await delivery.complete(None, publish_completion=True)
@@ -1525,9 +1575,6 @@ class AgentLoop:
                 and recovery_admission is not None
             ):
                 recovery_admission.unregister_recovery_task(session_key, current_task)
-            if pending is None:
-                await delivery.idle()
-                await self._publish_next_deferred_automation_turn(session_key)
 
     async def aclose(self) -> None:
         """Stop active work, then close resources owned by the agent loop.
@@ -1549,9 +1596,14 @@ class AgentLoop:
     async def _aclose_unlocked(self) -> None:
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})
+        current_task = asyncio.current_task()
+        pending_queues = {
+            key: self._pending_queues[key]
+            for key, tasks in active_task_groups.items()
+            if key in self._pending_queues and any(task is not current_task for task in tasks)
+        }
         active_tasks = tuple({task for tasks in active_task_groups.values() for task in tasks})
         active_task_groups.clear()
-        current_task = asyncio.current_task()
         active_tasks = tuple(task for task in active_tasks if task is not current_task)
         for task in active_tasks:
             if not task.done():
@@ -1559,6 +1611,10 @@ class AgentLoop:
         try:
             if active_tasks:
                 await asyncio.gather(*active_tasks, return_exceptions=True)
+            for key, pending in pending_queues.items():
+                if self._pending_queues.get(key) is pending:
+                    self._pending_queues.pop(key)
+                    await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
         except BaseException as exc:

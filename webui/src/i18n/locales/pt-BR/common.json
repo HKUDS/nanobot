@@ -694,6 +694,8 @@
       "searchPlaceholder": "Buscar provedores",
       "noMatches": "Nenhum provedor corresponde a esta busca.",
       "addOwnProvider": "Adicionar seu próprio provedor de modelos",
+      "addProvider": "Adicionar provedor",
+      "backToProviders": "Voltar aos provedores",
       "customProvider": "Provedor personalizado",
       "customProviderName": "Nome do provedor",
       "customProviderNamePlaceholder": "Meu provedor de modelos",

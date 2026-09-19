@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import run_session
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
@@ -81,7 +82,7 @@ async def test_transient_session_stays_outside_unified_session(tmp_path) -> None
     key = "websocket:transient-unified"
     transient = loop.sessions.get_or_create_transient(key)
 
-    await loop._dispatch(_message(key, "private question"))
+    await run_session(loop, _message(key, "private question"))
 
     assert [message["content"] for message in transient.messages] == [
         "private question",

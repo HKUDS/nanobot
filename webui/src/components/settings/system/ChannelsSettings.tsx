@@ -49,13 +49,14 @@ export function ChannelsSettings({
     .filter((feature) => feature.type === "channel" && feature.settings_visible !== false)
     .sort((left, right) => Number(!left.ready) - Number(!right.ready)
       || localizedChannelDisplayName(left, t).localeCompare(localizedChannelDisplayName(right, t)));
-  const hasEnabledChannels = channels.some((feature) => feature.enabled);
+  const hasEnabledConfigurableChannels = channels.some((feature) =>
+    feature.enabled && !feature.capabilities?.includes("always_enabled"));
   const restartRequired = requiresRestartPending || Boolean(nanobotFeatures?.requires_restart);
   useLayoutEffect(() => {
     if (!nanobotFeatures || filterInitializedRef.current) return;
     filterInitializedRef.current = true;
-    setFilter(hasEnabledChannels ? "enabled" : "all");
-  }, [hasEnabledChannels, nanobotFeatures]);
+    setFilter(hasEnabledConfigurableChannels ? "enabled" : "all");
+  }, [hasEnabledConfigurableChannels, nanobotFeatures]);
   const visibleChannels = channels.filter((feature) =>
     (filter === "all" || feature.enabled)
     && `${feature.name} ${localizedChannelDisplayName(feature, t)}`.toLocaleLowerCase()

@@ -50,6 +50,13 @@
           "true": "Bật",
           "false": "Tắt"
         }
+      },
+      "replyToMessage": {
+        "label": "Trả lời tin nhắn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
       }
     }
   }

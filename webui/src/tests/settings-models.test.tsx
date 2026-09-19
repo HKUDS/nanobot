@@ -502,6 +502,7 @@ describe("Settings models", () => {
 
     const enableSwitch = within(codexRow).getByRole("switch", { name: "Enable preset" });
     expect(enableSwitch).not.toBeChecked();
+    expect(enableSwitch).toHaveClass("h-5", "w-9", "bg-muted-foreground/25");
     fireEvent.click(enableSwitch);
 
     await waitFor(() => {
@@ -516,6 +517,16 @@ describe("Settings models", () => {
     expect(
       within(enabledCodexRow).getByRole("switch", { name: "Disable preset" }),
     ).toBeChecked();
+    expect(within(enabledCodexRow).getByRole("switch")).toHaveClass("h-5", "w-9", "bg-foreground");
+  });
+
+  it("does not allow disabling the last preset", () => {
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    const toggle = screen.getByRole("switch", { name: "Disable preset" });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeDisabled();
+    fireEvent.click(toggle);
+    expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
   it("appends a new model preset to the call order immediately", async () => {

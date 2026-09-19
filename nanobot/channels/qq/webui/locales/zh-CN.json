@@ -33,6 +33,13 @@
       },
       "downloadMaxBytes": {
         "label": "下载大小上限"
+      },
+      "showCompactionNotices": {
+        "label": "上下文压缩通知",
+        "choices": {
+          "true": "开",
+          "false": "关"
+        }
       }
     }
   }

@@ -1,6 +1,6 @@
 # Chat Apps for Self-Hosted AI Agents
 
-Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, and
+Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, Linear, and
 other chat platforms. This page is the full chat-channel reference. If you want
 a focused setup path for one platform, start with a guide:
 
@@ -15,6 +15,7 @@ a focused setup path for one platform, start with a guide:
 | QQ | [Build a QQ AI Agent with nanobot](./guides/qq-ai-agent.md) |
 | Email | [Build an Email AI Agent with nanobot](./guides/email-ai-agent.md) |
 | Mattermost | [Build a Mattermost AI Agent with nanobot](./guides/mattermost-ai-agent.md) |
+| Linear | [Use nanobot as a native Linear agent](./guides/linear-agent.md) |
 
 Want to build your own channel? See the [Channel Package Guide](./channel-package-guide.md).
 
@@ -105,6 +106,34 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
 | **Signal** | signal-cli daemon + phone number |
+| **Linear** | Private OAuth app + public HTTPS callback and webhook URLs |
+
+<details id="linear">
+<summary><b>Linear</b></summary>
+
+Linear is a native Agent channel rather than a comment bot. A user starts a task
+by explicitly mentioning the installed nanobot app in an issue. Follow-up prompts
+inside that Agent Session continue the same nanobot session without another
+mention. Ordinary issue comments do not invoke nanobot.
+
+The native Agent API is webhook-based. Linear must reach a public HTTPS URL.
+An HTTPS tunnel can forward requests to nanobot's local listener without a public
+IP; a publicly reachable server can use a reverse proxy. Use a fixed hostname for
+ongoing use. Temporary tunnels also work for testing, but a hostname change
+requires updating nanobot's public URL and the app's callback and webhook URLs.
+
+The recommended setup is **Settings → Channels → Linear**. Enter the public URL
+and wait for automatic saving, select **Create prefilled Linear app**, create the
+app, then copy its Client ID, Client Secret, and Webhook Signing Secret back into
+nanobot. Leave each secret field to save it. Once the settings are saved, choose
+**Connect Linear**. OAuth requests only `read`, `write`, and
+`app:mentionable`; it deliberately does not request `app:assignable` so a new task
+must begin with an @mention.
+
+See the [native Linear agent guide](./guides/linear-agent.md) for the complete
+setup, tunnel examples, security model, and troubleshooting.
+
+</details>
 
 <details>
 <summary><b>Telegram</b></summary>
@@ -298,7 +327,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "allowFrom": ["YOUR_USER_ID"],
       "allowChannels": [],
       "groupPolicy": "mention",
-      "streaming": true
+      "streaming": true,
+      "replyToMessage": false
     }
   }
 }
@@ -311,6 +341,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 > - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session.
 > `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass. Discord threads under an allowed parent channel are also allowed; for Forum channels, allowing the parent Forum channel allows all threads/posts in that forum.
 > `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies.
+> `replyToMessage` defaults to `false`. Enable it to use Discord's native reply UI for responses.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator

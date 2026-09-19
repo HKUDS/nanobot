@@ -1,4 +1,5 @@
 import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
+import { ToggleButton } from "@/components/settings/ToggleButton";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
@@ -794,36 +795,22 @@ export function ModelsSettings({
                       ) : (
                         <span className="h-4 w-4 shrink-0" aria-hidden />
                       )}
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={ordered}
-                        aria-label={
+                      <ToggleButton
+                        checked={ordered}
+                        label={
                           ordered
                             ? tx("settings.models.removeFromOrder", "Disable preset")
                             : tx("settings.models.addToOrder", "Enable preset")
                         }
                         disabled={callOrderBusy || (ordered && callOrder.length <= 1)}
-                        onClick={() => {
+                        onChange={() => {
                           if (ordered) {
                             removeCallOrderItem(orderIndex);
                           } else if (preset) {
                             onChangeCallOrder([...callOrder, preset.name]);
                           }
                         }}
-                        className={cn(
-                          "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40",
-                          ordered ? "bg-foreground" : "bg-muted-foreground/25",
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "h-4 w-4 rounded-full bg-background shadow-sm transition-transform",
-                            ordered ? "translate-x-[18px]" : "translate-x-0.5",
-                          )}
-                          aria-hidden
-                        />
-                      </button>
+                      />
                     </div>
                   );
                   return (
@@ -954,6 +941,7 @@ function ModelAdvancedFields({
         </span>
         <SegmentedControl
           value={String(contextWindowTokens)}
+          animateIndicator={false}
           options={contextWindowOptions.map((tokens) => ({
             value: String(tokens),
             label: formatModelContextWindow(tokens),

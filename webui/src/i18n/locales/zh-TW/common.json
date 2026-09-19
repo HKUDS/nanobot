@@ -472,6 +472,8 @@
       "searchPlaceholder": "搜尋供應商",
       "noMatches": "沒有符合的供應商。",
       "addOwnProvider": "新增自己的模型供應商",
+      "addProvider": "新增供應商",
+      "backToProviders": "返回供應商列表",
       "customProvider": "自訂供應商",
       "customProviderName": "供應商名稱",
       "customProviderNamePlaceholder": "例如：公司模型閘道",

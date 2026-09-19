@@ -33,6 +33,13 @@
       },
       "downloadMaxBytes": {
         "label": "최대 다운로드 크기"
+      },
+      "showCompactionNotices": {
+        "label": "컨텍스트 압축 알림",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
       }
     }
   }

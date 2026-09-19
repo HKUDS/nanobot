@@ -552,11 +552,18 @@ class ContextGovernor:
                 )
 
             compaction.active_summary = summary
+            # Fresh user input defines the next task. Only ongoing work without
+            # new user input needs a temporary instruction to resume after H is replaced.
+            continuation = (
+                []
+                if any(message.get("role") == "user" for message in delta_messages)
+                else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
+            )
             prepared = self.prepare_messages_for_model(
                 state.config,
                 [
                     *self._summary_transcript(compaction, summary),
-                    {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
+                    *continuation,
                     *delta_messages,
                 ],
             )

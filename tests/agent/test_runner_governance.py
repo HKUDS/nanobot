@@ -250,7 +250,6 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
     )
     assert requests[0][0] == [
         {"role": "system", "content": "fresh checkpoint"},
-        {"role": "user", "content": SUMMARY_CONTINUATION_TEXT},
         {"role": "user", "content": "continue the current task"},
     ]
     assert requests[0][1].conversation_state is None

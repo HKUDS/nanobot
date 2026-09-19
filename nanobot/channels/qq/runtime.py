@@ -37,6 +37,7 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
@@ -192,6 +193,11 @@ class QQConfig(Base):
     download_chunk_size: int = 1024 * 256  # 256KB
     download_max_bytes: int = 1024 * 1024 * 200  # 200MB safety limit
 
+    # QQ's C2C/group message API has no edit or recall endpoint, so compaction
+    # notices would land as separate permanent messages (#5784). Off by default;
+    # set showCompactionNotices: true to post them anyway.
+    show_compaction_notices: bool = False
+
 
 class QQChannel(BaseChannel):
     """QQ channel using botpy SDK with WebSocket connection."""
@@ -298,6 +304,17 @@ class QQChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send attachments first, then text."""
+        # Compaction notices assume the channel can update one message in place
+        # (Telegram/Discord edit their notice; WebSocket projects it as status).
+        # QQ's C2C/group API has no edit or recall endpoint, so by default the
+        # lifecycle is dropped here instead of posting two permanent messages
+        # (#5784); showCompactionNotices: true restores them.
+        if (
+            isinstance(msg.event, ContextCompactionEvent)
+            and not self.config.show_compaction_notices
+        ):
+            return
+
         try:
             if not self._client:
                 raise RuntimeError("QQ client not initialized")

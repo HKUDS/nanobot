@@ -134,13 +134,13 @@ export function ModelPresetBadge({
   const fallbackDisplayLabel = fallbackPreset?.name
     || fallbackModelName?.trim().split(/[/:]/).pop()
     || null;
-  const displayLabel = fallbackDisplayLabel || label;
+  const displayLabel = needsSetup ? label : fallbackDisplayLabel || label;
   const displayModelDetail = fallbackPreset
     ? fallbackPreset.model
     : fallbackModelName || modelDetail;
   const displayProvider = fallbackPreset?.provider
     || (fallbackModelName ? inferProviderFromModelName(fallbackModelName) : provider);
-  const tooltipLabel = [...new Set([
+  const tooltipLabel = needsSetup ? label : [...new Set([
     displayLabel,
     displayModelDetail,
     fallbackModelName ? null : providerLabel,
@@ -285,7 +285,7 @@ export function ModelPresetBadge({
       provider={displayProvider}
       needsSetup={needsSetup}
       needsAttention={needsSetup && attentionRequest > 0}
-      fallbackModelName={fallbackModelName}
+      fallbackModelName={needsSetup ? null : fallbackModelName}
       isHero={isHero}
     />
   );
@@ -617,13 +617,15 @@ function PresetProviderIcon({
 }) {
   const inferredProvider = provider || inferProviderFromModelName(modelDetail || label);
   const brand = providerBrand(inferredProvider);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
   return (
     <span
       data-testid={testId}
       className={cn(
-        "grid shrink-0 place-items-center",
+        "grid shrink-0 place-items-center overflow-hidden rounded-[5px]",
         isHero ? "h-4 w-4" : "h-[18px] w-[18px]",
+        logoUrl && (logoLoaded ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted"),
       )}
       aria-hidden
     >
@@ -634,7 +636,12 @@ function PresetProviderIcon({
           draggable={false}
           decoding="async"
           loading="lazy"
-          className={cn("object-contain", isHero ? "h-3.5 w-3.5" : "h-[18px] w-[18px]")}
+          referrerPolicy="no-referrer"
+          className={cn(
+            "object-contain",
+            isLogoTile ? "h-full w-full" : "h-3.5 w-3.5",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />

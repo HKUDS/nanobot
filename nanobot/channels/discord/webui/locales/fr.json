@@ -50,6 +50,13 @@
           "true": "Sur",
           "false": "Désactivé"
         }
+      },
+      "replyToMessage": {
+        "label": "Répondre au message",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
       }
     }
   }

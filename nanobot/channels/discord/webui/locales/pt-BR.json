@@ -50,6 +50,13 @@
           "true": "Ligado",
           "false": "Desligado"
         }
+      },
+      "replyToMessage": {
+        "label": "Responder à mensagem",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
       }
     }
   }

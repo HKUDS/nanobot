@@ -33,6 +33,13 @@
       },
       "downloadMaxBytes": {
         "label": "最大ダウンロードサイズ"
+      },
+      "showCompactionNotices": {
+        "label": "コンテキスト圧縮通知",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
       }
     }
   }

@@ -33,6 +33,13 @@
       },
       "downloadMaxBytes": {
         "label": "Ukuran unduhan maksimum"
+      },
+      "showCompactionNotices": {
+        "label": "Notifikasi pemadatan konteks",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
       }
     }
   }

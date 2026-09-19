@@ -11,6 +11,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "allowFrom": field("list"),
         "msgFormat": field("enum", choices={"plain", "markdown"}, default="plain"),
         "ackMessage": field(default="⏳ Processing..."),
+        "showCompactionNotices": field("bool", default=False),
         "mediaDir": field(),
         "downloadChunkSize": field("int", default=1024 * 256),
         "downloadMaxBytes": field("int", default=1024 * 1024 * 200),

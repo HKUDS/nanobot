@@ -1654,6 +1654,18 @@ Normal tool workspace and media access rules still apply to attachment paths.
 }
 ```
 
+QQ `showCompactionNotices` defaults to `false`. It controls the context-compaction lifecycle notices ("Compressing context…" / "Context compacted."). Telegram, Discord and WebSocket present that lifecycle as one in-place-updated message or status, but QQ's C2C/group message API has no edit or recall endpoint, so each phase would land as a separate permanent message; the QQ channel therefore drops the notices by default (#5784). Set `channels.qq.showCompactionNotices: true` to post them anyway:
+
+```json
+{
+  "channels": {
+    "qq": {
+      "showCompactionNotices": true
+    }
+  }
+}
+```
+
 Telegram `richMessages` defaults to `false`. Enable it only to opt in to Bot API 10.1 `sendRichMessage` rendering; leave it disabled for Telegram Web clients that show unsupported-message errors for rich messages.
 
 ### Retry Behavior

@@ -33,6 +33,13 @@
       },
       "downloadMaxBytes": {
         "label": "Kích thước tải xuống tối đa"
+      },
+      "showCompactionNotices": {
+        "label": "Thông báo nén ngữ cảnh",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
       }
     }
   }

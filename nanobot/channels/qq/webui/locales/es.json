@@ -33,6 +33,13 @@
       },
       "downloadMaxBytes": {
         "label": "Tamaño máximo de descarga"
+      },
+      "showCompactionNotices": {
+        "label": "Avisos de compactación de contexto",
+        "choices": {
+          "true": "Activado",
+          "false": "Desactivado"
+        }
       }
     }
   }
