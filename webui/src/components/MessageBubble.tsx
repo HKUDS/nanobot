@@ -66,6 +66,8 @@ interface MessageBubbleProps {
   temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
   showCopyAction?: boolean;
+  /** Whether this message is the final display unit in the thread. */
+  isThreadTail?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
@@ -330,6 +332,7 @@ export function MessageBubble({
   isTurnStreaming = false,
   temporary = false,
   showCopyAction = true,
+  isThreadTail = true,
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
@@ -483,7 +486,7 @@ export function MessageBubble({
       ? completedAt
       : message.createdAt;
   const assistantTimestampLabel =
-    message.role === "assistant" && !message.isStreaming
+    message.role === "assistant" && !message.isStreaming && !isTurnStreaming
       ? formatMessageEndTime(assistantTimestamp)
       : "";
   const showCompletedAt =
@@ -496,9 +499,12 @@ export function MessageBubble({
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
   const showAssistantFooterRow =
     showCopyButton || showForkButton || showAssistantTimestamp;
-  const showAssistantFooterSlot =
+  const hasAssistantFooterContent =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
+  const showAssistantFooterSlot =
+    hasAssistantFooterContent
+    && (showAssistantFooterRow || ((message.isStreaming || isTurnStreaming) && isThreadTail));
   return (
     <div className="w-full text-[15px]" style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
