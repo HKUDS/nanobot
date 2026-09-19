@@ -16,6 +16,7 @@ from nanobot.agent.tools.shell import ExecToolConfig
 from nanobot.agent.tools.web import WebSearchConfig, WebToolsConfig
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMUsage
+from nanobot.session.manager import SessionManager
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1137,3 +1138,76 @@ class TestRequestContext:
             "temperature = 0.2",
             "feishu:oc_abc123",
         )
+
+
+# ---------------------------------------------------------------------------
+# persistent session focus
+# ---------------------------------------------------------------------------
+
+class TestSessionFocus:
+
+    @pytest.mark.asyncio
+    async def test_focus_persists_and_is_injected_after_reload(self, tmp_path):
+        loop = _make_mock_loop()
+        sessions = SessionManager(tmp_path)
+        tool = MyTool(runtime_control=AgentRuntimeControl(loop), sessions=sessions)
+        request = RequestContext(
+            channel="test",
+            chat_id="chat",
+            session_key="test:chat",
+        )
+
+        with request_context(request):
+            result = await tool.execute(
+                action="set",
+                key="focus",
+                value="Finish the persistence test.",
+            )
+            inspected = await tool.execute(action="check", key="focus")
+
+        assert result == "Set focus = 'Finish the persistence test.'"
+        assert inspected == "focus: 'Finish the persistence test.'"
+        assert sessions.get_or_create("test:chat").metadata["_focus"] == (
+            "Finish the persistence test."
+        )
+
+        reloaded_sessions = SessionManager(tmp_path)
+        reloaded_tool = MyTool(
+            runtime_control=AgentRuntimeControl(loop),
+            sessions=reloaded_sessions,
+        )
+        provider = reloaded_tool.runtime_context_provider()
+        assert provider is not None
+        block = await provider(request)
+
+        assert block is not None
+        assert block.source == "focus"
+        assert "Finish the persistence test." in block.content
+        assert "Runtime Context" in block.content
+
+    @pytest.mark.asyncio
+    async def test_focus_is_session_scoped_and_can_be_cleared(self, tmp_path):
+        loop = _make_mock_loop()
+        sessions = SessionManager(tmp_path)
+        tool = MyTool(runtime_control=AgentRuntimeControl(loop), sessions=sessions)
+        request = RequestContext(
+            channel="test",
+            chat_id="chat",
+            session_key="test:chat",
+        )
+
+        with request_context(request):
+            await tool.execute(action="set", key="focus", value="Only this session.")
+            clear_result = await tool.execute(action="set", key="focus", value="")
+
+        assert clear_result == "Cleared session focus."
+        assert "_focus" not in sessions.get_or_create("test:chat").metadata
+
+        other_request = RequestContext(
+            channel="test",
+            chat_id="other",
+            session_key="test:other",
+        )
+        provider = tool.runtime_context_provider()
+        assert provider is not None
+        assert await provider(other_request) is None
