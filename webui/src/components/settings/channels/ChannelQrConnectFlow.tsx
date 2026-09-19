@@ -43,6 +43,7 @@ export function ChannelQrConnectFlow({
   idleLabel,
   connectRequestId,
   forceOnRepeat = false,
+  connected = false,
   autoStart = false,
   minimalPending = false,
   labels,
@@ -51,6 +52,8 @@ export function ChannelQrConnectFlow({
   renderPending,
   resolveMessage,
   suppressSucceeded = false,
+  onActiveChange,
+  renderActions,
 }: {
   token: string;
   channelName: string;
@@ -58,6 +61,7 @@ export function ChannelQrConnectFlow({
   idleLabel?: string;
   connectRequestId?: number;
   forceOnRepeat?: boolean;
+  connected?: boolean;
   autoStart?: boolean;
   minimalPending?: boolean;
   labels: ChannelQrConnectLabels;
@@ -66,6 +70,8 @@ export function ChannelQrConnectFlow({
   renderPending?: (context: ChannelQrConnectPendingContext) => ReactNode;
   resolveMessage?: (payload: ChannelConnectPayload) => string | undefined;
   suppressSucceeded?: boolean;
+  onActiveChange?: (active: boolean) => void;
+  renderActions?: (connectButton: ReactNode) => ReactNode;
 }) {
   const { client } = useClient();
   const pageVisible = usePageVisibility();
@@ -80,8 +86,11 @@ export function ChannelQrConnectFlow({
   const pollInFlight = useRef(false);
 
   const pending = connect?.status === "pending";
-  const succeeded = connect?.status === "succeeded";
+  const succeeded = !pending && (connected || connect?.status === "succeeded");
   const canStart = !pending && !busy;
+  useEffect(() => {
+    onActiveChange?.(pending || busy);
+  }, [pending, busy, onActiveChange]);
   const pollingPaused = Boolean(connect && pausePolling?.(connect));
   const displayMessage = connect
     ? resolveMessage?.(connect) ?? (connect.message ? channelValidationMessage(connect.message, t) : undefined)
@@ -175,12 +184,15 @@ export function ChannelQrConnectFlow({
         ...(force ? { force: true } : {}),
       });
       setConnect(payload);
+      if (payload.nanobot_features) {
+        onFeaturesUpdate(payload.nanobot_features);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
-  }, [channelName, client, startParams]);
+  }, [channelName, client, startParams, onFeaturesUpdate]);
 
   useEffect(() => {
     const requested = Boolean(connectRequestId && connectRequestId !== handledRequestId.current);
@@ -242,6 +254,10 @@ export function ChannelQrConnectFlow({
       setBusy(false);
     }
   };
+
+  const renderActionRow = renderActions ?? ((connectButton: ReactNode) => (
+    <div className="flex flex-wrap justify-end gap-2">{connectButton}</div>
+  ));
 
   return (
     <div className="mt-3 space-y-3">
@@ -315,7 +331,8 @@ export function ChannelQrConnectFlow({
         </div>
       ) : null}
 
-      {connect && ["expired", "failed", "cancelled"].includes(connect.status) ? (
+      {connect && ["expired", "failed", "cancelled"].includes(connect.status)
+        && !(connected && connect.status === "cancelled") ? (
         <div className="rounded-control border border-border/60 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
           {displayMessage || labels.stopped}
         </div>
@@ -327,7 +344,7 @@ export function ChannelQrConnectFlow({
         </div>
       ) : null}
 
-      {!pending && !(autoStart && busy && !connect) ? <div className="flex flex-wrap justify-end gap-2">
+      {!pending && !(autoStart && busy && !connect) ? renderActionRow(
         <Button
           type="button"
           size="sm"
@@ -347,7 +364,7 @@ export function ChannelQrConnectFlow({
               ? labels.scanAgain
               : idleLabel ?? labels.connect}
         </Button>
-      </div> : null}
+      ) : null}
     </div>
   );
 }

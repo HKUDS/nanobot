@@ -62,6 +62,7 @@ class DiscordConfig(Base):
     working_emoji: str = "🔧"
     working_emoji_delay: float = 2.0
     streaming: bool = True
+    reply_to_message: bool = False
     proxy: str | None = None
     proxy_username: str | None = None
     proxy_password: str | None = None
@@ -280,15 +281,20 @@ if DISCORD_AVAILABLE:
                     raise
 
             messageable_channel = cast(Messageable, channel)
-            reference, mention_settings = self._build_reply_context(messageable_channel, msg.reply_to)
+            reply_to = self._channel._reply_target(msg.metadata, explicit=msg.reply_to)
+            reference, mention_settings = self._channel._build_reply_context(
+                messageable_channel,
+                reply_to,
+                fail_if_not_exists=msg.reply_to is not None,
+            )
             sent_media = False
             failed_media: list[str] = []
 
-            for index, media_path in enumerate(msg.media or []):
+            for media_path in msg.media or []:
                 if await self._send_file(
                     messageable_channel,
                     media_path,
-                    reference=reference if index == 0 else None,
+                    reference=reference if not sent_media else None,
                     mention_settings=mention_settings,
                 ):
                     sent_media = True
@@ -326,7 +332,7 @@ if DISCORD_AVAILABLE:
             channel: Messageable,
             file_path: str,
             *,
-            reference: discord.PartialMessage | None,
+            reference: discord.MessageReference | None,
             mention_settings: discord.AllowedMentions,
         ) -> bool:
             """Send a file attachment via discord.py."""
@@ -359,24 +365,6 @@ if DISCORD_AVAILABLE:
                 return chunks
             fallback = "\n".join(f"[attachment: {name} - send failed]" for name in failed_media)
             return split_message(fallback, MAX_MESSAGE_LEN)
-
-        def _build_reply_context(
-            self,
-            channel: Messageable,
-            reply_to: str | None,
-        ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
-            """Build reply context for outbound messages."""
-            mention_settings = discord.AllowedMentions(replied_user=False)
-            if not reply_to:
-                return None, mention_settings
-            try:
-                message_id = int(reply_to)
-            except ValueError:
-                self._channel.logger.warning("Invalid reply target: {}", reply_to)
-                return None, mention_settings
-
-            return cast(Any, channel).get_partial_message(message_id), mention_settings
-
 
 class DiscordChannel(BaseChannel):
     """Discord channel using discord.py."""
@@ -413,6 +401,40 @@ class DiscordChannel(BaseChannel):
         if parent is not None:
             return cls._channel_key(parent)
         return None
+
+    def _reply_target(
+        self,
+        metadata: dict[str, Any] | None,
+        *,
+        explicit: str | None = None,
+    ) -> str | None:
+        """Choose an explicit reply target, or the triggering message when enabled."""
+        if explicit:
+            return explicit
+        if not self.config.reply_to_message or not metadata:
+            return None
+        message_id = metadata.get("message_id")
+        return str(message_id) if message_id is not None else None
+
+    def _build_reply_context(
+        self,
+        channel: Messageable,
+        reply_to: str | None,
+        *,
+        fail_if_not_exists: bool,
+    ) -> tuple[discord.MessageReference | None, discord.AllowedMentions]:
+        """Build a native Discord reply without pinging the replied-to user."""
+        mention_settings = discord.AllowedMentions(replied_user=False)
+        if not reply_to:
+            return None, mention_settings
+        try:
+            message_id = int(reply_to)
+        except ValueError:
+            self.logger.warning("Invalid reply target: {}", reply_to)
+            return None, mention_settings
+
+        partial = cast(Any, channel).get_partial_message(message_id)
+        return partial.to_reference(fail_if_not_exists=fail_if_not_exists), mention_settings
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
@@ -575,7 +597,17 @@ class DiscordChannel(BaseChannel):
         now = time.monotonic()
         if buf.message is None:
             try:
-                buf.message = await target.send(content=buf.text)
+                reply_to = self._reply_target(metadata)
+                reference, mention_settings = self._build_reply_context(
+                    target,
+                    reply_to,
+                    fail_if_not_exists=False,
+                )
+                kwargs: dict[str, Any] = {"content": buf.text}
+                if reference is not None:
+                    kwargs["reference"] = reference
+                    kwargs["allowed_mentions"] = mention_settings
+                buf.message = await target.send(**kwargs)
                 buf.last_edit = now
             except Exception as e:
                 self.logger.warning("stream initial send failed: {}", e)

@@ -50,6 +50,13 @@
           "true": "Aktif",
           "false": "Mati"
         }
+      },
+      "replyToMessage": {
+        "label": "Balas pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
       }
     }
   }

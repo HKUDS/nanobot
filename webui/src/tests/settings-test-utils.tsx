@@ -5,6 +5,8 @@ import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
 
+export { fireEvent, screen, waitFor, within } from "@testing-library/react";
+
 export const requestMutationMock = vi.fn();
 
 export function jsonResponse(body: unknown): Response {

@@ -50,6 +50,13 @@
           "true": "開啟",
           "false": "關閉"
         }
+      },
+      "replyToMessage": {
+        "label": "回覆訊息",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
       }
     }
   }
