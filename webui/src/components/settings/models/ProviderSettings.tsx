@@ -1184,7 +1184,7 @@ export function ProvidersSettings({
                   className="group settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
                 >
                   <span className="flex min-w-0 items-center gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-muted text-muted-foreground">
                       <Plus className="h-5 w-5" aria-hidden />
                     </span>
                     <span className="truncate text-[14px] font-medium text-foreground">
@@ -1272,41 +1272,45 @@ export function ProviderIcon({
 }) {
   const brand = providerBrand(provider);
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const showRemoteLogo = showBrandLogos && Boolean(logoUrl);
+  const showLoadedLogo = showRemoteLogo && logoLoaded;
 
-  if (showBrandLogos && logoUrl) {
-    return (
+  return (
+    <span
+      data-testid={`provider-logo-${provider}`}
+      className={cn(
+        "relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-[10px] text-[12px] font-semibold text-muted-foreground",
+        showLoadedLogo ? "bg-transparent" : "bg-muted",
+      )}
+      aria-hidden
+    >
       <span
-        data-testid={`provider-logo-${provider}`}
-        className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-control border border-border/45 bg-background"
+        className={cn(
+          "transition-opacity duration-150 motion-reduce:transition-none",
+          showLoadedLogo ? "opacity-0" : "opacity-100",
+        )}
       >
+        {showBrandLogos && brand
+          ? brand.initials
+          : <Icon className="h-5 w-5" strokeWidth={2} />}
+      </span>
+      {showRemoteLogo ? (
         <img
           src={logoUrl}
           alt=""
           decoding="async"
           loading="lazy"
-          className="h-6 w-6 object-contain"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          className={cn(
+            "absolute h-full w-full object-contain transition-opacity duration-150 motion-reduce:transition-none",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />
-      </span>
-    );
-  }
-  if (showBrandLogos && brand) {
-    return (
-      <span
-        data-testid={`provider-logo-fallback-${provider}`}
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-control text-[11px] font-semibold text-white"
-        style={{ backgroundColor: brand.color }}
-        aria-hidden
-      >
-        {brand.initials}
-      </span>
-    );
-  }
-  return (
-    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 dark:bg-muted/70">
-      <Icon className="h-5 w-5" strokeWidth={2} aria-hidden />
+      ) : null}
     </span>
   );
 }

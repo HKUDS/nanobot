@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
@@ -13,6 +14,37 @@ async function chooseProviderToConfigure(label: string) {
 
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
+
+  it("keeps provider labels and keyboard configuration accessible with decorative logos", async () => {
+    const user = userEvent.setup();
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      providers: [{
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        model_catalog: "builtin",
+        oauth_account: "test-account",
+        oauth_login_supported: true,
+      }],
+    };
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const provider = await screen.findByRole("button", { name: "OpenAI Codex", exact: true });
+    expect(within(provider).getByText("Configure")).toBeInTheDocument();
+    expect(within(provider).queryByRole("img")).not.toBeInTheDocument();
+    provider.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "OpenAI Codex" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(provider).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
 
 
   it("signs in to the xAI Grok provider", async () => {
