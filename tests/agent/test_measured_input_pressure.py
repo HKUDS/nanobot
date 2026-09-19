@@ -94,6 +94,20 @@ async def test_no_compactor_does_not_resend_known_overbudget_input(monkeypatch, 
     assert create.await_count == 1
 
 
+async def test_noop_summary_cannot_discard_known_input_pressure(monkeypatch, underestimate):
+    provider, create, _ = provider_client(monkeypatch, responses=[chat_stream(9000, tool=True)])
+    # With a system-only prefix, a summary that repeats it leaves the measured
+    # input in place. Calling the compactor is not evidence that fitting worked.
+    spec = spec_for(
+        provider, transcript_input=TranscriptInput(history=[], current_message=None),
+        transcript_builder=build_transcript,
+        consolidate_history=AsyncMock(return_value="system"),
+    )
+    with pytest.raises(ContextWindowExceededError, match="unchanged measured input"):
+        await AgentRunner().run(spec)
+    assert create.await_count == 1
+
+
 @pytest.mark.parametrize("case", ["missing", "estimated", "aggregate", "native", "error"])
 def test_invalid_measurements_never_establish_a_floor(monkeypatch, case):
     provider, _, _ = provider_client(monkeypatch)

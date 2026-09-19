@@ -589,6 +589,7 @@ class ContextGovernor:
                 prepared,
                 tool_definitions=tool_definitions,
             )
+            self.ensure_measured_input_fits(state, prepared, tool_definitions)
             compaction.summary_checkpoint = SessionSummaryCheckpoint(
                 summary=summary,
                 transcript_boundary=compaction.raw_accepted_boundary,
@@ -667,22 +668,7 @@ class ContextGovernor:
                         prepared,
                         tool_definitions=tool_definitions,
                     )
-                    if (
-                        input_usage is not None
-                        and input_floor is not None
-                        and input_floor >= self.input_budget(state.config)
-                        and input_usage.floor_for(
-                            self.input_snapshot(state.config, prepared, tool_definitions),
-                        ) is not None
-                    ):
-                        # An underestimated local counter can leave fitting a
-                        # no-op. Never resend a known-overbudget unchanged H.
-                        raise ContextWindowExceededError(
-                            session_key=state.config.session_key,
-                            estimated_tokens=input_floor,
-                            input_budget=self.input_budget(state.config),
-                            source="unchanged measured input after request fitting",
-                        )
+                    self.ensure_measured_input_fits(state, prepared, tool_definitions)
                 except Exception:
                     await state.events.emit(
                         ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
@@ -735,6 +721,26 @@ class ContextGovernor:
         state.messages = deepcopy(prepared)
         state.tool_definitions = deepcopy(tool_definitions)
         return prepared, provider_context
+
+    @staticmethod
+    def ensure_measured_input_fits(
+        state: ModelRequestState,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> None:
+        """A fit/summary label does not prove the measured prefix was replaced."""
+        if state.input_usage is None:
+            return
+        floor = state.input_usage.floor_for(
+            ContextGovernor.input_snapshot(state.config, messages, tools),
+        )
+        if floor is not None and floor >= ContextGovernor.input_budget(state.config):
+            raise ContextWindowExceededError(
+                session_key=state.config.session_key,
+                estimated_tokens=floor,
+                input_budget=ContextGovernor.input_budget(state.config),
+                source="unchanged measured input after request fitting",
+            )
 
     @staticmethod
     def input_snapshot(
