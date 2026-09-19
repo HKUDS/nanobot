@@ -54,13 +54,13 @@ def test_ionet_gateway_routes_unprefixed_models_when_configured() -> None:
             },
             "agents": {
                 "defaults": {
-                    "model": "meta-llama/Llama-3.3-70B-Instruct",
+                    "model": "Llama-3.3-70B-Instruct",
                 },
             },
         }
     )
 
-    model = "meta-llama/Llama-3.3-70B-Instruct"
+    model = "Llama-3.3-70B-Instruct"
     assert config.get_provider_name(model) == "ionet"
     assert config.get_api_key(model) == "ionet-key"
     assert config.get_api_base(model) == "https://api.intelligence.io.solutions/api/v1"
