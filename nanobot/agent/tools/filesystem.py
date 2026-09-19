@@ -11,6 +11,12 @@ from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.file_locks import (
+    FileLockTimeout,
+    _write_bytes_atomic,
+    _write_lock_for,
+    _write_text_atomic,
+)
 from nanobot.agent.tools.file_state import FileStates, current_file_states
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
@@ -561,8 +567,16 @@ class WriteFileTool(_FsTool):
             if content is None:
                 raise ValueError("Unknown content")
             fp = self._resolve_write(path)
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8")
+            lock = _write_lock_for(fp)
+            try:
+                await lock.acquire()
+            except FileLockTimeout as e:
+                return ToolResult.error(f"Error: timed out waiting for file lock on {path}: {e}")
+            try:
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                _write_text_atomic(fp, content)
+            finally:
+                await lock.release()
             self._file_states.record_write(fp)
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
@@ -899,148 +913,167 @@ class EditFileTool(_FsTool):
         replace_all: bool = False, occurrence: int | None = None,
         line_hint: int | None = None, expected_replacements: int | None = None, **kwargs: Any,
     ) -> str:
+        if not path:
+            return ToolResult.error("Error editing file: Unknown path")
+        if old_text is None:
+            return ToolResult.error("Error editing file: Unknown old_text")
+        if new_text is None:
+            return ToolResult.error("Error editing file: Unknown new_text")
+        if occurrence is not None and occurrence < 1:
+            return ToolResult.error("Error: occurrence must be >= 1.")
+        if line_hint is not None and line_hint < 1:
+            return ToolResult.error("Error: line_hint must be >= 1.")
+        if expected_replacements is not None and expected_replacements < 1:
+            return ToolResult.error("Error: expected_replacements must be >= 1.")
         try:
-            if not path:
-                raise ValueError("Unknown path")
-            if old_text is None:
-                raise ValueError("Unknown old_text")
-            if new_text is None:
-                raise ValueError("Unknown new_text")
-            if occurrence is not None and occurrence < 1:
-                return ToolResult.error("Error: occurrence must be >= 1.")
-            if line_hint is not None and line_hint < 1:
-                return ToolResult.error("Error: line_hint must be >= 1.")
-            if expected_replacements is not None and expected_replacements < 1:
-                return ToolResult.error("Error: expected_replacements must be >= 1.")
-
             fp = self._resolve_write(path)
-            file_exists = fp.exists()
-            if file_exists and old_text == new_text:
-                return ToolResult.error("Error: new_text must be different from old_text.")
-
-            # Create-file semantics: old_text='' + file doesn't exist → create
-            if not file_exists:
-                if old_text == "":
-                    fp.parent.mkdir(parents=True, exist_ok=True)
-                    fp.write_text(new_text, encoding="utf-8")
-                    self._file_states.record_write(fp)
-                    return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
-                return self._file_not_found_msg(path, fp)
-
-            # File size protection
+        except Exception as e:
+            return ToolResult.error(f"Error editing file: {e}")
+        # Size gate before locking: pure stat, needs no exclusion, and keeps
+        # broad Path.stat mocks (see test_edit_advanced size test) from
+        # colliding with filelock internals during acquire.
+        if fp.exists():
             try:
                 fsize = fp.stat().st_size
             except OSError:
                 fsize = 0
             if fsize > self._MAX_EDIT_FILE_SIZE:
                 return ToolResult.error(f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB.")
-
-            # Create-file: old_text='' but file exists and not empty → reject
-            if old_text == "":
-                raw = fp.read_bytes()
-                content = raw.decode("utf-8")
-                if content.strip():
-                    return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
-                fp.write_text(new_text, encoding="utf-8")
-                self._file_states.record_write(fp)
-                return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
-
-            raw = fp.read_bytes()
-            uses_crlf = b"\r\n" in raw
-            content = raw.decode("utf-8").replace("\r\n", "\n")
-            norm_old = old_text.replace("\r\n", "\n")
-            matches = _find_matches(content, norm_old)
-
-            if not matches:
-                return self._not_found_msg(old_text, content, path)
-            count = len(matches)
-            if replace_all and occurrence is not None:
-                return ToolResult.error("Error: occurrence cannot be used with replace_all=true.")
-            if replace_all and line_hint is not None:
-                return ToolResult.error("Error: line_hint cannot be used with replace_all=true.")
-            if occurrence is not None and line_hint is not None:
-                return ToolResult.error("Error: line_hint cannot be used with occurrence.")
-            if occurrence is not None and occurrence > count:
-                return ToolResult.error(
-                    f"Error: occurrence {occurrence} is out of range; "
-                    f"old_text appears {count} time(s)."
-                )
-            if count > 1 and not replace_all and occurrence is None and line_hint is None:
-                line_numbers = [match.line for match in matches]
-                preview = ", ".join(f"line {n}" for n in line_numbers[:3])
-                if len(line_numbers) > 3:
-                    preview += ", ..."
-                location_hint = f" at {preview}" if preview else ""
-                return (
-                    f"Warning: old_text appears {count} times{location_hint}. "
-                    "Provide more context, set occurrence to choose one match, "
-                    "or set replace_all=true."
-                )
-
-            norm_new = new_text.replace("\r\n", "\n")
-
-            # Trailing whitespace stripping (skip markdown to preserve double-space line breaks)
-            if fp.suffix.lower() not in self._MARKDOWN_EXTS:
-                norm_new = self._strip_trailing_ws(norm_new)
-
-            if replace_all:
-                selected = matches
-            elif occurrence is not None:
-                selected = [matches[occurrence - 1]]
-            elif line_hint is not None:
-                candidates = [match for match in matches if _match_covers_line(match, line_hint)]
-                if not candidates:
-                    locations = ", ".join(f"line {match.line}" for match in matches[:3])
-                    if len(matches) > 3:
-                        locations += ", ..."
-                    return ToolResult.error(
-                        f"Error: line_hint {line_hint} does not match the old_text location. "
-                        f"old_text appears at {locations}. Re-read the intended region and "
-                        "copy old_text that covers the target line."
-                    )
-                if len(candidates) > 1:
-                    return ToolResult.error(
-                        f"Error: line_hint {line_hint} is ambiguous; "
-                        f"old_text appears {len(candidates)} times on that line."
-                    )
-                selected = candidates
-            else:
-                selected = [matches[0]]
-            if expected_replacements is not None and len(selected) != expected_replacements:
-                return ToolResult.error(
-                    f"Error: expected {expected_replacements} replacements but "
-                    f"would make {len(selected)}."
-                )
-            new_content = content
-            for match in reversed(selected):
-                replacement = _preserve_quote_style(norm_old, match.text, norm_new)
-                replacement = _reindent_like_match(norm_old, match.text, replacement)
-
-                # Only consume the trailing newline when deleting complete lines;
-                # inline suffix deletions must preserve the remaining line boundary.
-                end = match.end
-                if (
-                    replacement == ""
-                    and (match.start == 0 or content[match.start - 1] == "\n")
-                    and not match.text.endswith("\n")
-                    and content[end:end + 1] == "\n"
-                ):
-                    end += 1
-
-                new_content = new_content[: match.start] + replacement + new_content[end:]
-            if uses_crlf:
-                new_content = new_content.replace("\n", "\r\n")
-
-            fp.write_bytes(new_content.encode("utf-8"))
-            self._file_states.record_write(fp)
-            return self._format_summary(fp, content, new_content)
+        lock = _write_lock_for(fp)
+        try:
+            await lock.acquire()
+        except FileLockTimeout as e:
+            return ToolResult.error(f"Error: timed out waiting for file lock on {path}: {e}")
+        try:
+            return await self._execute_locked(path, fp, old_text, new_text, replace_all, occurrence, line_hint, expected_replacements)
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
             return ToolResult.error(f"Error editing file: {e}")
+        finally:
+            await lock.release()
+
+    async def _execute_locked(
+        self, path: str, fp: Path, old_text: str, new_text: str,
+        replace_all: bool, occurrence: int | None,
+        line_hint: int | None, expected_replacements: int | None,
+    ) -> str:
+        file_exists = fp.exists()
+        if file_exists and old_text == new_text:
+            return ToolResult.error("Error: new_text must be different from old_text.")
+
+        # Create-file semantics: old_text='' + file doesn't exist → create
+        if not file_exists:
+            if old_text == "":
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                _write_text_atomic(fp, new_text)
+                self._file_states.record_write(fp)
+                return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
+            return self._file_not_found_msg(path, fp)
+
+        # Size gate already enforced pre-lock in execute.
+
+        # Create-file: old_text='' but file exists and not empty → reject
+        if old_text == "":
+            raw = fp.read_bytes()
+            content = raw.decode("utf-8")
+            if content.strip():
+                return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
+            _write_text_atomic(fp, new_text)
+            self._file_states.record_write(fp)
+            return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
+
+        raw = fp.read_bytes()
+        uses_crlf = b"\r\n" in raw
+        content = raw.decode("utf-8").replace("\r\n", "\n")
+        norm_old = old_text.replace("\r\n", "\n")
+        matches = _find_matches(content, norm_old)
+
+        if not matches:
+            return self._not_found_msg(old_text, content, path)
+        count = len(matches)
+        if replace_all and occurrence is not None:
+            return ToolResult.error("Error: occurrence cannot be used with replace_all=true.")
+        if replace_all and line_hint is not None:
+            return ToolResult.error("Error: line_hint cannot be used with replace_all=true.")
+        if occurrence is not None and line_hint is not None:
+            return ToolResult.error("Error: line_hint cannot be used with occurrence.")
+        if occurrence is not None and occurrence > count:
+            return ToolResult.error(
+                f"Error: occurrence {occurrence} is out of range; "
+                f"old_text appears {count} time(s)."
+            )
+        if count > 1 and not replace_all and occurrence is None and line_hint is None:
+            line_numbers = [match.line for match in matches]
+            preview = ", ".join(f"line {n}" for n in line_numbers[:3])
+            if len(line_numbers) > 3:
+                preview += ", ..."
+            location_hint = f" at {preview}" if preview else ""
+            return (
+                f"Warning: old_text appears {count} times{location_hint}. "
+                "Provide more context, set occurrence to choose one match, "
+                "or set replace_all=true."
+            )
+
+        norm_new = new_text.replace("\r\n", "\n")
+
+        # Trailing whitespace stripping (skip markdown to preserve double-space line breaks)
+        if fp.suffix.lower() not in self._MARKDOWN_EXTS:
+            norm_new = self._strip_trailing_ws(norm_new)
+
+        if replace_all:
+            selected = matches
+        elif occurrence is not None:
+            selected = [matches[occurrence - 1]]
+        elif line_hint is not None:
+            candidates = [match for match in matches if _match_covers_line(match, line_hint)]
+            if not candidates:
+                locations = ", ".join(f"line {match.line}" for match in matches[:3])
+                if len(matches) > 3:
+                    locations += ", ..."
+                return ToolResult.error(
+                    f"Error: line_hint {line_hint} does not match the old_text location. "
+                    f"old_text appears at {locations}. Re-read the intended region and "
+                    "copy old_text that covers the target line."
+                )
+            if len(candidates) > 1:
+                return ToolResult.error(
+                    f"Error: line_hint {line_hint} is ambiguous; "
+                    f"old_text appears {len(candidates)} times on that line."
+                )
+            selected = candidates
+        else:
+            selected = [matches[0]]
+        if expected_replacements is not None and len(selected) != expected_replacements:
+            return ToolResult.error(
+                f"Error: expected {expected_replacements} replacements but "
+                f"would make {len(selected)}."
+            )
+        new_content = content
+        for match in reversed(selected):
+            replacement = _preserve_quote_style(norm_old, match.text, norm_new)
+            replacement = _reindent_like_match(norm_old, match.text, replacement)
+
+            # Only consume the trailing newline when deleting complete lines;
+            # inline suffix deletions must preserve the remaining line boundary.
+            end = match.end
+            if (
+                replacement == ""
+                and (match.start == 0 or content[match.start - 1] == "\n")
+                and not match.text.endswith("\n")
+                and content[end:end + 1] == "\n"
+            ):
+                end += 1
+
+            new_content = new_content[: match.start] + replacement + new_content[end:]
+        if uses_crlf:
+            new_content = new_content.replace("\n", "\r\n")
+
+        _write_bytes_atomic(fp, new_content.encode("utf-8"))
+        self._file_states.record_write(fp)
+        return self._format_summary(fp, content, new_content)
 
     def _file_not_found_msg(self, path: str, fp: Path) -> str:
-        """Build an error message with 'Did you mean ...?' suggestions."""
         parent = fp.parent
         suggestions: list[str] = []
         if parent.is_dir():
@@ -1061,7 +1094,6 @@ class EditFileTool(_FsTool):
                 best_window_lines,
                 fromfile="old_text (provided)",
                 tofile=f"{path} (actual, line {best_start + 1})",
-                lineterm="",
             ))
             hint_text = ""
             if hints:
