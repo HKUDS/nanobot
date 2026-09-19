@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Callable, Iterable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 
@@ -13,32 +13,13 @@ class AutomationTurnError(RuntimeError):
     """Raised when an automation turn reaches the agent and finishes with an error."""
 
 
-async def publish_next_deferred_turn(
-    *,
-    deferred_queues: dict[str, list[InboundMessage]],
-    publish_inbound: Callable[[InboundMessage], Awaitable[None]],
-    session_key: str,
-) -> bool:
-    """Publish the next deferred automation turn for a session."""
-    queue = deferred_queues.get(session_key)
-    if not queue:
-        return False
-    msg = queue.pop(0)
-    if not queue:
-        deferred_queues.pop(session_key, None)
-    await publish_inbound(msg)
-    return True
-
-
 class AutomationTurnCoordinator:
     """Manage automation turns without mixing them into live injections."""
 
     def __init__(
         self,
         *,
-        publish_inbound: Callable[[InboundMessage], Awaitable[None]],
-        dispatch: Callable[[InboundMessage], Awaitable[object]],
-        is_running: Callable[[], bool],
+        enqueue: Callable[[InboundMessage], None],
         turn_id: Callable[[InboundMessage], str | None],
         pending_id: Callable[[InboundMessage], str | None],
         should_defer_turn: Callable[[InboundMessage, str, Iterable[str]], bool],
@@ -46,9 +27,7 @@ class AutomationTurnCoordinator:
         duplicate_id_error: Callable[[str], str],
         deferred_queues: dict[str, list[InboundMessage]] | None = None,
     ) -> None:
-        self._publish_inbound = publish_inbound
-        self._dispatch = dispatch
-        self._is_running = is_running
+        self._enqueue = enqueue
         self._turn_id = turn_id
         self._pending_id = pending_id
         self._should_defer_turn = should_defer_turn
@@ -57,6 +36,10 @@ class AutomationTurnCoordinator:
         self.deferred_queues = deferred_queues if deferred_queues is not None else {}
         self._waiters: dict[str, asyncio.Future[OutboundMessage | None]] = {}
         self._pending_messages_by_turn_id: dict[str, InboundMessage] = {}
+
+    def owns_turn(self, msg: InboundMessage) -> bool:
+        """Whether this message requires an independent automation completion."""
+        return bool(self._turn_id(msg))
 
     async def submit(self, msg: InboundMessage) -> OutboundMessage | None:
         """Submit an automation turn and wait for its session response."""
@@ -71,10 +54,7 @@ class AutomationTurnCoordinator:
         self._waiters[turn_id] = future
         self._pending_messages_by_turn_id[turn_id] = msg
         try:
-            if self._is_running():
-                await self._publish_inbound(msg)
-            else:
-                await self._dispatch(msg)
+            self._enqueue(msg)
             try:
                 return await future
             except asyncio.CancelledError:

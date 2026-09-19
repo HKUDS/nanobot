@@ -24,6 +24,7 @@ from nanobot.session.turn_continuation import (
     maybe_continue_turn,
     should_finalize_on_max_iterations,
     should_stream_budget_response,
+    sustained_goal_continuation_inbound,
 )
 
 
@@ -73,6 +74,7 @@ async def test_maybe_continue_turn_queues_internal_message():
     assert queued.sender_id == "system:continuation"
     assert queued.metadata[INTERNAL_CONTINUATION_META] is True
     assert queued.metadata[INTERNAL_CONTINUATION_KIND_META] == "sustained_goal"
+    assert sustained_goal_continuation_inbound(queued.metadata) is True
     assert queued.metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == 1234.5
     assert internal_continuation_run_started_at(queued.metadata) == 1234.5
     assert internal_continuation_pending(ctx.msg.metadata)
@@ -88,6 +90,10 @@ async def test_maybe_continue_turn_queues_internal_message():
     assert ctx.suppress_response is True
     assert ctx.msg.metadata[INTERNAL_CONTINUATION_PENDING_META] is True
     assert meta["_sustained_goal_continuation_rounds"] == 1
+
+
+def test_generic_internal_continuation_is_not_a_sustained_goal_continuation() -> None:
+    assert sustained_goal_continuation_inbound({INTERNAL_CONTINUATION_META: True}) is False
 
 
 @pytest.mark.asyncio
@@ -141,14 +147,13 @@ def test_internal_continuation_requires_budget_boundary_and_queue():
     )
 
 
-def test_save_skip_matches_prefix_when_current_message_merged():
+def test_save_skip_matches_prefix_when_current_message_was_persisted():
     skip = _save_skip_for_turn(
         message_metadata=None,
-        initial_message_count=2,  # [system, merged user]
-        history_count=1,
+        initial_message_count=3,  # [system, history user, current user]
         input_persisted_early=True,
     )
-    assert skip == 2
+    assert skip == 3
 
 
 def test_save_skip_unchanged_for_standalone_current_message():
@@ -156,12 +161,10 @@ def test_save_skip_unchanged_for_standalone_current_message():
     assert _save_skip_for_turn(
         message_metadata=None,
         initial_message_count=3,
-        history_count=1,
         input_persisted_early=True,
     ) == 3
     assert _save_skip_for_turn(
         message_metadata=None,
         initial_message_count=3,
-        history_count=1,
         input_persisted_early=False,
     ) == 2

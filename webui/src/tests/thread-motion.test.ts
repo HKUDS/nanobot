@@ -120,6 +120,31 @@ describe("ThreadMotionCoordinator", () => {
     });
   });
 
+  it("reconciles observed layout growth before the next paint", () => {
+    const {
+      camera,
+      coordinator,
+      frames,
+      scheduler,
+      advanceFrame,
+      setGeometry,
+    } = motionHarness();
+
+    coordinator.resumeAutoFollow();
+    advanceFrame();
+    camera.jumpTo.mockClear();
+    scheduler.cancel.mockClear();
+
+    setGeometry({ scrollTop: 1_400, scrollHeight: 2_054 });
+    coordinator.invalidateGeometry();
+    coordinator.reconcileObservedGeometry();
+
+    expect(camera.jumpTo).toHaveBeenCalledWith(1_554);
+    expect(scheduler.cancel).toHaveBeenCalledTimes(1);
+    expect(frames).toHaveLength(0);
+    expect(coordinator.snapshot()).toMatchObject({ measurementPending: false });
+  });
+
   it("pins repeated output growth on each authoritative geometry frame", () => {
     const {
       camera,

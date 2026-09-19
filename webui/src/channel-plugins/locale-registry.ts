@@ -73,7 +73,13 @@ async function loadChannelLocale(
   channel: string,
   locale: SupportedLocale,
 ): Promise<ChannelMessages> {
-  const translations = translationsByChannel.get(channel) ?? new Map();
+  // Get-or-create the shared per-channel map synchronously so concurrent locale
+  // loads append to one Map instead of replacing each other's registration.
+  let translations = translationsByChannel.get(channel);
+  if (!translations) {
+    translations = new Map();
+    translationsByChannel.set(channel, translations);
+  }
   const loaded = translations.get(locale);
   if (loaded) return loaded;
 
@@ -87,6 +93,5 @@ async function loadChannelLocale(
     throw new Error(`Channel '${channel}' locale '${locale}' has no default export`);
   }
   translations.set(locale, messages);
-  translationsByChannel.set(channel, translations);
   return messages;
 }

@@ -123,6 +123,40 @@ appended to nanobot's generated functions. This keeps unrelated local tools such
 available in the same request. Responses-only server tools require an API surface that the
 OpenRouter provider does not currently enable.
 
+### OrcaRouter Gateway
+
+[OrcaRouter](https://www.orcarouter.ai) is an OpenAI-compatible model routing gateway. Configure
+the built-in `orcarouter` provider and use a model ID from OrcaRouter's catalog:
+
+```json
+{
+  "providers": {
+    "orcarouter": {
+      "apiKey": "${ORCAROUTER_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "orcarouter",
+      "model": "orcarouter/auto",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Use the model ID exactly as OrcaRouter lists it. `orcarouter/auto` routes to a
+suitable upstream automatically; explicit IDs such as
+`anthropic/claude-sonnet-4.6` or `openai/gpt-5` are also accepted. OrcaRouter API keys start with
+`sk-orca-`. The WebUI can load the account's model catalog after the API key is saved under
+**Settings → Models**.
+
 ### Eden AI Gateway
 
 Eden AI exposes an OpenAI-compatible chat-completions endpoint at
@@ -538,15 +572,23 @@ For OpenAI Codex:
 nanobot provider login openai-codex --set-main
 ```
 
+The WebUI reads the account's Codex model catalog online, including current
+context-window and reasoning-effort metadata. A small compatible catalog remains
+available when the service cannot be reached.
+
 For an eligible X Premium / Grok subscription:
 
 ```bash
 nanobot provider login xai-grok --set-main
 ```
 
-This selects `xai-grok/grok-4.5`. The provider reads xAI's model catalog and
-exposes the hosted `x_search` tool only when the selected model advertises
-`supportsBackendSearch`; otherwise the model runs without hosted X Search.
+This selects `xai-grok/grok-4.6`. The WebUI model selector reads xAI's online
+model catalog, so newly available subscription models appear without a nanobot
+release. Online metadata is cached and enriched with nanobot's curated labels;
+if xAI is temporarily unavailable, nanobot uses the last successful catalog or
+a small built-in fallback instead of emptying the selector. The same catalog
+controls whether the provider exposes the hosted `x_search` tool; models that do
+not advertise support continue without hosted X Search.
 When enabled, Grok can search current X posts and return inline source links
 without invoking a local nanobot tool. Credentials are stored under the
 active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), not in
@@ -564,6 +606,10 @@ For GitHub Copilot:
 ```bash
 nanobot provider login github-copilot --set-main
 ```
+
+The WebUI reads the models enabled for the signed-in Copilot account. nanobot
+lists entries that support its current Copilot chat-completions or Responses
+transport and hides models that it cannot route safely.
 
 Each command authenticates the selected provider and makes its current default model active. OpenAI Codex and eligible GitHub Copilot models participate in [Responses state retention](./configuration.md#responses-state-and-compaction), while native compaction remains provider-capability-specific. OAuth providers are not valid automatic fallbacks. See [`troubleshooting.md`](./troubleshooting.md#provider-and-model-problems) for proxy, headless-login, model-name, and config-key errors.
 
@@ -599,7 +645,6 @@ Model presets are the recommended model configuration surface. Use them when you
 {
   "modelPresets": {
     "fast": {
-      "label": "Fast",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
@@ -607,7 +652,6 @@ Model presets are the recommended model configuration surface. Use them when you
       "temperature": 0.1
     },
     "deep": {
-      "label": "Deep",
       "provider": "anthropic",
       "model": "claude-opus-4-5",
       "maxTokens": 8192,
@@ -633,7 +677,6 @@ Fallbacks are useful for transient provider failures, rate limits, or model avai
 {
   "modelPresets": {
     "fast": {
-      "label": "Fast",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4.5",
       "maxTokens": 4096,
@@ -641,7 +684,6 @@ Fallbacks are useful for transient provider failures, rate limits, or model avai
       "temperature": 0.1
     },
     "deep": {
-      "label": "Deep",
       "provider": "anthropic",
       "model": "claude-opus-4-5",
       "maxTokens": 8192,
@@ -649,7 +691,6 @@ Fallbacks are useful for transient provider failures, rate limits, or model avai
       "temperature": 0.1
     },
     "localSmall": {
-      "label": "Local Small",
       "provider": "ollama",
       "model": "llama3.2",
       "maxTokens": 4096,

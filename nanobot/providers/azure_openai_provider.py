@@ -19,8 +19,9 @@ Two modes are supported, selected automatically:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, cast
 
 from loguru import logger
@@ -31,9 +32,11 @@ from nanobot.providers.base import (
     LLMResponse,
     ProviderCallContext,
     ProviderConversationState,
+    resolve_stream_idle_timeout_s,
 )
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
+    build_responses_compaction_state,
     build_responses_state,
     consume_sdk_stream,
     convert_tools,
@@ -106,8 +109,10 @@ class AzureOpenAIProvider(LLMProvider):
         api_key: str = "",
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
+        *,
+        provider_name: str = "azure_openai",
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self._native_compaction_available = True
 
@@ -247,8 +252,11 @@ class AzureOpenAIProvider(LLMProvider):
         body: dict[str, Any],
     ) -> Any:
         """Retry once without server compaction when Azure rejects the option."""
+        request_options: dict[str, Any] = (
+            {"timeout": resolve_stream_idle_timeout_s()} if body.get("stream") else {}
+        )
         try:
-            return cast(Any, await self._client.responses.create(**body))
+            return cast(Any, await self._client.responses.create(**body, **request_options))
         except Exception as exc:
             if (
                 "context_management" not in body
@@ -262,7 +270,7 @@ class AzureOpenAIProvider(LLMProvider):
                 "instance (status={})",
                 getattr(exc, "status_code", None),
             )
-            return cast(Any, await self._client.responses.create(**body))
+            return cast(Any, await self._client.responses.create(**body, **request_options))
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
@@ -374,22 +382,34 @@ class AzureOpenAIProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
-        _ = on_thinking_delta
         body = self._build_body(
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
             provider_context,
         )
         body["stream"] = True
+        idle_timeout_s = resolve_stream_idle_timeout_s()
 
         try:
             stream = await self._create_response_with_compaction_fallback(body)
+
+            async def _timed_stream() -> AsyncIterator[Any]:
+                stream_iter: AsyncIterator[Any] = stream.__aiter__()
+                while True:
+                    try:
+                        yield await asyncio.wait_for(
+                            stream_iter.__anext__(), timeout=idle_timeout_s,
+                        )
+                    except StopAsyncIteration:
+                        break
+
             capture = ResponsesStreamCapture()
             content, tool_calls, finish_reason, usage, reasoning_content = (
                 await consume_sdk_stream(
-                    stream,
+                    _timed_stream(),
                     on_content_delta,
                     on_tool_call_delta,
+                    on_reasoning_delta=on_thinking_delta,
                     capture=capture,
                 )
             )
@@ -408,6 +428,16 @@ class AzureOpenAIProvider(LLMProvider):
                     output_items=capture.output_items,
                     usage=usage,
                 )
+                result.provider_compaction_state = build_responses_compaction_state(
+                    provider=self._responses_state_provider(),
+                    model=str(body["model"]),
+                    output_items=capture.output_items,
+                )
+                result.provider_compaction_applied = (
+                    result.provider_compaction_state is not None
+                )
+                if result.provider_compaction_applied:
+                    result.provider_compaction_scope = "current_request"
             return result
         except Exception as e:
             return self._handle_error(e)

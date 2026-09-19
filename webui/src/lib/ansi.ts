@@ -3,7 +3,7 @@ export type AnsiSegment = {
   style?: AnsiStyle;
 };
 
-export type AnsiStyle = {
+type AnsiStyle = {
   backgroundColor?: string;
   color?: string;
   fontStyle?: "italic";

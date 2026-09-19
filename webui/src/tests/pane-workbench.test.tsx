@@ -314,6 +314,51 @@ describe("PaneWorkbench", () => {
     await waitFor(() => expect(animate).toHaveBeenCalledTimes(4));
   });
 
+  it("keeps a retargeted pane surface in the same physical motion", async () => {
+    const common = {
+      layout: "columns" as const,
+      showLayoutControl: false,
+      onActivatePane: vi.fn(),
+      onAddPane: vi.fn(),
+      onLayoutChange: vi.fn(),
+      onPaneOrderChange: vi.fn(),
+      renderPane: (pane: { title: string }) => <span>{pane.title}</span>,
+    };
+    const { rerender } = render(
+      <PaneWorkbench
+        {...common}
+        panes={[
+          { key: "alpha", reactKey: "tab-root", title: "Alpha" },
+          { key: "beta", reactKey: "pane:beta", title: "Beta" },
+        ]}
+        activePaneKey="alpha"
+      />,
+    );
+    animate.mockClear();
+
+    rerender(
+      <PaneWorkbench
+        {...common}
+        panes={[
+          { key: "beta", reactKey: "pane:beta", title: "Beta" },
+          { key: "gamma", reactKey: "tab-root", title: "Gamma" },
+        ]}
+        activePaneKey="gamma"
+      />,
+    );
+
+    await waitFor(() => expect(animate).toHaveBeenCalledWith(
+      [
+        { transform: "translate(-500px, 0px) scale(1, 1)" },
+        { transform: "translate(0, 0) scale(1, 1)" },
+      ],
+      {
+        duration: 260,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+      },
+    ));
+  });
+
   it("renders only the active pane and hides workbench controls on mobile", () => {
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
       matches: query.includes("max-width: 767px"),

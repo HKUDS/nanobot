@@ -30,7 +30,7 @@ def _fake_resolve_public(hostname, port, family=0, type_=0):
 
 @pytest.mark.asyncio
 async def test_exec_blocks_curl_metadata():
-    tool = ExecTool()
+    tool = ExecTool(restrict_to_workspace=True)
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
         result = await tool.execute(
             command='curl -s -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/'
@@ -41,7 +41,7 @@ async def test_exec_blocks_curl_metadata():
 
 @pytest.mark.asyncio
 async def test_exec_blocks_wget_localhost():
-    tool = ExecTool()
+    tool = ExecTool(restrict_to_workspace=True)
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
         result = await tool.execute(command="wget http://localhost:8080/secret -O /tmp/out")
     assert "Error" in result
@@ -111,6 +111,40 @@ def test_exec_full_workspace_scope_still_blocks_metadata(tmp_path):
     assert "internal/private" in error
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo blocked",
+        "echo http://169.254.169.254/latest/meta-data/",
+    ],
+)
+async def test_exec_full_access_skips_command_guard(tmp_path, command):
+    tool = ExecTool(
+        working_dir=str(tmp_path),
+        restrict_to_workspace=False,
+        deny_patterns=[r"echo\s+blocked"],
+    )
+    result = await tool.execute(command=command)
+
+    assert "Exit code: 0" in result
+    assert "Command blocked" not in result
+
+
+async def test_exec_full_workspace_scope_skips_command_guard(tmp_path):
+    tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=True)
+    scope = build_workspace_scope(tmp_path, "full", source_channel="websocket")
+    token = bind_workspace_scope(scope)
+    try:
+        result = await tool.execute(
+            command="echo http://169.254.169.254/latest/meta-data/",
+        )
+    finally:
+        reset_workspace_scope(token)
+
+    assert "Exit code: 0" in result
+    assert "Command blocked" not in result
+
+
 @pytest.mark.asyncio
 async def test_exec_allows_normal_commands():
     tool = ExecTool(timeout=5)
@@ -131,7 +165,7 @@ async def test_exec_allows_curl_to_public_url():
 @pytest.mark.asyncio
 async def test_exec_blocks_chained_internal_url():
     """Internal URLs buried in chained commands should still be caught."""
-    tool = ExecTool()
+    tool = ExecTool(restrict_to_workspace=True)
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
         result = await tool.execute(
             command="echo start && curl http://169.254.169.254/latest/meta-data/ && echo done"
@@ -198,6 +232,28 @@ async def test_exec_blocks_working_dir_outside_workspace(tmp_path):
     workspace.mkdir()
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
     result = await tool.execute(command="rm calendar.ics", working_dir="/etc")
+    assert "outside the configured workspace" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_blocks_relative_working_dir_outside_workspace(tmp_path):
+    """A relative working_dir that escapes the workspace must be rejected."""
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+
+    tool = ExecTool(
+        working_dir=str(workspace),
+        restrict_to_workspace=True,
+        timeout=5,
+    )
+
+    result = await tool.execute(
+        command="echo ok",
+        working_dir="../outside",
+    )
+
     assert "outside the configured workspace" in result
 
 
@@ -317,7 +373,8 @@ def test_exec_still_blocks_real_outside_path_via_redirect(tmp_path):
     assert "path outside working dir" in blocked
 
 
-def test_exec_allows_absolute_path_inside_bwrap_ro_bind(tmp_path, monkeypatch):
+@pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+def test_exec_allows_absolute_path_inside_sandbox_ro_bind(tmp_path, monkeypatch, backend):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     tool_bin = tmp_path / "home" / ".local" / "bin"
@@ -328,7 +385,7 @@ def test_exec_allows_absolute_path_inside_bwrap_ro_bind(tmp_path, monkeypatch):
     tool = ExecTool(
         working_dir=str(workspace),
         restrict_to_workspace=True,
-        sandbox="bwrap",
+        sandbox=backend,
         sandbox_ro_binds=[str(tool_bin)],
     )
 
@@ -342,7 +399,8 @@ def test_exec_allows_absolute_path_inside_bwrap_ro_bind(tmp_path, monkeypatch):
     assert blocked is None
 
 
-def test_exec_allows_absolute_path_inside_bwrap_rw_bind(tmp_path, monkeypatch):
+@pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+def test_exec_allows_absolute_path_inside_sandbox_rw_bind(tmp_path, monkeypatch, backend):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     cache_dir = tmp_path / "cache"
@@ -351,7 +409,7 @@ def test_exec_allows_absolute_path_inside_bwrap_rw_bind(tmp_path, monkeypatch):
     tool = ExecTool(
         working_dir=str(workspace),
         restrict_to_workspace=True,
-        sandbox="bwrap",
+        sandbox=backend,
         sandbox_rw_binds=[str(cache_dir)],
     )
 
@@ -365,7 +423,7 @@ def test_exec_allows_absolute_path_inside_bwrap_rw_bind(tmp_path, monkeypatch):
     assert blocked is None
 
 
-def test_exec_bind_roots_do_not_widen_guard_without_bwrap(tmp_path):
+def test_exec_bind_roots_do_not_widen_guard_without_sandbox(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     tool_bin = tmp_path / "home" / ".local" / "bin"
@@ -390,7 +448,8 @@ def test_exec_bind_roots_do_not_widen_guard_without_bwrap(tmp_path):
     assert "path outside working dir" in blocked
 
 
-def test_exec_bwrap_bind_parent_does_not_widen_workspace_guard(tmp_path, monkeypatch):
+@pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+def test_exec_sandbox_bind_parent_does_not_widen_workspace_guard(tmp_path, monkeypatch, backend):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     secret = tmp_path / "config.json"
@@ -399,7 +458,7 @@ def test_exec_bwrap_bind_parent_does_not_widen_workspace_guard(tmp_path, monkeyp
     tool = ExecTool(
         working_dir=str(workspace),
         restrict_to_workspace=True,
-        sandbox="bwrap",
+        sandbox=backend,
         sandbox_ro_binds=[str(tmp_path)],
     )
 

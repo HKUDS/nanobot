@@ -1,9 +1,6 @@
 import { useRef, useState } from "react";
 
-import type {
-  AutomationFilter,
-  AutomationSort,
-} from "@/components/settings/system/AutomationsSettings";
+import type { AutomationFilter } from "@/components/settings/system/AutomationsSettings";
 import {
   DEFAULT_CUSTOM_MCP_FORM,
   type AppsKindFilter,
@@ -20,6 +17,11 @@ import type {
   SessionAutomationJob,
 } from "@/lib/types";
 
+export type NanobotFeatureInstallRequest = {
+  feature: NanobotFeatureInfo;
+  installOnly: boolean;
+};
+
 export function useSystemSettingsState() {
   const [cliApps, setCliApps] = useState<CliAppsPayload | null>(null);
   const [nanobotFeatures, setNanobotFeatures] = useState<NanobotFeaturesPayload | null>(null);
@@ -31,7 +33,9 @@ export function useSystemSettingsState() {
   const [automationsLoading, setAutomationsLoading] = useState(false);
   const [cliAppsAction, setCliAppsAction] = useState<string | null>(null);
   const [nanobotFeatureAction, setNanobotFeatureAction] = useState<string | null>(null);
-  const [nanobotFeatureConfirm, setNanobotFeatureConfirm] = useState<NanobotFeatureInfo | null>(null);
+  const nanobotFeatureActionRef = useRef<string | null>(null);
+  const [nanobotFeatureConfirm, setNanobotFeatureConfirm] =
+    useState<NanobotFeatureInstallRequest | null>(null);
   const [mcpPresetAction, setMcpPresetAction] = useState<string | null>(null);
   const [mcpOAuthFlow, setMcpOAuthFlow] = useState<McpOAuthFlowPayload | null>(null);
   const mcpOAuthFlowRef = useRef<McpOAuthFlowPayload | null>(null);
@@ -46,10 +50,7 @@ export function useSystemSettingsState() {
   const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
   const [apiServiceError, setApiServiceError] = useState<string | null>(null);
   const [appsQuery, setAppsQuery] = useState("");
-  const [channelsQuery, setChannelsQuery] = useState("");
-  const [automationsQuery, setAutomationsQuery] = useState("");
   const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
-  const [automationsSort, setAutomationsSort] = useState<AutomationSort>("next");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
@@ -81,9 +82,6 @@ export function useSystemSettingsState() {
     automationsError,
     automationsFilter,
     automationsLoading,
-    automationsQuery,
-    automationsSort,
-    channelsQuery,
     cliApps,
     cliAppsAction,
     cliAppsError,
@@ -107,6 +105,7 @@ export function useSystemSettingsState() {
     mcpPresets,
     mcpPresetsLoading,
     nanobotFeatureAction,
+    nanobotFeatureActionRef,
     nanobotFeatureConfirm,
     nanobotFeatures,
     nanobotFeaturesError,
@@ -124,9 +123,6 @@ export function useSystemSettingsState() {
     setAutomationsError,
     setAutomationsFilter,
     setAutomationsLoading,
-    setAutomationsQuery,
-    setAutomationsSort,
-    setChannelsQuery,
     setCliApps,
     setCliAppsAction,
     setCliAppsError,

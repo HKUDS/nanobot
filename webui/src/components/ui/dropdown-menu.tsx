@@ -9,6 +9,7 @@ import {
   floatingSurfaceMotionClassName,
 } from "@/components/ui/floating-surface";
 import { cn } from "@/lib/utils";
+import { useFloatingPortal } from "@/components/ui/floating-portal";
 
 const DropdownMenu = DropdownMenuPrimitive.Root;
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
@@ -26,8 +27,10 @@ interface DropdownMenuContentProps
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   DropdownMenuContentProps
->(({ className, sideOffset = 4, portalContainer, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal container={portalContainer ?? undefined}>
+>(({ className, sideOffset = 4, portalContainer, ...props }, ref) => {
+  const dialogContainer = useFloatingPortal();
+  return (
+  <DropdownMenuPrimitive.Portal container={portalContainer ?? dialogContainer ?? undefined}>
     <DropdownMenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
@@ -40,7 +43,8 @@ const DropdownMenuContent = React.forwardRef<
       {...props}
     />
   </DropdownMenuPrimitive.Portal>
-));
+  );
+});
 DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
 
 const DropdownMenuItem = React.forwardRef<

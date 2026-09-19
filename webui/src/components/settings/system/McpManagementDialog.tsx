@@ -153,7 +153,6 @@ export function McpManagementDialog({
         showCloseButton={false}
         className={cn(
           "flex h-[min(34rem,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-[42rem] flex-col gap-0 overflow-hidden p-0",
-          "rounded-[22px]",
         )}
       >
         <div className="flex shrink-0 items-center gap-3 border-b border-border/45 px-5 py-3.5 sm:px-6">
@@ -282,7 +281,7 @@ function OverviewPanel({
   const previewTools = (preset.tool_names ?? []).slice(0, 4);
   return (
     <div className="space-y-4">
-      <section className="rounded-[16px] border border-border/55 px-4 py-3.5">
+      <section className="rounded-floating border border-border/55 px-4 py-3.5">
         <h3 className="text-[13px] font-semibold text-foreground">
           {tx("settings.mcp.about", "About this MCP")}
         </h3>
@@ -314,7 +313,7 @@ function OverviewPanel({
       </dl>
 
       {previewTools.length ? (
-        <section className="rounded-[16px] bg-muted/45 p-4">
+        <section className="rounded-floating bg-muted/45 p-4">
           <h3 className="text-[13px] font-semibold text-foreground">
             {tx("settings.mcp.toolPreview", "Tools")}
           </h3>
@@ -375,7 +374,7 @@ function ToolsPanel({
     return (
       <div
         className={cn(
-          "flex flex-col gap-3 rounded-[16px] border px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between",
+          "flex flex-col gap-3 rounded-floating border px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between",
           preset.error ? "border-destructive/25 bg-destructive/5" : "border-border/55 bg-muted/25",
         )}
       >
@@ -444,13 +443,13 @@ function ToolsPanel({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-[16px] border border-border/55">
+      <div className="overflow-hidden rounded-floating border border-border/55">
         {filteredTools.length ? filteredTools.map((toolName) => {
           const selected = selectedTools.has(toolName);
           return (
             <label
               key={toolName}
-              className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-border/45 px-3.5 py-2.5 transition-colors last:border-b-0 hover:bg-muted/35 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring"
+              className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-border/45 px-3.5 py-2.5 transition-colors last:border-b-0 settings-hover has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring"
             >
               <span className="relative h-5 w-5 shrink-0">
                 <input
@@ -463,7 +462,7 @@ function ToolsPanel({
                 <span
                   aria-hidden
                   className={cn(
-                    "pointer-events-none absolute inset-0 grid place-items-center rounded-[7px] border transition-colors",
+                    "pointer-events-none absolute inset-0 grid place-items-center rounded-compact border transition-colors",
                     selected
                       ? "border-foreground bg-foreground text-background"
                       : "border-border bg-background text-transparent",
@@ -529,7 +528,7 @@ function ConnectionPanel({
         <h3 id={`mcp-connection-${preset.name}`} className="sr-only">
           {tx("settings.mcp.connectionDetails", "Connection details")}
         </h3>
-        <div className="rounded-[16px] bg-muted/40 px-4 py-3.5">
+        <div className="rounded-floating bg-muted/40 px-4 py-3.5">
           {preset.connection_summary ? (
             <div className="min-w-0">
               <p className="text-[12.5px] font-medium text-muted-foreground">{connectionLabel}</p>
@@ -580,7 +579,7 @@ function ConnectionPanel({
       </section>
 
       {preset.error ? (
-        <div role="alert" className="rounded-[14px] bg-destructive/10 px-3.5 py-3 text-[12.5px] leading-5 text-destructive">
+        <div role="alert" className="rounded-control bg-destructive/10 px-3.5 py-3 text-[12.5px] leading-5 text-destructive">
           {preset.error}
         </div>
       ) : null}
@@ -599,7 +598,7 @@ function ConnectionPanel({
                     {field.label}
                     {field.configured ? (
                       <span className="font-normal text-emerald-600 dark:text-emerald-300">
-                        · {tx("settings.mcp.configured", "configured")}
+                        · {tx("settings.mcp.configured", "Configured")}
                       </span>
                     ) : null}
                   </span>
@@ -608,7 +607,7 @@ function ConnectionPanel({
                     type={field.secret ? "password" : "text"}
                     value={values[field.name] ?? ""}
                     onChange={(event) => onFieldChange(preset.name, field.name, event.target.value)}
-                    placeholder={field.configured ? tx("settings.mcp.keepExisting", "Leave blank to keep existing") : field.placeholder}
+                    placeholder={field.configured ? tx("settings.mcp.keepExisting", "Leave blank to keep the current value") : field.placeholder}
                     className="h-10 rounded-full bg-muted/35 text-[12.5px]"
                   />
                 </label>
@@ -661,7 +660,7 @@ function ConnectionPanel({
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-[14px] bg-muted/45 px-3.5 py-3">
+    <div className="min-w-0 rounded-control bg-muted/45 px-3.5 py-3">
       <dt className="text-[12px] font-medium text-muted-foreground">{label}</dt>
       <dd className="mt-1 truncate text-[14px] font-semibold text-foreground">{value}</dd>
     </div>

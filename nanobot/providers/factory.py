@@ -49,6 +49,30 @@ def _provider_extra_headers(
     return headers or None
 
 
+def _provider_spec_for_config(
+    provider_name: str,
+    provider_config: ProviderConfig | None,
+) -> ProviderSpec | None:
+    spec = find_by_name(provider_name)
+    if (
+        spec is not None
+        and spec.name == "orcarouter"
+        and provider_config is not None
+        and provider_config.api_base
+        and provider_config.api_base.rstrip("/").lower()
+        != spec.default_api_base.rstrip("/").lower()
+    ):
+        # Before OrcaRouter became a built-in provider, this name was valid for a
+        # dynamic custom provider. Preserve that provider's model-prefix behavior
+        # when an existing config points the name at a different endpoint.
+        return create_dynamic_spec(
+            provider_name,
+            display_name=provider_config.display_name or "",
+            thinking_style=provider_config.thinking_style or "",
+        )
+    return spec
+
+
 def _resolve_provider_setup(
     config: Config,
     *,
@@ -61,7 +85,7 @@ def _resolve_provider_setup(
     p = config.get_provider(model, preset=preset)
     if not provider_name:
         raise ValueError(f"No provider is configured for model '{model}'.")
-    spec = find_by_name(provider_name)
+    spec = _provider_spec_for_config(provider_name, p)
     if not spec and p:
         if not p.api_base:
             raise ValueError(f"Provider '{provider_name}' requires api_base in config.")
@@ -148,6 +172,7 @@ def _make_provider_core(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
+            provider_name=provider_name,
         )
     elif backend == "xai_grok":
         from nanobot.providers.xai_grok_provider import XAIGrokProvider
@@ -156,6 +181,7 @@ def _make_provider_core(
             default_model=model,
             proxy=getattr(p, "proxy", None) if p else None,
             extra_body=p.extra_body if p else None,
+            provider_name=provider_name,
         )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
@@ -166,11 +192,12 @@ def _make_provider_core(
             api_key=p.api_key or "",
             api_base=p.api_base,
             default_model=model,
+            provider_name=provider_name,
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
-        provider = GitHubCopilotProvider(default_model=model)
+        provider = GitHubCopilotProvider(default_model=model, provider_name=provider_name)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
@@ -179,6 +206,7 @@ def _make_provider_core(
             api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
+            provider_name=provider_name,
         )
     elif backend == "bedrock":
         from nanobot.providers.bedrock_provider import BedrockProvider
@@ -190,6 +218,7 @@ def _make_provider_core(
             region=getattr(p, "region", None) if p else None,
             profile=getattr(p, "profile", None) if p else None,
             extra_body=p.extra_body if p else None,
+            provider_name=provider_name,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -204,6 +233,7 @@ def _make_provider_core(
             api_type=p.api_type if p and provider_name == "openai" else "auto",
             extra_query=p.extra_query if p else None,
             proxy=p.proxy if p else None,
+            provider_name=provider_name,
         )
 
     provider.generation = preset.to_generation_settings()

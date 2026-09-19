@@ -29,8 +29,11 @@ class TestPruneDreamSessions:
         import os
         import time
 
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
+        manager = SessionManager(
+            tmp_path / "workspace",
+            sessions_root=tmp_path / "runtime",
+        )
+        sessions_dir = manager.sessions_dir
 
         base_time = time.time() - 100
         dream_paths = []
@@ -50,7 +53,7 @@ class TestPruneDreamSessions:
         normal_path = sessions_dir / "telegram_123.jsonl"
         normal_path.write_text('{"_type": "metadata"}\n', encoding="utf-8")
 
-        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
+        MemoryStore.prune_dream_sessions(manager, keep=10)
 
         assert [path.exists() for path in dream_paths] == [False] * 5 + [True] * 10
         assert normal_path.exists()
@@ -59,8 +62,11 @@ class TestPruneDreamSessions:
         import os
         import time
 
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
+        manager = SessionManager(
+            tmp_path / "workspace",
+            sessions_root=tmp_path / "runtime",
+        )
+        sessions_dir = manager.sessions_dir
         base_time = time.time() - 100
         current_paths = []
 
@@ -81,24 +87,29 @@ class TestPruneDreamSessions:
         )
         os.utime(legacy_path, (base_time - 1, base_time - 1))
 
-        MemoryStore.prune_dream_sessions(sessions_dir, keep=1)
+        MemoryStore.prune_dream_sessions(manager, keep=1)
 
         assert [path.exists() for path in current_paths] == [False, True]
         assert legacy_path.exists()
 
     def test_noop_when_under_limit(self, tmp_path):
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
+        manager = SessionManager(
+            tmp_path / "workspace",
+            sessions_root=tmp_path / "runtime",
+        )
+        sessions_dir = manager.sessions_dir
         for i in range(3):
             key = f"dream:20260528-{100000 + i:06d}"
             path = sessions_dir / f"{SessionManager._storage_key(key)}.jsonl"
             path.write_text("{}", encoding="utf-8")
 
-        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
+        MemoryStore.prune_dream_sessions(manager, keep=10)
         assert len(list(sessions_dir.glob("*.jsonl"))) == 3
 
     def test_empty_dir_noop(self, tmp_path):
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-        MemoryStore.prune_dream_sessions(sessions_dir, keep=10)
-        assert list(sessions_dir.iterdir()) == []
+        manager = SessionManager(
+            tmp_path / "workspace",
+            sessions_root=tmp_path / "runtime",
+        )
+        MemoryStore.prune_dream_sessions(manager, keep=10)
+        assert list(manager.sessions_dir.glob("*.jsonl")) == []

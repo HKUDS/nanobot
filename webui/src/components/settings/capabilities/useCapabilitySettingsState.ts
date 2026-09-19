@@ -25,6 +25,7 @@ import type {
 } from "@/lib/types";
 
 export function useCapabilitySettingsState(initialSettings: SettingsPayload | null) {
+  const [capabilityErrors, setCapabilityErrors] = useState<Partial<Record<"image" | "voice" | "web" | "safety", string>>>({});
   const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [transcriptionSaving, setTranscriptionSaving] = useState(false);
@@ -47,6 +48,8 @@ export function useCapabilitySettingsState(initialSettings: SettingsPayload | nu
   const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
 
   return {
+    capabilityErrors,
+    setCapabilityErrors,
     imageGenerationForm,
     imageGenerationSaving,
     networkSafetyForm,

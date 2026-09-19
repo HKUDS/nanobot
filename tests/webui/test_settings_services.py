@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -81,6 +82,15 @@ def test_gateway_settings_services_isolate_config_paths_and_oauth_flows(
     assert second_flow.cancel_count == 0
 
 
+def test_settings_service_supports_a_new_config_directory(tmp_path: Path) -> None:
+    config_path = tmp_path / "new" / "nested" / "config.json"
+
+    services = WebUISettingsServices.create(config_path)
+    services.mutate(update_api_settings, {"port": ["19001"]})
+
+    assert load_config(config_path).api.port == 19001
+
+
 def test_settings_mutations_serialize_read_modify_write(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -129,6 +139,71 @@ def test_settings_mutations_serialize_read_modify_write(
     assert first_loaded.wait(timeout=2)
     second.start()
     assert second_started.wait(timeout=2)
+    assert not second_loaded.wait(timeout=0.1)
+    release_first.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert not errors
+    saved = load_config(config_path)
+    assert saved.agents.defaults.timezone == "Asia/Tokyo"
+    assert saved.api.host == "127.0.0.9"
+
+
+def test_distinct_gateways_serialize_mutations_for_the_same_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    save_config(Config(), config_path)
+    first_services = WebUISettingsServices.create(config_path)
+    second_services = WebUISettingsServices.create(config_path)
+    first_loaded = threading.Event()
+    release_first = threading.Event()
+    second_loaded = threading.Event()
+    errors: list[BaseException] = []
+
+    from nanobot.webui import settings_api
+
+    original_load = settings_api._load_settings_config
+
+    def controlled_load(path: Path | None) -> Config:
+        config = original_load(path)
+        if threading.current_thread().name == "gateway-first":
+            first_loaded.set()
+            if not release_first.wait(timeout=2):
+                raise TimeoutError("timed out waiting to release first gateway")
+        elif threading.current_thread().name == "gateway-second":
+            second_loaded.set()
+        return config
+
+    monkeypatch.setattr(settings_api, "_load_settings_config", controlled_load)
+
+    def mutate(
+        services: WebUISettingsServices,
+        operation: Callable[..., object],
+        query: dict[str, list[str]],
+    ) -> None:
+        try:
+            services.mutate(operation, query)
+        except BaseException as exc:  # noqa: BLE001 - re-raised in the test thread
+            errors.append(exc)
+
+    first = threading.Thread(
+        target=mutate,
+        args=(first_services, update_agent_settings, {"timezone": ["Asia/Tokyo"]}),
+        name="gateway-first",
+    )
+    second = threading.Thread(
+        target=mutate,
+        args=(second_services, update_api_settings, {"host": ["127.0.0.9"]}),
+        name="gateway-second",
+    )
+    first.start()
+    assert first_loaded.wait(timeout=2)
+    second.start()
     assert not second_loaded.wait(timeout=0.1)
     release_first.set()
     first.join(timeout=2)

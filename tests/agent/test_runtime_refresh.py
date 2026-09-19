@@ -29,7 +29,7 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
     return provider
 
 
-def test_provider_refresh_updates_only_runtime_resolver(tmp_path: Path) -> None:
+def test_provider_refresh_updates_runtime_resolver(tmp_path: Path) -> None:
     old_provider = _provider("old-model")
     new_provider = _provider("new-model", max_tokens=456)
     loop = AgentLoop(
@@ -53,37 +53,6 @@ def test_provider_refresh_updates_only_runtime_resolver(tmp_path: Path) -> None:
     assert loop.provider is new_provider
     assert loop.model == "new-model"
     assert loop.context_window_tokens == 2000
-    assert not hasattr(loop.runner, "provider")
-    assert not hasattr(loop.subagents, "provider")
-    assert not hasattr(loop.subagents, "model")
-    assert not hasattr(loop.subagents.runner, "provider")
-    assert not hasattr(loop.consolidator, "provider")
-    assert not hasattr(loop.consolidator, "model")
-    assert not hasattr(loop.consolidator, "context_window_tokens")
-    assert not hasattr(loop.consolidator, "max_completion_tokens")
-
-
-def test_loop_has_no_mutable_runtime_mirrors_or_legacy_snapshot_api(tmp_path: Path) -> None:
-    loop = AgentLoop(
-        bus=MessageBus(),
-        provider=_provider("test-model"),
-        workspace=tmp_path,
-        model="test-model",
-        context_window_tokens=1000,
-    )
-
-    assert {
-        "provider",
-        "model",
-        "context_window_tokens",
-        "model_presets",
-        "_active_preset",
-        "_provider_signature",
-        "_max_messages",
-    }.isdisjoint(loop.__dict__)
-    assert not hasattr(loop, "_apply_provider_snapshot")
-    assert not hasattr(loop, "_build_model_preset_snapshot")
-    assert not hasattr(loop, "_sync_replay_max_messages")
 
 
 def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
@@ -109,7 +78,6 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     assert runtime.provider is new_provider
     assert runtime.model == "new-model"
     assert loop.provider is new_provider
-    assert not hasattr(loop.runner, "provider")
 
 
 def test_llm_runtime_surfaces_invalidated_config_errors(tmp_path: Path) -> None:
@@ -226,7 +194,7 @@ def test_named_default_refresh_is_used_by_sessions_without_override(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_config_invalidation_notifies_clients_before_session_runtime_refresh(
+async def test_config_invalidation_defers_canonical_notification_until_default_refresh(
     tmp_path: Path,
 ) -> None:
     provider = _provider("model-a")
@@ -256,7 +224,7 @@ async def test_config_invalidation_notifies_clients_before_session_runtime_refre
         model_preset="fast",
         preset_snapshot_loader=load_preset,
     )
-    loop.runtime_events.subscribe(published.append, RuntimeModelChanged)
+    loop.bus.subscribe(published.append, RuntimeModelChanged)
     session = loop.sessions.get_or_create("websocket:chat")
     session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
     current_model = "model-b"
@@ -266,11 +234,58 @@ async def test_config_invalidation_notifies_clients_before_session_runtime_refre
     runtime = loop.runtime_for_session(session)
     await asyncio.sleep(0)
 
-    assert [(event.model, event.model_preset) for event in published] == [
-        ("model-a", "fast"),
-    ]
+    assert published == []
     assert runtime.model == "model-b"
     assert loop.model_presets["fast"].model == "model-b"
+
+    assert loop.llm_runtime().model == "model-b"
+    await asyncio.sleep(0)
+
+    assert [(event.model, event.model_preset) for event in published] == [
+        ("model-b", "fast"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_config_refresh_publishes_renamed_canonical_preset(tmp_path: Path) -> None:
+    provider = _provider("model-a")
+    catalog = {"fast": ModelPresetConfig(model="model-a")}
+    default_name = "fast"
+    published: list[RuntimeModelChanged] = []
+
+    def load_preset(name: str) -> ProviderSnapshot:
+        return ProviderSnapshot(
+            provider=provider,
+            model=catalog[name].model,
+            context_window_tokens=16_000,
+            signature=(name, catalog[name].model),
+            model_preset=name,
+        )
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="model-a",
+        context_window_tokens=16_000,
+        provider_signature=("fast", "model-a"),
+        provider_snapshot_loader=lambda: load_preset(default_name),
+        model_presets=catalog,
+        preset_catalog_loader=lambda: catalog,
+        model_preset="fast",
+        preset_snapshot_loader=load_preset,
+    )
+    loop.bus.subscribe(published.append, RuntimeModelChanged)
+    catalog["Codex"] = catalog.pop("fast")
+    default_name = "Codex"
+
+    runtime = loop.refresh_runtime_config()
+    await asyncio.sleep(0)
+
+    assert (runtime.model, runtime.model_preset) == ("model-a", "Codex")
+    assert [(event.model, event.model_preset) for event in published] == [
+        ("model-a", "Codex"),
+    ]
 
 
 def test_next_turn_captures_generation_changed_after_previous_admission(

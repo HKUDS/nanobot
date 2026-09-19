@@ -123,7 +123,7 @@ def test_interactive_agent_routes_a_complete_user_turn(
     monkeypatch.setattr("nanobot.cli.terminal._read_interactive_input_async", read_input)
     monkeypatch.setattr("nanobot.cli.terminal._print_agent_response", print_response)
 
-    result = runner.invoke(app, ["agent", "--session", "cli:journey"])
+    result = runner.invoke(app, ["agent", "--classic", "--session", "cli:journey"])
 
     assert result.exit_code == 0, result.output
     inbound = seen["inbound"]

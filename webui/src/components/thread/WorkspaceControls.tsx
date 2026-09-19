@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import {
   isAbsoluteWorkspacePath,
   projectNameFromPath,
+  sameWorkspacePath,
   scopeWithAccessMode,
   selectedProjectScope,
   shortWorkspacePath,
@@ -51,6 +52,7 @@ export function WorkspaceProjectPicker({
   defaultScope,
   controls,
   error,
+  onPickFolder,
   onChange,
 }: {
   isHero: boolean;
@@ -61,6 +63,7 @@ export function WorkspaceProjectPicker({
   defaultScope: WorkspaceScopePayload | null;
   controls: WorkspacesPayload["controls"] | null;
   error?: string | null;
+  onPickFolder?: () => Promise<string | null>;
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
   const { t } = useTranslation();
@@ -79,7 +82,9 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
-  const pickFolder = getRuntimeHost().pickFolder;
+  const pickFolder = controls?.can_pick_folder
+    ? getRuntimeHost().pickFolder ?? onPickFolder
+    : undefined;
   const nativeProjectPicker = !!pickFolder;
 
   useEffect(() => {
@@ -113,16 +118,22 @@ export function WorkspaceProjectPicker({
         setPathError(t("workspace.dialog.absolutePathRequired"));
         return;
       }
+      const accessMode =
+        controls?.can_use_full_access === false
+        && !sameWorkspacePath(trimmed, base.project_path)
+          ? "restricted"
+          : base.access_mode;
       onChange({
         ...base,
         project_path: trimmed,
         project_name: projectName || projectNameFromPath(trimmed),
-        restrict_to_workspace: base.access_mode === "restricted",
+        access_mode: accessMode,
+        restrict_to_workspace: accessMode === "restricted",
       });
       setPathError(null);
       setOpen(false);
     },
-    [defaultScope, onChange, scope, t],
+    [controls?.can_use_full_access, defaultScope, onChange, scope, t],
   );
 
   const pickNativeFolder = useCallback(async () => {
@@ -219,7 +230,7 @@ export function WorkspaceProjectPicker({
               "flex min-h-[48px] w-full cursor-default gap-3 px-3 py-2.5 focus:bg-muted/55",
             )}
           >
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[12px] bg-muted text-foreground/80">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-control bg-muted text-foreground/80">
               <Folder className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
@@ -326,7 +337,7 @@ export function WorkspaceAccessMenu({
           aria-label={accessAriaLabel}
           title={accessLabel}
           className={cn(
-            "thread-composer-access touch-target min-w-0 max-w-[min(12.5rem,42vw)] whitespace-nowrap rounded-[10px] border border-transparent font-semibold shadow-none",
+            "thread-composer-access touch-target min-w-0 max-w-[min(12.5rem,42vw)] whitespace-nowrap rounded-control border border-transparent font-semibold shadow-none",
             isHero ? "h-8 px-2.5 text-[12px]" : "h-9 px-3 text-[12.5px]",
             isFull
               ? "bg-transparent text-orange-600 hover:bg-orange-500/8 dark:text-orange-300 dark:hover:bg-orange-400/10"
@@ -387,7 +398,7 @@ function AccessMenuItem({
       disabled={disabled}
       onSelect={onSelect}
       className={cn(
-        "flex h-10 items-center gap-3 px-3 text-[13.5px] font-semibold",
+        "flex h-10 items-center gap-3 px-3 text-[13.5px] font-semibold max-sm:min-h-11",
         warning && "text-orange-600 focus:text-orange-600 dark:text-orange-300 dark:focus:text-orange-300",
       )}
     >

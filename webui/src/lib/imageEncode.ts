@@ -11,7 +11,7 @@ import {
   type EncodeResponse,
 } from "@/workers/imageEncode.worker";
 
-export type { EncodeResponse, EncodeSuccess, EncodeFailure } from "@/workers/imageEncode.worker";
+export type { EncodeResponse, EncodeFailure } from "@/workers/imageEncode.worker";
 
 type Pending = {
   resolve: (r: EncodeResponse) => void;

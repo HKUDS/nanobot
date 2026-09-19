@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, TypeAlias, cast
 
+from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import public_history_messages
 
 StreamEventType: TypeAlias = Literal[
@@ -53,7 +54,7 @@ class RunResult:
     content: str
     tools_used: list[str] = field(default_factory=list)
     messages: list[dict[str, Any]] = field(default_factory=list)
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
     stop_reason: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -72,7 +73,7 @@ class StreamEvent:
     arguments: dict[str, Any] | None = None
     iteration: int | None = None
     resuming: bool | None = None
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 

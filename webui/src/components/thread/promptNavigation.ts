@@ -26,13 +26,13 @@ export function userPromptAnchors(messages: UIMessage[]): PromptAnchor[] {
   });
 }
 
-export function promptLabel(content: string, index: number): string {
+function promptLabel(content: string, index: number): string {
   const text = content.replace(/\s+/g, " ").trim();
   if (!text) return `Prompt ${index + 1}`;
   return truncatePreview(text, 80);
 }
 
-export function promptPreview(content: string, index: number): string {
+function promptPreview(content: string, index: number): string {
   const text = compactPreview(content);
   if (!text) return `Prompt ${index + 1}`;
   return truncatePreview(text, 320);

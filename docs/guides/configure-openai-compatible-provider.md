@@ -41,8 +41,7 @@ Merge this into `~/.nanobot/config.json`:
     }
   },
   "modelPresets": {
-    "primary": {
-      "label": "Custom",
+    "Custom": {
       "provider": "custom",
       "model": "provider-model-name",
       "maxTokens": 4096,
@@ -52,7 +51,7 @@ Merge this into `~/.nanobot/config.json`:
   },
   "agents": {
     "defaults": {
-      "modelPreset": "primary"
+      "modelPreset": "Custom"
     }
   }
 }

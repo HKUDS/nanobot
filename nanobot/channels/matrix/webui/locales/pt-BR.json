@@ -1,19 +1,10 @@
 {
-  "description": "Use o nanobot em salas do Matrix.",
-  "requirements": "Homeserver, token da conta e acesso às salas",
   "setup": {
     "docsLabel": "Abrir guia do Matrix",
     "officialLabel": "Abrir lista de clientes Matrix",
-    "tryIt": "Convide a conta Matrix para uma sala e envie uma mensagem de teste.",
-    "summary": "O Matrix precisa de uma conta no homeserver e login por senha ou token de acesso.",
-    "steps": [
-      "Crie ou escolha uma conta Matrix para o nanobot.",
-      "Informe o homeserver, ID de usuário e senha ou token de acesso.",
-      "Salve e ative o Matrix, convide a conta para uma sala e envie uma mensagem de teste."
-    ],
     "fields": {
       "homeserver": {
-        "label": "Homeserver",
+        "label": "Servidor da conta",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -22,18 +13,15 @@
       },
       "password": {
         "label": "Senha",
-        "placeholder": "••••••",
-        "help": "Use senha ou token de acesso."
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "Token de acesso",
-        "placeholder": "Login opcional por token",
-        "help": "Preferível quando o cliente Matrix fornece um token."
+        "placeholder": "Informe um token de acesso"
       },
       "deviceId": {
         "label": "ID do dispositivo",
-        "placeholder": "Obrigatório com token",
-        "help": "Copie o ID associado ao token. O login por senha não precisa dele."
+        "placeholder": "Obrigatório com token"
       },
       "groupPolicy": {
         "label": "Comportamento em grupos",
@@ -42,6 +30,53 @@
           "open": "Todas as mensagens",
           "allowlist": "Lista de permissão"
         }
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos"
+      },
+      "e2eeEnabled": {
+        "label": "Criptografia ponta a ponta",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "sasVerification": {
+        "label": "Verificação SAS",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Período de carência para interrupção da sincronização"
+      },
+      "maxMediaBytes": {
+        "label": "Tamanho máximo da mídia"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Downloads simultâneos de mídia"
+      },
+      "groupAllowFrom": {
+        "label": "Grupos permitidos"
+      },
+      "allowRoomMentions": {
+        "label": "Permitir menções à sala",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "streaming": {
+        "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "proxy": {
+        "label": "Proxy de rede",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

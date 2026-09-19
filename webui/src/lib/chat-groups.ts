@@ -216,7 +216,7 @@ export function visibleSessionsForGroup(
 }
 
 export function displayTitle(
-  session: ChatSummary,
+  session: Pick<ChatSummary, "key" | "title" | "preview">,
   titleOverrides: Record<string, string>,
   fallbackTitle: string,
 ): string {
