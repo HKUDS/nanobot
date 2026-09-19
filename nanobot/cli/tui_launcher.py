@@ -6,6 +6,7 @@ import hashlib
 import io
 import os
 import platform
+import shutil  # noqa: F401 - retained as a module-level compatibility hook
 import subprocess
 import time
 import urllib.error
