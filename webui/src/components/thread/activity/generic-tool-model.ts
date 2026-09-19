@@ -5,7 +5,7 @@ import { compactActivityPath, redactActivityText } from "./activity-text";
 export type GenericToolStatus = "running" | "done" | "error";
 export type ToolFamily = "content-search" | "file-search" | "list" | "read" | "memory" | "generic";
 
-export interface ToolField {
+interface ToolField {
   key:
     | "query"
     | "pattern"
@@ -261,6 +261,8 @@ function activityLabel(
       return activityStatus(t, status, "startingLongTask", "startedLongTask", "startLongTaskFailed");
     case "update_goal":
       return activityStatus(t, status, "updatingLongTask", "updatedLongTask", "updateLongTaskFailed");
+    // TODO(0.3.2): Remove write_stdin display compatibility after 0.3.1.
+    case "exec_session":
     case "write_stdin":
       return activityStatus(t, status, "continuingCommand", "continuedCommand", "continueCommandFailed");
     case "list_exec_sessions":
@@ -312,6 +314,8 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
       return safeText(fieldValue(trace, "ui_summary"));
     case "update_goal":
       return safeText(fieldValue(trace, "action"));
+    // TODO(0.3.2): Remove write_stdin display compatibility after 0.3.1.
+    case "exec_session":
     case "write_stdin":
       return compactIdentifier(fieldValue(trace, "session_id"));
     case "screenshot":

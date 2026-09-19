@@ -23,6 +23,7 @@ if sys.platform == "win32":
 # Keep console encoding setup before importing CLI UI/logging libraries.
 import typer  # noqa: E402
 from loguru import logger  # noqa: E402
+from typer.core import TyperGroup  # noqa: E402
 
 # Remove default handler and re-add with unified nanobot format
 logger.remove()
@@ -56,6 +57,7 @@ from nanobot.cli.agent import agent  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
 from nanobot.cli.gateway_runtime import _run_gateway  # noqa: E402
 from nanobot.cli.log_control import _set_nanobot_logs  # noqa: E402
+from nanobot.cli.process_identity import set_cli_process_identity  # noqa: E402
 from nanobot.cli.provider import provider_app  # noqa: E402
 from nanobot.cli.runtime_config import (  # noqa: E402
     _load_inspection_config,
@@ -82,11 +84,25 @@ from nanobot.utils.helpers import (  # noqa: E402
 SafeFileHistory = cli_terminal.SafeFileHistory
 
 
+class _DesktopAwareGroup(TyperGroup):
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        # Keep exact arguments: explicitly passing even a default-valued option
+        # must bypass the picker. Also covers older commands:app launchers.
+        ctx.meta["desktop_target_args"] = list(args)
+        return super().parse_args(ctx, args)
+
+
 app = typer.Typer(
+    cls=_DesktopAwareGroup,
     name="nanobot",
     context_settings={"help_option_names": ["-h", "--help"]},
     help=f"{__logo__} nanobot - Personal AI Assistant",
-    no_args_is_help=True,
+    epilog=(
+        "Run `nanobot` without a subcommand to start the terminal agent. "
+        "Use `nanobot agent --help` for agent options."
+    ),
+    invoke_without_command=True,
+    no_args_is_help=False,
 )
 
 console = Console()
@@ -97,14 +113,30 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
     """nanobot - Personal AI Assistant."""
-    pass
+    # Editable/source installs can retain an older generated console script that
+    # imports this Typer app directly instead of ``nanobot.cli.entry``. Keep the
+    # role identity correct until that launcher is regenerated.
+    command = ctx.invoked_subcommand
+    set_cli_process_identity([command] if command else ["agent"])
+    from nanobot.cli.desktop_target import dispatch_bare_desktop_target
+
+    raw_args = ctx.meta.get("desktop_target_args")
+    if isinstance(raw_args, list):
+        desktop_exit = dispatch_bare_desktop_target(cast(list[str], raw_args))
+        if desktop_exit is not None:
+            raise typer.Exit(desktop_exit)
+    if command is None:
+        from nanobot.cli.entry import _run_agent
+
+        _run_agent([], prog_name="nanobot")
 
 
 # ============================================================================

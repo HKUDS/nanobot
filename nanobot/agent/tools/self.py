@@ -58,7 +58,6 @@ def _is_string_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
 class MyTool(Tool):
     """Check and set the agent loop's runtime configuration."""
 
-    _plugin_discoverable = False  # Requires AgentLoop reference; registered manually
     config_key = "my"
 
     @classmethod
@@ -67,7 +66,16 @@ class MyTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.config.my.enable
+        return ctx.runtime_control is not None and ctx.config.my.enable
+
+    @classmethod
+    def create(cls, ctx: ToolContext) -> Tool:
+        if ctx.runtime_control is None:
+            raise RuntimeError("MyTool requires a runtime control capability")
+        return cls(
+            runtime_control=ctx.runtime_control,
+            modify_allowed=ctx.config.my.allow_set,
+        )
 
     BLOCKED = frozenset({
         # Core infrastructure
@@ -88,9 +96,6 @@ class MyTool(Tool):
     READ_ONLY = frozenset({
         "subagents",  # observable but replacing it would break the system
         "tool_names",
-        "current_iteration",
-        "_current_iteration",  # updated by runner only
-        "_last_usage",
         "exec_config",  # inspect allowed (e.g. check sandbox), modify blocked
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
         "model_presets",  # config-derived catalog; changes require config reload
@@ -150,11 +155,9 @@ class MyTool(Tool):
             "Actions: check, set.\n"
             "- check (no key): full config overview — start here.\n"
             "- check (key): drill into a value. Dot-paths allowed "
-            "(e.g. '_last_usage.prompt_tokens', 'web_config.enable').\n"
+            "(e.g. 'web_config.enable').\n"
             "- set (key, value): change config or store notes in your scratchpad. "
             "Scratchpad keys persist across turns but not restarts.\n"
-            "Key values: _current_iteration (current progress), "
-            "max_iterations - _current_iteration = remaining iterations.\n"
             "Current routing metadata is available read-only via request.channel, "
             "request.chat_id, and request.sender_id.\n"
             "Use model_preset for session-scoped model or context changes; direct "
@@ -162,7 +165,7 @@ class MyTool(Tool):
             "Note: web_config and exec_config are readable but read-only.\n"
             "\n"
             "When to use:\n"
-            "- User asks about your model, settings, or token usage → check that key.\n"
+            "- User asks about your model or settings → check that key.\n"
             "- User asks to switch to a named model preset → set model_preset to that preset name.\n"
             "- A tool fails or behaves unexpectedly → check the related config to diagnose.\n"
             "- User asks you to remember a preference for this session → set to store it in your scratchpad.\n"
@@ -442,14 +445,11 @@ class MyTool(Tool):
             "workspace",
             "provider_retry_mode",
             "max_tool_result_chars",
-            "_current_iteration",
             "web_config",
             "exec_config",
             "subagents",
         ):
             parts.append(self._format_value(values[k], k))
-        if snapshot.last_usage:
-            parts.append(self._format_value(snapshot.last_usage, "_last_usage"))
         if snapshot.scratchpad:
             parts.append(self._format_value(snapshot.scratchpad, "scratchpad"))
         return "\n".join(parts)

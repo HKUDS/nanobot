@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from loguru import logger
 
+from nanobot.providers.base import LLMUsage
 from nanobot.providers.openai_responses.converters import (
     convert_messages,
     convert_tools,
@@ -150,6 +151,7 @@ class TestConvertMessages:
         assert items[0]["role"] == "assistant"
         assert items[0]["content"][0]["type"] == "output_text"
         assert items[0]["content"][0]["text"] == "I'll help"
+        assert "id" not in items[0]
 
     def test_preserves_deepseek_reasoning_content(self):
         _, items = convert_messages([
@@ -166,7 +168,6 @@ class TestConvertMessages:
                 "role": "assistant",
                 "content": [{"type": "output_text", "text": "answer"}],
                 "status": "completed",
-                "id": "msg_0",
             },
         ]
 
@@ -211,7 +212,7 @@ class TestConvertMessages:
         }])
         assert items[0]["type"] == "function_call"
         assert items[0]["call_id"] == "call_abc"
-        assert items[0]["id"] == "fc_1"
+        assert "id" not in items[0]
         assert items[0]["name"] == "get_weather"
         assert items[0]["arguments"] == '{"city": "SF"}'
 
@@ -227,58 +228,32 @@ class TestConvertMessages:
 
         assert json.loads(items[0]["arguments"]) == {"path": "foo.txt"}
 
-    def test_duplicate_response_item_ids_are_made_unique(self):
-        """Codex rejects replayed Responses input items with duplicate ids."""
+    def test_discards_provider_item_ids_without_changing_call_ids(self):
         _, items = convert_messages([
             {
                 "role": "assistant",
                 "content": None,
                 "tool_calls": [{
-                    "id": "call_a|rs_same",
-                    "function": {"name": "first", "arguments": "{}"},
+                    "id": "call_1|fc_1",
+                    "function": {"name": "get_weather", "arguments": "{}"},
                 }],
             },
-            {"role": "tool", "tool_call_id": "call_a|rs_same", "content": "ok"},
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{
-                    "id": "call_b|rs_same",
-                    "function": {"name": "second", "arguments": "{}"},
-                }],
-            },
-            {"role": "tool", "tool_call_id": "call_b|rs_same", "content": "ok"},
+            {"role": "tool", "tool_call_id": "call_1|fc_1", "content": "ok"},
         ])
-        function_call_ids = [
-            item["id"] for item in items if item.get("type") == "function_call"
-        ]
-        assert function_call_ids == ["rs_same", "rs_same_2"]
-        assert len(function_call_ids) == len(set(function_call_ids))
 
-    def test_fallback_response_item_ids_are_unique_with_multiple_tool_calls(self):
-        _, items = convert_messages([{
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {"id": "call_a", "function": {"name": "first", "arguments": "{}"}},
-                {"id": "call_b", "function": {"name": "second", "arguments": "{}"}},
-            ],
-        }])
-        function_call_ids = [
-            item["id"] for item in items if item.get("type") == "function_call"
-        ]
-        assert function_call_ids == ["fc_0", "fc_0_2"]
-        assert len(function_call_ids) == len(set(function_call_ids))
+        assert all("id" not in item for item in items)
+        assert items[0]["call_id"] == "call_1"
+        assert items[1]["call_id"] == "call_1"
 
     def test_assistant_with_tool_calls_no_id(self):
-        """Fallback IDs when tool_call.id is missing."""
+        """Fallback call IDs still work when tool_call.id is missing."""
         _, items = convert_messages([{
             "role": "assistant",
             "content": None,
             "tool_calls": [{"function": {"name": "f1", "arguments": "{}"}}],
         }])
         assert items[0]["call_id"] == "call_0"
-        assert items[0]["id"].startswith("fc_")
+        assert "id" not in items[0]
 
     def test_tool_message(self):
         _, items = convert_messages([{
@@ -484,7 +459,7 @@ class TestParseResponseOutput:
         result = parse_response_output(resp)
         assert result.content == "Hello!"
         assert result.finish_reason == "stop"
-        assert result.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert result.usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert result.tool_calls == []
 
     def test_refusal_response_surfaces_text_without_advancing_state(self):
@@ -652,7 +627,8 @@ class TestParseResponseOutput:
         }
         result = parse_response_output(mock)
         assert result.content == "sdk"
-        assert result.usage["prompt_tokens"] == 1
+        assert result.usage is not None
+        assert result.usage.input_tokens == 1
 
     def test_usage_maps_responses_api_keys(self):
         """Responses API uses input_tokens/output_tokens, not prompt_tokens/completion_tokens."""
@@ -662,9 +638,20 @@ class TestParseResponseOutput:
             "usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
         }
         result = parse_response_output(resp)
-        assert result.usage["prompt_tokens"] == 100
-        assert result.usage["completion_tokens"] == 50
-        assert result.usage["total_tokens"] == 150
+        assert result.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
+
+    def test_non_stream_preserves_provider_reported_total(self):
+        result = parse_response_output({
+            "output": [],
+            "status": "completed",
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 999},
+        })
+
+        assert result.usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=999,
+        )
 
     def test_preserves_every_output_item_as_opaque_state(self):
         input_items = [{"role": "user", "content": "inspect the repo"}]
@@ -699,8 +686,77 @@ class TestParseResponseOutput:
         assert result.provider_state is not None
         assert responses_state_items(result.provider_state) == [*input_items, *output]
 
+    def test_marks_only_a_new_response_compaction(self):
+        compacted = parse_response_output(
+            {
+                "output": [
+                    {"type": "compaction", "encrypted_content": "opaque"},
+                    {"type": "message", "role": "assistant", "content": "done"},
+                ],
+                "status": "completed",
+                "usage": {},
+            },
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[{"role": "user", "content": "old"}],
+        )
+        replayed = parse_response_output(
+            {
+                "output": [
+                    {"type": "message", "role": "assistant", "content": "continued"},
+                ],
+                "status": "completed",
+                "usage": {},
+            },
+            state_provider="openai:test",
+            state_model="gpt-5.6",
+            state_input_items=[
+                {"type": "compaction", "encrypted_content": "opaque"},
+            ],
+        )
+
+        assert compacted.provider_compaction_applied is True
+        assert compacted.provider_compaction_state is not None
+        assert compacted.provider_compaction_scope == "current_request"
+        assert responses_state_items(compacted.provider_compaction_state) == [
+            {"type": "compaction", "encrypted_content": "opaque"},
+        ]
+        assert replayed.provider_compaction_applied is False
+        assert replayed.provider_compaction_state is None
+        assert replayed.provider_compaction_scope is None
+
 
 class TestResponsesConversationState:
+    def test_replayed_reasoning_items_omit_unsupported_status(self):
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=[{"role": "user", "content": "previous"}],
+            output_items=[{
+                "type": "reasoning",
+                "id": "rs_1",
+                "status": None,
+                "encrypted_content": "opaque",
+            }],
+        ).with_pending_messages([
+            {"role": "user", "content": "continue"},
+        ])
+
+        _, items, replayed = prepare_responses_input(
+            [{"role": "user", "content": "current"}],
+            state=state,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is True
+        reasoning_item = next(
+            item for item in items
+            if item.get("type") == "reasoning"
+        )
+        assert "status" not in reasoning_item
+        assert reasoning_item["encrypted_content"] == "opaque"
+
     def test_server_compaction_prunes_superseded_prefix(self):
         state = build_responses_state(
             provider="openai:test",
@@ -713,18 +769,18 @@ class TestResponsesConversationState:
                 {"type": "compaction", "encrypted_content": "compact"},
                 {"type": "message", "role": "assistant", "content": "new"},
             ],
-            usage={
-                "prompt_tokens": 90,
-                "completion_tokens": 10,
-                "total_tokens": 100,
-            },
+            usage=LLMUsage.reported(
+                input_tokens=90,
+                output_tokens=10,
+                total_tokens=175,
+            ),
         )
 
         assert responses_state_items(state) == [
             {"type": "compaction", "encrypted_content": "compact"},
             {"type": "message", "role": "assistant", "content": "new"},
         ]
-        assert responses_state_context_tokens(state) == 100
+        assert responses_state_context_tokens(state) == 175
 
     def test_existing_compaction_keeps_canonical_retained_prefix(self):
         canonical_input = [
@@ -799,6 +855,46 @@ class TestResponsesConversationState:
         assert "pending_messages=1" in log_text
         assert "dropped_items=2" in log_text
         assert secret not in log_text
+
+    def test_fresh_and_pending_conversions_omit_item_ids(self):
+        pending_messages = [{
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1|fc_1",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }],
+        }]
+
+        _, fresh_items, replayed = prepare_responses_input(
+            pending_messages,
+            state=None,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is False
+        assert fresh_items[0]["call_id"] == "call_1"
+        assert "id" not in fresh_items[0]
+
+        state = build_responses_state(
+            provider="openai:test",
+            model="gpt-5.6",
+            input_items=[{"role": "user", "content": "previous"}],
+            output_items=[{"type": "message", "id": "msg_previous"}],
+        ).with_pending_messages(pending_messages)
+
+        _, items, replayed = prepare_responses_input(
+            [{"role": "user", "content": "current"}],
+            state=state,
+            provider="openai:test",
+            model="gpt-5.6",
+        )
+
+        assert replayed is True
+        assert items[1]["id"] == "msg_previous"
+        assert items[2]["call_id"] == "call_1"
+        assert "id" not in items[2]
 
     def test_replays_exact_items_then_only_pending_and_new_messages(self):
         prior_items = [
@@ -924,6 +1020,14 @@ class _SseResponse:
 
 
 class TestConsumeSse:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
+    async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
+        response = _SseResponse([{"type": event_type, "delta": "partial"}])
+
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sse_with_reasoning(response)
+
     @pytest.mark.asyncio
     async def test_legacy_consume_sse_returns_three_tuple(self):
         response = _SseResponse([
@@ -1056,8 +1160,24 @@ class TestConsumeSse:
     @pytest.mark.asyncio
     async def test_reasoning_summary_delta_extracted(self):
         response = _SseResponse([
-            {"type": "response.reasoning_summary_text.delta", "delta": "thinking "},
-            {"type": "response.reasoning_summary_text.delta", "delta": "briefly"},
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "thinking ",
+            },
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 0,
+                "delta": "briefly",
+            },
+            {
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": "rs_1",
+                "summary_index": 1,
+                "delta": "Checking result",
+            },
             {"type": "response.output_text.delta", "delta": "answer"},
             {"type": "response.completed", "response": {"status": "completed"}},
         ])
@@ -1074,9 +1194,9 @@ class TestConsumeSse:
         assert content == "answer"
         assert tool_calls == []
         assert finish_reason == "stop"
-        assert usage == {}
-        assert reasoning == "thinking briefly"
-        assert deltas == ["thinking ", "briefly"]
+        assert usage is None
+        assert reasoning == "thinking briefly\nChecking result"
+        assert deltas == ["thinking ", "briefly", "\nChecking result"]
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_from_completed_response(self):
@@ -1087,7 +1207,7 @@ class TestConsumeSse:
                     "status": "completed",
                     "output": [
                         {"type": "reasoning", "summary": [
-                            {"type": "summary_text", "text": "cached "},
+                            {"type": "summary_text", "text": "cached"},
                             {"type": "summary_text", "text": "summary"},
                         ]},
                     ],
@@ -1097,7 +1217,7 @@ class TestConsumeSse:
 
         _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
-        assert reasoning == "cached summary"
+        assert reasoning == "cached\nsummary"
 
     @pytest.mark.asyncio
     async def test_capture_commits_exact_items_only_after_completed_event(self):
@@ -1208,7 +1328,7 @@ class TestConsumeSse:
 
         assert content == "partial"
         assert finish_reason == expected_finish_reason
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert capture.completed is True
         assert capture.response == terminal_response
         assert capture.output_items == output
@@ -1228,7 +1348,8 @@ class TestConsumeSse:
             },
         ])
 
-        await consume_sse_with_reasoning(response, capture=capture)
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sse_with_reasoning(response, capture=capture)
 
         assert capture.completed is False
 
@@ -1278,14 +1399,83 @@ class TestConsumeSse:
                 "type": "response.completed",
                 "response": {
                     "status": "completed",
-                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {
+                            "cached_tokens": 8,
+                            "cache_write_tokens": 0,
+                        },
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
                 },
             },
         ])
 
         _, _, _, usage, _ = await consume_sse_with_reasoning(response)
 
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=8,
+            cache_write_tokens=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_and_non_stream_share_usage_normalization(self):
+        terminal = {
+            "status": "completed",
+            "output": [],
+            "usage": {
+                "input_tokens": 15,
+                "input_tokens_details": {
+                    "cached_tokens": 0,
+                    "cache_write_tokens": 7,
+                },
+                "output_tokens": 18,
+                "total_tokens": 175,
+            },
+        }
+        non_stream = parse_response_output(terminal).usage
+        sse = _SseResponse([
+            {"type": "response.completed", "response": terminal},
+        ])
+        _, _, _, streamed, _ = await consume_sse_with_reasoning(sse)
+
+        sdk_response = SimpleNamespace(**terminal)
+        sdk_response.usage = SimpleNamespace(
+            input_tokens=15,
+            input_tokens_details=SimpleNamespace(
+                cached_tokens=0,
+                cache_write_tokens=7,
+            ),
+            output_tokens=18,
+            total_tokens=175,
+        )
+
+        async def sdk_stream():
+            yield SimpleNamespace(type="response.completed", response=sdk_response)
+
+        _, _, _, sdk_streamed, _ = await consume_sdk_stream(sdk_stream())
+        expected = LLMUsage.reported(
+            input_tokens=15,
+            output_tokens=18,
+            total_tokens=175,
+            cache_read_tokens=0,
+            cache_write_tokens=7,
+        )
+        assert non_stream == streamed == sdk_streamed == expected
+
+    def test_missing_usage_is_not_explicit_zero_usage(self):
+        missing = parse_response_output({"status": "completed", "output": []})
+        explicit_zero = parse_response_output({
+            "status": "completed",
+            "output": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        })
+
+        assert missing.usage is None
+        assert explicit_zero.usage == LLMUsage.reported(input_tokens=0, output_tokens=0)
 
     @pytest.mark.asyncio
     async def test_tool_call_done_arguments_callback(self):
@@ -1372,6 +1562,15 @@ class TestConsumeSse:
 
 
 class TestConsumeSdkStream:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
+    async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
+        async def stream():
+            yield SimpleNamespace(type=event_type, delta="partial")
+
+        with pytest.raises(ConnectionError, match="terminal response event"):
+            await consume_sdk_stream(stream())
+
     @pytest.mark.asyncio
     async def test_text_stream(self):
         ev1 = MagicMock(type="response.output_text.delta", delta="Hello")
@@ -1752,15 +1951,24 @@ class TestConsumeSdkStream:
 
     @pytest.mark.asyncio
     async def test_usage_extracted(self):
-        usage_obj = MagicMock(input_tokens=10, output_tokens=5, total_tokens=15)
-        resp_obj = MagicMock(status="completed", usage=usage_obj, output=[])
-        ev = MagicMock(type="response.completed", response=resp_obj)
+        usage_obj = SimpleNamespace(
+            input_tokens=10,
+            input_tokens_details=SimpleNamespace(cached_tokens=8),
+            output_tokens=5,
+            total_tokens=15,
+        )
+        resp_obj = SimpleNamespace(status="completed", usage=usage_obj, output=[])
+        ev = SimpleNamespace(type="response.completed", response=resp_obj)
 
         async def stream():
             yield ev
 
         _, _, _, usage, _ = await consume_sdk_stream(stream())
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=8,
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1815,7 +2023,7 @@ class TestConsumeSdkStream:
 
         assert content == "partial"
         assert finish_reason == expected_finish_reason
-        assert usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        assert usage == LLMUsage.reported(input_tokens=10, output_tokens=5)
         assert capture.completed is True
         assert capture.response == terminal_response
         assert capture.output_items == output
@@ -1839,6 +2047,10 @@ class TestConsumeSdkStream:
             MagicMock(type="response.reasoning_text.delta", delta="step 1 "),
             MagicMock(type="response.reasoning_text.delta", delta="step 2"),
             MagicMock(type="response.reasoning_text.done", text="step 1 step 2"),
+            SimpleNamespace(
+                type="response.completed",
+                response=SimpleNamespace(status="completed", usage=None, output=[]),
+            ),
         ]
         emitted: list[str] = []
 

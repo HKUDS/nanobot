@@ -10,7 +10,6 @@ import {
   applyDocumentLocale,
   defaultLocale,
   fallbackLocale,
-  LOCALE_STORAGE_KEY,
   normalizeLocale,
   persistLocale,
   resolveInitialLocale,
@@ -47,7 +46,7 @@ export function currentLocale(): SupportedLocale {
   return normalizeLocale(i18n.resolvedLanguage ?? i18n.language ?? defaultLocale);
 }
 
-export async function loadLocaleResources(
+async function loadLocaleResources(
   locale: SupportedLocale,
 ): Promise<LocaleResource> {
   const existing = resourcePromises.get(locale);
@@ -131,5 +130,4 @@ function syncLocaleSideEffects(language: string) {
   persistLocale(locale);
 }
 
-export { LOCALE_STORAGE_KEY };
 export default i18n;

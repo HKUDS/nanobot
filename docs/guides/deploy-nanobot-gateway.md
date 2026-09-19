@@ -37,10 +37,12 @@ nanobot gateway
 For WebUI background usage:
 
 ```bash
-nanobot webui --background
+nanobot gateway --background
 nanobot gateway status
 nanobot gateway logs
 ```
+
+Open the configured WebUI URL in a browser, or run `nanobot webui` as a foreground client.
 
 ## Production notes
 

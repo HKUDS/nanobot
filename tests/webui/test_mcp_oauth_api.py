@@ -21,6 +21,18 @@ class _Connection:
         self.closed = True
 
 
+class _BlockingConnection:
+    def __init__(self) -> None:
+        self.close_started = asyncio.Event()
+        self.allow_close = asyncio.Event()
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.close_started.set()
+        await self.allow_close.wait()
+        self.closed = True
+
+
 def _config() -> MCPServerConfig:
     return MCPServerConfig(
         type="streamableHttp",
@@ -104,6 +116,62 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
     assert first["hot_reload"]["failed"] == ["notion"]
     assert received["callback"] == ("oauth-code", "state-123")
     assert reload_calls == 2
+    assert connection.closed is True
+
+
+@pytest.mark.asyncio
+async def test_browser_flow_activates_tools_before_probe_cleanup_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = McpOAuthManager()
+    connection = _BlockingConnection()
+    reload_started = asyncio.Event()
+
+    monkeypatch.setattr(
+        "nanobot.webui.mcp_oauth_api.validate_url_target",
+        lambda _url: (True, ""),
+    )
+
+    async def connect(_servers, _registry, *, oauth_handlers):
+        handlers = oauth_handlers["linear"]
+        await handlers.redirect_handler(
+            "https://accounts.example.com/authorize?client_id=test&state=blocked-close"
+        )
+        await handlers.callback_handler()
+        return {"linear": connection}
+
+    async def reload_mcp() -> dict[str, object]:
+        reload_started.set()
+        return {
+            "ok": True,
+            "requires_restart": False,
+            "connected": ["linear"],
+            "failed": [],
+        }
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+
+    started = await manager.start(
+        "linear",
+        _config(),
+        "https://agent.example.com/auth/mcp/callback",
+        reload_mcp=reload_mcp,
+    )
+    manager.submit_callback(state="blocked-close", code="oauth-code", error=None)
+
+    try:
+        await asyncio.wait_for(reload_started.wait(), timeout=0.5)
+        await asyncio.wait_for(connection.close_started.wait(), timeout=0.5)
+        result = await manager.status(started["flow_id"])
+        assert result["status"] == "connected"
+        assert connection.closed is False
+    finally:
+        connection.allow_close.set()
+
+    for _ in range(10):
+        await asyncio.sleep(0)
+        if connection.closed:
+            break
     assert connection.closed is True
 
 

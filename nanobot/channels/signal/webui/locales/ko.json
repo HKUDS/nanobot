@@ -1,21 +1,11 @@
 {
-  "description": "Signal 메시지에서 nanobot을 사용합니다.",
-  "requirements": "signal-cli HTTP 데몬, 전화번호 및 허용 목록",
   "setup": {
     "docsLabel": "Signal 설정 가이드 열기",
     "officialLabel": "signal-cli 가이드 열기",
-    "tryIt": "연결된 전화번호로 Signal DM을 보내세요.",
-    "summary": "Signal은 Signal 전화번호에 연결된 signal-cli HTTP 데몬을 통해 접속합니다.",
-    "steps": [
-      "signal-cli-rest-api를 설치하고 Signal 번호를 연결하거나 등록하세요.",
-      "데몬 호스트, 포트, 연결된 전화번호를 입력하세요.",
-      "저장하고 Signal을 활성화한 다음 DM으로 테스트하세요."
-    ],
     "fields": {
       "phoneNumber": {
         "label": "전화번호",
-        "placeholder": "+1234567890",
-        "help": "signal-cli에 등록된 Signal 번호를 사용하세요."
+        "placeholder": "+1234567890"
       },
       "daemonHost": {
         "label": "데몬 호스트",
@@ -26,12 +16,53 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "허용된 DM",
+        "label": "DM을 보낼 수 있는 사용자",
         "placeholder": "전화번호 또는 UUID"
       },
       "group_allowFrom": {
         "label": "허용된 그룹",
         "placeholder": "그룹 ID"
+      },
+      "groupMessageBufferSize": {
+        "label": "그룹 상황 메시지"
+      },
+      "attachmentsDir": {
+        "label": "첨부파일 디렉토리"
+      },
+      "dm_enabled": {
+        "label": "다이렉트 메시지 활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "dm_policy": {
+        "label": "다이렉트 메시지 액세스",
+        "choices": {
+          "allowlist": "허용 목록",
+          "open": "열기"
+        }
+      },
+      "group_enabled": {
+        "label": "그룹 활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "group_policy": {
+        "label": "그룹 액세스",
+        "choices": {
+          "allowlist": "허용 목록",
+          "open": "열기"
+        }
+      },
+      "group_requireMention": {
+        "label": "그룹에서 멘션 필요",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
       }
     }
   }

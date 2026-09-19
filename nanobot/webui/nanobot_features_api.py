@@ -9,6 +9,7 @@ from nanobot.optional_features import (
     OptionalFeatureError,
     disable_optional_feature,
     enable_optional_feature,
+    install_optional_feature_support,
     optional_features_payload,
 )
 from nanobot.webui.http_utils import query_first
@@ -42,9 +43,24 @@ def nanobot_features_action(
 ) -> dict[str, Any]:
     name = (query_first(query, "name") or "").strip()
     instance_id = nanobot_feature_instance_target(query)
+    raw_install_only = query_first(query, "install_only")
+    install_only = False
+    if raw_install_only is not None:
+        normalized = raw_install_only.strip().lower()
+        if normalized not in {"1", "0", "true", "false", "yes", "no"}:
+            raise OptionalFeatureError("install_only must be boolean")
+        install_only = normalized in {"1", "true", "yes"}
+        if action != "enable":
+            raise OptionalFeatureError("install_only is only supported for enable actions")
     if not name:
         raise OptionalFeatureError("missing feature name")
     if action == "enable":
+        if install_only:
+            return install_optional_feature_support(
+                name,
+                config_path=config_path,
+                allow_install=allow_install,
+            )
         return enable_optional_feature(
             name,
             config_path=config_path,

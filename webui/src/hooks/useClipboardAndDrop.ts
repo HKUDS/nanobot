@@ -11,7 +11,7 @@ import { acceptedAttachmentKind } from "@/hooks/useAttachedImages";
  *   - Plain text pasted alongside attachments is *not* consumed by this helper,
  *     so the caller can still let the textarea receive it naturally.
  */
-export function extractImageFilesFromPaste(
+function extractImageFilesFromPaste(
   event: ClipboardEvent | React.ClipboardEvent,
 ): File[] {
   const clipboard = (event as ClipboardEvent).clipboardData
@@ -27,7 +27,7 @@ export function extractImageFilesFromPaste(
 }
 
 /** Extract dropped attachment files, mirroring ``extractImageFilesFromPaste``. */
-export function extractImageFilesFromDrop(
+function extractImageFilesFromDrop(
   event: DragEvent | React.DragEvent,
 ): File[] {
   const dt = (event as DragEvent).dataTransfer

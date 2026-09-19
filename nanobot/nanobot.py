@@ -13,6 +13,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import Config
+from nanobot.providers.base import LLMUsage
 from nanobot.providers.image_generation import image_gen_provider_configs
 from nanobot.sdk.clients import MemoryClient, RuntimeClient, SessionClient
 from nanobot.sdk.runtime import (
@@ -43,6 +44,7 @@ from nanobot.utils.llm_runtime import LLMRuntime
 
 __all__ = [
     "Nanobot",
+    "LLMUsage",
     "RunResult",
     "RunStream",
     "SessionInfo",
@@ -287,7 +289,7 @@ class Nanobot:
                     type=STREAM_EVENT_RUN_COMPLETED,
                     content=result.content,
                     result=result,
-                    usage=dict(result.usage),
+                    usage=result.usage,
                     metadata=dict(result.metadata),
                 ))
                 return result
@@ -300,7 +302,7 @@ class Nanobot:
                 ))
                 raise
             finally:
-                emitter.close()
+                await emitter.close()
 
         task = asyncio.create_task(_run())
         return RunStream(task, queue)

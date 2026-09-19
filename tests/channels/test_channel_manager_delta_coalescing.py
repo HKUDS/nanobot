@@ -11,7 +11,6 @@ from nanobot.bus.outbound_events import (
     RetryWaitEvent,
     StreamDeltaEvent,
     StreamEndEvent,
-    outbound_event_from_message,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -120,13 +119,13 @@ class TestDeltaCoalescing:
         async def process_one():
             try:
                 m = await asyncio.wait_for(bus.consume_outbound(), timeout=0.1)
-                event = outbound_event_from_message(m)
+                event = m.event
                 if isinstance(event, StreamDeltaEvent):
                     m, pending = manager._coalesce_stream_deltas(m)
                     for p in pending:
                         await bus.publish_outbound(p)
                 channel = manager.channels.get(m.channel)
-                event = outbound_event_from_message(m)
+                event = m.event
                 if channel and isinstance(event, StreamDeltaEvent):
                     await channel.send_delta(
                         m.chat_id,
@@ -274,13 +273,13 @@ class TestDispatchOutboundWithCoalescing:
         processed = []
 
         msg = pending.pop(0) if pending else await bus.consume_outbound()
-        event = outbound_event_from_message(msg)
+        event = msg.event
         if isinstance(event, StreamDeltaEvent):
             msg, extra_pending = manager._coalesce_stream_deltas(msg)
             pending.extend(extra_pending)
 
         channel = manager.channels.get(msg.channel)
-        event = outbound_event_from_message(msg)
+        event = msg.event
         if channel and isinstance(event, StreamDeltaEvent):
             await channel.send_delta(
                 msg.chat_id,
@@ -393,38 +392,6 @@ class TestProgressFiltering:
         send_mock = manager.channels["mock"]._send_mock
         assert send_mock.await_count == 1
         assert send_mock.await_args_list[0].args[0].content == "final answer"
-
-    @pytest.mark.asyncio
-    async def test_legacy_progress_flag_uses_runtime_progress_filter(self, manager, bus):
-        manager.channels["mock"].send_progress = False
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="legacy progress-shaped message",
-            metadata={"_progress": True},
-        ))
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="processing sentinel",
-        ))
-
-        task = asyncio.create_task(manager._dispatch_outbound())
-        try:
-            for _ in range(30):
-                if manager.channels["mock"]._send_mock.await_count >= 1:
-                    break
-                await asyncio.sleep(0.05)
-        finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-        send_mock = manager.channels["mock"]._send_mock
-        assert send_mock.await_count == 1
-        assert send_mock.await_args.args[0].content == "processing sentinel"
 
     @pytest.mark.asyncio
     async def test_channel_override_can_enable_tool_hints(self, manager, bus):

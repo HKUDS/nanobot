@@ -36,7 +36,6 @@ from nanobot.webui.nanobot_features_api import (
     nanobot_features_payload,
 )
 from nanobot.webui.settings_api import (
-    WebUISettingsError,
     complete_oauth_provider,
     create_model_configuration,
     create_provider_settings,
@@ -55,6 +54,7 @@ from nanobot.webui.settings_api import (
     update_model_configuration,
     update_network_safety_settings,
     update_provider_settings,
+    update_runtime_config_settings,
     update_transcription_settings,
     update_web_search_settings,
 )
@@ -63,6 +63,7 @@ from nanobot.webui.settings_contracts import (
     SettingsRequest,
     SettingsRouteResult,
 )
+from nanobot.webui.settings_runtime import runtime_config_payload
 from nanobot.webui.settings_services import WebUISettingsServices
 from nanobot.webui.version_check import check_for_update
 
@@ -127,6 +128,7 @@ _CAPABILITY_ROUTES = {
 }
 
 _SYSTEM_ROUTES = {
+    "/api/settings/runtime-config/update": "runtime-config-update",
     "/api/settings/cli-apps": "cli-list",
     "/api/settings/cli-apps/install": "cli-install",
     "/api/settings/cli-apps/update": "cli-update",
@@ -149,6 +151,7 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/runtime-config/update",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
     "/api/settings/model-configurations/update",
@@ -246,12 +249,18 @@ class WebUISettingsRouter:
         self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
         self._mcp_oauth = McpOAuthManager()
         self._restart_sections: set[str] = set()
+        self._restart_baselines: dict[str, dict[str, Any]] = {}
+        self._restart_changes: dict[str, str] = {}
         self._models = model_domain.ModelSettingsHandler(settings, logger)
         self._capabilities = capability_domain.CapabilitySettingsHandler(
             settings,
             logger,
         )
         self._system = system_domain.SystemSettingsHandler(settings, logger)
+
+    async def close(self) -> None:
+        """Release state owned by settings domains."""
+        await self._system.close()
 
     async def dispatch(
         self,
@@ -285,17 +294,23 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         if route == ("root", "settings"):
-            return self._handle_settings()
+            return await asyncio.to_thread(self._handle_settings)
         if route == ("root", "usage"):
-            return self._handle_settings_usage()
+            return await asyncio.to_thread(self._handle_settings_usage)
 
         domain, action = route
+        restart_before = (
+            await asyncio.to_thread(self._restart_values, action)
+            if action in {"runtime-config-update", "image-update", "web-search-update"}
+            else None
+        )
         domain_request = self._domain_request(
             connection,
             request,
             needs_local_browser=(
                 action in {
                     "api-start",
+                    "runtime-config-update",
                     "features-enable",
                     "channel-configure",
                     "channel-connect",
@@ -323,7 +338,35 @@ class WebUISettingsRouter:
                 channel_name=(channel_connect[0] if channel_connect else None),
                 connect_action=(channel_connect[1] if channel_connect else None),
             )
+        if restart_before is not None and result.error is None and result.payload is not None:
+            restart_after = await asyncio.to_thread(self._restart_values, action)
+            if result.clear_restart_section:
+                self._restart_baselines.pop(action, None)
+                self._restart_changes.pop(action, None)
+            elif result.payload.get("requires_restart") or action in self._restart_changes:
+                baseline = self._restart_baselines.setdefault(action, {})
+                for key, value in restart_before.items():
+                    if restart_after.get(key) != value:
+                        baseline.setdefault(key, value)
+                for key in list(baseline):
+                    if restart_after.get(key) == baseline[key]:
+                        del baseline[key]
+                if not baseline:
+                    self._restart_baselines.pop(action, None)
+                    self._restart_changes.pop(action, None)
+                elif result.restart_section:
+                    self._restart_changes[action] = result.restart_section
+                # Reversible changes are tracked separately from installation and reload failures.
+                result.payload["requires_restart"] = False
         return self._render_result(result)
+
+    def _restart_values(self, action: str) -> dict[str, Any]:
+        config = self.settings.config.load()
+        if action == "runtime-config-update":
+            return runtime_config_payload(config)
+        if action == "image-update":
+            return config.tools.image_generation.model_dump(mode="json")
+        return {"use_jina_reader": config.tools.web.fetch.use_jina_reader}
 
     @staticmethod
     def is_mutation_path(path: str) -> bool:
@@ -382,7 +425,7 @@ class WebUISettingsRouter:
     ) -> dict[str, Any]:
         if section and payload.get("requires_restart"):
             self._restart_sections.add(section)
-        sections = sorted(self._restart_sections)
+        sections = sorted(self._restart_sections | set(self._restart_changes.values()))
         updated = dict(payload)
         if sections:
             updated["requires_restart"] = True
@@ -463,6 +506,7 @@ class WebUISettingsRouter:
 
     def _system_operations(self) -> system_domain.SystemSettingsOperations:
         return system_domain.SystemSettingsOperations(
+            update_runtime_config=update_runtime_config_settings,
             cli_apps_payload=cli_apps_payload,
             cli_apps_action=cli_apps_action,
             nanobot_features_payload=nanobot_features_payload,
@@ -489,17 +533,6 @@ class WebUISettingsRouter:
             payload,
             lambda: request_image_generation_reload(self.bus),
         )
-
-    async def _apply_image_generation_runtime_change(
-        self,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        updated, restart_cleared = (
-            await self._apply_image_generation_runtime_change_result(payload)
-        )
-        if restart_cleared:
-            self._restart_sections.discard("image")
-        return updated
 
     async def _reload_mcp_runtime(self) -> dict[str, Any]:
         if self._mcp_reload is None:
@@ -531,46 +564,8 @@ class WebUISettingsRouter:
     def _parse_mcp_settings_query(self, request: WsRequest) -> QueryParams:
         return self._query(request)
 
-    def _parse_provider_settings_query(self, request: WsRequest) -> QueryParams:
-        return self._query(request)
-
-    def _parse_api_service_settings_query(self, request: WsRequest) -> QueryParams:
-        payload = _mutation_payload(request)
-        if payload is not None:
-            api_key = payload.get("api_key")
-            if api_key is not None and not isinstance(api_key, str):
-                raise WebUISettingsError("API service API key must be a string")
-        return self._query(request)
-
     def _api_runtime(self) -> ApiRuntime:
         return ApiRuntime(paths=api_runtime_paths(self.settings.config.path))
-
-    def _api_service_payload(
-        self,
-        *,
-        last_action: str | None = None,
-    ) -> dict[str, Any]:
-        return capability_domain.api_service_payload(
-            self.settings,
-            self._api_runtime(),
-            last_action=last_action,
-        )
-
-    @staticmethod
-    def _masked_secret(value: str) -> str | None:
-        return capability_domain.masked_api_secret(value)
-
-    @staticmethod
-    def _api_runtime_message(message: str) -> str:
-        return capability_domain.api_runtime_message(message)
-
-    def _parse_channel_values(self, request: WsRequest) -> dict[str, Any]:
-        return self._system.parse_channel_values(
-            SettingsRequest(
-                query=self._query(request),
-                payload=_mutation_payload(request),
-            )
-        )
 
     def _save_channel_config_values(
         self,
@@ -608,17 +603,6 @@ class WebUISettingsRouter:
             action,
             query,
             allow_install=allow_install,
-        )
-
-    @staticmethod
-    def _feature_runtime_fallback(
-        payload: dict[str, Any],
-        *,
-        message: str,
-    ) -> dict[str, Any]:
-        return system_domain.SystemSettingsHandler.feature_runtime_fallback(
-            payload,
-            message=message,
         )
 
     def _allow_feature_package_install(

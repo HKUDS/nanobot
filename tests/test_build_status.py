@@ -1,5 +1,6 @@
 """Tests for build_status_content cache hit rate display."""
 
+from nanobot.providers.base import LLMUsage
 from nanobot.utils.helpers import build_status_content
 
 
@@ -8,7 +9,7 @@ def test_status_shows_cache_hit_rate():
         version="0.1.0",
         model="glm-4-plus",
         start_time=1000000.0,
-        last_usage={"prompt_tokens": 2000, "completion_tokens": 300, "cached_tokens": 1200},
+        last_usage=LLMUsage.reported(input_tokens=2000, output_tokens=300, cache_read_tokens=1200),
         context_window_tokens=128000,
         session_msg_count=10,
         context_tokens_estimate=5000,
@@ -19,12 +20,12 @@ def test_status_shows_cache_hit_rate():
 
 
 def test_status_no_cache_info():
-    """Without cached_tokens, display should not show cache percentage."""
+    """Without a reported cache-read count, omit the cache percentage."""
     content = build_status_content(
         version="0.1.0",
         model="glm-4-plus",
         start_time=1000000.0,
-        last_usage={"prompt_tokens": 2000, "completion_tokens": 300},
+        last_usage=LLMUsage.reported(input_tokens=2000, output_tokens=300),
         context_window_tokens=128000,
         session_msg_count=10,
         context_tokens_estimate=5000,
@@ -34,13 +35,13 @@ def test_status_no_cache_info():
     assert "Tasks: 0 active" in content
 
 
-def test_status_zero_cached_tokens():
-    """cached_tokens=0 should not show cache percentage."""
+def test_status_zero_cache_read_tokens():
+    """An explicit zero cache-read count should not show cache percentage."""
     content = build_status_content(
         version="0.1.0",
         model="glm-4-plus",
         start_time=1000000.0,
-        last_usage={"prompt_tokens": 2000, "completion_tokens": 300, "cached_tokens": 0},
+        last_usage=LLMUsage.reported(input_tokens=2000, output_tokens=300, cache_read_tokens=0),
         context_window_tokens=128000,
         session_msg_count=10,
         context_tokens_estimate=5000,
@@ -53,7 +54,7 @@ def test_status_100_percent_cached():
         version="0.1.0",
         model="glm-4-plus",
         start_time=1000000.0,
-        last_usage={"prompt_tokens": 1000, "completion_tokens": 100, "cached_tokens": 1000},
+        last_usage=LLMUsage.reported(input_tokens=1000, output_tokens=100, cache_read_tokens=1000),
         context_window_tokens=128000,
         session_msg_count=5,
         context_tokens_estimate=3000,
@@ -67,7 +68,7 @@ def test_status_context_pct_uses_budget_not_total():
         version="0.1.0",
         model="test",
         start_time=1000000.0,
-        last_usage={"prompt_tokens": 2000, "completion_tokens": 300},
+        last_usage=LLMUsage.reported(input_tokens=2000, output_tokens=300),
         context_window_tokens=128000,
         session_msg_count=10,
         context_tokens_estimate=120000,
@@ -83,7 +84,7 @@ def test_status_context_pct_capped_at_999():
         version="0.1.0",
         model="test",
         start_time=1000000.0,
-        last_usage={"prompt_tokens": 2000, "completion_tokens": 300},
+        last_usage=LLMUsage.reported(input_tokens=2000, output_tokens=300),
         context_window_tokens=10000,
         session_msg_count=10,
         context_tokens_estimate=100000,

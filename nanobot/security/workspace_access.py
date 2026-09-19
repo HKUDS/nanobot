@@ -19,6 +19,7 @@ _PROVIDER_LABELS = {
     "unknown": "Unknown system sandbox",
     "macos_app_sandbox": "macOS App Sandbox",
     "bwrap": "Bubblewrap",
+    "seatbelt": "macOS Seatbelt",
 }
 
 _CURRENT_WORKSPACE_SCOPE: ContextVar["WorkspaceScope | None"] = ContextVar(

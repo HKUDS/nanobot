@@ -30,7 +30,8 @@ describe("generic tool activity semantics", () => {
     ['cron({"action":"remove","name":"Daily digest"})', "Removed automation", "Daily digest"],
     ['create_goal({"objective":"private objective","ui_summary":"Benchmark memory"})', "Started long task", "Benchmark memory"],
     ['update_goal({"action":"complete","recap":"private recap"})', "Updated long task", "complete"],
-    ['write_stdin({"session_id":"session-1234567890-secret","chars":"private input"})', "Continued command", "session…ecret"],
+    ['exec_session({"session_id":"session-1234567890-secret","until_exit":true})', "Continued command", "session…ecret"],
+    ['write_stdin({"session_id":"legacy-1234567890-secret","chars":"private input"})', "Continued command", "legacy-…ecret"],
     ['list_exec_sessions({})', "Checked running commands", ""],
     ['screenshot({"path":"artifacts/home.png"})', "Captured screenshot", ""],
     ['third_party_sync({"token":"secret","payload":"private payload"})', "Completed Third party sync", ""],
@@ -92,6 +93,19 @@ describe("generic tool activity semantics", () => {
       label: "已搜索文件",
       aside: "2 次搜索",
     });
+  });
+
+  it.each(["exec_session", "write_stdin"])("localizes current and legacy command events: %s", async (name) => {
+    await setAppLanguage("zh-CN");
+    const line = `${name}({"session_id":"session-1234567890-secret"})`;
+    for (const status of ["running", "done", "error"] as const) {
+      const key = status === "running" ? "continuingCommand"
+        : status === "done" ? "continuedCommand" : "continueCommandFailed";
+      expect(describeRun(line, status)).toMatchObject({
+        label: i18n.t(`message.agentActivity.${key}`),
+        detail: "session…ecret",
+      });
+    }
   });
 
   it.each([

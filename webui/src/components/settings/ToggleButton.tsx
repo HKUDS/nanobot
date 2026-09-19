@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 export function ToggleButton({
@@ -6,15 +7,17 @@ export function ToggleButton({
   onChange,
   ariaLabel,
   label,
+  ...accessibility
 }: {
   checked: boolean;
   disabled?: boolean;
   onChange: (checked: boolean) => void;
   ariaLabel?: string;
   label: string;
-}) {
+} & Pick<ComponentProps<"button">, "id" | "aria-describedby" | "aria-invalid">) {
   return (
     <button
+      {...accessibility}
       type="button"
       role="switch"
       aria-checked={checked}

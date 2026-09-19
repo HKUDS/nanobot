@@ -275,6 +275,25 @@ def test_model_presets_accepts_camel_case_root_key() -> None:
     assert config.model_presets["fast"].provider == "openai"
 
 
+@pytest.mark.parametrize(
+    "model_presets",
+    [
+        {"Default": {"model": "openai/gpt-4.1"}},
+        {
+            "Fast": {"model": "openai/gpt-4.1-mini"},
+            "fast": {"model": "openai/gpt-4.1"},
+        },
+        {" fast ": {"model": "openai/gpt-4.1"}},
+    ],
+)
+def test_model_preset_names_accepted_by_earlier_releases_remain_loadable(
+    model_presets: dict[str, dict[str, str]],
+) -> None:
+    config = Config.model_validate({"modelPresets": model_presets})
+
+    assert list(config.model_presets) == list(model_presets)
+
+
 def test_model_presets_serializes_with_camel_case_root_key() -> None:
     config = Config.model_validate({
         "model_presets": {

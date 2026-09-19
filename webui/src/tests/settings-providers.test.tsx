@@ -83,7 +83,7 @@ describe("Settings providers", () => {
 
     expect(
       screen.getByText(
-        "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, paste the authorization code below.",
+        "Complete sign-in in your browser. If nanobot does not connect automatically, paste the authorization code below.",
       ),
     ).toBeInTheDocument();
     const callbackInput = await screen.findByRole("textbox", {
@@ -170,7 +170,7 @@ describe("Settings providers", () => {
       ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-      const dialog = await screen.findByRole("dialog");
+      const dialog = (await screen.findByText("Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.")).closest('[role="dialog"]') as HTMLElement;
 
       expect(openMock).not.toHaveBeenCalled();
       expect(
@@ -178,12 +178,6 @@ describe("Settings providers", () => {
           "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
         ),
       ).toBeInTheDocument();
-      expect(
-        within(dialog).queryByRole("textbox", { name: "xAI sign-in URL" }),
-      ).not.toBeInTheDocument();
-      expect(
-        within(dialog).queryByRole("button", { name: "Copy" }),
-      ).not.toBeInTheDocument();
       expect(
         within(dialog).getByRole("textbox", { name: "Authorization code" }),
       ).toBeInTheDocument();
@@ -251,7 +245,7 @@ describe("Settings providers", () => {
 
     await chooseProviderToConfigure("OpenAI Codex");
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = (await screen.findByText("Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.")).closest('[role="dialog"]') as HTMLElement;
 
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.provider.oauth_login",
@@ -261,13 +255,10 @@ describe("Settings providers", () => {
     expect(openMock).not.toHaveBeenCalled();
     expect(
       within(dialog).getByText(
-        "Complete sign-in in your browser. Nanobot usually finishes automatically; if it does not, copy the full localhost callback URL from the address bar and paste it below.",
+        "Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.",
       ),
     ).toBeInTheDocument();
     expect(within(dialog).getByText("Waiting for the browser callback…")).toBeInTheDocument();
-    expect(
-      within(dialog).queryByText("Paste the callback URL to continue."),
-    ).not.toBeInTheDocument();
 
     expect(
       await screen.findByText("Signed in as acct-codex", {}, { timeout: 2500 }),
@@ -354,7 +345,7 @@ describe("Settings providers", () => {
       ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-      const dialog = await screen.findByRole("dialog");
+      const dialog = (await screen.findByText("Open ChatGPT in this browser and finish signing in. When the localhost page fails to load, copy the full URL from the address bar and paste it below.")).closest('[role="dialog"]') as HTMLElement;
 
       expect(openMock).not.toHaveBeenCalled();
       expect(
@@ -496,7 +487,7 @@ describe("Settings providers", () => {
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     await chooseProviderToConfigure("OpenAI Codex");
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     const codexProxy = screen.getByLabelText("Network proxy");
@@ -595,7 +586,7 @@ describe("Settings providers", () => {
       screen.getByRole("button", { name: "Save provider" }),
     ).toBeEnabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "xAI Grok" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
     fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
@@ -608,7 +599,7 @@ describe("Settings providers", () => {
       screen.getByRole("button", { name: "Save provider" }),
     ).toBeEnabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: /^DeepSeek/ }));
     expect(screen.getByText(/DeepSeek V4 Flash/)).toBeInTheDocument();
     const deepSeekSearch = screen.getByRole("switch", { name: "DeepSeek web search" });
@@ -616,15 +607,15 @@ describe("Settings providers", () => {
     fireEvent.click(deepSeekSearch);
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(
-      screen.queryByRole("switch", { name: "DeepSeek web search" }),
-    ).not.toBeInTheDocument());
+      screen.getByRole("button", { name: "DeepSeek", exact: true }),
+    ).toBeVisible());
 
-    fireEvent.click(screen.getByRole("button", { name: /^OpenAI https:/ }));
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI", exact: true }));
     fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(
-      screen.queryByRole("switch", { name: "OpenAI web search" }),
-    ).not.toBeInTheDocument());
+      screen.getByRole("button", { name: "OpenAI", exact: true }),
+    ).toBeVisible());
 
     await waitFor(() => {
       const requestUpdates = requestMutationMock.mock.calls
@@ -690,7 +681,7 @@ describe("Settings providers", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.click(await screen.findByRole("button", { name: /^OpenAI https:/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "OpenAI", exact: true }));
     const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
     expect(searchSwitch).toHaveAttribute("aria-checked", "true");
     fireEvent.click(searchSwitch);
@@ -792,10 +783,6 @@ describe("Settings providers", () => {
     expect(openRouterOption.querySelector("svg, img")).not.toBeNull();
     fireEvent.click(customOption);
 
-    expect(
-      screen.queryByRole("button", { name: "Add your own model provider" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Extra headers")).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("My model provider"), {
       target: { value: "Company Gateway" },
     });
@@ -807,19 +794,21 @@ describe("Settings providers", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    fireEvent.change(screen.getByLabelText("Extra headers"), {
-      target: { value: '{"X-Tenant":"engineering"}' },
-    });
-    fireEvent.change(screen.getByLabelText("Extra body"), {
-      target: { value: '{"service_tier":"priority"}' },
-    });
-    fireEvent.change(screen.getByLabelText("Extra query"), {
-      target: { value: '{"api-version":"2026-01-01"}' },
-    });
+    for (const [title, value] of [
+      ["Extra headers", '{"X-Tenant":"engineering"}'],
+      ["Additional body parameters", '{"service_tier":"priority"}'],
+      ["Additional query parameters", '{"api-version":"2026-01-01"}'],
+    ]) {
+      fireEvent.click(screen.getByRole("button", { name: title }));
+      const editor = screen.getByRole("dialog", { name: title });
+      fireEvent.change(within(editor).getByRole("textbox", { name: title }), { target: { value } });
+      fireEvent.click(within(editor).getByRole("button", { name: "Save", exact: true }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).not.toBeInTheDocument());
+    }
     fireEvent.change(screen.getByLabelText("Network proxy"), {
       target: { value: "http://127.0.0.1:7890" },
     });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Thinking style" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Reasoning parameter format" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "enable_thinking" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 

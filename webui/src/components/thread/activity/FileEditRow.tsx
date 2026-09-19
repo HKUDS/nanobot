@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { DisclosureContent } from "@/components/ui/disclosure";
 import {
-  AlertCircle,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  CircleDashed,
   ExternalLink,
 } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
@@ -96,29 +94,11 @@ function FileEditRow({
   const action = fileEditAction(edit, editing, failed, t);
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
   const showDiff = canRenderDiff(edit, displayMode);
-  const statusIcon = failed ? (
-    <AlertCircle className="h-3 w-3" aria-hidden />
-  ) : editing ? (
-    <CircleDashed className="h-3 w-3 animate-spin" aria-hidden />
-  ) : (
-    <CheckCircle2 className="h-3 w-3" aria-hidden />
-  );
 
   return (
     <div className="min-w-0">
       <ActivityStep
-        marker={(
-          <span
-            className={cn(
-              "grid h-3.5 w-3.5 place-items-center rounded-full border bg-background transition-colors",
-              failed && "border-destructive/30 text-destructive/78",
-              editing && "border-muted-foreground/24 text-muted-foreground/65",
-              !failed && !editing && "border-emerald-500/28 text-emerald-500/78",
-            )}
-          >
-            {statusIcon}
-          </span>
-        )}
+        showMarker={false}
         active={editing}
         tone={failed ? "error" : editing ? "active" : "success"}
         className="text-xs"
@@ -131,7 +111,7 @@ function FileEditRow({
                 i18nKey="message.agentActivity.actionTargetRich"
                 values={{ action }}
                 components={{
-                  action: <span className="shrink-0" />,
+                  action: <span className={cn("shrink-0", failed && "text-destructive/80")} />,
                   target: (
                     <FileReferenceChip
                       path={edit.path}
@@ -151,20 +131,18 @@ function FileEditRow({
           )}
       />
       {showDiff ? (
-        <div className="ml-[2.125rem] min-w-0">
-          <FileUnifiedDiff
-            diff={edit.diff!}
-            collapsed={displayMode === "collapsed_diff"}
-            previewPath={edit.absolute_path || edit.path}
-            onOpenFilePreview={onOpenFilePreview}
-          />
-        </div>
+        <FileUnifiedDiff
+          diff={edit.diff!}
+          collapsed={displayMode === "collapsed_diff"}
+          previewPath={edit.absolute_path || edit.path}
+          onOpenFilePreview={onOpenFilePreview}
+        />
       ) : null}
     </div>
   );
 }
 
-export function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): boolean {
+function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): boolean {
   return edit.added > 0 || edit.deleted > 0;
 }
 
@@ -203,13 +181,15 @@ function FileUnifiedDiff({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const contentId = useId();
   const [expandedLines, setExpandedLines] = useState(false);
   const renderableDiff = useMemo(() => parseRenderableFileDiff(diff), [diff]);
   const language = useMemo(() => codeLanguageFromPath(previewPath), [previewPath]);
   const totalLineCount = useMemo(() => countDiffLines(renderableDiff), [renderableDiff]);
   const shouldAutoCollapse = totalLineCount > AUTO_COLLAPSE_DIFF_LINES || !!diff.truncated;
   const startsCollapsed = collapsed || shouldAutoCollapse;
-  const shouldRenderBody = !startsCollapsed || open;
+  const shouldRenderBody = !startsCollapsed || hasOpened;
   const shouldLimitLines = totalLineCount > INITIAL_VISIBLE_DIFF_LINES;
   const lineLimit = expandedLines || !shouldLimitLines
     ? totalLineCount
@@ -230,13 +210,21 @@ function FileUnifiedDiff({
 
   useEffect(() => {
     setOpen(false);
+    setHasOpened(false);
     setExpandedLines(false);
   }, [diff]);
 
   const handleToggleOpen = () => {
-    if (open) setExpandedLines(false);
+    if (!open) {
+      setHasOpened(true);
+      setExpandedLines(false);
+    }
     setOpen(!open);
   };
+  const releaseBody = useCallback(() => {
+    setHasOpened(false);
+    setExpandedLines(false);
+  }, []);
 
   if (totalLineCount === 0) return null;
 
@@ -324,6 +312,7 @@ function FileUnifiedDiff({
       <button
         type="button"
         aria-expanded={open}
+        aria-controls={contentId}
         data-testid="file-edit-diff-toggle"
         onClick={handleToggleOpen}
         className={cn(
@@ -332,13 +321,15 @@ function FileUnifiedDiff({
         )}
       >
         <ChevronRight
-          className={cn("h-3 w-3 shrink-0 transition-transform", open && "rotate-90")}
+          className={cn("h-3 w-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-90")}
           aria-hidden
         />
         <span className="min-w-0 flex-1">{viewDiffLabel}</span>
         <span className="shrink-0 text-muted-foreground/65">{lineCountLabel}</span>
       </button>
-      {open ? renderBody() : null}
+      <DisclosureContent id={contentId} open={open} onExitComplete={releaseBody}>
+        {shouldRenderBody ? renderBody() : null}
+      </DisclosureContent>
     </div>
   );
 }

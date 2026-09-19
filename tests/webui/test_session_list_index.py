@@ -18,6 +18,7 @@ from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.recovery import RECOVERY_METADATA_KEY
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +51,44 @@ def test_webui_session_list_reuses_valid_index_without_scanning_files(
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
     assert rows[0]["model_preset"] == "fast"
+
+
+def test_webui_session_list_refreshes_after_model_preset_rename(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:renamed-preset")
+    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "openai"
+    session.add_message("user", "hello")
+    manager.save(session)
+
+    assert list_webui_sessions(manager)[0]["model_preset"] == "openai"
+
+    assert manager.rename_model_preset("openai", "Codex") == 1
+
+    assert list_webui_sessions(manager)[0]["model_preset"] == "Codex"
+
+
+def test_webui_session_list_surfaces_pending_recovery_state(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:needs-attention")
+    session.add_message("user", "the interrupted task")
+    session.metadata[RECOVERY_METADATA_KEY] = {
+        "status": "awaiting_user",
+        "recovery_id": "recovery-123",
+        "reason": "uncertain_tool_state",
+        "attempts": 1,
+        # Private checkpoint details must never leak into the sidebar index.
+        "checkpoint": {"tool_args": "secret"},
+    }
+    manager.save(session)
+
+    row = list_webui_sessions(manager)[0]
+
+    assert row["recovery_state"] == {
+        "status": "awaiting_user",
+        "recovery_id": "recovery-123",
+        "reason": "uncertain_tool_state",
+        "attempts": 1,
+    }
 
 
 def test_webui_session_index_uses_unique_temp_file(tmp_path: Path) -> None:

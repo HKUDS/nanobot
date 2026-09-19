@@ -1,7 +1,9 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { ProviderIcon } from "@/components/settings/models/ProviderSettings";
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   ChevronDown,
-  ChevronRight,
   GripVertical,
   ListOrdered,
   Loader2,
@@ -44,7 +46,6 @@ export interface AgentSettingsDraft {
   model: string;
   provider: string;
   modelPreset: string;
-  presetLabel: string;
   maxTokens: number;
   contextWindowTokens: number;
   temperature: number;
@@ -63,11 +64,30 @@ function modelPresetValue(payload: SettingsPayload): string {
   );
 }
 
+function suggestedPresetName(
+  model: string,
+  presets: SettingsPayload["model_presets"],
+): string {
+  const modelName = model.trim().split("/").filter(Boolean).at(-1) ?? "";
+  const base = (modelName.toLowerCase() === "default" ? "model" : modelName).slice(0, 48);
+  if (!base) return "";
+
+  const existing = new Set(
+    presets.filter((preset) => !preset.is_default).map((preset) => preset.name.toLowerCase()),
+  );
+  if (!existing.has(base.toLowerCase())) return base;
+
+  for (let index = 2; ; index += 1) {
+    const suffix = ` ${index}`;
+    const candidate = `${base.slice(0, 48 - suffix.length)}${suffix}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
 export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   model: "",
   provider: "",
   modelPreset: "",
-  presetLabel: "",
   maxTokens: 8192,
   contextWindowTokens: 200_000,
   temperature: 0.1,
@@ -89,7 +109,6 @@ export function agentDraftFromPayload(
     model: activePreset?.model ?? payload.agent.model,
     provider: activePreset?.provider ?? payload.agent.provider ?? payload.agent.resolved_provider ?? "",
     modelPreset: activePresetName,
-    presetLabel: activePreset?.label ?? activePresetName,
     maxTokens: activePreset?.max_tokens ?? payload.agent.max_tokens,
     contextWindowTokens: normalizeContextWindowTokens(
       activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
@@ -125,8 +144,8 @@ export function ModelPresetDeleteDialog({
           <DialogDescription className="leading-5">
             {tx(
               "settings.models.deletePresetHelp",
-              "This removes the preset “{{name}}”. Provider credentials are not affected.",
-              { name: preset?.label ?? "" },
+              "Delete “{{name}}” and remove it from the fallback list. Provider credentials will be kept.",
+              { name: preset?.name ?? "" },
             )}
           </DialogDescription>
         </DialogHeader>
@@ -162,6 +181,8 @@ export function ModelsSettings({
   token,
   form,
   setForm,
+  editingPresetName,
+  presetNameError,
   settings,
   dirty,
   creating,
@@ -178,12 +199,15 @@ export function ModelsSettings({
   onMigrate,
   onBeginCreate,
   onCancelCreate,
+  onClearPresetNameError,
   onSelectConfiguration,
   onDeleteConfiguration,
 }: {
   token: string;
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
+  editingPresetName: string;
+  presetNameError: string | null;
   settings: SettingsPayload;
   dirty: boolean;
   creating: boolean;
@@ -200,17 +224,35 @@ export function ModelsSettings({
   onMigrate: () => void;
   onBeginCreate: () => void;
   onCancelCreate: () => void;
-  onSelectConfiguration: () => void;
+  onClearPresetNameError: () => void;
+  onSelectConfiguration: (name: string) => void;
   onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number]) => void;
 }) {
   const { t } = useTranslation();
+  useAutoSave(form, dirty, saving, onSave, !creating && !!form.model.trim());
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
+  const editorTriggerRef = useRef<HTMLElement | null>(null);
+  const presetNameInputRef = useRef<HTMLInputElement>(null);
+  const suggestedPresetNameRef = useRef<string | null>(null);
   const [editorRowKey, setEditorRowKey] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedId = useId();
   const [draggedCallOrderIndex, setDraggedCallOrderIndex] = useState<number | null>(null);
   const [dragOverCallOrderIndex, setDragOverCallOrderIndex] = useState<number | null>(null);
+  const [draggedRowHeight, setDraggedRowHeight] = useState(0);
+  const dragStartY = useRef(0);
+  const pendingDrag = useRef<number | null>(null);
+  const suppressDragClick = useRef(false);
+  const [draggedOffset, setDraggedOffset] = useState(0);
+
+  useEffect(() => {
+    if (presetNameError) presetNameInputRef.current?.focus();
+  }, [presetNameError]);
+  useEffect(() => {
+    if (!creating) suggestedPresetNameRef.current = null;
+  }, [creating]);
   const namedPresets = settings.model_presets.filter((preset) => !preset.is_default);
   const namedPresetsByName = new Map(namedPresets.map((preset) => [preset.name, preset]));
   const unorderedPresets = namedPresets.filter((preset) => !callOrder.includes(preset.name));
@@ -233,7 +275,7 @@ export function ModelsSettings({
       preset,
     })),
   ];
-  const selectedPreset = namedPresetsByName.get(form.modelPreset) ?? null;
+  const selectedPreset = namedPresetsByName.get(editingPresetName) ?? null;
   const activeEditorRowKey =
     editorRowKey ??
     presetRows.find((row) => row.name === selectedPreset?.name)?.key ??
@@ -266,21 +308,22 @@ export function ModelsSettings({
   const modelFieldsMissing =
     !form.model.trim() ||
     !form.provider.trim() ||
-    !form.presetLabel.trim() ||
+    !form.modelPreset.trim() ||
     form.maxTokens <= 0 ||
     form.temperature < 0 ||
     form.temperature > 2;
   const selectedPresetReferenced = Boolean(
-    selectedPreset && callOrder.includes(selectedPreset.name),
+    selectedPreset && callOrder[0] === selectedPreset.name,
   );
   const callOrderBusy = orderSaving || saving;
   const selectPreset = (
     preset: SettingsPayload["model_presets"][number],
     rowKey: string,
   ) => {
+    editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const toggleCurrentPreset =
       !creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey;
-    onSelectConfiguration();
+    onSelectConfiguration(preset.name);
     if (toggleCurrentPreset) {
       setEditorOpen((open) => !open);
       return;
@@ -290,7 +333,6 @@ export function ModelsSettings({
       modelPreset: preset.name,
       model: preset.model,
       provider: preset.provider,
-      presetLabel: preset.label,
       maxTokens: preset.max_tokens,
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
@@ -341,25 +383,50 @@ export function ModelsSettings({
     <div
       id="model-preset-editor"
       data-testid="model-preset-editor"
-      className="mx-3 mb-3 divide-y divide-border/45 overflow-hidden rounded-floating border border-border/45 bg-background/80 shadow-sm motion-reduce:animate-none animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:mx-5 lg:mx-auto lg:w-[calc(100%-2.5rem)] lg:max-w-6xl"
+      className="space-y-1 pb-4"
     >
-      {creating ? (
-        <div className="flex min-h-[52px] items-center px-4 py-3 sm:px-5">
-          <span className="text-[13px] font-semibold text-foreground/85">
-            {tx("settings.models.newPreset", "New model preset")}
-          </span>
+      <SettingsRow
+        title={tx("settings.models.presetName", "Preset name")}
+        description={tx(
+          "settings.models.presetNameHelp",
+          "Used everywhere, including /model commands. Names must be unique.",
+        )}
+      >
+        <div
+          className={cn(
+            "w-full motion-reduce:animate-none",
+            presetNameError && "animate-[preset-name-shake_180ms_ease-in-out]",
+          )}
+        >
+          <Input
+            ref={presetNameInputRef}
+            autoFocus={creating}
+            aria-label={tx("settings.models.presetName", "Preset name")}
+            aria-invalid={Boolean(presetNameError)}
+            aria-describedby={presetNameError ? "model-preset-name-error" : undefined}
+            value={form.modelPreset}
+            placeholder={tx("settings.models.presetNamePlaceholder", "e.g. Fast writing")}
+            onChange={(event) => {
+              suggestedPresetNameRef.current = null;
+              onClearPresetNameError();
+              setForm((prev) => ({ ...prev, modelPreset: event.target.value }));
+            }}
+            className={cn(
+              "h-9 rounded-full text-[13px]",
+              presetNameError &&
+                "border-destructive/70 focus-visible:border-destructive focus-visible:ring-destructive/25",
+            )}
+          />
+          {presetNameError ? (
+            <p
+              id="model-preset-name-error"
+              role="alert"
+              className="mt-1.5 px-1 text-[12px] leading-4 text-destructive"
+            >
+              {presetNameError}
+            </p>
+          ) : null}
         </div>
-      ) : null}
-      <SettingsRow title={tx("settings.models.presetName", "Preset name")}>
-        <Input
-          autoFocus={creating}
-          value={form.presetLabel}
-          placeholder={tx("settings.models.presetNamePlaceholder", "Fast writing")}
-          onChange={(event) =>
-            setForm((prev) => ({ ...prev, presetLabel: event.target.value }))
-          }
-          className="h-8 w-[min(280px,70vw)] rounded-full text-[13px]"
-        />
       </SettingsRow>
       <SettingsRow title={t("settings.rows.provider")}>
         <ProviderPicker
@@ -367,13 +434,21 @@ export function ModelsSettings({
           value={providerValue}
           emptyLabel={t("settings.byok.noConfiguredProviders")}
           showProviderLogos={showBrandLogos}
-          onChange={(provider) =>
+          onChange={(provider) => {
+            const providerChanged = provider !== form.provider;
+            const clearSuggestedName =
+              creating &&
+              providerChanged &&
+              suggestedPresetNameRef.current !== null &&
+              form.modelPreset === suggestedPresetNameRef.current;
+            if (clearSuggestedName) suggestedPresetNameRef.current = null;
             setForm((prev) => ({
               ...prev,
               provider,
               model: provider === prev.provider ? prev.model : "",
-            }))
-          }
+              modelPreset: clearSuggestedName ? "" : prev.modelPreset,
+            }));
+          }}
         />
       </SettingsRow>
       {selectedProviderNeedsSignIn ? (
@@ -407,14 +482,28 @@ export function ModelsSettings({
           provider={form.provider}
           value={form.model}
           showProviderLogos={showBrandLogos}
-          onChange={(model) => setForm((prev) => ({ ...prev, model }))}
+          onChange={(model) => {
+            const canSuggestName =
+              creating &&
+              (!form.modelPreset.trim() || form.modelPreset === suggestedPresetNameRef.current);
+            const suggestion = canSuggestName
+              ? suggestedPresetName(model, settings.model_presets)
+              : "";
+            if (canSuggestName) suggestedPresetNameRef.current = suggestion;
+            setForm((prev) => ({
+              ...prev,
+              model,
+              modelPreset: canSuggestName ? suggestion : prev.modelPreset,
+            }));
+          }}
         />
       </SettingsRow>
       <button
         type="button"
         aria-expanded={advancedOpen}
+        aria-controls={advancedId}
         onClick={() => setAdvancedOpen((value) => !value)}
-        className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
+        className="flex min-h-[62px] w-full items-center justify-between gap-4 px-4 py-3.5 text-left transition-colors settings-hover sm:px-5"
       >
         <span>
           <span className="block text-[14px] font-medium text-foreground">
@@ -433,13 +522,13 @@ export function ModelsSettings({
         </span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
             advancedOpen && "rotate-180",
           )}
           aria-hidden
         />
       </button>
-      {advancedOpen ? (
+      <DisclosureContent id={advancedId} open={advancedOpen}>
         <div className="bg-muted/12 px-4 py-4 sm:px-5">
           <ModelAdvancedFields
             maxTokens={form.maxTokens}
@@ -449,7 +538,7 @@ export function ModelsSettings({
             onChange={(value) => setForm((prev) => ({ ...prev, ...value }))}
           />
         </div>
-      ) : null}
+      </DisclosureContent>
       <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         {creating ? (
           <Button
@@ -486,7 +575,7 @@ export function ModelsSettings({
               >
                 {tx(
                   "settings.models.removeBeforeDelete",
-                  "Remove this preset from the call order before deleting it.",
+                  "Choose another primary preset before deleting this one.",
                 )}
               </span>
             ) : null}
@@ -508,7 +597,7 @@ export function ModelsSettings({
           >
             {saving || creatingSaving
               ? tx("settings.actions.saving", "Saving...")
-              : tx("settings.actions.savePreset", "Save preset")}
+              : tx("settings.actions.savePreset", "Save")}
           </Button>
         </div>
       </div>
@@ -516,13 +605,14 @@ export function ModelsSettings({
   );
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         <SettingsSectionTitle>
           {tx("settings.models.presets", "Model presets")}
         </SettingsSectionTitle>
         <SettingsGroup>
-          {!settings.model_call_order_editable ? (
+          {!settings.model_call_order_editable &&
+          settings.model_configuration_migratable !== false ? (
             <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="flex min-w-0 items-start gap-3">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
@@ -557,7 +647,7 @@ export function ModelsSettings({
             </div>
           ) : (
             <>
-              <div role="list" className="divide-y divide-border/45">
+              <div role="list">
                 {presetRows.map(({ key, name, orderIndex, preset }) => {
                   const ordered = orderIndex >= 0;
                   const provider = preset
@@ -570,14 +660,13 @@ export function ModelsSettings({
                         preset.resolved_provider,
                       )
                     : true;
-                  const isDropTarget =
-                    ordered &&
-                    dragOverCallOrderIndex === orderIndex &&
-                    draggedCallOrderIndex !== orderIndex;
-                  const dropAfterTarget =
-                    isDropTarget &&
-                    draggedCallOrderIndex !== null &&
-                    draggedCallOrderIndex < orderIndex;
+                  let dragOffset = 0;
+                  const isDragging = ordered && draggedCallOrderIndex === orderIndex;
+                  if (ordered && draggedCallOrderIndex !== null && dragOverCallOrderIndex !== null) {
+                    if (isDragging) dragOffset = draggedOffset;
+                    if (orderIndex > draggedCallOrderIndex && orderIndex <= dragOverCallOrderIndex) dragOffset = -draggedRowHeight;
+                    if (orderIndex < draggedCallOrderIndex && orderIndex >= dragOverCallOrderIndex) dragOffset = draggedRowHeight;
+                  }
                   const isSelected =
                     editorOpen &&
                     !creating &&
@@ -586,45 +675,52 @@ export function ModelsSettings({
                   const presetRow = (
                     <div
                       tabIndex={ordered ? 0 : -1}
-                      draggable={ordered && !callOrderBusy}
+                      onDragStart={(event) => event.preventDefault()}
                       aria-label={
                         ordered
-                          ? `${preset?.label ?? name}. ${tx(
+                          ? `${name}. ${tx(
                               "settings.models.dragToReorder",
                               "Drag to reorder",
                             )}`
-                          : preset?.label ?? name
+                          : name
                       }
                       data-testid={`model-call-order-row-${name}`}
-                      onDragStart={(event) => {
-                        if (!ordered || callOrderBusy) {
-                          event.preventDefault();
-                          return;
-                        }
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", name);
-                        setDraggedCallOrderIndex(orderIndex);
-                        setDragOverCallOrderIndex(orderIndex);
+                      onPointerDown={(event) => {
+                        if (!ordered || callOrderBusy || event.button !== 0 || (event.target as HTMLElement).closest('[role="switch"]')) return;
+                        pendingDrag.current = orderIndex;
+                        suppressDragClick.current = false;
+                        dragStartY.current = event.clientY;
+                        setDraggedOffset(0);
+                        const wrapper = event.currentTarget.parentElement;
+                        setDraggedRowHeight(wrapper?.getBoundingClientRect().height || 60);
                       }}
-                      onDragEnd={() => {
+                      onPointerMove={(event) => {
+                        if (!event.buttons) { pendingDrag.current = null; return; }
+                        if (pendingDrag.current !== orderIndex || callOrderBusy) return;
+                        const offset = event.clientY - dragStartY.current;
+                        if (draggedCallOrderIndex === null && Math.abs(offset) < 5) return;
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        suppressDragClick.current = true;
+                        setDraggedCallOrderIndex(orderIndex);
+                        const target = Math.max(0, Math.min(callOrder.length - 1, orderIndex + Math.round(offset / draggedRowHeight)));
+                        setDragOverCallOrderIndex(target);
+                        setDraggedOffset(Math.max(-orderIndex * draggedRowHeight, Math.min((callOrder.length - orderIndex - 1) * draggedRowHeight, offset)));
+                      }}
+                      onPointerUp={() => {
+                        pendingDrag.current = null;
+                        if (draggedCallOrderIndex !== null) dropCallOrderItem(dragOverCallOrderIndex ?? orderIndex);
+                      }}
+                      onPointerCancel={() => {
+                        pendingDrag.current = null;
                         setDraggedCallOrderIndex(null);
                         setDragOverCallOrderIndex(null);
                       }}
-                      onDragEnter={(event) => {
-                        if (ordered && draggedCallOrderIndex !== null) {
+                      onClickCapture={(event) => {
+                        if (suppressDragClick.current) {
                           event.preventDefault();
-                          setDragOverCallOrderIndex(orderIndex);
+                          event.stopPropagation();
+                          suppressDragClick.current = false;
                         }
-                      }}
-                      onDragOver={(event) => {
-                        if (!ordered || draggedCallOrderIndex === null) return;
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = "move";
-                      }}
-                      onDrop={(event) => {
-                        if (!ordered) return;
-                        event.preventDefault();
-                        dropCallOrderItem(orderIndex);
                       }}
                       onKeyDown={(event) => {
                         if (event.currentTarget !== event.target) return;
@@ -640,64 +736,40 @@ export function ModelsSettings({
                         }
                       }}
                       className={cn(
-                        "group relative flex min-h-[76px] select-none items-center gap-3 px-4 py-3 outline-none transition-[background-color,opacity] duration-150 sm:px-5",
+                        "settings-list-row group relative flex select-none items-center gap-3 py-2 outline-none transition-colors duration-150",
                         ordered &&
                           (callOrderBusy
                             ? "cursor-wait"
                             : "cursor-grab active:cursor-grabbing"),
-                        "hover:bg-muted/25",
-                        isDropTarget &&
-                          !dropAfterTarget &&
-                          "before:absolute before:inset-x-4 before:top-0 before:z-10 before:h-0.5 before:rounded-full before:bg-foreground sm:before:inset-x-5",
-                        isDropTarget &&
-                          dropAfterTarget &&
-                          "after:absolute after:inset-x-4 after:bottom-0 after:z-10 after:h-0.5 after:rounded-full after:bg-foreground sm:after:inset-x-5",
-                        ordered && draggedCallOrderIndex === orderIndex && "opacity-35",
-                        isSelected && "bg-muted/45 hover:bg-muted/45",
+                        !isDragging && "settings-hover",
+                        isDragging && "bg-settings-surface shadow-md",
+                        isSelected && "bg-muted/45 settings-hover",
                         "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                       )}
                     >
-                      {ordered ? (
-                        <GripVertical
-                          className="pointer-events-none h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
-                          aria-hidden
-                        />
-                      ) : (
-                        <span className="h-4 w-4 shrink-0" aria-hidden />
-                      )}
                       <button
                         type="button"
                         aria-pressed={selectedPreset?.name === name}
-                        aria-expanded={isSelected}
-                        aria-controls={isSelected ? "model-preset-editor" : undefined}
+                        aria-haspopup="dialog"
                         disabled={!preset}
                         onClick={() => preset && selectPreset(preset, key)}
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-control text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        {ordered ? (
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-muted font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
-                            {orderIndex + 1}
-                          </span>
+                        {presetConfigured ? (
+                          <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} />
                         ) : (
-                          <span className="h-7 w-7 shrink-0" aria-hidden />
+                          <span className="grid h-8 w-8 shrink-0 place-items-center">
+                            <ProviderPickerIcon provider={provider} showBrandLogos={showBrandLogos} unconfigured />
+                          </span>
                         )}
-                        <ProviderPickerIcon
-                          provider={provider}
-                          showBrandLogos={showBrandLogos}
-                          unconfigured={!presetConfigured}
-                        />
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 flex-wrap items-center gap-2">
                             <span className="truncate text-[14px] font-medium text-foreground">
-                              {preset?.label ?? name}
+                              {name}
                             </span>
                             {orderIndex === 0 ? (
                               <StatusPill tone="success">
                                 {tx("settings.models.primary", "Primary")}
-                              </StatusPill>
-                            ) : !ordered ? (
-                              <StatusPill tone="neutral">
-                                {tx("settings.models.disabled", "Disabled")}
                               </StatusPill>
                             ) : null}
                             {!presetConfigured ? (
@@ -709,18 +781,19 @@ export function ModelsSettings({
                               </span>
                             ) : null}
                           </span>
-                          <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                            {preset?.model ?? name}
-                          </span>
                         </span>
-                        <ChevronRight
-                          className={cn(
-                            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                            isSelected && "rotate-90",
-                          )}
+                        <span className="shrink-0 px-2 py-1 text-[13px] font-normal leading-5 text-muted-foreground">
+                          {t("settings.configure")}
+                        </span>
+                      </button>
+                      {ordered ? (
+                        <GripVertical
+                          className="h-4 w-4 shrink-0 touch-none text-muted-foreground/40 transition-colors group-hover:text-muted-foreground"
                           aria-hidden
                         />
-                      </button>
+                      ) : (
+                        <span className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
                       <button
                         type="button"
                         role="switch"
@@ -754,46 +827,61 @@ export function ModelsSettings({
                     </div>
                   );
                   return (
-                    <div key={key} role="listitem">
-                      {presetRow}
-                      {isSelected ? renderPresetEditor() : null}
+                    <div key={key} role="listitem" data-call-order-index={orderIndex}>
+                      <div className={cn("relative", isDragging ? "z-10" : "transition-transform duration-150 ease-out motion-reduce:transition-none")}
+                        style={{ transform: `translateY(${dragOffset}px)` }}>
+                        {presetRow}
+                      </div>
                     </div>
                   );
                 })}
               </div>
-              <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                {!creating ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="rounded-full"
-                    disabled={callOrderBusy}
-                    onClick={() => {
-                      setEditorRowKey(null);
-                      setEditorOpen(true);
-                      onBeginCreate();
-                    }}
-                  >
-                    <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              {!creating ? (
+                <button
+                  type="button"
+                  className="flex min-h-[58px] w-full items-center justify-between gap-3 settings-list-inset py-3 text-left outline-none transition-colors settings-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={callOrderBusy}
+                  onClick={(event) => {
+                    editorTriggerRef.current = event.currentTarget;
+                    setEditorRowKey(null);
+                    setEditorOpen(true);
+                    onBeginCreate();
+                  }}
+                >
+                  <span className="inline-flex items-center gap-3 text-[14px] font-medium">
+                    <span className="grid w-10 shrink-0 place-items-center"><Plus className="h-5 w-5" aria-hidden /></span>
                     {tx("settings.models.newPreset", "New model preset")}
-                  </Button>
-                ) : (
-                  <span />
-                )}
-                {orderSaving ? (
-                  <SettingsStatusMessage>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                      {tx("settings.actions.saving", "Saving...")}
-                    </span>
-                  </SettingsStatusMessage>
-                ) : null}
-              </div>
-              {creating && editorOpen ? renderPresetEditor() : null}
+                  </span>
+                  {orderSaving ? (
+                    <SettingsStatusMessage>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                        {tx("settings.actions.saving", "Saving...")}
+                      </span>
+                    </SettingsStatusMessage>
+                  ) : null}
+                </button>
+              ) : null}
             </>
           )}
         </SettingsGroup>
       </section>
+      <Dialog open={editorOpen && (creating || selectedPreset !== null)} onOpenChange={(open) => {
+        setEditorOpen(open);
+        if (!open && creating) onCancelCreate();
+      }}>
+        <DialogContent aria-describedby={undefined}
+          className="relative max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            editorTriggerRef.current?.focus();
+          }}>
+          <DialogHeader className="px-6 pb-2 pt-5 pr-12">
+            <DialogTitle>{creating ? tx("settings.models.newPreset", "New model preset") : selectedPreset?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="settings-grid !px-0">{renderPresetEditor()}</div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -866,6 +954,7 @@ function ModelAdvancedFields({
         </span>
         <SegmentedControl
           value={String(contextWindowTokens)}
+          animateIndicator={false}
           options={contextWindowOptions.map((tokens) => ({
             value: String(tokens),
             label: formatModelContextWindow(tokens),

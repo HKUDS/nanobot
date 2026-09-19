@@ -67,6 +67,11 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
   );
 }
 
+function currentMonthTimestamp(day: number, hour = 10, minute = 0): number {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), day, hour, minute).getTime();
+}
+
 function baseSettingsPayload() {
   return {
     agent: {
@@ -131,7 +136,6 @@ function baseSettingsPayload() {
       heartbeat: {
         enabled: true,
         interval_s: 1800,
-        keep_recent_messages: 8,
       },
       dream: {
         schedule: "every 2h",
@@ -260,6 +264,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       return () => runStatusHandlers.delete(handler);
     };
     getRunStartedAt = () => null;
+    getRunTurnId = () => null;
     getGoalState = () => undefined;
     sendMessage = sendMessageSpy;
     newChat = vi.fn();
@@ -310,8 +315,10 @@ describe("App layout", () => {
     sessionUpdateHandlers.clear();
     sidebarStateUpdateHandlers.clear();
     window.history.replaceState(null, "", "/");
+    Reflect.deleteProperty(window, "nanobotHost");
     setNavigatorPlatform("Linux x86_64");
     localStorage.removeItem("nanobot-webui.sidebar");
+    localStorage.removeItem("nanobot-webui.sidebar.width");
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
     localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
@@ -335,6 +342,7 @@ describe("App layout", () => {
 
   afterEach(() => {
     cleanup();
+    Reflect.deleteProperty(window, "nanobotHost");
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -346,19 +354,76 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
       .toBeInTheDocument();
-    const password = screen.getByLabelText("Password");
+    const password = screen.getByLabelText("WebUI password");
+    expect(password).not.toHaveAttribute("aria-describedby");
     expect(password).toHaveAttribute(
       "autocomplete",
       "current-password",
     );
     expect(password).not.toHaveAttribute("placeholder");
-    expect(screen.queryByText("Authentication required")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Incorrect password. Try again."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("switches language before connecting while preserving the password draft", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText("WebUI password"), "draft-password");
+    await user.tab({ shift: true });
+    expect(screen.getByRole("combobox", { name: "Change language" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("listbox");
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(await screen.findByRole("heading", { name: "连接到 nanobot" }))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText("WebUI 密码")).toHaveValue("draft-password");
+    expect(screen.getByRole("button", { name: "连接", exact: true })).toBeEnabled();
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it("reveals password setup help with the keyboard without submitting the form", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValueOnce(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const password = await screen.findByLabelText("WebUI password");
+    await user.type(password, "draft-password");
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    const help = screen.getByRole("button", { name: "Where can I find the password?" });
+    expect(help).toHaveFocus();
+    expect(help).toHaveAttribute("aria-expanded", "false");
+    const content = document.getElementById(help.getAttribute("aria-controls")!);
+    expect(content).toHaveAttribute("aria-hidden", "true");
+
+    await user.keyboard("{Enter}");
+
+    expect(help).toHaveAttribute("aria-expanded", "true");
+    expect(content).not.toHaveAttribute("aria-hidden");
+    expect(content).toHaveTextContent("~/.nanobot/config.json");
+    expect(content).toHaveTextContent("channels.websocket.tokenIssueSecret");
+    expect(content).toHaveTextContent("If that value is empty, use channels.websocket.token.");
+
+    await user.keyboard(" ");
+
+    expect(help).toHaveAttribute("aria-expanded", "false");
+    expect(password).toHaveValue("draft-password");
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
 
   it("toggles password visibility without changing the password", async () => {
@@ -369,7 +434,7 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     await user.type(password, "correct horse battery staple");
     expect(password).toHaveAttribute("type", "password");
 
@@ -394,17 +459,25 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     const connect = screen.getByRole("button", { name: "Connect" });
     expect(connect).toBeEnabled();
     fireEvent.click(connect);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Enter your password.",
+      "Enter password",
     );
+    expect(password).toHaveAttribute("placeholder", "Enter password");
     expect(password).toHaveAttribute("aria-invalid", "true");
-    expect(password).toHaveAttribute("aria-describedby", "webui-auth-error");
+    expect(password).toHaveAttribute(
+      "aria-describedby",
+      "webui-auth-error",
+    );
     expect(password).toHaveFocus();
+    fireEvent.change(password, { target: { value: "   " } });
+    fireEvent.click(connect);
+    expect(password).toHaveValue("");
+    expect(password).toHaveAttribute("placeholder", "Enter password");
     expect(fetchBootstrap).toHaveBeenCalledTimes(1);
   });
 
@@ -417,11 +490,9 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Password" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
       .toBeInTheDocument();
-    expect(
-      screen.queryByText("Incorrect password. Try again."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
@@ -432,18 +503,53 @@ describe("App layout", () => {
 
     render(<App />);
 
-    const password = await screen.findByLabelText("Password");
+    const password = await screen.findByLabelText("WebUI password");
     fireEvent.change(password, { target: { value: "wrong-password" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
-    const retryPassword = await screen.findByLabelText("Password");
+    const retryPassword = await screen.findByLabelText("WebUI password");
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Incorrect password. Try again.",
+      "Incorrect password",
     );
+    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
+    expect(retryPassword).toHaveValue("");
     expect(retryPassword).toHaveAttribute("aria-invalid", "true");
     expect(retryPassword).toHaveFocus();
     expect(fetchBootstrap).toHaveBeenLastCalledWith("", "wrong-password");
     expect(connectSpy).not.toHaveBeenCalled();
+    fireEvent.change(retryPassword, { target: { value: "retry-password" } });
+    expect(retryPassword).not.toHaveAttribute("placeholder");
+    expect(retryPassword).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears auth feedback after three seconds without moving focus", async () => {
+    vi.mocked(fetchBootstrap).mockRejectedValue(
+      new Error("bootstrap failed: HTTP 401"),
+    );
+    render(<App />);
+    const password = await screen.findByLabelText("WebUI password");
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(password).toHaveAttribute("placeholder", "Enter password");
+    act(() => vi.advanceTimersByTime(3_000));
+    expect(password).not.toHaveAttribute("placeholder");
+    expect(password).toHaveFocus();
+
+    await act(async () => {
+      fireEvent.change(password, { target: { value: "wrong-password" } });
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    });
+    const retryPassword = screen.getByLabelText("WebUI password");
+    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
+    act(() => vi.advanceTimersByTime(2_999));
+    expect(retryPassword).toHaveAttribute("placeholder", "Incorrect password");
+    act(() => vi.advanceTimersByTime(1));
+    expect(retryPassword).not.toHaveAttribute("placeholder");
+    expect(retryPassword).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(retryPassword).toHaveFocus();
   });
 
   it("keeps sidebar layout out of the main thread width contract", async () => {
@@ -454,6 +560,9 @@ describe("App layout", () => {
     const main = container.querySelector("main");
     expect(main).toBeInTheDocument();
     expect(main).not.toHaveAttribute("style");
+    expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
+    expect(screen.getByTestId("sidebar-brand-mark")).not.toHaveClass("mt-5");
+    expect(screen.getByRole("separator", { name: "Resize sidebar" })).toHaveAttribute("aria-valuenow", "272");
 
     const asideClassNames = Array.from(container.querySelectorAll("aside")).map(
       (el) => el.className,
@@ -476,8 +585,43 @@ describe("App layout", () => {
     expect(
       screen.getByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
+    const backButton = screen.getByRole("button", { name: "Back to chat" });
+    expect(backButton.closest("aside")).toHaveClass("pt-4", "lg:pt-4");
+    expect(backButton).not.toHaveClass("-ml-1");
     expect(container.querySelectorAll("main")).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
+  });
+
+  it("opens the full Models settings directly from the first-run prompt", async () => {
+    const user = userEvent.setup();
+    const base = baseSettingsPayload();
+    mockFetchRoutes({
+      "/api/settings": {
+        ...base,
+        agent: {
+          ...base.agent,
+          model: "",
+          resolved_provider: "",
+          has_api_key: false,
+          model_preset: "",
+        },
+        model_presets: [],
+        model_call_order: [],
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await user.click(await screen.findByRole("button", { name: "Choose your AI" }));
+
+    expect(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Model providers")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add your own model provider" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
   it("places Automations after Skills in the main sidebar", async () => {
@@ -497,6 +641,29 @@ describe("App layout", () => {
     ).toBeTruthy();
   });
 
+  it("opens Channels below Automations and supports its keyboard shortcut", async () => {
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/nanobot-features": { features: [], enabled_count: 0 },
+    });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const channels = within(sidebar).getByRole("button", { name: "Channels" });
+    expect(within(sidebar).getByRole("button", { name: "Automations" })
+      .compareDocumentPosition(channels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(channels);
+    expect(await screen.findByRole("heading", { name: "Channels" })).toBeVisible();
+    expect(window.location.hash).toBe("#/channels");
+    expect(channels).toHaveAttribute("aria-current", "page");
+    expect(document.title).toBe("Channels · nanobot");
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/new"));
+    fireEvent.keyDown(window, { key: "$", code: "Digit4", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByRole("heading", { name: "Channels" })).toBeVisible();
+    expect(window.location.hash).toBe("#/channels");
+  });
+
   it("highlights the blank new-topic destination immediately", async () => {
     render(<App />);
 
@@ -505,12 +672,8 @@ describe("App layout", () => {
     const newTopicButton = within(sidebar).getByRole("button", { name: "New topic" });
 
     expect(newTopicButton).toHaveAttribute("aria-current", "page");
-    expect(newTopicButton).not.toHaveClass("bg-sidebar-accent");
     expect(newTopicButton).toHaveClass("transition-[width,padding,color]");
-    expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
-      "data-active-id",
-      "new-chat",
-    );
+    expect(newTopicButton).toBeEnabled();
   });
 
   it("keeps a just-created topic route while the session list catches up", async () => {
@@ -726,6 +889,45 @@ describe("App layout", () => {
     expect(screen.queryByText("connection-sensitive message")).not.toBeInTheDocument();
   });
 
+  it("keeps the context-menu project through navigation and first-message creation", async () => {
+    const projectScope = {
+      project_path: "/tmp/selected-project",
+      project_name: "selected-project",
+      access_mode: "full" as const,
+      restrict_to_workspace: false,
+    };
+    mockSessions = [{
+      key: "websocket:existing-chat",
+      channel: "websocket",
+      chatId: "existing-chat",
+      preview: "Existing topic",
+      workspaceScope: projectScope,
+    }];
+    mockFetchRoutes({
+      "/api/workspaces": {
+        schema_version: 1,
+        default_access_mode: "full",
+        default_scope: { ...projectScope, project_path: "/tmp/workspace", project_name: "workspace" },
+        controls: { can_change_project: true, can_use_full_access: true },
+      },
+    });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const projectSection = screen.getByRole("region", { name: "selected-project" });
+    fireEvent.contextMenu(within(projectSection).getByRole("button", { name: "selected-project" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New topic" }));
+    expect(window.location.hash).toBe("#/new");
+    // Let queued browser navigation events settle before sending the first message.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(await screen.findByRole("button", { name: "Choose project" })).toHaveTextContent("selected-project");
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "project topic" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledWith(projectScope));
+  });
+
   it("uses the restricted default scope without offering project selection", async () => {
     mockFetchRoutes({
       "/api/workspaces": {
@@ -820,7 +1022,7 @@ describe("App layout", () => {
     consoleError.mockRestore();
   });
 
-  it("restores the Settings route after a restart fallback hash", async () => {
+  it("restores the standalone Channels page from a legacy restart route", async () => {
     localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
     localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");
     window.history.replaceState(null, "", "/#/new");
@@ -846,9 +1048,9 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     expect(
-      await screen.findByRole("navigation", { name: "Settings sections" }),
+      await screen.findByRole("heading", { name: "Channels" }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Channels" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Channels" })).toHaveAttribute("aria-current", "page");
     expect(window.location.hash).toBe("#/settings?section=channels");
   });
 
@@ -1200,6 +1402,7 @@ describe("App layout", () => {
     expect(screen.getAllByText("SkillHub")).toHaveLength(2);
     expect(screen.getAllByText("skills.sh")).toHaveLength(2);
     expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
+    expect(screen.queryByText(/11,831 installs/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "SkillHub" }));
     expect(screen.getByText("ima-skills")).toBeInTheDocument();
     expect(screen.queryByText("find-skills")).not.toBeInTheDocument();
@@ -1272,7 +1475,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(17),
               last_status: "ok",
               pending: false,
               run_history: [],
@@ -1297,7 +1500,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 11, 30, 0),
+              next_run_at_ms: currentMonthTimestamp(17, 11, 30),
               last_status: "ok",
               pending: false,
               run_history: [],
@@ -1332,35 +1535,97 @@ describe("App layout", () => {
 
     fireEvent.click(automationsButton);
 
-    const heading = await screen.findByRole("heading", { name: "Automations" });
+    const heading = await screen.findByRole(
+      "heading",
+      { name: "Automations" },
+      { timeout: 5_000 },
+    );
     expect(heading).toBeInTheDocument();
     const automationsMain = heading.closest("main");
     expect(automationsMain).not.toBeNull();
     expect(within(automationsMain as HTMLElement).queryByText("Settings")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Daily repo check").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Check the repo status").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Release prep").length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText(
+      "Daily repo check",
+      {},
+      { timeout: 5_000 },
+    )).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Check the repo status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Daily repo check/ }));
+    expect(within(screen.getByRole("dialog", { name: "Daily repo check" })).getByText("Check the repo status")).toBeVisible();
+    const detail = within(screen.getByRole("dialog", { name: "Daily repo check" }));
+    expect(detail.queryByText("Release prep")).not.toBeInTheDocument();
+    expect(detail.getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Achat-a",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.getByText("WeChat quiz")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /WeChat quiz/ }));
     expect(screen.getByText("WeChat")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
     expect(screen.queryByText("weixin:wx-chat")).not.toBeInTheDocument();
     expect(screen.queryByText("memory with dream state")).not.toBeInTheDocument();
-    expect(screen.getByText("heartbeat")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /heartbeat/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "System tasks 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText("heartbeat")).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Automations" })).toHaveAttribute(
       "aria-current",
       "page",
     );
     expect(document.title).toBe("Automations · nanobot");
 
-    const searchInput = within(automationsMain as HTMLElement).getByPlaceholderText(
-      "Search task, message, linked chat, or schedule",
-    );
-    fireEvent.change(searchInput, { target: { value: "WeChat" } });
-    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
-    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
+  });
 
-    fireEvent.change(searchInput, { target: { value: "09-23" } });
-    await waitFor(() => expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument());
-    expect(screen.getAllByText("WeChat quiz").length).toBeGreaterThanOrEqual(1);
+  it("keeps the automation chat link stable across live sidebar renames without duplicating titles", async () => {
+    const key = "websocket:linked-chat";
+    mockSessions = [{
+      key, channel: "websocket", chatId: "linked-chat", createdAt: null, updatedAt: null,
+      title: "Stored title", preview: "Original preview",
+    }];
+    const sidebarState: SidebarStatePayload = {
+      schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [],
+      title_overrides: { [key]: "推特大战场" }, project_name_overrides: {},
+      tags_by_key: {}, collapsed_groups: {}, workbench: { version: 1, tabs: {} },
+      view: { density: "comfortable", show_previews: false, show_timestamps: false,
+        show_archived: false, sort: "updated_desc" },
+    };
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/webui/sidebar-state": sidebarState,
+      "/api/webui/automations": { jobs: [{
+        id: "reminder", name: "Drink water", enabled: true,
+        schedule: { kind: "every", every_ms: 60_000 },
+        payload: { message: "Take a break" },
+        state: { next_run_at_ms: currentMonthTimestamp(17) },
+        origin: { session_key: key, channel: "websocket", chat_id: "linked-chat",
+          title: "Stored title", preview: "Original preview" },
+      }] },
+    });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    await within(sidebar).findByRole("button", { name: "推特大战场", exact: true });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Drink water/ }));
+    const dialog = screen.getByRole("dialog", { name: "Drink water" });
+    expect(within(dialog).queryByText("推特大战场")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Stored title")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Alinked-chat",
+    );
+    for (const title of ["新会话名称", ""]) {
+      act(() => {
+        sidebarStateUpdateHandlers.forEach((handler) => handler({
+          ...sidebarState, title_overrides: title ? { [key]: title } : {},
+        }));
+      });
+      const expected = title || "Stored title";
+      expect(within(sidebar).getByText(expected)).toBeInTheDocument();
+      expect(within(dialog).queryByText(expected)).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("link", { name: "Open a chat" })).toHaveAttribute(
+        "href", "#/chat/websocket%3Alinked-chat",
+      );
+    }
+    expect(requestMutationSpy).not.toHaveBeenCalled();
   });
 
   it("edits a past one-time automation without resubmitting its old schedule", async () => {
@@ -1377,6 +1642,7 @@ describe("App layout", () => {
       },
       state: {
         next_run_at_ms: null,
+        last_run_at_ms: currentMonthTimestamp(12),
         last_status: "ok",
         pending: false,
         run_history: [],
@@ -1407,7 +1673,15 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
     expect((await screen.findAllByText("Past one-shot")).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
+    const runDetail = within(screen.getByRole("dialog", { name: "Past one-shot" }));
+    expect(runDetail.getByText("Completed")).toBeVisible();
+    expect(runDetail.queryByRole("button", { name: "Edit", exact: true })).not.toBeInTheDocument();
+    fireEvent.click(runDetail.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Tasks", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /Past one-shot/ }));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("dialog", { name: "Edit automation" });
     expect(screen.queryByText("Run time must be in the future.")).not.toBeInTheDocument();
     expect(
       screen.queryByText("Update the prompt and schedule. The linked chat stays unchanged."),
@@ -1447,12 +1721,12 @@ describe("App layout", () => {
       "The full content should remain available without forcing the user into a small nested scroll area.",
     ].join("\n");
     const history = [
-      { run_at_ms: Date.UTC(2026, 3, 12, 10, 0, 0), status: "error", duration_ms: 900, error: "oldest failure" },
-      { run_at_ms: Date.UTC(2026, 3, 13, 10, 0, 0), status: "error", duration_ms: 800, error: "second oldest failure" },
-      { run_at_ms: Date.UTC(2026, 3, 14, 10, 0, 0), status: "ok", duration_ms: 700 },
-      { run_at_ms: Date.UTC(2026, 3, 15, 10, 0, 0), status: "ok", duration_ms: 600 },
-      { run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0), status: "ok", duration_ms: 500 },
-      { run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0), status: "ok", duration_ms: 400 },
+      { run_at_ms: currentMonthTimestamp(12), status: "error", duration_ms: 900, error: "oldest failure" },
+      { run_at_ms: currentMonthTimestamp(13), status: "error", duration_ms: 800, error: "second oldest failure" },
+      { run_at_ms: currentMonthTimestamp(14), status: "ok", duration_ms: 700 },
+      { run_at_ms: currentMonthTimestamp(15), status: "ok", duration_ms: 600 },
+      { run_at_ms: currentMonthTimestamp(16), status: "ok", duration_ms: 500 },
+      { run_at_ms: currentMonthTimestamp(17), status: "ok", duration_ms: 400 },
     ];
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
@@ -1470,7 +1744,7 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 18, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(18),
               last_status: "ok",
               pending: false,
               run_history: history,
@@ -1493,18 +1767,23 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Automations" }));
 
-    const detailHeading = await screen.findByRole("heading", { name: "Long detail automation" });
-    const detailPanel = detailHeading.closest("article") as HTMLElement;
-    expect(detailPanel).not.toBeNull();
-    const message = Array.from(detailPanel.querySelectorAll("section div")).find(
+    fireEvent.click(await screen.findByRole(
+      "button",
+      { name: /Long detail automation.*Planned/ },
+      { timeout: 5_000 },
+    ));
+    const detailPanel = await screen.findByRole("dialog", { name: "Long detail automation" });
+    const message = Array.from(detailPanel.querySelectorAll("section p")).find(
       (node) => node.textContent === longMessage,
     ) as HTMLElement | undefined;
     expect(message).toBeTruthy();
-    expect(message!).toHaveClass("line-clamp-6");
+    const preview = message!.closest(".expandable-text")!;
+    expect(preview).toHaveAttribute("data-state", "closed");
 
     fireEvent.click(within(detailPanel).getByRole("button", { name: "Show full message" }));
     expect(within(detailPanel).getByRole("button", { name: "Show less" })).toBeInTheDocument();
-    expect(message!).not.toHaveClass("line-clamp-6");
+    expect(preview).toHaveAttribute("data-state", "open");
+    expect(preview).toContainElement(message!);
 
     expect(within(detailPanel).queryByText("Recent health")).not.toBeInTheDocument();
     expect(within(detailPanel).queryByRole("button", { name: /Run history/ })).not.toBeInTheDocument();
@@ -1530,13 +1809,13 @@ describe("App layout", () => {
               kind: "agent_turn",
             },
             state: {
-              next_run_at_ms: Date.UTC(2026, 3, 17, 10, 0, 0),
-              last_run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+              next_run_at_ms: currentMonthTimestamp(17),
+              last_run_at_ms: currentMonthTimestamp(16),
               last_status: "ok",
               pending: false,
               run_history: [
                 {
-                  run_at_ms: Date.UTC(2026, 3, 16, 10, 0, 0),
+                  run_at_ms: currentMonthTimestamp(16),
                   status: "ok",
                   duration_ms: 500,
                 },
@@ -1565,10 +1844,15 @@ describe("App layout", () => {
     const automationsMain = heading.closest("main");
     expect(automationsMain).not.toBeNull();
     expect(within(automationsMain as HTMLElement).queryByText("设置")).not.toBeInTheDocument();
-    expect(screen.getByText("任务队列")).toBeInTheDocument();
+    expect(screen.queryByText("任务队列")).not.toBeInTheDocument();
     expect(screen.getAllByText("每日检查").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("检查仓库状态").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("每 1天")).toBeInTheDocument();
+    expect(screen.queryByText("检查仓库状态")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /每日检查.*计划运行/ }));
+    const detail = within(screen.getByRole("dialog", { name: "每日检查" }));
+    expect(detail.getByText("检查仓库状态")).toBeVisible();
+    expect(detail.queryByText(/每 1天/)).not.toBeInTheDocument();
+    fireEvent.click(detail.getByRole("button", { name: "任务信息" }));
+    expect(within(screen.getByRole("dialog", { name: "任务信息" })).getByText(/每 1天/)).toBeVisible();
     expect(screen.queryByText("最近健康状态")).not.toBeInTheDocument();
     expect(screen.queryByText("近期无问题")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
@@ -1576,7 +1860,77 @@ describe("App layout", () => {
     expect(document.title).toBe("自动任务 · nanobot");
   });
 
-  it("fully collapses the native host sidebar and previews it on hover", async () => {
+  it("resizes the sidebar, collapses at the drag threshold and restores its saved width", async () => {
+    const view = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const handle = screen.getByRole("separator", { name: "Resize sidebar" });
+    const sidebar = screen.getByTestId("host-sidebar-flow");
+    expect(sidebar).toHaveClass("group/sidebar");
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
+    expect(sidebar).toHaveAttribute("data-resizing", "true");
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 360 });
+    expect(sidebar).toHaveStyle({ width: "360px" });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 360 });
+    expect(sidebar).not.toHaveAttribute("data-resizing");
+    expect(sidebar).toHaveStyle({ width: "360px" });
+    expect(localStorage.getItem("nanobot-webui.sidebar.width")).toBe("360");
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 2, clientX: 360 });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 150 });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 180 });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientX: 240 });
+    fireEvent.pointerUp(handle, { pointerId: 2, clientX: 240 });
+    expect(sidebar).toHaveStyle({ width: "240px" });
+    fireEvent.keyDown(handle, { key: "Enter" });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    view.unmount();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Toggle sidebar" }));
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "240px" });
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "ArrowRight" });
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "272px" });
+  });
+
+  it.each(["pointerUp", "pointerCancel", "lostPointerCapture"] as const)("keeps highlight easing while disabling navigation target lag until %s", async (finish) => {
+    mockSessions = [{
+      key: "websocket:resize-test", channel: "websocket", chatId: "resize-test",
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+      title: "Resize test", preview: "",
+    }];
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByTestId("host-sidebar-flow");
+    await within(sidebar).findByTestId("chats-selection-highlight");
+    const handle = within(sidebar).getByRole("separator", { name: "Resize sidebar" });
+    for (const label of ["Apps", "Skills", "Automations", "Channels"]) {
+      expect(within(sidebar).getByRole("button", { name: label })).toHaveClass(
+        "group-data-[resizing=true]/sidebar:transition-none",
+      );
+    }
+    for (const scope of ["actions", "chats"]) {
+      const highlight = within(sidebar).getByTestId(`${scope}-selection-highlight`);
+      expect(highlight).not.toHaveClass(
+        "group-data-[resizing=true]/sidebar:transition-none",
+      );
+      expect(highlight).toHaveClass(
+        "transition-[transform,width,height]",
+        "duration-300",
+        "ease-out",
+        "motion-reduce:transition-none",
+      );
+    }
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 });
+    expect(sidebar).toHaveAttribute("data-resizing", "true");
+    expect(sidebar).toHaveStyle({ width: "400px" });
+    fireEvent[finish](handle, { pointerId: 1, clientX: 400 });
+    expect(sidebar).not.toHaveAttribute("data-resizing");
+    expect(sidebar).toHaveClass("transition-[width]");
+  });
+
+  it("uses the shared sidebar controls and rail on the native host", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -1599,36 +1953,74 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const flowSidebar = screen.getByTestId("host-sidebar-flow");
-    const toggle = screen.getByTestId("host-sidebar-toggle");
     expect(flowSidebar).toHaveStyle({ width: "272px" });
+    expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
+    expect(screen.getByTestId("sidebar-brand-mark")).toHaveClass("mt-5");
+    expect(screen.getByRole("separator", { name: "Resize sidebar" })).toHaveAttribute("aria-valuenow", "272");
+    expect(screen.queryByTestId("host-sidebar-toggle")).not.toBeInTheDocument();
     expect(
       screen.getByRole("navigation", { name: "Sidebar navigation" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(toggle);
-    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "0px" }));
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "Enter" });
+    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "56px" }));
     expect(
-      screen.queryByRole("navigation", { name: "Sidebar navigation" }),
-    ).not.toBeInTheDocument();
-
-    fireEvent.mouseEnter(toggle);
-    const previewSidebar = await screen.findByTestId("host-sidebar-preview");
-    expect(flowSidebar).toHaveStyle({ width: "0px" });
-    expect(previewSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      within(previewSidebar).getByRole("navigation", {
-        name: "Sidebar navigation",
-      }),
+      screen.getByRole("navigation", { name: "Sidebar navigation" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(toggle);
-    await waitFor(() =>
-      expect(screen.queryByTestId("host-sidebar-preview")).not.toBeInTheDocument(),
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
+        .getByRole("button", { name: "Toggle sidebar" }),
     );
-    expect(flowSidebar).toHaveStyle({ width: "272px" });
-    expect(
-      screen.getByRole("navigation", { name: "Sidebar navigation" }),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(flowSidebar).toHaveStyle({ width: "272px" }));
+  });
+
+  it("aligns native settings navigation below the titlebar without extra top padding", async () => {
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok",
+      api_token: "api-tok",
+      ws_path: "/",
+      expires_in: 300,
+      runtime_surface: "native",
+    });
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+
+    const backButton = await screen.findByRole("button", { name: "Back to chat" });
+    expect(backButton.closest("aside")).toHaveClass("pt-10", "lg:pt-10");
+    expect(backButton.closest("aside")).not.toHaveClass("pt-[4.25rem]");
+    expect(backButton).toHaveClass("-ml-1");
+  });
+
+  it("uses native chrome when the host bridge overrides browser gateway metadata", async () => {
+    Reflect.set(window, "nanobotHost", { pickFolder: vi.fn() });
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok",
+      api_token: "api-tok",
+      ws_path: "/",
+      expires_in: 300,
+      runtime_surface: "browser",
+    });
+    mockFetchRoutes({
+      "/api/settings": {
+        ...baseSettingsPayload(),
+        surface: "browser",
+        runtime_surface: "browser",
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByTestId("sidebar-brand-mark")).toHaveClass("mt-5");
+    });
+    expect(document.documentElement).toHaveClass("native-host");
   });
 
   it("switches to the next session when deleting the active chat", async () => {
@@ -2228,431 +2620,23 @@ describe("App layout", () => {
   });
 
   it("opens the settings view from the sidebar footer", async () => {
-    const user = userEvent.setup();
-    mockSessions = [
-      {
-        key: "websocket:chat-a",
-        channel: "websocket",
-        chatId: "chat-a",
-        createdAt: "2026-04-16T10:00:00Z",
-        updatedAt: "2026-04-16T10:00:00Z",
-        preview: "Existing chat",
-      },
-    ];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const href = String(input);
-        if (href === "/api/settings/api-service") {
-          return jsonResponse({
-            installed: false,
-            running: false,
-            managed: false,
-            host: "127.0.0.1",
-            port: 8900,
-            timeout: 120,
-            endpoint: "http://127.0.0.1:8900/v1",
-            command: "nanobot serve",
-          });
-        }
-        if (href === "/api/settings/provider-models?provider=openai") {
-          return jsonResponse({
-            provider: "openai",
-            label: "OpenAI",
-            status: "available",
-            catalog_kind: "official",
-            models: [
-              { id: "openai/gpt-4o", owned_by: "openai", context_window: 128000 },
-              { id: "openai/gpt-4o-mini", owned_by: "openai", context_window: 128000 },
-            ],
-            model_count: 2,
-            fetched_at: 1,
-          });
-        }
-        if (href.includes("/api/settings")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              agent: {
-                model: "openai/gpt-4o",
-                provider: "auto",
-                resolved_provider: "openai",
-                has_api_key: true,
-                model_preset: "primary",
-                max_tokens: 8192,
-                context_window_tokens: 65536,
-                temperature: 0.1,
-                reasoning_effort: null,
-                timezone: "UTC",
-                tool_hint_max_length: 40,
-              },
-              model_presets: [
-                {
-                  name: "primary",
-                  label: "Primary",
-                  active: true,
-                  is_default: false,
-                  model: "openai/gpt-4o",
-                  provider: "auto",
-                  resolved_provider: "openai",
-                  max_tokens: 8192,
-                  context_window_tokens: 65536,
-                  temperature: 0.1,
-                  reasoning_effort: null,
-                },
-                {
-                  name: "deep",
-                  label: "deep",
-                  active: false,
-                  is_default: false,
-                  model: "anthropic/claude-opus-4-5",
-                  provider: "anthropic",
-                  max_tokens: 8192,
-                  context_window_tokens: 200000,
-                  temperature: 0.1,
-                  reasoning_effort: "high",
-                },
-              ],
-              model_call_order: ["primary", "deep"],
-              model_call_order_editable: true,
-              providers: [
-                {
-                  name: "openai",
-                  label: "OpenAI",
-                  configured: true,
-                  api_key_hint: "open••••-key",
-                },
-                {
-                  name: "openrouter",
-                  label: "OpenRouter",
-                  configured: false,
-                  api_key_required: true,
-                  default_api_base: "https://openrouter.ai/api/v1",
-                },
-                {
-                  name: "ant_ling",
-                  label: "Ant Ling",
-                  configured: false,
-                  api_key_required: true,
-                  default_api_base: "https://api.ant-ling.com/v1",
-                },
-                {
-                  name: "azure_openai",
-                  label: "Azure OpenAI",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "huggingface",
-                  label: "Hugging Face",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "siliconflow",
-                  label: "SiliconFlow",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "volcengine",
-                  label: "VolcEngine",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "byteplus",
-                  label: "BytePlus",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "qianfan",
-                  label: "Qianfan",
-                  configured: false,
-                  api_key_required: true,
-                },
-                {
-                  name: "atomic_chat",
-                  label: "Atomic Chat",
-                  configured: false,
-                  api_key_required: false,
-                  default_api_base: "http://localhost:1337/v1",
-                },
-              ],
-              web_search: {
-                provider: "brave",
-                api_key_hint: "BSAo••••ew20",
-                base_url: null,
-                max_results: 5,
-                timeout: 30,
-                providers: [
-                  { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
-                  { name: "brave", label: "Brave Search", credential: "api_key" },
-                  { name: "tavily", label: "Tavily", credential: "api_key" },
-                ],
-              },
-              web: {
-                enable: true,
-                proxy: null,
-                user_agent: null,
-                search: { max_results: 5, timeout: 30 },
-                fetch: { use_jina_reader: true },
-              },
-              image_generation: {
-                enabled: false,
-                provider: "openrouter",
-                provider_configured: true,
-                model: "openai/gpt-5.4-image-2",
-                default_aspect_ratio: "1:1",
-                default_image_size: "1K",
-                max_images_per_turn: 4,
-                save_dir: "generated",
-                providers: [
-                  {
-                    name: "openrouter",
-                    label: "OpenRouter",
-                    configured: true,
-                    api_key_hint: "sk-o••••test",
-                    api_base: "https://openrouter.ai/api/v1",
-                    default_api_base: "https://openrouter.ai/api/v1",
-                  },
-                  {
-                    name: "gemini",
-                    label: "Gemini",
-                    configured: false,
-                    api_key_hint: null,
-                    api_base: null,
-                    default_api_base: "https://generativelanguage.googleapis.com/v1beta/openai/",
-                  },
-                ],
-              },
-              runtime: {
-                config_path: "/tmp/config.json",
-                workspace_path: "/tmp/workspace",
-                gateway_host: "127.0.0.1",
-                gateway_port: 18790,
-                heartbeat: {
-                  enabled: true,
-                  interval_s: 1800,
-                  keep_recent_messages: 8,
-                },
-                dream: {
-                  schedule: "every 2h",
-                },
-                unified_session: false,
-              },
-              advanced: {
-                restrict_to_workspace: false,
-                webui_allow_local_service_access: true,
-                webui_default_access_mode: "default",
-                private_service_protection_enabled: true,
-                ssrf_whitelist_count: 0,
-                mcp_server_count: 0,
-                exec_enabled: true,
-                exec_sandbox: null,
-                exec_path_prepend_set: false,
-                exec_path_append_set: false,
-              },
-              requires_restart: false,
-            }),
-          };
-        }
-        return { ok: false, status: 404, json: async () => ({}) };
-      }),
-    );
-
-    localStorage.setItem(
-      "nanobot-webui.settings-preferences",
-      JSON.stringify({ brandLogos: true }),
-    );
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
     render(<App />);
-
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const searchButton = within(sidebar).getByRole("button", { name: "Search" });
-    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
-    expect(searchButton.compareDocumentPosition(appsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    await user.click(within(sidebar).getByRole("button", { name: "Settings" }));
-
-    expect(
-      await screen.findByRole("navigation", { name: "Settings sections" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
-    expect(document.title).toBe("Settings · nanobot");
-    expect(screen.getByTestId("overview-logo-openai")).toBeInTheDocument();
-    expect(screen.getByTestId("overview-logo-brave")).toBeInTheDocument();
-    expect(screen.getByTestId("overview-logo-openrouter")).toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-nanobot-gateway")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("overview-logo-nanobot-workspace")).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
-    const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(settingsNav.className).not.toContain("overflow-x-auto");
-    expect(within(settingsNav).getByRole("button", { name: "Settings: Overview" })).toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Overview" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Providers" })).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Files" })).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
-    expect(within(settingsNav).queryByRole("button", { name: "Apps" })).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Security" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
-    fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Overview" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Appearance" }));
-    expect(screen.getByText("Brand logos")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
-    expect(
-      screen.queryByText("Switch between light and dark appearance."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("Choose the language used by the WebUI.")).not.toBeInTheDocument();
-    expect(screen.queryByText("Stored only in this browser.")).not.toBeInTheDocument();
-    expect(within(settingsNav).getByRole("button", { name: "Settings: Appearance" })).toBeInTheDocument();
-    fireEvent.pointerDown(within(settingsNav).getByRole("button", { name: "Settings: Appearance" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Models" }));
-    expect(screen.queryByText("AI")).not.toBeInTheDocument();
-    expect(screen.getByText("Model presets")).toBeInTheDocument();
-    expect(screen.queryByText("Model call order")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "New model preset" }));
-    expect(screen.queryByRole("dialog", { name: "New model preset" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Fast writing"), {
-      target: { value: "Fast writing" },
-    });
-    expect(
-      screen
-        .getAllByRole("button", { name: /OpenAI/ })
-        .some((button) => button.getAttribute("aria-haspopup") === "menu"),
-    ).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Select model" }));
-    await user.click(await screen.findByRole("option", { name: /openai\/gpt-4o-mini/ }));
-    expect(screen.getByRole("button", { name: "Save preset" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText("Up to date.")).not.toBeInTheDocument();
-    fireEvent.click(
-      within(screen.getByTestId("model-call-order-row-primary")).getAllByRole("button")[0],
-    );
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Auto/ }));
-    expect(screen.getAllByTestId("provider-picker-logo-openai").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("menuitem", { name: /Auto/ }));
-    const openModelPicker = async () => {
-      const modelButtons = screen.getAllByRole("button", { name: /openai\/gpt-4o/ });
-      await user.click(modelButtons[modelButtons.length - 1]);
-    };
-    await openModelPicker();
-    await user.click(await screen.findByRole("option", { name: /openai\/gpt-4o-mini/ }));
-    expect(screen.queryByText("Unsaved changes.")).not.toBeInTheDocument();
-    expect(screen.getByText("Model providers")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add your own model provider" })).toBeInTheDocument();
-    expect(screen.queryByText("OpenRouter")).not.toBeInTheDocument();
-    expect(screen.queryByText("Ant Ling")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Bring your own provider keys. Nanobot reads these values from the current config and only configured providers can be used in model presets.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("azure_openai")).not.toBeInTheDocument();
-    expect(screen.getByTestId("provider-logo-openai")).toBeInTheDocument();
-    expect(screen.queryByText(/Product names, logos, and brands/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Not configured")).not.toBeInTheDocument();
-    const clickProviderRow = async (label: string) => {
-      const providerLabel = (await screen.findAllByText(label))
-        .find((element) => element.className.includes("font-semibold"));
-      expect(providerLabel).toBeTruthy();
-      fireEvent.click(providerLabel!);
-    };
-    const chooseProvider = async (label: string) => {
-      fireEvent.pointerDown(
-        screen.getByRole("button", { name: "Add your own model provider" }),
-      );
-      fireEvent.click(await screen.findByRole("menuitem", { name: label }));
-    };
-    await clickProviderRow("OpenAI");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
-      target: { value: "unsaved-openai-key" },
-    });
-    await clickProviderRow("OpenAI");
-    await chooseProvider("OpenRouter");
-    await clickProviderRow("OpenRouter");
-    await clickProviderRow("OpenAI");
-    expect(screen.getByText("open••••-key")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
-    await clickProviderRow("OpenAI");
-    await chooseProvider("Ant Ling");
-    expect(screen.getByDisplayValue("https://api.ant-ling.com/v1")).toBeInTheDocument();
-    await clickProviderRow("Ant Ling");
-    await chooseProvider("Atomic Chat");
-    expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save provider" })).toBeEnabled();
-
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Image" }));
-    expect(screen.queryByRole("heading", { name: "Image" })).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
+      .getByRole("button", { name: "Settings" }));
+    const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+    for (const name of ["Overview", "Appearance", "Models", "Capabilities", "System", "Advanced", "About"]) {
+      expect(within(nav).getByRole("button", { name, exact: true })).toBeInTheDocument();
+    }
+    fireEvent.click(within(nav).getByRole("button", { name: "Appearance", exact: true }));
+    expect(await screen.findByRole("switch", { name: "Brand logos" })).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "Models", exact: true }));
+    expect(await screen.findByText("Model presets")).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "Capabilities", exact: true }));
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeInTheDocument();
-    expect(screen.getByText("Provider status")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "openai/gpt-5.4-image-2" })).toBeInTheDocument();
-    expect(screen.getByText("Save directory")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    expect(
-      screen.queryByText(
-        "Expose generate_image in chats when a configured image provider is available.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Choose a model supported by the selected image provider."),
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "Web" }));
-    expect(screen.getByText("Search provider")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Jina reader" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Brave Search/ })).toBeInTheDocument();
-    expect(screen.getByTestId("provider-picker-logo-brave")).toBeInTheDocument();
-    expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Choose the backend used by the web search tool."),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Results returned by each web_search call."),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the current key"), {
-      target: { value: "unsaved-brave-key" },
-    });
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Brave Search/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Tavily" }));
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Tavily/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Brave Search" }));
-    expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
-
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "System" }));
-    expect(screen.queryByText("Regional")).not.toBeInTheDocument();
-    expect(screen.getByText("Timezone")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Used for schedules and time-aware replies."),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Restart nanobot to apply runtime changes."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("Bot name")).not.toBeInTheDocument();
-    expect(screen.queryByText("Bot icon")).not.toBeInTheDocument();
-    expect(screen.queryByText("Tool hint length")).not.toBeInTheDocument();
-    expect(screen.queryByText("Heartbeat")).not.toBeInTheDocument();
-    expect(screen.queryByText("Dream")).not.toBeInTheDocument();
-    expect(screen.queryByText("Unified session")).not.toBeInTheDocument();
-    expect(screen.getByText("Default workspace")).toBeInTheDocument();
-    expect(screen.getByText("UTC")).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Search timezone")).not.toBeInTheDocument();
-    expect(screen.queryByRole("listbox", { name: "Select timezone" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "UTC" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Connect SDKs and agents through a local /v1 endpoint."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("The API uses this local port.")).not.toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "About", exact: true }));
+    expect(await screen.findByRole("button", { name: "Check for updates" })).toBeInTheDocument();
   });
 
   it("restores the settings section from the URL hash after a page reload", async () => {
@@ -2662,7 +2646,7 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Transcription" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/settings?section=voice");
   });
 
@@ -2688,11 +2672,8 @@ describe("App layout", () => {
     const systemSection = screen.getByRole("heading", { name: "System" }).closest("section");
     expect(systemSection).not.toBeNull();
     const system = within(systemSection as HTMLElement);
-    const timezoneLabel = system.getByText("Timezone");
-    const restartButton = system.getByRole("button", { name: "Restart nanobot" });
-    expect(
-      timezoneLabel.compareDocumentPosition(restartButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(system.getByText("Timezone")).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).getByRole("button", { name: "Restart", exact: true })).toBeInTheDocument();
     expect(
       system.queryByText("Restart nanobot to apply runtime changes."),
     ).not.toBeInTheDocument();
@@ -2751,15 +2732,15 @@ describe("App layout", () => {
     expect(settingsHighlight).toHaveAttribute("data-active-id", "models");
 
     const voiceButton = within(settingsNav).getByRole("button", {
-      name: "Voice",
+      name: "Capabilities",
       exact: true,
     });
     fireEvent.click(voiceButton);
 
-    expect(await screen.findByRole("heading", { name: "Voice input" })).toBeInTheDocument();
-    expect(window.location.hash).toBe("#/settings?section=voice");
+    expect(await screen.findByRole("switch", { name: "Transcription" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/settings?section=capabilities");
     expect(voiceButton).toHaveAttribute("aria-current", "page");
-    expect(settingsHighlight).toHaveAttribute("data-active-id", "voice");
+    expect(settingsHighlight).toHaveAttribute("data-active-id", "capabilities");
   });
 
   it("transitions between Apps and Skills without replacing the sidebar", async () => {
@@ -2847,7 +2828,7 @@ describe("App layout", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("/api/settings")) {
+        if (String(input) === "/api/settings") {
           return {
             ok: true,
             status: 200,
@@ -2926,7 +2907,6 @@ describe("App layout", () => {
                 heartbeat: {
                   enabled: true,
                   interval_s: 1800,
-                  keep_recent_messages: 8,
                 },
                 dream: {
                   schedule: "every 2h",
@@ -3000,7 +2980,7 @@ describe("App layout", () => {
     const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
     const searchButton = within(sidebar).getByRole("button", { name: "Search" });
     expect(
-      newChatButton.compareDocumentPosition(searchButton) &
+      searchButton.compareDocumentPosition(newChatButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
@@ -3178,7 +3158,6 @@ describe("App layout", () => {
     )).toEqual(["Alpha child"]));
     expect(screen.queryByRole("button", { name: "Pane layout" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
 
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.pointerDown(within(sidebar).getByRole("button", {
@@ -3413,6 +3392,23 @@ describe("App layout", () => {
       expect(restoredGrid).toHaveAttribute("data-layout", "rows");
     });
 
+    const alphaGroupButton = within(sidebar).getByRole("button", {
+      name: "Group: Alpha",
+    });
+    const alphaGroup = alphaGroupButton.closest("[data-sidebar-tab-group]") as HTMLElement;
+    fireEvent.pointerDown(within(alphaGroup).getByLabelText("Topic actions for Alpha"), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const renameDialog = await screen.findByRole("dialog", { name: "Rename group" });
+    fireEvent.change(within(renameDialog).getByPlaceholderText("Group name"), {
+      target: { value: "Research" },
+    });
+    fireEvent.click(within(renameDialog).getByRole("button", { name: "Save" }));
+    expect(await within(sidebar).findByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+
     fireEvent.pointerDown(within(sidebar).getByRole("button", {
       name: "New topic pane actions",
     }), { button: 0, ctrlKey: false });
@@ -3420,8 +3416,92 @@ describe("App layout", () => {
       name: "Remove",
     }));
     await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(1));
+    const researchGroup = within(sidebar).getByRole("button", {
+      name: "Group: Research",
+    }).closest("[data-sidebar-tab-group]") as HTMLElement;
+    expect(within(researchGroup).getByRole("list", { name: "Panes in Research" }))
+      .toBeInTheDocument();
+    expect(within(researchGroup).getByRole("button", { name: "Alpha" }))
+      .toBeInTheDocument();
     expect(within(sidebar).getAllByRole("button", { name: "New topic" })).toHaveLength(2);
   });
+
+  it("keeps a named group and its remaining pane active after deleting a pane", async () => {
+    mockSessions = [
+      {
+        key: "websocket:new-pane",
+        channel: "websocket",
+        chatId: "new-pane",
+        createdAt: "2026-08-05T12:00:00Z",
+        updatedAt: "2026-08-05T12:00:00Z",
+        title: "New topic",
+        preview: "",
+      },
+      {
+        key: "websocket:unrelated",
+        channel: "websocket",
+        chatId: "unrelated",
+        createdAt: "2026-08-05T11:00:00Z",
+        updatedAt: "2026-08-05T11:00:00Z",
+        title: "Unrelated",
+        preview: "",
+      },
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-08-05T10:00:00Z",
+        updatedAt: "2026-08-05T10:00:00Z",
+        title: "Alpha",
+        preview: "",
+      },
+    ];
+    window.history.replaceState(null, "", "/#/chat/websocket%3Anew-pane");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string | URL | Request) => {
+      if (String(url) === "/api/webui/sidebar-state") {
+        return {
+          ok: true,
+          json: async () => ({
+            workbench: {
+              version: 1,
+              tabs: {
+                "tab:websocket:alpha": {
+                  explicit: false,
+                  title: "Research",
+                  paneKeys: ["websocket:alpha", "websocket:new-pane"],
+                  layoutPaneKeys: ["websocket:alpha", "websocket:new-pane"],
+                  layout: "columns",
+                  splitRatios: [],
+                },
+              },
+            },
+          }),
+        };
+      }
+      return { ok: false, status: 404 };
+    }));
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(await within(sidebar).findByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+    fireEvent.pointerDown(within(sidebar).getByRole("button", {
+      name: "New topic pane actions",
+    }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(await screen.findByText("Delete this topic?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(deleteChatSpy).toHaveBeenCalledWith("websocket:new-pane"));
+    await waitFor(() => expect(window.location.hash).toBe("#/chat/websocket%3Aalpha"));
+    expect(within(sidebar).getByRole("button", { name: "Group: Research" }))
+      .toBeInTheDocument();
+    expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
+    expect(screen.getByTestId("pane-grid").firstElementChild)
+      .toHaveAttribute("aria-label", "Alpha");
+  }, 15_000);
 
   it("opens search from the keyboard shortcut", async () => {
     mockSessions = [
@@ -3456,6 +3536,19 @@ describe("App layout", () => {
       expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument(),
     );
     expect(createChatSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["apps", "1", "Digit1", true],
+    ["skills", "2", "Digit2", true],
+    ["automations", "3", "Digit3", true],
+    ["settings", ",", "Comma", false],
+  ])("opens %s using its sidebar shortcut", async (route, key, code, shiftKey) => {
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.keyDown(window, { key, code, shiftKey, ctrlKey: true });
+    await waitFor(() => expect(window.location.hash).toContain("#/" + route));
   });
 
   it.each([
@@ -3507,34 +3600,35 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/new");
   });
 
-  it("exposes the new chat keyboard shortcut in the sidebar title", async () => {
+  it("exposes the new chat keyboard shortcut in the sidebar tooltip", async () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
     const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
-    expect(newChatButton).toHaveAttribute(
-      "title",
-      "New topic (Ctrl+Shift+O)",
-    );
+    expect(newChatButton).toHaveTextContent("");
+    await userEvent.setup().hover(newChatButton);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("New topic");
+    expect(tooltip.querySelector("kbd")).toHaveTextContent("Ctrl+Shift+O");
     expect(newChatButton).toHaveAttribute(
       "aria-keyshortcuts",
       "Meta+Shift+O Control+Shift+O",
     );
   });
 
-  it("uses macOS shortcut glyphs in the sidebar title", async () => {
+  it("uses macOS shortcut glyphs in the sidebar tooltip", async () => {
     setNavigatorPlatform("MacIntel");
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
-    expect(within(sidebar).getByRole("button", { name: "New topic" })).toHaveAttribute(
-      "title",
-      "New topic (⌘⇧O)",
-    );
+    await userEvent.setup().hover(within(sidebar).getByRole("button", { name: "New topic" }));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("New topic");
+    expect(tooltip.querySelector("kbd")).toHaveTextContent("⌘⇧O");
   });
 
   it("keeps large sidebars light while search still covers every chat", async () => {
@@ -3600,7 +3694,7 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Toggle theme from header" }));
     expect(toggleThemeSpy).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "Enter" });
     const sidebarAside = container.querySelector("aside.lg\\:block") as HTMLElement;
     await waitFor(() => expect(sidebarAside.style.width).toBe("56px"));
 

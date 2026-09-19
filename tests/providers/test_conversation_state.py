@@ -9,6 +9,7 @@ import pytest
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
 )
@@ -143,6 +144,51 @@ def test_controller_uses_governed_messages_for_provider_state_delta() -> None:
     )
     assert governed_checkpoint is not None
     assert governed_checkpoint.pending_messages[-1]["content"] == "compacted result"
+
+
+def test_controller_estimates_active_state_plus_pending_delta(monkeypatch) -> None:
+    provider = _provider()
+    current_message = {"role": "user", "content": "new delta"}
+    state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="gpt-5.6",
+        version=1,
+        payload={
+            "items": [{"type": "reasoning", "encrypted_content": "opaque"}],
+            "context_tokens": 450,
+        },
+        pending_messages=[current_message],
+    )
+    controller = ProviderConversationStateController(
+        provider=provider,
+        model="gpt-5.6",
+        messages=[current_message],
+        state=state,
+    )
+    seen = {}
+
+    def estimate(_provider, _model, messages, tools):
+        seen["messages"] = messages
+        seen["tools"] = tools
+        return 100, "test-counter"
+
+    monkeypatch.setattr(
+        "nanobot.providers.conversation_state.estimate_prompt_tokens_chain",
+        estimate,
+    )
+
+    tokens = controller.estimate_request_context_tokens(
+        [current_message],
+        model_messages=[current_message],
+        tool_definitions=[{"type": "web_search"}],
+    )
+
+    assert tokens == 550
+    assert seen == {
+        "messages": [current_message],
+        "tools": [{"type": "web_search"}],
+    }
 
 
 def test_transient_response_preserves_only_durable_request_messages() -> None:
@@ -289,3 +335,23 @@ def test_independent_request_exposes_context_without_capability_check() -> None:
     assert provider_context.conversation_state is None
     assert provider_context.context_window_tokens == 200_000
     provider.supports_native_compaction.assert_not_called()
+
+
+def test_independent_request_exposes_session_id_without_token_budget() -> None:
+    provider = _provider(compact=False)
+    messages = [{"role": "user", "content": "hello"}]
+    controller = ProviderConversationStateController(
+        provider=provider,
+        model="gpt-5.6",
+        messages=messages,
+        session_id="webui:cache-test",
+    )
+
+    provider_context = controller.prepare_request(
+        messages,
+        context_window_tokens=None,
+    )
+
+    assert provider_context == ProviderCallContext(
+        session_id="webui:cache-test",
+    )

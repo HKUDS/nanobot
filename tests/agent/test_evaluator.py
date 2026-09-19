@@ -12,7 +12,7 @@ from nanobot.utils.evaluator import (
 
 class DummyProvider(LLMProvider):
     def __init__(self, responses: list[LLMResponse]):
-        super().__init__()
+        super().__init__(provider_name="dummy")
         self._responses = list(responses)
 
     async def chat(self, *args, **kwargs) -> LLMResponse:

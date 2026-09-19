@@ -45,7 +45,8 @@ outside the workspace when the gateway allows it.
 
 ## Production notes
 
-- Use `nanobot webui --background` when you do not want to keep a terminal open.
+- Use `nanobot gateway --background` when you do not want to keep a terminal open, then open the
+  configured WebUI URL in a browser.
 - Use `nanobot gateway status`, `logs`, `restart`, and `stop` to manage a
   background gateway.
 - If you expose the WebUI beyond localhost, set a token issue secret and review

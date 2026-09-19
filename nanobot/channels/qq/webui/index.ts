@@ -3,18 +3,18 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://im.qq.com/favicon.ico",
     displayName: "QQ",
     initials: "QQ",
     color: "#12B7F5",
-    logoUrl: "https://im.qq.com/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("qq"),
       fields: [
-        { key: "channels.qq.appId" },
-        { key: "channels.qq.secret" },
-        { key: "channels.qq.allowFrom" },
-        { key: "channels.qq.msgFormat" },
+        { key: "channels.qq.appId", section: "credentials" },
+        { key: "channels.qq.secret", section: "credentials" },
+        { key: "channels.qq.allowFrom", section: "access" },
+        { key: "channels.qq.msgFormat", section: "behavior" },
       ],
     },
   },

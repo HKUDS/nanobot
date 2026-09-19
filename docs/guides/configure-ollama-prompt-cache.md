@@ -179,8 +179,7 @@ Merge this preset into `~/.nanobot/config.json` and select it:
     }
   },
   "modelPresets": {
-    "ollamaPrefixStable": {
-      "label": "Ollama Llama 3.1 prefix-stable",
+    "Ollama Llama 3.1 prefix-stable": {
       "provider": "ollama",
       "model": "llama3.1:8b-prefix-stable-v1",
       "maxTokens": 2048,
@@ -190,7 +189,7 @@ Merge this preset into `~/.nanobot/config.json` and select it:
   },
   "agents": {
     "defaults": {
-      "modelPreset": "ollamaPrefixStable"
+      "modelPreset": "Ollama Llama 3.1 prefix-stable"
     }
   }
 }

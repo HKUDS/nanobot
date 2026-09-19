@@ -5,10 +5,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import i18n from "@/i18n";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
-import type { CliAppsPayload, ConnectionStatus, SettingsPayload, UIMessage } from "@/lib/types";
+import type {
+  CliAppsPayload,
+  ConnectionStatus,
+  SettingsPayload,
+  UIMessage,
+  WebuiThreadPersistedPayload,
+} from "@/lib/types";
 
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -21,6 +29,7 @@ function makeClient() {
     (modelName: string | null, modelPreset?: string | null) => void
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const runStartedAtByChatId = new Map<string, number>();
   const runGenerationByChatId = new Map<string, number>();
   const latestRunTurnIdByChatId = new Map<string, string>();
@@ -98,6 +107,13 @@ function makeClient() {
         statusHandlers.delete(handler);
       };
     },
+    onRunStatus: (handler: (chatId: string, startedAt: number | null) => void) => {
+      runStatusHandlers.add(handler);
+      for (const [chatId, startedAt] of runStartedAtByChatId) handler(chatId, startedAt);
+      return () => {
+        runStatusHandlers.delete(handler);
+      };
+    },
     onRuntimeModelUpdate: (
       handler: (modelName: string | null, modelPreset?: string | null) => void,
     ) => {
@@ -107,6 +123,7 @@ function makeClient() {
       };
     },
     getRunStartedAt: (chatId: string) => runStartedAtByChatId.get(chatId) ?? null,
+    getRunTurnId: (chatId: string) => latestRunTurnIdByChatId.get(chatId) ?? null,
     finishRunLocally: vi.fn((chatId: string) => {
       runStartedAtByChatId.delete(chatId);
       latestRunTurnIdByChatId.delete(chatId);
@@ -156,11 +173,13 @@ function makeClient() {
       ) {
         advanceRunGeneration(chatId, ev.turn_id);
         runStartedAtByChatId.set(chatId, ev.started_at);
+        for (const h of runStatusHandlers) h(chatId, ev.started_at);
       } else if (
         (ev.event === "goal_status" && ev.status === "idle")
         || ev.event === "turn_end"
       ) {
         runStartedAtByChatId.delete(chatId);
+        for (const h of runStatusHandlers) h(chatId, null);
       }
       if (ev.event === "goal_state") {
         goalStateByChatId.set(chatId, ev.goal_state);
@@ -247,6 +266,36 @@ function httpJson(body: unknown) {
     ok: true,
     status: 200,
     json: async () => body,
+  };
+}
+
+function traceDetailThread(
+  deferred: boolean,
+  answer: string,
+  revision?: string,
+): WebuiThreadPersistedPayload {
+  return {
+    schemaVersion: 3,
+    ...(revision ? { revision } : {}),
+    messages: [
+      {
+        id: "trace-shared",
+        role: "tool",
+        kind: "trace",
+        content: deferred ? "exec(…)" : 'exec({"command":"echo full"})',
+        traces: [deferred ? "exec(…)" : 'exec({"command":"echo full"})'],
+        ...(deferred
+          ? { traceDetail: { ref: "1.trace-shared", bytes: 40_000, traceCount: 1 } }
+          : {}),
+        createdAt: 1_000,
+      },
+      {
+        id: "answer-shared",
+        role: "assistant",
+        content: answer,
+        createdAt: 2_000,
+      },
+    ],
   };
 }
 
@@ -367,7 +416,6 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       heartbeat: {
         enabled: true,
         interval_s: 1800,
-        keep_recent_messages: 8,
       },
       dream: {
         schedule: "every 2h",
@@ -406,6 +454,7 @@ function settingsWithFastPreset(): SettingsPayload {
 
 describe("ThreadShell", () => {
   beforeEach(() => {
+    webuiThreadCache.clear();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -414,6 +463,318 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("surfaces and retries a deferred trace-detail request failure", async () => {
+    const client = makeClient();
+    let detailCalls = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailCalls += 1;
+        if (detailCalls === 1) {
+          return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+        }
+        return Promise.resolve(httpJson({
+          message_id: "trace-deferred",
+          content: 'exec({"command":"echo full"})',
+          traces: ['exec({"command":"echo full"})'],
+        }));
+      }
+      if (url.includes("websocket%3Atrace-detail-retry/webui-thread")) {
+        return Promise.resolve(httpJson({
+          schemaVersion: 3,
+          messages: [
+            {
+              id: "trace-deferred",
+              role: "tool",
+              kind: "trace",
+              content: "exec(…)",
+              traces: ["exec(…)"],
+              traceDetail: { ref: "1.trace-deferred", bytes: 40_000, traceCount: 1 },
+              createdAt: 1_000,
+            },
+            { id: "answer", role: "assistant", content: "done", createdAt: 2_000 },
+          ],
+        }));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("trace-detail-retry")}
+        title="Trace detail retry"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const activity = await screen.findByRole("button", { name: /Worked/ });
+    fireEvent.click(activity);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Full activity details could not be loaded.",
+    );
+    expect(detailCalls).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(detailCalls).toBe(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+
+    fireEvent.click(activity);
+    fireEvent.click(activity);
+    await act(async () => Promise.resolve());
+    expect(detailCalls).toBe(2);
+  });
+
+  it("ignores a deferred trace-detail failure after switching sessions", async () => {
+    const client = makeClient();
+    const detailUrls: string[] = [];
+    let rejectDetail!: (reason: Error) => void;
+    const pendingDetail = new Promise<Response>((_resolve, reject) => {
+      rejectDetail = reject;
+    });
+    const cachedB = traceDetailThread(false, "done-b", "rev-b");
+    webuiThreadCache.set("websocket:trace-failure-b", cachedB);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailUrls.push(url);
+        return pendingDetail;
+      }
+      if (url.includes("websocket%3Atrace-failure-a/webui-thread")) {
+        return Promise.resolve(httpJson(traceDetailThread(true, "done-a")));
+      }
+      if (url.includes("websocket%3Atrace-failure-b/webui-thread")) {
+        return Promise.resolve(httpJson(cachedB));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Trace ${chatId}`}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const { rerender } = render(view("trace-failure-a"));
+    fireEvent.click(await screen.findByRole("button", { name: /Worked/ }));
+
+    rerender(view("trace-failure-b"));
+    await screen.findByText("done-b");
+    await act(async () => rejectDetail(new Error("late failure")));
+
+    expect(detailUrls).toHaveLength(1);
+    expect(detailUrls[0]).toContain("websocket%3Atrace-failure-a");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not carry a visible trace-detail failure into a cached session", async () => {
+    const client = makeClient();
+    const detailUrls: string[] = [];
+    const cachedB = traceDetailThread(false, "cached-b", "rev-visible-b");
+    webuiThreadCache.set("websocket:visible-failure-b", cachedB);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailUrls.push(url);
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+      }
+      if (url.includes("websocket%3Avisible-failure-a/webui-thread")) {
+        return Promise.resolve(httpJson(traceDetailThread(true, "failed-a")));
+      }
+      if (url.includes("websocket%3Avisible-failure-b/webui-thread")) {
+        return Promise.resolve(httpJson(cachedB));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+
+    const view = (chatId: string) => wrap(
+      client,
+      <ThreadShell
+        session={session(chatId)}
+        title={`Trace ${chatId}`}
+        onToggleSidebar={() => {}}
+      />,
+    );
+    const { rerender } = render(view("visible-failure-a"));
+    fireEvent.click(await screen.findByRole("button", { name: /Worked/ }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    rerender(view("visible-failure-b"));
+    await screen.findByText("cached-b");
+
+    expect(detailUrls).toHaveLength(1);
+    expect(detailUrls[0]).toContain("websocket%3Avisible-failure-a");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("renders each logical round in a completed turn as its own usage bar", async () => {
+    const client = makeClient();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("websocket%3Ausage-chart/webui-thread")) {
+        return Promise.resolve(httpJson({
+          schemaVersion: 3,
+          messages: [
+            {
+              id: "assistant-1",
+              role: "assistant",
+              content: "First response",
+              turnId: "turn-1",
+              createdAt: 1_000,
+              usage: {
+                prompt_tokens: 18_000,
+                completion_tokens: 280,
+                cached_tokens: 12_000,
+                request_count: 2,
+              },
+              roundUsages: [
+                { prompt_tokens: 8_000, completion_tokens: 120, cached_tokens: 2_000 },
+                { prompt_tokens: 10_000, completion_tokens: 160, cached_tokens: 10_000 },
+              ],
+            },
+            {
+              id: "assistant-2",
+              role: "assistant",
+              content: "Second response",
+              turnId: "turn-2",
+              createdAt: 2_000,
+              contextWindowTokens: 65_536,
+              usage: {
+                prompt_tokens: 29_400,
+                completion_tokens: 416,
+                cached_tokens: 26_180,
+                context_tokens: 14_700,
+                request_count: 2,
+              },
+              roundUsages: [
+                { prompt_tokens: 13_000, completion_tokens: 180, cached_tokens: 10_000 },
+                { prompt_tokens: 16_400, completion_tokens: 236, cached_tokens: 16_180 },
+              ],
+            },
+          ] satisfies UIMessage[],
+        }));
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      });
+    }));
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("usage-chart")}
+        title="Usage chart"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={modelSettings("openai-codex/gpt-5.5", "openai_codex")}
+      />,
+      "openai-codex/gpt-5.5",
+    ));
+
+    const trigger = await screen.findByTestId("composer-context-usage");
+    fireEvent.click(trigger);
+    expect(await screen.findAllByTestId("round-usage-bar")).toHaveLength(4);
+    expect(screen.getByRole("img", {
+      name: /input tokens 16,400.*KV cache hit rate 99%.*output tokens 236/i,
+    })).toBeInTheDocument();
+    expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
+    for (const phase of ["started", "failed"] as const) {
+      act(() => client._emitChat("usage-chart", {
+        event: "context_compaction", chat_id: "usage-chart", compaction_id: "failed", phase,
+      }));
+      expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
+    }
+    act(() => client._emitChat("usage-chart", {
+      event: "context_compaction", chat_id: "usage-chart",
+      compaction_id: "success", phase: "succeeded",
+    }));
+    expect(trigger).toHaveAccessibleName("Open context usage");
+    expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(4);
+  });
+
+  it.each([false, true])("restores context after compaction only with newer usage (%s)", async (newReply) => {
+    const client = makeClient();
+    const messages: UIMessage[] = [
+      {
+        id: "old", role: "assistant", content: "Before compact", createdAt: 1_000,
+        contextWindowTokens: 1_000_000, usage: { context_tokens: 170_000 },
+        roundUsages: [{ prompt_tokens: 170_000 }],
+      },
+      {
+        id: "compact", role: "assistant", kind: "compaction", content: "", createdAt: 2_000,
+        compaction: { id: "compact", phase: "succeeded" },
+      },
+    ];
+    if (newReply) messages.push({
+      id: "new", role: "assistant", content: "After compact", createdAt: 3_000,
+      contextWindowTokens: 1_000_000, usage: { context_tokens: 20_700 },
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Acompact-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, messages })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    render(wrap(client, <ThreadShell
+      session={session("compact-usage")} title="Compact usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    if (newReply) {
+      expect(trigger).toHaveAccessibleName("Context 2%. Open context usage");
+    } else {
+      expect(trigger).toHaveAccessibleName("Open context usage");
+    }
+  });
+
+  it("moves the session handle into the pane only when the workbench is split", () => {
+    const client = makeClient();
+    const portal = document.createElement("div");
+    document.body.append(portal);
+    const activeSession = {
+      ...session("pane-handle"),
+      handle: {
+        id: "handle_11111111111111111111111111111111",
+        name: "soro",
+      },
+    };
+
+    const { unmount } = render(wrap(
+      client,
+      <ThreadShell
+        session={activeSession}
+        title="Single pane"
+        onToggleSidebar={() => {}}
+        hideHeaderTitle
+        headerPortalTarget={portal}
+      />,
+    ));
+
+    expect(within(portal).queryByText("@soro")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Session @soro")).not.toBeInTheDocument();
+
+    unmount();
+    const splitView = render(wrap(
+      client,
+      <ThreadShell
+        session={activeSession}
+        title="Split pane"
+        onToggleSidebar={() => {}}
+        hideHeaderTitle
+        inlineHandle
+        headerPortalTarget={portal}
+      />,
+    ));
+
+    expect(screen.getByLabelText("Session @soro")).toHaveTextContent("@soro");
+    expect(within(portal).queryByText("@soro")).not.toBeInTheDocument();
+
+    splitView.unmount();
+    portal.remove();
   });
 
   it("keeps inferred file paths non-interactive when the availability probe fails", async () => {
@@ -468,6 +829,54 @@ describe("ThreadShell", () => {
     expect(reference).not.toHaveAttribute("tabindex");
     fireEvent.click(reference);
     expect(screen.queryByText("failed to read file")).not.toBeInTheDocument();
+  });
+
+  it("hides actions for a complete assistant-only message until turn_end", async () => {
+    const client = makeClient();
+    vi.mocked(fetch).mockImplementation(async (input) => (
+      String(input).includes("websocket%3Aassistant-only-actions/webui-thread")
+        ? httpJson(transcriptFromSimpleMessages([
+            { role: "assistant", content: "old automation", turnId: "turn-old" },
+          ]))
+        : { ok: false, status: 404, json: async () => ({}) }
+    ) as Response);
+
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("assistant-only-actions")}
+        title="Assistant-only actions"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1));
+    const turnId = "turn-automation";
+    const startedAt = Date.now() / 1000;
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "goal_status",
+      chat_id: "assistant-only-actions",
+      status: "running",
+      started_at: startedAt,
+      turn_id: turnId,
+    }));
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "message",
+      chat_id: "assistant-only-actions",
+      text: "new automation",
+      turn_id: turnId,
+    }));
+    await waitFor(() => expect(screen.getByText("new automation")).toBeInTheDocument());
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+
+    act(() => client._emitChat("assistant-only-actions", {
+      event: "turn_end",
+      chat_id: "assistant-only-actions",
+      turn_id: turnId,
+    }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2));
   });
 
   it("does not navigate away when clicking the chat title", async () => {
@@ -560,8 +969,37 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("Fast · gpt-5.5 · OpenAI Codex")).toBeInTheDocument();
-    expect(screen.queryByTitle("Default · deepseek-v4-pro · DeepSeek")).not.toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
+    expect(screen.queryByLabelText("Default")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the current preset while a renamed session reference is stale", async () => {
+    const client = makeClient();
+    const settings = settingsWithFastPreset();
+    settings.agent.model_preset = "fast";
+    settings.model_presets = settings.model_presets.map((preset) => ({
+      ...preset,
+      active: preset.name === "fast",
+    }));
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("renamed-preset", "old-fast")}
+          title="Renamed preset"
+          onToggleSidebar={() => {}}
+          settingsSnapshot={settings}
+        />,
+        "openai-codex/gpt-5.5",
+      ),
+    );
+
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
+    expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
   it("switches through every named preset while preserving call-order priority", async () => {
@@ -588,27 +1026,26 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view("default"));
 
-    const badge = await screen.findByRole("spinbutton", { name: "Default" });
+    const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
-    fireEvent.keyDown(badge, { key: "ArrowDown" });
+    fireEvent.click(badge);
+    fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
 
     expect(client.sendSystemCommand).toHaveBeenCalledWith(
       "preset-order",
       "/model fast",
     );
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Fast" }),
-      { key: "End" },
-    );
+    expect(await screen.findByText("fast")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "fast" }));
+    fireEvent.click(await screen.findByRole("option", { name: /^extra\b/i }));
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
       "/model extra",
     );
-    expect(await screen.findByText("Extra")).toBeInTheDocument();
+    expect(await screen.findByText("extra")).toBeInTheDocument();
 
     rerender(view("fast"));
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    expect(await screen.findByText("fast")).toBeInTheDocument();
   });
 
   it("uses the backend-resolved provider for an auto session preset", async () => {
@@ -643,11 +1080,13 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(await screen.findByTitle("Fast · gpt-4 · Company Proxy")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Model not configured" })).not.toBeInTheDocument();
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-4 · Company Proxy");
+    fireEvent.blur(screen.getByLabelText("fast"));
+    expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
-  it("highlights the configured model badge without replacing the preset label", async () => {
+  it("shows the effective fallback model in the composer badge", async () => {
     const client = makeClient();
     render(wrap(
       client,
@@ -661,7 +1100,8 @@ describe("ThreadShell", () => {
     ));
 
     expect(await screen.findByText("Default")).toBeInTheDocument();
-    const configuredBadge = screen.getByTestId("composer-model-logo-openai_codex").parentElement;
+    const configuredLogo = await screen.findByTestId("composer-model-logo-openai_codex");
+    const configuredBadge = configuredLogo.parentElement;
     expect(configuredBadge).not.toBeNull();
     expect(configuredBadge).toHaveClass("composer-model-badge");
     expect(configuredBadge).not.toHaveAttribute("data-fallback");
@@ -670,22 +1110,38 @@ describe("ThreadShell", () => {
       client._emitChat("fallback-model", {
         event: "turn_model_updated",
         chat_id: "fallback-model",
-        model_name: "deepseek/deepseek-chat",
+        model_name: "openai-codex/gpt-5.5",
+        model_preset: "Default",
       });
     });
 
-    const logo = screen.getByTestId("composer-model-logo-openai_codex");
+    expect(configuredBadge).not.toHaveAttribute("data-fallback");
+    expect(screen.getByText("Default")).toBeInTheDocument();
+
+    act(() => {
+      client._emitChat("fallback-model", {
+        event: "turn_model_updated",
+        chat_id: "fallback-model",
+        model_name: "deepseek/deepseek-chat",
+        fallback: true,
+      });
+    });
+
+    const logo = await screen.findByTestId("composer-model-logo-deepseek");
     const badge = logo.parentElement;
     expect(badge).not.toBeNull();
     expect(badge).toBe(configuredBadge);
-    expect(screen.getByText("Default")).toBeInTheDocument();
-    expect(screen.queryByText("deepseek-chat")).not.toBeInTheDocument();
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
+    expect(screen.getByText("deepseek-chat")).toBeInTheDocument();
     expect(badge).toHaveAttribute("data-fallback", "true");
-    expect(badge).toHaveAttribute(
-      "title",
-      "deepseek/deepseek-chat",
+    expect(badge).not.toHaveAttribute("title");
+    fireEvent.focus(screen.getByLabelText("deepseek-chat"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "deepseek-chat · deepseek/deepseek-chat",
     );
-    expect(logo).not.toHaveAttribute("data-fallback");
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("Default");
+    fireEvent.blur(screen.getByLabelText("deepseek-chat"));
+    expect(logo).toBeInTheDocument();
 
     act(() => {
       client._emitChat("fallback-model", {
@@ -699,15 +1155,45 @@ describe("ThreadShell", () => {
         screen.getByTestId("composer-model-logo-openai_codex").parentElement,
       ).not.toHaveAttribute("data-fallback");
     });
-    expect(
-      screen.getByTestId("composer-model-logo-openai_codex").parentElement,
-    ).toHaveAttribute("title", "Default · gpt-5.5 · OpenAI Codex");
-    expect(
-      screen.getByTestId("composer-model-logo-openai_codex").parentElement,
-    ).toBe(badge);
+    expect(screen.getByText("Default")).toBeInTheDocument();
   });
 
-  it("opens model settings from the unconfigured model badge", async () => {
+  it.each([false, true])("hides unconfigured model details in setup tooltips (existing history: %s)", async (hasHistory) => {
+    const client = makeClient();
+    const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
+    settings.agent.has_api_key = false;
+    settings.providers = [{ name: "anthropic", label: "Anthropic", configured: false }];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("websocket%3Asetup-tooltip/webui-thread")) {
+        return Promise.resolve(httpJson(transcriptFromSimpleMessages(
+          hasHistory ? [{ role: "user", content: "Previous message" }] : [],
+        )));
+      }
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    const onOpenModelSettings = vi.fn();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("setup-tooltip")}
+        title="Setup tooltip"
+        onToggleSidebar={() => {}}
+        settingsSnapshot={settings}
+        onOpenModelSettings={onOpenModelSettings}
+      />,
+      "anthropic/claude-opus-4-5",
+    ));
+
+    await screen.findByText(hasHistory ? "Previous message" : HERO_GREETING_PATTERN);
+    const badge = screen.getByRole("button", { name: "Choose your AI" });
+    fireEvent.focus(badge);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Choose your AI$/);
+    fireEvent.click(badge);
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("opens model settings directly without clearing the draft", async () => {
     const client = makeClient();
     const settings = modelSettings("openai-codex/gpt-5.1-codex", "openai_codex");
     settings.agent.has_api_key = false;
@@ -715,6 +1201,20 @@ describe("ThreadShell", () => {
       provider.name === "openai_codex"
         ? { ...provider, auth_type: "oauth", configured: false }
         : provider,
+    );
+    settings.providers.push(
+      {
+        name: "xai_grok",
+        label: "xAI Grok",
+        auth_type: "oauth",
+        configured: true,
+      },
+      {
+        name: "ollama",
+        label: "Ollama",
+        configured: true,
+        api_base: "http://127.0.0.1:11434",
+      },
     );
     const onOpenModelSettings = vi.fn();
 
@@ -732,18 +1232,39 @@ describe("ThreadShell", () => {
       ),
     );
 
-    const badge = await screen.findByRole("button", { name: "Model not configured" });
-    expect(screen.getByTestId("composer-model-setup-icon")).toBeInTheDocument();
+    const badge = await screen.findByRole("button", { name: "Choose your AI" });
+    expect(screen.queryByTestId("composer-model-setup-icon")).not.toBeInTheDocument();
+    expect(badge.querySelector('[data-needs-setup="true"]')).toHaveClass(
+      "composer-model-pill-setup",
+    );
+    expect(screen.getByTestId("composer-model-setup-label")).toHaveTextContent("Choose your AI");
+    expect(badge).not.toHaveClass("border-amber-500/35");
     expect(screen.queryByTestId("composer-model-logo-openai_codex")).not.toBeInTheDocument();
-    fireEvent.click(badge);
-    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, {
       target: { value: "hello" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Configure model" }));
-    expect(onOpenModelSettings).toHaveBeenCalledTimes(2);
+    fireEvent.click(badge);
+
+    expect(screen.queryByRole("dialog", { name: "Choose your AI" })).not.toBeInTheDocument();
+    expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue("hello");
     expect(client.sendMessage).not.toHaveBeenCalled();
+
+    onOpenModelSettings.mockClear();
+    const firstSetupPill = badge.querySelector('[data-needs-setup="true"]');
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    const secondSetupPill = badge.querySelector('[data-needs-setup="true"]');
+    expect(onOpenModelSettings).not.toHaveBeenCalled();
+    expect(secondSetupPill).not.toBe(firstSetupPill);
+    expect(secondSetupPill).toHaveClass("composer-model-pill-setup-attention");
+    expect(input).toHaveValue("hello");
+    expect(client.sendMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(badge.querySelector('[data-needs-setup="true"]')).not.toBe(secondSetupPill);
   });
 
   it("keeps image generation controls out of the composer", async () => {
@@ -990,7 +1511,7 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
-    expect(onCreateChat).toHaveBeenCalledWith(null, "start for real");
+    expect(onCreateChat).toHaveBeenCalledWith(null, "start for real", null);
     expect(onNewChat).not.toHaveBeenCalled();
   });
 
@@ -1017,11 +1538,9 @@ describe("ThreadShell", () => {
     ));
     const { rerender } = render(view(null));
 
-    fireEvent.keyDown(
-      await screen.findByRole("spinbutton", { name: "Default" }),
-      { key: "ArrowDown" },
-    );
-    expect(await screen.findByText("Fast")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
+    expect(await screen.findByText("fast")).toBeInTheDocument();
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Message input"), {
@@ -1033,8 +1552,15 @@ describe("ThreadShell", () => {
       "chat-new",
       "/model fast",
     ));
+    expect(onCreateChat).toHaveBeenCalledWith(null, "use the selected model", "fast");
 
-    rerender(view(session("chat-new")));
+    await act(async () => {
+      rerender(view(session("chat-new", "fast")));
+    });
+    fireEvent.focus(await screen.findByLabelText("fast"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
+    fireEvent.blur(screen.getByLabelText("fast"));
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -1107,6 +1633,47 @@ describe("ThreadShell", () => {
 
     await waitFor(() =>
       expectSendMessageWithTurn(client, "chat-new", "must not leak"),
+    );
+  });
+
+  it("consumes an automation-page first message through the normal thread stream", async () => {
+    const client = makeClient();
+    const consumed = vi.fn();
+    const pendingFirstMessage = {
+      id: "automation-first-message",
+      chatId: "chat-new",
+      content: "Every weekday at 9, summarize open pull requests",
+      options: { intent: "create_automation" as const },
+    };
+
+    render(
+      wrap(
+        client,
+        <StrictMode>
+          <ThreadShell
+            session={session("chat-new")}
+            title="New automation chat"
+            onToggleSidebar={() => {}}
+            pendingFirstMessage={pendingFirstMessage}
+            onPendingFirstMessageConsumed={consumed}
+          />
+        </StrictMode>,
+      ),
+    );
+
+    await waitFor(() => expectSendMessageWithTurn(
+      client,
+      "chat-new",
+      pendingFirstMessage.content,
+    ));
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(consumed).toHaveBeenCalledOnce();
+    expect(consumed).toHaveBeenCalledWith(pendingFirstMessage.id);
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      "chat-new",
+      pendingFirstMessage.content,
+      undefined,
+      expect.objectContaining({ intent: "create_automation" }),
     );
   });
 
@@ -2784,6 +3351,72 @@ describe("ThreadShell", () => {
     ));
   });
 
+  it("keeps active-run timing attached to the original turn after guidance", async () => {
+    const client = makeClient();
+    const turnId = "turn-active-timing";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("websocket%3Atiming-chat/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([{
+            role: "user",
+            content: "research this",
+            turnId,
+          }]));
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("timing-chat")}
+          title="Timing chat"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("research this")).toBeInTheDocument());
+    act(() => {
+      client._emitChat("timing-chat", {
+        event: "goal_status",
+        chat_id: "timing-chat",
+        status: "running",
+        started_at: Date.now() / 1000 - 215,
+        turn_id: turnId,
+      });
+      client._emitChat("timing-chat", {
+        event: "message",
+        chat_id: "timing-chat",
+        kind: "progress",
+        text: "web_search()",
+        turn_id: turnId,
+      });
+      client._emitChat("timing-chat", {
+        event: "message",
+        chat_id: "timing-chat",
+        text: "Continuing the search.",
+        latency_ms: 1_000,
+        turn_id: turnId,
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText("Continuing the search.")).toBeInTheDocument());
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "How is it going?" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByText("How is it going?")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^Working for / })).toBeInTheDocument();
+    expect(screen.queryByText("Worked for 1s")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /^Thinking for / })).not.toBeInTheDocument();
+  });
+
   it("refreshes the current thread when the page returns to the foreground", async () => {
     const client = makeClient();
     let historyCalls = 0;
@@ -3480,6 +4113,56 @@ describe("ThreadShell", () => {
     });
   });
 
+  it("keeps a terminal model failure visible until the next user action", async () => {
+    const client = makeClient();
+    await act(async () => {
+      await i18n.changeLanguage("zh-CN");
+    });
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-model-failure")}
+          title="Chat model failure"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await act(async () => {});
+    act(() => {
+      client._emitChat("chat-model-failure", {
+        event: "turn_end",
+        chat_id: "chat-model-failure",
+        turn_id: "turn-model-failure",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_error_kind: "connection",
+        failure_attempts: 4,
+        failure_message: "Unlocalized server failure",
+      });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("无法连接模型提供商");
+    expect(banner).toHaveTextContent(
+      "模型提供商请求在第 4 次尝试后仍然失败，已停止重试。请检查提供商配置或服务状态后重试。",
+    );
+    expect(banner).not.toHaveTextContent("Unlocalized server failure");
+
+    fireEvent.change(screen.getByLabelText("消息输入框"), {
+      target: { value: "try again" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
   it("moves a correlated delivery error from the banner into the failed message tooltip", async () => {
     const client = makeClient();
 
@@ -3811,11 +4494,12 @@ describe("ThreadShell", () => {
 
     expect(screen.getByRole("option", { name: /@obsidian-agent-cli/i })).toBeInTheDocument();
     expect(screen.getByTestId("composer-cli-mention-obsidian-agent-cli")).toHaveTextContent(
-      "@obsidian-agent-cli",
+      "@Obsidian",
     );
+    expect(input).toHaveValue("@Obsidian");
   });
 
-  it("offers only same-project sessions in restricted mode", async () => {
+  it("offers sessions across projects in restricted mode", async () => {
     const client = makeClient();
     const currentScope = {
       project_path: "/projects/current",
@@ -3825,6 +4509,10 @@ describe("ThreadShell", () => {
       ...session("same-project"),
       title: "Same project",
       workspaceScope: currentScope,
+      handle: {
+        id: "handle_11111111111111111111111111111111",
+        name: "same-1111111111",
+      },
     };
     const otherProject = {
       ...session("other-project"),
@@ -3832,6 +4520,10 @@ describe("ThreadShell", () => {
       workspaceScope: {
         project_path: "/projects/other",
         access_mode: "restricted" as const,
+      },
+      handle: {
+        id: "handle_22222222222222222222222222222222",
+        name: "other-2222222222",
       },
     };
 
@@ -3850,6 +4542,35 @@ describe("ThreadShell", () => {
     fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
 
     expect(screen.getByRole("option", { name: /Same project/i })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /Other project/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
+
+  it("allows a new turn after a completed recovery state", async () => {
+    const client = makeClient();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("recovered-chat")}
+        title="Recovered chat"
+        onToggleSidebar={() => {}}
+      />,
+    ));
+
+    const input = await screen.findByLabelText("Message input");
+    act(() => {
+      client._emitChat("recovered-chat", {
+        event: "recovery_state",
+        chat_id: "recovered-chat",
+        recovery_id: "recovery-1",
+        status: "recovered",
+      });
+    });
+
+    fireEvent.change(input, { target: { value: "start the next task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(client.sendMessage).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+  });
+
 });
