@@ -214,7 +214,7 @@ Internal variables such as `NANOBOT_RESTART_*` and `NANOBOT_PATH_*` are set by n
 
 ## Langfuse Observability
 
-nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI SDK wrapper. This is configured with environment variables, not `config.json`.
+nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI SDK wrapper, and Codex OAuth provider calls through Langfuse's native Python SDK. This is configured with environment variables, not `config.json`.
 
 Install the optional package in the same Python environment that runs nanobot:
 
@@ -238,11 +238,11 @@ $env:LANGFUSE_PUBLIC_KEY = "pk-lf-..."
 $env:LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 ```
 
-When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed, nanobot uses `langfuse.openai.AsyncOpenAI` for OpenAI-compatible providers so model requests are sent to Langfuse in the background. If the secret key is set but `langfuse` is missing, nanobot logs a warning and falls back to the regular OpenAI client.
+When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed, nanobot uses `langfuse.openai.AsyncOpenAI` for OpenAI-compatible providers so model requests are sent to Langfuse in the background. If the secret key is set but `langfuse` is missing, nanobot logs a warning and falls back to the regular OpenAI client. The Codex OAuth provider (`openai_codex`) uses the same `LANGFUSE_SECRET_KEY` check but logs each request through Langfuse's native SDK directly, since Codex does not use the OpenAI Python SDK client.
 
 Use the Langfuse region or self-hosted URL that matches your project. The [Langfuse OpenAI SDK docs](https://langfuse.com/integrations/model-providers/openai-py) use `LANGFUSE_BASE_URL` for cloud regions and self-hosted instances.
 
-Tracing covers the providers that go through nanobot's OpenAI-compatible client path. Native providers that do not use that client may not produce Langfuse OpenAI-wrapper traces.
+Tracing covers the providers that go through nanobot's OpenAI-compatible client path, plus the Codex OAuth provider (`openai_codex`) via Langfuse's native SDK. Other native providers that do not use either path may not produce Langfuse traces.
 
 ## Providers
 
