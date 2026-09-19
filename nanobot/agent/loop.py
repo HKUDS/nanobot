@@ -1218,6 +1218,8 @@ class AgentLoop:
                 injection_callback=_drain_pending,
                 terminal_injection_callback=_wait_for_pending,
                 continuation_callback=_goal_continue,
+                max_idle_continues=turn_continuation.MAX_GOAL_IDLE_CONTINUES,
+                idle_continues=turn_continuation.idle_continuation_count(request_metadata),
                 finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
                     pending_queue_available=pending_queue is not None and session is not None,
                     session_metadata=session_metadata,
@@ -2065,7 +2067,7 @@ class AgentLoop:
         ctx.usage = result.usage
         ctx.delivery.record_usage(result.round_usages)
         if ctx.kind is TurnKind.USER:
-            await turn_continuation.maybe_continue_turn(ctx)
+            await turn_continuation.maybe_continue_turn(ctx, idle_continues=result.idle_continues)
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()

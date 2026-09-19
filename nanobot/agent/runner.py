@@ -110,6 +110,9 @@ class AgentRunSpec:
     provider_state: ProviderConversationState | None = None
     llm_usage_source: LLMUsageSource | None = None
     events: EventSink = NO_EVENTS
+    # Optional caller-owned idle budget, carried across internal execution slices.
+    max_idle_continues: int | None = None
+    idle_continues: int = 0
 
 
 @dataclass(slots=True)
@@ -133,6 +136,7 @@ class AgentRunResult:
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     summary_checkpoint: SessionSummaryCheckpoint | None = field(default=None, repr=False)
     provider_compaction_applied: bool = field(default=False, repr=False)
+    idle_continues: int = 0
 
 
 class AgentRunner:
@@ -373,6 +377,8 @@ class AgentRunner:
         pending_length_segment: tuple[AgentHookContext, str] | None = None
         had_injections = False
         injection_cycles = 0
+        idle_continues = max(0, spec.idle_continues)
+        last_injection_cycle = 0
         pending_stream_content: str | None = None
         conversation_state = ProviderConversationStateController(
             provider=spec.runtime.provider,
@@ -413,6 +419,9 @@ class AgentRunner:
                 await hook.on_stream_end(segment_context, resuming=True)
 
         for iteration in range(spec.max_iterations):
+            if injection_cycles != last_injection_cycle:
+                idle_continues = 0
+            last_injection_cycle = injection_cycles
             # The session inbox cuts a finite snapshot before every model call.
             # This includes follow-ups that arrived before the first request and
             # messages received while the previous request or tools were running.
@@ -424,7 +433,9 @@ class AgentRunner:
                 phase="before model call",
             )
             if drained_before_request:
+                idle_continues = 0
                 had_injections = True
+            last_injection_cycle = injection_cycles
             await end_length_segment(interrupted=drained_before_request)
             context = AgentHookContext(
                 iteration=iteration,
@@ -473,6 +484,7 @@ class AgentRunner:
                 context.streamed_reasoning = True
 
             if response.should_execute_tools:
+                idle_continues = 0
                 context.tool_calls = list(response.tool_calls)
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
@@ -683,6 +695,10 @@ class AgentRunner:
                 iteration=iteration,
                 allow_continuation=(
                     response.finish_reason not in {"refusal", "content_filter"}
+                    and (
+                        spec.max_idle_continues is None
+                        or idle_continues < spec.max_idle_continues
+                    )
                 ),
                 wait_at_terminal=(
                     assistant_message is not None
@@ -693,6 +709,11 @@ class AgentRunner:
             )
             if should_continue:
                 had_injections = True
+                if injection_cycles != last_injection_cycle:
+                    idle_continues = 0
+                else:
+                    idle_continues += 1
+                last_injection_cycle = injection_cycles
 
             if hook.wants_streaming():
                 await hook.on_stream_end(context, resuming=should_continue)
@@ -831,6 +852,7 @@ class AgentRunner:
             failure_error_kind=failure_error_kind,
             tool_events=tool_events,
             had_injections=had_injections,
+            idle_continues=idle_continues,
             pending_stream_content=pending_stream_content,
             provider_state=conversation_state.finish(messages),
             summary_checkpoint=(

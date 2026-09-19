@@ -6,6 +6,7 @@ These commands work inside chat channels and interactive agent sessions:
 |---------|-------------|
 | `/new` | Stop current task and start a new conversation |
 | `/stop` | Stop the current task |
+| `/goal <objective>` | Start an explicit sustained goal |
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |
 | `/model` | Show the current model and available model presets |
@@ -26,6 +27,15 @@ These commands work inside chat channels and interactive agent sessions:
 | `/pairing revoke <user_id>` | Revoke a previously approved user on the current channel |
 | `/pairing revoke <channel> <user_id>` | Revoke a previously approved user on a specific channel |
 | `/help` | Show available in-chat commands |
+
+## Sustained goals
+
+An active goal can continue across tool-call iteration limits. If the model keeps
+answering without calling tools, nanobot allows at most two automatic nudges in
+the same run, including its internal continuation slices, then returns the answer
+and waits. The goal remains active; waiting is not completion. New user input or
+tool execution resets this idle budget. Tool failures still count as executions;
+this guard bounds prose-only repetition, not every form of unsuccessful work.
 
 ## Pairing
 
