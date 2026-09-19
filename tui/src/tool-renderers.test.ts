@@ -26,4 +26,28 @@ describe("tool renderers", () => {
     expect(renderToolEvent({ phase: "end", name: "apply_patch", arguments: { path: "app.ts" } }))
       .toBe("  ✓ Edited  app.ts")
   })
+
+  test("shortens file paths relative to the workspace while preserving the useful tail", () => {
+    const workspace = String.raw`C:\workspace\nanobot`
+    expect(renderToolEvent({
+      phase: "end",
+      name: "read_file",
+      arguments: { path: String.raw`C:\workspace\nanobot\tui\src\app.ts` },
+    }, { workspace })).toBe("  ✓ Read  tui/src/app.ts")
+    expect(renderToolEvent({
+      phase: "end",
+      name: "read_file",
+      arguments: {
+        path: String.raw`C:\workspace\nanobot\.worktrees\feature\nanobot\providers\fallback_provider.py`,
+      },
+    }, { workspace })).toBe("  ✓ Read  …/feature/nanobot/providers/fallback_provider.py")
+  })
+
+  test("summarizes subagent delegation without exposing raw argument JSON", () => {
+    expect(renderToolEvent({
+      phase: "end",
+      name: "spawn",
+      arguments: { task: "Simplify the fallback provider implementation" },
+    })).toBe("  ✓ Delegated  Simplify the fallback provider implementation")
+  })
 })

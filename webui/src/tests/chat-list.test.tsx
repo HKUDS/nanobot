@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
+import { sessionHandleColor } from "@/lib/session-handle";
 import { readDraggedSession, SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary } from "@/lib/types";
 
@@ -64,6 +65,124 @@ describe("ChatList", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
 
     expect(onTogglePin).toHaveBeenCalledWith("websocket:review");
+  });
+
+  it("restores the colored handle underline and animated active track", () => {
+    render(
+      <ChatList
+        sessions={[session({
+          chatId: "review",
+          title: "Review the patch",
+          handle: { id: "handle_1234", name: "mira" },
+        })]}
+        activeKey="websocket:review"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const conversation = screen.getByRole("button", {
+      name: "@mira Review the patch",
+    });
+    const handle = conversation.querySelector("[data-sidebar-session-handle]");
+    expect(handle).toHaveClass("max-w-20", "shrink-0");
+    const underline = handle?.querySelector("[data-sidebar-session-handle-underline]");
+    expect(underline).toHaveClass("border-b-2", "text-sidebar-muted-foreground");
+    expect(underline?.getAttribute("style"))
+      .toContain(sessionHandleColor("handle_1234"));
+
+    expect(conversation.closest("[data-chat-row]"))
+      .toHaveClass("rounded-xl");
+    expect(conversation.querySelector("[data-sidebar-selection-track]")).toBeNull();
+  });
+
+  it("marks a conversation that needs recovery attention with a warning indicator", () => {
+    render(
+      <ChatList
+        sessions={[session({ chatId: "recovery", title: "Interrupted task" })]}
+        recoveryChatIds={["recovery"]}
+        activeKey="websocket:other"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "This conversation needs your attention" }))
+      .toBeInTheDocument();
+  });
+
+  it("keeps handle columns intact inside grouped panes", () => {
+    render(
+      <ChatList
+        sessions={[session({
+          key: "tab:group",
+          chatId: "workbench-tab:group",
+          title: "Grouped work",
+        })]}
+        activeKey="websocket:root"
+        paneGroups={{
+          "tab:group": {
+            tabKey: "tab:group",
+            title: "Grouped work",
+            activePaneKey: "websocket:root",
+            visible: true,
+            panes: [
+              {
+                key: "websocket:root",
+                chatId: "root",
+                title: "Short",
+                handle: { id: "handle_1234", name: "mira" },
+              },
+              {
+                key: "websocket:child",
+                chatId: "child",
+                title: "A much longer conversation title",
+                handle: { id: "handle_5678", name: "nora" },
+              },
+            ],
+          },
+        }}
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "@mira Short" }))
+      .toHaveTextContent("@mira");
+    expect(screen.getByRole("button", { name: "@nora A much longer conversation title" }))
+      .toHaveTextContent("@nora");
+    for (const handle of document.querySelectorAll("[data-sidebar-session-handle]")) {
+      expect(handle).toHaveClass("max-w-20", "shrink-0");
+    }
+  });
+
+  it("shows the running indicator while a recovery continuation is active", () => {
+    render(
+      <ChatList
+        sessions={[session({ chatId: "recovery", title: "Interrupted task" })]}
+        runningChatIds={["recovery"]}
+        recoveryChatIds={["recovery"]}
+        activeKey="websocket:other"
+        onSelect={vi.fn()}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Agent running" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "This conversation needs your attention" }))
+      .not.toBeInTheDocument();
   });
 
   it("keeps tab grouping out of drag protocols while exposing inactive panes as mention sources", () => {
@@ -560,25 +679,21 @@ describe("ChatList", () => {
     expect(tabHeader).not.toHaveAttribute("data-chat-row");
     expect(tabHeader).not.toHaveAttribute("data-sidebar-pane");
     expect(tabButton).not.toHaveAttribute("aria-current");
-    expect(tabButton.querySelector(".lucide-folder-tree")).toBeInTheDocument();
+    expect(tabHeader.querySelector(".lucide-folder-tree")).toBeNull();
     const paneList = within(tabGroup).getByRole("list", { name: "Panes in Root topic" });
     expect(tabSurface).toContainElement(paneList);
     const activePane = within(tabGroup).getByRole("button", { name: "Research pane" });
     expect(activePane).toHaveAttribute("aria-current", "true");
-    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-control");
-    expect(activePane.querySelector("[data-sidebar-selection-track]"))
-      .toHaveAttribute("data-active", "true");
+    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-xl");
+    expect(screen.getByTestId("chats-selection-highlight"))
+      .toHaveAttribute("data-active-id", "websocket:root");
     expect(screen.getByRole("button", {
       name: "Research pane pane actions",
     })).toHaveClass("opacity-0");
     expect(within(tabGroup).getByRole("button", { name: "Root topic" }))
       .not.toHaveAttribute("aria-current");
     expect(tabGroup).not.toHaveTextContent("2/4");
-    expect(paneList).toHaveClass(
-      "rounded-es-[14px]",
-      "border-s-2",
-      "border-sidebar-foreground/25",
-    );
+    expect(paneList).toHaveClass("ms-4");
 
     const collapse = within(tabGroup).getByRole("button", {
       name: "Collapse panes in Root topic",
@@ -860,6 +975,7 @@ describe("ChatList", () => {
       session({
         chatId: "alpha",
         title: "Alpha task",
+        handle: { id: "handle_alpha", name: "mira" },
         updatedAt: "2026-05-20T11:00:00Z",
         workspaceScope: {
           project_path: "/Users/me/nanobot",
@@ -901,12 +1017,14 @@ describe("ChatList", () => {
     );
 
     expect(screen.getByRole("region", { name: "nanobot-bench" })).toBeInTheDocument();
-    expect(projectSurface).toHaveClass(
-      "rounded-es-[16px]",
-      "border-s-2",
-      "border-sidebar-foreground/10",
-    );
+    expect(projectSurface).toHaveClass("ms-4");
     expect(within(nanobotSection).getByText("Alpha task")).toBeInTheDocument();
+    expect(
+      within(nanobotSection)
+        .getByText("@mira")
+        .closest("[data-sidebar-session-handle]")
+        ?.parentElement,
+    ).toHaveClass("items-center");
     expect(within(nanobotSection).getByText("Zeta task")).toBeInTheDocument();
     expect(nanobotText.indexOf("Alpha task")).toBeLessThan(nanobotText.indexOf("Zeta task"));
     expect(within(nanobotSection).getByLabelText("Agent running")).toBeInTheDocument();
@@ -960,7 +1078,7 @@ describe("ChatList", () => {
     expect(within(chatsSection).queryByText("Project chat")).not.toBeInTheDocument();
   });
 
-  it("grows and retracts the row-owned selection track", () => {
+  it("moves the selected background between topic rows", () => {
     const props = {
       sessions: [
         session({ chatId: "active", title: "Active topic" }),
@@ -982,8 +1100,9 @@ describe("ChatList", () => {
 
     const activeButton = screen.getByRole("button", { name: "Active topic" });
     expect(activeButton).toHaveAttribute("aria-current", "page");
-    expect(activeButton.querySelector("[data-sidebar-selection-track]"))
-      .toHaveClass("origin-left", "scale-x-100", "transition-transform", "bg-current");
+    expect(screen.getByTestId("chats-selection-highlight"))
+      .toHaveAttribute("data-active-id", "websocket:active");
+    expect(activeButton.querySelector("[data-sidebar-selection-track]")).toBeNull();
 
     rerender(
       <ChatList
@@ -997,11 +1116,10 @@ describe("ChatList", () => {
     expect(screen.getByRole("button", { name: "Inactive topic" }))
       .toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Active topic" })
-      .querySelector("[data-sidebar-selection-track]"))
-      .toHaveClass("scale-x-0");
-    expect(screen.getByRole("button", { name: "Inactive topic" })
-      .querySelector("[data-sidebar-selection-track]"))
-      .toHaveClass("scale-x-100");
+      .closest("[data-chat-row]"))
+      .not.toHaveClass("bg-sidebar-foreground/[0.055]");
+    expect(screen.getByTestId("chats-selection-highlight"))
+      .toHaveAttribute("data-active-id", "websocket:inactive");
   });
 
   it("restores collapsed tabs from the local UI preference", () => {
@@ -1150,9 +1268,9 @@ describe("ChatList", () => {
       "ease-out",
       "motion-reduce:transition-none",
     );
-    expect(expandedIcon).not.toHaveClass("rotate-90");
+    expect(expandedIcon).not.toHaveClass("-rotate-90");
     expect(screen.getByRole("button", { name: "Topic actions for Alpha project" })
-      .compareDocumentPosition(disclosureButton) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .compareDocumentPosition(disclosureButton) & Node.DOCUMENT_POSITION_PRECEDING)
       .toBeTruthy();
 
     fireEvent.click(disclosureButton);
@@ -1164,7 +1282,7 @@ describe("ChatList", () => {
 
     expect(screen.getByRole("button", { name: "Projects: Alpha project" })
       .querySelector("[data-sidebar-project-disclosure-icon]"))
-      .toHaveClass("rotate-90");
+      .toHaveClass("-rotate-90");
     expect(projectButton).toHaveAttribute("aria-expanded", "false");
     expect(animate).toHaveBeenCalledWith(
       [

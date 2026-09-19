@@ -1,26 +1,15 @@
 {
-  "description": "Utilisez nanobot dans les canaux et messages privés Mattermost.",
-  "requirements": "URL du serveur Mattermost, jeton du bot et accès aux canaux",
   "setup": {
     "docsLabel": "Ouvrir le guide Mattermost",
     "officialLabel": "Ouvrir le guide des bots Mattermost",
-    "tryIt": "Mentionnez le bot dans un canal Mattermost ou envoyez-lui un message privé.",
-    "summary": "Mattermost se connecte via un compte bot sur votre serveur et écoute les canaux et messages privés.",
-    "steps": [
-      "Créez un compte bot Mattermost et copiez son jeton d’accès.",
-      "Saisissez l’URL du serveur et accordez l’accès à l’équipe et aux canaux cibles.",
-      "Enregistrez et activez Mattermost, puis mentionnez le bot ou envoyez-lui un message privé."
-    ],
     "fields": {
       "serverUrl": {
         "label": "URL du serveur",
-        "placeholder": "https://mattermost.example.com",
-        "help": "Utilisez l’URL de base de votre espace Mattermost."
+        "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "Jeton du bot",
-        "placeholder": "Jeton du bot Mattermost",
-        "help": "Créez-le depuis un compte bot Mattermost."
+        "placeholder": "Jeton du bot Mattermost"
       },
       "teamId": {
         "label": "ID de l’équipe",
@@ -35,7 +24,7 @@
         }
       },
       "groupPolicyInThread": {
-        "label": "Comportement en fil",
+        "label": "Réponses dans les fils de discussion",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages (sans mention)",
@@ -45,6 +34,78 @@
       "allowFrom": {
         "label": "Utilisateurs autorisés",
         "placeholder": "ID utilisateur séparés par des virgules"
+      },
+      "allowFromMatchMode": {
+        "label": "Correspondance des utilisateurs",
+        "choices": {
+          "email": "Courriel",
+          "id": "Identifiant utilisateur",
+          "username": "Nom d'utilisateur"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Chaînes autorisées"
+      },
+      "replyInThread": {
+        "label": "Répondre dans le fil de discussion",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Inclure le contexte du fil de discussion",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limite du contexte du fil de discussion"
+      },
+      "streaming": {
+        "label": "Diffusion en continu",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "reactEmoji": {
+        "label": "Lire les emoji"
+      },
+      "doneEmoji": {
+        "label": "Terminé emoji"
+      },
+      "sendProgress": {
+        "label": "Envoyer la progression",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "sendToolHints": {
+        "label": "Envoyer des conseils sur les outils",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "dm_enabled": {
+        "label": "Activer les messages directs",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "dm_policy": {
+        "label": "Accès aux messages directs",
+        "choices": {
+          "allowlist": "Liste verte",
+          "open": "Ouvert"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Utilisateurs de messagerie directe autorisés"
       }
     }
   }

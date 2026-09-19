@@ -3,18 +3,18 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://telegram.org/favicon.ico",
     displayName: "Telegram",
     initials: "TG",
     color: "#229ED9",
-    logoUrl: "https://telegram.org/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("telegram"),
       fields: [
-        { key: "channels.telegram.token" },
-        { key: "channels.telegram.proxy" },
-        { key: "channels.telegram.allowFrom" },
-        { key: "channels.telegram.groupPolicy" },
+        { key: "channels.telegram.token", section: "credentials" },
+        { key: "channels.telegram.proxy", section: "connection" },
+        { key: "channels.telegram.allowFrom", section: "access" },
+        { key: "channels.telegram.groupPolicy", section: "behavior" },
       ],
     },
   },

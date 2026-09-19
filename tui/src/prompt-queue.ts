@@ -2,6 +2,7 @@ import type { MessageOptions } from "./protocol"
 
 export interface QueuedPrompt {
   content: string
+  displayContent?: string
   options: MessageOptions
 }
 

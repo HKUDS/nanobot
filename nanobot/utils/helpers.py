@@ -1,5 +1,7 @@
 """Utility functions for nanobot."""
 
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -12,10 +14,13 @@ from contextlib import suppress
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 import tiktoken
 from loguru import logger
+
+if TYPE_CHECKING:
+    from nanobot.providers.base import LLMUsage
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
@@ -97,27 +102,8 @@ def sanitize_surrogates_deep(value: Any) -> Any:
     return value
 
 
-@lru_cache(maxsize=16)
-def _get_token_encoding(model: str | None = None) -> Any:
-    """Return a tiktoken encoding for *model*.
-
-    tiktoken's Python package ships only OpenAI vocabularies, so exact
-    counts exist only for the GPT family: legacy GPT-4/GPT-3.5 use
-    cl100k_base, everything else (GPT-4o/GPT-5, o-series, open-weight
-    families like Qwen/DeepSeek/Llama) falls back to o200k_base, which
-    approximates multilingual tokenizers better than cl100k_base.  The
-    no-argument default stays cl100k_base so model-agnostic helpers
-    (``truncate_text_to_tokens``, ``estimate_message_tokens``) keep prior
-    behavior.
-    """
-    if model:
-        name = model.lower()
-        # gpt-4 (but not gpt-4o) and gpt-3.5 are the legacy cl100k vocabularies.
-        if name.startswith("gpt-3.5") or (
-            name.startswith("gpt-4") and not name.startswith("gpt-4o")
-        ):
-            return tiktoken.get_encoding("cl100k_base")
-        return tiktoken.get_encoding("o200k_base")
+@lru_cache(maxsize=1)
+def _get_token_encoding() -> Any:
     return tiktoken.get_encoding("cl100k_base")
 
 
@@ -205,6 +191,9 @@ def strip_think(text: str) -> str:
     tokens mid-text would silently rewrite any message where a user or the
     assistant discusses the tokens themselves.
     """
+    # Every supported control tag contains '<'; ordinary text only needs trimming.
+    if "<" not in text:
+        return text.strip()
     # Well-formed blocks first.
     text = re.sub(rf"<(?P<tag>{_THINKING_TAG})>[\s\S]*?</(?P=tag)>", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>[\s\S]*$", "", text)
@@ -238,6 +227,8 @@ def strip_reasoning_tags(text: object) -> str:
     """Remove wrapper tags from text that is already known to be reasoning."""
     if not isinstance(text, str):
         return ""
+    if "<" not in text:
+        return text.strip()
     text = re.sub(rf"^\s*<{_THINKING_TAG}/>\s*", "", text)
     text = re.sub(rf"\s*<{_THINKING_TAG}/>\s*$", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>\s*", "", text)
@@ -253,6 +244,8 @@ def extract_think(text: str) -> tuple[str | None, str]:
     extracted; unclosed streaming prefixes are stripped from the cleaned
     text but not surfaced — :func:`strip_think` handles that case.
     """
+    if "<" not in text:
+        return None, text.strip()
     parts: list[str] = []
     for m in re.finditer(rf"<(?P<tag>{_THINKING_TAG})>([\s\S]*?)</(?P=tag)>", text):
         parts.append(m.group(2).strip())
@@ -517,20 +510,24 @@ def stringify_text_blocks(content: list[object]) -> str | None:
 
 
 def _render_tool_result_reference(
-    filepath: Path,
+    reference_path: str,
     *,
     original_size: int,
     preview: str,
     truncated_preview: bool,
+    max_chars: int | None = None,
 ) -> str:
     result = (
         f"[tool output persisted]\n"
-        f"Full output saved to: {filepath}\n"
+        f"Full output saved to workspace path: {reference_path}\n"
         f"Original size: {original_size} chars\n"
         f"Preview:\n{preview}"
     )
     if truncated_preview:
-        result += "\n...\n(Read the saved file if you need the full output.)"
+        result += "\n...\nPreview is also truncated."
+    result += "\nResult truncated. Read the saved file if you need the complete output."
+    if max_chars and len(result) > max_chars:
+        result = f"[truncated: {reference_path}]"
     return result
 
 
@@ -584,28 +581,16 @@ def maybe_persist_tool_result(
     workspace: Path | None,
     session_key: str | None,
     tool_call_id: str,
-    content: Any,
+    content: str,
     *,
     max_chars: int,
-) -> Any:
-    """Persist oversized tool output and replace it with a stable reference string."""
-    if workspace is None or max_chars <= 0:
-        return content
+) -> str:
+    """Offload oversized text.
 
-    text_payload: str | None = None
-    suffix = "txt"
-    if isinstance(content, str):
-        text_payload = content
-    elif isinstance(content, list):
-        text_payload = stringify_text_blocks(cast(list[object], content))
-        if text_payload is None:
-            return cast(Any, content)
-        suffix = "json"
-    else:
+    Complete references may exceed the per-block ``max_chars`` budget.
+    """
+    if workspace is None or max_chars <= 0 or len(content) <= max_chars:
         return content
-
-    if len(text_payload) <= max_chars:
-        return cast(Any, content)
 
     root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
     bucket = ensure_dir(root / safe_filename(session_key or "default"))
@@ -613,19 +598,17 @@ def maybe_persist_tool_result(
         _cleanup_tool_result_buckets(root, bucket)
     except Exception:
         logger.exception("Failed to clean stale tool result buckets in {}", root)
-    path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
+    path = bucket / f"{safe_filename(tool_call_id)}.txt"
     if not path.exists():
-        if suffix == "json" and isinstance(content, list):
-            _write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
-        else:
-            _write_text_atomic(path, text_payload)
+        _write_text_atomic(path, content)
 
-    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    preview = content[:_TOOL_RESULT_PREVIEW_CHARS]
     return _render_tool_result_reference(
-        path,
-        original_size=len(text_payload),
+        str(path.resolve()),
+        original_size=len(content),
         preview=preview,
-        truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
+        truncated_preview=len(content) > _TOOL_RESULT_PREVIEW_CHARS,
+        max_chars=max_chars,
     )
 
 
@@ -647,21 +630,69 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
         return [content]
     if len(content) <= max_len:
         return [content]
+    original_content = content
     chunks: list[str] = []
     while content:
         if len(content) <= max_len:
-            chunks.append(content)
+            if content.strip():
+                chunks.append(content)
             break
         cut = content[:max_len]
-        # Try to break at newline first, then space, then hard break
-        pos = cut.rfind("\n")
-        if pos <= 0:
-            pos = cut.rfind(" ")
-        if pos <= 0:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
+        # Consume only the newline itself so indentation starts the next chunk.
+        newline_pos = cut.rfind("\n")
+        if newline_pos >= 0:
+            # Exclude both bytes of a CRLF boundary from the emitted chunk.
+            line_end = newline_pos
+            if line_end > 0 and content[line_end - 1] == "\r":
+                line_end -= 1
+            chunk = content[:line_end]
+            if chunk.strip():
+                chunks.append(chunk)
+            content = content[newline_pos + 1 :]
+            continue
+
+        # Keep the existing word-boundary behavior, but avoid emitting a
+        # whitespace-only chunk when an indented line exceeds max_len.
+        space_pos = cut.rfind(" ")
+        if space_pos > 0 and cut[:space_pos].strip():
+            chunks.append(content[:space_pos])
+            content = content[space_pos:].lstrip(" \t")
+            # A space boundary may sit immediately before a line break. Drop
+            # that delimiter too, without stripping the next line's indent.
+            if content.startswith("\r\n"):
+                content = content[2:]
+            elif content.startswith("\n"):
+                content = content[1:]
+            continue
+
+        # Do not split between the two code points of a CRLF delimiter.
+        if cut.endswith("\r") and content[max_len : max_len + 1] == "\n":
+            chunk = cut[:-1]
+            if chunk.strip():
+                chunks.append(chunk)
+            content = content[max_len + 1 :]
+            continue
+
+        chunk = content[:max_len]
+        if chunk.strip():
+            chunks.append(chunk)
+        content = content[max_len:]
+        if not chunk.strip():
+            # Keep any remaining indentation so the final non-blank chunk can
+            # retain as much of it as the channel limit permits.
+            continue
+        # A delimiter can sit immediately after the hard-break boundary. Keep
+        # ordinary space trimming, but consume only the newline so indentation
+        # on the following line is preserved.
+        content = content.lstrip(" \t")
+        if content.startswith("\r\n"):
+            content = content[2:]
+        elif content.startswith("\n"):
+            content = content[1:]
+    # Preserve the historical non-empty-input contract for callers that take
+    # the first chunk directly. This fallback is only reachable for content
+    # made entirely of whitespace.
+    return chunks or [original_content[:max_len]]
 
 
 def build_assistant_message(
@@ -688,7 +719,6 @@ def build_assistant_message(
 def _estimate_prompt_tokens_with_source(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
-    model: str | None = None,
 ) -> tuple[int, str]:
     """Estimate prompt tokens and identify the counter used.
 
@@ -724,7 +754,7 @@ def _estimate_prompt_tokens_with_source(
     message_payload = "\n".join(parts)
     per_message_overhead = len(messages) * 4
     try:
-        enc = _get_token_encoding(model)
+        enc = _get_token_encoding()
         tool_tokens = (
             _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
         )
@@ -794,33 +824,17 @@ def estimate_prompt_tokens_chain(
     model: str | None,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
-    known_usage: int | None = None,
 ) -> tuple[int, str]:
-    """Estimate prompt tokens via provider, tiktoken, then a byte heuristic.
-
-    *known_usage* (the API's last ``usage.prompt_tokens``) is authoritative
-    and, when higher than the estimate, is used as a floor so undercounting
-    hidden template/system tokens never keeps consolidation from firing.
-    """
-    estimated = 0
-    estimate_source = "none"
+    """Estimate prompt tokens via provider, tiktoken, then a byte heuristic."""
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
         with suppress(Exception):
             tokens, source = cast(tuple[object, object], provider_counter(messages, tools, model))
             if isinstance(tokens, (int, float)) and tokens > 0:
-                estimated = int(tokens)
-                estimate_source = str(source or "provider_counter")
-    if estimated <= 0:
-        estimated, estimate_source = _estimate_prompt_tokens_with_source(
-            messages,
-            tools,
-            model=model,
-        )
-    if known_usage and known_usage > estimated:
-        return int(known_usage), f"{estimate_source}+usage"
+                return int(tokens), str(source or "provider_counter")
+    estimated, source = _estimate_prompt_tokens_with_source(messages, tools)
     if estimated > 0:
-        return int(estimated), estimate_source
+        return int(estimated), source
     return 0, "none"
 
 
@@ -829,7 +843,7 @@ def build_status_content(
     version: str,
     model: str,
     start_time: float,
-    last_usage: dict[str, int],
+    last_usage: LLMUsage | None,
     context_window_tokens: int,
     session_msg_count: int,
     context_tokens_estimate: int,
@@ -850,9 +864,9 @@ def build_status_content(
         if uptime_s >= 3600
         else f"{uptime_s // 60}m {uptime_s % 60}s"
     )
-    last_in = last_usage.get("prompt_tokens", 0)
-    last_out = last_usage.get("completion_tokens", 0)
-    cached = last_usage.get("cached_tokens", 0)
+    last_in = last_usage.input_tokens if last_usage else 0
+    last_out = last_usage.output_tokens if last_usage else 0
+    cached = last_usage.cache_read_tokens if last_usage else None
     ctx_total = max(context_window_tokens, 0)
     # Budget mirrors Consolidator formula: ctx_window - max_completion - _SAFETY_BUFFER
     ctx_budget = max(ctx_total - int(max_completion_tokens) - 1024, 1)

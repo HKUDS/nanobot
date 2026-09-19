@@ -33,6 +33,9 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ef8e30;
+    --usage-token: 29 86% 56%;
+    --session-handle-lightness: 0.5;
+    --session-handle-chroma: 0.12;
     --temporary-control-active: #ef8e30;
     --temporary-accent: 24 95% 53%;
     --temporary-foreground: 17 88% 32%;
@@ -47,14 +50,18 @@
     --radius-modal: 1.375rem;
     --radius-prominent: 1.75rem;
     --radius-pill: 9999px;
+    --content-column-width: 49.5rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-content: 240 3% 30%;
+    --sidebar-muted-foreground: 240 2% 44%;
     --sidebar-selected: 40 1% 89.4%;
     --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
     --sidebar-border: 40 8% 90.5%;
     --settings-canvas: var(--background);
     --settings-surface: 60 6% 96.7%;
+    --automation-view-track: hsl(0 0% 91%);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
@@ -81,18 +88,23 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --session-handle-lightness: 0.75;
+    --session-handle-chroma: 0.11;
     --temporary-control-active: #ef8e30;
     --temporary-accent: 24 95% 53%;
     --temporary-foreground: 32 98% 73%;
     --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
+    --sidebar-content: 240 3% 84%;
+    --sidebar-muted-foreground: 240 2% 70%;
     --sidebar-selected: 0 0% 29.8%;
     --sidebar-accent: var(--background);
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: var(--border);
     --settings-canvas: var(--background);
     --settings-surface: var(--card);
+    --automation-view-track: hsl(var(--muted) / 0.65);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
@@ -153,6 +165,36 @@
     overflow: hidden;
   }
 
+  .kv-cache-not-reused {
+    background: hsl(var(--usage-token) / 0.84);
+  }
+
+  .kv-cache-reused {
+    background-color: hsl(var(--usage-token) / 0.1);
+    background-image: repeating-linear-gradient(
+      135deg,
+      hsl(var(--usage-token) / 0.46) 0,
+      hsl(var(--usage-token) / 0.46) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  }
+
+  .dark .kv-cache-not-reused {
+    background: hsl(var(--usage-token) / 0.92);
+  }
+
+  .dark .kv-cache-reused {
+    background-color: hsl(var(--usage-token) / 0.15);
+    background-image: repeating-linear-gradient(
+      135deg,
+      hsl(var(--usage-token) / 0.58) 0,
+      hsl(var(--usage-token) / 0.58) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  }
+
   .composer-model-badge::before {
     content: "";
     position: absolute;
@@ -161,11 +203,19 @@
     pointer-events: none;
     background-color: rgb(236 141 49);
     opacity: 0;
-    transition: opacity 220ms ease-out;
+    transition: opacity 180ms ease-out;
+  }
+
+  .composer-model-badge[data-fallback="true"] {
+    border-color: rgb(236 141 49 / 0.38);
   }
 
   .composer-model-badge[data-fallback="true"]::before {
-    opacity: 1;
+    opacity: 0.1;
+  }
+
+  .dark .composer-model-badge[data-fallback="true"]::before {
+    opacity: 0.15;
   }
 
   .composer-model-badge > * {
@@ -365,6 +415,7 @@
    * bottom without a remount or a transform clone.
    */
   .thread-layout {
+    --thread-composer-fade-height: 2.25rem;
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
     transition: grid-template-rows 220ms ease-out;
   }
@@ -378,6 +429,33 @@
     .thread-layout[data-layout="hero"] {
       grid-template-rows: minmax(min-content, 1fr) auto 1fr;
     }
+  }
+
+  /**
+   * Keep the transcript and composer visually continuous. The scrollport owns
+   * the fade because overflow clips its contents before an adjacent overlay
+   * can soften the edge. The matching in-flow gap keeps the last line fully
+   * visible once the user reaches the bottom.
+   */
+  .thread-message-viewport {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      #000 0,
+      #000 calc(100% - var(--thread-composer-fade-height)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      #000 0,
+      #000 calc(100% - var(--thread-composer-fade-height)),
+      transparent 100%
+    );
+  }
+  .thread-message-end-gap {
+    height: var(--thread-composer-fade-height);
+  }
+  .thread-composer-dock {
+    background: hsl(var(--background));
   }
 
   @keyframes composer-status-strip-enter {
@@ -452,38 +530,42 @@
     opacity: 1;
     transform: translateY(0);
   }
-  .composer-workspace-drawer {
-    --composer-workspace-drawer-duration: 220ms;
+  /* Shared in-flow disclosure: animate intrinsic height without measuring it. */
+  .inline-disclosure {
+    --inline-disclosure-duration: 220ms;
 
     display: grid;
     grid-template-rows: 0fr;
     opacity: 0;
     pointer-events: none;
   }
-  .composer-workspace-drawer[data-state="open"] {
-    --composer-workspace-drawer-duration: 240ms;
+  .inline-disclosure[data-state="open"] {
+    --inline-disclosure-duration: 240ms;
 
     grid-template-rows: 1fr;
     opacity: 1;
     pointer-events: auto;
   }
-  .composer-workspace-drawer-clip {
+  .inline-disclosure-clip {
     min-height: 0;
     overflow: hidden;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .composer-workspace-drawer {
-      transition:
-        grid-template-rows var(--composer-workspace-drawer-duration)
-          cubic-bezier(0.4, 0, 0.2, 1),
-        opacity var(--composer-workspace-drawer-duration) ease-in-out;
+    .expandable-text {
+      transition: height 240ms cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .composer-workspace-drawer-content {
+    .inline-disclosure {
+      transition:
+        grid-template-rows var(--inline-disclosure-duration)
+          cubic-bezier(0.4, 0, 0.2, 1),
+        opacity var(--inline-disclosure-duration) ease-in-out;
+    }
+    .inline-disclosure-content {
       transform: translateY(-6px);
-      transition: transform var(--composer-workspace-drawer-duration)
+      transition: transform var(--inline-disclosure-duration)
         cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .composer-workspace-drawer[data-state="open"] .composer-workspace-drawer-content {
+    .inline-disclosure[data-state="open"] .inline-disclosure-content {
       transform: translateY(0);
     }
   }
@@ -519,6 +601,17 @@
     }
     .queued-prompt-row {
       animation: none;
+    }
+  }
+
+  .thread-workspace {
+    container: thread-workspace / inline-size;
+  }
+  /* Keep room for the 49.5rem message column and controls in the side margin. */
+  @container thread-workspace (max-width: 72rem) {
+    .thread-workspace > * {
+      --thread-header-position: relative;
+      --thread-prompt-inset: 1rem;
     }
   }
 
@@ -619,6 +712,11 @@
     overflow-x: auto;
   }
 
+  /* Prism's Markdown table tokens must not pick up Tailwind's table layout. */
+  .not-prose pre .token.table {
+    display: inline;
+  }
+
   /* Wide markdown tables scroll horizontally within the conversation column.
      Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
      custom `table` component (see MarkdownTextRenderer); min-w-max on the
@@ -660,7 +758,15 @@
   }
 }
 
+.message-actions > button:first-child {
+  margin-inline-start: -0.5rem;
+}
+
 @media (pointer: coarse) {
+  .message-actions > button:first-child {
+    margin-inline-start: -0.875rem;
+  }
+
   .touch-target {
     min-width: 2.75rem;
     min-height: 2.75rem;
@@ -668,9 +774,8 @@
 }
 
 /*
- * Composer controls compress against their actual container, not the viewport.
- * Permission state has priority over the model label; both retain their full
- * accessible names and title text when their visible labels are shortened.
+ * Composer controls adapt to their actual container, not just the viewport.
+ * Narrow layouts move access and usage into a separate metadata row.
  */
 .thread-composer-surface {
   container-name: thread-composer;
@@ -691,9 +796,103 @@
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
 }
 
-.thread-composer-model-badge:not([data-switching="true"]):active
-  > .composer-model-pill {
+.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
   transform: scale(0.98);
+}
+
+.composer-model-pill-setup {
+  border-color: hsl(var(--border) / 0.72);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.62),
+    0 1px 2px hsl(var(--foreground) / 0.035);
+  transition-property: color, background-color, border-color, box-shadow, transform;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dark .composer-model-pill-setup {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.thread-composer-model-badge:hover > .composer-model-pill-setup {
+  border-color: hsl(var(--border));
+  background-color: hsl(var(--accent) / 0.7);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.72),
+    0 2px 5px hsl(var(--foreground) / 0.06);
+}
+
+.dark .thread-composer-model-badge:hover > .composer-model-pill-setup {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 2px 5px rgb(0 0 0 / 0.16);
+}
+
+@keyframes composer-model-pill-setup-attention {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  22% {
+    transform: translateX(-3px);
+  }
+
+  46% {
+    transform: translateX(3px);
+  }
+
+  68% {
+    transform: translateX(-2px);
+  }
+
+  86% {
+    transform: translateX(1px);
+  }
+}
+
+.composer-model-pill-setup-attention {
+  animation: composer-model-pill-setup-attention 280ms cubic-bezier(0.22, 0.8, 0.32, 1);
+}
+
+@keyframes composer-model-pill-viewport-enter {
+  from {
+    transform: scale(0.9074);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+.composer-model-pill-viewport {
+  transform-origin: right center;
+  animation: composer-model-pill-viewport-enter 210ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
+}
+
+.composer-model-pill-dock {
+  transform-origin: right center;
+  transition-property: none;
+  will-change: transform;
+}
+
+.composer-model-pill-track[data-settling="true"],
+.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes settings-restart-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .settings-restart-pending { animation: settings-restart-breathe 3s ease-in-out infinite; }
+  .settings-restart-pending:hover, .settings-restart-pending:focus-visible { animation: none; }
 }
 
 @keyframes preset-name-shake {
@@ -711,38 +910,17 @@
   }
 }
 
-@keyframes composer-model-pill-viewport-enter {
-  from {
-    transform: scale(0.9074);
-  }
-
-  to {
-    transform: scale(1);
-  }
-}
-
-.composer-model-pill-viewport {
-  transform-origin: right center;
-  animation: composer-model-pill-viewport-enter 210ms
-    cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 4px, #000 calc(100% - 4px), transparent);
-}
-
-.composer-model-pill-dock {
-  transform-origin: right center;
-  transition-property: none;
-  will-change: transform;
-}
-
-.composer-model-pill-track[data-settling="true"],
-.composer-model-pill-track[data-settling="true"] .composer-model-pill-dock {
-  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .thread-composer-model-badge:active > .composer-model-pill {
+  .thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
     transform: none !important;
+  }
+
+  .composer-model-pill-setup {
+    transition: none;
+  }
+
+  .composer-model-pill-setup-attention {
+    animation: none;
   }
 
   .composer-model-pill-track[data-settling="true"],
@@ -756,88 +934,408 @@
   }
 }
 
-@container thread-composer (max-width: 21rem) {
-  .thread-composer-footer {
-    column-gap: 0.25rem;
-    padding-inline: 0.5rem;
-  }
-
-  .thread-composer-footer-primary,
-  .thread-composer-footer-actions {
-    gap: 0.25rem;
-  }
-
-  .thread-composer-access {
-    max-width: 6.5rem;
-    padding-inline: 0.5rem;
-    font-size: 0.71875rem;
-  }
-
-  .thread-composer-access-icon {
-    margin-right: 0.25rem;
-  }
-
-  .thread-composer-access-chevron {
-    margin-left: 0.25rem;
-  }
-
-  .thread-composer-access-label-full {
-    display: none;
-  }
-
-  .thread-composer-access-label-short {
-    display: inline;
-  }
+/* Narrow composers separate message actions from permissions and usage instead
+ * of shrinking touch targets or hiding the active model and access state. */
+[data-compact-controls] .thread-composer-footer {
+  column-gap: 0.25rem;
+  padding: 0 0.5rem 0.5rem;
 }
 
-@container thread-composer (max-width: 19rem) {
-  .thread-composer-model-badge {
-    width: 2rem;
-    flex: none;
-  }
-
-  .thread-composer-model-badge .composer-model-pill {
-    width: 100%;
-    justify-content: center;
-    gap: 0;
-    padding-inline: 0;
-  }
-
-  .thread-composer-model-label {
-    display: none;
-  }
+[data-compact-controls] .thread-composer-footer-primary,
+[data-compact-controls] .thread-composer-footer-actions {
+  gap: 0.25rem;
 }
 
-@container thread-composer (max-width: 16rem) {
-  .thread-composer-access {
-    width: 2rem;
-    flex: none;
-    justify-content: center;
-    padding-inline: 0;
-  }
-
-  .thread-composer-access-icon {
-    margin-right: 0;
-  }
-
-  .thread-composer-access-label-short,
-  .thread-composer-access-chevron {
-    display: none;
-  }
+[data-compact-controls] .thread-composer-footer-actions {
+  flex: none;
+  max-width: none;
 }
 
-@container thread-composer (max-width: 15rem) {
-  .thread-composer-action.touch-target,
-  .thread-composer-access.touch-target {
-    width: 2rem;
-    min-width: 2rem;
-    height: 2rem;
-    min-height: 2rem;
-  }
+[data-compact-controls] .thread-composer-action.touch-target {
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+[data-compact-controls] .thread-composer-model-badge {
+  max-width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+}
+
+/* Keep a 44px hit area around the quieter 36px attachment/send circles.
+ * The transparent pseudo-element belongs to the button, including its disabled
+ * state; margins reserve its space so adjacent controls never overlap it. */
+[data-compact-controls] .thread-composer-round-action.touch-target {
+  position: relative;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  margin: 0.25rem;
+}
+
+[data-compact-controls] .thread-composer-round-action::before {
+  content: "";
+  position: absolute;
+  inset: -0.3125rem;
+  border-radius: inherit;
+}
+
+[data-compact-controls] .composer-model-pill {
+  height: 2.25rem;
+}
+
+.thread-composer-meta .touch-target {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.thread-composer-meta .thread-composer-access {
+  max-width: 100%;
+  padding-inline: 0.5rem;
 }
 @media (forced-colors: active) {
   [data-workbench-move-handle]:focus-visible {
     outline: 2px solid CanvasText;
     outline-offset: 2px;
   }
+}
+
+@layer components {
+  @media (prefers-reduced-motion: no-preference) {
+    .segmented-control-indicator[data-animate="true"] {
+      transition-property: transform, width;
+      transition-duration: 220ms, 160ms;
+      transition-timing-function:
+        cubic-bezier(0.2, 0.95, 0.25, 1.08),
+        cubic-bezier(0.2, 0, 0, 1);
+    }
+  }
+}
+
+/* Settings grid: 4px baseline; 720px frame; 12 columns / 24px gutter on
+   desktop, 4 columns / 16px gutter on mobile. Rows share the same tracks. */
+@layer components {
+  .settings-grid {
+    --settings-baseline: 4px;
+    --settings-columns: 4;
+    --settings-gutter: 16px;
+    --settings-margin: 16px;
+    --settings-inset: 16px;
+    --settings-module-gap: 20px;
+    container-type: inline-size;
+    max-inline-size: 720px;
+    padding-inline: var(--settings-margin);
+  }
+  .settings-grid.settings-feature-page {
+    --settings-margin: 0.75rem;
+    max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
+  }
+  .settings-grid.settings-feature-page.settings-automations-grid {
+    max-inline-size: calc(60rem + 2 * var(--settings-margin));
+  }
+  /* Stack a task's status below its title when the content column is narrow. */
+  .automations-page {
+    --settings-inset: 1rem;
+    container: automations / inline-size;
+  }
+  .automation-create-composer .thread-composer-surface {
+    max-inline-size: none;
+  }
+  .automation-create-composer .thread-composer-input textarea {
+    padding-inline: var(--settings-inset);
+  }
+  .automation-view-switch .segmented-control button {
+    padding-inline: calc(var(--settings-inset) - 0.5rem);
+  }
+  .automation-panel-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    min-block-size: 4rem;
+    padding-block: 0.75rem;
+    padding-inline: 0.75rem 0.25rem;
+  }
+  .automation-create-composer .thread-composer-collapsible-layout {
+    padding-block-start: 0;
+  }
+  /* Match the main sidebar's lg visibility; its collapsed rail has no labels. */
+  @media (min-width: 1024px) {
+    .settings-feature-page[data-main-navigation-expanded="true"] .settings-feature-header {
+      margin-block-end: 0;
+    }
+    .settings-feature-page[data-main-navigation-expanded="true"] .settings-feature-header h1 {
+      @apply sr-only;
+    }
+  }
+  .automation-run-at-picker {
+    container: automation-run-at / inline-size;
+  }
+  @container automation-run-at (min-width: 18rem) {
+    .automation-run-at-fields { grid-template-columns: minmax(0, 1fr) 7rem; }
+  }
+  .automation-panel-filters {
+    margin-inline-start: auto;
+  }
+  .thread-composer-collapsible-layout {
+    container: composer-layout / inline-size;
+  }
+  .thread-composer-collapsible .thread-composer-input textarea:placeholder-shown {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+    display: block;
+    block-size: 3.125rem !important;
+  }
+  @container composer-layout (min-width: 40rem) {
+    .thread-composer-collapsible .thread-composer-input {
+      inline-size: 100%;
+    }
+    .thread-composer-collapsible .thread-composer-input textarea {
+      display: block;
+      min-block-size: 3.5rem;
+      padding-block: 1.125rem;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-input {
+      inline-size: max(0px, calc(100% - var(--composer-compact-controls-width, 15rem) - 1.5rem));
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+      display: block;
+      block-size: 3.5rem !important;
+      min-block-size: 3.5rem;
+      padding-block: 1.125rem;
+    }
+    .thread-composer-collapsible .thread-composer-footer {
+      min-block-size: 3.5rem;
+      margin-block-start: 0;
+      padding: 0.5rem;
+      pointer-events: none;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer {
+      margin-block-start: -3.5rem;
+    }
+    .thread-composer-collapsible .thread-composer-footer-primary {
+      flex: 1 0 auto;
+      margin-inline-start: auto;
+      pointer-events: auto;
+    }
+    .thread-composer-collapsible[data-compact] .thread-composer-footer-primary {
+      flex-grow: 0;
+    }
+    .thread-composer-collapsible .thread-composer-footer-actions {
+      max-inline-size: none;
+      margin-inline-start: 0;
+      pointer-events: auto;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .thread-composer-collapsible .thread-composer-input {
+        transition: inline-size 220ms ease-out;
+      }
+      .thread-composer-collapsible .thread-composer-footer {
+        transition: margin-block-start 220ms ease-out;
+      }
+      .thread-composer-collapsible .thread-composer-footer-primary {
+        transition: flex-grow 220ms ease-out;
+      }
+    }
+  }
+  .automation-calendar-grid { display: none; }
+  .automation-calendar-agenda { display: block; }
+  @container automations (min-width: 44rem) {
+    .automation-calendar-grid { display: block; }
+    .automation-calendar-agenda { display: none; }
+    .automation-calendar-weekdays {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+    .automation-calendar-weekdays > div {
+      padding: 8px 10px;
+      color: hsl(var(--muted-foreground));
+      font-size: 10px;
+      line-height: 16px;
+      text-align: end;
+    }
+    .automation-calendar-month {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+    .automation-calendar-day {
+      min-block-size: 112px;
+      min-inline-size: 0;
+      border-inline-end: 1px solid hsl(var(--border) / 0.55);
+      border-block-end: 1px solid hsl(var(--border) / 0.55);
+    }
+    .automation-calendar-day:nth-child(7n) { border-inline-end: 0; }
+    .automation-calendar-day:nth-last-child(-n + 7) { border-block-end: 0; }
+  }
+  .settings-stack > :not([hidden]) ~ :not([hidden]) {
+    margin-block-start: var(--settings-module-gap, 20px);
+  }
+  .settings-section-title {
+    margin-block-end: 20px;
+    padding-inline: var(--settings-inset, 16px);
+    line-height: 20px;
+  }
+  .settings-section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 24px;
+    padding-inline: var(--settings-inset, 16px);
+  }
+  .settings-section-heading > .settings-section-title { margin: 0; padding: 0; }
+  .settings-stack > .settings-section-heading + :not([hidden]) { margin-block-start: 20px; }
+  .settings-row, .settings-footer {
+    display: grid;
+    grid-template-columns: repeat(var(--settings-columns, 4), minmax(0, 1fr));
+    column-gap: var(--settings-gutter, 16px);
+    row-gap: 12px;
+    align-items: center;
+    padding: 12px var(--settings-inset, 16px);
+    min-block-size: 60px;
+  }
+  .settings-row > *, .settings-footer > * { grid-column: 1 / -1; min-inline-size: 0; }
+  .settings-control { display: flex; align-items: center; max-inline-size: 100%; }
+  .settings-control > * { max-inline-size: 100%; }
+  .settings-control input, .settings-control textarea { max-inline-size: 100%; text-align: start; }
+  .settings-control input[type="number"] { font-variant-numeric: tabular-nums; }
+  .settings-footer { min-block-size: 60px; }
+  .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
+  .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
+  .settings-footer-auto > :nth-child(2):empty { display: none; }
+  .settings-row:has(> .settings-control > [role="switch"]) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 24px;
+  }
+  .settings-row:has(> .settings-control > [role="switch"]) > :first-child { grid-column: 1; }
+  .settings-row:has(> .settings-control > [role="switch"]) > :nth-child(2) { grid-column: 2; }
+  .settings-disclosure > summary {
+    cursor: pointer;
+    padding: 12px var(--settings-inset, 16px);
+    border-radius: var(--radius-control, 12px);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    color: hsl(var(--muted-foreground));
+  }
+  .settings-disclosure > summary:hover { color: hsl(var(--foreground)); }
+  .settings-disclosure > summary:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+  .settings-disclosure[open] > summary { margin-block-end: 8px; }
+
+  .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
+  .settings-list-row { min-block-size: 60px; border-radius: 12px; }
+  .sidebar-action-label:lang(zh) {
+    display: inline-block;
+    min-inline-size: var(--sidebar-label-width, 3em);
+    text-align: justify;
+    text-align-last: justify;
+  }
+  @media (hover: hover) {
+    .settings-hover:hover { background-color: hsl(var(--sidebar-foreground) / 0.055); }
+    .dark .settings-hover:hover { background-color: rgb(255 255 255 / 0.07); }
+  }
+  .settings-editor { padding: 16px var(--settings-inset, 16px); }
+  @media (min-width: 640px) {
+    .settings-grid { --settings-margin: 32px; }
+    .settings-grid.settings-feature-page { --settings-margin: 1rem; }
+  }
+  @container (min-width: 640px) {
+    .settings-grid .settings-row, .settings-grid .settings-footer {
+      --settings-columns: 12;
+      --settings-gutter: 24px;
+    }
+    .settings-grid .settings-control { justify-content: flex-end; }
+    .settings-grid .settings-row > :first-child,
+    .settings-grid .settings-footer > :first-child { grid-column: 1 / 8; }
+    .settings-grid .settings-row > :nth-child(2),
+    .settings-grid .settings-footer > :nth-child(2) { grid-column: 8 / -1; }
+    .settings-grid .settings-footer-auto > :first-child { grid-column: 1 / -1; }
+    .settings-grid .settings-row:has(.segmented-control) > :first-child { grid-column: 1 / 7; }
+    .settings-grid .settings-row:has(.segmented-control) > :nth-child(2) { grid-column: 7 / -1; }
+  }
+  @media (min-width: 768px) {
+    .settings-grid { --settings-inset: 24px; }
+  }
+}
+
+.sidebar-scroll-fade {
+  --sidebar-fade-top: 0px;
+  --sidebar-fade-bottom: 0px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--sidebar-fade-top), #000 calc(100% - var(--sidebar-fade-bottom)), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--sidebar-fade-top), #000 calc(100% - var(--sidebar-fade-bottom)), transparent);
+}
+
+.sidebar-child-list {
+  position: relative;
+}
+
+.sidebar-child-list::before {
+  content: "";
+  position: absolute;
+  inset-block: 4px;
+  inset-inline-start: -5px;
+  width: 1px;
+  background: hsl(var(--sidebar-foreground) / 0.12);
+  pointer-events: none;
+}
+
+.sidebar-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.sidebar-scrollbar:is(:hover, :has(:focus-visible), [data-scrolling="true"]) {
+  scrollbar-color: hsl(var(--sidebar-foreground) / 0.2) transparent;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .sidebar-scrollbar,
+  .sidebar-scrollbar:is(:hover, :has(:focus-visible), [data-scrolling="true"]) {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb {
+    min-height: 32px;
+    border: 3.5px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    background-clip: padding-box;
+    transition: background-color 180ms ease-out;
+  }
+
+  .sidebar-scrollbar:is(:hover, :has(:focus-visible), [data-scrolling="true"])::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--sidebar-foreground) / 0.2);
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb:hover,
+  .sidebar-scrollbar::-webkit-scrollbar-thumb:active {
+    background-color: hsl(var(--sidebar-foreground) / 0.38);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-scrollbar::-webkit-scrollbar-thumb { transition: none; }
 }

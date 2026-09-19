@@ -2,13 +2,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { MessageBubble } from "@/components/MessageBubble";
+import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import { resources } from "@/i18n";
+import { resources, setAppLanguage } from "@/i18n";
 import {
   LOCALE_STORAGE_KEY,
   resolveInitialLocale,
@@ -20,6 +22,7 @@ const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portra
 const HERO_GREETING_KEYS = ["workOn", "start", "build", "tackle"];
 const SLASH_COMMAND_KEYS = [
   "new",
+  "compact",
   "stop",
   "restart",
   "status",
@@ -156,29 +159,27 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.sections.about",
   "settings.rows.theme",
   "settings.rows.language",
-  "settings.rows.density",
   "settings.rows.activityMode",
   "settings.rows.fileEditDisplay",
   "settings.rows.codeWrap",
   "settings.rows.brandLogos",
+  "settings.rows.browserNotifications",
   "settings.rows.currentModel",
   "settings.rows.localServiceAccess",
   "settings.rows.webuiDefaultAccess",
   "settings.rows.contextWindow",
   "settings.help.theme",
   "settings.help.language",
-  "settings.help.density",
   "settings.help.activityMode",
   "settings.help.fileEditDisplay",
   "settings.help.codeWrap",
   "settings.help.brandLogos",
+  "settings.help.browserNotifications",
   "settings.help.currentModel",
   "settings.help.localServiceAccess",
   "settings.help.webuiDefaultAccess",
   "settings.values.light",
   "settings.values.dark",
-  "settings.values.comfortable",
-  "settings.values.compact",
   "settings.values.expanded",
   "settings.values.enabled",
   "settings.values.disabled",
@@ -227,7 +228,6 @@ const LOCALIZED_CHANNEL_SHELL_KEYS = [
   "settings.channels.instanceConfigured",
   "settings.channels.instanceNeedsSetup",
   "settings.channels.managedByWebui",
-  "settings.channels.officialGuide",
   "settings.channels.optional",
   "settings.channels.providerPreset",
   "settings.channels.requiredSetup",
@@ -236,11 +236,9 @@ const LOCALIZED_CHANNEL_SHELL_KEYS = [
   "settings.channels.savedSettings",
   "settings.channels.saveSettings",
   "settings.channels.selectChannel",
-  "settings.channels.setupSteps",
   "settings.channels.showSecret",
   "settings.channels.toggleChannel",
   "settings.channels.toggleInstance",
-  "settings.channels.tryIt",
   "settings.channels.validation.connected",
   "settings.channels.validation.configured",
   "settings.channels.validation.invalid",
@@ -252,6 +250,7 @@ const LOCALIZED_NEW_SURFACE_KEYS = [
   "chat.activity.running",
   "chat.activity.complete",
   "chat.activity.updated",
+  "chat.activity.recovery",
   "chat.pin",
   "chat.unpin",
   "chat.rename",
@@ -293,6 +292,16 @@ const LOCALIZED_NEW_SURFACE_KEYS = [
   "message.skill",
   "settings.channels.connectionChecks",
   "settings.channels.open",
+  "recovery.actionFailed",
+  "recovery.interrupted",
+  "recovery.completed",
+  "recovery.failed",
+  "recovery.failedHelp",
+  "recovery.resuming",
+  "recovery.review",
+  "recovery.safeResume",
+  "recovery.dismiss",
+  "recovery.continue",
 ];
 const ACCIDENTALLY_SPANISH_SETTINGS_KEYS = [
   "settings.help.provider",
@@ -405,6 +414,30 @@ describe("webui i18n", () => {
     );
   });
 
+  it.each(supportedLocales)("localizes compaction states in $code", async ({ code }) => {
+    await setAppLanguage(code);
+    const copy = resources[code].common.thread.compaction;
+    const { container, rerender } = render(
+      <ContextCompactionNotice compaction={{ id: "compact-1", phase: "started", announce: true }} />,
+    );
+    for (const phase of ["started", "succeeded", "failed", "cancelled"] as const) {
+      rerender(<ContextCompactionNotice compaction={{
+        id: "compact-1", phase, announce: true,
+      }} />);
+      const notice = container.querySelector("[data-context-compaction]");
+      expect(copy[phase]).toBeTruthy();
+      expect(notice?.textContent).toBe(copy[phase]);
+      expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
+    }
+    for (const compactReply of ["empty", "failed"] as const) {
+      rerender(<MessageBubble message={{
+        id: "reply", role: "assistant", content: "original command reply",
+        compactReply, createdAt: 1,
+      }} />);
+      expect(screen.getByText(copy[compactReply])).toBeInTheDocument();
+    }
+  });
+
   it("keeps preboot copy aligned with every registered locale", () => {
     for (const { code } of supportedLocales) {
       const result = runPrebootLocale(code);
@@ -439,6 +472,17 @@ describe("webui i18n", () => {
     expect(resolveInitialLocale()).toBe("zh-CN");
   });
 
+  it("lists each language by its native name", async () => {
+    const user = userEvent.setup();
+
+    render(<LanguageSwitcher />);
+    await user.click(screen.getByRole("combobox", { name: "Change language" }));
+
+    for (const { nativeLabel } of supportedLocales) {
+      expect(screen.getByRole("option", { name: nativeLabel })).toBeInTheDocument();
+    }
+  });
+
   it("switches UI copy and document locale through the language switcher", async () => {
     const user = userEvent.setup();
 
@@ -454,8 +498,8 @@ describe("webui i18n", () => {
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");
 
-    await user.click(screen.getByRole("button", { name: "Change language" }));
-    await user.click(screen.getByRole("menuitemradio", { name: /简体中文/i }));
+    await user.click(screen.getByRole("combobox", { name: "Change language" }));
+    await user.click(screen.getByRole("option", { name: /简体中文/i }));
 
     await waitFor(() => {
       expect(document.documentElement.lang).toBe("zh-CN");
@@ -473,6 +517,36 @@ describe("webui i18n", () => {
     });
 
     expect(screen.getByLabelText("メッセージ入力欄")).toBeInTheDocument();
+  });
+
+  it("localizes a backend-provided compact slash command", async () => {
+    await act(async () => {
+      const { setAppLanguage } = await import("@/i18n");
+      await setAppLanguage("zh-CN");
+    });
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        slashCommands={[{
+          command: "/compact",
+          title: "Compact context",
+          description: "Compact this chat's context and continue the conversation.",
+          icon: "archive",
+          lifecycle: "side_channel",
+          acceptsArgs: false,
+        }]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("消息输入框"), {
+      target: { value: "/co" },
+    });
+
+    expect(screen.getByRole("listbox", { name: "斜杠命令" })).toBeInTheDocument();
+    expect(screen.getByText("压缩上下文")).toBeInTheDocument();
+    expect(screen.getByText("压缩当前对话的上下文并继续对话。")).toBeInTheDocument();
+    expect(screen.getByText("/compact")).toBeInTheDocument();
   });
 
   it("keeps empty landing resources localized for every registered locale", () => {

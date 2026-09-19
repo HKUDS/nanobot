@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
+import { setAppLanguage } from "@/i18n";
+import * as clipboard from "@/lib/clipboard";
 import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
 import type {
   CliAppInfo,
@@ -95,6 +97,45 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 describe("MessageBubble", () => {
+  it("copies the localized compact reply instead of the stored English text", async () => {
+    await setAppLanguage("zh-CN");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<MessageBubble message={{
+      id: "compact-empty", role: "assistant", content: "Nothing to compact.",
+      compactReply: "empty", createdAt: 1,
+    }} />);
+    expect(screen.getByText("无需压缩上下文")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("无需压缩上下文"));
+  });
+
+  it("renders a compacted context notice", () => {
+    const message: UIMessage = {
+      id: "compaction-1",
+      role: "assistant",
+      content: "",
+      kind: "compaction",
+      createdAt: Date.now(),
+      compaction: {
+        id: "compact-1",
+        phase: "succeeded",
+        announce: true,
+      },
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    const notice = container.querySelector("[data-context-compaction='succeeded']");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(notice).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+    expect(notice).toHaveTextContent(/^Context compacted$/);
+  });
+
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
       id: "u1",
@@ -111,6 +152,28 @@ describe("MessageBubble", () => {
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-floating");
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
+  });
+
+  it("renders cross-session input with its public handle", () => {
+    const message: UIMessage = {
+      id: "session-message:message-1",
+      role: "user",
+      content: "Please review this.",
+      createdAt: 1_700_000_000_123,
+      sessionMessage: {
+        message_id: "message-1",
+        session: {
+          id: "handle_0123456789abcdef0123456789abcdef",
+          name: "mira-0123456789",
+        },
+      },
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    expect(container.querySelector("[data-session-message]")).toBeInTheDocument();
+    expect(screen.getByText("@mira-0123456789")).toBeInTheDocument();
+    expect(screen.getByText("Please review this.")).toBeInTheDocument();
   });
 
   it("outlines temporary-chat user messages with a short dashed border", () => {
@@ -223,6 +286,7 @@ describe("MessageBubble", () => {
 
     const quote = screen.getByLabelText("Quoted context");
     expect(quote).toHaveTextContent("selected assistant excerpt");
+    expect(quote).not.toHaveAttribute("title");
     expect(screen.queryByText("Quoted context")).not.toBeInTheDocument();
     expect(screen.getByText("What about this?")).toBeInTheDocument();
 
@@ -331,7 +395,7 @@ describe("MessageBubble", () => {
     );
 
     expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
-    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
   });
 
   it("highlights skill references without a live skill catalog", () => {
@@ -359,8 +423,8 @@ describe("MessageBubble", () => {
     expect(skill.getAttribute("style")).not.toContain("text-shadow");
     expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
     expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
-    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@zoom");
-    expect(skill.parentElement).toHaveTextContent("Ask github to review this with @zoom");
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
+    expect(skill.parentElement).toHaveTextContent("Ask github to review this with @Zoom");
   });
 
   it("highlights well-formed skill references and leaves a bare marker plain", () => {
@@ -503,14 +567,16 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} cliApps={CLI_APPS} />);
 
     const token = screen.getByTestId("message-cli-mention-zoom");
-    expect(token).toHaveTextContent("@zoom");
-    expect(token).toHaveAttribute("title", "CLI app: Zoom");
+    expect(token).toHaveTextContent("@Zoom");
+    expect(token).toHaveAttribute("title", "CLI app: Zoom (@zoom)");
     expect(token).toHaveClass("font-[550]");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #0B5CFF");
     expect(token.getAttribute("style")).not.toContain("text-shadow");
-    expect(screen.getByTestId("message-cli-mention-logo-zoom")).toBeInTheDocument();
+    const logo = screen.getByTestId("message-cli-mention-logo-zoom");
+    expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
+    expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
     expect(screen.queryByTestId("message-cli-mention-krita")).not.toBeInTheDocument();
     expect(screen.getByText(/not @krita/)).toBeInTheDocument();
   });
@@ -569,7 +635,7 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} cliApps={[]} />);
 
     const token = screen.getByTestId("message-cli-mention-drawio");
-    expect(token).toHaveTextContent("@drawio");
+    expect(token).toHaveTextContent("@Draw.io");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #F08705");
@@ -587,10 +653,61 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} mcpPresets={MCP_PRESETS} />);
 
     const token = screen.getByTestId("message-mcp-mention-browserbase");
-    expect(token).toHaveTextContent("@browserbase");
-    expect(token).toHaveAttribute("title", "MCP server: Browserbase");
+    expect(token).toHaveTextContent("@Browserbase");
+    expect(token).toHaveAttribute("title", "MCP server: Browserbase (@browserbase)");
     expect(token.getAttribute("style")).toContain("color: #111827");
-    expect(screen.getByTestId("message-mcp-mention-logo-browserbase")).toBeInTheDocument();
+    const logo = screen.getByTestId("message-mcp-mention-logo-browserbase");
+    expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
+    expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
+  });
+
+  it.each((["cli", "mcp"] as const).flatMap((kind) => [
+    ["linear", "Linear", "Linear"],
+    ["iterm2", "iTerm2", "iTerm2"],
+    ["drawio", "Draw.io", "Draw.io"],
+    ["gimp", "GIMP", "GIMP"],
+    ["google-drive", "Google Drive", "Google Drive"],
+    ["1password-cli", "1Password CLI", "1Password CLI"],
+    ["feishu-cli", "Feishu/Lark CLI", "Feishu/Lark CLI"],
+    ["local-app", "  本地应用  ", "本地应用"],
+    ["fallback-app", "   ", "fallback-app"],
+  ].map(([name, displayName, expected]) => ({ kind, name, displayName, expected }))))(
+    "uses the saved display name for $kind $name without rewriting its identifier",
+    ({ kind, name, displayName, expected }) => {
+      const message: UIMessage = {
+        id: "saved-app-name",
+        role: "user",
+        content: `Use @${name} please`,
+        ...(kind === "cli" ? {
+          cliApps: [{ name, display_name: displayName, category: "test", entry_point: name }],
+        } : {
+          mcpPresets: [{ name, display_name: displayName, category: "test", transport: "stdio" }],
+        }),
+      };
+      render(<MessageBubble message={message} />);
+      const token = screen.getByTestId(`message-${kind}-mention-${name}`);
+      expect(token.textContent).toBe(`@${expected}`);
+      expect(token).toHaveAttribute("title", `${kind === "cli" ? "CLI app" : "MCP server"}: ${expected} (@${name})`);
+      expect(token).toHaveClass("inline-flex", "items-baseline", "max-w-full", "[overflow-wrap:anywhere]");
+      expect(token.firstElementChild).toHaveClass("shrink-0");
+      expect(token.lastElementChild).toHaveClass("min-w-0", "font-semibold");
+      expect(message.content).toBe(`Use @${name} please`);
+    },
+  );
+
+  it("copies the original mention identifiers rather than display names", async () => {
+    const copy = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(true);
+    try {
+      render(<MessageBubble message={{
+        id: "copy-display-name", role: "user", content: "Please use @drawio",
+        cliApps: [{ name: "drawio", display_name: "Draw.io", category: "diagram", entry_point: "drawio" }],
+      }} />);
+      expect(screen.getByTestId("message-cli-mention-drawio")).toHaveTextContent("@Draw.io");
+      fireEvent.click(screen.getByRole("button", { name: "Copy", exact: true }));
+      await waitFor(() => expect(copy).toHaveBeenCalledWith("Please use @drawio"));
+    } finally {
+      copy.mockRestore();
+    }
   });
 
   it("renders persisted session mentions inside sent user messages", () => {
@@ -777,12 +894,55 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} />);
     const toggle = screen.getByRole("button", { name: /used 2 tools/i });
 
-    expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
-    expect(screen.queryByText('search "hk weather"')).not.toBeInTheDocument();
+    const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(content).toHaveAttribute("data-state", "closed");
+    expect(content).toHaveAttribute("inert");
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
 
     fireEvent.click(toggle);
     expect(screen.getByText('weather("get")')).toBeInTheDocument();
     expect(screen.getByText('search "hk weather"')).toBeInTheDocument();
+    expect(content).toHaveAttribute("data-state", "open");
+    fireEvent.click(toggle);
+    expect(content).toHaveAttribute("data-state", "closed");
+    expect(content).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
+  });
+
+  it("lazily mounts large trace groups and releases them only after an uninterrupted exit", async () => {
+    const traces = Array.from({ length: 1000 }, (_, index) => `tool call ${index}`);
+    render(<MessageBubble message={{
+      id: "large-trace", role: "tool", kind: "trace",
+      content: traces[0], traces, createdAt: Date.now(),
+    }} />);
+    const toggle = screen.getByRole("button", { name: /used 1000 tools/i });
+    const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    // Hidden content must not allocate a DOM node for every historical trace.
+    expect(content.querySelectorAll("li")).toHaveLength(0);
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+
+    let finishExit!: () => void;
+    const getAnimations = vi.fn(() => [{
+      finished: new Promise<void>((resolve) => { finishExit = resolve; }),
+    }]);
+    Object.defineProperty(content, "getAnimations", { value: getAnimations });
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+    expect(content).toHaveAttribute("inert");
+
+    // Reopening cancels cleanup of the previous exit, even if it finishes later.
+    fireEvent.click(toggle);
+    await act(async () => { finishExit(); });
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+    expect(content).not.toHaveAttribute("inert");
+
+    fireEvent.click(toggle);
+    expect(getAnimations).toHaveBeenCalledTimes(2);
+    await act(async () => { finishExit(); });
+    expect(content.querySelectorAll("li")).toHaveLength(0);
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
   });
 
   it("renders video media as an inline player", () => {
@@ -989,4 +1149,5 @@ describe("MessageBubble", () => {
     expect(container.querySelector('img[src="/api/media/sig/svg"]')).toBeInTheDocument();
     expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
   });
+
 });

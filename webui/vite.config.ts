@@ -59,6 +59,17 @@ export function gzipWebuiAssets(): Plugin {
 }
 
 export function webuiManualChunk(id: string): string | undefined {
+  const locale = /\/webui\/locales\/([^/]+)\.json$/.exec(id)?.[1]
+    ?? /\/src\/i18n\/locales\/([^/]+)\/common\.json$/.exec(id)?.[1];
+  if (locale) return `locale-${locale}`;
+  // Clipboard actions are shared with lazy Markdown and must not pull it into the shell.
+  if (id.endsWith("/src/lib/clipboard.ts")) return "clipboard";
+  if (id.endsWith("/src/lib/markdown-math.ts")
+    || id.includes("node_modules/rehype-katex/")
+    // The micromark barrel also exports an HTML renderer that imports KaTeX.
+    || (id.includes("node_modules/micromark-extension-math/") && id.endsWith("/html.js"))) {
+    return "markdown-math";
+  }
   if (
     id.includes("node_modules/react/")
     || id.includes("node_modules/react-dom/")
@@ -73,12 +84,8 @@ export function webuiManualChunk(id: string): string | undefined {
   }
   // Streamdown lazy-loads diagrams and highlighted code. Keep those modules
   // outside the core markdown chunk so ordinary replies do not download them.
-  if (
-    id.includes("node_modules/streamdown/dist/mermaid-")
-    || id.includes("node_modules/streamdown/dist/highlighted-body-")
-  ) {
-    return;
-  }
+  if (id.includes("node_modules/streamdown/dist/mermaid-")) return "markdown-diagrams";
+  if (id.includes("node_modules/streamdown/dist/highlighted-body-")) return "markdown-code";
   // Refractor reaches this HAST helper through hastscript. Keeping it with
   // Refractor prevents syntax-highlight <-> markdown-vendor circular chunks.
   if (
@@ -122,10 +129,10 @@ export default defineConfig(({ mode }) => {
       dedupe: ["react", "react-dom", "lucide-react", "react-i18next", "qrcode"],
     },
     optimizeDeps: {
-      // Radix Dialog can rewrite its optimized chunk while a dev tab is open.
-      // Syntax highlighting must remain pre-bundled because Refractor's core
-      // still uses CommonJS internally.
-      exclude: ["@radix-ui/react-dialog"],
+      // Pre-bundle Dialog up front, including lazy settings/sheets. Excluding
+      // it splits its layer/focus state from optimized Popover and DropdownMenu,
+      // so nested overlays can dismiss the wrong layer in development.
+      include: ["@radix-ui/react-dialog"],
     },
     build: {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),
@@ -162,6 +169,10 @@ export default defineConfig(({ mode }) => {
       environment: "happy-dom",
       globals: true,
       setupFiles: ["./src/tests/setup.ts"],
+      include: [
+        "src/**/*.{test,spec}.{ts,tsx}",
+        "../nanobot/channels/*/tests/webui/**/*.{test,spec}.{ts,tsx}",
+      ],
       coverage: {
         provider: "v8",
         include: ["src/**/*.{ts,tsx}"],

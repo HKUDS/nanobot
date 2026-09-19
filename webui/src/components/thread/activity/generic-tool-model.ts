@@ -3,7 +3,7 @@ import { compactActivityPath, redactActivityText } from "./activity-text";
 export type GenericToolStatus = "running" | "done" | "error";
 export type ToolFamily = "content-search" | "file-search" | "list" | "read" | "memory" | "generic";
 
-export interface ToolField {
+interface ToolField {
   key:
     | "query"
     | "pattern"
@@ -240,6 +240,8 @@ function activityLabel(
       return statusCopy(status, "Starting long task", "Started long task", "Could not start long task");
     case "update_goal":
       return statusCopy(status, "Updating long task", "Updated long task", "Could not update long task");
+    // TODO(0.3.2): Remove write_stdin display compatibility after 0.3.1.
+    case "exec_session":
     case "write_stdin":
       return statusCopy(status, "Continuing command", "Continued command", "Could not continue command");
     case "list_exec_sessions":
@@ -291,6 +293,8 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
       return safeText(fieldValue(trace, "ui_summary"));
     case "update_goal":
       return safeText(fieldValue(trace, "action"));
+    // TODO(0.3.2): Remove write_stdin display compatibility after 0.3.1.
+    case "exec_session":
     case "write_stdin":
       return compactIdentifier(fieldValue(trace, "session_id"));
     case "screenshot":

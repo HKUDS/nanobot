@@ -70,7 +70,7 @@ class ToolRegistry:
 
     def has(self, name: str) -> bool:
         """Check if a tool is registered."""
-        return name in self._tools
+        return self.get(name) is not None
 
     @staticmethod
     def _schema_name(schema: dict[str, Any]) -> str:
@@ -113,7 +113,7 @@ class ToolRegistry:
         params: Any,
     ) -> tuple[Tool | None, Any, str | None]:
         """Resolve, cast, and validate one tool call."""
-        tool = self._tools.get(name)
+        tool = self.get(name)
         if not tool:
             suggestion = self._suggest_name(str(name))
             hint = f" Did you mean '{suggestion}'? Tool names must match exactly." if suggestion else ""
@@ -209,4 +209,4 @@ class ToolRegistry:
         return len(self._tools)
 
     def __contains__(self, name: str) -> bool:
-        return name in self._tools
+        return self.has(name)

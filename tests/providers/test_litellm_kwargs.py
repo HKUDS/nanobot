@@ -369,6 +369,46 @@ async def test_deepseek_v4_pro_uses_responses_api() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deepseek_vision_uses_responses_api_with_image_input() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response())
+    mock_responses = AsyncMock(return_value=_fake_responses_response("vision response"))
+    content = [
+        {"type": "text", "text": "describe this image"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+    ]
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_class:
+        client_instance = mock_client_class.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="deepseek-v4-flash-vision-exp",
+            spec=find_by_name("deepseek"),
+        )
+        result = await provider.chat(
+            messages=[{"role": "user", "content": content}],
+            model="deepseek-v4-flash-vision-exp",
+        )
+
+    assert result.content == "vision response"
+    mock_chat.assert_not_awaited()
+    call_kwargs = mock_responses.call_args.kwargs
+    assert call_kwargs["input"] == [{
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "describe this image"},
+            {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,AA==",
+                "detail": "auto",
+            },
+        ],
+    }]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("provider_name", "model"),
     [
@@ -1061,10 +1101,37 @@ def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
         {"role": "user", "content": "thanks"},
     ])
 
-    assert sanitized[1]["content"] is None
+    assert sanitized[1]["content"] == "done"
     assert sanitized[1]["reasoning_content"] == "hidden"
     assert sanitized[1]["extra_content"] == {"debug": True}
     assert sanitized[1]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
+
+
+def test_openai_compat_replays_tool_call_commentary_to_model() -> None:
+    spec = find_by_name("openai")
+    assert spec is not None
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(spec=spec)
+
+    kwargs = provider._build_kwargs(
+        messages=[
+            {"role": "user", "content": "check the files"},
+            {
+                "role": "assistant",
+                "content": "I am checking the profile first.",
+                "tool_calls": [_tool_call("call_1")],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        tools=None,
+        model="gpt-5",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort="high",
+        tool_choice=None,
+    )
+
+    assert kwargs["messages"][1]["content"] == "I am checking the profile first."
 
 
 def _deepseek_kwargs(messages: list[dict]) -> dict:
@@ -1154,7 +1221,7 @@ def test_openai_compat_preserves_tool_call_ids_after_consecutive_assistant_messa
     ])
 
     assert sanitized[1]["role"] == "assistant"
-    assert sanitized[1]["content"] is None
+    assert sanitized[1]["content"] == "<think>我再查一下</think>"
     assert sanitized[1]["tool_calls"][0]["id"] == "call_function_akxp3wqzn7ph_1"
     assert sanitized[2]["tool_call_id"] == "call_function_akxp3wqzn7ph_1"
 
@@ -1182,7 +1249,7 @@ def test_mistral_normalizes_tool_call_ids_after_consecutive_assistant_messages()
     ])
 
     assert sanitized[1]["role"] == "assistant"
-    assert sanitized[1]["content"] is None
+    assert sanitized[1]["content"] == "<think>我再查一下</think>"
     assert sanitized[1]["tool_calls"][0]["id"] == "3ec83c30d"
     assert sanitized[2]["tool_call_id"] == "3ec83c30d"
 
@@ -1555,6 +1622,33 @@ def test_deepseek_coerces_list_content_to_string() -> None:
     assert isinstance(kw["messages"][0]["content"], str)
     assert "hello" in kw["messages"][0]["content"]
     assert "world" in kw["messages"][0]["content"]
+
+
+def test_deepseek_vision_preserves_multimodal_content() -> None:
+    """DeepSeek's vision model requires OpenAI-compatible content blocks."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(
+            api_key="k",
+            default_model="deepseek-v4-flash-vision-exp",
+            spec=spec,
+        )
+    content = [
+        {"type": "text", "text": "describe this image"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+    ]
+
+    kw = p._build_kwargs(
+        messages=[{"role": "user", "content": content}],
+        tools=None,
+        model="deepseek-v4-flash-vision-exp",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert kw["messages"][0]["content"] == content
 
 
 def test_non_deepseek_keeps_list_content() -> None:

@@ -40,13 +40,6 @@ LENGTH_RECOVERY_PROMPT = (
     "existing text, recap, or apologize."
 )
 
-SUSTAINED_GOAL_CONTINUE_PROMPT = (
-    "You have an active sustained goal. Please continue working toward the "
-    "objective using your tools, or call update_goal with action='complete' "
-    "if the work is truly finished."
-)
-
-
 def empty_tool_result_message(tool_name: str) -> str:
     """Short prompt-safe marker for tools that completed without visible output."""
     return f"({tool_name} completed with no output)"
@@ -95,11 +88,6 @@ def build_length_recovery_message(content: str) -> dict[str, str]:
         "Begin with the text that belongs immediately after this tail."
     )
     return {"role": "user", "content": prompt}
-
-
-def build_goal_continue_message(custom: str | None = None) -> dict[str, str]:
-    """Prompt the model to continue when a sustained goal is still active."""
-    return {"role": "user", "content": custom or SUSTAINED_GOAL_CONTINUE_PROMPT}
 
 
 def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:

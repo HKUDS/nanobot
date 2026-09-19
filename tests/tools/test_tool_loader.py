@@ -59,6 +59,7 @@ def test_tool_context_has_required_fields():
         "config", "workspace", "bus", "subagent_manager",
         "cron_service", "exec_session_manager", "file_state_store",
         "provider_snapshot_loader", "image_generation_provider_configs", "timezone",
+        "runtime_control",
     }
     assert required <= field_names
 
@@ -71,6 +72,7 @@ def test_tool_context_defaults():
     assert ctx.exec_session_manager is None
     assert ctx.provider_snapshot_loader is None
     assert ctx.image_generation_provider_configs is None
+    assert ctx.runtime_control is None
     assert ctx.timezone == "UTC"
 
 
@@ -91,8 +93,9 @@ def test_discover_finds_concrete_tools():
     assert "ExecTool" in class_names
     assert "CliAppsTool" in class_names
     assert "MessageTool" in class_names
+    assert "MyTool" in class_names
     assert "SpawnTool" in class_names
-    assert "WriteStdinTool" in class_names
+    assert "ExecSessionTool" in class_names
 
 
 def test_discover_excludes_abstract_and_mcp():
@@ -160,8 +163,15 @@ def test_loader_wires_shared_exec_session_manager(tmp_path):
     ToolLoader().load(ctx, registry)
 
     assert registry.get("exec")._session_manager is manager
-    assert registry.get("write_stdin")._manager is manager
+    assert registry.get("exec_session")._manager is manager
+    assert registry.get("write_stdin") is None
     assert registry.get("list_exec_sessions")._manager is manager
+    definition_names = {
+        definition["function"]["name"]
+        for definition in registry.get_definitions()
+    }
+    assert "exec_session" in definition_names
+    assert "write_stdin" not in definition_names
 
 
 # --- Task 4: _FsTool.create() ---
@@ -366,9 +376,23 @@ def test_my_tool_enabled():
     from nanobot.agent.tools.self import MyTool
     mock_config = MagicMock()
     mock_config.my.enable = True
-    ctx = ToolContext(config=mock_config, workspace="/tmp")
+    ctx = ToolContext(
+        config=mock_config,
+        workspace="/tmp",
+        runtime_control=MagicMock(),
+    )
     assert MyTool.enabled(ctx) is True
     mock_config.my.enable = False
+    assert MyTool.enabled(ctx) is False
+
+
+def test_my_tool_requires_runtime_control():
+    from nanobot.agent.tools.self import MyTool
+
+    mock_config = MagicMock()
+    mock_config.my.enable = True
+    ctx = ToolContext(config=mock_config, workspace="/tmp")
+
     assert MyTool.enabled(ctx) is False
 
 
@@ -404,6 +428,7 @@ def test_loader_registers_same_tools_as_old_hardcoded():
     mock_config.web.user_agent = None
     mock_config.image_generation.enabled = False
     mock_config.my.enable = True
+    mock_config.my.allow_set = False
 
     ctx = ToolContext(
         config=mock_config,
@@ -412,6 +437,7 @@ def test_loader_registers_same_tools_as_old_hardcoded():
         subagent_manager=MagicMock(),
         cron_service=MagicMock(),
         timezone="UTC",
+        runtime_control=MagicMock(),
     )
     registry = ToolRegistry()
     loader = ToolLoader()
@@ -419,9 +445,10 @@ def test_loader_registers_same_tools_as_old_hardcoded():
 
     expected = {
         "read_file", "write_file", "edit_file", "list_dir",
-        "find_files", "grep", "exec", "write_stdin", "list_exec_sessions",
+        "find_files", "grep", "exec", "exec_session", "list_exec_sessions",
         "web_search", "web_fetch",
         "message", "spawn", "cron",
+        "my",
     }
     actual = set(registered)
     assert expected <= actual, f"Missing tools: {expected - actual}"

@@ -18,6 +18,7 @@ from nanobot.gateway import (
     GatewayRuntimePaths,
     GatewayStartOptions,
     GatewayStatus,
+    RuntimeResult,
 )
 from nanobot.gateway.runtime import monitor_gateway_clients
 from nanobot.process_runtime import process_is_running
@@ -454,6 +455,33 @@ def test_restart_does_not_detach_a_foreground_gateway(tmp_path, monkeypatch):
     assert result.message == "gateway_foreground_restart_required"
 
 
+def test_restart_stops_then_starts_the_background_gateway(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    status = GatewayStatus(
+        running=True,
+        pid=12345,
+        state_path=runtime.paths.state_path,
+        log_path=runtime.paths.log_path,
+        launch_mode="background",
+    )
+    monkeypatch.setattr(runtime, "status", lambda **_kwargs: status)
+
+    def stop(*, timeout_s: int):
+        assert timeout_s == 20
+        return SimpleNamespace(ok=True, message="gateway_stopped", status=status)
+
+    monkeypatch.setattr(runtime, "_stop", stop)
+    monkeypatch.setattr(
+        runtime,
+        "_start_background",
+        lambda _options: RuntimeResult(True, "gateway_started_background", status),
+    )
+
+    result = runtime.restart(GatewayStartOptions(port=18790))
+
+    assert result.ok is True
+
+
 def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
@@ -477,6 +505,25 @@ def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatc
     assert webui.release() is True
     assert stopped == [20]
     assert not webui.state_path.exists()
+
+
+def test_last_client_can_leave_shutdown_to_the_gateway_monitor(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(
+        runtime,
+        "_stop",
+        lambda **_kwargs: pytest.fail("deferred release must not stop synchronously"),
+    )
+    client = GatewayClientLease(runtime, kind="tui", pid=os.getpid(), token="tui")
+    client.acquire()
+    client.mark_ephemeral()
+
+    assert client.release(wait_for_stop=False) is False
+
+    state = json.loads(client.state_path.read_text(encoding="utf-8"))
+    assert state == {"auto_stop": True, "clients": {}}
 
 
 def test_last_client_shutdown_preserves_a_replacement_lease(tmp_path, monkeypatch):
@@ -945,6 +992,37 @@ def test_status_keeps_live_state_when_identity_probe_is_temporarily_unavailable(
     assert status.running is True
     assert status.reason == "identity_unavailable"
     assert runtime.paths.state_path.exists()
+
+
+def test_status_distinguishes_live_process_from_degraded_gateway_readiness(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    runtime.paths.run_dir.mkdir(parents=True)
+    runtime.paths.state_path.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "identity": 42,
+                "port": 18791,
+                "health_host": "127.0.0.1",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 42)
+    monkeypatch.setattr(
+        "nanobot.gateway.runtime._gateway_health_ready",
+        lambda _host, _port: False,
+    )
+
+    status = runtime.status()
+
+    assert status.running is True
+    assert status.ready is False
+    assert status.reason == "websocket_unavailable"
 
 
 def test_stop_refuses_to_signal_a_process_when_identity_cannot_be_verified(

@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import inspect
 import json
-from typing import Any, Awaitable, Callable, cast
+from typing import Any
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.bus.outbound_events import ProgressEvent, StreamDeltaEvent, StreamEndEvent
+from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.helpers import IncrementalThinkExtractor, strip_think
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
-    invoke_on_progress,
-    on_progress_accepts_tool_events,
 )
 from nanobot.utils.tool_hints import format_tool_hints
 
@@ -25,27 +24,23 @@ class AgentProgressHook(AgentHook):
 
     def __init__(
         self,
-        on_progress: Callable[..., Awaitable[None]] | None = None,
-        on_stream: Callable[[str], Awaitable[None]] | None = None,
-        on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        events: EventSink = NO_EVENTS,
         *,
+        streaming: bool = False,
         session_key: str | None = None,
         tool_hint_max_length: int = 40,
-        on_iteration: Callable[[int], None] | None = None,
     ) -> None:
         super().__init__(reraise=True)
-        self._on_progress = on_progress
-        self._on_stream = on_stream
-        self._on_stream_end = on_stream_end
+        self._publish = events.publish
+        self._streaming = streaming
         self._session_key = session_key
         self._tool_hint_max_length = tool_hint_max_length
-        self._on_iteration = on_iteration
         self._stream_buf = ""
         self._think_extractor = IncrementalThinkExtractor()
         self._reasoning_open = False
 
     def wants_streaming(self) -> bool:
-        return self._on_stream is not None
+        return self._streaming
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -55,16 +50,6 @@ class AgentProgressHook(AgentHook):
 
     def _tool_hint(self, tool_calls: list[Any]) -> str:
         return format_tool_hints(tool_calls, max_length=self._tool_hint_max_length)
-
-    @staticmethod
-    def _on_progress_accepts(cb: Callable[..., Any], name: str) -> bool:
-        try:
-            sig = inspect.signature(cb)
-        except (TypeError, ValueError):
-            return False
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            return True
-        return name in sig.parameters
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         prev_clean = strip_think(self._stream_buf)
@@ -79,25 +64,19 @@ class AgentProgressHook(AgentHook):
             # Answer text has started; close the reasoning segment so the UI can
             # lock the bubble before the answer renders below it.
             await self.emit_reasoning_end()
-            if self._on_stream:
-                await self._on_stream(incremental)
+            if self._publish and self._streaming:
+                await self._publish(StreamDeltaEvent(content=incremental))
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         await self.emit_reasoning_end()
-        if self._on_stream_end:
-            kwargs: dict[str, bool] = {"resuming": resuming}
-            if (
-                context.stream_continues_current_message
-                and self._on_progress_accepts(self._on_stream_end, "merge_next")
-            ):
-                kwargs["merge_next"] = True
-            await self._on_stream_end(**kwargs)
+        if self._publish and self._streaming:
+            await self._publish(StreamEndEvent(
+                resuming=resuming, merge_next=context.stream_continues_current_message,
+            ))
         self._stream_buf = ""
         self._think_extractor.reset()
 
     async def before_iteration(self, context: AgentHookContext) -> None:
-        if self._on_iteration:
-            self._on_iteration(context.iteration)
         logger.debug(
             "Starting agent loop iteration {} for session {}",
             context.iteration,
@@ -109,7 +88,7 @@ class AgentProgressHook(AgentHook):
         context: AgentHookContext,
         event: dict[str, Any],
     ) -> None:
-        if not self._on_progress:
+        if not self._publish:
             return
         phase = event.get("phase")
         name = event.get("name")
@@ -139,83 +118,63 @@ class AgentProgressHook(AgentHook):
             await self.emit_reasoning_end()
             tool_call = ToolCallRequest(id=str(call_id), name=name, arguments=arguments)
             tool_hint = self._strip_think(self._tool_hint([tool_call])) or name
-            await invoke_on_progress(
-                self._on_progress,
-                tool_hint,
-                tool_hint=True,
-                tool_events=[payload],
-            )
+            await self._publish(ProgressEvent(
+                content=tool_hint, tool_hint=True, tool_events=[payload],
+            ))
             logger.info(
                 "Provider-hosted tool call: {}({})",
                 name,
                 json.dumps(arguments, ensure_ascii=False)[:200],
             )
             return
-        if on_progress_accepts_tool_events(self._on_progress):
-            await invoke_on_progress(
-                self._on_progress,
-                "",
-                tool_hint=False,
-                tool_events=[payload],
-            )
+        await self._publish(ProgressEvent(tool_events=[payload]))
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
-        if self._on_progress:
-            if not self._on_stream and not context.streamed_content:
+        if self._publish:
+            if not self._streaming and not context.streamed_content:
                 thought = self._strip_think(context.response.content if context.response else None)
                 if thought:
-                    await self._on_progress(thought)
+                    await self._publish(ProgressEvent(content=thought))
             tool_hint = self._strip_think(self._tool_hint(context.tool_calls))
             tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
-            await invoke_on_progress(
-                self._on_progress,
-                cast(str, tool_hint),
-                tool_hint=True,
-                tool_events=tool_events,
-            )
+            await self._publish(ProgressEvent(
+                content=tool_hint or "", tool_hint=True, tool_events=tool_events,
+            ))
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         """Publish a reasoning chunk; channel plugins decide whether to render."""
-        if (
-            self._on_progress
-            and reasoning_content
-            and self._on_progress_accepts(self._on_progress, "reasoning")
-        ):
+        if self._publish and reasoning_content:
             self._reasoning_open = True
-            await self._on_progress(reasoning_content, reasoning=True)
+            await self._publish(ProgressEvent(content=reasoning_content, reasoning_delta=True))
 
     async def emit_reasoning_end(self) -> None:
         """Close the current reasoning stream segment, if any was open."""
-        if self._reasoning_open and self._on_progress:
+        if self._reasoning_open and self._publish:
             self._reasoning_open = False
-            await self._on_progress("", reasoning_end=True)
+            await self._publish(ProgressEvent(reasoning_end=True))
         else:
             self._reasoning_open = False
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         if (
-            self._on_progress
+            self._publish
             and context.tool_calls
             and context.tool_events
-            and on_progress_accepts_tool_events(self._on_progress)
         ):
             tool_events = build_tool_event_finish_payloads(context)
             if tool_events:
-                await invoke_on_progress(
-                    self._on_progress,
-                    "",
-                    tool_hint=False,
-                    tool_events=tool_events,
-                )
-        u = context.usage or {}
+                await self._publish(ProgressEvent(tool_events=tool_events))
+        u = context.usage
         logger.debug(
-            "LLM usage: prompt={} completion={} cached={}",
-            u.get("prompt_tokens", 0),
-            u.get("completion_tokens", 0),
-            u.get("cached_tokens", 0),
+            "LLM usage: input={} output={} cache_read={} cache_write={} source={}",
+            u.input_tokens if u else 0,
+            u.output_tokens if u else 0,
+            u.cache_read_tokens if u else None,
+            u.cache_write_tokens if u else None,
+            u.source if u else "missing",
         )
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:

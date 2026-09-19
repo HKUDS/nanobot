@@ -13,31 +13,46 @@ import type { UIMediaAttachment, UIMessage } from "@/lib/types";
  */
 export function coalesceActivityMessages(messages: UIMessage[]): UIMessage[] {
   const normalized: UIMessage[] = [];
+  const calls = new Map<string, { latest: number; byTurn: Map<string, number> }>();
 
   for (const message of messages) {
-    const targetIndex = findMergeTarget(normalized, message);
-    if (targetIndex < 0) {
-      normalized.push(message);
-      continue;
+    let targetIndex = -1;
+    if (message.kind === "trace") {
+      for (const event of message.toolEvents ?? []) {
+        if (!event.call_id) continue;
+        const call = calls.get(event.call_id);
+        if (!call) continue;
+        const index = message.turnId
+          ? Math.max(call.byTurn.get(message.turnId) ?? -1, call.byTurn.get("") ?? -1)
+          : call.latest;
+        targetIndex = Math.max(targetIndex, index);
+      }
+      if (targetIndex < 0 && canMergeAdjacentProgress(normalized.at(-1), message)) {
+        targetIndex = normalized.length - 1;
+      }
     }
-    normalized[targetIndex] = mergeTraceMessages(normalized[targetIndex], message);
+    if (targetIndex < 0) {
+      targetIndex = normalized.length;
+      normalized.push(message);
+    } else {
+      normalized[targetIndex] = mergeTraceMessages(normalized[targetIndex], message);
+    }
+    if (message.kind !== "trace") continue;
+    // Merging preserves the target's turn. Legacy rows without a turn match any turn.
+    const turn = normalized[targetIndex].turnId || "";
+    for (const event of message.toolEvents ?? []) {
+      if (!event.call_id) continue;
+      let call = calls.get(event.call_id);
+      if (!call) {
+        call = { latest: targetIndex, byTurn: new Map() };
+        calls.set(event.call_id, call);
+      }
+      call.latest = Math.max(call.latest, targetIndex);
+      call.byTurn.set(turn, Math.max(call.byTurn.get(turn) ?? -1, targetIndex));
+    }
   }
 
   return normalized;
-}
-
-function findMergeTarget(messages: UIMessage[], incoming: UIMessage): number {
-  if (incoming.kind !== "trace") return -1;
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const previous = messages[index];
-    if (previous.kind !== "trace") continue;
-    if (hasSharedToolCall(previous, incoming) && sameTurn(previous, incoming)) return index;
-  }
-
-  const adjacentIndex = messages.length - 1;
-  const adjacent = messages[adjacentIndex];
-  return canMergeAdjacentProgress(adjacent, incoming) ? adjacentIndex : -1;
 }
 
 function canMergeAdjacentProgress(
@@ -85,15 +100,6 @@ function mergeTraceMessages(previous: UIMessage, incoming: UIMessage): UIMessage
 function messageTraces(message: UIMessage): string[] {
   if (message.traces?.length) return message.traces;
   return message.content.trim() ? [message.content] : [];
-}
-
-function hasSharedToolCall(previous: UIMessage, incoming: UIMessage): boolean {
-  const previousCallIds = new Set(
-    (previous.toolEvents ?? []).map((event) => event.call_id).filter(Boolean),
-  );
-  return (incoming.toolEvents ?? []).some((event) => (
-    !!event.call_id && previousCallIds.has(event.call_id)
-  ));
 }
 
 function hasSharedTrace(previous: UIMessage, incoming: UIMessage): boolean {

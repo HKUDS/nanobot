@@ -29,9 +29,7 @@ Memory moves through nanobot in two stages.
 
 ### Stage 1: Consolidator
 
-When a conversation grows large enough to pressure the context window, nanobot does not try to carry every old message forever.
-
-Instead, the `Consolidator` summarizes the oldest safe slice of the conversation and appends that summary to `memory/history.jsonl`.
+When a conversation grows large, the `Consolidator` summarizes older turns and appends the result to `memory/history.jsonl`, while keeping recent conversation available. Each summary preserves useful long-term facts and a short handoff for active work.
 
 This file is:
 

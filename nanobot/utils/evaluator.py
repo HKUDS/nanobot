@@ -96,7 +96,7 @@ async def evaluate_response(
     """
 
     try:
-        llm_response = await provider.chat_with_retry(
+        llm_response = await provider.chat_stream_with_retry(
             messages=[
                 {"role": "system", "content": evaluator_prompt},
                 {"role": "user", "content": render_template(

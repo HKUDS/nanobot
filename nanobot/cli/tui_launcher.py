@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import os
 import platform
 import shutil
 import subprocess
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -19,15 +17,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot import __version__
+from nanobot.cli.process_identity import named_executable
 from nanobot.cli.runtime_config import _model_display
 from nanobot.cli.webui_support import (
     _gateway_health_ready,
-    _webui_browser_url,
+    _gateway_health_url,
+    _gateway_instance_command,
+    _host_for_local_browser,
     _webui_endpoint_reachable,
-    webui_bootstrap_secret,
 )
 from nanobot.config.paths import get_data_dir
 from nanobot.config.schema import Config
+from nanobot.webui.session_identity import is_webui_session_key, webui_chat_id
 
 if TYPE_CHECKING:
     from nanobot.gateway import GatewayClientLease
@@ -62,6 +63,10 @@ _TUI_RELEASE_LIMITS = {
     "nanobot-tui-source.tar.gz": 20 * 1024 * 1024,
     "MANIFEST.sha256": 64 * 1024,
 }
+# Keep in sync with TUI_DETACH_EXIT_CODE in tui/src/index.ts.
+_TUI_DETACH_EXIT_CODE = 90
+_GATEWAY_READY_TIMEOUT_S = 20.0
+_GATEWAY_READY_POLL_S = 0.1
 
 
 @dataclass(frozen=True)
@@ -79,50 +84,85 @@ def launch_tui(
     theme: str,
 ) -> int:
     """Run the native TUI against the shared local gateway."""
-    state_path = config_path.parent / "tui" / "state.json"
-    chat_id = _initial_tui_chat_id(session_id, state_path)
-    command = _resolve_tui_command()
-    gateway = _ensure_gateway(
-        config,
-        config_path=config_path,
-        workspace_override=workspace_override,
-    )
+    chat_id = _initial_tui_chat_id(session_id)
+    tui_workspace = _initial_tui_workspace(workspace_override)
+    command = resolve_tui_command()
+    base_url, bootstrap_secret = _tui_gateway_connection(config)
+    gateway: _GatewayHandle | None = None
+    process: subprocess.Popen[Any] | None = None
     try:
-        bootstrap = _fetch_bootstrap(
-            gateway.base_url,
-            secret=webui_bootstrap_secret(config),
-        )
         env = os.environ.copy()
+        env.pop("NANOBOT_TUI_WS_URL", None)
+        env.pop("NANOBOT_TUI_API_TOKEN", None)
+        env.pop("NANOBOT_TUI_DESKTOP_RESOLVER", None)
+        env.pop("NANOBOT_TUI_DESKTOP_TARGET", None)
         env.update(
             {
-                "NANOBOT_TUI_WS_URL": _authenticated_ws_url(bootstrap),
-                "NANOBOT_TUI_API_URL": gateway.base_url,
-                "NANOBOT_TUI_API_TOKEN": str(bootstrap.get("api_token") or ""),
+                "NANOBOT_TUI_BOOTSTRAP_URL": f"{base_url}/webui/bootstrap",
+                "NANOBOT_TUI_HEALTH_URL": _gateway_health_url(
+                    config.gateway.host,
+                    config.gateway.port,
+                ),
+                "NANOBOT_TUI_API_URL": base_url,
                 "NANOBOT_TUI_MODEL": _model_display(config)[0],
                 "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",
-                "NANOBOT_TUI_WORKSPACE": str(config.workspace_path),
+                "NANOBOT_TUI_WORKSPACE": str(tui_workspace),
                 "NANOBOT_TUI_VERSION": __version__,
                 "NANOBOT_TUI_ACCESS": (
                     "workspace access" if config.tools.restrict_to_workspace else "full access"
                 ),
                 "NANOBOT_TUI_THEME": theme,
+                "NANOBOT_TUI_GATEWAY_STOP_COMMAND": _gateway_instance_command(
+                    "stop",
+                    config_path=config_path,
+                    workspace=workspace_override,
+                ),
             }
         )
-        env["NANOBOT_TUI_STATE_PATH"] = str(state_path)
+        if bootstrap_secret:
+            env["NANOBOT_TUI_BOOTSTRAP_SECRET"] = bootstrap_secret
+        else:
+            env.pop("NANOBOT_TUI_BOOTSTRAP_SECRET", None)
         if chat_id:
             env["NANOBOT_TUI_CHAT_ID"] = chat_id
         else:
             env.pop("NANOBOT_TUI_CHAT_ID", None)
-        return subprocess.run(command, env=env, check=False).returncode
-    except OSError as exc:
-        raise TuiUnavailableError(f"could not start the native TUI: {exc}") from exc
+        try:
+            process = subprocess.Popen(command, env=env)
+        except OSError as exc:
+            raise TuiUnavailableError(f"could not start the native TUI: {exc}") from exc
+        gateway = _ensure_gateway(
+            config,
+            config_path=config_path,
+            workspace_override=workspace_override,
+            wait_until_ready=False,
+        )
+        exit_code = process.wait()
+        if exit_code == _TUI_DETACH_EXIT_CODE:
+            lease = gateway.lease
+            if lease is not None:
+                lease.mark_persistent()
+            return 0
+        return exit_code
+    except BaseException:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        raise
     finally:
-        lease = getattr(gateway, "lease", None)
+        lease = getattr(gateway, "lease", None) if gateway is not None else None
         if lease is not None:
-            lease.release()
+            # Returning to the shell must not wait for process termination. The
+            # gateway's client monitor observes the released last lease and owns
+            # the orderly on-demand shutdown.
+            lease.release(wait_for_stop=False)
 
 
-def _resolve_tui_command() -> list[str]:
+def resolve_tui_command(*, data_dir: Path | None = None) -> list[str]:
     override = os.environ.get("NANOBOT_TUI_BIN", "").strip()
     if override:
         executable = Path(override).expanduser().resolve(strict=False)
@@ -153,13 +193,13 @@ def _resolve_tui_command() -> list[str]:
                 "this source checkout requires Bun to run its matching TUI; "
                 "install Bun, then run `nanobot agent` again"
             )
-        return _resolve_source_tui_command(source_dir, bun)
+        return _resolve_source_tui_command(source_dir, bun, data_dir=data_dir)
 
     packaged = Path(__file__).resolve().parents[1] / "tui" / "bin" / asset
     if packaged.is_file():
         return [str(packaged)]
 
-    downloaded = _download_release_tui(asset)
+    downloaded = _download_release_tui(asset, data_dir=data_dir)
     if downloaded is not None:
         return [str(downloaded)]
 
@@ -184,7 +224,9 @@ def _tui_source_dir(project_root: Path) -> Path | None:
     return None
 
 
-def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
+def _resolve_source_tui_command(
+    source_dir: Path, bun: str, *, data_dir: Path | None = None,
+) -> list[str]:
     dependency = source_dir / "node_modules" / "@opentui" / "core"
     try:
         install = subprocess.run(
@@ -200,10 +242,15 @@ def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
         detail = (install.stderr or install.stdout).strip().splitlines()
         suffix = f": {detail[-1]}" if detail else ""
         raise TuiUnavailableError(f"could not install TUI dependencies{suffix}")
-    return [bun, str(source_dir / "src" / "index.ts")]
+    executable = named_executable(
+        bun,
+        name="nanobot-tui",
+        directory=(data_dir if data_dir is not None else get_data_dir()) / "run" / "executables",
+    )
+    return [executable, str(source_dir / "src" / "index.ts")]
 
 
-def _download_release_tui(asset: str) -> Path | None:
+def _download_release_tui(asset: str, *, data_dir: Path | None = None) -> Path | None:
     """Install the complete, version-matched TUI release bundle."""
     if os.environ.get("NANOBOT_TUI_NO_DOWNLOAD") == "1":
         return None
@@ -211,7 +258,7 @@ def _download_release_tui(asset: str) -> Path | None:
     if not version or version.endswith((".dev0", "+dev")):
         return None
 
-    target_dir = get_data_dir() / "bin" / "tui" / version
+    target_dir = (data_dir if data_dir is not None else get_data_dir()) / "bin" / "tui" / version
     cached = _cached_release_tui(target_dir, asset)
     if cached is not None:
         return cached
@@ -364,6 +411,7 @@ def _ensure_gateway(
     *,
     config_path: Path,
     workspace_override: str | None,
+    wait_until_ready: bool = True,
 ) -> _GatewayHandle:
     from nanobot.gateway import (
         GatewayClientLease,
@@ -371,7 +419,7 @@ def _ensure_gateway(
         GatewayRuntime,
     )
 
-    base_url = _webui_browser_url(config).split("/#/", 1)[0].rstrip("/")
+    base_url, _bootstrap_secret = _tui_gateway_connection(config)
     instance = GatewayInstance.resolve(
         config_path=config_path,
         workspace=workspace_override,
@@ -380,17 +428,52 @@ def _ensure_gateway(
     lease = GatewayClientLease(runtime, kind="tui")
     lease.acquire()
     try:
+        def ready(status: object) -> bool:
+            management_ready = getattr(status, "ready", None)
+            if not isinstance(management_ready, bool):
+                management_ready = _gateway_health_ready(
+                    config.gateway.host,
+                    config.gateway.port,
+                )
+            return _webui_endpoint_reachable(base_url) and management_ready
+
+        def wait_for_ready(log_path: object) -> _GatewayHandle:
+            deadline = time.monotonic() + _GATEWAY_READY_TIMEOUT_S
+            while time.monotonic() < deadline:
+                current = runtime.status()
+                if not current.running:
+                    break
+                if current.port not in {None, config.gateway.port}:
+                    break
+                if ready(current):
+                    return _GatewayHandle(base_url=base_url, lease=lease)
+                time.sleep(_GATEWAY_READY_POLL_S)
+
+            current = runtime.status()
+            if current.running:
+                raise TuiUnavailableError(
+                    "local gateway process is running but its WebSocket/WebUI listener "
+                    "is unavailable; channel recovery did not restore it. "
+                    "Run `nanobot gateway status` and inspect logs at "
+                    f"{log_path}; if it remains degraded, run `nanobot gateway restart`."
+                )
+            raise TuiUnavailableError(
+                f"local gateway did not become ready; logs: {log_path}"
+            )
+
         status = runtime.status()
-        endpoint_reachable = _webui_endpoint_reachable(base_url)
         if status.running:
             if status.port not in {None, config.gateway.port}:
                 raise TuiUnavailableError(
                     "the matching gateway instance is running on a different port; "
                     "restart it or use `nanobot agent --classic`"
                 )
-            if endpoint_reachable:
+            if not wait_until_ready:
                 return _GatewayHandle(base_url=base_url, lease=lease)
-        elif endpoint_reachable:
+            if ready(status):
+                return _GatewayHandle(base_url=base_url, lease=lease)
+            return wait_for_ready(status.log_path)
+        elif _webui_endpoint_reachable(base_url):
             raise TuiUnavailableError(
                 "the configured gateway port belongs to a different nanobot instance; "
                 "stop that instance or use `nanobot agent --classic`"
@@ -405,65 +488,44 @@ def _ensure_gateway(
                 f"logs: {result.status.log_path}"
             )
 
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            if _webui_endpoint_reachable(base_url):
-                current = runtime.status()
-                if current.running and current.port in {None, config.gateway.port}:
-                    return _GatewayHandle(base_url=base_url, lease=lease)
-                break
-            if not runtime.status().running and not _gateway_health_ready(
-                config.gateway.host,
-                config.gateway.port,
-            ):
-                break
-            time.sleep(0.1)
-
-        raise TuiUnavailableError(
-            f"local gateway did not become ready; logs: {result.status.log_path}"
-        )
+        if result.message == "gateway_already_running" and result.status.port not in {
+            None,
+            config.gateway.port,
+        }:
+            raise TuiUnavailableError(
+                "the matching gateway instance is running on a different port; "
+                "restart it or use `nanobot agent --classic`"
+            )
+        if not wait_until_ready:
+            return _GatewayHandle(base_url=base_url, lease=lease)
+        return wait_for_ready(result.status.log_path)
     except BaseException:
         lease.release(timeout_s=5)
         raise
 
 
-def _fetch_bootstrap(base_url: str, *, secret: str) -> dict[str, Any]:
-    headers = {"X-Nanobot-Auth": secret} if secret else {}
-    request = urllib.request.Request(f"{base_url}/webui/bootstrap", headers=headers)
+def _tui_gateway_connection(config: Config) -> tuple[str, str]:
+    """Read the small bootstrap subset without importing the WebSocket runtime."""
+    raw: object = getattr(config.channels, "websocket", None)
+    settings = cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
+    host = _host_for_local_browser(str(settings.get("host") or "127.0.0.1"))
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            raw_payload: Any = json.loads(response.read().decode("utf-8"))
-    except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        raise TuiUnavailableError(
-            f"could not authenticate with the local gateway: {exc}"
-        ) from exc
-    if not isinstance(raw_payload, dict):
-        raise TuiUnavailableError("gateway bootstrap response is missing ws_path")
-    payload = cast(dict[str, Any], raw_payload)
-    if not payload.get("ws_path"):
-        raise TuiUnavailableError("gateway bootstrap response is missing ws_path")
-    return payload
-
-
-def _authenticated_ws_url(bootstrap: dict[str, Any]) -> str:
-    raw_url = str(bootstrap.get("ws_url") or "").strip()
-    if not raw_url:
-        raise TuiUnavailableError("gateway bootstrap response is missing ws_url")
-    parsed = urllib.parse.urlsplit(raw_url)
-    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-    token = str(bootstrap.get("token") or "").strip()
-    if token:
-        query.append(("token", token))
-    query.append(("client_id", f"tui-{os.getpid()}"))
-    return urllib.parse.urlunsplit(
-        (parsed.scheme, parsed.netloc, parsed.path, urllib.parse.urlencode(query), parsed.fragment)
-    )
+        port = int(settings.get("port") or 8765)
+    except (TypeError, ValueError):
+        port = 8765
+    secret = str(
+        settings.get("tokenIssueSecret")
+        or settings.get("token_issue_secret")
+        or settings.get("token")
+        or ""
+    ).strip()
+    return f"http://{host}:{port}", secret
 
 
 def _websocket_chat_id(session_id: str) -> str | None:
     """Map the CLI selector to the WebSocket namespace used by the native TUI."""
-    if session_id.startswith("websocket:"):
-        return session_id.split(":", 1)[1] or None
+    if is_webui_session_key(session_id):
+        return webui_chat_id(session_id)
     if ":" in session_id:
         raise TuiSessionError(
             "the native TUI can open only WebSocket sessions; use --classic to resume "
@@ -472,26 +534,14 @@ def _websocket_chat_id(session_id: str) -> str | None:
     return session_id or None
 
 
-def _initial_tui_chat_id(session_id: str | None, state_path: Path) -> str | None:
-    """Resume the last TUI chat, while keeping an explicit selector authoritative."""
+def _initial_tui_chat_id(session_id: str | None) -> str | None:
+    """Start fresh unless the caller explicitly selects a TUI chat."""
     if session_id is not None:
         return _websocket_chat_id(session_id)
-    return _read_tui_chat_id(state_path)
+    return None
 
 
-def _read_tui_chat_id(path: Path) -> str | None:
-    """Read the last attached chat without making launch depend on optional state."""
-    try:
-        raw_payload: Any = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(raw_payload, dict):
-        return None
-    payload = cast(dict[str, Any], raw_payload)
-    value = payload.get("chat_id")
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    if not value or len(value) > 256 or any(character in value for character in "\r\n"):
-        return None
-    return value
+def _initial_tui_workspace(workspace_override: str | None) -> Path:
+    """Use the launch directory unless the caller explicitly selects a workspace."""
+    workspace = Path(workspace_override) if workspace_override is not None else Path.cwd()
+    return workspace.expanduser().resolve(strict=False)

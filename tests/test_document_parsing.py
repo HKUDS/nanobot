@@ -10,6 +10,7 @@ from nanobot.utils.document import (
     _is_text_extension,
     extract_pdf_pages,
     extract_text,
+    open_document_line_source,
 )
 
 
@@ -86,6 +87,39 @@ class TestExtractText:
 
         result = extract_text(json_file)
         assert result == content
+
+    def test_pdf_search_lines_expose_page_continuation(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        pdf_file = tmp_path / "large.pdf"
+        pdf_file.write_bytes(b"%PDF")
+
+        class _Page:
+            @staticmethod
+            def get_contents():
+                return None
+
+            @staticmethod
+            def extract_text():
+                return "needle"
+
+        class _Reader:
+            def __init__(self, *_args, **_kwargs):
+                self.pages = [_Page() for _ in range(250)]
+
+        monkeypatch.setattr("pypdf.PdfReader", _Reader)
+
+        source = open_document_line_source(pdf_file, pages="101-200")
+
+        assert source is not None
+        iterator = source.lines
+        next(iterator)
+        line = next(iterator)
+        iterator.close()
+        assert line.locator == "page=101,line=1"
+        assert source.continuation == "pages='201-250'"
 
     def test_extract_text_xlsx(self, tmp_path: Path):
         """Test extracting text from an .xlsx file."""

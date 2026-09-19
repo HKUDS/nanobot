@@ -14,8 +14,9 @@ class FakeUsage:
 
 class FakePromptDetails:
     """Mimics prompt_tokens_details sub-object."""
-    def __init__(self, cached_tokens=0):
+    def __init__(self, cached_tokens=0, cache_write_tokens=None):
         self.cached_tokens = cached_tokens
+        self.cache_write_tokens = cache_write_tokens
 
 
 class _FakeSpec:
@@ -62,8 +63,9 @@ def test_extract_usage_openai_cached_tokens_dict():
         }
     }
     result = p._parse(response)
-    assert result.usage["cached_tokens"] == 1200
-    assert result.usage["prompt_tokens"] == 2000
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 1200
+    assert result.usage.input_tokens == 2000
 
 
 def test_extract_usage_deepseek_cached_tokens_dict():
@@ -80,11 +82,12 @@ def test_extract_usage_deepseek_cached_tokens_dict():
         }
     }
     result = p._parse(response)
-    assert result.usage["cached_tokens"] == 1200
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 1200
 
 
 def test_extract_usage_no_cached_tokens_dict():
-    """Response without any cache fields -> no cached_tokens key."""
+    """Response without any cache fields preserves an unreported cache count."""
     p = _provider()
     response = {
         "choices": [_DICT_CHOICE],
@@ -95,11 +98,13 @@ def test_extract_usage_no_cached_tokens_dict():
         }
     }
     result = p._parse(response)
-    assert "cached_tokens" not in result.usage
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens is None
+    assert result.usage.cache_write_tokens is None
 
 
 def test_extract_usage_openai_cached_zero_dict():
-    """cached_tokens=0 should NOT be included (same as existing fields)."""
+    """cached_tokens=0 remains distinct from an unreported cache count."""
     p = _provider()
     response = {
         "choices": [_DICT_CHOICE],
@@ -107,11 +112,42 @@ def test_extract_usage_openai_cached_zero_dict():
             "prompt_tokens": 2000,
             "completion_tokens": 300,
             "total_tokens": 2300,
-            "prompt_tokens_details": {"cached_tokens": 0},
+            "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
         }
     }
     result = p._parse(response)
-    assert "cached_tokens" not in result.usage
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 0
+    assert result.usage.cache_write_tokens == 0
+
+
+def test_extract_usage_preserves_reported_total_and_cache_write_dict():
+    response = {
+        "choices": [_DICT_CHOICE],
+        "usage": {
+            "prompt_tokens": 15,
+            "completion_tokens": 18,
+            "total_tokens": 175,
+            "prompt_tokens_details": {
+                "cached_tokens": 0,
+                "cache_write_tokens": 7,
+            },
+        },
+    }
+
+    result = _provider()._parse(response)
+
+    assert result.usage is not None
+    assert result.usage.total_tokens == 175
+    assert result.usage.reported_tokens == 175
+    assert result.usage.cache_read_tokens == 0
+    assert result.usage.cache_write_tokens == 7
+
+
+def test_extract_usage_missing_is_none():
+    result = _provider()._parse({"choices": [_DICT_CHOICE]})
+
+    assert result.usage is None
 
 
 # --- object-based response (OpenAI SDK Pydantic model) ---
@@ -127,7 +163,29 @@ def test_extract_usage_openai_cached_tokens_obj():
     )
     response = FakeUsage(choices=[_FakeChoice()], usage=usage_obj)
     result = p._parse(response)
-    assert result.usage["cached_tokens"] == 1200
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 1200
+
+
+def test_extract_usage_preserves_reported_total_and_cache_write_obj():
+    usage_obj = FakeUsage(
+        prompt_tokens=15,
+        completion_tokens=18,
+        total_tokens=175,
+        prompt_tokens_details=FakePromptDetails(
+            cached_tokens=0,
+            cache_write_tokens=7,
+        ),
+    )
+    response = FakeUsage(choices=[_FakeChoice()], usage=usage_obj)
+
+    result = _provider()._parse(response)
+
+    assert result.usage is not None
+    assert result.usage.total_tokens == 175
+    assert result.usage.reported_tokens == 175
+    assert result.usage.cache_read_tokens == 0
+    assert result.usage.cache_write_tokens == 7
 
 
 def test_extract_usage_deepseek_cached_tokens_obj():
@@ -141,7 +199,8 @@ def test_extract_usage_deepseek_cached_tokens_obj():
     )
     response = FakeUsage(choices=[_FakeChoice()], usage=usage_obj)
     result = p._parse(response)
-    assert result.usage["cached_tokens"] == 1200
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 1200
 
 
 def test_extract_usage_stepfun_top_level_cached_tokens_dict():
@@ -157,7 +216,8 @@ def test_extract_usage_stepfun_top_level_cached_tokens_dict():
         }
     }
     result = p._parse(response)
-    assert result.usage["cached_tokens"] == 512
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 512
 
 
 def test_extract_usage_stepfun_top_level_cached_tokens_obj():
@@ -171,7 +231,8 @@ def test_extract_usage_stepfun_top_level_cached_tokens_obj():
     )
     response = FakeUsage(choices=[_FakeChoice()], usage=usage_obj)
     result = p._parse(response)
-    assert result.usage["cached_tokens"] == 512
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 512
 
 
 def test_extract_usage_priority_nested_over_top_level_dict():
@@ -188,11 +249,12 @@ def test_extract_usage_priority_nested_over_top_level_dict():
         }
     }
     result = p._parse(response)
-    assert result.usage["cached_tokens"] == 100
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 100
 
 
-def test_anthropic_maps_cache_fields_to_cached_tokens():
-    """Anthropic's cache_read_input_tokens should map to cached_tokens."""
+def test_anthropic_adds_native_cache_fields_to_logical_input():
+    """Anthropic excludes cache reads/writes from its native input_tokens."""
     from nanobot.providers.anthropic_provider import AnthropicProvider
 
     usage_obj = FakeUsage(
@@ -210,14 +272,15 @@ def test_anthropic_maps_cache_fields_to_cached_tokens():
         usage=usage_obj,
     )
     result = AnthropicProvider._parse_response(response)
-    assert result.usage["cached_tokens"] == 1200
-    assert result.usage["prompt_tokens"] == 2300
-    assert result.usage["total_tokens"] == 2500
-    assert result.usage["cache_creation_input_tokens"] == 300
+    assert result.usage is not None
+    assert result.usage.cache_read_tokens == 1200
+    assert result.usage.cache_write_tokens == 300
+    assert result.usage.input_tokens == 2300
+    assert result.usage.total_tokens == 2500
 
 
 def test_anthropic_no_cache_fields():
-    """Anthropic response without cache fields should not have cached_tokens."""
+    """Anthropic response without cache fields preserves unreported counts."""
     from nanobot.providers.anthropic_provider import AnthropicProvider
 
     usage_obj = FakeUsage(input_tokens=800, output_tokens=200)
@@ -230,4 +293,7 @@ def test_anthropic_no_cache_fields():
         usage=usage_obj,
     )
     result = AnthropicProvider._parse_response(response)
-    assert "cached_tokens" not in result.usage
+    assert result.usage is not None
+    assert result.usage.input_tokens == 800
+    assert result.usage.cache_read_tokens is None
+    assert result.usage.cache_write_tokens is None

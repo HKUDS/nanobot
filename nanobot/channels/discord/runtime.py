@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -62,6 +62,7 @@ class DiscordConfig(Base):
     working_emoji: str = "🔧"
     working_emoji_delay: float = 2.0
     streaming: bool = True
+    reply_to_message: bool = False
     proxy: str | None = None
     proxy_username: str | None = None
     proxy_password: str | None = None
@@ -257,6 +258,18 @@ if DISCORD_AVAILABLE:
 
         async def send_outbound(self, msg: OutboundMessage) -> None:
             """Send a nanobot outbound message using Discord transport rules."""
+            compaction = msg.event if isinstance(msg.event, ContextCompactionEvent) else None
+            # A compaction's outcome replaces its own start notice in place, so
+            # the lifecycle stays visible as one message instead of two (#5719).
+            # Without a stored notice (restart, edit refused) it is sent as usual.
+            if compaction is not None and compaction.phase != "started":
+                notice = self._channel._compaction_notices.pop(
+                    (msg.chat_id, compaction.compaction_id),
+                    None,
+                )
+                if notice is not None and await self._edit_compaction_notice(notice, msg.content or ""):
+                    return
+
             channel_id = int(msg.chat_id)
 
             channel = self._channel._known_channels.get(msg.chat_id) or self.get_channel(channel_id)
@@ -268,15 +281,20 @@ if DISCORD_AVAILABLE:
                     raise
 
             messageable_channel = cast(Messageable, channel)
-            reference, mention_settings = self._build_reply_context(messageable_channel, msg.reply_to)
+            reply_to = self._channel._reply_target(msg.metadata, explicit=msg.reply_to)
+            reference, mention_settings = self._channel._build_reply_context(
+                messageable_channel,
+                reply_to,
+                fail_if_not_exists=msg.reply_to is not None,
+            )
             sent_media = False
             failed_media: list[str] = []
 
-            for index, media_path in enumerate(msg.media or []):
+            for media_path in msg.media or []:
                 if await self._send_file(
                     messageable_channel,
                     media_path,
-                    reference=reference if index == 0 else None,
+                    reference=reference if not sent_media else None,
                     mention_settings=mention_settings,
                 ):
                     sent_media = True
@@ -290,14 +308,31 @@ if DISCORD_AVAILABLE:
                 if index == 0 and reference is not None and not sent_media:
                     kwargs["reference"] = reference
                     kwargs["allowed_mentions"] = mention_settings
-                await messageable_channel.send(**kwargs)
+                sent = await messageable_channel.send(**kwargs)
+                if compaction is not None and compaction.phase == "started" and index == 0:
+                    self._channel._remember_compaction_notice(
+                        msg.chat_id,
+                        compaction.compaction_id,
+                        sent,
+                    )
+
+        async def _edit_compaction_notice(self, notice: discord.Message, content: str) -> bool:
+            """Replace a start notice's text with the outcome; False when Discord refused."""
+            if not content:
+                return False
+            try:
+                await notice.edit(content=content)
+            except Exception as e:
+                self._channel.logger.warning("compaction notice edit failed, sending instead: {}", e)
+                return False
+            return True
 
         async def _send_file(
             self,
             channel: Messageable,
             file_path: str,
             *,
-            reference: discord.PartialMessage | None,
+            reference: discord.MessageReference | None,
             mention_settings: discord.AllowedMentions,
         ) -> bool:
             """Send a file attachment via discord.py."""
@@ -330,24 +365,6 @@ if DISCORD_AVAILABLE:
                 return chunks
             fallback = "\n".join(f"[attachment: {name} - send failed]" for name in failed_media)
             return split_message(fallback, MAX_MESSAGE_LEN)
-
-        def _build_reply_context(
-            self,
-            channel: Messageable,
-            reply_to: str | None,
-        ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
-            """Build reply context for outbound messages."""
-            mention_settings = discord.AllowedMentions(replied_user=False)
-            if not reply_to:
-                return None, mention_settings
-            try:
-                message_id = int(reply_to)
-            except ValueError:
-                self._channel.logger.warning("Invalid reply target: {}", reply_to)
-                return None, mention_settings
-
-            return cast(Any, channel).get_partial_message(message_id), mention_settings
-
 
 class DiscordChannel(BaseChannel):
     """Discord channel using discord.py."""
@@ -385,6 +402,40 @@ class DiscordChannel(BaseChannel):
             return cls._channel_key(parent)
         return None
 
+    def _reply_target(
+        self,
+        metadata: dict[str, Any] | None,
+        *,
+        explicit: str | None = None,
+    ) -> str | None:
+        """Choose an explicit reply target, or the triggering message when enabled."""
+        if explicit:
+            return explicit
+        if not self.config.reply_to_message or not metadata:
+            return None
+        message_id = metadata.get("message_id")
+        return str(message_id) if message_id is not None else None
+
+    def _build_reply_context(
+        self,
+        channel: Messageable,
+        reply_to: str | None,
+        *,
+        fail_if_not_exists: bool,
+    ) -> tuple[discord.MessageReference | None, discord.AllowedMentions]:
+        """Build a native Discord reply without pinging the replied-to user."""
+        mention_settings = discord.AllowedMentions(replied_user=False)
+        if not reply_to:
+            return None, mention_settings
+        try:
+            message_id = int(reply_to)
+        except ValueError:
+            self.logger.warning("Invalid reply target: {}", reply_to)
+            return None, mention_settings
+
+        partial = cast(Any, channel).get_partial_message(message_id)
+        return partial.to_reference(fail_if_not_exists=fail_if_not_exists), mention_settings
+
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
             config = DiscordConfig.model_validate(config)
@@ -394,6 +445,7 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_user_id: str | None = None
         self._pending_reactions: dict[str, Any] = {}  # chat_id -> message object
+        self._compaction_notices: dict[tuple[str, str], discord.Message] = {}
         self._working_emoji_tasks: dict[str, asyncio.Task[None]] = {}
         self._stream_bufs: dict[str, _StreamBuf] = {}
         self._known_channels: dict[str, Any] = {}
@@ -434,10 +486,13 @@ class DiscordChannel(BaseChannel):
                     "proxy_password must be set; ignoring partial credentials",
                 )
 
+            proxy = self.config.proxy
+            if proxy and "://" not in proxy:
+                proxy = f"http://{proxy}"
             self._client = DiscordBotClient(
                 self,
                 intents=intents,
-                proxy=self.config.proxy,
+                proxy=proxy,
                 proxy_auth=proxy_auth,
             )
         except Exception:
@@ -463,6 +518,15 @@ class DiscordChannel(BaseChannel):
         """Stop the Discord channel."""
         self._running = False
         await self._reset_runtime_state(close_client=True)
+
+    def _remember_compaction_notice(
+        self,
+        chat_id: str,
+        compaction_id: str,
+        message: discord.Message,
+    ) -> None:
+        """Keep a start notice until its matching outcome consumes it."""
+        self._compaction_notices[(chat_id, compaction_id)] = message
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Discord using discord.py."""
@@ -533,7 +597,17 @@ class DiscordChannel(BaseChannel):
         now = time.monotonic()
         if buf.message is None:
             try:
-                buf.message = await target.send(content=buf.text)
+                reply_to = self._reply_target(metadata)
+                reference, mention_settings = self._build_reply_context(
+                    target,
+                    reply_to,
+                    fail_if_not_exists=False,
+                )
+                kwargs: dict[str, Any] = {"content": buf.text}
+                if reference is not None:
+                    kwargs["reference"] = reference
+                    kwargs["allowed_mentions"] = mention_settings
+                buf.message = await target.send(**kwargs)
                 buf.last_edit = now
             except Exception as e:
                 self.logger.warning("stream initial send failed: {}", e)
@@ -831,6 +905,7 @@ class DiscordChannel(BaseChannel):
     async def _reset_runtime_state(self, close_client: bool) -> None:
         """Reset client and typing state."""
         await self._cancel_all_typing()
+        self._compaction_notices.clear()
         self._stream_bufs.clear()
         self._known_channels.clear()
         if close_client and self._client is not None and not self._client.is_closed():

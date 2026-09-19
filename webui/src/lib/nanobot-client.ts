@@ -1,3 +1,4 @@
+import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
   ConnectionStatus,
   InboundEvent,
@@ -78,9 +79,9 @@ type RunStatusHandler = (chatId: string, startedAt: number | null) => void;
 
 /** Structured errors surfaced to the UI.
  *
- * Most entries are transport-level or protocol-level faults. Workspace scope
- * rejections are server application errors promoted here because they affect
- * controls outside the message stream and must be visible immediately.
+ * Most entries are transport-level or protocol-level faults. Runtime and
+ * workspace failures are promoted here when they must remain visible outside
+ * the message stream.
  */
 export type StreamError =
   /** Server rejected the inbound frame as too large (WS close code 1009).
@@ -99,6 +100,13 @@ export type StreamError =
       reason?: string;
       chatId: string;
       turnId: string;
+    }
+  | {
+      kind: "model_request_failed";
+      chatId: string;
+      turnId?: string;
+      errorKind?: string;
+      attempts?: number;
     };
 
 type ErrorHandler = (error: StreamError) => void;
@@ -113,7 +121,7 @@ interface PendingWebUIRequest extends PendingRequest<unknown> {
   serializedFrame: string;
 }
 
-export class WebUIMutationError extends Error {
+class WebUIMutationError extends Error {
   status: number;
 
   constructor(status: number, message: string) {
@@ -968,6 +976,7 @@ export class NanobotClient {
       mcpPresets?: OutboundMcpPresetMention[];
       sessionMentions?: SessionMention[];
       quotedContext?: string;
+      intent?: "create_automation";
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
@@ -987,6 +996,7 @@ export class NanobotClient {
         ? { session_mentions: options.sessionMentions }
         : {}),
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
+      ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
@@ -1072,6 +1082,7 @@ export class NanobotClient {
     let parsed: InboundEvent;
     try {
       parsed = JSON.parse(typeof ev.data === "string" ? ev.data : "") as InboundEvent;
+      if (decodeNotification(parsed) === null) return;
     } catch {
       if (wsInboundDebugEnabled()) {
         const raw = typeof ev.data === "string" ? ev.data : String(ev.data);

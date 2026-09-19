@@ -15,7 +15,6 @@ from nanobot.sdk.types import (
     snapshot_from_payload,
     snapshot_from_session,
 )
-from nanobot.session.manager import replay_max_messages_for_context
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
@@ -207,23 +206,20 @@ class RuntimeClient:
         handler: Callable[[SessionTurnPersisted], Awaitable[None] | None],
     ) -> Callable[[], None]:
         """Register a persisted-turn callback and return an unsubscribe callback."""
-        return self._loop.runtime_events.subscribe(handler, SessionTurnPersisted)
+        return self._loop.bus.subscribe(handler, SessionTurnPersisted)
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
-        """Run token/replay-window consolidation for one session."""
+        """Summarize one session and exclude its archived messages from replay."""
         session = self._loop.sessions.get_or_create(session_key)
         runtime = self._loop.runtime_for_session(session)
-        await self._loop.consolidator.maybe_consolidate_by_tokens(
-            session,
+        await self._loop.consolidator.compact_idle_session(
+            session_key,
             runtime=runtime,
-            replay_max_messages=replay_max_messages_for_context(
-                runtime.context_window_tokens
-            ),
         )
         return snapshot_from_session(self._loop.sessions.get_or_create(session_key))
 
-    async def compact_idle_session(self, session_key: str, *, max_suffix: int = 8) -> str | None:
-        """Run idle-session compaction for one session and return the summary."""
+    async def compact_idle_session(self, session_key: str, *, max_suffix: int = 0) -> str | None:
+        """Return a replacement summary; legacy ``max_suffix`` no longer retains history."""
         session = self._loop.sessions.get_or_create(session_key)
         runtime = self._loop.runtime_for_session(session)
         return await self._loop.consolidator.compact_idle_session(

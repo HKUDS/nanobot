@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ENTER_ALT_SCREEN = b"\x1b[?1049h"
 LEAVE_ALT_SCREEN = b"\x1b[?1049l"
+RESUME_COMMAND = b"Resume with: nanobot agent --session websocket:resume-chat"
 
 
 def _resize(fd: int, rows: int, columns: int) -> None:
@@ -68,7 +69,7 @@ def _wait_for_exit(pid: int, timeout: float) -> int:
         time.sleep(0.05)
     os.kill(pid, signal.SIGKILL)
     os.waitpid(pid, 0)
-    raise AssertionError("TUI did not exit after Ctrl+C")
+    raise AssertionError("TUI did not exit after the exit command")
 
 
 def main() -> int:
@@ -82,6 +83,7 @@ def main() -> int:
         "NANOBOT_TUI_WS_URL": "ws://127.0.0.1:9/ws",
         "NANOBOT_TUI_API_URL": "",
         "NANOBOT_TUI_API_TOKEN": "",
+        "NANOBOT_TUI_CHAT_ID": "resume-chat",
         "NANOBOT_TUI_MODEL": "test/model",
         "NANOBOT_TUI_WORKSPACE": "/tmp/nanobot-tui-pty",
         "NANOBOT_TUI_VERSION": "test",
@@ -90,6 +92,8 @@ def main() -> int:
         # terminal emulator's optional OSC 10/11 response.
         "NANOBOT_TUI_THEME": "dark",
     }
+    env.pop("HERDR_ENV", None)
+    env.pop("HERDR_PANE_ID", None)
 
     pid, master = pty.fork()
     if pid == 0:
@@ -117,13 +121,14 @@ def main() -> int:
         if b"\x1b[18;" not in resized or b";42H" not in resized:
             raise AssertionError("TUI did not repaint to the resized PTY dimensions")
 
-        # First Ctrl+C clears the draft; the second exits and must restore the
-        # alternate screen without a prompt_toolkit-style traceback.
+        # Ctrl+C clears the draft. The local exit command must still work while
+        # the intentionally unavailable gateway has not attached a chat.
         os.write(master, b"\x03")
         output.extend(_read(master, 0.2))
-        os.write(master, b"\x03")
+        os.write(master, b"exit\r")
         output.extend(_wait_for(master, LEAVE_ALT_SCREEN, 5))
         exit_code = _wait_for_exit(pid, 5)
+        output.extend(_read(master, 0.5))
         reaped = True
     finally:
         if not reaped:
@@ -144,6 +149,10 @@ def main() -> int:
             raise AssertionError(f"TUI did not render committed input {glyph!r}")
     if "Traceback" in text or "Task exception was never retrieved" in text:
         raise AssertionError("TUI emitted an exception during shutdown")
+    if output.count(RESUME_COMMAND) != 1:
+        raise AssertionError("TUI did not print exactly one reusable session command")
+    if output.index(RESUME_COMMAND) < output.index(LEAVE_ALT_SCREEN):
+        raise AssertionError("TUI printed the session command before restoring the terminal")
     # The UI must inherit the host terminal background. Fixed RGB/indexed
     # surfaces become black strips in embedded terminals after long output.
     for escape in (
@@ -154,7 +163,7 @@ def main() -> int:
     ):
         if escape in output:
             raise AssertionError(f"TUI painted a fixed background: {escape!r}")
-    print("PTY smoke test passed: Unicode input, resize, and terminal restoration")
+    print("PTY smoke test passed: Unicode input, resize, restoration, and session resume")
     return 0
 
 

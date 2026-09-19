@@ -31,7 +31,10 @@ def test_responses_api_available_by_default(provider):
     assert provider._should_use_responses_api("gpt-5", None) is True
 
 
-@pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-v4-pro"])
+@pytest.mark.parametrize(
+    "model",
+    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+)
 def test_deepseek_v4_models_use_responses_by_model(provider, model):
     provider._spec = find_by_name("deepseek")
     provider._effective_base = "https://api.deepseek.com"
@@ -41,7 +44,10 @@ def test_deepseek_v4_models_use_responses_by_model(provider, model):
     assert provider._should_use_responses_api("deepseek-chat", None) is False
 
 
-@pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-v4-pro"])
+@pytest.mark.parametrize(
+    "model",
+    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+)
 def test_deepseek_v4_models_match_provider_prefixed_model(provider, model):
     provider._spec = find_by_name("deepseek")
     provider._effective_base = "https://api.deepseek.com"

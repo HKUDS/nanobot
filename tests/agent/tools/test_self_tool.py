@@ -15,6 +15,7 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.shell import ExecToolConfig
 from nanobot.agent.tools.web import WebSearchConfig, WebToolsConfig
 from nanobot.config.schema import ModelPresetConfig
+from nanobot.providers.base import LLMUsage
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,10 +32,6 @@ def _make_mock_loop(**overrides):
     loop._start_time = 1000.0
     loop.exec_config = ExecToolConfig()
     loop.channels_config = MagicMock()
-    loop._last_usage = {"prompt_tokens": 100, "completion_tokens": 50}
-    loop.last_usage = loop._last_usage
-    loop._current_iteration = 0
-    loop.current_iteration = loop._current_iteration
     loop.provider_retry_mode = "standard"
     loop.max_tool_result_chars = 16000
     loop.model_preset = None
@@ -111,8 +108,6 @@ class TestInspectSummary:
         assert "workspace" in result
         assert "provider_retry_mode" in result
         assert "max_tool_result_chars" in result
-        assert "_last_usage" in result
-        assert "_current_iteration" in result
 
 
 # ---------------------------------------------------------------------------
@@ -159,14 +154,6 @@ class TestInspectPathNavigation:
         tool = _make_tool(loop=loop)
         result = await tool.execute(action="check", key="web_config.enable")
         assert "True" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_dict_key_via_dotpath(self):
-        loop = _make_mock_loop()
-        loop._last_usage = {"prompt_tokens": 100, "completion_tokens": 50}
-        tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="_last_usage.prompt_tokens")
-        assert "100" in result
 
     @pytest.mark.asyncio
     async def test_inspect_blocked_in_path(self):
@@ -624,7 +611,7 @@ class TestSubagentStatusFormatting:
                 {"name": "grep", "status": "ok", "detail": "searched ERROR"},
                 {"name": "exec", "status": "error", "detail": "timeout"},
             ],
-            usage={"prompt_tokens": 4500, "completion_tokens": 1200},
+            usage=LLMUsage.reported(input_tokens=4500, output_tokens=1200),
         )
         result = MyTool._format_value(status)
         assert "abc12345" in result
@@ -698,14 +685,14 @@ class TestSubagentHookStatus:
             iteration=5,
             messages=[],
             tool_events=[{"name": "read_file", "status": "ok", "detail": "ok"}],
-            usage={"prompt_tokens": 100, "completion_tokens": 50},
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=50),
         )
         await hook.after_iteration(context)
 
         assert status.iteration == 5
         assert len(status.tool_events) == 1
         assert status.tool_events[0]["name"] == "read_file"
-        assert status.usage == {"prompt_tokens": 100, "completion_tokens": 50}
+        assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
 
     @pytest.mark.asyncio
     async def test_after_iteration_with_error(self):
@@ -821,7 +808,7 @@ class TestInspectTaskStatuses:
                 phase="awaiting_tools",
                 iteration=2,
                 tool_events=[{"name": "read_file", "status": "ok", "detail": "ok"}],
-                usage={"prompt_tokens": 500, "completion_tokens": 100},
+                usage=LLMUsage.reported(input_tokens=500, output_tokens=100),
             ),
         }
         tool = _make_tool(loop=loop)
@@ -1088,55 +1075,6 @@ class TestSecurityAttributeProtection:
         result = await tool.execute(action="check", key="model_presets.fast.model")
 
         assert result == "model_presets.fast.model: 'fast-model'"
-
-
-# ---------------------------------------------------------------------------
-# current iteration count (Fix #2)
-# ---------------------------------------------------------------------------
-
-class TestCurrentIteration:
-
-    @pytest.mark.asyncio
-    async def test_inspect_current_iteration(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="_current_iteration")
-        assert "0" in result
-
-    @pytest.mark.asyncio
-    async def test_current_iteration_in_summary(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check")
-        assert "_current_iteration" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_current_iteration_blocked(self):
-        """_current_iteration is READ_ONLY — cannot be set manually."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_current_iteration", value=5)
-        assert "read-only" in result
-
-
-# ---------------------------------------------------------------------------
-# _last_usage in check summary (Fix #5)
-# ---------------------------------------------------------------------------
-
-class TestLastUsageInSummary:
-
-    @pytest.mark.asyncio
-    async def test_last_usage_shown_in_summary(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check")
-        assert "_last_usage" in result
-        assert "prompt_tokens" in result
-
-    @pytest.mark.asyncio
-    async def test_last_usage_not_shown_when_empty(self):
-        loop = _make_mock_loop()
-        loop._last_usage = {}
-        loop.last_usage = loop._last_usage
-        tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check")
-        assert "_last_usage" not in result
 
 
 # ---------------------------------------------------------------------------

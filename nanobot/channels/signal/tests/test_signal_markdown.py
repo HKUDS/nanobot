@@ -363,13 +363,6 @@ def test_reported_daily_brief_pattern():
 # ---------------------------------------------------------------------------
 
 
-def _resolve_chunk_styles(text: str, max_len: int) -> tuple[list[str], list[list[str]]]:
-    """Helper: full markdown → signal pipeline, including chunking."""
-    plain, styles = _markdown_to_signal(text)
-    chunks = split_message(plain, max_len) if plain else [""]
-    return chunks, _partition_styles(plain, chunks, styles)
-
-
 def test_partition_styles_single_chunk_passthrough():
     plain, styles = _markdown_to_signal("**bold** plain *it*")
     parts = _partition_styles(plain, [plain], styles)
@@ -389,6 +382,23 @@ def test_partition_styles_drops_styles_outside_chunks():
     chunks = ["a", "b"]
     parts = _partition_styles(plain, chunks, ["1:3:BOLD"])
     assert parts == [[], []]
+
+
+def test_partition_styles_keeps_offset_in_indented_chunk():
+    """Styles after preserved indentation remain relative to the chunk."""
+    plain = "header\n    code"
+    chunks = split_message(plain, 10)
+
+    assert chunks == ["header", "    code"]
+    assert _partition_styles(plain, chunks, ["11:4:BOLD"]) == [[], ["4:4:BOLD"]]
+
+
+def test_partition_styles_keeps_offset_after_crlf_boundary():
+    plain = "header\r\n    code"
+    chunks = split_message(plain, 10)
+
+    assert chunks == ["header", "    code"]
+    assert _partition_styles(plain, chunks, ["12:4:BOLD"]) == [[], ["4:4:BOLD"]]
 
 
 def test_partition_styles_long_message_preserves_chunk_one_styles():

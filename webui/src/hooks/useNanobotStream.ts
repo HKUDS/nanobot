@@ -1,7 +1,11 @@
+import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
 import { toMediaAttachment } from "@/lib/media";
+import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import {
   mergeToolProgressEvents,
   mergeToolProgressTraceLines,
@@ -20,7 +24,6 @@ import {
   isReasoningOnlyPlaceholder,
   matchesTurn,
   mergeFileEdits,
-  pruneReasoningOnlyPlaceholders,
   replaceMessageAt,
   stampLastAssistantCompletion,
   stripCoveredFileEditToolHintsFromMessages,
@@ -28,6 +31,7 @@ import {
 } from "@/lib/thread-event-projection";
 import type { UIMessageTurnFields } from "@/lib/thread-event-projection";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
+import { readLocalPreferences } from "@/lib/local-preferences";
 import type {
   InboundEvent,
   OutboundCliAppMention,
@@ -36,6 +40,8 @@ import type {
   SessionMention,
   GoalStateWsPayload,
   MessageDeliveryStatus,
+  RecoveryState,
+  RetryStatus,
   UIMediaAttachment,
   UIMessage,
   WorkspaceScopePayload,
@@ -44,6 +50,7 @@ import type {
 interface StreamBuffer {
   /** ID of the assistant message currently receiving deltas (cleared when its segment closes). */
   messageId: string;
+  mergeReasoning?: boolean;
 }
 
 interface ActiveAssistantCursor {
@@ -55,16 +62,17 @@ type PendingStreamEvent =
   | { kind: "delta"; text: string; turn: UIMessageTurnFields; source?: UIMessage["source"] }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
 
-const STREAM_END_IDLE_DELAY_MS = 1000;
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
+// Markdown and layout work must leave room for input between visible updates.
+const VISIBLE_STREAM_FLUSH_INTERVAL_MS = 50;
 
 /**
  * Append a reasoning chunk to the last open reasoning stream in ``prev``.
  *
  * Lookup rule: reasoning can only extend the current reasoning placeholder.
  * Once ordinary answer text has appeared, the next reasoning chunk starts a
- * fresh Thought block so streamed output stays in arrival order:
- * Thought -> answer -> Thought -> answer.
+ * fresh activity surface so streamed output stays in arrival order while the
+ * final answer remains the only visible answer bubble.
  */
 function attachReasoningChunk(
   prev: UIMessage[],
@@ -88,10 +96,12 @@ function attachReasoningChunk(
     const activitySegmentId = candidate.activitySegmentId ?? segments?.ensure();
     const hasAnswer = candidate.content.length > 0;
     if (hasAnswer) break;
+    // ``reasoning_end`` closes this row even though the assistant placeholder
+    // stays streaming for the rest of the turn. The next reasoning stream must
+    // get its own row when an intervening tool trace is delayed or unavailable.
     if (
       candidate.reasoningStreaming
-      || candidate.reasoning !== undefined
-      || candidate.isStreaming
+      || (candidate.isStreaming && candidate.reasoning === undefined)
     ) {
       const merged: UIMessage = {
         ...candidate,
@@ -166,6 +176,7 @@ export interface SendAttachment {
 }
 
 export interface SendOptions {
+  intent?: "create_automation";
   cliApps?: OutboundCliAppMention[];
   mcpPresets?: OutboundMcpPresetMention[];
   sessionMentions?: SessionMention[];
@@ -181,16 +192,6 @@ export interface SubmittedTurn {
   turnId: string;
   userMessageId: string;
   sideChannel: boolean;
-}
-
-function eventExtendsModelActivity(ev: InboundEvent): boolean {
-  if (
-    ev.event === "delta"
-    || ev.event === "reasoning_delta"
-    || ev.event === "file_edit"
-  ) return true;
-  return ev.event === "message"
-    && (ev.kind === "tool_hint" || ev.kind === "progress" || ev.kind === "reasoning");
 }
 
 function eventTurnId(ev: InboundEvent): string | undefined {
@@ -218,6 +219,29 @@ function transitionTurnDelivery(
   return changed ? next : messages;
 }
 
+function appendProjectedSessionInput(
+  messages: UIMessage[],
+  event: Extract<InboundEvent, { event: "user_message" }>,
+): UIMessage[] {
+  const sessionMessage = event.provenance?.session_message;
+  const messageId = sessionMessage?.message_id?.trim();
+  if (!sessionMessage || !messageId) return messages;
+  if (messages.some((message) => message.sessionMessage?.message_id === messageId)) return messages;
+
+  const row: UIMessage = {
+    id: `session-message:${messageId}`,
+    role: "user",
+    content: event.text,
+    createdAt: typeof event.created_at_ms === "number"
+      && Number.isFinite(event.created_at_ms)
+      ? event.created_at_ms
+      : Date.now(),
+    sessionMessage,
+    ...turnFieldsFromEvent(event, "user"),
+  };
+  return [...messages, row];
+}
+
 export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
@@ -230,8 +254,13 @@ export function useNanobotStream(
   isStreaming: boolean;
   /** Unix epoch seconds when the current user turn started (WebSocket ``goal_status``). */
   runStartedAt: number | null;
+  /** Transient model retry state for the active turn. */
+  retryStatus: RetryStatus | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
+  recoveryState: RecoveryState | null;
+  continueRecovery: () => Promise<void>;
+  dismissRecovery: () => Promise<void>;
   send: (
     content: string,
     images?: SendAttachment[],
@@ -250,6 +279,10 @@ export function useNanobotStream(
   dismissStreamError: () => void;
 } {
   const { client } = useClient();
+  const threadVisible = useThreadVisibility();
+  const threadVisibleRef = useRef(threadVisible);
+  threadVisibleRef.current = threadVisible;
+  const { t } = useTranslation();
   const initialRunStartedAt = chatId ? client.getRunStartedAt(chatId) : null;
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages);
   const [messageOwnerChatId, setMessageOwnerChatId] = useState(chatId);
@@ -260,7 +293,9 @@ export function useNanobotStream(
   );
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(initialRunStartedAt);
+  const [retryStatus, setRetryStatus] = useState<RetryStatus | null>(null);
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
+  const [recoveryState, setRecoveryState] = useState<RecoveryState | null>(null);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const activeAssistantRef = useRef<ActiveAssistantCursor | null>(null);
@@ -271,18 +306,21 @@ export function useNanobotStream(
   const pendingStreamEventsRef = useRef<PendingStreamEvent[]>([]);
   const streamFrameRef = useRef<number | null>(null);
   const streamTimerRef = useRef<number | null>(null);
+  const lastStreamFlushRef = useRef(0);
   const suppressStreamUntilTurnEndRef = useRef(false);
   const sideChannelTurnIdsRef = useRef<Set<string>>(new Set());
-  /** Timer that defers ``isStreaming = false`` after ``stream_end``.
-   *
-   * When the model finishes a text segment and calls a tool, the server
-   * sends ``stream_end`` but the agent is still "thinking" while the tool
-   * executes.  By deferring the flag reset by a short window (1 s) we keep
-   * the loading spinner alive across tool-call boundaries without needing
-   * backend changes. */
-  const streamEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
+
+  const notifyInBackground = useCallback((body: string) => {
+    if (
+      typeof Notification === "undefined"
+      || Notification.permission !== "granted"
+      || document.visibilityState === "visible"
+      || !readLocalPreferences().browserNotifications
+    ) return;
+    new Notification("nanobot", { body });
+  }, []);
 
   const clearPendingStreamWork = useCallback(() => {
     if (streamFrameRef.current !== null) {
@@ -294,27 +332,13 @@ export function useNanobotStream(
       streamTimerRef.current = null;
     }
     pendingStreamEventsRef.current = [];
-  }, []);
-
-  const cancelStreamEndTimer = useCallback(() => {
-    if (streamEndTimerRef.current === null) return;
-    clearTimeout(streamEndTimerRef.current);
-    streamEndTimerRef.current = null;
+    lastStreamFlushRef.current = 0;
   }, []);
 
   const isSideChannelEvent = useCallback((ev: InboundEvent) => {
     const turnId = eventTurnId(ev);
     return turnId !== undefined && sideChannelTurnIdsRef.current.has(turnId);
   }, []);
-
-  const scheduleStreamEndTimer = useCallback((turn: UIMessageTurnFields = {}) => {
-    cancelStreamEndTimer();
-    streamEndTimerRef.current = setTimeout(() => {
-      streamEndTimerRef.current = null;
-      setIsStreaming(false);
-      setMessages((prev) => finalizeStreamedTurn(prev, turn));
-    }, STREAM_END_IDLE_DELAY_MS);
-  }, [cancelStreamEndTimer]);
 
   const createActivitySegmentId = useCallback((activate = true) => {
     activitySegmentCounterRef.current += 1;
@@ -357,6 +381,7 @@ export function useNanobotStream(
     // still be shown in the mounted thread, but cannot roll back any turn.
     if (!chatId || (err.chatId && err.chatId !== chatId)) return;
     setStreamError(err);
+    if (err.kind === "model_request_failed") return;
     if (!err.turnId) return;
 
     const rejectedTurnId = err.turnId;
@@ -364,7 +389,6 @@ export function useNanobotStream(
       (event) => event.turn.turnId !== rejectedTurnId,
     );
     sideChannelTurnIdsRef.current.delete(rejectedTurnId);
-    cancelStreamEndTimer();
     setMessages((prev) => {
       const rejectedRows = prev.filter((message) => message.turnId === rejectedTurnId);
       if (rejectedRows.length === 0) return prev;
@@ -415,7 +439,7 @@ export function useNanobotStream(
     setRunStartedAt(remainingStartedAt);
     setIsStreaming(hasRemainingRun);
     if (!hasRemainingRun) suppressStreamUntilTurnEndRef.current = false;
-  }, [cancelStreamEndTimer, chatId, client]);
+  }, [chatId, client]);
 
   useEffect(() => client.onError(applyStreamError), [applyStreamError, client]);
 
@@ -495,7 +519,7 @@ export function useNanobotStream(
       };
       closedAssistantStreamIdsRef.current.delete(merged.id);
       activeAssistantRef.current = { id: merged.id, index: targetIndex };
-      buffer.current = { messageId: merged.id };
+      if (buffer.current?.messageId !== merged.id) buffer.current = { messageId: merged.id };
       return replaceMessageAt(next, targetIndex, merged);
     },
     [resolveActiveAssistantIndex],
@@ -504,30 +528,64 @@ export function useNanobotStream(
   const applyPendingStreamEvents = useCallback(
     (prev: UIMessage[], events: PendingStreamEvent[]): UIMessage[] => {
       let next = prev;
-      for (const event of events) {
+      for (let index = 0; index < events.length; index++) {
+        const event = events[index];
+        const chunks = [event.text];
+        let turn = event.turn;
+        while (index + 1 < events.length) {
+          const nextEvent = events[index + 1];
+          if (nextEvent.kind !== event.kind
+            || nextEvent.turn.turnId !== event.turn.turnId
+            || nextEvent.turn.turnPhase !== event.turn.turnPhase
+            || (nextEvent.kind === "delta" && event.kind === "delta" && nextEvent.source !== event.source)) break;
+          chunks.push(nextEvent.text);
+          turn = { ...turn, ...nextEvent.turn };
+          index++;
+        }
+        const text = chunks.join("");
         if (event.kind === "delta") {
-          next = appendAnswerChunk(next, event.text, event.turn, event.source);
+          next = appendAnswerChunk(next, text, turn, event.source);
         } else {
+          const continuationIndex = buffer.current?.mergeReasoning
+            ? resolveActiveAssistantIndex(next, turn)
+            : null;
+          if (continuationIndex !== null) {
+            // Length continuation keeps one Markdown answer and its reasoning
+            // together. Ordinary reasoning still opens a new activity surface.
+            const target = next[continuationIndex];
+            const separator = target.reasoning && !target.reasoningStreaming ? "\n\n" : "";
+            next = replaceMessageAt(next, continuationIndex, {
+              ...target,
+              reasoning: (target.reasoning ?? "") + separator + text,
+              reasoningStreaming: true,
+            });
+            continue;
+          }
           if (closeActiveAssistantStream()) clearActivitySegment();
           next = attachReasoningChunk(
             next,
-            event.text,
+            text,
             { ensure: ensureActivitySegmentId },
-            event.turn,
+            turn,
           );
         }
       }
       return next;
     },
-    [appendAnswerChunk, clearActivitySegment, closeActiveAssistantStream, ensureActivitySegmentId],
+    [
+      appendAnswerChunk, clearActivitySegment, closeActiveAssistantStream,
+      ensureActivitySegmentId, resolveActiveAssistantIndex,
+    ],
   );
 
   const flushPendingStreamEvents = useCallback((options?: {
     closeAnswerSegment?: boolean;
+    mergeReasoning?: boolean;
     finalAnswerText?: string;
     turn?: UIMessageTurnFields;
     source?: UIMessage["source"];
   }) => {
+    lastStreamFlushRef.current = 0;
     if (streamFrameRef.current !== null) {
       window.cancelAnimationFrame(streamFrameRef.current);
       streamFrameRef.current = null;
@@ -540,7 +598,8 @@ export function useNanobotStream(
     const finalAnswerText = options?.finalAnswerText;
     const turn = options?.turn ?? {};
     const source = options?.source;
-    if (events.length === 0 && finalAnswerText === undefined && source === undefined) {
+    if (events.length === 0 && finalAnswerText === undefined && source === undefined
+      && !options?.mergeReasoning) {
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return;
     }
@@ -600,14 +659,15 @@ export function useNanobotStream(
           });
         }
       }
+      if (options?.mergeReasoning && buffer.current) buffer.current.mergeReasoning = true;
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return next;
     });
   }, [applyPendingStreamEvents, closeActiveAssistantStream, resolveActiveAssistantIndex]);
 
-  const schedulePendingStreamFlush = useCallback(() => {
+  const schedulePendingStreamFlush = useCallback(function schedule() {
     if (streamFrameRef.current !== null || streamTimerRef.current !== null) return;
-    if (document.visibilityState === "hidden") {
+    if (document.visibilityState === "hidden" || !threadVisibleRef.current) {
       streamTimerRef.current = window.setTimeout(() => {
         streamTimerRef.current = null;
         const events = pendingStreamEventsRef.current;
@@ -617,33 +677,75 @@ export function useNanobotStream(
       }, BACKGROUND_STREAM_FLUSH_INTERVAL_MS);
       return;
     }
+    const delay = VISIBLE_STREAM_FLUSH_INTERVAL_MS
+      - (performance.now() - lastStreamFlushRef.current);
+    if (delay > 0) {
+      streamTimerRef.current = window.setTimeout(() => {
+        streamTimerRef.current = null;
+        schedule();
+      }, delay);
+      return;
+    }
     streamFrameRef.current = window.requestAnimationFrame(() => {
       streamFrameRef.current = null;
       const events = pendingStreamEventsRef.current;
       if (events.length === 0) return;
       pendingStreamEventsRef.current = [];
+      lastStreamFlushRef.current = performance.now();
       setMessages((prev) => applyPendingStreamEvents(prev, events));
     });
   }, [applyPendingStreamEvents]);
 
   useEffect(() => {
-    const flushOnReturn = () => {
-      if (document.visibilityState !== "visible") return;
-      if (pendingStreamEventsRef.current.length === 0) return;
+    if (threadVisible) {
       flushPendingStreamEvents();
-    };
-    document.addEventListener("visibilitychange", flushOnReturn);
-    return () => document.removeEventListener("visibilitychange", flushOnReturn);
-  }, [flushPendingStreamEvents]);
+    } else if (streamFrameRef.current !== null || streamTimerRef.current !== null) {
+      if (streamFrameRef.current !== null) window.cancelAnimationFrame(streamFrameRef.current);
+      streamFrameRef.current = null;
+      if (streamTimerRef.current !== null) window.clearTimeout(streamTimerRef.current);
+      streamTimerRef.current = null;
+      schedulePendingStreamFlush();
+    }
+  }, [threadVisible, flushPendingStreamEvents, schedulePendingStreamFlush]);
 
   useEffect(() => {
-    return client.onStatus((status) => {
-      if (status !== "reconnecting" && status !== "closed") return;
-      // A transport drop does not prove the backend turn completed. Keep the
-      // semantic running state intact so queued guidance is not flushed early.
-      cancelStreamEndTimer();
+    const onVisibilityChange = () => {
+      if (pendingStreamEventsRef.current.length === 0) return;
+      if (document.visibilityState === "visible" && threadVisibleRef.current) {
+        flushPendingStreamEvents();
+      } else {
+        if (streamFrameRef.current !== null) window.cancelAnimationFrame(streamFrameRef.current);
+        streamFrameRef.current = null;
+        if (streamTimerRef.current !== null) window.clearTimeout(streamTimerRef.current);
+        streamTimerRef.current = null;
+        schedulePendingStreamFlush();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [flushPendingStreamEvents, schedulePendingStreamFlush]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    return client.onRunStatus((runChatId, startedAt) => {
+      if (runChatId !== chatId) return;
+      if (startedAt !== null) {
+        setRunStartedAt(startedAt);
+        setIsStreaming(true);
+        return;
+      }
+      flushPendingStreamEvents();
+      buffer.current = null;
+      activeAssistantRef.current = null;
+      closedAssistantStreamIdsRef.current.clear();
+      clearActivitySegment();
+      setMessages((prev) => prev.map((message) => (
+        message.isStreaming ? { ...message, isStreaming: false } : message
+      )));
+      setRunStartedAt(null);
+      setIsStreaming(false);
     });
-  }, [cancelStreamEndTimer, client]);
+  }, [chatId, client, clearActivitySegment, flushPendingStreamEvents]);
 
   // Reset local state when switching chats. Do not reset on every
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
@@ -659,7 +761,9 @@ export function useNanobotStream(
     );
     setStreamError(null);
     setRunStartedAt(restoredRunStartedAt);
+    setRetryStatus(null);
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
+    setRecoveryState(null);
     buffer.current = null;
     activeAssistantRef.current = null;
     closedAssistantStreamIdsRef.current.clear();
@@ -667,9 +771,8 @@ export function useNanobotStream(
     clearPendingStreamWork();
     sideChannelTurnIdsRef.current.clear();
     suppressStreamUntilTurnEndRef.current = false;
-    cancelStreamEndTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, client, cancelStreamEndTimer, clearActivitySegment, clearPendingStreamWork]);
+  }, [chatId, client, clearActivitySegment, clearPendingStreamWork]);
 
   useEffect(() => {
     if (hasPendingToolCalls) setIsStreaming(true);
@@ -710,6 +813,13 @@ export function useNanobotStream(
       }
       if (ev.event === "message_accepted") return;
       if (ev.event === "user_message") {
+        if (ev.provenance?.session_message) {
+          flushPendingStreamEvents({ closeAnswerSegment: true });
+          clearActivitySegment();
+          setIsStreaming(true);
+          setMessages((prev) => appendProjectedSessionInput(prev, ev));
+          return;
+        }
         setMessages((prev) => {
           if (ev.turn_id && prev.some((message) => (
             message.role === "user" && message.turnId === ev.turn_id
@@ -724,7 +834,10 @@ export function useNanobotStream(
               turnPhase: "user",
               turnSeq: 0,
               deliveryStatus: "accepted",
-              createdAt: Date.now(),
+              createdAt: typeof ev.created_at_ms === "number"
+                && Number.isFinite(ev.created_at_ms)
+                ? ev.created_at_ms
+                : Date.now(),
               ...(ev.media_urls?.length ? { media: ev.media_urls } : {}),
               ...(ev.cli_apps?.length ? { cliApps: ev.cli_apps } : {}),
               ...(ev.mcp_presets?.length ? { mcpPresets: ev.mcp_presets } : {}),
@@ -741,12 +854,43 @@ export function useNanobotStream(
         return;
       }
       const sideChannelEvent = isSideChannelEvent(ev);
+      if (ev.event === "context_compaction") {
+        flushPendingStreamEvents({ closeAnswerSegment: true });
+        clearActivitySegment();
+        const compaction = {
+          id: ev.compaction_id,
+          phase: ev.phase,
+          announce: true,
+        };
+        setMessages((prev) => {
+          const id = `compaction-${ev.compaction_id}`;
+          const existing = prev.findIndex((message) => message.id === id);
+          if (!acceptsCompactionPhase(prev[existing]?.compaction?.phase, ev.phase)) return prev;
+          const next = {
+            id,
+            role: "assistant" as const,
+            content: "",
+            kind: "compaction" as const,
+            createdAt: Date.now(),
+            compaction,
+            ...turnFieldsFromEvent(ev, "activity"),
+          };
+          if (existing < 0) return [...prev, next];
+          return prev.map((message, index) => (
+            index === existing
+              ? { ...next, createdAt: message.createdAt }
+              : message
+          ));
+        });
+        return;
+      }
       if (
-        streamEndTimerRef.current !== null
-        && !sideChannelEvent
-        && eventExtendsModelActivity(ev)
-      ) cancelStreamEndTimer();
-
+        ev.event === "delta"
+        || ev.event === "message"
+        || ev.event === "file_edit"
+        || ev.event === "reasoning_delta"
+        || ev.event === "stream_end"
+      ) setRetryStatus(null);
       if (ev.event === "delta") {
         if (suppressStreamUntilTurnEndRef.current) return;
         const chunk = typeof ev.text === "string" ? ev.text : "";
@@ -783,20 +927,20 @@ export function useNanobotStream(
         const mergeNext = ev.resuming === true && ev.merge_next === true;
         flushPendingStreamEvents({
           closeAnswerSegment: !mergeNext,
+          mergeReasoning: mergeNext,
           ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
           turn,
           source: ev.source,
         });
         if (suppressStreamUntilTurnEndRef.current) return;
         if (ev.resuming) {
-          cancelStreamEndTimer();
           setIsStreaming(true);
-          if (!mergeNext) {
-            setMessages((prev) => finalizeStreamedTurn(prev, turn));
-          }
           return;
         }
-        scheduleStreamEndTimer(turn);
+        // ``stream_end`` closes the current answer segment, not the turn.
+        // Tools and follow-up model segments may still arrive before the
+        // definitive ``turn_end`` event.
+        setIsStreaming(true);
         return;
       }
 
@@ -821,28 +965,78 @@ export function useNanobotStream(
 
       if (ev.event === "goal_status") {
         if (ev.status === "running" && typeof ev.started_at === "number") {
+          setStreamError(null);
           setRunStartedAt(ev.started_at);
           setIsStreaming(true);
         } else {
           setRunStartedAt(null);
           setIsStreaming(false);
+          setRetryStatus(null);
+        }
+        return;
+      }
+
+      if (ev.event === "retry_status") {
+        const activeTurnId = client.getRunTurnId(chatId);
+        if (ev.turn_id && activeTurnId && ev.turn_id !== activeTurnId) return;
+        if (ev.state === "recovered" || ev.state === "cleared") {
+          setRetryStatus(null);
+        } else {
+          const retryAfterSeconds =
+            typeof ev.retry_after_s === "number" &&
+            Number.isFinite(ev.retry_after_s) &&
+            ev.retry_after_s >= 0
+              ? ev.retry_after_s
+              : undefined;
+          setRetryStatus({
+            state: ev.state,
+            attempt: ev.attempt,
+            error_kind: ev.error_kind,
+            ...(typeof ev.max_attempts === "number"
+              ? { max_attempts: ev.max_attempts }
+              : {}),
+            ...(retryAfterSeconds !== undefined
+              ? { next_retry_at: Date.now() / 1000 + retryAfterSeconds }
+              : {}),
+            ...(ev.turn_id ? { turn_id: ev.turn_id } : {}),
+          });
+          setIsStreaming(true);
         }
         return;
       }
 
       if (ev.event === "turn_end") {
+        if (typeof ev.turn_id === "string") sideChannelTurnIdsRef.current.delete(ev.turn_id);
         if ("goal_state" in ev && ev.goal_state != null && typeof ev.goal_state === "object") {
           setGoalState(ev.goal_state);
         }
         setRunStartedAt(null);
-        // Definitive signal that the turn is fully complete.  Cancel any
-        // pending debounce timer and stop the loading indicator immediately.
-        cancelStreamEndTimer();
+        setRetryStatus(null);
+        // Definitive signal that the turn is fully complete, so stop the
+        // loading indicator immediately.
         setIsStreaming(false);
+        const modelRequestFailed = ev.outcome === "failed" && ev.failure_kind === "model";
+        const failureAttempts =
+          typeof ev.failure_attempts === "number"
+          && Number.isInteger(ev.failure_attempts)
+          && ev.failure_attempts > 0
+            ? ev.failure_attempts
+            : undefined;
+        const modelFailure = modelRequestFailed
+          ? {
+              kind: "model_request_failed" as const,
+              chatId,
+              ...(ev.turn_id ? { turnId: ev.turn_id } : {}),
+              ...(typeof ev.failure_error_kind === "string"
+                ? { errorKind: ev.failure_error_kind }
+                : {}),
+              ...(failureAttempts !== undefined ? { attempts: failureAttempts } : {}),
+            }
+          : null;
+        if (modelFailure) setStreamError(modelFailure);
         const completedAt = Date.now();
         setMessages((prev) => {
           let finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
-          finalized = pruneReasoningOnlyPlaceholders(finalized);
           const latencyMs =
             typeof ev.latency_ms === "number" && ev.latency_ms >= 0
               ? Math.round(ev.latency_ms)
@@ -851,6 +1045,11 @@ export function useNanobotStream(
             finalized,
             {
               ...(latencyMs !== undefined ? { latencyMs } : {}),
+              ...(ev.usage ? { usage: ev.usage } : {}),
+              ...(ev.round_usages?.length ? { roundUsages: ev.round_usages } : {}),
+              ...(typeof ev.context_window_tokens === "number"
+                ? { contextWindowTokens: ev.context_window_tokens }
+                : {}),
               completedAt,
             },
             ev.turn_id,
@@ -862,7 +1061,75 @@ export function useNanobotStream(
           return finalized;
         });
         suppressStreamUntilTurnEndRef.current = false;
+        notifyInBackground(
+          modelFailure
+            ? resolveModelRequestFailureCopy(modelFailure, t).body
+            : ev.outcome === "failed"
+              ? ev.failure_message || "This turn failed and has ended."
+            : t("recovery.completed", { defaultValue: "Task completed" }),
+        );
         onTurnEnd?.();
+        return;
+      }
+
+      if (ev.event === "recovery_state") {
+        const next: RecoveryState = {
+          status: ev.status,
+          recovery_id: ev.recovery_id,
+          ...(ev.reason ? { reason: ev.reason } : {}),
+          ...(typeof ev.attempts === "number" ? { attempts: ev.attempts } : {}),
+          ...(typeof ev.can_continue === "boolean"
+            ? { can_continue: ev.can_continue }
+            : {}),
+        };
+        setRecoveryState(next);
+        if (ev.status === "resuming") {
+          setRunStartedAt((current) => current ?? Date.now() / 1000);
+          setIsStreaming(true);
+        }
+        if (
+          ev.status === "awaiting_user"
+          || ev.status === "recovered"
+          || ev.status === "failed"
+        ) {
+          setRetryStatus(null);
+          // Recovery is an explicit boundary. The interrupted turn is no
+          // longer running, so do not let the stale start time keep the
+          // activity clock (or composer stop state) alive underneath the
+          // recovery notice.
+          setRunStartedAt(null);
+          setIsStreaming(false);
+          client.finishRunLocally(chatId);
+          clearPendingStreamWork();
+          closeActiveAssistantStream();
+          clearActivitySegment();
+          if (ev.status !== "recovered") {
+            notifyInBackground(
+              ev.status === "failed"
+                ? t("recovery.failed", { defaultValue: "Task recovery failed" })
+                : t("recovery.interrupted", { defaultValue: "Task interrupted" }),
+            );
+          }
+        }
+        return;
+      }
+
+      if (ev.event === "attached") {
+        setRecoveryState(ev.recovery_state ?? null);
+        if (ev.recovery_state?.status === "resuming") {
+          setRunStartedAt((current) => current ?? Date.now() / 1000);
+          setIsStreaming(true);
+        } else if (
+          ev.recovery_state?.status === "awaiting_user"
+          || ev.recovery_state?.status === "failed"
+        ) {
+          setRunStartedAt(null);
+          setIsStreaming(false);
+          client.finishRunLocally(chatId);
+          clearPendingStreamWork();
+          closeActiveAssistantStream();
+          clearActivitySegment();
+        }
         return;
       }
 
@@ -980,8 +1247,9 @@ export function useNanobotStream(
 
         // A complete (non-streamed) assistant message. If a stream was in
         // flight, drop the placeholder so we don't render the text twice.
-        // Streaming state is closed by ``stream_end`` when present, or by
-        // ``turn_end`` for non-streamed and tool-heavy turns.
+        // ``turn_end`` is the turn boundary. ``stream_end`` only closes the
+        // current text segment so a following tool/reasoning segment remains
+        // part of the same live activity surface.
         clearActivitySegment();
         setMessages((prev) => {
           const activeId = buffer.current?.messageId;
@@ -1055,7 +1323,6 @@ export function useNanobotStream(
         });
         return;
       }
-      // ``attached`` frames aren't actionable here.
     };
 
     const unsub = client.onChat(chatId, handle);
@@ -1066,12 +1333,11 @@ export function useNanobotStream(
       closedAssistantStreamIdsRef.current.clear();
       clearActivitySegment();
       clearPendingStreamWork();
-      cancelStreamEndTimer();
     };
   }, [
     applyStreamError,
-    cancelStreamEndTimer,
     chatId,
+    closeActiveAssistantStream,
     client,
     clearActivitySegment,
     clearPendingStreamWork,
@@ -1079,9 +1345,10 @@ export function useNanobotStream(
     ensureActivitySegmentId,
     flushPendingStreamEvents,
     isSideChannelEvent,
+    notifyInBackground,
     onTurnEnd,
     schedulePendingStreamFlush,
-    scheduleStreamEndTimer,
+    t,
   ]);
 
   const send = useCallback(
@@ -1092,6 +1359,7 @@ export function useNanobotStream(
       // them via ``media`` paths.
       if (!hasAttachments && !content.trim()) return null;
 
+      setStreamError(null);
       const sideChannel = options?.sideChannel === true;
       const finalizeActiveTurn = options?.finalizeActiveTurn === true;
       const continueActiveTurn = options?.continueActiveTurn === true;
@@ -1100,8 +1368,8 @@ export function useNanobotStream(
         : content;
       flushPendingStreamEvents();
       if (finalizeActiveTurn) {
-        cancelStreamEndTimer();
         setIsStreaming(false);
+        setRetryStatus(null);
       }
       const turnId = crypto.randomUUID();
       const userMessageId = crypto.randomUUID();
@@ -1122,7 +1390,7 @@ export function useNanobotStream(
         }
         const base = finalizeActiveTurn ? finalizeStreamedTurn(prev) : prev;
         return [
-          ...(sideChannel || continueActiveTurn ? base : pruneReasoningOnlyPlaceholders(base)),
+          ...base,
           {
             id: userMessageId,
             role: "user",
@@ -1155,13 +1423,14 @@ export function useNanobotStream(
       client.sendMessage(chatId, outboundContent, wireMedia, clientOptions);
       return { turnId, userMessageId, sideChannel };
     },
-    [cancelStreamEndTimer, chatId, clearActivitySegment, client, flushPendingStreamEvents],
+    [chatId, clearActivitySegment, client, flushPendingStreamEvents],
   );
 
   const stop = useCallback(() => {
     if (!chatId) return;
     flushPendingStreamEvents();
     setIsStreaming(false);
+    setRetryStatus(null);
     setMessages((prev) => {
       buffer.current = null;
       activeAssistantRef.current = null;
@@ -1176,7 +1445,6 @@ export function useNanobotStream(
   }, [chatId, clearActivitySegment, client, flushPendingStreamEvents]);
 
   const reconcileTurnComplete = useCallback(() => {
-    cancelStreamEndTimer();
     clearPendingStreamWork();
     buffer.current = null;
     activeAssistantRef.current = null;
@@ -1184,8 +1452,9 @@ export function useNanobotStream(
     clearActivitySegment();
     suppressStreamUntilTurnEndRef.current = false;
     setRunStartedAt(null);
+    setRetryStatus(null);
     setIsStreaming(false);
-  }, [cancelStreamEndTimer, clearActivitySegment, clearPendingStreamWork]);
+  }, [clearActivitySegment, clearPendingStreamWork]);
 
   const transcribeAudio = useCallback(
     (dataUrl: string, options?: { durationMs?: number }) =>
@@ -1193,12 +1462,33 @@ export function useNanobotStream(
     [client],
   );
 
+  const recoveryAction = useCallback(async (action: "continue" | "dismiss") => {
+    if (!chatId || !recoveryState) return;
+    await client.requestMutation(`recovery.${action}`, {
+      chat_id: chatId,
+      recovery_id: recoveryState.recovery_id,
+    });
+  }, [chatId, client, recoveryState]);
+
+  const continueRecovery = useCallback(
+    () => recoveryAction("continue"),
+    [recoveryAction],
+  );
+  const dismissRecovery = useCallback(
+    () => recoveryAction("dismiss"),
+    [recoveryAction],
+  );
+
   return {
     messages,
     messagesReady: messageOwnerChatId === chatId,
     isStreaming,
     runStartedAt,
+    retryStatus,
     goalState,
+    recoveryState,
+    continueRecovery,
+    dismissRecovery,
     send,
     transcribeAudio,
     stop,

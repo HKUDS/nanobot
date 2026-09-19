@@ -46,7 +46,8 @@ def test_custom_provider_parse_accepts_dict_response() -> None:
 
     assert result.finish_reason == "stop"
     assert result.content == "hello from dict"
-    assert result.usage["total_tokens"] == 3
+    assert result.usage is not None
+    assert result.usage.total_tokens == 3
 
 
 def test_custom_provider_parse_normalizes_text_tool_call() -> None:

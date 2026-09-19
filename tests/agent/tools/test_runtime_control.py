@@ -45,7 +45,6 @@ def test_agent_loop_assembles_my_tool_with_runtime_control(tmp_path: Path) -> No
     assert isinstance(tool._runtime_control, RuntimeControl)
     assert isinstance(tool._runtime_control, AgentRuntimeControl)
     assert tool._runtime_control is not loop
-    assert not hasattr(tool, "_runtime_state")
 
 
 def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path) -> None:
@@ -57,7 +56,22 @@ def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path
     snapshot = _my_tool(loop)._runtime_control.snapshot()
     values = snapshot.as_mapping()
 
-    assert frozenset(values) == RUNTIME_SNAPSHOT_KEYS
+    expected_snapshot_keys = frozenset({
+        "model",
+        "model_preset",
+        "model_presets",
+        "max_iterations",
+        "context_window_tokens",
+        "workspace",
+        "provider_retry_mode",
+        "max_tool_result_chars",
+        "tool_names",
+        "web_config",
+        "exec_config",
+        "subagents",
+    })
+    assert RUNTIME_SNAPSHOT_KEYS == expected_snapshot_keys
+    assert frozenset(values) == expected_snapshot_keys
     assert RUNTIME_COMMAND_KEYS == frozenset({
         "model",
         "model_preset",

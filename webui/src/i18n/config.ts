@@ -1,16 +1,16 @@
 export const LOCALE_STORAGE_KEY = "nanobot.locale";
 
 export const supportedLocales = [
-  { code: "en", label: "English", nativeLabel: "English" },
-  { code: "zh-CN", label: "Chinese (Simplified)", nativeLabel: "简体中文" },
-  { code: "zh-TW", label: "Chinese (Traditional)", nativeLabel: "繁體中文" },
-  { code: "fr", label: "French", nativeLabel: "Français" },
-  { code: "ja", label: "Japanese", nativeLabel: "日本語" },
-  { code: "ko", label: "Korean", nativeLabel: "한국어" },
-  { code: "es", label: "Spanish", nativeLabel: "Español" },
-  { code: "pt-BR", label: "Portuguese (Brazil)", nativeLabel: "Português (Brasil)" },
-  { code: "vi", label: "Vietnamese", nativeLabel: "Tiếng Việt" },
-  { code: "id", label: "Indonesian", nativeLabel: "Bahasa Indonesia" },
+  { code: "en", nativeLabel: "English" },
+  { code: "zh-CN", nativeLabel: "简体中文" },
+  { code: "zh-TW", nativeLabel: "繁體中文" },
+  { code: "fr", nativeLabel: "Français" },
+  { code: "ja", nativeLabel: "日本語" },
+  { code: "ko", nativeLabel: "한국어" },
+  { code: "es", nativeLabel: "Español" },
+  { code: "pt-BR", nativeLabel: "Português (Brasil)" },
+  { code: "vi", nativeLabel: "Tiếng Việt" },
+  { code: "id", nativeLabel: "Bahasa Indonesia" },
 ] as const;
 
 export type SupportedLocale = (typeof supportedLocales)[number]["code"];
@@ -51,7 +51,7 @@ export function normalizeLocale(
   return baseMatch?.code ?? defaultLocale;
 }
 
-export function readStoredLocale(): SupportedLocale | null {
+function readStoredLocale(): SupportedLocale | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(LOCALE_STORAGE_KEY);

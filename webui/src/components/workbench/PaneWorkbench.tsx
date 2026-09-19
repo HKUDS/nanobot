@@ -685,11 +685,15 @@ export function PaneWorkbench({
   return (
     <section
       aria-label={t("workbench.aria", { defaultValue: "Conversation workbench" })}
-      className="flex h-full min-h-0 flex-col overflow-hidden bg-background"
+      className={cn(
+        "thread-workspace relative flex h-full min-h-0 flex-col overflow-hidden bg-background",
+        chrome && displayedPanes.length > 1
+          && "[--thread-header-position:relative] [--thread-prompt-inset:1rem]",
+      )}
     >
-      <TooltipProvider delayDuration={500} skipDelayDuration={100}>
+      <TooltipProvider>
         {chrome ? (
-          <header className="shrink-0 bg-background">
+          <header className="pointer-events-none inset-x-0 top-0 z-30 shrink-0 [position:var(--thread-header-position,absolute)]">
             <div
               ref={setHeaderPortalTarget}
               data-testid="workbench-header-host"
