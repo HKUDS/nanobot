@@ -687,6 +687,7 @@ export function ProvidersSettings({
   const [creatingCustomProvider, setCreatingCustomProvider] = useState(false);
   const [addingProvider, setAddingProvider] = useState(false);
   const [providerToAdd, setProviderToAdd] = useState<string | null>(null);
+  const [providerSearch, setProviderSearch] = useState("");
   const [customProviderKeyVisible, setCustomProviderKeyVisible] = useState(false);
   const [customProviderDraft, setCustomProviderDraft] = useState<CustomProviderDraft>(
     emptyCustomProviderDraft,
@@ -1196,6 +1197,7 @@ export function ProvidersSettings({
             onOpenChange={(open) => {
               if (open) {
                 setProviderToAdd(null);
+                setProviderSearch("");
                 setAddingProvider(true);
               } else closeAddProvider();
             }}
@@ -1228,6 +1230,7 @@ export function ProvidersSettings({
               </div>
             ) : (
               <ProviderSearchList providers={unconfiguredProviders} showBrandLogos={showBrandLogos}
+                query={providerSearch} onQueryChange={setProviderSearch}
                 onSelect={(name) => {
                   setProviderToAdd(name);
                   onToggleProvider(name);
@@ -1276,12 +1279,12 @@ function ProviderSetupPanel({ open, onOpenChange, title, trigger, onBack, childr
     <DialogTrigger asChild>{trigger}</DialogTrigger>
     {mobile ? <SheetContent side="bottom" ref={setContainer} aria-describedby={undefined}
       onOpenAutoFocus={focusOnOpen}
-      className="mx-auto h-[min(36rem,85dvh)] max-w-md gap-0 overflow-hidden rounded-t-3xl pb-[env(safe-area-inset-bottom)] outline-none"
+      className={cn("mx-auto max-h-[85dvh] max-w-md gap-0 overflow-hidden rounded-t-3xl pb-[env(safe-area-inset-bottom)] outline-none", !configuring && "h-[min(36rem,85dvh)]")}
       closeButtonClassName="grid h-9 w-9 place-items-center right-3 top-3 rounded-full">
       <FloatingPortalContext.Provider value={container}>{content}</FloatingPortalContext.Provider>
     </SheetContent> : <DialogContent ref={setContainer} aria-describedby={undefined}
       onOpenAutoFocus={focusOnOpen}
-      className="flex h-[min(32rem,85dvh)] w-[min(28rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0">
+      className={cn("flex max-h-[85dvh] w-[min(28rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 outline-none", !configuring && "h-[min(32rem,85dvh)]")}>
       {content}
     </DialogContent>}
   </Dialog>;
@@ -1306,15 +1309,16 @@ const PROVIDER_SEARCH_ALIASES: Record<string, string> = {
   ant_ling: "蚂蚁 螞蟻 百灵 百靈",
 };
 
-function ProviderSearchList({ providers, showBrandLogos, onSelect, onCustom, onClose }: {
+function ProviderSearchList({ providers, showBrandLogos, query, onQueryChange, onSelect, onCustom, onClose }: {
   providers: SettingsPayload["providers"];
   showBrandLogos: boolean;
+  query: string;
+  onQueryChange: (query: string) => void;
   onSelect: (name: string) => void;
   onCustom: () => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [query, setQuery] = useState("");
   const mobile = useMediaQuery("(max-width: 639px)");
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -1334,14 +1338,14 @@ function ProviderSearchList({ providers, showBrandLogos, onSelect, onCustom, onC
   return <>
     <div className="relative mx-5 mb-3 shrink-0">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-      <Input {...inputProps} ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)}
+      <Input {...inputProps} ref={inputRef} value={query} onChange={(event) => onQueryChange(event.target.value)}
         aria-label={searchLabel} placeholder={searchLabel}
         className="h-10 rounded-xl border-0 bg-muted/60 pl-9 text-sm shadow-none focus-visible:ring-1" />
     </div>
     <div {...listProps} aria-label={searchLabel}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 scrollbar-thin scrollbar-track-transparent">
       {filtered.map((provider) => <ComboboxOption key={provider.name} {...getOptionProps(provider.name)}
-        aria-label={provider.label} className="min-h-11 gap-3 rounded-xl px-3 py-2 text-sm font-normal">
+        aria-label={provider.label} className="min-h-11 gap-3 rounded-xl px-3 py-2 text-sm font-normal data-[highlighted]:bg-foreground/[0.06] dark:data-[highlighted]:bg-white/[0.08]">
         <ProviderIcon provider={provider.name} showBrandLogos={showBrandLogos} compact />
         <span className="min-w-0 flex-1 truncate">{provider.label}</span>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden />

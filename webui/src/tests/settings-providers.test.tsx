@@ -39,6 +39,7 @@ describe("Settings providers", () => {
     expect(screen.queryByRole("button", { name: "VolcEngine Coding Plan" })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Back to providers" }));
     expect(screen.getByRole("dialog", { name: "Add provider" })).toBe(dialog);
+    expect(screen.getByRole("combobox")).toHaveValue("火山");
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
@@ -74,6 +75,26 @@ describe("Settings providers", () => {
     expect(screen.getByRole("combobox")).not.toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
     expect(screen.getByRole("dialog", { name: "Custom provider" })).toBe(dialog);
+  });
+
+  it("adds a built-in provider only after saving and returns focus to Add", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [{ name: "moonshot", label: "Moonshot", configured: false }];
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload, providers: [{ ...payload.providers[0], configured: true, api_key_hint: "configured" }],
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    const trigger = screen.getByRole("button", { name: "Add provider" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "Moonshot" }));
+    await user.type(screen.getByPlaceholderText("Enter API key"), "test-key");
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Moonshot", exact: true })).toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    await user.click(trigger);
+    expect(screen.queryByRole("option", { name: "Moonshot" })).not.toBeInTheDocument();
   });
 
   it("keeps provider labels and keyboard configuration accessible with decorative logos", async () => {
