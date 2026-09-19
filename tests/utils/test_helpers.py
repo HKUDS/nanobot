@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import tiktoken
 
 from nanobot.utils import helpers
@@ -185,3 +186,27 @@ def test_write_text_atomic_keeps_file_when_directory_fsync_is_unsupported(
 
     assert target.read_text(encoding="utf-8") == '{"pending": {}}'
     assert len(fsync_calls) == 1
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [("gpt-4", "cl100k_base"), ("gpt-4o", "o200k_base"),
+     ("openai/gpt-4.1", "o200k_base"), ("unknown/model", "cl100k_base")],
+)
+def test_model_tokenizer_uses_tiktoken_mapping(model, expected):
+    from nanobot.utils.helpers import _get_token_encoding
+
+    assert _get_token_encoding(model).name == expected
+
+
+def test_tool_token_cache_is_partitioned_by_encoding():
+    import tiktoken
+
+    from nanobot.utils.helpers import _estimate_tools_tokens
+
+    tools = [{"description": "中文天气查询与复杂参数" * 20}]
+    encodings = [tiktoken.get_encoding(name) for name in ("cl100k_base", "o200k_base")]
+    actual = [_estimate_tools_tokens(enc, tools, leading_separator=True) for enc in encodings]
+    import json
+
+    expected = [len(enc.encode("\n" + json.dumps(tools, ensure_ascii=False))) for enc in encodings]
+    assert expected[0] != expected[1]
+    assert actual == expected

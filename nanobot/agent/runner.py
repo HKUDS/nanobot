@@ -39,6 +39,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
+from nanobot.providers.input_usage import InputUsage
 from nanobot.session.summary import SessionSummaryCheckpoint
 from nanobot.utils.helpers import (
     build_assistant_message,
@@ -110,6 +111,7 @@ class AgentRunSpec:
     provider_state: ProviderConversationState | None = None
     llm_usage_source: LLMUsageSource | None = None
     events: EventSink = NO_EVENTS
+    input_usage: InputUsage | None = field(default=None, repr=False)
 
 
 @dataclass(slots=True)
@@ -133,6 +135,7 @@ class AgentRunResult:
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     summary_checkpoint: SessionSummaryCheckpoint | None = field(default=None, repr=False)
     provider_compaction_applied: bool = field(default=False, repr=False)
+    input_usage: InputUsage | None = field(default=None, repr=False)
 
 
 class AgentRunner:
@@ -390,12 +393,15 @@ class AgentRunner:
             max_tool_result_chars=spec.max_tool_result_chars,
             context_window_tokens=spec.runtime.context_window_tokens,
             max_tokens=spec.runtime.generation.max_tokens,
+            temperature=spec.runtime.generation.temperature,
+            reasoning_effort=spec.runtime.generation.reasoning_effort,
         )
         request_state = ModelRequestState(
             config=governance_config,
             conversation=conversation_state,
             compaction=compaction,
             events=spec.events,
+            input_usage=spec.input_usage,
         )
 
         async def end_length_segment(*, interrupted: bool) -> None:
@@ -839,6 +845,7 @@ class AgentRunner:
                 else None
             ),
             provider_compaction_applied=request_state.provider_compaction_applied,
+            input_usage=request_state.input_usage,
         )
 
     def _build_request_kwargs(
@@ -1301,6 +1308,17 @@ class AgentRunner:
             state.messages,
             response,
             tool_definitions=state.tool_definitions,
+        )
+        usage = response.usage
+        state.input_usage = (
+            InputUsage(response.input_snapshot, usage.input_tokens)
+            if response.input_snapshot is not None
+            and usage is not None
+            and usage.request_count == 1
+            and usage.source == "reported"
+            and response.finish_reason not in {"error", "cancelled"}
+            and not response.provider_compaction_applied
+            else None
         )
         return state.usage
 

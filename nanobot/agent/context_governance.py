@@ -31,6 +31,7 @@ from nanobot.providers.conversation_state import (
     ProviderConversationStateController,
     allows_conversation_message_merge,
 )
+from nanobot.providers.input_usage import InputSnapshot, InputUsage
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     detach_runtime_context,
@@ -119,6 +120,8 @@ class ContextGovernanceConfig:
     max_tool_result_chars: int
     context_window_tokens: int | None = None
     max_tokens: int | None = None
+    temperature: float = 0.7
+    reasoning_effort: str | None = None
 
 
 @dataclass(slots=True)
@@ -202,6 +205,7 @@ class ModelRequestState:
     provider_compaction_applied: bool = False
     compacted_tool_results: set[str] = field(default_factory=set)
     events: EventSink = NO_EVENTS
+    input_usage: InputUsage | None = None
 
 
 class ContextGovernor:
@@ -390,6 +394,8 @@ class ContextGovernor:
         usage_matches_messages: bool,
         tool_definitions: list[dict[str, Any]] | None,
         request_context_tokens: int | None = None,
+        input_floor: int | None = None,
+        input_is_exact: bool = False,
     ) -> tuple[int, str] | None:
         """Return the authoritative measurement when a request is pressured."""
         if not config.context_window_tokens:
@@ -398,6 +404,9 @@ class ContextGovernor:
         if request_context_tokens is not None:
             measured = request_context_tokens
             source = "resumed provider state plus pending messages"
+        elif input_is_exact and input_floor is not None:
+            measured = input_floor
+            source = "matching provider input"
         elif (
             usage_matches_messages
             and usage is not None
@@ -412,6 +421,9 @@ class ContextGovernor:
                 messages,
                 tool_definitions,
             )
+        if request_context_tokens is None and input_floor is not None and input_floor > measured:
+            measured = input_floor
+            source = "reported input for unchanged request prefix"
         if budget > 0 and measured < budget:
             return None
         return measured, source
@@ -620,11 +632,17 @@ class ContextGovernor:
                 supplemental_messages=supplemental_messages,
                 tool_definitions=tool_definitions,
             )
-        usage_matches_messages = (
-            state.messages is not None
-            and prepared == state.messages
-            and tool_definitions == state.tool_definitions
+        input_usage = state.input_usage
+        candidate = (
+            self.input_snapshot(state.config, prepared, tool_definitions)
+            if input_usage is not None and request_context_tokens is None else None
         )
+        input_floor = (
+            input_usage.floor_for(candidate) if input_usage is not None else None
+        )
+        input_is_exact = input_usage is not None and input_usage.snapshot == candidate
+        # Payload equality alone cannot attribute fallback usage to the primary.
+        usage_matches_messages = False
         request_was_fitted = False
         compaction = state.compaction
         if compaction is None:
@@ -635,6 +653,8 @@ class ContextGovernor:
                 usage_matches_messages=usage_matches_messages,
                 tool_definitions=tool_definitions,
                 request_context_tokens=request_context_tokens,
+                input_floor=input_floor,
+                input_is_exact=input_is_exact,
             )
             if pressure is not None:
                 compaction_id = uuid4().hex
@@ -647,6 +667,22 @@ class ContextGovernor:
                         prepared,
                         tool_definitions=tool_definitions,
                     )
+                    if (
+                        input_usage is not None
+                        and input_floor is not None
+                        and input_floor >= self.input_budget(state.config)
+                        and input_usage.floor_for(
+                            self.input_snapshot(state.config, prepared, tool_definitions),
+                        ) is not None
+                    ):
+                        # An underestimated local counter can leave fitting a
+                        # no-op. Never resend a known-overbudget unchanged H.
+                        raise ContextWindowExceededError(
+                            session_key=state.config.session_key,
+                            estimated_tokens=input_floor,
+                            input_budget=self.input_budget(state.config),
+                            source="unchanged measured input after request fitting",
+                        )
                 except Exception:
                     await state.events.emit(
                         ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
@@ -656,6 +692,7 @@ class ContextGovernor:
                     ContextCompactionEvent(compaction_id=compaction_id, phase="succeeded"),
                 )
                 request_was_fitted = True
+                state.input_usage = None
         else:
             pressure = self.request_pressure(
                 state.config,
@@ -664,6 +701,8 @@ class ContextGovernor:
                 usage_matches_messages=usage_matches_messages,
                 tool_definitions=tool_definitions,
                 request_context_tokens=request_context_tokens,
+                input_floor=input_floor,
+                input_is_exact=input_is_exact,
             )
             if pressure is not None:
                 prepared = await self._compact_request_history(
@@ -675,6 +714,7 @@ class ContextGovernor:
                 )
                 model_messages = prepared
                 supplemental_messages = None
+                state.input_usage = None
         provider_context = (
             state.conversation.prepare_request(
                 transcript,
@@ -695,6 +735,23 @@ class ContextGovernor:
         state.messages = deepcopy(prepared)
         state.tool_definitions = deepcopy(tool_definitions)
         return prepared, provider_context
+
+    @staticmethod
+    def input_snapshot(
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> InputSnapshot | None:
+        candidate = config.provider.input_snapshot(
+            messages, tools, config.model,
+            max_tokens=(
+                config.max_tokens if config.max_tokens is not None
+                else config.provider.generation.max_tokens
+            ),
+            temperature=config.temperature,
+            reasoning_effort=config.reasoning_effort,
+        )
+        return candidate if isinstance(candidate, InputSnapshot) else None
 
     @staticmethod
     def input_budget(config: ContextGovernanceConfig) -> int:
