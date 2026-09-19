@@ -33,7 +33,7 @@ async def test_run_inline_returns_result_without_announcement(tmp_path):
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
-    manager.runner.run = AsyncMock(return_value=SimpleNamespace(
+    manager._execute_session = AsyncMock(return_value=SimpleNamespace(
         stop_reason="done",
         final_content="review result",
         error=None,
@@ -66,7 +66,7 @@ async def test_run_inline_returns_structured_error(tmp_path):
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
-    manager.runner.run = AsyncMock(return_value=SimpleNamespace(
+    manager._execute_session = AsyncMock(return_value=SimpleNamespace(
         stop_reason="error",
         final_content=None,
         error="subagent failed",
@@ -105,9 +105,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     mgr._announce_result = AsyncMock()
 
     async def fake_run(spec):
-        exec_tool = spec.tools.get("exec")
-        assert exec_tool is not None
-        assert exec_tool.allowed_env_keys == ["GOPATH", "JAVA_HOME"]
+        assert spec.tools_config.exec.allowed_env_keys == ["GOPATH", "JAVA_HOME"]
         return SimpleNamespace(
             stop_reason="done",
             final_content="done",
@@ -115,7 +113,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
             tool_events=[],
         )
 
-    mgr.runner.run = AsyncMock(side_effect=fake_run)
+    mgr._execute_session = AsyncMock(side_effect=fake_run)
 
     status = SubagentStatus(
         task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
@@ -129,7 +127,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
         _runtime(provider),
     )
 
-    mgr.runner.run.assert_awaited_once()
+    mgr._execute_session.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -158,7 +156,7 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
             tool_events=[],
         )
 
-    mgr.runner.run = AsyncMock(side_effect=fake_run)
+    mgr._execute_session = AsyncMock(side_effect=fake_run)
 
     status = SubagentStatus(
         task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
@@ -172,7 +170,7 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
         _runtime(provider),
     )
 
-    mgr.runner.run.assert_awaited_once()
+    mgr._execute_session.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -201,7 +199,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
             stop_reason="done", final_content="done", error=None, tool_events=[],
         )
 
-    mgr.runner.run = AsyncMock(side_effect=fake_run)
+    mgr._execute_session = AsyncMock(side_effect=fake_run)
 
     await mgr.spawn(task="do task", runtime=parent_runtime, temperature=0.9)
     await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
@@ -235,7 +233,7 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
     release_second = asyncio.Event()
 
     async def fake_run(spec):
-        task = spec.initial_messages[-1]["content"]
+        task = spec.task
         if task == "first task":
             first_entered.set()
             await release_first.wait()
@@ -249,7 +247,7 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
             tool_events=[],
         )
 
-    mgr.runner.run = AsyncMock(side_effect=fake_run)
+    mgr._execute_session = AsyncMock(side_effect=fake_run)
 
     from nanobot.agent.tools.context import RequestContext, request_context
 
@@ -333,7 +331,7 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
     release_second = asyncio.Event()
 
     async def fake_run(spec):
-        task = spec.initial_messages[-1]["content"]
+        task = spec.task
         if task == "first":
             first_entered.set()
             await release_first.wait()
@@ -347,7 +345,7 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
             tool_events=[],
         )
 
-    manager.runner.run = AsyncMock(side_effect=fake_run)
+    manager._execute_session = AsyncMock(side_effect=fake_run)
     tool = SpawnTool(manager)
     with request_context(RequestContext(
         channel="test",
@@ -397,18 +395,18 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
     entered: list[str] = []
 
     async def fake_run(spec):
-        entered.append(spec.initial_messages[-1]["content"])
+        entered.append(spec.task)
         if len(entered) == 2:
             both_entered.set()
         await release.wait()
         return SimpleNamespace(
             stop_reason="done",
-            final_content=spec.initial_messages[-1]["content"],
+            final_content=spec.task,
             error=None,
             tool_events=[],
         )
 
-    manager.runner.run = AsyncMock(side_effect=fake_run)
+    manager._execute_session = AsyncMock(side_effect=fake_run)
     tools = ToolRegistry()
     tools.register(SpawnTool(manager))
     runtime = _runtime(MagicMock())
@@ -466,7 +464,7 @@ async def test_cancel_by_session_cancels_inline_subagent(tmp_path):
         entered.set()
         await asyncio.Event().wait()
 
-    manager.runner.run = AsyncMock(side_effect=fake_run)
+    manager._execute_session = AsyncMock(side_effect=fake_run)
     inline = asyncio.create_task(manager.run_inline(
         task="wait",
         session_key="test:c1",
