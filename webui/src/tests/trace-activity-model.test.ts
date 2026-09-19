@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { describeTraceLine } from "@/components/thread/activity/trace-activity-model";
 import type { GenericToolStatus } from "@/components/thread/activity/generic-tool-model";
+import i18n, { setAppLanguage } from "@/i18n";
 
 function describeTrace(line: string, status: GenericToolStatus = "done") {
-  return describeTraceLine(line, status);
+  return describeTraceLine(line, status, i18n.t);
 }
 
 describe("trace activity semantics", () => {
@@ -65,5 +66,18 @@ describe("trace activity semantics", () => {
       detail: "npm test · script, 3 lines",
     });
     expect(result.detail).not.toContain("second-secret-line");
+  });
+
+  it("localizes generated copy while preserving paths and commands", async () => {
+    await setAppLanguage("zh-CN");
+
+    expect(describeTrace('read_file({"path":"src/app.tsx"})')).toMatchObject({
+      label: "已读取",
+      detail: "src/app.tsx",
+    });
+    expect(describeTrace('exec({"command":"bun test"})')).toMatchObject({
+      label: "已运行命令",
+      detail: "bun test",
+    });
   });
 });

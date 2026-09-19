@@ -27,6 +27,7 @@ import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import { coalesceActivityMessages } from "@/components/thread/activity/activity-message-model";
 import {
   compactActivityPath,
+  formatActivityTarget,
   redactShellCommand,
 } from "@/components/thread/activity/activity-text";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
@@ -853,8 +854,9 @@ function ActivityTraceRow({
   active: boolean;
   state?: GenericToolState;
 }) {
+  const { t } = useTranslation();
   const status = state?.status ?? (active ? "running" : "done");
-  const trace = describeTraceLine(line, status, state?.result);
+  const trace = describeTraceLine(line, status, t, state?.result);
   const rowActive = status === "running" && active;
   const Icon = trace.icon === "clock" ? Clock3 : (trace.kind === "search"
     ? Search
@@ -880,7 +882,7 @@ function ActivityTraceRow({
       marker={<TraceIconMark trace={trace} fallbackIcon={Icon} active={rowActive} />}
       active={rowActive && trace.kind !== "done"}
       tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
-      label={[trace.label, trace.detail].filter(Boolean).join(" ")}
+      label={formatActivityTarget(t, trace.label, trace.detail)}
     />
   );
 }
@@ -1319,6 +1321,7 @@ function CliRunGroup({
 }
 
 function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; app?: CliAppInfo }) {
+  const { t } = useTranslation();
   const args = compactActivityPath(redactShellCommand(formatCliArgs(run)));
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
@@ -1326,8 +1329,10 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
   const logoUrls = useMemo(() => logoFallbackUrls(app?.logo_url), [app?.logo_url]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
   const displayName = app?.display_name || titleFromPresetName(run.name);
-  const action = failed ? "Could not use" : rowActive ? "Using" : "Used";
-  const label = `${action} ${displayName}${args ? ` · ${args}` : ""}`;
+  const label = `${t(
+    `message.${failed ? "cliActivityFailedOne" : rowActive ? "cliActivityRunningOne" : "cliActivityRanOne"}`,
+    { name: displayName },
+  )}${args ? ` · ${args}` : ""}`;
 
   return (
     <ActivityStep
@@ -1394,6 +1399,7 @@ function McpRunGroup({
 }
 
 function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolean; preset?: McpPresetInfo }) {
+  const { t } = useTranslation();
   const failed = run.status === "error";
   const rowActive = active && run.status === "running";
   const color = failed ? "#DC2626" : preset?.brand_color || "#6D5DF6";
@@ -1404,8 +1410,9 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
     run.toolName,
     run.args,
     failed ? "error" : rowActive ? "running" : "done",
+    t,
   );
-  const label = `${activity.action}${activity.target ? ` ${activity.target}` : ""} · ${displayName}`;
+  const label = `${formatActivityTarget(t, activity.action, activity.target ?? "")} · ${displayName}`;
 
   return (
     <ActivityStep
