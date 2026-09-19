@@ -11,6 +11,7 @@ export const supportedLocales = [
   { code: "pt-BR", nativeLabel: "Português (Brasil)" },
   { code: "vi", nativeLabel: "Tiếng Việt" },
   { code: "id", nativeLabel: "Bahasa Indonesia" },
+  { code: "pl", nativeLabel: "Polski" },
 ] as const;
 
 export type SupportedLocale = (typeof supportedLocales)[number]["code"];

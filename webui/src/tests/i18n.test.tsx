@@ -10,9 +10,10 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { MessageBubble } from "@/components/MessageBubble";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import { resources, setAppLanguage } from "@/i18n";
+import i18n, { resources, setAppLanguage } from "@/i18n";
 import {
   LOCALE_STORAGE_KEY,
+  normalizeLocale,
   resolveInitialLocale,
   supportedLocales,
 } from "@/i18n/config";
@@ -472,6 +473,29 @@ describe("webui i18n", () => {
     expect(resolveInitialLocale()).toBe("zh-CN");
   });
 
+  it("normalizes Polish regional locales before and after startup", () => {
+    for (const locale of ["pl", "pl-PL", "PL-pl"]) {
+      expect(normalizeLocale(locale)).toBe("pl");
+      expect(runPrebootLocale(locale)).toEqual({
+        lang: "pl",
+        boot: "Ładowanie nanobota…",
+        description: resources.pl.common.app.meta.description,
+      });
+    }
+  });
+
+  it("persists Polish and keeps count labels localized for Polish plural categories", async () => {
+    await setAppLanguage("pl");
+    expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("pl");
+    expect(document.documentElement.lang).toBe("pl");
+    expect(resolveInitialLocale()).toBe("pl");
+    expect(i18n.t("settings.cliApps.availableCount", { count: 1 })).toBe("1 aplikacja");
+    for (const count of [0, 2, 5, 12, 22, 1.5]) {
+      expect(i18n.t("settings.cliApps.availableCount", { count })).toBe(`Liczba aplikacji: ${count}`);
+      expect(i18n.t("settings.mcp.toolsFound", { count })).toBe(`Liczba narzędzi: ${count}`);
+    }
+  });
+
   it("lists each language by its native name", async () => {
     const user = userEvent.setup();
 
@@ -649,7 +673,9 @@ describe("webui i18n", () => {
         ...LOCALIZED_CHANNEL_SHELL_KEYS,
         ...LOCALIZED_NEW_SURFACE_KEYS,
       ].filter(
-        (key) => current.get(key) === english.get(key),
+        // "System" is also the Polish word; an identical label is intentional here.
+        (key) => current.get(key) === english.get(key)
+          && !(locale === "pl" && key === "settings.nav.runtime"),
       );
 
       expect({ locale, leaked }).toEqual({ locale, leaked: [] });
