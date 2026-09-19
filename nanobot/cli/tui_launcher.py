@@ -6,7 +6,7 @@ import hashlib
 import io
 import os
 import platform
-import shutil  # noqa: F401 - retained as a module-level compatibility hook
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -191,7 +191,9 @@ def resolve_tui_command(*, data_dir: Path | None = None) -> list[str]:
         try:
             bun = ensure_bun()
         except BunUnavailableError as exc:
-            raise TuiUnavailableError(str(exc)) from exc
+            available = shutil.which("bun")
+            hint = f" (Bun found at {available!r} but could not be used)" if available else ""
+            raise TuiUnavailableError(f"{exc}{hint}") from exc
         return _resolve_source_tui_command(source_dir, bun, data_dir=data_dir)
 
     packaged = Path(__file__).resolve().parents[1] / "tui" / "bin" / asset
