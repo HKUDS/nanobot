@@ -57,7 +57,7 @@ async def test_message_tool_keeps_task_local_context() -> None:
 
 @pytest.mark.asyncio
 async def test_spawn_tool_keeps_task_local_context() -> None:
-    seen: list[tuple[str, str, str]] = []
+    seen: list[tuple[str, str, str, str | None]] = []
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -77,10 +77,11 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             origin_chat_id: str,
             session_key: str,
             origin_message_id: str | None = None,
+            origin_turn_id: str | None = None,
             temperature: float | None = None,
             workspace_scope=None,
         ) -> str:
-            seen.append((origin_channel, origin_chat_id, session_key))
+            seen.append((origin_channel, origin_chat_id, session_key, origin_turn_id))
             return f"{origin_channel}:{origin_chat_id}:{task}"
 
     tool = SpawnTool(_Manager())
@@ -90,6 +91,7 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             channel="whatsapp",
             chat_id="chat-a",
             runtime=_runtime("model-a"),
+            turn_id="turn-a",
         )):
             entered.set()
             await release.wait()
@@ -101,6 +103,7 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             channel="telegram",
             chat_id="chat-b",
             runtime=_runtime("model-b"),
+            turn_id="turn-b",
         )):
             release.set()
             return await tool.execute(task="two")
@@ -109,8 +112,8 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
 
     assert result_one == "whatsapp:chat-a:one"
     assert result_two == "telegram:chat-b:two"
-    assert ("whatsapp", "chat-a", "whatsapp:chat-a") in seen
-    assert ("telegram", "chat-b", "telegram:chat-b") in seen
+    assert ("whatsapp", "chat-a", "whatsapp:chat-a", "turn-a") in seen
+    assert ("telegram", "chat-b", "telegram:chat-b", "turn-b") in seen
 
 
 @pytest.mark.asyncio
@@ -190,7 +193,7 @@ async def test_message_tool_default_values_without_request_context() -> None:
 @pytest.mark.asyncio
 async def test_spawn_tool_basic_request_context_and_execute() -> None:
     """A bound request context should provide the correct origin."""
-    seen: list[tuple[str, str, str]] = []
+    seen: list[tuple[str, str, str, str | None]] = []
 
     class _Manager:
         max_concurrent_subagents = 1
@@ -208,10 +211,11 @@ async def test_spawn_tool_basic_request_context_and_execute() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            origin_turn_id=None,
             temperature=None,
             workspace_scope=None,
         ):
-            seen.append((origin_channel, origin_chat_id, session_key))
+            seen.append((origin_channel, origin_chat_id, session_key, origin_turn_id))
             return f"ok: {task}"
 
     tool = SpawnTool(_Manager())
@@ -222,7 +226,7 @@ async def test_spawn_tool_basic_request_context_and_execute() -> None:
     )):
         result = await tool.execute(task="do something")
     assert result == "ok: do something"
-    assert seen == [("feishu", "chat-abc", "feishu:chat-abc")]
+    assert seen == [("feishu", "chat-abc", "feishu:chat-abc", None)]
 
 
 @pytest.mark.asyncio
@@ -246,6 +250,7 @@ async def test_spawn_tool_rejects_missing_request_runtime() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            origin_turn_id=None,
             temperature=None,
             workspace_scope=None,
         ):
