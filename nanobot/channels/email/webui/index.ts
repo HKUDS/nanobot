@@ -1,3 +1,5 @@
+import { Mail } from "lucide-react";
+
 import type { ChannelUiContribution } from "@/channel-plugins/types";
 import {
   type ChannelProviderPresetDefinition,
@@ -36,7 +38,7 @@ const EMAIL_PROVIDER_PRESETS: ChannelProviderPresetDefinition[] = [
 
 export default {
   presentation: {
-    logoUrl: "https://gmail.com/favicon.ico",
+    icon: Mail,
     displayName: "Email",
     initials: "EM",
     color: "#64748B",

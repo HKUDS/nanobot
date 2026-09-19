@@ -16,6 +16,7 @@ export default {
     initials: "LI",
     color: "#5E6AD2",
     logoUrl: "https://linear.app/favicon.ico",
+    logoLayout: "tile",
     setup: {
       mode: "connect",
       docsUrl: chatAppGuideUrl("linear"),
