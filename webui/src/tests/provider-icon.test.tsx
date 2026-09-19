@@ -58,7 +58,8 @@ describe("settings provider icons", () => {
 
       fireEvent.load(image);
       expect(image).toHaveClass("opacity-100");
-      expect(icon).toHaveClass("bg-white");
+      expect(icon).toHaveClass("bg-transparent");
+      expect(icon).not.toHaveClass("bg-white", "bg-muted");
 
       fireEvent.error(image);
       expect(image).toHaveAttribute("src", providerBrand(provider)!.logoUrls[1]);
@@ -67,6 +68,8 @@ describe("settings provider icons", () => {
       fireEvent.load(image);
       expectFootprint(icon);
       expect(image).toHaveClass("h-6", "w-6", "opacity-100");
+      expect(icon).toHaveClass("bg-white");
+      expect(icon).not.toHaveClass("bg-transparent");
     },
   );
 

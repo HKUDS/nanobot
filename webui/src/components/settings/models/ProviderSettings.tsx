@@ -1282,7 +1282,7 @@ export function ProviderIcon({
       data-testid={`provider-logo-${provider}`}
       className={cn(
         "relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] text-[11px] font-semibold text-muted-foreground",
-        showLoadedLogo ? "bg-white" : "bg-muted",
+        showLoadedLogo ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
       )}
       aria-hidden
     >
