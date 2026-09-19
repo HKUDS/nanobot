@@ -73,9 +73,13 @@ describe("provider brand logos", () => {
 
   it("uses official first-party assets for Step Fun and Xiaomi MIMO", () => {
     expect(providerBrand("stepfun")?.logoUrls[0]).toBe("https://www.stepfun.com/step_favicon.svg");
-    expect(providerBrand("xiaomi_mimo")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
-    expect(providerBrand("mimo")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
-    expect(providerBrand("xiaomi")?.logoUrls[0]).toBe("https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg");
+    expect(providerBrand("xiaomi_mimo")?.logoUrls[0]).toBe("https://cdn.cnbj1.fds.api.mi-img.com/aife/mimo-blog-fe/doc_build/mimo.ico");
+    expect(providerBrand("mimo")).toBe(providerBrand("xiaomi_mimo"));
+    expect(providerBrand("xiaomi")).toBe(providerBrand("xiaomi_mimo"));
+  });
+
+  it("uses the Copilot mark rather than the generic GitHub favicon", () => {
+    expect(providerBrand("github_copilot")?.logoUrl).toBe("https://raw.githubusercontent.com/primer/octicons/main/icons/copilot-24.svg");
   });
 
   it("keeps OpenRouter voice settings on the first-party brand domain", () => {

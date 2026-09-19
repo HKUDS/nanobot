@@ -14,7 +14,7 @@ describe("settings provider icons", () => {
     expect(icon.className.split(/\s+/).some((value) => value.startsWith("border"))).toBe(false);
   }
 
-  it.each(["openai_codex", "anthropic", "deepseek", "gemini", "xai_grok", "longcat", "openrouter"])(
+  it.each(["openai_codex", "anthropic", "deepseek", "gemini", "xai_grok", "longcat", "openrouter", "github_copilot", "xiaomi_mimo"])(
     "shows %s on a single white tile with a small inset after loading",
     (provider) => {
       const { container } = render(<ProviderIcon provider={provider} showBrandLogos />);

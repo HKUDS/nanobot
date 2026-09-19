@@ -166,7 +166,9 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   duckduckgo: brand("duckduckgo.com", "#DE5833", "DDG"),
   exa: { ...brand("exa.ai", "#5B5BF6", "E"), logoLayout: "tile" },
   gemini: brand("gemini.google.com", "#4285F4", "G"),
-  github_copilot: brand("github.com", "#24292F", "GH"),
+  github_copilot: brand("github.com", "#24292F", "GH", [
+    "https://raw.githubusercontent.com/primer/octicons/main/icons/copilot-24.svg",
+  ]),
   groq: {
     ...brand("groq.com", "#F55036", "GQ", ["https://groq.com/favicon.svg"]),
     logoLayout: "tile",
@@ -209,7 +211,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   volcengine: brand("volcengine.com", "#1664FF", "VE"),
   vllm: brand("vllm.ai", "#2563EB", "VL"),
   xiaomi_mimo: brand("mimo.xiaomi.com", "#FF6900", "MI", [
-    "https://mimo.xiaomi.com/mimo-v2-pro/assets/logo.svg",
+    "https://cdn.cnbj1.fds.api.mi-img.com/aife/mimo-blog-fe/doc_build/mimo.ico",
   ]),
   xai: brand("x.ai", "#111827", "xAI"),
   zhipu: {
