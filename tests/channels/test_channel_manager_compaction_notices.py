@@ -1,10 +1,8 @@
-"""Context-compaction lifecycle notices are delivered regardless of ``send_progress``.
+"""Manual context-compaction notices are delivered regardless of ``send_progress``.
 
-Compaction changes the context of every later turn, so both the start and
-the outcome of a compaction are information for the user, not progress
-chatter: a channel with ``send_progress`` off still receives them. Reducing
-the noise (one message updated in place) is the adapter's job; see the
-Discord channel (#5719).
+The routed notification policy and channel manager drop automatic compaction
+events. Manual compaction is user-requested information, not progress chatter,
+so a channel with ``send_progress`` off still receives both phases.
 """
 
 from __future__ import annotations
@@ -71,12 +69,18 @@ def _sent_contents(manager: ChannelManager) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_compaction_lifecycle_is_delivered_with_progress_off(manager: ChannelManager) -> None:
+async def test_manual_compaction_lifecycle_is_delivered_with_progress_off(
+    manager: ChannelManager,
+) -> None:
     manager.channels["mock"].send_progress = False
     for event in (
         ProgressEvent(content="ordinary progress"),
-        ContextCompactionEvent(compaction_id="c1", phase="started"),
-        ContextCompactionEvent(compaction_id="c1", phase="succeeded"),
+        ContextCompactionEvent(compaction_id="auto", phase="started"),
+        ContextCompactionEvent(compaction_id="auto", phase="succeeded"),
+        ContextCompactionEvent(compaction_id="auto-failed", phase="failed"),
+        ContextCompactionEvent(compaction_id="auto-cancelled", phase="cancelled"),
+        ContextCompactionEvent(compaction_id="c1", phase="started", notify=True),
+        ContextCompactionEvent(compaction_id="c1", phase="succeeded", notify=True),
     ):
         await manager.bus.publish_outbound(
             outbound_message_for_event(channel="mock", chat_id="chat", event=event)
@@ -86,4 +90,4 @@ async def test_compaction_lifecycle_is_delivered_with_progress_off(manager: Chan
 
     contents = _sent_contents(manager)
     assert "ordinary progress" not in contents
-    assert len(contents) == 2
+    assert contents == ["Compressing context…", "Context compacted."]

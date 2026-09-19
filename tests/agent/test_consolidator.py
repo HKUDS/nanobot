@@ -667,11 +667,13 @@ class TestCompactIdleSession:
             "cli:events",
             runtime=runtime,
             events=EventSink(observe),
+            notify=True,
         )
 
         assert result == "Summary."
         assert [event.phase for event in events] == ["started", "succeeded"]
         assert events[0].compaction_id == events[1].compaction_id
+        assert all(event.notify for event in events)
 
     @pytest.mark.asyncio
     async def test_event_callback_failure_does_not_abort_compaction(
