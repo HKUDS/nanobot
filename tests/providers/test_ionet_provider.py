@@ -23,6 +23,9 @@ def test_ionet_registry_contract() -> None:
     assert ionet.detect_by_base_keyword == "intelligence.io.solutions"
     assert ionet.default_api_base == "https://api.intelligence.io.solutions/api/v1"
     assert ionet.strip_model_prefix is False
+    assert ionet.strip_model_prefixes == ("ionet",)
+    # OpenAI-style top-level reasoning_effort; no separate gateway reasoning shape.
+    assert ionet.gateway_reasoning_style == ""
 
 
 def test_ionet_forced_provider_uses_default_api_base() -> None:
@@ -88,3 +91,25 @@ def test_ionet_preserves_model_id_and_reasoning_effort() -> None:
     assert kwargs["model"] == "meta-llama/Llama-3.3-70B-Instruct"
     assert kwargs["reasoning_effort"] == "medium"
     assert "reasoning" not in kwargs.get("extra_body", {})
+
+
+def test_ionet_strips_own_provider_prefix() -> None:
+    spec = find_by_name("ionet")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="ionet-key",
+            default_model="meta-llama/Llama-3.3-70B-Instruct",
+            spec=spec,
+        )
+
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        model="ionet/meta-llama/Llama-3.3-70B-Instruct",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert kwargs["model"] == "meta-llama/Llama-3.3-70B-Instruct"

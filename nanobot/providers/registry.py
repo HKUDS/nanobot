@@ -339,6 +339,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_gateway=True,
         detect_by_base_keyword="intelligence.io.solutions",
         default_api_base="https://api.intelligence.io.solutions/api/v1",
+        strip_model_prefixes=("ionet",),
     ),
 
     # VolcEngine (火山引擎): OpenAI-compatible gateway, pay-per-use models

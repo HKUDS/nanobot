@@ -225,11 +225,11 @@ issued by the [io.net cloud console](https://cloud.io.net). The model catalog is
 public — the WebUI can also load it after the API key is saved under
 **Settings → Models**.
 
-Model IDs like `meta-llama/...` or `deepseek-ai/...` are ambiguous across gateways,
-and several io.net model families (e.g. `deepseek-ai/*`, `qwen/*`, `google/*`,
-`mistralai/*`) match other providers' routing keywords — set `"provider": "ionet"`
-in the preset whenever other providers are configured (with only one provider
-configured, plain model IDs route to it).
+Most io.net model IDs (`deepseek-ai/*`, `qwen/*`, `google/*`, `mistralai/*`, and
+most other families) also match other providers' routing keywords, and some of those
+gateways accept the same IDs — an unpinned model can silently run (and bill) on the
+wrong provider. Set `"provider": "ionet"` in the preset whenever other providers are
+configured (with only one provider configured, plain model IDs route to it).
 
 ### OpenCode Zen and Go
 
