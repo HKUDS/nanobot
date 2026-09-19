@@ -2366,8 +2366,8 @@ def test_provider_models_payload_fetches_ionet_catalog(
             200,
             json={
                 "data": [
-                    {"id": "meta-llama/Llama-3.3-70B-Instruct", "owned_by": "meta-llama"},
-                    {"id": "deepseek-ai/DeepSeek-R1-0528", "owned_by": "deepseek-ai"},
+                    {"id": "meta-llama/Llama-3.3-70B-Instruct", "owned_by": "io-intelligence"},
+                    {"id": "deepseek-ai/DeepSeek-R1-0528", "owned_by": "io-intelligence"},
                 ]
             },
             request=httpx.Request("GET", url),
