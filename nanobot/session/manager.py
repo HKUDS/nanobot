@@ -1376,6 +1376,7 @@ class JsonlSessionStore:
             tmp_path = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
             try:
                 with open(path, encoding="utf-8") as source:
+                    source_stat = os.fstat(source.fileno())
                     first_line = source.readline()
                     data = _json_object(json.loads(first_line))
                     if data.get("_type") != "metadata":
@@ -1391,8 +1392,14 @@ class JsonlSessionStore:
                     with open(tmp_path, "x", encoding="utf-8") as target:
                         target.write(json.dumps(data, ensure_ascii=False) + "\n")
                         shutil.copyfileobj(source, target)
+                        target.flush()
+                        # Only a full session save supersedes the runtime checkpoint.
+                        # A metadata-only replacement must retain its base timestamp.
+                        os.utime(
+                            tmp_path,
+                            ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
+                        )
                         if fsync:
-                            target.flush()
                             os.fsync(target.fileno())
                 os.replace(tmp_path, path)
                 if fsync:

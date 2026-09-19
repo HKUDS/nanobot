@@ -1,6 +1,8 @@
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session import Session, SessionManager
 from nanobot.session.manager import SessionStore
@@ -121,7 +123,8 @@ def test_manager_preserves_full_session_before_store_save(tmp_path) -> None:
     store.save.assert_called_once_with(session, fsync=False)
 
 
-def test_runtime_checkpoint_does_not_rewrite_long_session(tmp_path) -> None:
+@pytest.mark.parametrize("update_metadata", [False, True])
+def test_runtime_checkpoint_does_not_rewrite_long_session(tmp_path, update_metadata) -> None:
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:long")
     for index in range(256):
@@ -153,10 +156,15 @@ def test_runtime_checkpoint_does_not_rewrite_long_session(tmp_path) -> None:
     assert main_path.stat().st_mtime_ns == stat_before.st_mtime_ns
     assert checkpoint_path.stat().st_size < len(main_before) // 100
 
+    if update_metadata:
+        assert manager.update_session_metadata(session.key, {"title": "renamed"}, fsync=True)
+
     restored = SessionManager(tmp_path).get_or_create(session.key)
     assert restored.metadata["runtime_checkpoint"]["phase"] == "tools_completed"
     assert restored.provider_state is not None
     assert restored.provider_state.payload == {"response_id": "private-response"}
+    if update_metadata:
+        assert restored.metadata["title"] == "renamed"
 
 
 def test_load_migrates_legacy_write_stdin_history(tmp_path) -> None:
