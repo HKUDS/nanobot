@@ -1,7 +1,9 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createRef, type Ref } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 vi.mock("@/providers/ClientProvider", () => ({
@@ -15,11 +17,13 @@ function noop() {}
 // pointerdown opens its tooltip.
 function DrawerWithSearchTooltip(props: {
   onOpenAutoFocus?: (event: Event) => void;
+  contentRef?: Ref<HTMLDivElement>;
 }) {
   return (
     <TooltipProvider>
       <Sheet open onOpenChange={noop}>
         <SheetContent
+          ref={props.contentRef}
           side="left"
           showCloseButton={false}
           aria-describedby={undefined}
@@ -73,5 +77,60 @@ describe("SheetContent autofocus", () => {
     render(<DrawerWithSearchTooltip onOpenAutoFocus={onOpenAutoFocus} />);
     await screen.findByRole("dialog");
     await waitFor(() => expect(onOpenAutoFocus).toHaveBeenCalled());
+  });
+
+  it("keeps the caller's explicit focus target", async () => {
+    render(<DrawerWithSearchTooltip onOpenAutoFocus={(event) => {
+      event.preventDefault();
+      screen.getByRole("button", { name: "search" }).focus();
+    }} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "search" })).toHaveFocus());
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Search tip");
+  });
+
+  it("preserves object refs while focusing the container", async () => {
+    const ref = createRef<HTMLDivElement>();
+    const { unmount } = render(<DrawerWithSearchTooltip contentRef={ref} />);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveFocus());
+    expect(ref.current).toBe(dialog);
+    unmount();
+    expect(ref.current).toBeNull();
+  });
+
+  it("preserves callback refs on mount and unmount", async () => {
+    const ref = vi.fn();
+    const { unmount } = render(<DrawerWithSearchTooltip contentRef={ref} />);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveFocus());
+    expect(ref).toHaveBeenCalledWith(dialog);
+    unmount();
+    expect(ref).toHaveBeenLastCalledWith(null);
+  });
+
+  it("keeps keyboard focus inside the drawer and restores it on Escape", async () => {
+    const user = userEvent.setup();
+    render(
+      <Sheet>
+        <SheetTrigger>Open drawer</SheetTrigger>
+        <SheetContent showCloseButton={false} aria-describedby={undefined}>
+          <SheetTitle>Navigation</SheetTitle>
+          <button>First action</button>
+          <button>Last action</button>
+        </SheetContent>
+      </Sheet>,
+    );
+    const trigger = screen.getByRole("button", { name: "Open drawer" });
+    await user.click(trigger);
+    await waitFor(() => expect(screen.getByRole("dialog")).toHaveFocus());
+    await user.tab();
+    expect(screen.getByRole("button", { name: "First action" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Last action" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "First action" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 });
