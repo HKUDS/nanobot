@@ -27,21 +27,21 @@ export function ToggleButton({
         if (!disabled) onChange(!checked);
       }}
       className={cn(
-        "relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full p-[2px]",
-        "transition-colors duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full p-0.5",
+        "after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']",
+        "transition-colors duration-200 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         checked
-          ? "bg-[#2997FF]"
-          : "bg-muted-foreground/20 hover:bg-muted-foreground/25",
+          ? "bg-foreground"
+          : "bg-muted-foreground/25 hover:bg-muted-foreground/30",
         disabled && "cursor-default opacity-60",
-        disabled && checked && "hover:bg-[#2997FF]",
-        disabled && !checked && "hover:bg-muted-foreground/20",
+        disabled && !checked && "hover:bg-muted-foreground/25",
       )}
     >
       <span
         aria-hidden
         className={cn(
-          "h-[18px] w-[18px] rounded-full bg-background",
-          "transition-transform duration-200 ease-out",
+          "h-4 w-4 rounded-full bg-background shadow-sm",
+          "transition-transform duration-200 ease-out motion-reduce:transition-none",
           checked ? "translate-x-[16px]" : "translate-x-0",
         )}
       />

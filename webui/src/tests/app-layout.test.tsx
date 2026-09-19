@@ -1204,6 +1204,7 @@ describe("App layout", () => {
     expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
     const enabledSwitch = screen.getByRole("switch", { name: "Disable github" });
     expect(enabledSwitch).toHaveAttribute("aria-checked", "true");
+    expect(enabledSwitch).toHaveClass("h-5", "w-9", "bg-foreground");
     fireEvent.click(enabledSwitch);
     await waitFor(() => {
       expect(screen.getByRole("switch", { name: "Enable github" })).toHaveAttribute(
@@ -1211,6 +1212,7 @@ describe("App layout", () => {
         "false",
       );
     });
+    expect(screen.getByRole("switch", { name: "Enable github" })).toHaveClass("h-5", "w-9", "bg-muted-foreground/25");
   });
 
   it("deletes a custom skill from its detail sheet", async () => {
