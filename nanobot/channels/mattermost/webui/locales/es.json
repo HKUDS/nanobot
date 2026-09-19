@@ -1,26 +1,15 @@
 {
-  "description": "Usa nanobot en canales y mensajes directos de Mattermost.",
-  "requirements": "URL del servidor Mattermost, token del bot y acceso a canales",
   "setup": {
     "docsLabel": "Abrir guía de Mattermost",
     "officialLabel": "Abrir guía de bots de Mattermost",
-    "tryIt": "Menciona al bot en un canal de Mattermost o envíale un mensaje directo.",
-    "summary": "Mattermost se conecta mediante una cuenta bot en tu servidor y escucha canales y mensajes directos.",
-    "steps": [
-      "Crea una cuenta bot de Mattermost y copia su token de acceso.",
-      "Introduce la URL del servidor y permite acceso al equipo y canales de destino.",
-      "Guarda y activa Mattermost; después menciona al bot o envíale un mensaje directo."
-    ],
     "fields": {
       "serverUrl": {
         "label": "URL del servidor",
-        "placeholder": "https://mattermost.example.com",
-        "help": "Usa la URL base de tu espacio Mattermost."
+        "placeholder": "https://mattermost.example.com"
       },
       "token": {
         "label": "Token del bot",
-        "placeholder": "Token del bot Mattermost",
-        "help": "Créalo desde una cuenta bot de Mattermost."
+        "placeholder": "Token del bot Mattermost"
       },
       "teamId": {
         "label": "ID del equipo",
@@ -31,7 +20,7 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       },
       "groupPolicyInThread": {
@@ -39,12 +28,84 @@
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes (sin mención)",
-          "allowlist": "Lista permitida"
+          "allowlist": "Lista de permitidos"
         }
       },
       "allowFrom": {
         "label": "Usuarios permitidos",
         "placeholder": "ID de usuario separados por comas"
+      },
+      "allowFromMatchMode": {
+        "label": "Coincidencia de usuarios",
+        "choices": {
+          "email": "Correo electrónico",
+          "id": "ID de usuario",
+          "username": "Nombre de usuario"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Canales permitidos"
+      },
+      "replyInThread": {
+        "label": "Responder en el hilo",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Incluir contexto de hilo",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Límite de contexto del hilo"
+      },
+      "streaming": {
+        "label": "Transmisión",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "reactEmoji": {
+        "label": "Leer emojis"
+      },
+      "doneEmoji": {
+        "label": "emoji hecho"
+      },
+      "sendProgress": {
+        "label": "Enviar progreso",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "sendToolHints": {
+        "label": "Enviar sugerencias de herramientas",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "dm_enabled": {
+        "label": "Habilitar mensajes directos",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "dm_policy": {
+        "label": "Acceso a mensajes directos",
+        "choices": {
+          "allowlist": "Lista de permitidos",
+          "open": "Abierto"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Usuarios permitidos de mensajes directos"
       }
     }
   }

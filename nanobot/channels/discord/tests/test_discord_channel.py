@@ -12,7 +12,7 @@ pytest.importorskip("discord")
 import discord
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.discord.runtime import (
     MAX_MESSAGE_LEN,
@@ -81,8 +81,16 @@ class _FakeAttachment:
 
 class _FakePartialMessage:
     # Lightweight stand-in for Discord partial message references used in replies.
-    def __init__(self, message_id: int) -> None:
+    def __init__(self, message_id: int, channel_id: int) -> None:
         self.id = message_id
+        self.channel_id = channel_id
+
+    def to_reference(self, *, fail_if_not_exists: bool = True) -> discord.MessageReference:
+        return discord.MessageReference(
+            message_id=self.id,
+            channel_id=self.channel_id,
+            fail_if_not_exists=fail_if_not_exists,
+        )
 
 
 class _FakeSentMessage:
@@ -125,7 +133,7 @@ class _FakeChannel:
         return message
 
     def get_partial_message(self, message_id: int) -> _FakePartialMessage:
-        return _FakePartialMessage(message_id)
+        return _FakePartialMessage(message_id, self.id)
 
     def typing(self):
         channel = self
@@ -728,6 +736,13 @@ def test_supports_streaming_enabled_by_default() -> None:
     assert channel.supports_streaming is True
 
 
+def test_reply_to_message_is_disabled_by_default() -> None:
+    config = DiscordConfig(enabled=True, allow_from=["*"])
+
+    assert config.reply_to_message is False
+    assert config.model_dump(by_alias=True)["replyToMessage"] is False
+
+
 @pytest.mark.asyncio
 async def test_send_delta_streams_by_editing_message(monkeypatch) -> None:
     owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -747,6 +762,26 @@ async def test_send_delta_streams_by_editing_message(monkeypatch) -> None:
     assert target.sent_payloads[0] == {"content": "hel"}
     assert target.sent_messages[0].edits == [{"content": "hello"}, {"content": "hello"}]
     assert owner._stream_bufs == {}
+
+
+@pytest.mark.asyncio
+async def test_send_delta_replies_to_triggering_message_when_enabled() -> None:
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], reply_to_message=True),
+        MessageBus(),
+    )
+    client = _FakeDiscordClient(owner, intents=None)
+    owner._client = client
+    owner._running = True
+    target = _FakeChannel(channel_id=123)
+    client.channels[123] = target
+
+    await owner.send_delta("123", "hello", {"message_id": "789"}, stream_id="s1")
+
+    reference = target.sent_payloads[0]["reference"]
+    assert reference.message_id == 789
+    assert reference.to_dict()["fail_if_not_exists"] is False
+    assert target.sent_payloads[0]["allowed_mentions"].replied_user is False
 
 
 @pytest.mark.asyncio
@@ -1077,9 +1112,86 @@ async def test_client_send_outbound_chunks_text_replies_and_uploads_files(tmp_pa
 
     assert len(target.sent_payloads) == 3
     assert target.sent_payloads[0]["file_name"] == "demo.txt"
-    assert target.sent_payloads[0]["reference"].id == 55
+    assert target.sent_payloads[0]["reference"].message_id == 55
     assert target.sent_payloads[1]["content"] == "a" * 2000
     assert target.sent_payloads[2]["content"] == "a" * 100
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_replies_to_triggering_message_when_enabled() -> None:
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], reply_to_message=True),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="hello",
+            metadata={"message_id": "789"},
+        )
+    )
+
+    reference = target.sent_payloads[0]["reference"]
+    assert reference.message_id == 789
+    assert reference.to_dict()["fail_if_not_exists"] is False
+    assert target.sent_payloads[0]["allowed_mentions"].replied_user is False
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_explicit_reply_takes_precedence() -> None:
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], reply_to_message=True),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="hello",
+            reply_to="55",
+            metadata={"message_id": "789"},
+        )
+    )
+
+    reference = target.sent_payloads[0]["reference"]
+    assert reference.message_id == 55
+    assert reference.to_dict()["fail_if_not_exists"] is True
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_replies_on_first_successful_attachment(tmp_path) -> None:
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], reply_to_message=True),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+    missing_file = tmp_path / "missing.txt"
+    valid_file = tmp_path / "valid.txt"
+    valid_file.write_text("hi")
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="",
+            media=[str(missing_file), str(valid_file)],
+            metadata={"message_id": "789"},
+        )
+    )
+
+    assert target.sent_payloads[0]["file_name"] == "valid.txt"
+    assert target.sent_payloads[0]["reference"].message_id == 789
 
 
 @pytest.mark.asyncio
@@ -1416,3 +1528,113 @@ async def test_send_succeeds_normally() -> None:
     assert len(sent_messages) == 1
     assert sent_messages[0].content == "hello world"
     assert sent_messages[0].chat_id == "123"
+
+
+def _compaction_message(
+    content: str,
+    phase: str,
+    compaction_id: str = "c1",
+    chat_id: str = "123",
+) -> OutboundMessage:
+    return OutboundMessage(
+        channel="discord",
+        chat_id=chat_id,
+        content=content,
+        event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase),  # type: ignore[arg-type]
+    )
+
+
+def _client_with_channel(target: _FakeChannel) -> tuple[DiscordChannel, "DiscordBotClient"]:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+
+    async def fetch_channel(channel_id: int):
+        return target if channel_id == target.id else None
+
+    client.fetch_channel = fetch_channel  # type: ignore[method-assign]
+    return owner, client
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_edits_the_start_notice_in_place() -> None:
+    # One message per compaction: the outcome replaces the "Compressing…" text
+    # instead of arriving as a second notice (#5719).
+    target = _FakeChannel(channel_id=123)
+    owner, client = _client_with_channel(target)
+
+    await client.send_outbound(_compaction_message("Compressing context…", "started"))
+
+    async def reject_fetch(_channel_id: int):
+        raise AssertionError("an existing notice should be edited without resolving its channel")
+
+    client.fetch_channel = reject_fetch  # type: ignore[method-assign]
+    await client.send_outbound(_compaction_message("Context compacted.", "succeeded"))
+
+    assert [payload["content"] for payload in target.sent_payloads] == ["Compressing context…"]
+    assert target.sent_messages[0].content == "Context compacted."
+    assert owner._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_without_a_start_notice_is_sent() -> None:
+    # After a restart (or when the edit is refused) the outcome still arrives.
+    target = _FakeChannel(channel_id=123)
+    owner, client = _client_with_channel(target)
+
+    await client.send_outbound(_compaction_message("Unable to compact context.", "failed"))
+
+    assert [payload["content"] for payload in target.sent_payloads] == ["Unable to compact context."]
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_falls_back_to_send_when_edit_fails() -> None:
+    target = _FakeChannel(channel_id=123)
+    owner, client = _client_with_channel(target)
+    await client.send_outbound(_compaction_message("Compressing context…", "started"))
+
+    async def refuse_edit(**_kwargs) -> None:
+        raise RuntimeError("message deleted")
+
+    target.sent_messages[0].edit = refuse_edit  # type: ignore[method-assign]
+    await client.send_outbound(_compaction_message("Context compacted.", "succeeded"))
+
+    assert [payload["content"] for payload in target.sent_payloads] == [
+        "Compressing context…",
+        "Context compacted.",
+    ]
+    assert owner._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_all_in_flight_compaction_notices_are_retained_until_outcomes() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    targets = {str(index): _FakeChannel(channel_id=index) for index in range(17)}
+    client.get_channel = lambda channel_id: targets.get(str(channel_id))  # type: ignore[method-assign]
+
+    for chat_id in targets:
+        await client.send_outbound(
+            _compaction_message("Compressing context…", "started", f"c-{chat_id}", chat_id)
+        )
+
+    assert len(owner._compaction_notices) == len(targets)
+
+    for chat_id in targets:
+        await client.send_outbound(
+            _compaction_message("Context compacted.", "succeeded", f"c-{chat_id}", chat_id)
+        )
+
+    assert all(len(target.sent_payloads) == 1 for target in targets.values())
+    assert all(target.sent_messages[0].content == "Context compacted." for target in targets.values())
+    assert owner._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_reset_discards_in_flight_compaction_notices() -> None:
+    target = _FakeChannel(channel_id=123)
+    owner, client = _client_with_channel(target)
+    await client.send_outbound(_compaction_message("Compressing context…", "started"))
+
+    await owner._reset_runtime_state(close_client=False)
+
+    assert owner._compaction_notices == {}

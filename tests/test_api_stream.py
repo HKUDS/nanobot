@@ -173,6 +173,51 @@ async def test_stream_default_is_false(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", ["false", "true", 0, 1, [], {}])
+async def test_stream_rejects_non_boolean_values(aiohttp_client, stream) -> None:
+    """Wrong JSON types must not select a response protocol or invoke the agent."""
+    agent = MagicMock()
+    agent.process_direct = AsyncMock(return_value="normal reply")
+    agent.aclose = AsyncMock()
+
+    app = create_app(agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "hi"}], "stream": stream},
+    )
+
+    assert resp.status == 400
+    body = await resp.json()
+    assert body["error"]["message"] == "stream must be a boolean"
+    agent.process_direct.assert_not_called()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_stream_null_preserves_non_streaming_compatibility(aiohttp_client) -> None:
+    """OpenAI clients may explicitly serialize the optional flag as null."""
+    agent = MagicMock()
+    agent.process_direct = AsyncMock(return_value="normal reply")
+    agent.aclose = AsyncMock()
+    client = await aiohttp_client(create_app(agent, model_name="m", api_key=API_KEY))
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "hi"}], "stream": None},
+    )
+
+    assert resp.status == 200
+    assert resp.content_type == "application/json"
+    assert (await resp.json())["choices"][0]["message"]["content"] == "normal reply"
+    agent.process_direct.assert_awaited_once()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_stream_sse_chunk_ids_are_consistent(aiohttp_client) -> None:
     """All SSE chunks in a single stream should share the same id."""
     agent = _make_streaming_agent(["A", "B", "C"])

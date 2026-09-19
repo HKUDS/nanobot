@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
   Check,
@@ -25,10 +25,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
+import { ExpandableText } from "@/components/ui/expandable-text";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { ToggleButton } from "@/components/settings/ToggleButton";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
 import { notifySkillsChanged } from "@/lib/skill-events";
 import type { SkillDetail, SkillSummary } from "@/lib/types";
@@ -77,7 +80,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const disabledCount = skills.filter((skill) => skill.enabled === false).length;
 
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <SegmentedControl
         value={view}
         mode="tabs"
@@ -149,10 +152,10 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
               {groupedSkills.map((group) => (
                 <section key={group.key} className="space-y-1">
                   <div className="flex items-center gap-2 px-2 py-1.5">
-                    <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    <h2 className="text-[13px] font-medium leading-5 text-muted-foreground">
                       {group.label}
                     </h2>
-                    <span className="text-[11px] tabular-nums text-muted-foreground/60">
+                    <span className="text-[12px] leading-5 tabular-nums text-muted-foreground/60">
                       {group.skills.length}
                     </span>
                   </div>
@@ -222,7 +225,7 @@ function SkillCatalogRow({
       className={cn(
         "group flex w-full min-w-0 items-center gap-3 rounded-control px-2 py-3 text-left",
         "transition-colors duration-150",
-        "hover:bg-muted/70",
+        "settings-hover",
         "focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         !enabled && "opacity-60",
       )}
@@ -279,6 +282,7 @@ function SkillDetailSheet({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const descriptionId = useId();
 
   useEffect(() => {
     if (!open || !skill) return;
@@ -368,7 +372,7 @@ function SkillDetailSheet({
           side="right"
           closeButtonClassName={cn(
             "right-2 top-2 inline-flex h-10 w-10 items-center justify-center rounded-full opacity-100",
-            "text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+            "text-muted-foreground transition-colors settings-hover hover:text-foreground",
             "sm:right-3 sm:top-3",
           )}
           className={cn(
@@ -407,18 +411,21 @@ function SkillDetailSheet({
                     {statusLabel}
                   </Pill>
                 </div>
-                <p
-                  className={cn(
-                    "mt-3 text-[13px] leading-5 text-muted-foreground",
-                    descriptionExpandable && !descriptionExpanded && "line-clamp-5",
-                  )}
-                >
-                  {activeSkill.description}
-                </p>
+                <div className="mt-3">
+                  <ExpandableText
+                    id={descriptionId}
+                    expanded={descriptionExpanded || !descriptionExpandable}
+                    lines={5}
+                    className="text-[13px] leading-5 text-muted-foreground"
+                  >
+                    {activeSkill.description}
+                  </ExpandableText>
+                </div>
                 {descriptionExpandable ? (
                   <button
                     type="button"
                     aria-expanded={descriptionExpanded}
+                    aria-controls={descriptionId}
                     onClick={() => setDescriptionExpanded((value) => !value)}
                     className="mt-1.5 min-h-8 rounded-full text-[12px] font-medium text-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
@@ -441,15 +448,13 @@ function SkillDetailSheet({
               </div>
             ) : (
               <div className="mt-6 space-y-5">
-                <div className="flex min-h-16 items-start justify-between gap-3 border-y border-border/45 px-1 py-3.5">
+                <div className="flex min-h-16 items-center justify-between gap-3 border-y border-border/45 px-1 py-3.5">
                   <p className="text-[13px] font-medium text-foreground">
                     {t("settings.skills.enabledControl", { defaultValue: "Use this skill" })}
                   </p>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={enabled}
-                    aria-label={
+                  <ToggleButton
+                    checked={enabled}
+                    label={
                       enabled
                         ? t("settings.skills.disableSkill", {
                             name: activeSkill.name,
@@ -461,26 +466,8 @@ function SkillDetailSheet({
                           })
                     }
                     disabled={actionBusy}
-                    onClick={() => void toggleEnabled()}
-                    className={cn(
-                      "relative -mr-1 h-10 w-14 shrink-0 rounded-full",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                      "disabled:cursor-wait disabled:opacity-60",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "absolute left-1.5 top-2 h-6 w-11 rounded-full transition-colors",
-                        enabled ? "bg-foreground" : "bg-muted-foreground/30",
-                      )}
-                    />
-                    <span
-                      className={cn(
-                        "absolute left-2 top-2.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
-                        enabled ? "translate-x-5" : "translate-x-0",
-                      )}
-                    />
-                  </button>
+                    onChange={() => void toggleEnabled()}
+                  />
                 </div>
 
                 {actionError ? (
@@ -570,19 +557,22 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
   const content =
     markdown ||
     t("settings.skills.rawInstructionsEmpty", {
-      defaultValue: "No raw instructions.",
+      defaultValue: "No skill file content available.",
     });
 
   return (
-    <details className="group rounded-floating border border-border/45 bg-muted/20 px-3 py-3">
-      <summary className="flex min-h-11 cursor-pointer select-none items-center justify-between gap-3 text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground">
+    <Disclosure
+      className="rounded-floating border border-border/45 bg-muted/20 px-3 py-3"
+      summaryClassName="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-sm text-[13px] font-medium text-foreground/90 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      summary={<>
         <span>
           {t("settings.skills.instructionsTitle", { defaultValue: "Skill instructions" })}
         </span>
         <code className="font-mono text-[10px] font-normal text-muted-foreground">
           SKILL.md
         </code>
-      </summary>
+      </>}
+    >
       <div className="mt-3 overflow-hidden rounded-control border border-border/35 bg-background/70">
         <pre
           className={cn(
@@ -596,7 +586,7 @@ function RawInstructionsBlock({ markdown }: { markdown: string }) {
           {content}
         </pre>
       </div>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -661,7 +651,7 @@ function RequirementsSection({
               })}
               title={option.label}
               onClick={() => void copyCommand(option.command)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors settings-hover hover:text-foreground sm:h-7 sm:w-7"
             >
               {copiedCommand === option.command ? (
                 <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
@@ -675,14 +665,14 @@ function RequirementsSection({
         {!installOptions.length && missing_bins.length ? (
           <SetupRequirement
             icon={<Terminal className="h-3.5 w-3.5" aria-hidden />}
-            label={t("settings.skills.missingCommands", { defaultValue: "Missing CLI" })}
+            label={t("settings.skills.missingCommands", { defaultValue: "Missing command-line tools" })}
             items={missing_bins}
           />
         ) : null}
         {missing_env.length ? (
           <SetupRequirement
             icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />}
-            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing ENV" })}
+            label={t("settings.skills.missingEnvironment", { defaultValue: "Missing environment variables" })}
             items={missing_env}
           />
         ) : null}

@@ -35,7 +35,7 @@ def make_provider(
         temperature=0.1,
         reasoning_effort=None,
     )
-    provider.estimate_prompt_tokens.return_value = (10_000, "test")
+    provider.estimate_prompt_tokens = MagicMock(return_value=(10_000, "test"))
     return provider
 
 

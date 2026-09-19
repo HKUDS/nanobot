@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import uuid4
 
+from loguru import logger
+
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import RequestContext, ToolContext, current_request_context
 from nanobot.agent.tools.schema import (
@@ -325,10 +327,19 @@ class SendSessionMessageTool(Tool):
         def expire() -> None:
             task = asyncio.create_task(self._expire_pending_reply(key, pending))
             self._expiry_tasks.add(task)
-            task.add_done_callback(self._expiry_tasks.discard)
+            task.add_done_callback(self._on_expiry_task_done)
 
         schedule = self._schedule_later or asyncio.get_running_loop().call_later
         pending.timer = schedule(float(timeout_seconds), expire)
+
+    def _on_expiry_task_done(self, task: asyncio.Task[None]) -> None:
+        self._expiry_tasks.discard(task)
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("Session reply timeout delivery failed")
 
     async def _expire_pending_reply(
         self,

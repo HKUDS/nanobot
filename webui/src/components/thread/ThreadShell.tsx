@@ -9,11 +9,15 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
+import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import type {
+  ComposerContextUsage,
+  ComposerRoundUsage,
+} from "@/components/thread/ComposerUsagePopover";
 import {
-  ThreadComposer,
-  type ComposerContextUsage,
-} from "@/components/thread/ThreadComposer";
-import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
+  modelPresetOptionsFromSettings,
+  toModelBadgeInfo,
+} from "@/components/thread/model-preset";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -25,6 +29,7 @@ import {
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
+  fetchWebuiThreadTraceDetail,
   listSlashCommands,
 } from "@/lib/api";
 import {
@@ -38,9 +43,9 @@ import {
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
-import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
 import type {
   ChatSummary,
+  RoundUsage,
   SettingsPayload,
   SlashCommand,
   SkillSummary,
@@ -49,6 +54,8 @@ import type {
   WorkspacesPayload,
 } from "@/lib/types";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 type MessageShape = Pick<UIMessage, "role" | "kind" | "content" | "isStreaming" | "turnId">;
@@ -90,6 +97,9 @@ function sameMessageShape(a: MessageShape, b: MessageShape): boolean {
 function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
+    if (message.kind === "compaction" && message.compaction?.phase === "succeeded") {
+      return null;
+    }
     const contextTokens = message.usage?.context_tokens;
     if (
       message.role !== "assistant"
@@ -109,6 +119,60 @@ function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage
     };
   }
   return null;
+}
+
+function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
+  const recent: ComposerRoundUsage[] = [];
+  const seenTurns = new Set<string>();
+  for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
+    const message = messages[index];
+    const turnKey = message.turnId || message.id;
+    if (
+      message.role !== "assistant"
+      || message.kind === "trace"
+      || message.isStreaming
+      || seenTurns.has(turnKey)
+    ) {
+      continue;
+    }
+
+    seenTurns.add(turnKey);
+    const rounds: RoundUsage[] = message.roundUsages ?? [];
+    for (let roundIndex = rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
+      const round = rounds[roundIndex];
+      const inputTokens = round.prompt_tokens;
+      if (
+        recent.length >= 8
+        || typeof inputTokens !== "number"
+        || !Number.isFinite(inputTokens)
+        || inputTokens <= 0
+      ) {
+        continue;
+      }
+      const outputTokens = round.completion_tokens;
+      const cachedTokens = round.cached_tokens;
+      const estimatedTokens = round.estimated_tokens;
+      const generationMs = round.generation_ms;
+      recent.push({
+        id: `${turnKey}:${roundIndex}`,
+        timestamp: message.completedAt ?? message.createdAt,
+        inputTokens,
+        ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)
+          ? { outputTokens }
+          : {}),
+        ...(typeof cachedTokens === "number" && Number.isFinite(cachedTokens)
+          ? { cachedTokens }
+          : {}),
+        ...(typeof estimatedTokens === "number" && Number.isFinite(estimatedTokens)
+          ? { estimatedTokens }
+          : {}),
+        ...(typeof generationMs === "number" && Number.isFinite(generationMs)
+          ? { generationMs }
+          : {}),
+      });
+    }
+  }
+  return recent.reverse();
 }
 
 function snapshotPreservesMessage(
@@ -336,7 +400,10 @@ interface ThreadShellProps {
   onCreateChat?: (
     workspaceScope?: WorkspaceScopePayload | null,
     initialMessage?: string,
+    modelPreset?: string | null,
   ) => Promise<string | null>;
+  pendingFirstMessage?: PendingFirstMessage & { id: string; chatId: string } | null;
+  onPendingFirstMessageConsumed?: (id: string) => void;
   onForkChat?: (sourceChatId: string, beforeUserIndex: number) => Promise<string | null>;
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
@@ -363,99 +430,6 @@ interface ThreadShellProps {
   settingsSnapshot?: SettingsPayload | null;
   onOpenModelSettings?: () => void;
   skills?: SkillSummary[];
-}
-
-function toModelBadgeLabel(modelName: string | null): string | null {
-  if (!modelName) return null;
-  const trimmed = modelName.trim();
-  if (!trimmed) return null;
-  const leaf = trimmed.split("/").pop() ?? trimmed;
-  return leaf || trimmed;
-}
-
-interface ModelBadgeInfo {
-  label: string | null;
-  model: string | null;
-  provider: string | null;
-  providerLabel: string | null;
-  needsSetup: boolean;
-}
-
-function modelPresetForBadge(
-  settings: SettingsPayload | null,
-  scopedPreset: string | null,
-): SettingsPayload["model_presets"][number] | null {
-  if (!settings) return null;
-  if (scopedPreset) {
-    return settings.model_presets.find((preset) => preset.name === scopedPreset) ?? null;
-  }
-  const configured = settings.agent.model_preset || "default";
-  return (
-    settings.model_presets.find((preset) => preset.name === configured)
-    ?? settings.model_presets.find((preset) => preset.active)
-    ?? null
-  );
-}
-
-function toModelBadgeInfo(
-  modelName: string | null,
-  settings: SettingsPayload | null,
-  modelPreset: string | null = null,
-): ModelBadgeInfo {
-  const scopedPreset = modelPreset?.trim() || null;
-  const preset = modelPresetForBadge(settings, scopedPreset);
-  const model = scopedPreset
-    ? preset?.model || null
-    : settings?.agent.model || modelName || null;
-  const label = preset
-    ? preset.is_default
-      ? preset.label?.trim() || "Default"
-      : preset.name.trim()
-    : scopedPreset || toModelBadgeLabel(model);
-  const rawProvider = preset?.provider
-    || (!scopedPreset ? settings?.agent.provider : null)
-    || null;
-  const provider = rawProvider === "auto"
-    ? preset?.resolved_provider
-      || (!scopedPreset ? settings?.agent.resolved_provider : null)
-      || null
-    : rawProvider || inferProviderFromModelName(model);
-  const providerRow = provider
-    ? settings?.providers.find((item) => item.name === provider)
-    : null;
-  const needsSetup = Boolean(
-    settings && (!model || !provider || !providerRow || !providerRow.configured),
-  );
-  return {
-    label,
-    model: toModelBadgeLabel(model),
-    provider,
-    providerLabel: provider ? providerDisplayLabel(settings?.providers ?? [], provider) : null,
-    needsSetup,
-  };
-}
-
-function modelPresetOptionsFromSettings(
-  settings: SettingsPayload | null,
-): ModelPresetOption[] {
-  if (!settings) return [];
-  const order = new Map(
-    (settings.model_call_order ?? []).map((name, index) => [name.trim(), index]),
-  );
-  return settings.model_presets
-    .filter((preset) => !preset.is_default && preset.name.trim())
-    .sort((a, b) => (
-      (order.get(a.name.trim()) ?? Number.POSITIVE_INFINITY)
-      - (order.get(b.name.trim()) ?? Number.POSITIVE_INFINITY)
-    ))
-    .map((preset) => {
-      const name = preset.name.trim();
-      return {
-        name,
-        model: preset.model,
-        provider: preset.resolved_provider || preset.provider,
-      };
-    });
 }
 
 const HERO_GREETING_KEYS = [
@@ -636,6 +610,8 @@ export function ThreadShell({
   onTemporaryChatEnabledChange,
   onToggleSidebar,
   onCreateChat,
+  pendingFirstMessage = null,
+  onPendingFirstMessageConsumed,
   onForkChat,
   onTurnEnd,
   theme = "light",
@@ -727,10 +703,13 @@ export function ThreadShell({
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
+  const consumedPendingFirstMessageIdRef = useRef<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
-  const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   const knownTemporaryChatIdsRef = useRef(new Set<string>());
+  const messageCacheRef = useRef(new ThreadMessageCache(
+    (key) => knownTemporaryChatIdsRef.current.has(key),
+  ));
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */
@@ -743,6 +722,9 @@ export function ThreadShell({
   const completedCanonicalHydrateVersionRef = useRef<Map<string, number>>(new Map());
   const committedHistoryLineageRef = useRef<Map<string, number>>(new Map());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
+  const traceDetailRequestsRef = useRef<Map<string, Promise<void>>>(new Map());
+  const activeHistoryKeyRef = useRef(historyKey);
+  activeHistoryKeyRef.current = historyKey;
   const currentUiMessagesRef = useRef<UIMessage[] | null>(null);
   const uiRevisionRef = useRef(0);
   const showTemporaryChatControl =
@@ -763,6 +745,7 @@ export function ThreadShell({
     messagesReady,
     isStreaming,
     runStartedAt,
+    retryStatus,
     goalState,
     recoveryState,
     continueRecovery,
@@ -775,6 +758,49 @@ export function ThreadShell({
     streamError,
     dismissStreamError,
   } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
+
+  const loadTraceDetails = useCallback(async (refs: string[]) => {
+    const requestKey = historyKey;
+    if (!requestKey) return;
+    const requests: Promise<void>[] = [];
+    for (const ref of refs) {
+      const requestId = `${requestKey}:${ref}`;
+      const existing = traceDetailRequestsRef.current.get(requestId);
+      if (existing) {
+        requests.push(existing);
+        continue;
+      }
+      const request = fetchWebuiThreadTraceDetail(getToken(), requestKey, ref)
+        .then((detail) => {
+          if (activeHistoryKeyRef.current !== requestKey) return;
+          setMessages((current) => current.map((message) => (
+            message.traceDetail?.ref === ref
+              ? {
+                  ...message,
+                  content: detail.content,
+                  traces: detail.traces,
+                  toolEvents: detail.toolEvents,
+                  traceDetail: undefined,
+                }
+              : message
+          )));
+        })
+        .catch((error: unknown) => {
+          if (activeHistoryKeyRef.current !== requestKey) return;
+          throw error;
+        })
+        .finally(() => {
+          traceDetailRequestsRef.current.delete(requestId);
+        });
+      traceDetailRequestsRef.current.set(requestId, request);
+      requests.push(request);
+    }
+    await Promise.all(requests);
+  }, [getToken, historyKey, setMessages]);
+
+  useEffect(() => () => {
+    activeHistoryKeyRef.current = null;
+  }, []);
 
   useLayoutEffect(() => {
     if (currentUiMessagesRef.current === messages) return;
@@ -836,6 +862,10 @@ export function ThreadShell({
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const composerContextUsage = useMemo(
     () => latestComposerContextUsage(displayMessages),
+    [displayMessages],
+  );
+  const composerRoundUsage = useMemo(
+    () => recentComposerRoundUsage(displayMessages),
     [displayMessages],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
@@ -1328,6 +1358,31 @@ export function ThreadShell({
   }, [chatId, pendingFirstTargetChatId, send]);
 
   useEffect(() => {
+    if (
+      !chatId
+      || pendingFirstMessage?.chatId !== chatId
+      || consumedPendingFirstMessageIdRef.current === pendingFirstMessage.id
+    ) return;
+    consumedPendingFirstMessageIdRef.current = pendingFirstMessage.id;
+    const submitted = send(
+      pendingFirstMessage.content,
+      pendingFirstMessage.images,
+      withWorkspaceScope(pendingFirstMessage.options),
+    );
+    if (submitted && !submitted.sideChannel) {
+      activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
+      setSubmittedViewportTurnId(submitted.turnId);
+    }
+    onPendingFirstMessageConsumed?.(pendingFirstMessage.id);
+  }, [
+    chatId,
+    onPendingFirstMessageConsumed,
+    pendingFirstMessage,
+    send,
+    withWorkspaceScope,
+  ]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -1348,7 +1403,7 @@ export function ThreadShell({
       setBooting(true);
       pendingFirstRef.current = { content, images, options: withWorkspaceScope(options) };
       setPendingFirstTargetChatId(null);
-      const newId = await onCreateChat?.(workspaceScope, content);
+      const newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
       if (!newId) {
         pendingFirstRef.current = null;
         setPendingFirstTargetChatId(null);
@@ -1519,6 +1574,7 @@ export function ThreadShell({
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
+          recentRoundUsage={composerRoundUsage}
           variant={composerVariant}
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
@@ -1568,6 +1624,7 @@ export function ThreadShell({
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
+          recentRoundUsage={composerRoundUsage}
           variant="hero"
           slashCommands={availableSlashCommands}
           cliApps={cliApps}
@@ -1604,7 +1661,7 @@ export function ThreadShell({
     </div>
   );
   const sessionInfoAction = historyKey ? (
-    <SessionInfoPopover sessionKey={historyKey} token={token} title={title} />
+    <SessionInfoPopover client={client} sessionKey={historyKey} token={token} title={title} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator
@@ -1616,7 +1673,6 @@ export function ThreadShell({
   const threadHeader = !hideHeader ? (
     <ThreadHeader
       title={title}
-      handle={temporary || (hideHeaderTitle && inlineHandle) ? null : session?.handle}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}
@@ -1638,7 +1694,10 @@ export function ThreadShell({
 
   return (
     <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className={cn(
+        "relative flex min-w-0 flex-1 flex-col overflow-hidden",
+        headerPortalTarget === undefined && !hideHeader && "thread-workspace",
+      )}>
         {hideHeaderTitle && inlineHandle && !temporary && session?.handle ? (
           <div
             aria-label={`Session @${session.handle.name}`}
@@ -1663,6 +1722,7 @@ export function ThreadShell({
             temporary={temporary}
             isStreaming={turnActive}
             runStartedAt={currentRunStartedAt}
+            retryStatus={retryStatus}
             emptyState={emptyState}
             composer={composerPortalTarget === undefined ? composer : null}
             activeTurnId={viewportTurnId}
@@ -1678,6 +1738,8 @@ export function ThreadShell({
             loadingOlder={loadingOlder}
             userMessageOffset={userMessageOffset}
             onLoadOlder={loadOlder}
+            traceDetailScope={historyKey}
+            onLoadTraceDetails={messagesReady ? loadTraceDetails : undefined}
             onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 from unittest.mock import patch
+from urllib.request import getproxies_environment
 
 import pytest
 
@@ -42,6 +43,9 @@ def test_is_loopback_host_rejects_network_targets(host: str) -> None:
 def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
+    # getproxies() falls back to OS-level proxy settings (e.g. the Windows
+    # registry) when no environment variables are set; keep tests hermetic.
+    monkeypatch.setattr("nanobot.security.network.getproxies", getproxies_environment)
 
 
 def _fake_resolve(host: str, results: list[str]):

@@ -123,6 +123,10 @@ def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: 
     assert payload["cache_read_tokens_30d"] == 40
     assert payload["cache_read_observed_input_tokens_30d"] == 100
     assert payload["cache_read_rate_30d"] == 0.4
+    assert payload["model_days_30d"] == [
+        {"date": "2026-06-03", "provider": "anthropic", "model": "claude-sonnet-4", "total_tokens": 40},
+        {"date": "2026-06-03", "provider": "openai", "model": "gpt-5", "total_tokens": 175},
+    ]
 
     day = payload["days"][0]
     assert day["date"] == "2026-06-03"

@@ -10,13 +10,14 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" --max-warnings 0"
+    "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" --max-warnings 0"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.4",
     "@radix-ui/react-dialog": "^1.1.4",
     "@radix-ui/react-dropdown-menu": "^2.1.4",
     "@radix-ui/react-popover": "1.1.15",
+    "@radix-ui/react-select": "2.2.6",
     "@radix-ui/react-slot": "^1.1.1",
     "@radix-ui/react-tooltip": "^1.1.6",
     "class-variance-authority": "^0.7.1",
@@ -24,6 +25,7 @@
     "diff": "^9.0.0",
     "i18next": "^26.0.6",
     "lucide-react": "^0.469.0",
+    "micromark-factory-space": "^2.0.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -56,7 +58,6 @@
     "happy-dom": "^16.3.0",
     "katex": "^0.16.21",
     "postcss": "^8.5.0",
-    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.7.2",

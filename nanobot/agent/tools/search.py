@@ -107,6 +107,22 @@ def _match_glob(rel_path: str, name: str, pattern: str) -> bool:
     if not normalized:
         return False
     if "/" in normalized or normalized.startswith("**"):
+        pattern_parts = PurePosixPath(normalized).parts
+        if "**" in pattern_parts:
+            path_parts = PurePosixPath(rel_path).parts
+            # Keep relative patterns suffix-matched, as with PurePath.match.
+            matched = [True] * (len(path_parts) + 1)
+            for part in pattern_parts:
+                if part == "**":
+                    # A globstar consumes zero or more complete path segments.
+                    for index in range(1, len(matched)):
+                        matched[index] = matched[index] or matched[index - 1]
+                else:
+                    matched = [False] + [
+                        matched[index] and fnmatch.fnmatchcase(path_part, part)
+                        for index, path_part in enumerate(path_parts)
+                    ]
+            return matched[-1]
         return PurePosixPath(rel_path).match(normalized)
     return fnmatch.fnmatch(name, normalized)
 

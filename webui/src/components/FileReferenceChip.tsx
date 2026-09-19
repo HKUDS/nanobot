@@ -60,7 +60,7 @@ export function FileReferenceChip({
     openPreview(event);
   };
   return (
-    <TooltipProvider delayDuration={500} skipDelayDuration={100}>
+    <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
           <span

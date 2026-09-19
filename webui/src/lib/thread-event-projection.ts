@@ -121,7 +121,10 @@ export function isReasoningOnlyPlaceholder(message: UIMessage): boolean {
 
 export function stampLastAssistantCompletion(
   prev: UIMessage[],
-  completion: Pick<UIMessage, "latencyMs" | "completedAt" | "usage" | "contextWindowTokens">,
+  completion: Pick<
+    UIMessage,
+    "latencyMs" | "completedAt" | "usage" | "roundUsages" | "contextWindowTokens"
+  >,
   turnId?: string,
 ): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {

@@ -22,6 +22,7 @@ from nanobot.cron.types import (
     CronJobState,
     CronPayload,
     CronRunRecord,
+    CronRunResult,
     CronSchedule,
     CronStore,
 )
@@ -176,7 +177,7 @@ class CronService:
     def __init__(
         self,
         store_path: Path,
-        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
+        on_job: Callable[[CronJob], Coroutine[Any, Any, str | CronRunResult | None]] | None = None,
         max_sleep_ms: int = 300_000,  # 5 minutes
     ):
         self.store_path = store_path
@@ -413,6 +414,7 @@ class CronService:
                                 "status": r.status,
                                 "durationMs": r.duration_ms,
                                 "error": r.error,
+                                "runId": r.run_id,
                             }
                             for r in j.state.run_history
                         ],
@@ -517,6 +519,11 @@ class CronService:
 
     def _arm_timer(self) -> None:
         """Schedule the next timer tick."""
+        # The timer task also owns the agent callback. Store edits during a
+        # callback must not cancel it or start another tick for the same due
+        # job. The final execution rearms after persisting its result.
+        if self._active_executions:
+            return
         if self._timer_task:
             self._timer_task.cancel()
 
@@ -562,7 +569,16 @@ class CronService:
                 if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
             ]
 
-            for job in due_jobs:
+            for candidate in due_jobs:
+                # Earlier callbacks may delete, disable, or reschedule later jobs.
+                job = self.get_job(candidate.id)
+                if (
+                    job is None
+                    or not job.enabled
+                    or not job.state.next_run_at_ms
+                    or job.state.next_run_at_ms > _now_ms()
+                ):
+                    continue
                 await self._execute_job(job)
 
             self._save_store()
@@ -586,10 +602,11 @@ class CronService:
         """Execute a single job."""
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        result: str | CronRunResult | None = None
 
         try:
             if self.on_job:
-                await self.on_job(job)
+                result = await self.on_job(job)
 
             job.state.last_status = "ok"
             job.state.last_error = None
@@ -620,6 +637,7 @@ class CronService:
             status=job.state.last_status,
             duration_ms=end_ms - start_ms,
             error=job.state.last_error,
+            run_id=result.run_id if isinstance(result, CronRunResult) else None,
         ))
         job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
 
@@ -809,6 +827,7 @@ class CronService:
 
         For ``channel`` and ``to``, pass an explicit value (including ``None``)
         to update; omit (sentinel ``...``) to leave unchanged.
+        Preserve the next occurrence unless the schedule actually changes.
         """
         store = self._require_store()
         job = next((j for j in store.jobs if j.id == job_id), None)
@@ -817,6 +836,7 @@ class CronService:
         if job.payload.kind == "system_event":
             return "protected"
 
+        schedule_changed = schedule is not None and schedule != job.schedule
         if schedule is not None:
             _validate_schedule_for_add(schedule)
             job.schedule = schedule
@@ -836,10 +856,10 @@ class CronService:
         self._enforce_agent_binding(job)
 
         job.updated_at_ms = _now_ms()
-        if job.enabled:
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
-        else:
+        if not job.enabled:
             job.state.next_run_at_ms = None
+        elif schedule_changed:
+            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
 
         if self._should_persist_store():
             self._save_store()

@@ -138,20 +138,35 @@ explicitly in the PR description so it can be discussed before merge.
 
 ## Release Packaging Contract
 
+Use the [release checklist](./docs/releasing.md) for candidate preparation, package checks,
+documentation coordination, and the final publication handoff.
+
 A stable install must never combine Python from one version with a TUI from another. Publish in
 this order:
 
-1. Set the package version and publish the matching GitHub release tag (`vX.Y.Z`).
-2. Review the pinned Bun/OpenTUI licenses, source offer, and relinking materials for that tag.
-3. Manually run **Publish Terminal UI** for the exact tag and confirm the compliance review input.
-4. Wait for every platform archive and checksum to appear on the release, then publish the same
-   `X.Y.Z` package to PyPI.
+1. Before pushing a tag, set the package version, verify the exact candidate, build the source
+   distribution, all five platform wheels and TUI archives, and review licenses, source offer, and relinking
+   materials. Obtain the maintainer's source-offer commitment before publication.
+2. Merge the release preparation, verify that its packaged sources match the checked candidate,
+   then publish the matching GitHub release tag (`vX.Y.Z`). Recheck any changed sources first.
+3. Attach the preverified TUI archives and checksums to the matching GitHub Release. Alternatively,
+   manually run **Publish Terminal UI** for the exact tag with the compliance review confirmed;
+   reverify its outputs, since a rebuild does not preserve the preflight artifact hashes.
+4. Verify every platform archive and checksum is publicly downloadable for fallback/source-built
+   installations, then publish the same `X.Y.Z` source distribution and five platform wheels to PyPI.
 
-The wheel contains the built WebUI. The native TUI stays a platform-specific release sidecar so
-users download only the archive for their machine. Each archive must contain the executable,
+Each platform wheel contains the built WebUI and the matching native TUI. Pip chooses the wheel
+for the user's machine; launching the installed TUI must work without a GitHub download or Bun.
+The universal wheel produced by `uv build` is only an intermediate: use
+`scripts/build_tui_wheels.py` as described in the checklist, and do not upload that intermediate.
+The source distribution remains platform-neutral and does not bundle native binaries.
+Keep the platform-specific release archives for fallback/source-built installations. Both the
+wheel's `nanobot/tui/bin/` bundle and its matching archive must contain the executable,
 target-specific third-party notices, project and runtime licenses, corresponding application
 source, a written source offer, relinking instructions, and a checksum manifest. Never upload a
-naked TUI executable. Source checkouts use an editable Python install, run `tui/` with Bun, and
+naked TUI executable. Review the minimum OS, libc, architecture and runtime CPU requirements
+when changing Bun/OpenTUI; never apply portable platform tags without checking their binaries.
+Source checkouts use an editable Python install, run `tui/` with Bun, and
 rebuild stale `webui/` assets locally.
 
 The confirmation is an operational commitment, not a cosmetic checkbox. Before accepting it,

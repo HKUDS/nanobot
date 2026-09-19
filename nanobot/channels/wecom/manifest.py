@@ -9,6 +9,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "botId": field(),
         "secret": field("secret"),
         "allowFrom": field("list"),
+        "welcomeMessage": field(),
     },
     required=required_fields("botId", "secret"),
     official_url="https://developer.work.weixin.qq.com/",
@@ -19,6 +20,6 @@ PLUGIN = ChannelPlugin(
     display_name="WeCom",
     runtime=f"{__package__}.runtime:WecomChannel",
     setup=SETUP_SPEC,
-    dependencies=("wecom-aibot-sdk-python>=0.1.5",),
+    dependencies=("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
     webui="webui/index.ts",
 )

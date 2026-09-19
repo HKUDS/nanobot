@@ -487,8 +487,9 @@ class TestPathAppendPlatform:
 class TestSandboxPlatform:
 
     @pytest.mark.asyncio
-    async def test_bwrap_skipped_on_windows(self):
-        """bwrap must be silently skipped on Windows, not crash."""
+    @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+    async def test_sandbox_skipped_on_windows(self, backend):
+        """Configured Unix backends preserve the Windows native fallback."""
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"ok", b"")
         mock_proc.returncode = 0
@@ -498,15 +499,16 @@ class TestSandboxPlatform:
             patch.object(ExecTool, "_spawn", return_value=mock_proc) as mock_spawn,
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
-            tool = ExecTool(sandbox="bwrap")
+            tool = ExecTool(sandbox=backend)
             result = await tool.execute(command="dir")
 
         assert "ok" in result
         spawned_cmd = mock_spawn.call_args[0][0]
-        assert "bwrap" not in spawned_cmd
+        assert backend not in spawned_cmd
 
     @pytest.mark.asyncio
-    async def test_bwrap_applied_on_unix(self):
+    @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+    async def test_sandbox_applied_on_unix(self, backend):
         """On Unix, sandbox wrapping should still happen normally."""
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"sandboxed", b"")
@@ -514,20 +516,21 @@ class TestSandboxPlatform:
 
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
-            patch("nanobot.agent.tools.shell.wrap_command", return_value="bwrap -- sh -c ls") as mock_wrap,
+            patch("nanobot.agent.tools.shell.wrap_command", return_value=f"{backend} -- sh -c ls") as mock_wrap,
             patch.object(ExecTool, "_spawn", return_value=mock_proc) as mock_spawn,
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
-            tool = ExecTool(sandbox="bwrap", working_dir="/workspace")
+            tool = ExecTool(sandbox=backend, working_dir="/workspace")
             await tool.execute(command="ls")
 
         mock_wrap.assert_called_once()
         spawned_cmd = mock_spawn.call_args[0][0]
-        assert "bwrap" in spawned_cmd
+        assert backend in spawned_cmd
 
     @pytest.mark.asyncio
-    async def test_bwrap_receives_configured_bind_roots(self, tmp_path):
-        """Configured bwrap bind roots should be forwarded to the sandbox wrapper."""
+    @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+    async def test_sandbox_receives_configured_bind_roots(self, tmp_path, backend):
+        """Configured bind roots should be forwarded to the sandbox wrapper."""
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"sandboxed", b"")
         mock_proc.returncode = 0
@@ -536,12 +539,12 @@ class TestSandboxPlatform:
 
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
-            patch("nanobot.agent.tools.shell.wrap_command", return_value="bwrap -- sh -c ls") as mock_wrap,
+            patch("nanobot.agent.tools.shell.wrap_command", return_value=f"{backend} -- sh -c ls") as mock_wrap,
             patch.object(ExecTool, "_spawn", return_value=mock_proc),
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             tool = ExecTool(
-                sandbox="bwrap",
+                sandbox=backend,
                 working_dir="/workspace",
                 sandbox_ro_binds=[str(tool_bin)],
                 sandbox_rw_binds=[str(tool_cache)],

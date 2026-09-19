@@ -25,7 +25,7 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
     rely on ``repeated_workspace_violation_error`` to throttle bypass loops.
     """
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="trying outside",
             tool_calls=[ToolCallRequest(
@@ -52,7 +52,7 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 2, (
+    assert provider.chat_stream_with_retry.await_count == 2, (
         "workspace violation must NOT short-circuit the loop"
     )
     assert result.stop_reason != "tool_error"
@@ -89,7 +89,7 @@ def test_is_ssrf_violation_recognizes_private_url_blocks():
 async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
     """SSRF stays blocked, but the runtime gives the LLM a final chance to recover."""
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="curl-ing metadata",
             tool_calls=[ToolCallRequest(
@@ -118,7 +118,7 @@ async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 2
+    assert provider.chat_stream_with_retry.await_count == 2
     assert result.stop_reason == "completed"
     assert result.error is None
     assert result.final_content == "I cannot access that private URL. Please share local files."
@@ -142,8 +142,8 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
     provider = MagicMock()
     captured_second_call: list[dict] = []
 
-    async def chat_with_retry(*, messages, **kwargs):
-        if provider.chat_with_retry.await_count == 1:
+    async def chat_stream_with_retry(*, messages, **kwargs):
+        if provider.chat_stream_with_retry.await_count == 1:
             return LLMResponse(
                 content="trying noisy cleanup",
                 tool_calls=[ToolCallRequest(
@@ -155,7 +155,7 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
         captured_second_call[:] = list(messages)
         return LLMResponse(content="recovered final answer", tool_calls=[])
 
-    provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=chat_stream_with_retry)
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(
@@ -173,7 +173,7 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 2, (
+    assert provider.chat_stream_with_retry.await_count == 2, (
         "guard hit must NOT short-circuit the loop -- LLM should get a second turn"
     )
     assert result.stop_reason != "tool_error"
@@ -207,7 +207,7 @@ async def test_runner_throttles_repeated_workspace_bypass_attempts():
     responses.append(LLMResponse(content="ok telling user", tool_calls=[]))
 
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(side_effect=responses)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=responses)
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(

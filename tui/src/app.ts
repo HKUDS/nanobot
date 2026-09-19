@@ -27,6 +27,7 @@ import {
   fetchGatewayConnection,
   fetchMentionCandidates,
   fetchSessionContext,
+  fetchSessionUsage,
   fetchSessions,
   fetchSlashCommands,
   type ApiReauthenticator,
@@ -34,11 +35,13 @@ import {
   type ConnectionStatusInfo,
   type FileEditEvent,
   type GatewayApiConnection,
+  type GatewayConnection,
   type HistoryMessage,
   type InboundEvent,
   type MentionCandidate,
   type MessageOptions,
   type RecoveryState,
+  type RetryStatus,
   type SkillCandidate,
   type SlashCommand,
   type SessionSummary,
@@ -54,6 +57,7 @@ import {
 } from "./command-menu"
 import { SessionMenu, sessionLabel } from "./session-menu"
 import { ContextPanel, formatTokenCount, type ContextPanelTheme } from "./context-panel"
+import { UsagePanel, type UsagePanelTheme } from "./usage-panel"
 import {
   DiffViewer,
   latestTurnFileEdits,
@@ -97,6 +101,8 @@ import {
 import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "./host"
 
 interface AppOptions {
+  resolveConnection?: () => Promise<GatewayConnection>
+  desktopGatewayId?: string
   wsUrl?: string
   bootstrapUrl?: string
   bootstrapSecret?: string
@@ -190,6 +196,8 @@ const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
 const SHIMMER_INTERVAL_MS = 80
+const EVENT_BATCH_SIZE = 64
+const EVENT_BATCH_BUDGET_MS = 4
 const SESSION_REFRESH_INTERVAL_MS = 1_000
 const LOCAL_COMMANDS: TuiCommand[] = [
   {
@@ -209,6 +217,12 @@ const LOCAL_COMMANDS: TuiCommand[] = [
     title: "Agent context",
     description: "Explain what this session contributes to the next prompt",
     action: "context",
+  },
+  {
+    command: "/usage",
+    title: "Token usage",
+    description: "Show context occupancy and recent model-call input tokens",
+    action: "usage",
   },
   {
     command: "/diff",
@@ -307,6 +321,10 @@ function contextPanelTheme(palette: Palette): ContextPanelTheme {
   }
 }
 
+function usagePanelTheme(palette: Palette): UsagePanelTheme {
+  return { ...palette, cached: palette.cool }
+}
+
 function diffViewerTheme(palette: Palette, backgroundKnown: boolean): DiffViewerTheme {
   const light = palette === LIGHT
   return {
@@ -402,6 +420,45 @@ function connectionStatusText(
   return "Session ended"
 }
 
+function retryFailureLabel(errorKind: string): string {
+  if (errorKind === "billing") return "Model provider quota is unavailable"
+  if (errorKind === "connection") return "Could not connect to the model provider"
+  if (errorKind === "timeout") return "Model provider request timed out"
+  if (errorKind === "rate_limit") return "Model provider rate limit reached"
+  if (errorKind === "server") return "Model provider service error"
+  return "Model provider request failed"
+}
+
+export function terminalModelFailureLine(errorKind?: string, attempts?: number): string {
+  const reason = retryFailureLabel(errorKind || "unknown")
+  if (errorKind === "billing") {
+    return `${reason}. Add credit or check billing for the provider account, then try again.`
+  }
+  const retryResult = typeof attempts === "number" && Number.isInteger(attempts) && attempts > 0
+    ? ` The request still failed on attempt ${attempts}, so retries stopped.`
+    : ""
+  return `${reason}.${retryResult} Check the provider configuration or service status, then try again.`
+}
+
+interface RenderedRetryStatus extends RetryStatus {
+  nextRetryAtMs?: number
+}
+
+export function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now()): string {
+  const label = retryFailureLabel(status.error_kind)
+  if (status.state === "exhausted") return `${label} · ending turn`
+  if (status.state === "recovered") return "Connection restored"
+  if (status.state === "cleared") return "Retry status cleared"
+  const remaining = Math.max(
+    0,
+    Math.ceil(((status.nextRetryAtMs ?? nowMs) - nowMs) / 1000),
+  )
+  const attempt = status.max_attempts
+    ? `${status.attempt}/${status.max_attempts}`
+    : String(status.attempt)
+  return `${label} · retrying in ${remaining}s · attempt ${attempt}`
+}
+
 export function sessionExitMessage(chatId: string): string {
   const sessionId = `websocket:${chatId}`
   return `Resume with: nanobot agent --session ${sessionId}\n`
@@ -436,6 +493,9 @@ export class NanobotTui {
   private readonly branchMenu: BranchMenu
   private readonly runtimeControls: RuntimeControls
   private readonly contextPanel: ContextPanel
+  private readonly usagePanel: UsagePanel
+  private usageRequest: AbortController | null = null
+  private usageRefreshPending = false
   private readonly diffViewer: DiffViewer
   private readonly queuePreview: QueuePreview
   private readonly recoveryNotice: RecoveryNotice
@@ -457,6 +517,7 @@ export class NanobotTui {
   private activeTurn = false
   private activeTurnId: string | null = null
   private activeLabel = "Thinking"
+  private retryStatus: RenderedRetryStatus | null = null
   private activeStartedAt = 0
   private finalMessage = ""
   private turnHadAnswer = false
@@ -466,6 +527,9 @@ export class NanobotTui {
   private historyLoadingOlder = false
   private attachedOnce = false
   private pendingEvents: InboundEvent[] | null = null
+  private eventQueue: Array<InboundEvent | (() => void)> = []
+  private eventDrain: ReturnType<typeof setImmediate> | null = null
+  private followUpPending = false
   private hydrationId = 0
   private ready = false
   private shimmerFrame = 0
@@ -532,7 +596,7 @@ export class NanobotTui {
     this.defaultModelPreset = options.modelPreset
     this.modelName = options.model
     this.modelPreset = options.modelPreset
-    this.apiReauthenticator = options.bootstrapUrl
+    this.apiReauthenticator = options.bootstrapUrl || options.resolveConnection
       ? (rejectedApiToken) => this.refreshApiConnection(rejectedApiToken)
       : undefined
     this.sessionModelPreset = options.chatId ? undefined : null
@@ -559,6 +623,7 @@ export class NanobotTui {
     this.skillMenu = new SkillMenu(renderer, commandMenuTheme(this.palette))
     this.branchMenu = new BranchMenu(renderer, commandMenuTheme(this.palette))
     this.contextPanel = new ContextPanel(renderer, contextPanelTheme(this.palette))
+    this.usagePanel = new UsagePanel(renderer, usagePanelTheme(this.palette))
     this.diffViewer = new DiffViewer(
       renderer,
       diffViewerTheme(this.palette, this.backgroundKnown),
@@ -574,7 +639,13 @@ export class NanobotTui {
       },
     )
     this.client = client || new NanobotClient({
-      ...(options.bootstrapUrl
+      ...(options.resolveConnection ? {
+        resolveConnection: options.resolveConnection,
+        onConnection: (connection: GatewayConnection) => this.useGatewayConnection(connection.apiUrl, connection.apiToken),
+        expectedGatewayId: options.desktopGatewayId,
+        reconnect: false,
+        targetEndpoint: "Nanobot Desktop",
+      } : options.bootstrapUrl
         ? {
             resolveConnection: () => fetchGatewayConnection(
               options.bootstrapUrl || "",
@@ -595,11 +666,11 @@ export class NanobotTui {
           }
         : { url: options.wsUrl }),
       chatId: options.chatId,
-      initialWorkspaceScope: {
+      initialWorkspaceScope: options.desktopGatewayId ? undefined : {
         project_path: options.workspace,
         access_mode: options.access.toLocaleLowerCase().includes("full") ? "full" : "restricted",
       },
-      onEvent: (event) => this.accept(event),
+      onEvent: (event) => this.enqueueEvent(event),
       onStatus: (status, detail, info) => this.handleStatus(status, detail, info),
     })
 
@@ -778,6 +849,7 @@ export class NanobotTui {
     this.shell.add(this.skillMenu.root)
     this.shell.add(this.branchMenu.root)
     this.shell.add(this.contextPanel.root)
+    this.shell.add(this.usagePanel.root)
     this.shell.add(this.runtimeControls.menuRoot)
     this.shell.add(this.title)
     this.shell.add(this.queuePreview.root)
@@ -865,8 +937,11 @@ export class NanobotTui {
     if (!this.submitPending || generation !== this.submitGeneration) return
     this.submitPending = false
     this.submitGeneration += 1
-    if (this.composer.isDestroyed) return
-    this.submit()
+    try {
+      if (!this.composer.isDestroyed) this.submit()
+    } finally {
+      this.scheduleEventDrain()
+    }
   }
 
   private submit(): void {
@@ -934,6 +1009,7 @@ export class NanobotTui {
     if (command?.source === "tui") {
       if (command.command.action === "sessions") void this.openSessions()
       else if (command.command.action === "context") void this.openContext()
+      else if (command.command.action === "usage") this.openUsage()
       else if (command.command.action === "diff") this.openDiff()
       else if (command.command.action === "branch") void this.openBranch()
       else if (command.command.action === "detach") this.quit(true)
@@ -999,6 +1075,7 @@ export class NanobotTui {
     this.finalMessage = ""
     this.turnHadAnswer = false
     this.activeLabel = "Thinking"
+    this.retryStatus = null
     this.currentFileEdits = []
     this.setActive(true, startedAt)
   }
@@ -1019,10 +1096,55 @@ export class NanobotTui {
     }
   }
 
+  private enqueueEvent(event: InboundEvent): void {
+    if (this.quitting) return
+    if (event.event === "attached") {
+      this.clearEventQueue()
+      this.accept(event)
+      return
+    }
+    this.eventQueue.push(event)
+    this.scheduleEventDrain()
+  }
+
+  private scheduleEventDrain(): void {
+    if (
+      this.eventDrain || this.quitting || this.submitPending
+      || this.pendingEvents || !this.eventQueue.length
+    ) return
+    this.eventDrain = setImmediate(() => {
+      this.eventDrain = null
+      const started = performance.now()
+      let processed = 0
+      // Yield between output batches so terminal input can run. Keep queued
+      // output paused until an IME-delayed submit has read the composer.
+      while (!this.submitPending && !this.quitting && processed < this.eventQueue.length) {
+        const event = this.eventQueue[processed++]!
+        if (typeof event === "function") event()
+        else this.accept(event)
+        if (processed >= EVENT_BATCH_SIZE || performance.now() - started >= EVENT_BATCH_BUDGET_MS) break
+      }
+      this.eventQueue.splice(0, processed)
+      this.scheduleEventDrain()
+      if (!this.eventQueue.length && this.followUpPending) {
+        this.followUpPending = false
+        this.sendNextFollowUp()
+      }
+    })
+  }
+
+  private clearEventQueue(): void {
+    if (this.eventDrain) clearImmediate(this.eventDrain)
+    this.eventDrain = null
+    this.eventQueue = []
+    this.followUpPending = false
+  }
+
   accept(event: InboundEvent): void {
     if (event.event === "attached") {
       const switchedSession = Boolean(this.currentChatId && this.currentChatId !== event.chat_id)
       this.currentChatId = event.chat_id
+      this.closeUsage()
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
         this.applyModelPreset(event.model_preset)
@@ -1063,6 +1185,10 @@ export class NanobotTui {
     }
 
     switch (event.event) {
+      case "context_compaction":
+        this.transcript.compaction({ id: event.compaction_id, phase: event.phase })
+        if (event.phase === "succeeded" && this.usagePanel.visible) void this.refreshUsage()
+        return
       case "message_accepted":
         this.reconcileTurnOwnership(event)
         return
@@ -1079,6 +1205,7 @@ export class NanobotTui {
         return
       }
       case "delta":
+        this.retryStatus = null
         this.setActive(true)
         this.activeLabel = "Writing"
         this.turnHadAnswer = true
@@ -1099,6 +1226,7 @@ export class NanobotTui {
           }
         }
         if (event.kind) {
+          this.retryStatus = null
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
           this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
@@ -1107,6 +1235,7 @@ export class NanobotTui {
         }
         return
       case "file_edit":
+        this.retryStatus = null
         this.activeLabel = "Editing"
         this.currentFileEdits = mergeFileEdits(this.currentFileEdits, event.edits)
         if (this.diffViewer.visible) this.diffViewer.update(this.currentFileEdits)
@@ -1114,6 +1243,7 @@ export class NanobotTui {
         this.setActive(true)
         return
       case "reasoning_delta":
+        this.retryStatus = null
         this.activeLabel = "Thinking"
         this.setActive(true)
         return
@@ -1127,19 +1257,50 @@ export class NanobotTui {
           this.transcript.finishStream(event.text || "")
         }
         return
+      case "retry_status":
+        if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
+        if (event.state === "recovered" || event.state === "cleared") {
+          this.retryStatus = null
+          if (this.activeTurn) this.renderActiveStatus()
+          return
+        }
+        const retryAfterSeconds = typeof event.retry_after_s === "number"
+          && Number.isFinite(event.retry_after_s)
+          && event.retry_after_s >= 0
+          ? event.retry_after_s
+          : undefined
+        this.retryStatus = {
+          ...event,
+          ...(retryAfterSeconds !== undefined
+            ? { nextRetryAtMs: Date.now() + retryAfterSeconds * 1000 }
+            : {}),
+        }
+        this.setActive(true)
+        this.renderActiveStatus()
+        return
       case "turn_end":
         if (event.turn_id && this.activeTurnId && event.turn_id !== this.activeTurnId) return
         if (event.turn_id) {
           this.commandTurns.delete(event.turn_id)
           this.modelCommandTurns.delete(event.turn_id)
         }
-        this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
+        const failed = event.outcome === "failed"
+        this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
+        if (failed) {
+          this.transcript.notice(
+            event.failure_kind === "model"
+              ? terminalModelFailureLine(event.failure_error_kind, event.failure_attempts)
+              : event.failure_message || "This turn failed and has ended.",
+            true,
+          )
+        }
         this.transcript.finishActivity()
         if (this.currentFileEdits.length) this.lastFileEdits = this.currentFileEdits
         this.currentFileEdits = []
         if (this.diffViewer.visible) this.diffViewer.update(this.lastFileEdits)
         this.finalMessage = ""
         this.turnHadAnswer = false
+        this.retryStatus = null
         this.activeTurnId = null
         if (event.usage) this.lastUsage = event.usage
         if (typeof event.context_window_tokens === "number") {
@@ -1150,11 +1311,12 @@ export class NanobotTui {
         // A synthetic/rehydrated turn may already be idle, in which case
         // setActive(false) intentionally does not repaint the footer.
         this.updateMeta()
-        this.readyDetail = typeof event.latency_ms === "number"
+        this.readyDetail = !failed && typeof event.latency_ms === "number"
           ? `${(event.latency_ms / 1000).toFixed(1)}s`
           : ""
         this.status.content = this.readyStatus()
         if (this.contextTokens !== null) void this.refreshContextEstimate(event.chat_id)
+        if (this.usagePanel.visible) void this.refreshUsage()
         this.sendNextFollowUp()
         return
       case "goal_status":
@@ -1270,7 +1432,8 @@ export class NanobotTui {
   private flushPendingEvents(): void {
     const events = this.pendingEvents
     this.pendingEvents = null
-    for (const event of events || []) this.accept(event)
+    if (events?.length) this.eventQueue = [...events, ...this.eventQueue]
+    this.scheduleEventDrain()
   }
 
   private clearRecoveryState(): void {
@@ -1362,12 +1525,12 @@ export class NanobotTui {
       return { apiUrl: this.options.apiUrl, apiToken: this.options.apiToken }
     }
     if (this.apiRefreshPromise) return this.apiRefreshPromise
-    const refresh = fetchGatewayConnection(
+    const refresh = (this.options.resolveConnection ? this.options.resolveConnection() : fetchGatewayConnection(
       this.options.bootstrapUrl || "",
       this.options.bootstrapSecret || "",
       this.options.apiUrl,
       `tui-${process.pid}`,
-    ).then((connection) => {
+    )).then((connection) => {
       this.updateGatewayApiConnection(connection.apiUrl, connection.apiToken)
       return connection
     })
@@ -1387,7 +1550,22 @@ export class NanobotTui {
     // Invalid frames do not mean the transport is unavailable. Keep the last
     // accurate user-facing state unless the protocol supplied connection diagnostics.
     if (status === "error" && !info) return
+    this.ready = false
+    // Render already-received output before the disconnect notice, but block
+    // submissions immediately when the transport becomes unavailable.
+    if (this.eventQueue.length) {
+      this.eventQueue.push(() => this.applyStatus(status, info))
+      this.scheduleEventDrain()
+      return
+    }
+    this.applyStatus(status, info)
+  }
+
+  private applyStatus(status: ConnectionStatus, info?: ConnectionStatusInfo): void {
     this.connectionMessage = connectionStatusText(status, info)
+    if (this.options.desktopGatewayId && status === "error") {
+      this.connectionMessage = "Desktop disconnected or incompatible · exit and run nanobot to reconnect"
+    }
     if (status === "connected") {
       this.ready = false
       this.renderConnectionMessage()
@@ -1447,11 +1625,18 @@ export class NanobotTui {
     }
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.shimmerTimer = null
+    this.retryStatus = null
     this.status.content = this.readyStatus()
   }
 
   private renderActiveStatus(): void {
     if (this.sessionLoading || this.sessionMenu.visible) return
+    if (this.retryStatus) {
+      const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
+      const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
+      this.status.content = `${retryStatusLine(this.retryStatus)}${queued}${navigation}`
+      return
+    }
     const elapsed = formatElapsed(Date.now() - this.activeStartedAt)
     const navigation = this.transcriptNavigation.awayFromBottom ? " · Ctrl+End latest" : ""
     const queued = this.promptQueue.length ? ` · ${this.promptQueue.length} queued` : ""
@@ -1476,6 +1661,11 @@ export class NanobotTui {
 
   private sendNextFollowUp(): void {
     if (!this.ready || this.activeTurn || this.quitting) return
+    // Hydration may have queued an active-turn snapshot for this session.
+    if (this.eventQueue.length) {
+      this.followUpPending = true
+      return
+    }
     const prompt = this.promptQueue.takeFollowUp()
     if (!prompt) return
     this.syncQueuePreview()
@@ -1535,6 +1725,10 @@ export class NanobotTui {
     const visibleContent = this.composer.plainText.trim()
     if (this.draft.media(visibleContent).length) {
       this.status.content = "Images cannot be queued · press Enter to send now"
+      return
+    }
+    if (this.commandMenu.resolve(visibleContent)?.source === "tui") {
+      this.status.content = "Local commands cannot be queued · press Enter to run"
       return
     }
     const content = this.draft.expand(visibleContent).trim()
@@ -1601,6 +1795,21 @@ export class NanobotTui {
       }
       key.preventDefault()
       return
+    }
+    if (this.usagePanel.visible && !key.ctrl && !key.meta) {
+      if (key.name === "escape") {
+        this.closeUsage()
+        if (this.activeTurn) this.renderActiveStatus()
+        else this.status.content = this.readyStatus()
+        this.updateMeta()
+        key.preventDefault()
+        return
+      }
+      if (key.name === "left" || key.name === "right") {
+        this.usagePanel.move(key.name === "left" ? -1 : 1)
+        key.preventDefault()
+        return
+      }
     }
     if (this.contextPanel.visible && key.name === "escape") {
       this.contextPanel.hide()
@@ -1738,16 +1947,30 @@ export class NanobotTui {
       key.preventDefault()
       return
     }
-    if (!key.ctrl && !key.meta && !key.shift && (key.name === "left" || key.name === "right")) {
+    if (!key.ctrl && !key.meta && (key.name === "left" || key.name === "right")) {
       const direction = key.name === "left" ? -1 : 1
+      const cursor = this.composerStringCursor()
       const target = this.draft.moveImageCursor(
         this.composer.plainText,
-        this.composerStringCursor(),
+        cursor,
         direction,
       )
       if (target !== null) {
         this.composerCursor = target
-        this.setComposerStringCursor(this.composer.plainText, target)
+        if (key.shift) {
+          const cursorOffset = this.composerOffsetForStringIndex(this.composer.plainText, cursor)
+          const targetOffset = this.composerOffsetForStringIndex(this.composer.plainText, target)
+          this.composer.setSelection(
+            Math.min(cursorOffset, targetOffset),
+            Math.max(cursorOffset, targetOffset),
+          )
+          // OpenTUI 0.5.10 clears the selection through the public cursor
+          // setter. Move the native edit cursor directly so the placeholder
+          // remains one selected, replaceable unit.
+          this.composer.editBuffer.setCursorByOffset(targetOffset)
+        } else {
+          this.setComposerStringCursor(this.composer.plainText, target)
+        }
         key.preventDefault()
         return
       }
@@ -1856,6 +2079,7 @@ export class NanobotTui {
     this.branchMenu.setTheme(commandMenuTheme(this.palette))
     this.runtimeControls.setTheme(runtimeControlsTheme(this.palette))
     this.contextPanel.setTheme(contextPanelTheme(this.palette))
+    this.usagePanel.setTheme(usagePanelTheme(this.palette))
     this.diffViewer.setTheme(diffViewerTheme(this.palette, this.backgroundKnown))
     this.queuePreview.setTheme(queuePreviewTheme(this.palette))
     this.recoveryNotice.setTheme(recoveryNoticeTheme(this.palette))
@@ -1877,6 +2101,7 @@ export class NanobotTui {
     this.resizeComposer()
     this.syncComposerPlaceholder()
     this.contextPanel.resize(this.renderer.height)
+    this.usagePanel.resize(this.renderer.width, this.renderer.height)
     this.diffViewer.resize(this.renderer.width)
     this.title.visible = this.renderer.height >= 14
     this.runtimeControls.resize(this.renderer.width)
@@ -1888,6 +2113,7 @@ export class NanobotTui {
     const mode: FooterMode = this.runtimeControls.visible ? "runtime"
       : this.mentionMenu.visible ? "mention"
       : this.skillMenu.visible ? "skill"
+      : this.usagePanel.visible ? "usage"
       : this.activeTurn ? "active"
       : this.branchMenu.visible ? "branch"
       : this.commandMenu.visible ? "command"
@@ -1897,8 +2123,8 @@ export class NanobotTui {
       : "ready"
     if (mode === "ready") {
       this.meta.content = footerTelemetry(
-        this.lastUsage,
-        this.renderer.width,
+        this.lastUsage?.context_tokens ?? null,
+        this.contextWindowTokens,
         footerHintTheme(this.palette),
       )
       return
@@ -2103,6 +2329,7 @@ export class NanobotTui {
     if (clearedUnsent) this.unsentSubmit = false
     this.runtimeControls.hide()
     if (this.contextPanel.visible && value) this.contextPanel.hide()
+    if (this.usagePanel.visible && value) this.closeUsage()
     this.syncComposerPlaceholder()
     if (this.sessionMenu.visible) this.syncSessionMenu()
     else if (this.branchMenu.visible) this.syncBranchMenu()
@@ -2232,6 +2459,7 @@ export class NanobotTui {
     this.skillMenu.hide()
     this.branchMenu.hide()
     this.contextPanel.hide()
+    this.closeUsage()
     this.activeMentionQuery = null
     this.activeSkillQuery = null
   }
@@ -2288,6 +2516,7 @@ export class NanobotTui {
   }
 
   private async openBranch(): Promise<void> {
+    this.closeUsage()
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
@@ -2358,6 +2587,7 @@ export class NanobotTui {
   }
 
   private async openSessions(): Promise<void> {
+    this.closeUsage()
     this.commandMenu.hide()
     this.dismissRuntimeControls()
     this.mentionMenu.hide()
@@ -2442,6 +2672,7 @@ export class NanobotTui {
   }
 
   private startNewChat(): void {
+    this.closeUsage()
     if (this.activeTurn) {
       this.status.content = "Wait for the current turn or press Ctrl+C"
       return
@@ -2611,7 +2842,60 @@ export class NanobotTui {
     }
   }
 
+  private openUsage(): void {
+    this.closeTransientMenus()
+    this.clearComposer()
+    this.usagePanel.showMessage("Loading usage…")
+    this.updateMeta()
+    void this.refreshUsage()
+  }
+
+  private closeUsage(): void {
+    this.usagePanel.hide()
+    this.usageRequest?.abort()
+    this.usageRequest = null
+    this.usageRefreshPending = false
+  }
+
+  private async refreshUsage(): Promise<void> {
+    if (this.quitting || !this.usagePanel.visible) return
+    if (this.usageRequest) {
+      // Events during a fetch need one later snapshot, not parallel thread replays.
+      this.usageRefreshPending = true
+      return
+    }
+    const request = new AbortController()
+    this.usageRequest = request
+    const chatId = this.client.activeChatId
+    const current = () => !this.quitting && this.usagePanel.visible
+      && request === this.usageRequest && chatId === this.client.activeChatId
+    try {
+      const snapshot = await fetchSessionUsage(
+        this.options.apiUrl,
+        this.options.apiToken,
+        chatId,
+        this.apiReauthenticator,
+        request.signal,
+      )
+      if (!current() || this.usageRefreshPending) return
+      this.usagePanel.show(snapshot)
+    } catch {
+      if (!current() || this.usageRefreshPending) return
+      this.usagePanel.showMessage("Usage unavailable · reopen /usage to retry")
+    } finally {
+      // A dismissed request must not clear a reopened panel's request or queued refresh.
+      if (request === this.usageRequest) {
+        this.usageRequest = null
+        if (this.usageRefreshPending) {
+          this.usageRefreshPending = false
+          void this.refreshUsage()
+        }
+      }
+    }
+  }
+
   private async openContext(): Promise<void> {
+    this.closeUsage()
     this.commandMenu.hide()
     this.hideSessionMenu()
     this.mentionMenu.hide()
@@ -2685,6 +2969,7 @@ export class NanobotTui {
   }
 
   private openDiff(): void {
+    this.closeUsage()
     this.commandMenu.hide()
     this.hideSessionMenu()
     this.mentionMenu.hide()
@@ -2762,6 +3047,8 @@ export class NanobotTui {
 
   private handleDestroy = (): void => {
     this.quitting = true
+    this.clearEventQueue()
+    this.usageRequest?.abort()
     this.clipboardPasteGeneration += 1
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
     this.stopSessionRefresh()

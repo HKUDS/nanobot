@@ -21,6 +21,7 @@ import {
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   Activity,
+  Archive,
   ArrowUp,
   BookOpen,
   Brain,
@@ -71,6 +72,11 @@ import {
   type ModelPresetOption,
 } from "@/components/thread/ModelPresetBadge";
 import {
+  ComposerUsagePopover,
+  type ComposerContextUsage,
+  type ComposerRoundUsage,
+} from "@/components/thread/ComposerUsagePopover";
+import {
   ACCEPT_ATTR,
   MAX_ATTACHMENTS_PER_MESSAGE,
   useAttachedImages,
@@ -80,6 +86,7 @@ import {
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
+import { useComposerMentionInput } from "@/hooks/useComposerMentionInput";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
@@ -102,6 +109,7 @@ import {
   logoFallbackUrls,
 } from "@/lib/provider-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
+import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
   isSideChannelLifecycle,
   slashCommandLifecycle,
@@ -112,7 +120,6 @@ import {
   readDraggedSession,
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
-import { formatCompactTokenCount } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
@@ -179,107 +186,6 @@ function getVoiceShortcutLabel(): string {
   }
 }
 
-export interface ComposerContextUsage {
-  contextTokens: number;
-  contextWindowTokens?: number;
-}
-
-function ComposerContextBadge({ usage }: { usage: ComposerContextUsage | null }) {
-  const { t } = useTranslation();
-  if (!usage || !Number.isFinite(usage.contextTokens) || usage.contextTokens < 0) return null;
-
-  const context = formatCompactTokenCount(usage.contextTokens);
-  const contextWindow = typeof usage.contextWindowTokens === "number"
-    && Number.isFinite(usage.contextWindowTokens)
-    && usage.contextWindowTokens > 0
-    ? usage.contextWindowTokens
-    : null;
-  const capacity = contextWindow !== null
-    ? ` / ${formatCompactTokenCount(contextWindow)}`
-    : "";
-  // The meter is meaningful only with a known capacity.  Do not turn an
-  // otherwise unknown total into a second, text-heavy control beside the
-  // model picker.
-  if (contextWindow === null) return null;
-  const percentage = Math.min(100, Math.round(usage.contextTokens / contextWindow * 100));
-  const status = percentage >= 90
-      ? "critical"
-      : percentage >= 75
-        ? "caution"
-        : "normal";
-  const contextDescription = t("thread.composer.context.tooltip", {
-    defaultValue: "Context · {{tokens}}{{capacity}}",
-    tokens: context,
-    capacity,
-  });
-  const meterDescription = t("thread.composer.context.meterDescription", {
-    defaultValue: "{{context}}. {{percent}}% used.",
-    context: contextDescription,
-    percent: percentage,
-  });
-  const ringCircumference = 2 * Math.PI * 6;
-  const ringLength = ringCircumference * percentage / 100;
-
-  return (
-    <TooltipProvider delayDuration={300} skipDelayDuration={80}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            data-testid="composer-context-usage"
-            aria-label={meterDescription}
-            className={cn(
-              "inline-flex size-5 shrink-0 items-center justify-center rounded-full",
-              "text-muted-foreground/75 transition-colors hover:text-foreground/85",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            )}
-          >
-            <svg
-              viewBox="0 0 16 16"
-              aria-hidden="true"
-              className={cn(
-                "size-[15px] shrink-0 -rotate-90",
-                status === "critical" && "text-destructive",
-                status === "caution" && "text-amber-600 dark:text-amber-400",
-                status === "normal" && "text-muted-foreground/75",
-              )}
-            >
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="opacity-20"
-              />
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeDasharray={`${ringLength} ${ringCircumference}`}
-                data-testid="composer-context-meter"
-              />
-            </svg>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent
-          side="top"
-          align="center"
-          sideOffset={8}
-          className="w-fit max-w-[calc(100vw-2rem)] rounded-full border-border/70 px-2.5 py-1 text-xs font-medium shadow-[0_8px_24px_rgba(15,23,42,0.13)]"
-        >
-          <span className="whitespace-nowrap tabular-nums">{contextDescription}</span>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
 interface ThreadComposerProps {
   onSend: (
     content: string,
@@ -289,6 +195,7 @@ interface ThreadComposerProps {
   disabled?: boolean;
   placeholder?: string;
   inputAriaLabel?: string;
+  compactWhenIdle?: boolean;
   isStreaming?: boolean;
   modelLabel?: string | null;
   modelDetail?: string | null;
@@ -302,6 +209,7 @@ interface ThreadComposerProps {
   onModelBadgeClick?: () => void;
   onManageModels?: () => void;
   contextUsage?: ComposerContextUsage | null;
+  recentRoundUsage?: readonly ComposerRoundUsage[];
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   cliApps?: CliAppInfo[];
@@ -331,6 +239,7 @@ interface ThreadComposerProps {
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
   activity: Activity,
+  archive: Archive,
   "book-open": BookOpen,
   brain: Brain,
   "circle-help": CircleHelp,
@@ -353,9 +262,6 @@ const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:"
 const QUEUED_PROMPTS_LIMIT = 20;
 const QUEUED_PROMPT_MAX_CHARS = 4000;
 const SESSION_MENTIONS_LIMIT = 8;
-
-const COMPOSER_DRAFT_STORAGE_PREFIX = "nanobot.webui.draft.";
-const COMPOSER_DRAFT_DEBOUNCE_MS = 120;
 
 function VoiceRecordingMeter({
   ariaLabel,
@@ -531,23 +437,6 @@ function storeSlashRecents(commands: string[]): void {
 function queuedPromptsStorageKey(key?: string | null): string | null {
   const clean = key?.trim();
   return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
-}
-
-function composerDraftStorageKey(pendingQueueKey?: string | null): string | null {
-  const clean = pendingQueueKey?.trim();
-  return clean ? `${COMPOSER_DRAFT_STORAGE_PREFIX}${clean}` : null;
-}
-
-function loadComposerDraft(pendingQueueKey?: string | null): string {
-  if (typeof window === "undefined") return "";
-  const key = composerDraftStorageKey(pendingQueueKey);
-  if (!key) return "";
-  try {
-    return window.localStorage.getItem(key) ?? "";
-  } catch {
-    // localStorage may be unavailable in private contexts.
-    return "";
-  }
 }
 
 function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
@@ -1008,6 +897,7 @@ export function ThreadComposer({
   disabled,
   placeholder,
   inputAriaLabel,
+  compactWhenIdle = false,
   isStreaming = false,
   modelLabel = null,
   modelDetail = null,
@@ -1021,6 +911,7 @@ export function ThreadComposer({
   onModelBadgeClick,
   onManageModels,
   contextUsage = null,
+  recentRoundUsage = [],
   variant = "thread",
   slashCommands = [],
   cliApps = [],
@@ -1047,7 +938,9 @@ export function ThreadComposer({
   onQuotedContextChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
-  const [value, setValue] = useState(() => loadComposerDraft(pendingQueueKey));
+  const [value, setValue] = useState("");
+  const [composerFocused, setComposerFocused] = useState(false);
+  const blurFrame = useRef<number | null>(null);
   const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
   const [sessionDragPreview, setSessionDragPreview] = useState<{
     mention: SessionMention;
@@ -1067,11 +960,35 @@ export function ThreadComposer({
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
-  // Wider than hasTouchPrimaryPointer on purpose: tablets with a physical
-  // keyboard still count as touch for the Enter key behavior below.
-  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const [compactControls, setCompactControls] = useState(false);
+
+  useLayoutEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    let previousWidth = 0;
+    const update = () => {
+      const width = form.getBoundingClientRect().width;
+      if (width <= 0 || width === previousWidth) return;
+      previousWidth = width;
+      setCompactControls(width <= 512);
+      const input = textareaRef.current;
+      if (input) {
+        input.style.height = "auto";
+        input.style.height = `${Math.min(input.scrollHeight, 260)}px`;
+      }
+    };
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(form);
+    window.addEventListener("resize", update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
@@ -1079,32 +996,7 @@ export function ThreadComposer({
   const secondEnterPromptIdRef = useRef<string | null>(null);
   const draggedQueuedPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
-  const wasStreamingRef = useRef(isStreaming);
-
-  // Persist draft text per session so reloading or switching sessions restores
-  // what the user was typing. Keyed the same way as queued prompts; the value
-  // effect flushes the pending write on key change/unmount so a fast switch
-  // never loses the last keystroke. Sending or clearing removes the draft.
-  useEffect(() => {
-    const key = composerDraftStorageKey(pendingQueueKey);
-    if (!key) return;
-    const persist = () => {
-      try {
-        if (value) {
-          window.localStorage.setItem(key, value);
-        } else {
-          window.localStorage.removeItem(key);
-        }
-      } catch {
-        // localStorage may be unavailable in private contexts.
-      }
-    };
-    const timer = window.setTimeout(persist, COMPOSER_DRAFT_DEBOUNCE_MS);
-    return () => {
-      window.clearTimeout(timer);
-      persist();
-    };
-  }, [pendingQueueKey, value]);
+  const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
   const skipNextQueuedFlushRef = useRef(false);
   const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
@@ -1198,14 +1090,18 @@ export function ThreadComposer({
   } = useClipboardAndDrop(addFiles);
 
   useEffect(() => {
-    if (interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
+    if (compactWhenIdle || interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
       return;
     }
     const el = textareaRef.current;
     if (!el) return;
     const id = requestAnimationFrame(() => el.focus());
     return () => cancelAnimationFrame(id);
-  }, [hasTouchPrimaryPointer, interactionDisabled, showProjectPicker, workspaceError]);
+  }, [compactWhenIdle, hasTouchPrimaryPointer, interactionDisabled, showProjectPicker, workspaceError]);
+
+  useEffect(() => () => {
+    if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+  }, []);
 
   useEffect(() => {
     if (!focusRequest || interactionDisabled) return;
@@ -1261,6 +1157,12 @@ export function ThreadComposer({
       text: match[1].toLowerCase(),
     };
   }, [cursorPosition, interactionDisabled, slashMenuDismissed, value]);
+
+  const skillMenuActive = skillQuery !== null;
+  useEffect(() => {
+    // Also refresh an empty menu: skills may have been installed by the agent.
+    if (skillMenuActive) requestSkillsRefresh();
+  }, [skillMenuActive]);
 
   const visibleSlashCommands = useMemo(() => {
     if (!(isStreaming && onStop)) return slashCommands;
@@ -1409,6 +1311,20 @@ export function ThreadComposer({
     () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
     [cliApps, mcpPresets, selectedSessionMentions, value],
   );
+  const editMentionInput = useCallback((next: string, cursor: number) => {
+    secondEnterPromptIdRef.current = null;
+    setValue(next);
+    setSlashMenuDismissed(false);
+    setCliAppMenuDismissed(false);
+    setCursorPosition(cursor);
+  }, []);
+  const mentionInput = useComposerMentionInput({
+    segments: mentionSegments,
+    inputRef: textareaRef,
+    onEdit: editMentionInput,
+    resetKey: pendingQueueKey,
+  });
+  const { rawSelection, replace: replaceMentionInput } = mentionInput;
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
         value,
@@ -1424,7 +1340,7 @@ export function ThreadComposer({
         mcpPresets,
         [...selectedSessionMentions, sessionDragPreview.mention],
       )
-    : mentionSegments;
+    : mentionInput.segments;
   const activeSessionMentions = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -1628,12 +1544,20 @@ export function ThreadComposer({
     });
   }, []);
 
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el || mentionInput.isComposing) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = el.scrollTop;
+  }, [compactControls, mentionInput.isComposing, mentionInput.value]);
+
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
     previousPendingQueueKeyRef.current = pendingQueueKey;
     secondEnterPromptIdRef.current = null;
-    setValue(loadComposerDraft(pendingQueueKey));
+    setValue("");
     setSelectedSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
@@ -1754,14 +1678,7 @@ export function ThreadComposer({
         const inserted = `${command.command}${suffix.startsWith(" ") ? "" : " "}`;
         const next = `${value.slice(0, skillQuery.start)}${inserted}${suffix}`;
         const nextCursor = skillQuery.start + inserted.length;
-        setValue(next);
-        setCursorPosition(nextCursor);
-        requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (!el) return;
-          el.focus();
-          el.setSelectionRange(nextCursor, nextCursor);
-        });
+        replaceMentionInput(next, nextCursor);
       } else {
         setValue(command.argHint ? `${command.command} ` : command.command);
       }
@@ -1770,7 +1687,7 @@ export function ThreadComposer({
       setInlineError(null);
       resizeTextarea();
     },
-    [isStreaming, onStop, recentSlashCommands, resizeTextarea, skillQuery, value],
+    [isStreaming, onStop, recentSlashCommands, replaceMentionInput, resizeTextarea, skillQuery, value],
   );
 
   const insertMentionCandidate = useCallback(
@@ -1790,20 +1707,13 @@ export function ThreadComposer({
         ]);
       }
       const insertion = mentionInsertion(value, candidate.name, start, end);
-      setValue(insertion.value);
-      setCursorPosition(insertion.cursor);
+      replaceMentionInput(insertion.value, insertion.cursor);
       setCliAppMenuDismissed(true);
       setSlashMenuDismissed(false);
       setInlineError(null);
       resizeTextarea();
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.focus();
-        el.setSelectionRange(insertion.cursor, insertion.cursor);
-      });
     },
-    [activeSessionMentions, resizeTextarea, value],
+    [activeSessionMentions, replaceMentionInput, resizeTextarea, value],
   );
 
   const chooseMentionCandidate = useCallback(
@@ -1826,7 +1736,7 @@ export function ThreadComposer({
       (candidate) => candidate.session_key === (sessionKey ?? preview?.mention.session_key),
     );
     if (!mention) return true;
-    const caret = preview?.start ?? textareaRef.current?.selectionStart ?? value.length;
+    const caret = preview?.start ?? rawSelection().start;
     insertMentionCandidate(
       {
         kind: "session",
@@ -1835,13 +1745,14 @@ export function ThreadComposer({
         mention,
       },
       caret,
-      preview?.end ?? textareaRef.current?.selectionEnd ?? caret,
+      preview?.end ?? rawSelection().end,
     );
     return true;
   }, [
     availableSessionMentions,
     insertMentionCandidate,
     interactionDisabled,
+    rawSelection,
     sessionDragPreview,
     value.length,
   ]);
@@ -1867,8 +1778,7 @@ export function ThreadComposer({
     }
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
-    const start = textareaRef.current?.selectionStart ?? value.length;
-    const end = textareaRef.current?.selectionEnd ?? start;
+    const { start, end } = rawSelection();
     setSessionDragPreview((current) => (
       current?.mention.session_key === mention.session_key
       && current.start === start
@@ -1877,7 +1787,7 @@ export function ThreadComposer({
         : { mention, start, end }
     ));
     return true;
-  }, [activeSessionMentions, availableSessionMentions, interactionDisabled, value.length]);
+  }, [activeSessionMentions, availableSessionMentions, interactionDisabled, rawSelection]);
 
   useEffect(() => {
     if (!sessionDragPreview) return;
@@ -1890,14 +1800,6 @@ export function ThreadComposer({
   }, [sessionDragPreview]);
 
   const clearComposerText = useCallback((restoreFocus = true) => {
-    const draftKey = composerDraftStorageKey(pendingQueueKey);
-    if (draftKey) {
-      try {
-        window.localStorage.removeItem(draftKey);
-      } catch {
-        // localStorage may be unavailable in private contexts.
-      }
-    }
     setValue("");
     setSelectedSessionMentions([]);
     setInlineError(null);
@@ -1905,7 +1807,7 @@ export function ThreadComposer({
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
     resizeTextarea(restoreFocus);
-  }, [pendingQueueKey, resizeTextarea]);
+  }, [resizeTextarea]);
 
   const queueGuidancePrompt = useCallback(() => {
     const text = value.trim();
@@ -1955,12 +1857,11 @@ export function ThreadComposer({
   const editQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
     secondEnterPromptIdRef.current = null;
     setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
-    setValue(prompt.text);
+    replaceMentionInput(prompt.text, prompt.text.length);
     setSelectedSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
-    setCursorPosition(prompt.text.length);
     onQuotedContextChange?.(prompt.quotedContext ?? null);
     if (prompt.images?.length) {
       restoreReadyImages(prompt.images as RestoredReadyImage[]);
@@ -1968,13 +1869,7 @@ export function ThreadComposer({
       clear();
     }
     resizeTextarea();
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(prompt.text.length, prompt.text.length);
-    });
-  }, [clear, onQuotedContextChange, resizeTextarea, restoreReadyImages]);
+  }, [clear, onQuotedContextChange, replaceMentionInput, resizeTextarea, restoreReadyImages]);
 
   const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
     if (dragId === targetId) return;
@@ -2044,16 +1939,21 @@ export function ThreadComposer({
   }, [onSend, queuedPrompts]);
 
   useEffect(() => {
-    const wasStreaming = wasStreamingRef.current;
-    wasStreamingRef.current = isStreaming;
+    const previous = previousQueueRunRef.current;
+    previousQueueRunRef.current = { key: pendingQueueKey, isStreaming };
     if (!isStreaming) secondEnterPromptIdRef.current = null;
-    if (!wasStreaming || isStreaming || queuedPrompts.length === 0) return;
+    // Switching to an idle session is not completion of the previous session's run.
+    if (previous.key !== pendingQueueKey) {
+      skipNextQueuedFlushRef.current = false;
+      return;
+    }
+    if (!previous.isStreaming || isStreaming || queuedPrompts.length === 0) return;
     if (skipNextQueuedFlushRef.current) {
       skipNextQueuedFlushRef.current = false;
       return;
     }
     sendNextQueuedPrompt();
-  }, [sendNextQueuedPrompt, isStreaming, queuedPrompts.length]);
+  }, [sendNextQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompts.length]);
 
   const handleStop = useCallback(() => {
     secondEnterPromptIdRef.current = null;
@@ -2187,6 +2087,8 @@ export function ThreadComposer({
   ]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    mentionInput.onKeyDown(e);
+    if (e.defaultPrevented || e.nativeEvent.isComposing || mentionInput.isComposing) return;
     if (showCliAppMenu) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -2234,19 +2136,6 @@ export function ThreadComposer({
         setSlashMenuDismissed(true);
         return;
       }
-    }
-    // Touch keyboards: a plain Enter inserts a newline; sending stays on the
-    // send button. The select-on-Enter menu branches above take precedence.
-    if (
-      e.key === "Enter"
-      && !e.shiftKey
-      && !e.altKey
-      && !e.ctrlKey
-      && !e.metaKey
-      && !e.nativeEvent.isComposing
-      && hasCoarsePointer
-    ) {
-      return;
     }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
@@ -2338,19 +2227,91 @@ export function ThreadComposer({
         : t("thread.composer.voice.hint");
   const showStopButton = isStreaming && !!onStop;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
+  const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
+    && value.length === 0 && images.length === 0 && !inlineError
+    && !normalizedQuotedContext && !queuedPrompts.length && !goalState?.active
+    && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
+  useLayoutEffect(() => {
+    if (!compactWhenIdle || compactControls) return;
+    const form = formRef.current;
+    const primary = form?.querySelector<HTMLElement>(".thread-composer-footer-primary");
+    const actions = form?.querySelector<HTMLElement>(".thread-composer-footer-actions");
+    if (!form || !primary || !actions) return;
+    const controls = Array.from(primary.children).filter((child) => getComputedStyle(child).display !== "none");
+    // Reserve the real toolbar width, including translated model labels, while
+    // the footer slides beneath the input. Neither control is remounted.
+    const measure = () => {
+      const gap = parseFloat(getComputedStyle(primary).columnGap) || 0;
+      const width = controls.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0)
+        + Math.max(0, controls.length - 1) * gap + actions.getBoundingClientRect().width;
+      form.style.setProperty("--composer-compact-controls-width", `${width}px`);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    controls.forEach((control) => observer?.observe(control));
+    observer?.observe(actions);
+    return () => observer?.disconnect();
+  }, [compactControls, compactWhenIdle, modelLabel, voiceRecorder.isRecording, workspaceScope]);
+  const accessControl = workspaceScope && !workspaceControlsHidden ? (
+    <WorkspaceAccessMenu
+      scope={workspaceScope}
+      disabled={interactionDisabled || workspaceScopeDisabled}
+      canUseFullAccess={workspaceControls?.can_use_full_access !== false}
+      isHero={isHero}
+      onChange={onWorkspaceScopeChange}
+    />
+  ) : null;
+  const modelControl = modelLabel && !voiceRecorder.isRecording ? (
+    <ModelPresetBadge
+      label={modelLabel}
+      modelDetail={modelDetail}
+      modelPreset={modelPreset}
+      modelPresets={modelPresets}
+      onPresetChange={onModelPresetChange}
+      onManageModels={onManageModels}
+      onRequestComposerFocus={() => textareaRef.current?.focus()}
+      provider={modelProvider}
+      providerLabel={modelProviderLabel}
+      needsSetup={modelNeedsSetup}
+      attentionRequest={modelSetupAttentionRequest}
+      fallbackModelName={fallbackModelName}
+      isHero={isHero && !compactControls}
+      onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
+    />
+  ) : null;
+  const usageControl = !voiceRecorder.isRecording ? (
+    <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} showLabel={compactControls} bottomSheet={compactControls} />
+  ) : null;
   const inputTextClasses = cn(
     "w-full resize-none bg-transparent",
-    isHero
-      ? cn(
-          "min-h-[78px] px-4 text-[16px] leading-6 sm:px-5",
-          relaxedHeroInput ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
-        )
-      : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[16px] leading-5 sm:px-4",
+    compactControls
+      ? "min-h-[52px] px-4 pb-2 pt-3 text-[16px] leading-6"
+      : isHero
+        ? cn(
+            "min-h-[78px] px-4 text-[16px] leading-6 sm:px-5",
+            relaxedHeroInput ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
+          )
+        : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[16px] leading-5 sm:px-4",
   );
 
   return (
     <form
       ref={formRef}
+      data-compact-controls={compactControls ? "true" : undefined}
+      onFocusCapture={() => {
+        if (!compactWhenIdle) return;
+        // Portaled model controls belong to this composer too: keep its layout
+        // stable while moving between the input, toolbar, and model picker.
+        if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+      }}
+      onBlurCapture={() => {
+        if (!compactWhenIdle) return;
+        if (blurFrame.current !== null) cancelAnimationFrame(blurFrame.current);
+        blurFrame.current = requestAnimationFrame(() => {
+          blurFrame.current = null;
+          setComposerFocused(false);
+        });
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -2374,7 +2335,11 @@ export function ThreadComposer({
       onDrop={(event) => {
         if (!handleSessionDrop(event)) onDrop(event);
       }}
-      className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
+      className={cn(
+        "relative w-full",
+        isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0",
+        compactWhenIdle && "thread-composer-collapsible-layout",
+      )}
     >
       {showSlashMenu ? (
         <SlashCommandPalette
@@ -2398,11 +2363,13 @@ export function ThreadComposer({
       ) : null}
       <div
         ref={surfaceRef}
+        data-compact={compactIdle || undefined}
         className={cn(
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
-            ? "max-w-[58rem] rounded-prominent bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]"
-            : "max-w-[49.5rem] rounded-panel bg-muted/30 focus-within:bg-muted/50 dark:bg-card dark:focus-within:bg-white/[0.06]",
+            ? "max-w-[58rem] rounded-prominent bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]"
+            : "max-w-[49.5rem] rounded-panel bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]",
+          compactWhenIdle && "thread-composer-collapsible transition-colors motion-reduce:transition-none",
           interactionDisabled && "opacity-60",
           sessionDragPreview && "ring-1 ring-primary/25",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
@@ -2486,11 +2453,13 @@ export function ThreadComposer({
           </div>
         ) : null}
         <GoalStateStrip goalState={goalState} />
-        <div className="relative">
+        <div className="thread-composer-input relative min-w-0">
           {hasMentionDecorations ? (
             <ComposerCliMentionOverlay
+              overlayRef={mentionOverlayRef}
               segments={displayMentionSegments}
               isHero={isHero}
+              isComposing={mentionInput.isComposing}
               className={inputTextClasses}
               ghostRange={sessionDragInsertion
                 ? { start: sessionDragInsertion.tokenStart, end: sessionDragInsertion.tokenEnd }
@@ -2499,31 +2468,34 @@ export function ThreadComposer({
           ) : null}
           <textarea
             ref={textareaRef}
-            value={value}
-            onChange={(e) => {
-              secondEnterPromptIdRef.current = null;
-              setValue(e.target.value);
-              setSlashMenuDismissed(false);
-              setCliAppMenuDismissed(false);
-              setCursorPosition(e.target.selectionStart ?? e.target.value.length);
+            value={mentionInput.value}
+            onFocus={() => {
+              if (compactWhenIdle) setComposerFocused(true);
             }}
+            onChange={mentionInput.onChange}
+            onCompositionStart={mentionInput.onCompositionStart}
+            onCompositionEnd={mentionInput.onCompositionEnd}
             onBlur={() => {
               secondEnterPromptIdRef.current = null;
             }}
             onInput={onInput}
             onKeyDown={onKeyDown}
-            onKeyUp={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
-            onSelect={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
-            onClick={(e) => setCursorPosition(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onKeyUp={() => setCursorPosition(rawSelection().start)}
+            onSelect={() => setCursorPosition(rawSelection().start)}
+            onClick={() => setCursorPosition(rawSelection().start)}
+            onCopy={mentionInput.onCopy}
+            onCut={mentionInput.onCut}
+            onScroll={(e) => {
+              if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = e.currentTarget.scrollTop;
+            }}
             onPaste={onPaste}
             rows={1}
-            enterKeyHint={hasCoarsePointer ? "enter" : undefined}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={interactionDisabled}
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
             className={cn(
               inputTextClasses,
-              "relative z-10 caret-foreground placeholder:text-muted-foreground/70",
+              "relative z-10 block caret-foreground placeholder:text-muted-foreground/70",
               "focus:outline-none focus-visible:outline-none",
               "disabled:cursor-not-allowed",
               hasMentionDecorations && "text-transparent selection:bg-primary/20",
@@ -2575,7 +2547,7 @@ export function ThreadComposer({
               aria-label={t("thread.composer.attachImage")}
               onClick={() => fileInputRef.current?.click()}
               className={cn(
-                "thread-composer-action touch-target rounded-full text-muted-foreground hover:text-foreground",
+                "thread-composer-action thread-composer-round-action touch-target rounded-full text-muted-foreground hover:text-foreground",
                 isHero
                   ? "h-8 w-8 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
                   : "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
@@ -2591,15 +2563,7 @@ export function ThreadComposer({
                 isHero={isHero}
                 levels={voiceRecorder.levels}
               />
-            ) : workspaceScope && !workspaceControlsHidden ? (
-              <WorkspaceAccessMenu
-                scope={workspaceScope}
-                disabled={interactionDisabled || workspaceScopeDisabled}
-                canUseFullAccess={workspaceControls?.can_use_full_access !== false}
-                isHero={isHero}
-                onChange={onWorkspaceScopeChange}
-              />
-            ) : null}
+            ) : compactControls ? modelControl : accessControl}
           </div>
           <div
             className={cn(
@@ -2607,27 +2571,10 @@ export function ThreadComposer({
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
-            {modelLabel && !voiceRecorder.isRecording ? (
-              <ModelPresetBadge
-                label={modelLabel}
-                modelDetail={modelDetail}
-                modelPreset={modelPreset}
-                modelPresets={modelPresets}
-                onPresetChange={onModelPresetChange}
-                onManageModels={onManageModels}
-                onRequestComposerFocus={() => textareaRef.current?.focus()}
-                provider={modelProvider}
-                providerLabel={modelProviderLabel}
-                needsSetup={modelNeedsSetup}
-                attentionRequest={modelSetupAttentionRequest}
-                fallbackModelName={fallbackModelName}
-                isHero={isHero}
-                onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
-              />
-            ) : null}
-            {!voiceRecorder.isRecording ? <ComposerContextBadge usage={contextUsage} /> : null}
+            {!compactControls ? modelControl : null}
+            {!compactControls ? usageControl : null}
             {showVoiceButton ? (
-              <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+              <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -2686,7 +2633,7 @@ export function ThreadComposer({
               }
               onClick={showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
               className={cn(
-                "thread-composer-action touch-target rounded-full transition-transform",
+                "thread-composer-action thread-composer-round-action touch-target rounded-full transition-transform",
                 showStopButton
                   ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
                   : isHero
@@ -2708,13 +2655,13 @@ export function ThreadComposer({
         </div>
         {projectPickerAvailable ? (
           <div
-            className="composer-workspace-drawer"
+            className="inline-disclosure"
             data-composer-workspace-drawer=""
             data-state={showProjectPicker ? "open" : "closed"}
             aria-hidden={showProjectPicker ? undefined : true}
           >
-            <div className="composer-workspace-drawer-clip">
-              <div className="composer-workspace-drawer-content">
+            <div className="inline-disclosure-clip">
+              <div className="inline-disclosure-content">
                 <WorkspaceProjectPicker
                   isHero={isHero}
                   disabled={interactionDisabled || workspaceScopeDisabled || !showProjectPicker}
@@ -2730,6 +2677,12 @@ export function ThreadComposer({
           </div>
         ) : null}
       </div>
+      {compactControls ? (
+        <div className="thread-composer-meta mx-auto flex w-full max-w-[58rem] items-center justify-between gap-2 px-2">
+          {accessControl}
+          <div className="ml-auto">{usageControl}</div>
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -2920,23 +2873,31 @@ function QueuedPromptRow({
 }
 
 function ComposerCliMentionOverlay({
+  overlayRef,
   segments,
   isHero,
+  isComposing,
   className,
   ghostRange,
 }: {
+  overlayRef: Ref<HTMLDivElement>;
   segments: CapabilityMentionSegment[];
   isHero: boolean;
+  isComposing: boolean;
   className: string;
   ghostRange?: { start: number; end: number } | null;
 }) {
   let offset = 0;
+  const occurrences = new Map<string, number>();
   return (
     <div
+      ref={overlayRef}
       aria-hidden
       className={cn(
         className,
         "pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-foreground",
+        // Native IME selection backgrounds can be opaque; keep the mirrored glyphs visible.
+        isComposing && "z-20",
       )}
     >
       {segments.map((segment, index) => {
@@ -2946,9 +2907,13 @@ function ComposerCliMentionOverlay({
           return <span key={`text-${index}`}>{segment.text}</span>;
         }
         const isGhost = ghostRange?.start === start && ghostRange.end === offset;
+        const identity = `${segment.kind}-${segment.kind === "cli"
+          ? segment.app.name : segment.kind === "mcp" ? segment.preset.name : segment.mention.session_key}`;
+        const occurrence = occurrences.get(identity) ?? 0;
+        occurrences.set(identity, occurrence + 1);
         return (
           <span
-            key={`${segment.kind}-${index}`}
+            key={`${identity}-${occurrence}`}
             data-testid={isGhost ? "composer-session-drag-preview" : undefined}
             className={cn(isGhost && "opacity-45 transition-opacity duration-100")}
           >
@@ -2960,6 +2925,7 @@ function ComposerCliMentionOverlay({
           </span>
         );
       })}
+      {segments.at(-1)?.text.endsWith("\n") ? "\u200b" : null}
     </div>
   );
 }
