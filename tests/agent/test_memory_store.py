@@ -549,3 +549,29 @@ def test_raw_archive_handles_none_timestamp_and_missing_role(tmp_path: Path) -> 
     assert "[?] USER: message with none timestamp" in raw_history
     assert "[1720000000] ASSISTANT: message with int timestamp" in raw_history
     assert "[2026-07-28T12:00] UNKNOWN: message with missing role" in raw_history
+
+
+def test_legacy_workspace_gitignore_backfilled_on_construction(tmp_path):
+    """#5246: MemoryStore repairs pre-fix workspace .gitignore on startup."""
+    from dulwich import porcelain
+
+    porcelain.init(str(tmp_path))
+    legacy = "/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n"
+    (tmp_path / ".gitignore").write_text(legacy, encoding="utf-8")
+
+    MemoryStore(tmp_path)
+
+    lines = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "memory/*" in lines
+    assert "!memory/.dream_cursor" in lines
+
+
+def test_gitignore_backfill_failure_does_not_prevent_memory_open(tmp_path, monkeypatch):
+    from nanobot.utils.gitstore import GitStore, GitStoreError
+
+    def fail(_self):
+        raise GitStoreError("read-only workspace")
+
+    monkeypatch.setattr(GitStore, "ensure_gitignore", fail)
+    store = MemoryStore(tmp_path)
+    assert store.memory_dir.is_dir()

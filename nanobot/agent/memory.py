@@ -28,7 +28,7 @@ from nanobot.providers.conversation_state import ProviderConversationStateContro
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
-from nanobot.utils.gitstore import GitStore
+from nanobot.utils.gitstore import GitStore, GitStoreError
 from nanobot.utils.helpers import (
     build_assistant_message,
     content_with_media_breadcrumbs,
@@ -88,6 +88,10 @@ class MemoryStore:
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
         ])
+        try:
+            self._git.ensure_gitignore()
+        except GitStoreError:
+            logger.warning("Failed to backfill workspace .gitignore at {}", workspace)
         self._maybe_migrate_legacy_history()
 
     @property
