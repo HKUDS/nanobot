@@ -27,7 +27,7 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.config.schema import AgentDefaults, ProviderConfig, ToolsConfig
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.security.workspace_access import (
@@ -105,6 +105,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
+        openrouter_provider_config: ProviderConfig | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -134,6 +135,7 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.tools_config = tools_config or ToolsConfig()
+        self.openrouter_provider_config = openrouter_provider_config
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
@@ -216,6 +218,7 @@ class SubagentManager:
             workspace=str(root.resolve()),
             exec_session_manager=self._exec_session_manager,
             file_state_store=FileStates(),
+            openrouter_provider_config=self.openrouter_provider_config,
             workspace_sandbox=workspace_sandbox_status(
                 restrict_to_workspace=cfg.restrict_to_workspace,
                 workspace=root,
