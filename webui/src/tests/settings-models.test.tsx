@@ -1244,8 +1244,8 @@ describe("Settings models", () => {
           status: "available",
           catalog_kind: "catalog",
           models: [
-            { id: "meta-llama/Llama-3.3-70B-Instruct", owned_by: "meta-llama" },
-            { id: "deepseek-ai/DeepSeek-R1-0528", owned_by: "deepseek-ai" },
+            { id: "meta-llama/Llama-3.3-70B-Instruct", owned_by: "io-intelligence" },
+            { id: "deepseek-ai/DeepSeek-R1-0528", owned_by: "io-intelligence" },
           ],
           model_count: 2,
           fetched_at: 1,
