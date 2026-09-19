@@ -459,6 +459,50 @@ async def test_multimodal_content_extracts_text(aiohttp_client, mock_agent) -> N
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content_part", "expected_error"),
+    [
+        ({"type": "text", "text": 123}, "messages[0].content[].text must be a string"),
+        (
+            {"type": "image_url", "image_url": "not-an-object"},
+            "messages[0].content[].image_url must be an object",
+        ),
+        (
+            {"type": "image_url", "image_url": {"url": 123}},
+            "messages[0].content[].image_url.url must be a string",
+        ),
+    ],
+)
+async def test_multimodal_invalid_field_type_returns_400(
+    aiohttp_client,
+    mock_agent,
+    content_part: dict[str, object],
+    expected_error: str,
+) -> None:
+    app = create_app(mock_agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [content_part],
+                }
+            ]
+        },
+    )
+
+    assert resp.status == 400
+    body = await resp.json()
+    assert body["error"]["message"] == expected_error
+    assert body["error"]["code"] == 400
+    mock_agent.process_direct.assert_not_called()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_multimodal_remote_image_url_returns_400(aiohttp_client, mock_agent) -> None:
     app = create_app(mock_agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
