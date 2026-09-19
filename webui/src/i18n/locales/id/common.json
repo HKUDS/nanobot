@@ -614,7 +614,16 @@
       "checking": "Memeriksa pembaruan...",
       "checkForUpdates": "Periksa pembaruan",
       "upToDate": "Anda sudah menggunakan versi terbaru",
-      "updateAvailable": "Pembaruan tersedia v{{version}}"
+      "updateAvailable": "Pembaruan tersedia v{{version}}",
+      "updateTitle": "Perbarui nanobot",
+      "updateDescription": "Pasang rilis stabil terbaru. Mulai ulang nanobot setelah pemasangan selesai.",
+      "updateAdvanced": "Opsi lanjutan",
+      "updateDev": "Pasang dari kode sumber",
+      "updateDevDescription": "Gunakan versi pengembangan. Memerlukan Git; Bun akan diunduh otomatis bila diperlukan. Checkout sumber yang sudah ada tetap menggunakan branch saat ini.",
+      "updateAction": "Pasang rilis terbaru",
+      "updateDevAction": "Pasang versi pengembangan",
+      "updateSuccess": "v{{version}} telah dipasang. Mulai ulang nanobot untuk menerapkan pembaruan.",
+      "updateLocalOnly": "Buka WebUI di server lokal atau aktifkan pemasangan paket jarak jauh untuk memperbarui."
     },
     "mcp": {
       "allCategories": "Semua kategori",

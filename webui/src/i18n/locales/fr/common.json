@@ -614,7 +614,16 @@
       "checking": "Recherche de mises à jour...",
       "checkForUpdates": "Rechercher les mises à jour",
       "upToDate": "Vous êtes à jour",
-      "updateAvailable": "Mise à jour disponible v{{version}}"
+      "updateAvailable": "Mise à jour disponible v{{version}}",
+      "updateTitle": "Mettre nanobot à jour",
+      "updateDescription": "Installe la dernière version stable. Redémarrez nanobot après l’installation.",
+      "updateAdvanced": "Options avancées",
+      "updateDev": "Installer depuis les sources",
+      "updateDevDescription": "Utilise la version de développement. Git est requis ; Bun est téléchargé automatiquement si nécessaire. Les dépôts sources existants conservent leur branche actuelle.",
+      "updateAction": "Installer la dernière version",
+      "updateDevAction": "Installer la version de développement",
+      "updateSuccess": "La version v{{version}} est installée. Redémarrez nanobot pour appliquer la mise à jour.",
+      "updateLocalOnly": "Ouvrez WebUI sur le serveur local ou activez l’installation distante de paquets pour effectuer la mise à jour."
     },
     "mcp": {
       "allCategories": "Toutes les catégories",

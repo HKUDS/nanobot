@@ -614,7 +614,16 @@
       "checking": "확인 중...",
       "checkForUpdates": "업데이트 확인",
       "upToDate": "최신 버전입니다",
-      "updateAvailable": "업데이트 사용 가능 v{{version}}"
+      "updateAvailable": "업데이트 사용 가능 v{{version}}",
+      "updateTitle": "nanobot 업데이트",
+      "updateDescription": "최신 안정 버전을 설치합니다. 설치 후 nanobot을 다시 시작하세요.",
+      "updateAdvanced": "고급 옵션",
+      "updateDev": "소스에서 설치",
+      "updateDevDescription": "개발 버전을 사용합니다. Git이 필요하며, Bun이 없으면 자동으로 다운로드합니다. 기존 소스 체크아웃은 현재 브랜치를 유지합니다.",
+      "updateAction": "최신 릴리스 설치",
+      "updateDevAction": "개발 버전 설치",
+      "updateSuccess": "v{{version}}이(가) 설치되었습니다. 업데이트를 적용하려면 nanobot을 다시 시작하세요.",
+      "updateLocalOnly": "업데이트하려면 서버에서 WebUI를 열거나 원격 패키지 설치를 활성화하세요."
     },
     "mcp": {
       "allCategories": "모든 카테고리",

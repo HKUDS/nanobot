@@ -17,6 +17,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { NanobotUpdate } from "@/components/settings/overview/NanobotUpdate";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
 import { settingsProviderConfigured } from "@/components/settings/shared/ModelControls";
@@ -133,7 +134,11 @@ export function OverviewSettings({
   );
 }
 
-export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
+export function AboutSettings({ currentVersion, onUpdateInstalled, nativeHost }: {
+  currentVersion?: string;
+  onUpdateInstalled?: () => void;
+  nativeHost?: boolean;
+}) {
   const { t } = useTranslation();
   const links = [
     { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
@@ -147,6 +152,7 @@ export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
         <VersionCheckRow currentVersion={currentVersion} />
       </div>
+      {!nativeHost && <NanobotUpdate onInstalled={onUpdateInstalled} />}
       <SettingsGroup>
         {links.map(({ key, icon: Icon, href }) => (
           <a key={key} href={href} target="_blank" rel="noopener noreferrer"

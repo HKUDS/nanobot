@@ -144,6 +144,8 @@ _SYSTEM_ROUTES = {
     "/api/settings/pairing/deny": "pairing-deny",
     "/api/settings/mcp-presets": "mcp-list",
     "/api/settings/version-check": "version-check",
+    "/api/settings/nanobot-update": "update-status",
+    "/api/settings/nanobot-update/start": "update-start",
     **{
         path: f"mcp-{action}"
         for path, action in _MCP_PRESET_ACTIONS_BY_PATH.items()
@@ -151,6 +153,7 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/nanobot-update/start",
     "/api/settings/runtime-config/update",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
@@ -299,6 +302,8 @@ class WebUISettingsRouter:
             return await asyncio.to_thread(self._handle_settings_usage)
 
         domain, action = route
+        if action in {"update-status", "update-start"} and self._runtime_surface == "native":
+            return self._error_response(409, "Update this installation through Nanobot Desktop.")
         restart_before = (
             await asyncio.to_thread(self._restart_values, action)
             if action in {"runtime-config-update", "image-update", "web-search-update"}
@@ -314,6 +319,8 @@ class WebUISettingsRouter:
                     "features-enable",
                     "channel-configure",
                     "channel-connect",
+                    "update-start",
+                    "update-status",
                 }
             ),
         )
