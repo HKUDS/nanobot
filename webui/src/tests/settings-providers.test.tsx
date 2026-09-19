@@ -6,14 +6,75 @@ import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView,
 
 
 async function chooseProviderToConfigure(label: string) {
-  fireEvent.pointerDown(
-    await screen.findByRole("button", { name: "Add your own model provider" }),
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add provider" }),
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+  fireEvent.click(await screen.findByRole("option", { name: label }));
 }
 
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
+
+  it("searches provider aliases and configures in the same dialog without adding an unsaved row", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [
+      { name: "deepseek", label: "DeepSeek", configured: true },
+      { name: "volcengine", label: "VolcEngine", configured: false },
+      { name: "volcengine_coding_plan", label: "VolcEngine Coding Plan", configured: false },
+    ];
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    const trigger = screen.getByRole("button", { name: "Add provider" });
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Add provider" });
+    const search = within(dialog).getByRole("combobox", { name: "Search providers" });
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(within(dialog).queryByRole("option", { name: "DeepSeek" })).not.toBeInTheDocument();
+    await user.type(search, "火山");
+    expect(within(dialog).getAllByRole("option")).toHaveLength(2);
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByRole("dialog", { name: "VolcEngine Coding Plan" })).toBe(dialog);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(within(dialog).getByLabelText("API key", { selector: "input" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "VolcEngine Coding Plan" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Back to providers" }));
+    expect(screen.getByRole("dialog", { name: "Add provider" })).toBe(dialog);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps custom provider creation available for empty searches and discards cancelled drafts", async () => {
+    const user = userEvent.setup();
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.type(screen.getByRole("combobox"), "does-not-exist");
+    expect(screen.getByRole("status")).toHaveTextContent("No providers match this search.");
+    await user.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await user.type(screen.getByPlaceholderText("My model provider"), "Unsaved gateway");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
+    expect(screen.getByPlaceholderText("My model provider")).toHaveValue("");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("uses a bottom sheet on mobile without opening the keyboard immediately", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query === "(max-width: 639px)", media: query,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    const dialog = screen.getByRole("dialog", { name: "Add provider" });
+    expect(dialog).toHaveClass("rounded-t-3xl", "bottom-0");
+    expect(screen.getByRole("combobox")).not.toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
+    expect(screen.getByRole("dialog", { name: "Custom provider" })).toBe(dialog);
+  });
 
   it("keeps provider labels and keyboard configuration accessible with decorative logos", async () => {
     const user = userEvent.setup();
@@ -806,11 +867,11 @@ describe("Settings providers", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Add your own model provider" }),
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add provider" }),
     );
-    const customOption = await screen.findByRole("menuitem", { name: "Custom provider" });
-    const openRouterOption = screen.getByRole("menuitem", { name: "OpenRouter" });
+    const customOption = await screen.findByRole("button", { name: "Custom provider" });
+    const openRouterOption = screen.getByRole("option", { name: "OpenRouter" });
     expect(customOption.querySelector("svg, img")).not.toBeNull();
     expect(openRouterOption.querySelector("svg, img")).not.toBeNull();
     fireEvent.click(customOption);
@@ -864,7 +925,7 @@ describe("Settings providers", () => {
       await screen.findByRole("button", { name: /Company Gateway/ }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Add your own model provider" }),
+      screen.getByRole("button", { name: "Add provider" }),
     ).toBeInTheDocument();
   });
 });

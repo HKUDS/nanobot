@@ -880,6 +880,8 @@
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search.",
       "addOwnProvider": "Add your own model provider",
+      "addProvider": "Add provider",
+      "backToProviders": "Back to providers",
       "customProvider": "Custom provider",
       "customProviderName": "Provider name",
       "customProviderNamePlaceholder": "My model provider",

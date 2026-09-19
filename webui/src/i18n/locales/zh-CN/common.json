@@ -880,6 +880,8 @@
       "searchPlaceholder": "搜索提供商",
       "noMatches": "没有匹配的提供商。",
       "addOwnProvider": "添加自定义提供商",
+      "addProvider": "添加提供商",
+      "backToProviders": "返回提供商列表",
       "customProvider": "自定义提供商",
       "customProviderName": "提供商名称",
       "customProviderNamePlaceholder": "例如：公司模型网关",

@@ -619,7 +619,7 @@ describe("App layout", () => {
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Model providers")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add your own model provider" }))
+    expect(screen.getByRole("button", { name: "Add provider" }))
       .toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
