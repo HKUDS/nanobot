@@ -950,9 +950,24 @@ class LLMProvider(ABC):
     def _error_response_from_exception(exc: Exception) -> LLMResponse:
         """Convert an unexpected exception while retaining retry metadata."""
         error_names = tuple(cls.__name__.lower() for cls in type(exc).__mro__)
+        detail = str(exc).strip() or type(exc).__name__
+        detail_lower = detail.lower()
+        response = getattr(exc, "response", None)
+        raw_status = getattr(exc, "status_code", None)
+        if raw_status is None and response is not None:
+            raw_status = getattr(response, "status_code", None)
+        try:
+            error_status_code = int(raw_status) if raw_status is not None else None
+        except (TypeError, ValueError):
+            error_status_code = None
+
         error_kind: str | None = None
         error_should_retry: bool | None = None
-        if any("timeout" in name for name in error_names):
+        if any("timeout" in name for name in error_names) or (
+            error_status_code not in {400, 404, 422} and "timed out" in detail_lower
+        ):
+            # Class name may be RuntimeError/APIError while the message carries
+            # the timeout (e.g. NVIDIA NIM ``timed out after 300s``).
             error_kind = "timeout"
             error_should_retry = True
         elif any(
@@ -981,18 +996,8 @@ class LLMProvider(ABC):
         ):
             error_kind = "authentication"
 
-        response = getattr(exc, "response", None)
-        raw_status = getattr(exc, "status_code", None)
-        if raw_status is None and response is not None:
-            raw_status = getattr(response, "status_code", None)
-        try:
-            error_status_code = int(raw_status) if raw_status is not None else None
-        except (TypeError, ValueError):
-            error_status_code = None
-
         raw_error_type = getattr(exc, "error_type", None)
         raw_error_code = getattr(exc, "error_code", None)
-        detail = str(exc).strip() or type(exc).__name__
         return LLMResponse(
             content=f"Error calling LLM: {detail}",
             finish_reason="error",

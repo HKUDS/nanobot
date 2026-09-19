@@ -699,14 +699,22 @@ class FallbackProvider(LLMProvider):
             return True
         if any(token in text for token in _AUTHENTICATION_ERROR_TOKENS):
             return True
-        if response.error_should_retry is False:
-            return False
         if status in {400, 404, 422}:
             return False
+        transient_status = status is not None and (
+            status in {408, 409, 429} or 500 <= status <= 599
+        )
+        # ``x-should-retry: false`` means "don't retry this request on the same
+        # model". A transient status/kind can still justify another model, but
+        # broad text hints such as "empty" must not override an explicit denial.
+        if response.error_should_retry is False:
+            return kind in _FALLBACK_ERROR_KINDS or transient_status
         if response.error_should_retry is True:
             return True
-        if status is not None and (status in {408, 409, 429} or 500 <= status <= 599):
+        if transient_status:
             return True
         if kind in _FALLBACK_ERROR_KINDS:
             return True
-        return any(token in value for value in (kind, error_type, code, text) for token in _FALLBACK_ERROR_TOKENS)
+        return any(token in text for token in _FALLBACK_ERROR_TOKENS) or any(
+            token in value for value in (kind, error_type, code) for token in _FALLBACK_ERROR_TOKENS
+        )
