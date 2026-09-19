@@ -167,6 +167,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   github_copilot: brand("github.com", "#24292F", "GH"),
   groq: brand("groq.com", "#F55036", "GQ"),
   huggingface: brand("huggingface.co", "#FF9D00", "HF"),
+  ionet: brand("io.net", "#111827", "IO"),
   jina: brand("jina.ai", "#7C3AED", "J"),
   kagi: brand("kagi.com", "#FFB319", "K"),
   keenable: brand("keenable.ai", "#0EA5E9", "K"),

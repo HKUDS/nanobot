@@ -1196,6 +1196,92 @@ describe("Settings models", () => {
     );
   });
 
+  it("defers the IO Intelligence catalog until the user searches", async () => {
+    const base = settingsPayload();
+    const payload: SettingsPayload = {
+      ...base,
+      agent: {
+        ...base.agent,
+        model: "meta-llama/Llama-3.3-70B-Instruct",
+        provider: "ionet",
+        resolved_provider: "ionet",
+      },
+      model_presets: [
+        {
+          ...base.model_presets[0],
+          model: "meta-llama/Llama-3.3-70B-Instruct",
+          provider: "ionet",
+          resolved_provider: "ionet",
+        },
+      ],
+      providers: [
+        {
+          name: "ionet",
+          label: "IO Intelligence",
+          configured: true,
+          auth_type: "api_key",
+          api_key_required: true,
+          api_key_hint: "io••••test",
+          api_base: null,
+          default_api_base: "https://api.intelligence.io.solutions/api/v1",
+          model_catalog: "catalog",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(payload);
+      if (url === "/api/settings/cli-apps") {
+        return jsonResponse({ apps: [], installed_count: 0 });
+      }
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [] });
+      }
+      if (url === "/api/settings/provider-models?provider=ionet") {
+        return jsonResponse({
+          provider: "ionet",
+          label: "IO Intelligence",
+          status: "available",
+          catalog_kind: "catalog",
+          models: [
+            { id: "meta-llama/Llama-3.3-70B-Instruct", owned_by: "meta-llama" },
+            { id: "deepseek-ai/DeepSeek-R1-0528", owned_by: "deepseek-ai" },
+          ],
+          model_count: 2,
+          fetched_at: 1,
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettingsView({ initialSection: "models" });
+
+    await togglePresetEditor();
+    const modelButtons = await screen.findAllByRole("button", {
+      name: /meta-llama\/Llama-3\.3-70B-Instruct/i,
+    });
+    await openPopover(modelButtons[modelButtons.length - 1]);
+    expect(await screen.findByText("Search this provider’s model catalog.")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).startsWith("/api/settings/provider-models"),
+      ),
+    ).toBe(false);
+
+    fireEvent.change(screen.getByPlaceholderText("Search or type model ID"), {
+      target: { value: "de" },
+    });
+
+    await screen.findByText("deepseek-ai/DeepSeek-R1-0528");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings/provider-models?provider=ionet",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
   it("loads curated models for configured OAuth providers", async () => {
     const base = settingsPayload();
     const payload: SettingsPayload = {

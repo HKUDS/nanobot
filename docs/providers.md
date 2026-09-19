@@ -225,6 +225,11 @@ issued by the [io.net cloud console](https://cloud.io.net). The model catalog is
 public — the WebUI can also load it after the API key is saved under
 **Settings → Models**.
 
+Model IDs like `meta-llama/...` or `deepseek-ai/...` are ambiguous across gateways,
+so nanobot does not infer the provider from the model name: set
+`"provider": "ionet"` in the preset when several gateways are configured (with only
+one provider configured, plain model IDs route to it).
+
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.

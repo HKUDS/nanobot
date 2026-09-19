@@ -44,7 +44,29 @@ def test_ionet_forced_provider_uses_default_api_base() -> None:
     assert config.get_api_base(model) == "https://api.intelligence.io.solutions/api/v1"
 
 
-def test_ionet_preserves_model_id() -> None:
+def test_ionet_gateway_routes_unprefixed_models_when_configured() -> None:
+    config = Config.model_validate(
+        {
+            "providers": {
+                "ionet": {
+                    "apiKey": "ionet-key",
+                },
+            },
+            "agents": {
+                "defaults": {
+                    "model": "meta-llama/Llama-3.3-70B-Instruct",
+                },
+            },
+        }
+    )
+
+    model = "meta-llama/Llama-3.3-70B-Instruct"
+    assert config.get_provider_name(model) == "ionet"
+    assert config.get_api_key(model) == "ionet-key"
+    assert config.get_api_base(model) == "https://api.intelligence.io.solutions/api/v1"
+
+
+def test_ionet_preserves_model_id_and_reasoning_effort() -> None:
     spec = find_by_name("ionet")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(
@@ -59,8 +81,10 @@ def test_ionet_preserves_model_id() -> None:
         model="meta-llama/Llama-3.3-70B-Instruct",
         max_tokens=1024,
         temperature=0.7,
-        reasoning_effort=None,
+        reasoning_effort="medium",
         tool_choice=None,
     )
 
     assert kwargs["model"] == "meta-llama/Llama-3.3-70B-Instruct"
+    assert kwargs["reasoning_effort"] == "medium"
+    assert "reasoning" not in kwargs.get("extra_body", {})

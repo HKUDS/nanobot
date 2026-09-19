@@ -138,6 +138,26 @@ def test_settings_payload_exposes_orcarouter_provider(
     assert orcarouter["model_selectable"] is True
 
 
+def test_settings_payload_exposes_ionet_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.ionet.api_key = "io-test-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    ionet = next(row for row in payload["providers"] if row["name"] == "ionet")
+
+    assert ionet["label"] == "IO Intelligence"
+    assert ionet["configured"] is True
+    assert ionet["default_api_base"] == "https://api.intelligence.io.solutions/api/v1"
+    assert ionet["model_catalog"] == "catalog"
+    assert ionet["model_selectable"] is True
+
+
 def test_settings_payload_includes_relocated_capabilities(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
