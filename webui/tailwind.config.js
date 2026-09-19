@@ -129,9 +129,8 @@ export default {
     animate,
     typography,
     plugin(({ addVariant }) => {
-      // Touch devices get :hover applied on the first tap, which makes iOS
-      // Safari drop click synthesis for that tap; gate hover styles to
-      // devices that can actually hover.
+      // Revealing controls on emulated hover can consume the first Safari
+      // tap. Keep these sidebar hover effects on hover-capable pointers.
       addVariant("media-hover", "@media (hover: hover)");
     }),
   ],
