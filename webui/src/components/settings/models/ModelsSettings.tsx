@@ -758,7 +758,7 @@ export function ModelsSettings({
                         {presetConfigured ? (
                           <ProviderIcon provider={provider} showBrandLogos={showBrandLogos} />
                         ) : (
-                          <span className="grid h-9 w-9 shrink-0 place-items-center">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center">
                             <ProviderPickerIcon provider={provider} showBrandLogos={showBrandLogos} unconfigured />
                           </span>
                         )}

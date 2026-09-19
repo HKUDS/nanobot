@@ -10,7 +10,7 @@ describe("settings provider icons", () => {
   afterEach(cleanup);
 
   function expectFootprint(icon: Element) {
-    expect(icon).toHaveClass("h-9", "w-9", "shrink-0", "overflow-hidden", "rounded-[10px]");
+    expect(icon).toHaveClass("h-8", "w-8", "shrink-0", "overflow-hidden", "rounded-[9px]");
     expect(icon.className.split(/\s+/).some((value) => value.startsWith("border"))).toBe(false);
   }
 

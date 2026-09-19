@@ -1184,7 +1184,7 @@ export function ProvidersSettings({
                   className="group settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
                 >
                   <span className="flex min-w-0 items-center gap-3">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-muted text-muted-foreground">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-muted text-muted-foreground">
                       <Plus className="h-5 w-5" aria-hidden />
                     </span>
                     <span className="truncate text-[14px] font-medium text-foreground">
@@ -1280,7 +1280,7 @@ export function ProviderIcon({
     <span
       data-testid={`provider-logo-${provider}`}
       className={cn(
-        "relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-[10px] text-[12px] font-semibold text-muted-foreground",
+        "relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] text-[11px] font-semibold text-muted-foreground",
         showLoadedLogo ? "bg-transparent" : "bg-muted",
       )}
       aria-hidden
