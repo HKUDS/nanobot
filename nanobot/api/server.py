@@ -1,7 +1,8 @@
-"""OpenAI-compatible HTTP API server for a fixed nanobot session.
+"""OpenAI-compatible HTTP API server for nanobot sessions.
 
 Provides /v1/chat/completions and /v1/models endpoints.
-All requests route to a single persistent API session.
+Requests without ``session_id`` share one persistent default session; each
+``session_id`` owns an isolated session with its own chat route.
 """
 
 from __future__ import annotations
@@ -157,6 +158,25 @@ def _require_json_string(value: object, field: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{field} must be a string")
     return value
+
+
+def _api_session(session_id: object) -> tuple[str, str]:
+    """Return ``(session_key, chat_id)`` for one request.
+
+    Every ``session_id`` gets a chat route of its own.  Turn routing, request
+    context for tools, cron bindings and subagent origins are all keyed by
+    ``(channel, chat_id)``, so reusing the default chat for every session would
+    alias each isolated session back onto ``api:default`` and let one
+    conversation's replies, follow-ups and scheduled turns land in another.
+    """
+    if session_id is None:
+        return API_SESSION_KEY, API_CHAT_ID
+    if not isinstance(session_id, str):
+        raise ValueError("session_id must be a string")
+    chat_id = session_id.strip()
+    if not chat_id:
+        return API_SESSION_KEY, API_CHAT_ID
+    return f"api:{chat_id}", chat_id
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +353,10 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
     if requested_model and requested_model != model_name:
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
-    session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
+    try:
+        session_key, chat_id = _api_session(session_id)
+    except ValueError as e:
+        return _error_json(400, str(e))
     session_locks: dict[str, asyncio.Lock] = _app_value(
         request.app,
         _SESSION_LOCKS_KEY,
@@ -381,7 +404,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                             media=media_paths if media_paths else None,
                             session_key=session_key,
                             channel="api",
-                            chat_id=API_CHAT_ID,
+                            chat_id=chat_id,
                             on_stream=_on_stream,
                             on_stream_end=_on_stream_end,
                         )
@@ -425,7 +448,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                         media=media_paths if media_paths else None,
                         session_key=session_key,
                         channel="api",
-                        chat_id=API_CHAT_ID,
+                        chat_id=chat_id,
                         hooks=[usage_capture],
                     )
                 response_text = _response_text(response)

@@ -336,6 +336,7 @@ async def test_multipart_with_session_id(aiohttp_client, mock_agent, tmp_path) -
         assert resp.status == 200
         call_kwargs = mock_agent.process_direct.call_args.kwargs
         assert call_kwargs["session_key"] == "api:my-session"
+        assert call_kwargs["chat_id"] == "my-session"
     finally:
         os.chdir(original_cwd)
 
