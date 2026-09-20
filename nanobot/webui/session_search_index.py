@@ -23,10 +23,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
+from nanobot.runtime_context import public_history_message
+from nanobot.session.history_visibility import is_hidden_history_message
+
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
 
-_INDEX_VERSION = 1
+_INDEX_VERSION = 2
 _INDEX_FILENAME = ".webui_session_search.db"
 _SCHEMA = (
     "CREATE VIRTUAL TABLE session_search USING fts5("
@@ -41,6 +44,7 @@ _ROW_SOURCE = "_source"
 _ACTIVITY_MTIME_FIELD = "webui_activity_mtime_ns"
 _ACTIVITY_SIZE_FIELD = "webui_activity_size"
 _ACTIVITY_FILES_FIELD = "webui_activity_files"
+_VISIBLE_ROLES = {"user", "assistant"}
 
 
 def _row_identity(row: dict[str, Any]) -> str:
@@ -90,6 +94,13 @@ def _message_text(message: dict[str, Any]) -> str:
         if block.get("type") == "text" and isinstance(text, str):
             parts.append(text)
     return "\n".join(parts).strip()
+
+
+def _visible_message_text(message: dict[str, Any]) -> str:
+    role = message.get("role")
+    if role not in _VISIBLE_ROLES or message.get("_command") or is_hidden_history_message(message):
+        return ""
+    return _message_text(public_history_message(message))
 
 
 def _escape_fts5_phrase(text: str) -> str:
@@ -174,43 +185,41 @@ class SessionSearchIndex:
 
     # -- reconciliation ------------------------------------------------------
 
-    def _transcript_texts(self, session_key: str) -> list[str]:
-        """Extract text from WebUI transcript events (active + segments).
+    def _transcript_texts(
+        self,
+        session_key: str,
+        *,
+        session_messages: list[dict[str, Any]] | None,
+    ) -> list[str]:
+        """Extract canonical visible messages from all WebUI transcript pages."""
+        from nanobot.webui.transcript import build_webui_thread_response
 
-        WebUI transcripts are a separate store from the JSONL session file;
-        legacy search reads both, so the index must cover both. Any string
-        ``text`` field from any event is included (over-indexing is harmless:
-        the legacy excerpt generator still filters exactly).
-        """
-        from nanobot.webui.transcript import (
-            webui_transcript_path,
-            webui_transcript_segments_dir,
-        )
-
-        paths = [webui_transcript_path(session_key)]
-        segments_dir = webui_transcript_segments_dir(session_key)
-        if segments_dir.is_dir():
-            paths.extend(sorted(segments_dir.glob("*.jsonl")))
         texts: list[str] = []
-        for path in paths:
-            try:
-                with open(path, encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            record = json.loads(line)
-                        except ValueError:
-                            continue
-                        if not isinstance(record, dict):
-                            continue
-                        record_dict = cast(dict[str, Any], record)
-                        text = record_dict.get("text")
-                        if isinstance(text, str) and text.strip():
-                            texts.append(text.strip())
-            except OSError:
-                continue
+        before: str | None = None
+        while True:
+            thread = build_webui_thread_response(
+                session_key,
+                session_messages=session_messages,
+                before=before,
+            )
+            if thread is None:
+                break
+            raw_messages = thread.get("messages")
+            if isinstance(raw_messages, list):
+                for raw_message in cast(list[object], raw_messages):
+                    if not isinstance(raw_message, dict):
+                        continue
+                    text = _visible_message_text(cast(dict[str, Any], raw_message))
+                    if text:
+                        texts.append(text)
+            raw_page = thread.get("page")
+            if not isinstance(raw_page, dict):
+                break
+            page = cast(dict[str, Any], raw_page)
+            cursor = page.get("before_cursor")
+            if not page.get("has_more_before") or not isinstance(cursor, str) or cursor == before:
+                break
+            before = cursor
         return texts
 
     def _session_content(self, row: dict[str, Any]) -> str:
@@ -223,17 +232,23 @@ class SessionSearchIndex:
         key = row.get("key")
         if isinstance(key, str) and key:
             payload = self._sessions.read_session_file(key)
+            session_messages: list[dict[str, Any]] | None = None
             if payload is not None:
                 raw_messages = payload.get("messages")
                 if isinstance(raw_messages, list):
-                    for message in cast(list[object], raw_messages):
-                        if not isinstance(message, dict):
-                            continue
-                        text = _message_text(cast(dict[str, Any], message))
+                    session_messages = [
+                        cast(dict[str, Any], message)
+                        for message in cast(list[object], raw_messages)
+                        if isinstance(message, dict)
+                    ]
+                    for message in session_messages:
+                        text = _visible_message_text(message)
                         if text:
                             parts.append(text)
-            parts.extend(self._transcript_texts(key))
-        return "\n".join(parts)
+            parts.extend(self._transcript_texts(key, session_messages=session_messages))
+        # Legacy matching casefolds both the query and each visible message.
+        # FTS5's built-in Unicode folding is narrower than Python's casefold.
+        return "\n".join(parts).casefold()
 
     def _reconcile(self, conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
         current = {_row_identity(row): row for row in rows}
@@ -270,9 +285,11 @@ class SessionSearchIndex:
                     )
 
     def _load_rows(self) -> list[dict[str, Any]]:
-        from nanobot.webui.session_list_index import list_webui_sessions
+        from nanobot.webui.session_list_index import (
+            _list_webui_session_index_rows,  # pyright: ignore[reportPrivateUsage]
+        )
 
-        return list_webui_sessions(self._sessions)
+        return _list_webui_session_index_rows(self._sessions)
 
     # -- public API ------------------------------------------------------------
 
