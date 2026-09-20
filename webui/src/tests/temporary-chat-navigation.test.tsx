@@ -200,6 +200,39 @@ describe("temporary chat navigation", () => {
       .getAllByText("one")).toHaveLength(1));
   });
 
+  it.each(["stream_end", "turn_end", "message"] as const)(
+    "retains a received %s when navigation unmounts the pane before React commits",
+    async (event) => {
+      groupedTopics = true;
+      vi.stubGlobal("matchMedia", (query: string) => ({
+        matches: query.includes("max-width: 767px"), media: query,
+        addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      }));
+      render(<App />);
+      await screen.findByRole("button", { name: "Temporary chat" });
+      act(() => TestSocket.current.open());
+      const chatId = await startTemporaryChat("Count from one to three");
+      const turnId = TestSocket.current.sent.find((frame) => frame.type === "message")?.turn_id;
+      act(() => {
+        if (event !== "message") {
+          TestSocket.current.receive({ event: "delta", chat_id: chatId, turn_id: turnId, text: "one two three" });
+        }
+        TestSocket.current.receive({ event, chat_id: chatId, turn_id: turnId, text: "one two three" });
+        const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+        fireEvent.click(within(sidebar).getByRole("button", { name: "Second pane" }));
+      });
+      expect(screen.queryByTestId("workbench-pane-websocket:regular")).not.toBeInTheDocument();
+      await selectTopic("Count from one to three");
+      const region = screen.getByTestId("thread-message-region");
+      expect(region.textContent).toContain("one two three");
+      expect(within(region).getAllByText("one two three")).toHaveLength(1);
+      expect(within(region).getAllByText("Count from one to three")).toHaveLength(1);
+      if (event === "turn_end") {
+        expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+      }
+    },
+  );
+
   it("keeps multiple temporary chats isolated and releases the closed chat's cache", async () => {
     const deleteCache = vi.spyOn(ThreadMessageCache.prototype, "delete");
     render(<App />);
