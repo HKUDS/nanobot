@@ -584,7 +584,7 @@ function SetupPromptLabel({ label }: { label: string }) {
   );
 }
 
-function PresetProviderIcon({
+export function PresetProviderIcon({
   label,
   modelDetail,
   provider,

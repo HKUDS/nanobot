@@ -1559,6 +1559,7 @@ export function ThreadShell({
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
           model={modelFallback.model}
+          reauthProvider={modelFallback.reauthProvider}
           reauthProviderLabel={modelFallback.reauthProvider
             ? providerDisplayLabel(settings?.providers ?? [], modelFallback.reauthProvider)
             : undefined}
