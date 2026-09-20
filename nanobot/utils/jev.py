@@ -5,7 +5,7 @@ import math
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 
@@ -148,7 +148,7 @@ class JevClient:
         api_key: str | None,
         timeout: float,
         proxy: str | None = None,
-        transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if not model or not model.strip():
             raise JevProtocolError("Model cannot be empty")
@@ -160,7 +160,7 @@ class JevClient:
         self.api_key = resolved_key
         self.timeout = float(timeout)
         self.proxy = proxy
-        self.transport = transport
+        self.transport: httpx.AsyncBaseTransport | None = transport
 
     @staticmethod
     def _validate_question_id(question_id: str) -> None:
@@ -174,8 +174,8 @@ class JevClient:
 
     @staticmethod
     def _validate_state(state: str) -> None:
-        if not isinstance(state, str):
-            raise JevProtocolError("State must be a string")
+        if not state or not state.strip():
+            raise JevProtocolError("State must be a non-empty string")
 
     @staticmethod
     def _coerce_question_map(
@@ -184,8 +184,6 @@ class JevClient:
         out: dict[str, JevQuestion] = {}
         for question_id, question in questions.items():
             JevClient._validate_question_id(question_id)
-            if not isinstance(question, (NoulQuestion, ChoiceQuestion, ScoreQuestion)):
-                raise JevProtocolError(f"Unsupported question type for {question_id!r}")
             question.validate()
             out[question_id] = question
         return out
@@ -204,14 +202,12 @@ class JevClient:
                 "instructions": question.instructions,
                 "criteria": dict(question.criteria),
             }
-        if isinstance(question, ScoreQuestion):
-            criteria = list(question.criteria)
-            return {
-                "type": "score",
-                "instructions": question.instructions,
-                "criteria": criteria,
-            }
-        raise JevProtocolError("Unsupported question type")
+        criteria = list(question.criteria)
+        return {
+            "type": "score",
+            "instructions": question.instructions,
+            "criteria": criteria,
+        }
 
     def _build_request(self, *, state: str, questions: Mapping[str, JevQuestion]) -> JevRequest:
         self._validate_model(self.model)
@@ -219,7 +215,7 @@ class JevClient:
         validated = self._coerce_question_map(questions)
         return JevRequest(model=self.model, state=state, questions=validated)
 
-    def _make_transport(self) -> httpx.BaseTransport | httpx.AsyncBaseTransport | None:
+    def _make_transport(self) -> httpx.AsyncBaseTransport | None:
         if self.transport is not None:
             return self.transport
         if self.proxy:
@@ -236,7 +232,7 @@ class JevClient:
             raise JevMissingCredentialsError("OpenRouter API key is not configured")
 
         request = self._build_request(state=state, questions=questions)
-        payload = {
+        payload: dict[str, Any] = {
             "model": request.model,
             "state": request.state,
             "questions": {
@@ -245,7 +241,7 @@ class JevClient:
             },
         }
 
-        headers = {
+        headers: dict[str, str] = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
@@ -291,11 +287,14 @@ class JevClient:
     def _parse_result(cls, data: Any, requested_questions: Mapping[str, JevQuestion]) -> JevResult:
         if not isinstance(data, Mapping):
             raise JevProtocolError("Response root must be an object")
-        if "answers" not in data or not isinstance(data["answers"], Mapping):
+        payload = cast(Mapping[str, Any], data)
+        answers_value = payload.get("answers")
+        if not isinstance(answers_value, Mapping):
             raise JevIncompleteResponseError("Response answers missing")
 
+        answers_payload: Mapping[str, Any] = cast(Mapping[str, Any], answers_value)
         requested_ids = set(requested_questions)
-        actual_ids = set(data["answers"].keys())
+        actual_ids = set(answers_payload.keys())
         if not requested_ids.issubset(actual_ids):
             raise JevIncompleteResponseError("Missing requested answers")
         if actual_ids - requested_ids:
@@ -303,96 +302,120 @@ class JevClient:
 
         answers: dict[str, JevAnswer] = {}
         for question_id, question in requested_questions.items():
-            raw_answer = data["answers"].get(question_id)
+            raw_answer = answers_payload.get(question_id)
             if raw_answer is None or not isinstance(raw_answer, Mapping):
                 raise JevIncompleteResponseError(f"Answer {question_id!r} missing")
-            if raw_answer.get("type") != question.type:
+            answer_map: Mapping[str, Any] = cast(Mapping[str, Any], raw_answer)
+            if answer_map.get("type") != question.type:
                 raise JevProtocolError(f"Answer type mismatch for {question_id!r}")
             if isinstance(question, NoulQuestion):
-                value = raw_answer.get("noul")
-                if not cls._is_finite_number(value) or not (0.0 <= float(value) <= 1.0):
+                value = answer_map.get("noul")
+                if value is None or not cls._is_finite_number(value):
                     raise JevProtocolError(f"Noul value for {question_id!r} is invalid")
-                answers[question_id] = NoulAnswer(type="noul", noul=float(value))
+                numeric_value = float(value)
+                if not (0.0 <= numeric_value <= 1.0):
+                    raise JevProtocolError(f"Noul value for {question_id!r} is invalid")
+                answers[question_id] = NoulAnswer(type="noul", noul=numeric_value)
             elif isinstance(question, ChoiceQuestion):
-                choice = raw_answer.get("choice")
-                probs = raw_answer.get("probabilities")
-                confidence = raw_answer.get("confidence")
+                choice = answer_map.get("choice")
+                probs = answer_map.get("probabilities")
+                confidence = answer_map.get("confidence")
                 if not isinstance(choice, str) or choice not in question.criteria:
                     raise JevProtocolError(f"Choice answer for {question_id!r} is invalid")
                 if not isinstance(probs, Mapping):
                     raise JevProtocolError(f"Choice probabilities for {question_id!r} are invalid")
-                if set(probs.keys()) != set(question.criteria.keys()):
+                choice_probability_map: Mapping[str, Any] = cast(Mapping[str, Any], probs)
+                if set(choice_probability_map.keys()) != set(question.criteria.keys()):
                     raise JevProtocolError(f"Choice probability keys for {question_id!r} do not match criteria")
                 total = 0.0
-                for key, value in probs.items():
-                    if not cls._is_finite_number(value) or float(value) < 0:
+                for _, value in choice_probability_map.items():
+                    if value is None or not cls._is_finite_number(value):
                         raise JevProtocolError(f"Choice probability for {question_id!r} is invalid")
-                    total += float(value)
+                    numeric_value = float(value)
+                    if numeric_value < 0:
+                        raise JevProtocolError(f"Choice probability for {question_id!r} is invalid")
+                    total += numeric_value
                 if not math.isclose(total, 1.0, abs_tol=1e-6):
                     raise JevProtocolError(f"Choice probabilities for {question_id!r} do not sum to 1")
-                if not cls._is_finite_number(confidence) or not (0.0 <= float(confidence) <= 1.0):
+                if confidence is None or not cls._is_finite_number(confidence):
+                    raise JevProtocolError(f"Choice confidence for {question_id!r} is invalid")
+                confidence_value = float(confidence)
+                if not (0.0 <= confidence_value <= 1.0):
                     raise JevProtocolError(f"Choice confidence for {question_id!r} is invalid")
                 answers[question_id] = ChoiceAnswer(
                     type="choice",
                     choice=choice,
-                    probabilities={str(k): float(v) for k, v in probs.items()},
-                    confidence=float(confidence),
+                    probabilities={str(k): float(v) for k, v in choice_probability_map.items()},
+                    confidence=confidence_value,
                 )
-            elif isinstance(question, ScoreQuestion):
-                score = raw_answer.get("score")
-                legend = raw_answer.get("legend")
-                probs = raw_answer.get("probabilities")
-                confidence = raw_answer.get("confidence")
-                if not cls._is_finite_number(score) or not (0.0 <= float(score) <= len(question.criteria) - 1):
+            else:
+                score = answer_map.get("score")
+                legend = answer_map.get("legend")
+                probs = answer_map.get("probabilities")
+                confidence = answer_map.get("confidence")
+                if score is None or not cls._is_finite_number(score):
+                    raise JevProtocolError(f"Score value for {question_id!r} is invalid")
+                score_value = float(score)
+                if not (0.0 <= score_value <= len(question.criteria) - 1):
                     raise JevProtocolError(f"Score value for {question_id!r} is invalid")
                 if not isinstance(legend, Mapping):
                     raise JevProtocolError(f"Score legend for {question_id!r} is invalid")
+                legend_map: dict[str, Any] = cast(dict[str, Any], legend)
                 expected_legend_keys = {str(i) for i in range(len(question.criteria))}
-                if set(legend.keys()) != expected_legend_keys:
+                if set(legend_map.keys()) != expected_legend_keys:
                     raise JevProtocolError(f"Score legend keys for {question_id!r} do not match criteria")
                 if not isinstance(probs, Mapping):
                     raise JevProtocolError(f"Score probabilities for {question_id!r} are invalid")
-                if set(probs.keys()) != expected_legend_keys:
+                score_probability_map: Mapping[str, Any] = cast(Mapping[str, Any], probs)
+                if set(score_probability_map.keys()) != expected_legend_keys:
                     raise JevProtocolError(f"Score probability keys for {question_id!r} do not match legend")
                 total = 0.0
-                for key, value in probs.items():
-                    if not cls._is_finite_number(value) or float(value) < 0:
+                for _, value in score_probability_map.items():
+                    if value is None or not cls._is_finite_number(value):
                         raise JevProtocolError(f"Score probability for {question_id!r} is invalid")
-                    total += float(value)
+                    numeric_value = float(value)
+                    if numeric_value < 0:
+                        raise JevProtocolError(f"Score probability for {question_id!r} is invalid")
+                    total += numeric_value
                 if not math.isclose(total, 1.0, abs_tol=1e-6):
                     raise JevProtocolError(f"Score probabilities for {question_id!r} do not sum to 1")
-                if not cls._is_finite_number(confidence) or not (0.0 <= float(confidence) <= 1.0):
+                if confidence is None or not cls._is_finite_number(confidence):
+                    raise JevProtocolError(f"Score confidence for {question_id!r} is invalid")
+                confidence_value = float(confidence)
+                if not (0.0 <= confidence_value <= 1.0):
                     raise JevProtocolError(f"Score confidence for {question_id!r} is invalid")
                 answers[question_id] = ScoreAnswer(
                     type="score",
-                    score=float(score),
-                    legend={str(k): str(v) for k, v in legend.items()},
-                    probabilities={str(k): float(v) for k, v in probs.items()},
-                    confidence=float(confidence),
+                    score=score_value,
+                    legend={str(k): str(v) for k, v in legend_map.items()},
+                    probabilities={str(k): float(v) for k, v in score_probability_map.items()},
+                    confidence=confidence_value,
                 )
-            else:
-                raise JevProtocolError(f"Unsupported answer type for {question_id!r}")
 
-        response_id = data.get("id")
+        response_id = payload.get("id")
         if not isinstance(response_id, str) or not response_id.strip():
             raise JevIncompleteResponseError("Missing response id")
-        model = data.get("model")
+        model = payload.get("model")
         if not isinstance(model, str) or not model.strip():
             raise JevIncompleteResponseError("Missing response model")
-        provider = data.get("provider")
+        provider = payload.get("provider")
         if not isinstance(provider, str) or not provider.strip():
             raise JevIncompleteResponseError("Missing response provider")
-        usage = data.get("usage")
+        usage = payload.get("usage")
         if not isinstance(usage, Mapping):
             raise JevIncompleteResponseError("Missing usage metadata")
-        input_tokens = usage.get("input_tokens")
-        output_tokens = usage.get("output_tokens")
-        cost = usage.get("cost")
+        usage_map: Mapping[str, Any] = cast(Mapping[str, Any], usage)
+        input_tokens = usage_map.get("input_tokens")
+        output_tokens = usage_map.get("output_tokens")
+        cost = usage_map.get("cost")
         if not isinstance(input_tokens, int) or isinstance(input_tokens, bool) or input_tokens < 0:
             raise JevIncompleteResponseError("Usage input_tokens missing or invalid")
         if not isinstance(output_tokens, int) or isinstance(output_tokens, bool) or output_tokens < 0:
             raise JevIncompleteResponseError("Usage output_tokens missing or invalid")
-        if not cls._is_finite_number(cost) or float(cost) < 0:
+        if cost is None or not cls._is_finite_number(cost):
+            raise JevIncompleteResponseError("Usage cost missing or invalid")
+        cost_value = float(cost)
+        if cost_value < 0:
             raise JevIncompleteResponseError("Usage cost missing or invalid")
 
         return JevResult(
@@ -403,7 +426,7 @@ class JevClient:
             usage=Usage(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-                cost=float(cost),
+                cost=cost_value,
             ),
         )
 
@@ -416,7 +439,7 @@ async def decide(
     questions: Mapping[str, JevQuestion],
     timeout: float = 15.0,
     proxy: str | None = None,
-    transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> JevResult:
     """Compatibility helper for JEV requests."""
     client = JevClient(
