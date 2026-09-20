@@ -4,13 +4,17 @@ import asyncio
 import json
 from functools import partial
 from pathlib import Path
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from mcp.shared.auth import OAuthToken
 
 from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
+from nanobot.agent.tools import mcp as mcp_runtime
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
-from nanobot.config.loader import load_config, save_config
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
 from nanobot.config.schema import Config
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
@@ -74,6 +78,7 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
         "figma",
         "context7",
         "firecrawl",
+        "baizhi",
         "parallel-search",
         "exa",
         "microsoft-learn",
@@ -378,6 +383,130 @@ def test_parallel_search_preset_is_keyless_and_tool_limited(
     assert server.url == "https://search.parallel.ai/mcp"
     assert server.enabled_tools == ["web_search", "web_fetch"]
     assert server.headers == {}
+
+
+def test_baizhi_preset_starts_uninstalled(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_config(tmp_path, monkeypatch)
+    monkeypatch.delenv("BAIZHI_AUTHORIZATION", raising=False)
+
+    row = next(item for item in mcp_presets_payload()["presets"] if item["name"] == "baizhi")
+
+    assert row["installed"] is False
+    assert row["configured"] is False
+    assert row["transport"] == "streamableHttp"
+    assert row["required_fields"][0]["secret"] is True
+    assert row["required_fields"][0]["placeholder"] == "Bearer <your API key>"
+    assert "baizhi" not in load_config().tools.mcp_servers
+
+
+def test_baizhi_preset_requires_authorization(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_config(tmp_path, monkeypatch)
+    monkeypatch.delenv("BAIZHI_AUTHORIZATION", raising=False)
+
+    with pytest.raises(McpPresetError, match="Authorization header"):
+        mcp_presets_action("enable", {"name": ["baizhi"]})
+
+    assert "baizhi" not in load_config().tools.mcp_servers
+
+
+def test_baizhi_preset_preserves_and_hides_complete_header(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    authorization = "Bearer synthetic-baizhi-key"
+
+    payload = mcp_presets_action(
+        "enable", {"name": ["baizhi"], "baizhi_authorization": [authorization]},
+    )
+    assert "synthetic-baizhi-key" not in json.dumps(payload)
+    server = load_config().tools.mcp_servers["baizhi"]
+    assert server.headers == {"Authorization": authorization}
+    assert server.auth is None
+    assert server.url == "https://agent-toolkit.app.baizhi.cloud/mcp"
+    assert server.enabled_tools == ["websearch_search", "web_scrape", "web_extract"]
+
+    updated = mcp_presets_action("enable", {"name": ["baizhi"]})
+    assert "synthetic-baizhi-key" not in json.dumps(updated)
+    assert load_config().tools.mcp_servers["baizhi"].headers == server.headers
+    mcp_presets_action("remove", {"name": ["baizhi"]})
+    assert "synthetic-baizhi-key" not in (tmp_path / "config.json").read_text()
+
+
+def test_baizhi_preset_resolves_authorization_env_without_persisting_secret(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("BAIZHI_AUTHORIZATION", "Bearer synthetic-environment-key")
+
+    payload = mcp_presets_action("enable", {"name": ["baizhi"]})
+
+    assert "synthetic-environment-key" not in json.dumps(payload)
+    stored = json.loads((tmp_path / "config.json").read_text())
+    assert stored["tools"]["mcpServers"]["baizhi"]["headers"] == {
+        "Authorization": "${BAIZHI_AUTHORIZATION}",
+    }
+    server = resolve_config_env_vars(load_config()).tools.mcp_servers["baizhi"]
+    assert server.headers == {"Authorization": "Bearer synthetic-environment-key"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("from_env", [False, True])
+async def test_baizhi_preset_discovers_only_allowed_tools_with_real_sdk(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, from_env: bool,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    authorization = "Bearer synthetic-sdk-key"
+    if from_env:
+        monkeypatch.setenv("BAIZHI_AUTHORIZATION", authorization)
+        mcp_presets_action("enable", {"name": ["baizhi"]})
+    else:
+        mcp_presets_action(
+            "enable", {"name": ["baizhi"], "baizhi_authorization": [authorization]},
+        )
+    methods: list[str] = []
+    advertised = ["websearch_search", "web_scrape", "web_extract", "unrelated_write_tool"]
+
+    def response(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://agent-toolkit.app.baizhi.cloud/mcp"
+        assert request.headers["Authorization"] == authorization
+        if request.method != "POST":
+            return httpx.Response(405)
+        message = json.loads(request.content)
+        methods.append(message["method"])
+        if message["method"] == "notifications/initialized":
+            return httpx.Response(202)
+        if message["method"] == "initialize":
+            result = {
+                "protocolVersion": message["params"]["protocolVersion"],
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "synthetic-baizhi", "version": "1.0"},
+            }
+        else:
+            assert message["method"] == "tools/list"
+            result = {"tools": [
+                {"name": name, "description": "Synthetic tool", "inputSchema": {"type": "object"}}
+                for name in advertised
+            ]}
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": message["id"], "result": result})
+
+    # Only replace network I/O: retain the real preset, config loader, host and MCP SDK.
+    monkeypatch.setattr(mcp_runtime, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_runtime, "_probe_http_url", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        mcp_runtime, "_pinned_transport_kwargs", lambda: {"transport": httpx.MockTransport(response)},
+    )
+    registry = ToolRegistry()
+    config = resolve_config_env_vars(load_config())
+    connections = await mcp_runtime.connect_mcp_servers(config.tools.mcp_servers, registry)
+    try:
+        assert set(connections) == {"baizhi"}
+        assert set(registry.tool_names) == {
+            "mcp_baizhi_websearch_search", "mcp_baizhi_web_scrape", "mcp_baizhi_web_extract",
+        }
+        assert set(methods) == {"initialize", "notifications/initialized", "tools/list"}
+    finally:
+        for connection in connections.values():
+            await connection.aclose()
 
 
 def test_remove_mcp_preset_updates_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -286,6 +286,19 @@ endpoint and exposes `web_search` and `web_fetch` without requiring an API key.
 It is an optional integration and does not replace nanobot's built-in web search
 provider; mention `@parallel-search` when a turn should use it.
 
+The **Baizhi Cloud Agent Toolkit** preset uses the hosted Streamable HTTP endpoint
+at `https://agent-toolkit.app.baizhi.cloud/mcp`. It enables only `websearch_search`,
+`web_scrape`, and `web_extract`. In Apps, enter the complete Authorization header
+as `Bearer <your API key>`, including the prefix, or start nanobot with
+`BAIZHI_AUTHORIZATION` set to that complete value. The environment-variable setup
+stores a `${BAIZHI_AUTHORIZATION}` reference in the config; a value entered in the
+form is stored in the local config and hidden from the preset card response.
+Keep that config private. Enable the preset explicitly and mention `@baizhi` when
+a turn should use it. Calls use your own Baizhi account and may incur charges.
+The [MIT-licensed client source](https://github.com/chaitin/baizhi-agent-toolkit)
+does not include the hosted service backend. This preset does not change
+nanobot's built-in web search provider.
+
 After a CLI App or MCP server is available, mention it from the composer with
 `@` to attach that tool to the next message. Plugin-provided skills participate
 in normal skill discovery and can be invoked with `$skill-name`.

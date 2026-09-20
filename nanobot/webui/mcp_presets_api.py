@@ -202,6 +202,38 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         ),
     ),
     McpPreset(
+        name="baizhi",
+        display_name="Baizhi Cloud Agent Toolkit",
+        category="web",
+        description="Search, scrape, and extract web pages through Baizhi Cloud's hosted MCP service.",
+        docs_url="https://github.com/chaitin/baizhi-agent-toolkit",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="baizhi.cloud",
+        brand_color="#111827",
+        requires="Baizhi API key in a complete Bearer Authorization header",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            url="https://agent-toolkit.app.baizhi.cloud/mcp",
+            tool_timeout=60,
+            enabled_tools=["websearch_search", "web_scrape", "web_extract"],
+        ),
+        fields=(
+            McpPresetField(
+                name="baizhi_authorization",
+                label="Authorization header (Bearer API_KEY)",
+                target=("header", "Authorization"),
+                env_var="BAIZHI_AUTHORIZATION",
+                placeholder="Bearer <your API key>",
+            ),
+        ),
+        note=(
+            "Include the Bearer prefix; a bare API key is not an Authorization header. "
+            "Uses your own Baizhi key. Tool calls may incur charges. "
+            "The hosted backend is separate from the MIT-licensed client source."
+        ),
+    ),
+    McpPreset(
         name="parallel-search",
         display_name="Parallel Search",
         category="web",
