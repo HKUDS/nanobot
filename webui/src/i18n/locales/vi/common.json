@@ -1383,6 +1383,8 @@
       "chooseAI": "Chọn AI của bạn",
       "switchModel": "Chuyển mô hình cho cuộc trò chuyện này",
       "manageModels": "Quản lý mô hình",
+      "fallbackNotice": "Phản hồi này đã sử dụng mô hình dự phòng: {{model}}.",
+      "checkModelSettings": "Kiểm tra cài đặt mô hình",
       "context": {
         "tooltip": "Ngữ cảnh {{percent}}%",
         "detailsLabel": "Mở mức sử dụng ngữ cảnh",

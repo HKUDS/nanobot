@@ -1384,6 +1384,8 @@
       "chooseAI": "Elige tu IA",
       "switchModel": "Cambiar el modelo de este chat",
       "manageModels": "Gestionar modelos",
+      "fallbackNotice": "Esta respuesta usó un modelo alternativo: {{model}}.",
+      "checkModelSettings": "Revisar ajustes del modelo",
       "context": {
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso del contexto",

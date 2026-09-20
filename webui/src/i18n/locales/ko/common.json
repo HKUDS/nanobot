@@ -1383,6 +1383,8 @@
       "chooseAI": "AI 선택",
       "switchModel": "이 대화에서 사용할 모델 전환",
       "manageModels": "모델 관리",
+      "fallbackNotice": "이 응답은 대체 모델을 사용했습니다: {{model}}.",
+      "checkModelSettings": "모델 설정 확인",
       "context": {
         "tooltip": "컨텍스트 {{percent}}%",
         "detailsLabel": "컨텍스트 사용량 열기",

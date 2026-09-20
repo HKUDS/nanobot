@@ -1397,6 +1397,8 @@
       "chooseAI": "Escolha sua IA",
       "switchModel": "Alternar o modelo desta conversa",
       "manageModels": "Gerenciar modelos",
+      "fallbackNotice": "Esta resposta usou um modelo alternativo: {{model}}.",
+      "checkModelSettings": "Verificar configurações do modelo",
       "context": {
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso do contexto",

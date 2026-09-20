@@ -1383,6 +1383,8 @@
       "chooseAI": "選擇你的 AI",
       "switchModel": "切換此對話使用的模型",
       "manageModels": "管理模型預設",
+      "fallbackNotice": "本次已使用備用模型：{{model}}。",
+      "checkModelSettings": "檢查模型設定",
       "context": {
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "開啟上下文用量",

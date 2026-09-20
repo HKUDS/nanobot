@@ -1383,6 +1383,8 @@
       "chooseAI": "Pilih AI Anda",
       "switchModel": "Ganti model untuk percakapan ini",
       "manageModels": "Kelola model",
+      "fallbackNotice": "Respons ini menggunakan model cadangan: {{model}}.",
+      "checkModelSettings": "Periksa pengaturan model",
       "context": {
         "tooltip": "Konteks {{percent}}%",
         "detailsLabel": "Buka penggunaan konteks",

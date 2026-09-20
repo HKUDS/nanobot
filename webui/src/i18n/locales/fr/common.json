@@ -1383,6 +1383,8 @@
       "chooseAI": "Choisissez votre IA",
       "switchModel": "Changer le modèle de cette conversation",
       "manageModels": "Gérer les modèles",
+      "fallbackNotice": "Cette réponse a utilisé un modèle de secours : {{model}}.",
+      "checkModelSettings": "Vérifier les paramètres du modèle",
       "context": {
         "tooltip": "Contexte {{percent}} %",
         "detailsLabel": "Ouvrir l’utilisation du contexte",

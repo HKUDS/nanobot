@@ -7,6 +7,7 @@ import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailab
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -690,6 +691,11 @@ export function ThreadShell({
     selectItems: installedMcpPresetsFromPayload,
   });
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
+  const [modelFallback, setModelFallback] = useState<{
+    chatId: string;
+    model: string;
+    dismissed: boolean;
+  } | null>(null);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
@@ -964,6 +970,25 @@ export function ThreadShell({
     || settings?.agent.model_preset
     || "default"
   );
+  useEffect(() => {
+    setModelFallback(null);
+    if (!chatId) return;
+    return client.onChat(chatId, (event) => {
+      if (event.event !== "turn_model_updated") return;
+      if (event.fallback !== true) {
+        // The next turn starts with its configured model, not the previous fallback.
+        setModelFallback(null);
+        return;
+      }
+      const model = event.model_name.trim();
+      if (!model) return;
+      // A tool loop may report the same fallback repeatedly. Closing the notice
+      // lasts until the next turn/model change, without changing the actual preset.
+      setModelFallback((current) => current?.chatId === chatId && current.model === model
+        ? current
+        : { chatId, model, dismissed: false });
+    });
+  }, [activeModelPreset, chatId, client]);
   const handleModelPresetChange = useCallback((name: string) => {
     setLocalModelPreset(name);
     if (chatId) {
@@ -1521,6 +1546,13 @@ export function ThreadShell({
 
   const composer = (
     <>
+      {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
+        <ModelFallbackNotice
+          model={modelFallback.model}
+          onOpenSettings={onOpenModelSettings}
+          onDismiss={() => setModelFallback((current) => current && { ...current, dismissed: true })}
+        />
+      ) : null}
       {recoveryState ? (
         <RecoveryNotice
           state={recoveryState}

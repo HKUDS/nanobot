@@ -1583,6 +1583,8 @@
       "chooseAI": "Choose your AI",
       "switchModel": "Switch model for this chat",
       "manageModels": "Manage models",
+      "fallbackNotice": "This response used a fallback model: {{model}}.",
+      "checkModelSettings": "Check model settings",
       "context": {
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",

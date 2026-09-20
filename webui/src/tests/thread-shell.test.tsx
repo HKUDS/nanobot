@@ -1180,6 +1180,67 @@ describe("ThreadShell", () => {
     expect(await screen.findByText("backup")).toBeInTheDocument();
   });
 
+  it("shows a dismissible, session-scoped fallback notice without changing the composer preset", async () => {
+    const client = makeClient();
+    const openSettings = vi.fn();
+    const settings = modelSettings("openai-codex/gpt-5.5", "openai_codex");
+    const tree = (chatId: string) => wrap(client, <ThreadShell
+      session={session(chatId)} title="Fallback notice" onToggleSidebar={() => {}}
+      settingsSnapshot={settings} onOpenModelSettings={openSettings}
+    />);
+    const view = render(tree("notice-a"));
+    await screen.findByTestId("composer-model-logo-openai_codex");
+    const emit = (chatId: string, fallback: boolean) => act(() => client._emitChat(chatId, {
+      event: "turn_model_updated", chat_id: chatId,
+      model_name: fallback ? "xai-grok/grok-4.5" : "openai-codex/gpt-5.5",
+      fallback,
+    }));
+    const notice = () => screen.queryByText("This response used a fallback model: xai-grok/grok-4.5.");
+    emit("notice-b", true);
+    emit("notice-a", false);
+    expect(notice()).not.toBeInTheDocument();
+    emit("notice-a", true);
+    const banner = notice()!.closest('[role="status"]') as HTMLElement;
+    expect(banner).toBeVisible();
+    expect(screen.getByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
+    expect(banner.textContent).not.toMatch(/expired|sign in/i);
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "Keep my draft" } });
+    fireEvent.click(within(banner).getByRole("button", { name: "Check model settings" }));
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(banner).getByRole("button", { name: "Dismiss" }));
+    expect(notice()).not.toBeInTheDocument();
+    expect(input).toHaveValue("Keep my draft");
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    emit("notice-a", true);
+    expect(notice()).not.toBeInTheDocument();
+    // A new turn can notify again; it does not inherit the previous dismissal.
+    emit("notice-a", false);
+    emit("notice-a", true);
+    expect(notice()).toBeVisible();
+    view.rerender(tree("notice-b"));
+    expect(notice()).not.toBeInTheDocument();
+    emit("notice-a", true);
+    expect(notice()).not.toBeInTheDocument();
+    view.rerender(tree("notice-a"));
+    await act(async () => {});
+    expect(notice()).not.toBeInTheDocument();
+  });
+
+  it("does not show a live fallback notice just from replayed response attribution", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("/webui-thread") ? httpJson({
+        schemaVersion: 3,
+        messages: [{ id: "old-reply", role: "assistant", content: "Previous reply", createdAt: 1_000,
+          responseSources: [{ provider: "xai", model: "grok-4.5", preset: "backup", fallback: true }] }],
+      }) : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    render(wrap(makeClient(), <ThreadShell session={session("old-fallback")} title="History"
+      onToggleSidebar={() => {}} settingsSnapshot={modelSettings("gpt-5.5", "openai_codex")} />));
+    expect(await screen.findByText("Previous reply")).toBeInTheDocument();
+    expect(screen.queryByText(/This response used a fallback model/)).not.toBeInTheDocument();
+  });
+
   it.each([false, true])("hides unconfigured model details in setup tooltips (existing history: %s)", async (hasHistory) => {
     const client = makeClient();
     const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
