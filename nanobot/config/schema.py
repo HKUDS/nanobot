@@ -323,6 +323,30 @@ class ProvidersConfig(Base):
         return self
 
 
+class JevConfig(Base):
+    """Configuration for opt-in JEV notification evaluation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    model: str = "typesafe/jev-1.13"
+    threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    timeout_s: float = Field(
+        default=15.0,
+        gt=0,
+        le=120,
+        validation_alias=AliasChoices("timeoutS", "timeout_s"),
+        serialization_alias="timeoutS",
+    )
+
+    @field_validator("model")
+    @classmethod
+    def _validate_model(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("jev.model cannot be empty")
+        return value
+
+
 class HeartbeatConfig(Base):
     """Heartbeat service configuration (now backed by cron)."""
 
@@ -428,6 +452,7 @@ class Config(BaseSettings):
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    jev: JevConfig = Field(default_factory=JevConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)

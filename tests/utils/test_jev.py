@@ -9,8 +9,12 @@ from nanobot.utils.jev import (
     ChoiceQuestion,
     JevClient,
     JevHttpError,
+    JevIncompleteResponseError,
+    JevMalformedJsonError,
     JevMissingCredentialsError,
     JevProtocolError,
+    JevTimeoutError,
+    JevTransportError,
     NoulQuestion,
     ScoreQuestion,
 )
@@ -163,6 +167,69 @@ async def test_score_decide_parses_response():
 
 
 @pytest.mark.asyncio
+async def test_uses_env_openrouter_key_when_not_explicitly_set(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "env-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer env-key"
+        return httpx.Response(
+            200,
+            json={
+                "id": "gen-dec-env",
+                "model": "typesafe/jev-1.13-20260917",
+                "provider": "TypeSafe",
+                "answers": {"safe_to_run": {"type": "noul", "noul": 0.5}},
+                "usage": {"input_tokens": 8, "output_tokens": 2, "cost": 0.0},
+            },
+        )
+
+    client = JevClient(
+        model="typesafe/jev-1.13",
+        api_key=None,
+        timeout=15.0,
+        transport=_Transport(handler),
+    )
+
+    result = await client.decide(
+        state="Task: check",
+        questions={
+            "safe_to_run": NoulQuestion(
+                instructions="Decide if should notify.",
+                criteria={"true": "Notify.", "false": "Skip."},
+            )
+        },
+    )
+
+    assert result.provider == "TypeSafe"
+    assert result.answers["safe_to_run"].noul == pytest.approx(0.5)
+
+
+def test_injected_transport_takes_precedence_over_proxy():
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
+        "id": "gen-dec-proxy",
+        "model": "typesafe/jev-1.13-20260917",
+        "provider": "TypeSafe",
+        "answers": {"safe_to_run": {"type": "noul", "noul": 0.5}},
+        "usage": {"input_tokens": 1, "output_tokens": 1, "cost": 0.0},
+    }))
+
+    client = JevClient(
+        model="typesafe/jev-1.13",
+        api_key="sk-test",
+        timeout=15.0,
+        proxy="http://proxy:8080",
+        transport=transport,
+    )
+
+    assert client._make_transport() is transport
+
+
+def test_timeout_must_be_positive():
+    with pytest.raises(ValueError):
+        JevClient(model="typesafe/jev-1.13", api_key="sk-test", timeout=0.0)
+
+
+@pytest.mark.asyncio
 async def test_missing_credentials_error():
     client = JevClient(model="typesafe/jev-1.13", api_key="", timeout=15.0)
     with pytest.raises(JevMissingCredentialsError):
@@ -170,6 +237,70 @@ async def test_missing_credentials_error():
             instructions="Decide if should notify.",
             criteria={"true": "Notify.", "false": "Skip."},
         )})
+
+
+@pytest.mark.asyncio
+async def test_rejects_boolean_numeric_values():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "bad-bool",
+                "model": "typesafe/jev-1.13-20260917",
+                "provider": "TypeSafe",
+                "answers": {"safe_to_run": {"type": "noul", "noul": True}},
+                "usage": {"input_tokens": 10, "output_tokens": 2, "cost": 0.0},
+            },
+        )
+
+    client = JevClient(
+        model="typesafe/jev-1.13",
+        api_key="sk-bool",
+        timeout=15.0,
+        transport=_Transport(handler),
+    )
+
+    with pytest.raises(JevProtocolError):
+        await client.decide(
+            state="Task: check",
+            questions={
+                "safe_to_run": NoulQuestion(
+                    instructions="Decide if should notify.",
+                    criteria={"true": "Notify.", "false": "Skip."},
+                )
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_missing_required_metadata_raises_incomplete_response_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "gen-dec-missing-metadata",
+                "model": "typesafe/jev-1.13-20260917",
+                "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
+            },
+        )
+
+    client = JevClient(
+        model="typesafe/jev-1.13",
+        api_key="sk-metadata",
+        timeout=15.0,
+        transport=_Transport(handler),
+    )
+
+    with pytest.raises(JevIncompleteResponseError):
+        await client.decide(
+            state="Task: check",
+            questions={
+                "safe_to_run": NoulQuestion(
+                    instructions="Decide if should notify.",
+                    criteria={"true": "Notify.", "false": "Skip."},
+                )
+            },
+        )
 
 
 @pytest.mark.asyncio
@@ -234,3 +365,110 @@ async def test_http_error_raises_jev_http_error():
                 )
             },
         )
+
+
+@pytest.mark.asyncio
+async def test_malformed_json_raises_jev_malformed_json_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"{not valid json")
+
+    client = JevClient(
+        model="typesafe/jev-1.13",
+        api_key="sk-json",
+        timeout=15.0,
+        transport=_Transport(handler),
+    )
+
+    with pytest.raises(JevMalformedJsonError):
+        await client.decide(
+            state="Task: malformed payload",
+            questions={
+                "safe_to_run": NoulQuestion(
+                    instructions="Decide if should notify.",
+                    criteria={"true": "Notify.", "false": "Skip."},
+                )
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_timeout_raises_jev_timeout_error():
+    class TimeoutTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            raise httpx.TimeoutException("timed out")
+
+    client = JevClient(
+        model="typesafe/jev-1.13",
+        api_key="sk-timeout",
+        timeout=15.0,
+        transport=TimeoutTransport(),
+    )
+
+    with pytest.raises(JevTimeoutError):
+        await client.decide(
+            state="Task: timeout",
+            questions={
+                "safe_to_run": NoulQuestion(
+                    instructions="Decide if should notify.",
+                    criteria={"true": "Notify.", "false": "Skip."},
+                )
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_transport_error_raises_jev_transport_error():
+    class FailingTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            raise httpx.TransportError("connection lost")
+
+    client = JevClient(
+        model="typesafe/jev-1.13",
+        api_key="sk-transport",
+        timeout=15.0,
+        transport=FailingTransport(),
+    )
+
+    with pytest.raises(JevTransportError):
+        await client.decide(
+            state="Task: network",
+            questions={
+                "safe_to_run": NoulQuestion(
+                    instructions="Decide if should notify.",
+                    criteria={"true": "Notify.", "false": "Skip."},
+                )
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_errors_do_not_expose_sensitive_payloads():
+    secret_state = "super-secret-state-123"
+    secret_instructions = "Internal instructions: do not leak token abc123"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": secret_state, "details": secret_instructions})
+
+    client = JevClient(
+        model="typesafe/jev-1.13",
+        api_key="sk-secret",
+        timeout=15.0,
+        transport=_Transport(handler),
+    )
+
+    with pytest.raises(JevHttpError) as exc:
+        await client.decide(
+            state=secret_state,
+            questions={
+                "safe_to_run": NoulQuestion(
+                    instructions=secret_instructions,
+                    criteria={"true": "Notify.", "false": "Skip."},
+                )
+            },
+        )
+
+    message = str(exc.value)
+    assert "super-secret-state-123" not in message
+    assert "abc123" not in message
+    assert "do not leak" not in message.lower()
+    assert "HTTP 401" in message

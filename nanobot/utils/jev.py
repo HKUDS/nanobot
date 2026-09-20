@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -147,10 +148,16 @@ class JevClient:
         api_key: str | None,
         timeout: float,
         proxy: str | None = None,
-        transport: httpx.AsyncBaseTransport | None = None,
+        transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        if not model or not model.strip():
+            raise JevProtocolError("Model cannot be empty")
+        if timeout <= 0 or timeout > 120:
+            raise ValueError("JEV timeout must be within (0, 120]")
+
         self.model = model
-        self.api_key = api_key
+        resolved_key = (api_key or os.environ.get("OPENROUTER_API_KEY") or "").strip()
+        self.api_key = resolved_key
         self.timeout = float(timeout)
         self.proxy = proxy
         self.transport = transport
@@ -212,12 +219,12 @@ class JevClient:
         validated = self._coerce_question_map(questions)
         return JevRequest(model=self.model, state=state, questions=validated)
 
-    def _make_transport(self) -> httpx.AsyncBaseTransport | None:
+    def _make_transport(self) -> httpx.BaseTransport | httpx.AsyncBaseTransport | None:
         if self.transport is not None:
             return self.transport
         if self.proxy:
-            return httpx.AsyncHTTPTransport(proxy=self.proxy, trust_env=False, follow_redirects=False)
-        return httpx.AsyncHTTPTransport(trust_env=False, follow_redirects=False)
+            return httpx.AsyncHTTPTransport(proxy=self.proxy, trust_env=False)
+        return httpx.AsyncHTTPTransport(trust_env=False)
 
     async def decide(
         self,
@@ -274,7 +281,11 @@ class JevClient:
 
     @staticmethod
     def _is_finite_number(value: Any) -> bool:
-        return isinstance(value, (int, float)) and math.isfinite(float(value))
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        )
 
     @classmethod
     def _parse_result(cls, data: Any, requested_questions: Mapping[str, JevQuestion]) -> JevResult:
@@ -377,9 +388,9 @@ class JevClient:
         input_tokens = usage.get("input_tokens")
         output_tokens = usage.get("output_tokens")
         cost = usage.get("cost")
-        if not isinstance(input_tokens, int) or input_tokens < 0:
+        if not isinstance(input_tokens, int) or isinstance(input_tokens, bool) or input_tokens < 0:
             raise JevIncompleteResponseError("Usage input_tokens missing or invalid")
-        if not isinstance(output_tokens, int) or output_tokens < 0:
+        if not isinstance(output_tokens, int) or isinstance(output_tokens, bool) or output_tokens < 0:
             raise JevIncompleteResponseError("Usage output_tokens missing or invalid")
         if not cls._is_finite_number(cost) or float(cost) < 0:
             raise JevIncompleteResponseError("Usage cost missing or invalid")
@@ -405,7 +416,7 @@ async def decide(
     questions: Mapping[str, JevQuestion],
     timeout: float = 15.0,
     proxy: str | None = None,
-    transport: httpx.AsyncBaseTransport | None = None,
+    transport: httpx.BaseTransport | httpx.AsyncBaseTransport | None = None,
 ) -> JevResult:
     """Compatibility helper for JEV requests."""
     client = JevClient(
