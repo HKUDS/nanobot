@@ -515,6 +515,10 @@
       "installing": "必要なパッケージをインストール中…"
     },
     "models": {
+      "catalogAuthRequired": "認証が失効しました。再度ログインしてください。",
+      "catalogUnavailable": "モデルを更新できません。しばらくしてから再試行してください。",
+      "catalogStale": "キャッシュ済みのモデルを表示しています。最新ではない可能性があります。",
+      "catalogFallback": "組み込みのモデルを表示しています。最新ではない可能性があります。",
       "selectModel": "モデルを選択",
       "addConfiguration": "設定を追加",
       "newConfiguration": "新しいモデル設定",

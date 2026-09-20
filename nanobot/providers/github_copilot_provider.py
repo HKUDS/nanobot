@@ -19,6 +19,7 @@ from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot.providers.base import LLMResponse, ProviderCallContext
 from nanobot.providers.oauth_model_catalog import (
+    OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
 )
@@ -326,7 +327,7 @@ def invalidate_github_copilot_model_catalog() -> None:
 def _fetch_github_copilot_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
     github_token = get_storage().load()
     if not github_token or not github_token.access:
-        raise RuntimeError("GitHub Copilot is not logged in")
+        raise OAuthCatalogAuthRequiredError()
 
     common_headers = {
         "Accept": "application/json",

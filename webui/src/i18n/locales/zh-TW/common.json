@@ -515,6 +515,10 @@
       "installing": "正在安裝所需套件…"
     },
     "models": {
+      "catalogAuthRequired": "授權已失效，請重新登入。",
+      "catalogUnavailable": "暫時無法更新模型，請稍後重試。",
+      "catalogStale": "目前顯示快取的模型清單，可能不是最新。",
+      "catalogFallback": "目前顯示內建模型清單，可能不是最新。",
       "selectModel": "選擇模型",
       "addConfiguration": "新增設定",
       "newConfiguration": "新增模型設定",

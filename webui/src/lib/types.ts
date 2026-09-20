@@ -564,6 +564,7 @@ export interface ProviderModelsPayload {
     | "custom"
     | "unsupported";
   source?: "remote" | "cache" | "stale" | "fallback";
+  error_kind?: "auth_required" | "unavailable" | null;
   models: ProviderModelInfo[];
   model_count: number;
   message?: string | null;

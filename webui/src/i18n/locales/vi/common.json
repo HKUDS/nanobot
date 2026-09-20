@@ -515,6 +515,10 @@
       "installing": "Đang cài các gói cần thiết…"
     },
     "models": {
+      "catalogAuthRequired": "Quyền truy cập đã hết hạn. Vui lòng đăng nhập lại.",
+      "catalogUnavailable": "Không thể cập nhật mô hình. Vui lòng thử lại sau.",
+      "catalogStale": "Đang hiển thị mô hình đã lưu đệm; danh sách có thể chưa được cập nhật.",
+      "catalogFallback": "Đang hiển thị mô hình tích hợp sẵn; danh sách có thể chưa được cập nhật.",
       "selectModel": "Chọn mô hình",
       "addConfiguration": "Thêm cấu hình",
       "newConfiguration": "Cấu hình mô hình mới",

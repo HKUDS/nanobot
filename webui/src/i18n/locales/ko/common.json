@@ -515,6 +515,10 @@
       "installing": "필수 패키지 설치 중…"
     },
     "models": {
+      "catalogAuthRequired": "인증이 만료되었습니다. 다시 로그인해 주세요.",
+      "catalogUnavailable": "모델 목록을 갱신할 수 없습니다. 나중에 다시 시도해 주세요.",
+      "catalogStale": "캐시된 모델을 표시합니다. 최신 목록이 아닐 수 있습니다.",
+      "catalogFallback": "기본 제공 모델을 표시합니다. 최신 목록이 아닐 수 있습니다.",
       "selectModel": "모델 선택",
       "addConfiguration": "설정 추가",
       "newConfiguration": "새 모델 설정",

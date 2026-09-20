@@ -515,6 +515,10 @@
       "installing": "Memasang paket yang diperlukan…"
     },
     "models": {
+      "catalogAuthRequired": "Otorisasi kedaluwarsa. Silakan masuk lagi.",
+      "catalogUnavailable": "Model tidak dapat diperbarui. Coba lagi nanti.",
+      "catalogStale": "Menampilkan model dari cache; daftar mungkin belum terbaru.",
+      "catalogFallback": "Menampilkan model bawaan; daftar mungkin belum terbaru.",
       "selectModel": "Pilih model",
       "addConfiguration": "Tambah konfigurasi",
       "newConfiguration": "Konfigurasi model baru",

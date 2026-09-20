@@ -483,6 +483,8 @@ export function ModelsSettings({
           provider={form.provider}
           value={form.model}
           showProviderLogos={showBrandLogos}
+          onProviderOAuthLogin={onProviderOAuthLogin}
+          providerSigningIn={selectedProviderSigningIn}
           onChange={(model) => {
             const canSuggestName =
               creating &&

@@ -515,6 +515,10 @@
       "installing": "Installation des dépendances…"
     },
     "models": {
+      "catalogAuthRequired": "L’autorisation a expiré. Veuillez vous reconnecter.",
+      "catalogUnavailable": "Impossible d’actualiser les modèles. Réessayez plus tard.",
+      "catalogStale": "Modèles en cache affichés ; la liste peut ne pas être à jour.",
+      "catalogFallback": "Modèles intégrés affichés ; la liste peut ne pas être à jour.",
       "selectModel": "Choisir un modèle",
       "addConfiguration": "Ajouter une configuration",
       "newConfiguration": "Nouvelle configuration de modèle",

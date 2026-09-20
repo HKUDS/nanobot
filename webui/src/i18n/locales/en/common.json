@@ -401,6 +401,10 @@
       "voiceInput": "Voice input"
     },
     "models": {
+      "catalogAuthRequired": "Authorization expired. Please sign in again.",
+      "catalogUnavailable": "Could not refresh models. Try again later.",
+      "catalogStale": "Showing cached models; the list may be out of date.",
+      "catalogFallback": "Showing built-in models; the list may be out of date.",
       "selectModel": "Select model",
       "addConfiguration": "Add configuration",
       "newConfiguration": "New model configuration",

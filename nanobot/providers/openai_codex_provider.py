@@ -26,8 +26,10 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
 )
 from nanobot.providers.oauth_model_catalog import (
+    OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
+    oauth_catalog_auth_rejected,
 )
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
@@ -655,7 +657,26 @@ def invalidate_openai_codex_model_catalog() -> None:
 
 
 def _fetch_openai_codex_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
-    token = get_codex_token(proxy=proxy)
+    try:
+        token = get_codex_token(proxy=proxy)
+    except RuntimeError as exc:
+        # oauth-cli-kit exposes refresh failures as strings, not typed HTTP errors.
+        # Interpret only its exact envelope; never propagate the raw token response.
+        detail = str(exc)
+        if detail == "OAuth credentials not found. Please run the login command.":
+            raise OAuthCatalogAuthRequiredError() from None
+        prefix = "Token refresh failed: "
+        if detail.startswith(prefix):
+            status, _, body = detail[len(prefix):].partition(" ")
+            payload: object = None
+            if len(body) <= 16_384:
+                try:
+                    payload = json.loads(body)
+                except ValueError:
+                    pass
+            if status.isdecimal() and oauth_catalog_auth_rejected(int(status), payload):
+                raise OAuthCatalogAuthRequiredError() from None
+        raise
     account_id = getattr(token, "account_id", None)
     if not isinstance(account_id, str) or not account_id:
         raise RuntimeError("OpenAI Codex OAuth token has no account ID")

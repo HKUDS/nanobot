@@ -215,6 +215,10 @@
       "voiceInput": "Entrada de voz"
     },
     "models": {
+      "catalogAuthRequired": "A autorização expirou. Entre novamente.",
+      "catalogUnavailable": "Não foi possível atualizar os modelos. Tente mais tarde.",
+      "catalogStale": "Exibindo modelos em cache; a lista pode estar desatualizada.",
+      "catalogFallback": "Exibindo modelos integrados; a lista pode estar desatualizada.",
       "selectModel": "Selecionar modelo",
       "addConfiguration": "Adicionar configuração",
       "newConfiguration": "Nova configuração de modelo",

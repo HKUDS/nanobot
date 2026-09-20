@@ -22,7 +22,11 @@ from nanobot.providers.base import (
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
-from nanobot.providers.oauth_model_catalog import OAuthModelCatalog, OAuthModelCatalogSnapshot
+from nanobot.providers.oauth_model_catalog import (
+    OAuthCatalogAuthRequiredError,
+    OAuthModelCatalog,
+    OAuthModelCatalogSnapshot,
+)
 from nanobot.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_messages,
@@ -661,7 +665,12 @@ def invalidate_xai_grok_model_catalog() -> None:
 
 
 def _fetch_xai_grok_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
-    token = get_xai_oauth_token(proxy=proxy)
+    from nanobot.providers.xai_oauth import XAIOAuthReauthRequiredError
+
+    try:
+        token = get_xai_oauth_token(proxy=proxy)
+    except XAIOAuthReauthRequiredError:
+        raise OAuthCatalogAuthRequiredError() from None
     client_kwargs: dict[str, Any] = {"timeout": 10.0, "follow_redirects": False}
     if proxy:
         client_kwargs.update(proxy=proxy, trust_env=False)

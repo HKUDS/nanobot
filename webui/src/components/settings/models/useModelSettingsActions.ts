@@ -501,14 +501,12 @@ export function useModelSettingsActions({
         setProviderOAuthFlow(payload);
         setProviderOAuthResponse("");
         setProviderOAuthDialogError(null);
-        setExpandedProvider(providerName);
         setError(null);
         return;
       }
       popup?.close();
       closeProviderOAuthFlow();
-      applyPayload(payload);
-      setExpandedProvider(providerName);
+      applyPayload(payload, { preserveAgentForm: action === "login" });
       setError(null);
     } catch (err) {
       popup?.close();
@@ -533,8 +531,7 @@ export function useModelSettingsActions({
       );
       if (providerOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
       if (isProviderOAuthPending(payload)) return;
-      applyPayload(payload);
-      setExpandedProvider(flow.provider);
+      applyPayload(payload, { preserveAgentForm: true });
       setError(null);
       closeProviderOAuthFlow();
     } catch (err) {

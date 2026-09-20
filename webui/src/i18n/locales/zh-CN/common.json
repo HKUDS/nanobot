@@ -401,6 +401,10 @@
       "voiceInput": "语音识别"
     },
     "models": {
+      "catalogAuthRequired": "授权已失效，请重新登录。",
+      "catalogUnavailable": "暂时无法刷新模型，请稍后重试。",
+      "catalogStale": "当前显示缓存的模型列表，可能不是最新。",
+      "catalogFallback": "当前显示内置模型列表，可能不是最新。",
       "selectModel": "选择模型",
       "addConfiguration": "添加配置",
       "newConfiguration": "新建模型配置",

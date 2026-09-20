@@ -4,6 +4,15 @@ Use this page when the first reply fails because of provider/model mismatch, or 
 
 For normal local setup, open **Settings → Models** in the WebUI to add provider credentials, create a model preset, and select the active model. Use the JSON below for manual deployments, local endpoints, provider-specific fields, or diagnosis.
 
+The model picker fetches online catalogs for OpenAI Codex, xAI Grok, and GitHub
+Copilot. If a refresh fails, it labels cached or built-in lists as potentially
+out of date. An explicit authorization failure offers **Sign in again** using
+the existing provider login flow; successful WebUI sign-in clears the catalog
+cache. Network, rate-limit, and service failures instead ask you to try again
+later (failed refreshes are cached briefly). Existing presets and manual model
+IDs remain available. A successful chat may have used a fallback preset and
+does not prove that the selected provider's authorization is still valid.
+
 For every setup, answer three questions:
 
 1. Which provider owns the credential or endpoint?

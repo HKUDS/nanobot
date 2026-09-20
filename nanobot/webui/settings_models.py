@@ -685,6 +685,7 @@ def provider_models_payload(
             **base_payload,
             "status": "available",
             "source": catalog.source,
+            "error_kind": catalog.error_kind,
             "models": rows,
             "model_count": len(rows),
             "message": catalog.message,
@@ -1591,15 +1592,13 @@ def login_oauth_provider(
     if spec.name == "github_copilot":
         try:
             from nanobot.providers.github_copilot_provider import (
-                get_github_copilot_login_status,
                 login_github_copilot,
             )
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
-        token = get_github_copilot_login_status()
-        if not token:
-            token = login_github_copilot(print_fn=lambda _message: None)
+        # An existing token can be revoked; an explicit sign-in must replace it.
+        token = login_github_copilot(print_fn=lambda _message: None)
         if not (token and token.access):
             raise WebUISettingsError("OAuth login failed", status=401)
         invalidate_oauth_model_catalog(spec.name)

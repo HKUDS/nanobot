@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   Bot,
   Brain,
@@ -160,6 +160,8 @@ export function ModelIdPicker({
   emptyLabel,
   searchPlaceholder,
   emptyMessage,
+  onProviderOAuthLogin,
+  providerSigningIn = false,
   onChange,
 }: {
   token: string;
@@ -171,6 +173,8 @@ export function ModelIdPicker({
   emptyLabel?: string;
   searchPlaceholder?: string;
   emptyMessage?: string;
+  onProviderOAuthLogin?: (provider: string) => void;
+  providerSigningIn?: boolean;
   onChange: (model: string) => void;
 }) {
   const { t } = useTranslation();
@@ -182,6 +186,7 @@ export function ModelIdPicker({
   const [payload, setPayload] = useState<ProviderModelsPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const catalogNoticeId = useId();
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
   const hasConcreteProvider = Boolean(effectiveProvider && effectiveProvider !== "auto");
@@ -239,6 +244,9 @@ export function ModelIdPicker({
   );
   const providerModelCount = payload?.model_count ?? providerModels.length;
   const modelUnconfigured = !value.trim() || !providerConfigured;
+  const showCatalogNotice = !loading && payload?.status === "available"
+    && (payload.source === "stale" || payload.source === "fallback");
+  const catalogNeedsSignIn = payload?.error_kind === "auth_required";
 
   useEffect(() => {
     if (!open) return;
@@ -269,7 +277,8 @@ export function ModelIdPicker({
     return () => {
       cancelled = true;
     };
-  }, [effectiveProvider, open, shouldFetchModels]);
+  // Successful OAuth completion replaces the settings row even for the same account.
+  }, [effectiveProvider, open, shouldFetchModels, providerRow]);
 
   const selectModel = (model: string) => {
     onChange(model);
@@ -377,10 +386,45 @@ export function ModelIdPicker({
               aria-label={
                 searchPlaceholder || tx("settings.models.searchModels", "Search or type model ID")
               }
+              aria-describedby={showCatalogNotice ? catalogNoticeId : undefined}
               className="h-8 rounded-full pl-8 pr-3 text-[12px]"
             />
           </div>
         </div>
+
+        {showCatalogNotice ? (
+          <div className="mx-1 mb-1.5 rounded-control bg-muted/60 px-2.5 py-2 text-[11px] leading-4">
+            <div id={catalogNoticeId} role="status">
+              <p className="font-medium text-foreground">
+                {catalogNeedsSignIn
+                  ? tx("settings.models.catalogAuthRequired", "Authorization expired. Please sign in again.")
+                  : tx("settings.models.catalogUnavailable", "Could not refresh models. Try again later.")}
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                {payload.source === "stale"
+                  ? tx("settings.models.catalogStale", "Showing cached models; the list may be out of date.")
+                  : tx("settings.models.catalogFallback", "Showing built-in models; the list may be out of date.")}
+              </p>
+            </div>
+            {catalogNeedsSignIn && onProviderOAuthLogin && providerRow?.oauth_login_supported ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-2 h-7 rounded-full px-2.5 text-[11px]"
+                disabled={providerSigningIn}
+                onClick={() => {
+                  setOpen(false);
+                  onProviderOAuthLogin(effectiveProvider);
+                }}
+              >
+                {providerSigningIn
+                  ? tx("settings.oauth.signingIn", "Signing in...")
+                  : tx("settings.oauth.signInAgain", "Sign in again")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
 
         {providerRequiresConfiguration ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">

@@ -35,7 +35,6 @@ export function useProviderOAuthPolling({
   const {
     providerOAuthFlow,
     providerOAuthFlowRef,
-    setExpandedProvider,
   } = state;
 
   useEffect(() => {
@@ -57,8 +56,7 @@ export function useProviderOAuthPolling({
           timer = window.setTimeout(() => void poll(), 1000);
           return;
         }
-        applyPayload(payload);
-        setExpandedProvider(providerOAuthFlow.provider);
+        applyPayload(payload, { preserveAgentForm: true });
         setError(null);
         closeProviderOAuthFlow();
       } catch (err) {
