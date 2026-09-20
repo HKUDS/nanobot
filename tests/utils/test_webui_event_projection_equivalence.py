@@ -56,8 +56,8 @@ def _normalize_projection(messages: list[dict[str, Any]]) -> list[dict[str, Any]
     return normalized
 
 
-def test_replay_matches_shared_live_projection_before_canonical_revision_migration() -> None:
-    """Lock the known-equivalent subset without defining the future snapshot protocol."""
+def test_legacy_message_projection_keeps_canonical_fixture_compatibility() -> None:
+    """Keep the old-client and oversized-trace fallback compatible during migration."""
     fixture = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
 
     for case in fixture["cases"]:

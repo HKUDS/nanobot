@@ -205,7 +205,6 @@ interface ThreadComposerProps {
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
-  fallbackModelName?: string | null;
   onModelBadgeClick?: () => void;
   onManageModels?: () => void;
   contextUsage?: ComposerContextUsage | null;
@@ -907,7 +906,6 @@ export function ThreadComposer({
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
-  fallbackModelName = null,
   onModelBadgeClick,
   onManageModels,
   contextUsage = null,
@@ -2274,7 +2272,6 @@ export function ThreadComposer({
       providerLabel={modelProviderLabel}
       needsSetup={modelNeedsSetup}
       attentionRequest={modelSetupAttentionRequest}
-      fallbackModelName={fallbackModelName}
       isHero={isHero && !compactControls}
       onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
     />

@@ -1599,6 +1599,7 @@
     "openAttachment": "開啟 {{name}}",
     "skill": "技能：{{name}}",
     "forkFromHere": "建立分支",
+    "fallbackResponse": "本則回覆已切換至備用模型，由 {{preset}} 回答。",
     "copyReply": "複製",
     "copiedReply": "已複製",
     "turnLatencyTitle": "本輪耗時（端到端）",

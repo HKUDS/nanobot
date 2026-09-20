@@ -1826,6 +1826,7 @@
     "automationTriggered": "Triggered automatically",
     "askAboutSelection": "Ask about this",
     "forkFromHere": "Fork",
+    "fallbackResponse": "This reply switched to a fallback model, answered by {{preset}}.",
     "copyReply": "Copy",
     "copiedReply": "Copied",
     "turnLatencyTitle": "Response time (end-to-end)",

@@ -64,6 +64,13 @@ export interface TurnUsage {
 
 export type RoundUsage = TurnUsage;
 
+export interface ResponseSource {
+  provider: string;
+  model: string;
+  preset: string;
+  fallback?: boolean;
+}
+
 export interface RetryStatus extends WireRetryStatus {
   next_retry_at?: number;
   turn_id?: string;
@@ -72,6 +79,8 @@ export interface UIMessage {
   id: string;
   role: Role;
   content: string;
+  /** Invocation-time snapshots, never resolved from today's model presets. */
+  responseSources?: ResponseSource[];
   kind?: MessageKind;
   isStreaming?: boolean;
   createdAt: number;
@@ -1385,6 +1394,7 @@ export type InboundEvent =
       latency_ms?: number;
       /** Lightweight provenance for proactive assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
@@ -1401,6 +1411,7 @@ export type InboundEvent =
       stream_id?: string;
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
@@ -1409,6 +1420,7 @@ export type InboundEvent =
       text?: string;
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
       /** This answer segment ended, but the active agent turn will continue. */
       resuming?: boolean;
       /** The next answer segment continues this same assistant message. */
@@ -1424,6 +1436,8 @@ export type InboundEvent =
       event: "reasoning_end";
       chat_id: string;
       stream_id?: string;
+      /** Legacy persisted transcripts may carry the final reasoning text here. */
+      text?: string;
     } & InboundTurnMetadata)
   | {
       event: "runtime_model_updated";
@@ -1503,6 +1517,25 @@ export type InboundEvent =
       turn_id?: string;
     };
 
+type ThreadProjectionEventName =
+  | "user_message"
+  | "message"
+  | "file_edit"
+  | "delta"
+  | "stream_end"
+  | "reasoning_delta"
+  | "reasoning_end"
+  | "context_compaction"
+  | "turn_end";
+
+export type ThreadProjectionEvent = Extract<
+  InboundEvent,
+  { event: ThreadProjectionEventName }
+> & {
+  projection_id?: string;
+  created_at_ms?: number;
+};
+
 /** Base64-encoded file attached to an outbound ``message`` envelope.
  *
  * ``data_url`` must use a server-whitelisted image, video, or document MIME
@@ -1542,6 +1575,7 @@ interface WebuiThreadPagePayload {
   loaded_message_count?: number;
   total_known_message_count?: number;
   user_message_offset?: number;
+  loaded_event_count?: number;
 }
 
 export interface WebuiThreadPersistedPayload {
@@ -1550,8 +1584,13 @@ export interface WebuiThreadPersistedPayload {
   savedAt?: string;
   /** Cheap server revision used for application-managed conditional revalidation. */
   revision?: string;
-  messages: UIMessage[];
+  /** Legacy server-projected snapshots, retained as a compatibility fallback. */
+  messages?: UIMessage[];
+  /** Canonical transcript events projected by the same reducer as live events. */
+  events?: ThreadProjectionEvent[];
+  projection?: "events";
   fork_boundary_message_count?: number;
+  fork_boundary_event_index?: number;
   /** Turn ids backed by an explicit persisted ``turn_end`` event. */
   completed_turn_ids?: string[];
   has_pending_tool_calls?: boolean;

@@ -23,6 +23,7 @@ import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
+import { ResponseSourceBadge } from "@/components/ResponseSourceBadge";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
@@ -497,8 +498,9 @@ export function MessageBubble({
     && (!empty || hasReasoning || media.length > 0);
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
+  const fallbackSources = message.responseSources?.filter((source) => source.fallback === true) ?? [];
   const showAssistantFooterRow =
-    showCopyButton || showForkButton || showAssistantTimestamp;
+    showCopyButton || showForkButton || showAssistantTimestamp || fallbackSources.length > 0;
   const hasAssistantFooterContent =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
@@ -576,6 +578,13 @@ export function MessageBubble({
               >
                 {assistantTimestampLabel}
               </MessageTimestamp>
+            ) : null}
+            {fallbackSources.length > 0 ? (
+              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1">
+                {fallbackSources.map((source) => (
+                  <ResponseSourceBadge key={JSON.stringify(source)} source={source} />
+                ))}
+              </div>
             ) : null}
             {showAutomationTrigger ? (
               <AutomationTriggerMeta

@@ -1640,6 +1640,7 @@
     "automationTriggered": "Acionada automaticamente",
     "askAboutSelection": "Perguntar sobre isto",
     "forkFromHere": "Fazer fork",
+    "fallbackResponse": "Esta resposta usa um modelo alternativo: {{preset}}.",
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tempo de resposta (ponta a ponta)",

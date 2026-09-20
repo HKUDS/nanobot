@@ -6032,6 +6032,64 @@ def test_handle_webui_thread_get_accepts_pagination_query(tmp_path, monkeypatch)
     assert body["page"]["before_cursor"]
 
 
+@pytest.mark.parametrize("sources", [
+    None,
+    [],
+    [{"provider": "xai", "model": "grok", "preset": "saved backup", "fallback": True}],
+])
+def test_handle_webui_thread_get_negotiates_client_event_projection(
+    tmp_path,
+    monkeypatch,
+    sources,
+) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:event-route"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "event-route", "text": "question"},
+    )
+    append_transcript_object(
+        key,
+        {
+            "event": "message", "chat_id": "event-route", "text": "answer",
+            **({"response_sources": sources} if sources is not None else {}),
+        },
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "event-route"})
+
+    channel = _ch(MagicMock())
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread?projection=events",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    response = channel.gateway.http._handle_webui_thread_get(request, encoded)
+
+    assert response.status_code == 200
+    body = json.loads(response.body.decode())
+    assert "messages" not in body
+    assert body["projection"] == "events"
+    assert [event["event"] for event in body["events"]] == [
+        "user_message",
+        "message",
+        "turn_end",
+    ]
+    answer = body["events"][1]
+    if sources is None:
+        assert "response_sources" not in answer
+    else:
+        assert answer["response_sources"] == sources
+
+
 def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     from urllib.parse import quote
 

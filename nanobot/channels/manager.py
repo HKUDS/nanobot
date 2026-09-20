@@ -975,7 +975,11 @@ class ChannelManager:
             is_delta = isinstance(next_event, StreamDeltaEvent)
             is_end = isinstance(next_event, StreamEndEvent)
 
-            if same_target and (is_delta or (is_end and next_msg.content)):
+            same_response_sources = (
+                next_msg.metadata.get("response_sources")
+                == first_msg.metadata.get("response_sources")
+            )
+            if same_target and same_response_sources and (is_delta or (is_end and next_msg.content)):
                 # Accumulate content
                 combined_content += next_msg.content
                 # If we see stream_end, remember it and stop coalescing this stream

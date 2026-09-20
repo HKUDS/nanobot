@@ -1600,6 +1600,7 @@
     "skill": "Keterampilan: {{name}}",
     "askAboutSelection": "Tanyakan tentang ini",
     "forkFromHere": "Buat cabang",
+    "fallbackResponse": "Balasan ini beralih ke model cadangan dan dijawab oleh {{preset}}.",
     "copyReply": "Salin",
     "copiedReply": "Disalin",
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",

@@ -1086,7 +1086,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("button", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
 
-  it("shows the effective fallback model in the composer badge", async () => {
+  it("keeps the selected composer preset and attributes only the reply to its actual source", async () => {
     const client = makeClient();
     render(wrap(
       client,
@@ -1127,23 +1127,21 @@ describe("ThreadShell", () => {
       });
     });
 
-    const logo = await screen.findByTestId("composer-model-logo-deepseek");
-    const badge = logo.parentElement;
-    expect(badge).not.toBeNull();
-    expect(badge).toBe(configuredBadge);
-    expect(screen.queryByText("Default")).not.toBeInTheDocument();
-    expect(screen.getByText("deepseek-chat")).toBeInTheDocument();
-    expect(badge).toHaveAttribute("data-fallback", "true");
-    expect(badge).not.toHaveAttribute("title");
-    fireEvent.focus(screen.getByLabelText("deepseek-chat"));
+    expect(screen.getByTestId("composer-model-logo-openai_codex").parentElement).toBe(configuredBadge);
+    expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-model-logo-deepseek")).not.toBeInTheDocument();
+    expect(configuredBadge).not.toHaveAttribute("data-fallback");
+    fireEvent.focus(screen.getByLabelText("Default"));
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "deepseek-chat · deepseek/deepseek-chat",
+      "Default · gpt-5.5 · OpenAI Codex",
     );
-    expect(screen.getByRole("tooltip")).not.toHaveTextContent("Default");
-    fireEvent.blur(screen.getByLabelText("deepseek-chat"));
-    expect(logo).toBeInTheDocument();
+    fireEvent.blur(screen.getByLabelText("Default"));
 
     act(() => {
+      client._emitChat("fallback-model", {
+        event: "message", chat_id: "fallback-model", text: "Reply from the actual provider",
+        response_sources: [{provider: "deepseek", model: "deepseek-chat", preset: "backup", fallback: true}],
+      });
       client._emitChat("fallback-model", {
         event: "turn_end",
         chat_id: "fallback-model",
@@ -1156,6 +1154,7 @@ describe("ThreadShell", () => {
       ).not.toHaveAttribute("data-fallback");
     });
     expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(await screen.findByText("backup")).toBeInTheDocument();
   });
 
   it.each([false, true])("hides unconfigured model details in setup tooltips (existing history: %s)", async (hasHistory) => {

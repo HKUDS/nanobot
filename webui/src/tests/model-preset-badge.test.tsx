@@ -37,16 +37,15 @@ describe("ModelPresetBadge setup tooltip", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["openai-codex/gpt-5.5", "deepseek/deepseek-chat"])(
-    "keeps the localized setup prompt despite a stale fallback (%s)",
-    async (fallbackModelName) => {
+  it(
+    "keeps the localized setup prompt instead of an available preset",
+    async () => {
       render(
         <ModelPresetBadge
           label="选择你的 AI"
           modelDetail="claude-opus-4-5"
           providerLabel="Anthropic"
           modelPresets={presets}
-          fallbackModelName={fallbackModelName}
           needsSetup
           onClick={vi.fn()}
           isHero={false}
@@ -62,8 +61,8 @@ describe("ModelPresetBadge setup tooltip", () => {
   );
 });
 
-describe("ModelPresetBadge fallback tooltip", () => {
-  it("shows only the effective preset on hover and preserves the preset picker", async () => {
+describe("ModelPresetBadge selected preset tooltip", () => {
+  it("shows the selected preset on hover and preserves the preset picker", async () => {
     const user = userEvent.setup();
     const onPresetChange = vi.fn();
     const { container } = render(
@@ -73,18 +72,17 @@ describe("ModelPresetBadge fallback tooltip", () => {
         modelDetail="glm-5"
         provider="zhipu"
         modelPresets={presets}
-        fallbackModelName="openai-codex/gpt-5.5"
         onPresetChange={onPresetChange}
         isHero={false}
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "codex" });
+    const trigger = screen.getByRole("button", { name: "zhipu" });
     expect(container.querySelector("[title]")).toBeNull();
     await user.hover(trigger);
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("codex · openai-codex/gpt-5.5");
-    expect(tooltip).not.toHaveTextContent("zhipu");
+    expect(tooltip).toHaveTextContent("zhipu · glm-5");
+    expect(tooltip).not.toHaveTextContent("codex");
     await user.click(trigger);
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
@@ -96,16 +94,16 @@ describe("ModelPresetBadge fallback tooltip", () => {
     render(
       <ModelPresetBadge
         label="zhipu"
+        modelDetail="glm-5"
         modelPresets={presets}
-        fallbackModelName="openai-codex/gpt-5.5"
         isHero
       />,
     );
-    const trigger = screen.getByLabelText("codex");
+    const trigger = screen.getByLabelText("zhipu");
     expect(trigger).toHaveAttribute("tabindex", "0");
     fireEvent.focus(trigger);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "codex · openai-codex/gpt-5.5",
+      "zhipu · glm-5",
     );
     fireEvent.keyDown(trigger, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());

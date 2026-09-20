@@ -1826,6 +1826,7 @@
     "automationTriggered": "自动触发",
     "askAboutSelection": "询问此内容",
     "forkFromHere": "从此处分叉",
+    "fallbackResponse": "本条回复已切换至备用模型，由 {{preset}} 回答。",
     "copyReply": "复制",
     "copiedReply": "已复制",
     "turnLatencyTitle": "本轮耗时（端到端）",

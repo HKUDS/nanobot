@@ -88,6 +88,26 @@ _SESSION_MENTION_NAME_RE = re.compile(r"^[\w-]+$")
 _SESSION_HANDLE_ID_RE = re.compile(r"^handle_[0-9a-f]{32}$")
 
 
+def _response_sources(value: object) -> list[dict[str, str | bool]]:
+    """Allow only recorded display identity, never settings or credential blobs."""
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, str | bool]] = []
+    keys = ("provider", "model", "preset")
+    for item in cast(list[object], value):
+        if not isinstance(item, dict):
+            return []
+        fields = cast(dict[str, object], item)
+        if any(not isinstance(fields.get(key), str) or not fields[key] for key in keys):
+            return []
+        source: dict[str, str | bool] = {key: cast(str, fields[key]) for key in keys}
+        # Old records without an explicit fallback flag must not guess from model names.
+        source["fallback"] = fields.get("fallback") is True
+        if source not in result:
+            result.append(source)
+    return result
+
+
 def _sanitize_turn_usage(value: object) -> dict[str, int] | None:
     if not isinstance(value, dict):
         return None
@@ -919,6 +939,7 @@ def _select_transcript_page(
     limit: int | None,
     before: str | None,
     stats: TranscriptReplayStats | None = None,
+    page_unit_counter: Callable[[list[dict[str, Any]]], int] | None = None,
     _manifest_rebuilt: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     stats = stats or TranscriptReplayStats()
@@ -963,6 +984,7 @@ def _select_transcript_page(
                 limit=limit,
                 before=before,
                 stats=stats,
+                page_unit_counter=page_unit_counter,
                 _manifest_rebuilt=True,
             )
         local_upper = min(local_upper, len(turns))
@@ -999,9 +1021,12 @@ def _select_transcript_page(
             selected.append(_TranscriptTurnRef(ordinal, turn, trace_details_safe))
             selected_record_count += turn_record_count
             selected_bytes += turn_bytes
-            replay_started = time.perf_counter()
-            selected_message_count += len(replay_transcript_to_ui_messages(turn))
-            stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
+            if page_unit_counter is not None:
+                selected_message_count += page_unit_counter(turn)
+            else:
+                replay_started = time.perf_counter()
+                selected_message_count += len(replay_transcript_to_ui_messages(turn))
+                stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
             if selected_message_count >= page_limit:
                 break
         if selected_message_count >= page_limit or budget_reached:
@@ -1181,6 +1206,8 @@ class WebUITranscriptRecorder:
     ) -> None:
         if include_source and (source := webui_message_source(metadata)):
             event["source"] = source
+        if include_source and metadata is not None and "response_sources" in metadata:
+            event["response_sources"] = _response_sources(metadata["response_sources"])
         self._annotate_turn(chat_id, event, metadata, phase)
 
     def prepare_and_append(
@@ -2260,14 +2287,17 @@ def replay_transcript_to_ui_messages(
         return fields
 
     def _source_fields(rec: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if "response_sources" in rec:
+            out["responseSources"] = _response_sources(rec["response_sources"])
         source = rec.get("source")
         if not isinstance(source, dict):
-            return {}
+            return out
         source_data = cast(dict[str, Any], source)
         kind = source_data.get("kind")
         if not isinstance(kind, str) or not is_automation_kind(kind):
-            return {}
-        out: dict[str, Any] = {"source": {"kind": kind}}
+            return out
+        out["source"] = {"kind": kind}
         label = source_data.get("label")
         if isinstance(label, str) and label.strip():
             out["source"]["label"] = label.strip()
@@ -3176,6 +3206,317 @@ def build_webui_trace_detail_response(
     return None
 
 
+def _client_projection_event_id(record: Mapping[str, Any]) -> str:
+    identity = record.get(_WEBUI_REPLAY_IDENTITY_KEY)
+    if not isinstance(identity, str) or not identity:
+        identity = _stable_record_digest(dict(record))
+    digest = hashlib.sha256(f"event\0{identity}".encode("utf-8")).hexdigest()[:20]
+    return f"history-{digest}"
+
+
+def _client_projection_turn_fields(record: Mapping[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    turn_id = record.get("turn_id")
+    if isinstance(turn_id, str) and turn_id:
+        fields["turn_id"] = turn_id
+    turn_phase = record.get("turn_phase")
+    if isinstance(turn_phase, str) and turn_phase in {
+        "user", "reasoning", "activity", "answer", "complete",
+    }:
+        fields["turn_phase"] = turn_phase
+    turn_seq = record.get("turn_seq")
+    if isinstance(turn_seq, int | float) and not isinstance(turn_seq, bool):
+        fields["turn_seq"] = int(turn_seq)
+    return fields
+
+
+def _client_projection_common_fields(record: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "chat_id": str(record.get("chat_id") or ""),
+        "projection_id": _client_projection_event_id(record),
+        **_client_projection_turn_fields(record),
+    }
+    created_at_ms = _valid_created_at_ms(record.get("created_at_ms"))
+    if created_at_ms is not None:
+        fields["created_at_ms"] = created_at_ms
+    return fields
+
+
+def _client_projection_source(record: dict[str, Any]) -> dict[str, Any] | None:
+    source = record.get("source")
+    if not isinstance(source, dict):
+        return None
+    source_data = cast(dict[str, Any], source)
+    kind = source_data.get("kind")
+    if not isinstance(kind, str) or not is_automation_kind(kind):
+        return None
+    projected: dict[str, Any] = {"kind": kind}
+    label = source_data.get("label")
+    if isinstance(label, str) and label.strip():
+        projected["label"] = label.strip()
+    return projected
+
+
+def _client_projection_event(
+    record: dict[str, Any],
+    *,
+    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None,
+    augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None,
+    augment_assistant_text: Callable[[str], str] | None,
+) -> dict[str, Any] | None:
+    event = record.get("event")
+    common = _client_projection_common_fields(record)
+    if event in {"delta", "stream_end", "message"} and "response_sources" in record:
+        common["response_sources"] = _response_sources(record["response_sources"])
+    if event == "user":
+        projected: dict[str, Any] = {
+            "event": "user_message",
+            **common,
+            "text": record.get("text") if isinstance(record.get("text"), str) else "",
+            "starts_turn": True,
+        }
+        raw_paths = record.get("media_paths")
+        paths = [
+            str(path)
+            for path in cast(list[Any], raw_paths)
+            if path
+        ] if isinstance(raw_paths, list) else []
+        if paths and augment_user_media is not None:
+            media = augment_user_media(paths)
+            if media:
+                projected["media_urls"] = media
+        for source_key, target_key in (
+            ("cli_apps", "cli_apps"),
+            ("mcp_presets", "mcp_presets"),
+        ):
+            value = record.get(source_key)
+            if isinstance(value, list):
+                rows = [
+                    dict(cast(dict[str, Any], row))
+                    for row in cast(list[Any], value)
+                    if isinstance(row, dict)
+                ]
+                if rows:
+                    projected[target_key] = rows
+        mentions = normalize_session_mentions_metadata(record.get("session_mentions"))
+        if mentions:
+            projected["session_mentions"] = mentions
+        session_message = normalize_session_message_ui_metadata(record.get("session_message"))
+        if session_message:
+            projected["provenance"] = {"session_message": session_message}
+        return projected
+
+    if event in {"delta", "stream_end", "reasoning_delta", "reasoning_end"}:
+        projected = {"event": event, **common}
+        text = record.get("text")
+        if isinstance(text, str):
+            if event == "stream_end" and augment_assistant_text is not None:
+                text = augment_assistant_text(text)
+            projected["text"] = text
+        if event == "stream_end":
+            if record.get("resuming") is True:
+                projected["resuming"] = True
+            if record.get("merge_next") is True:
+                projected["merge_next"] = True
+            source = _client_projection_source(record)
+            if source:
+                projected["source"] = source
+        return projected
+
+    if event == "message":
+        text = record.get("text")
+        content = text if isinstance(text, str) else ""
+        if augment_assistant_text is not None:
+            content = augment_assistant_text(content)
+        projected = {"event": "message", **common, "text": content}
+        kind = record.get("kind")
+        if kind in {"tool_hint", "progress", "reasoning"}:
+            projected["kind"] = kind
+        tool_events = _normalize_tool_events(record.get("tool_events"))
+        if tool_events:
+            projected["tool_events"] = tool_events
+        raw_media = record.get("media")
+        media_paths = [
+            path
+            for path in cast(list[Any], raw_media)
+            if isinstance(path, str) and path
+        ] if isinstance(raw_media, list) else []
+        media = (
+            augment_assistant_media(media_paths)
+            if media_paths and augment_assistant_media is not None
+            else []
+        )
+        if not media and (not media_paths or augment_assistant_media is None):
+            media = _media_from_signed_urls(record.get("media_urls"))
+        if media:
+            projected["media_urls"] = media
+        latency_ms = record.get("latency_ms")
+        if isinstance(latency_ms, int | float) and latency_ms >= 0:
+            projected["latency_ms"] = int(latency_ms)
+        source = _client_projection_source(record)
+        if source:
+            projected["source"] = source
+        return projected
+
+    if event == "file_edit":
+        raw_edits = record.get("edits")
+        edits = [
+            dict(cast(dict[str, Any], edit))
+            for edit in cast(list[Any], raw_edits)
+            if isinstance(edit, dict)
+        ] if isinstance(raw_edits, list) else []
+        return {"event": "file_edit", **common, "edits": edits}
+
+    if event == "context_compaction":
+        compaction_id = record.get("compaction_id")
+        phase = record.get("phase")
+        if (
+            not isinstance(compaction_id, str)
+            or not compaction_id
+            or not isinstance(phase, str)
+            or phase not in {"started", "succeeded", "failed", "cancelled"}
+        ):
+            return None
+        return {
+            "event": "context_compaction",
+            **common,
+            "compaction_id": compaction_id,
+            "phase": phase,
+        }
+
+    if event == "turn_end":
+        projected = {"event": "turn_end", **common}
+        latency_ms = record.get("latency_ms")
+        if isinstance(latency_ms, int | float) and latency_ms >= 0:
+            projected["latency_ms"] = int(latency_ms)
+        usage = _sanitize_turn_usage(record.get("usage"))
+        if usage:
+            projected["usage"] = usage
+        raw_round_usages = record.get("round_usages")
+        if isinstance(raw_round_usages, list):
+            round_usages = [
+                sanitized
+                for item in cast(list[object], raw_round_usages)
+                if (sanitized := _sanitize_turn_usage(item)) is not None
+            ]
+            if round_usages:
+                projected["round_usages"] = round_usages
+        context_window = record.get("context_window_tokens")
+        if isinstance(context_window, int | float) and context_window >= 0:
+            projected["context_window_tokens"] = int(context_window)
+        return projected
+    return None
+
+
+def _client_projection_requires_legacy_messages(lines: list[dict[str, Any]]) -> bool:
+    """Keep the established deferred-detail response for unusually large traces."""
+    trace_bytes = 0
+    conservative_limit = _MAX_INLINE_TRACE_DETAIL_BYTES // 2
+    for record in lines:
+        if record.get("event") == "message" and record.get("kind") in {
+            "tool_hint",
+            "progress",
+        }:
+            trace_bytes += len(_record_json_line(record).encode("utf-8"))
+            if trace_bytes > conservative_limit:
+                return True
+        elif record.get("event") in {"user", "delta", "stream_end", "turn_end"}:
+            trace_bytes = 0
+    return False
+
+
+def _client_projection_page_units(turn: list[dict[str, Any]]) -> int:
+    """Bound event pages without invoking the legacy UI-message projector.
+
+    The limit is intentionally a soft display-unit budget. Completed stream
+    deltas have already been compacted, so ordinary user/answer turns retain
+    the same two-unit shape as the legacy message count.
+    """
+    units = 0
+    reasoning_placeholder = False
+    answer_open = False
+    activity_open = False
+    for record in turn:
+        event = record.get("event")
+        if event == "user":
+            units += 1
+            reasoning_placeholder = False
+            answer_open = False
+            activity_open = False
+        elif event in {"reasoning_delta", "reasoning_end"}:
+            text = record.get("text")
+            if isinstance(text, str) and text and not answer_open and not reasoning_placeholder:
+                units += 1
+                reasoning_placeholder = True
+            activity_open = False
+        elif event in {"delta", "stream_end"}:
+            text = record.get("text")
+            if isinstance(text, str) and text and not answer_open:
+                if not reasoning_placeholder:
+                    units += 1
+                answer_open = True
+                reasoning_placeholder = False
+            if event == "stream_end" and not (
+                record.get("resuming") is True and record.get("merge_next") is True
+            ):
+                answer_open = False
+            activity_open = False
+        elif event == "message":
+            kind = record.get("kind")
+            if kind == "reasoning":
+                if record.get("text") and not answer_open and not reasoning_placeholder:
+                    units += 1
+                    reasoning_placeholder = True
+                activity_open = False
+            elif kind in {"tool_hint", "progress"}:
+                if not activity_open:
+                    units += 1
+                    activity_open = True
+                answer_open = False
+                reasoning_placeholder = False
+            else:
+                if not reasoning_placeholder:
+                    units += 1
+                reasoning_placeholder = False
+                answer_open = False
+                activity_open = False
+        elif event == "file_edit":
+            if not activity_open:
+                units += 1
+                activity_open = True
+            answer_open = False
+            reasoning_placeholder = False
+        elif event == "context_compaction":
+            units += 1
+            activity_open = False
+    return max(1, units)
+
+
+def _client_projection_events(
+    lines: list[dict[str, Any]],
+    *,
+    augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None,
+    augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None,
+    augment_assistant_text: Callable[[str], str] | None,
+) -> tuple[list[dict[str, Any]], int | None]:
+    events: list[dict[str, Any]] = []
+    fork_boundary_event_index: int | None = None
+    for record in lines:
+        if record.get("event") == WEBUI_FORK_MARKER_EVENT:
+            if fork_boundary_event_index is None:
+                fork_boundary_event_index = len(events)
+            continue
+        event = _client_projection_event(
+            record,
+            augment_user_media=augment_user_media,
+            augment_assistant_media=augment_assistant_media,
+            augment_assistant_text=augment_assistant_text,
+        )
+        if event is not None:
+            events.append(event)
+    return events, fork_boundary_event_index
+
+
 def build_webui_thread_response(
     session_key: str,
     *,
@@ -3190,6 +3531,7 @@ def build_webui_thread_response(
     limit: int | None = None,
     direction: str | None = None,
     before: str | None = None,
+    projection: str = "messages",
     stats: TranscriptReplayStats | None = None,
 ) -> dict[str, Any] | None:
     """Return a payload compatible with ``WebuiThreadPersistedPayload``."""
@@ -3199,6 +3541,9 @@ def build_webui_thread_response(
         limit=limit,
         before=before,
         stats=replay_stats,
+        page_unit_counter=(
+            _client_projection_page_units if projection == "events" else None
+        ),
     )
     if not lines and active_turn_started_at is None:
         return None
@@ -3217,20 +3562,9 @@ def build_webui_thread_response(
         if needs_incomplete_recovery:
             lines = _recover_incomplete_turns(lines, session_turns)
     lines = _ensure_replay_identities(lines)
-    fork_boundary = fork_boundary_message_count(lines)
-    replay_started = time.perf_counter()
-    msgs = replay_transcript_to_ui_messages(
-        lines,
-        augment_user_media=augment_user_media,
-        augment_assistant_media=augment_assistant_media,
-        augment_assistant_text=augment_assistant_text,
-        defer_trace_details=True,
-    )
-    replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
     payload: dict[str, Any] = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
-        "messages": msgs,
         "completed_turn_ids": completed_turn_ids(lines),
         "has_pending_tool_calls": has_pending_tool_calls(
             lines,
@@ -3242,8 +3576,38 @@ def build_webui_thread_response(
         ),
         "active_turn_id": active_turn_id,
     }
-    page["loaded_message_count"] = len(msgs)
+    # TODO: Remove the server-owned UI-message projection after the event response
+    # owns deferred trace details and the unnegotiated ``messages`` contract ends.
+    use_client_projection = (
+        projection == "events"
+        and not _client_projection_requires_legacy_messages(lines)
+    )
+    if use_client_projection:
+        events, fork_boundary_event_index = _client_projection_events(
+            lines,
+            augment_user_media=augment_user_media,
+            augment_assistant_media=augment_assistant_media,
+            augment_assistant_text=augment_assistant_text,
+        )
+        payload["projection"] = "events"
+        payload["events"] = events
+        page["loaded_event_count"] = len(events)
+        if fork_boundary_event_index is not None:
+            payload["fork_boundary_event_index"] = fork_boundary_event_index
+    else:
+        fork_boundary = fork_boundary_message_count(lines)
+        replay_started = time.perf_counter()
+        msgs = replay_transcript_to_ui_messages(
+            lines,
+            augment_user_media=augment_user_media,
+            augment_assistant_media=augment_assistant_media,
+            augment_assistant_text=augment_assistant_text,
+            defer_trace_details=True,
+        )
+        replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
+        payload["messages"] = msgs
+        page["loaded_message_count"] = len(msgs)
+        if fork_boundary is not None:
+            payload["fork_boundary_message_count"] = fork_boundary
     payload["page"] = page
-    if fork_boundary is not None:
-        payload["fork_boundary_message_count"] = fork_boundary
     return payload

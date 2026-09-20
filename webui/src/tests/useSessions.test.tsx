@@ -568,6 +568,75 @@ describe("useSessions", () => {
     expect(result.current.messages[2]!.content).toBe("summary");
   });
 
+  it("projects canonical transcript events with the live event reducer", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      projection: "events",
+      events: [
+        {
+          event: "user_message",
+          chat_id: "chat-event-history",
+          text: "explain",
+          starts_turn: true,
+          projection_id: "history-user",
+          turn_id: "turn-history",
+          turn_phase: "user",
+          turn_seq: 1,
+        },
+        {
+          event: "reasoning_delta",
+          chat_id: "chat-event-history",
+          text: "thinking",
+          projection_id: "history-reasoning",
+          turn_id: "turn-history",
+          turn_phase: "reasoning",
+          turn_seq: 2,
+        },
+        {
+          event: "reasoning_end",
+          chat_id: "chat-event-history",
+          projection_id: "history-reasoning-end",
+          turn_id: "turn-history",
+          turn_phase: "reasoning",
+          turn_seq: 3,
+        },
+        {
+          event: "delta",
+          chat_id: "chat-event-history",
+          text: "answer",
+          projection_id: "history-answer",
+          turn_id: "turn-history",
+          turn_phase: "answer",
+          turn_seq: 4,
+        },
+        {
+          event: "turn_end",
+          chat_id: "chat-event-history",
+          projection_id: "history-end",
+          latency_ms: 25,
+          turn_id: "turn-history",
+          turn_phase: "complete",
+          turn_seq: 5,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-event-history"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[1]).toMatchObject({
+      role: "assistant",
+      content: "answer",
+      reasoning: "thinking",
+      latencyMs: 25,
+      turnId: "turn-history",
+    });
+  });
+
   it("shows a cached transcript immediately while revalidating it", async () => {
     const cached = {
       schemaVersion: 3,
