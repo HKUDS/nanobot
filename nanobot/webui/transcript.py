@@ -3547,6 +3547,8 @@ def build_webui_thread_response(
         ),
         "active_turn_id": active_turn_id,
     }
+    # TODO: Remove the server-owned UI-message projection after the event response
+    # owns deferred trace details and the unnegotiated ``messages`` contract ends.
     use_client_projection = (
         projection == "events"
         and not _client_projection_requires_legacy_messages(lines)
