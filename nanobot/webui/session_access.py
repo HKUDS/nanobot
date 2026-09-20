@@ -16,6 +16,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.webui.session_list_index import list_webui_sessions
+from nanobot.webui.session_search_index import SessionSearchIndex
 from nanobot.webui.transcript import (
     build_webui_thread_response,
     normalize_session_mentions_metadata,
@@ -106,6 +107,7 @@ class WebuiSessionAccess:
     def __init__(self, sessions: SessionManager) -> None:
         self._sessions = sessions
         self._handles = SessionHandleResolver(sessions)
+        self._search_index = SessionSearchIndex(sessions)
 
     def _metadata(
         self,
@@ -216,6 +218,15 @@ class WebuiSessionAccess:
 
         ranked.sort(key=lambda item: item[0])
         needed = max(0, limit - len(ranked))
+        if needed > 0:
+            indexed_keys = self._search_index.matching_session_keys(needle)
+            if indexed_keys is not None:
+                # FTS5 mirror is healthy: only transcripts whose indexed
+                # title/preview mentions the query can contain it.
+                indexed = set(indexed_keys)
+                remaining = [
+                    row for row in remaining if cast(str, row["key"]) in indexed
+                ]
         for row in remaining:
             if needed <= 0:
                 break
