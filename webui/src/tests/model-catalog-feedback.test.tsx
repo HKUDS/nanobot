@@ -35,38 +35,65 @@ function catalog(
 describe("OAuth catalog feedback", () => {
   installSettingsViewTestHooks();
 
-  it.each(["stale", "fallback"] as const)("explains %s auth failures without hiding models or manual IDs", async (source) => {
+  it.each(["stale", "fallback"] as const)("replaces %s models and search with sign-in after auth fails", async (source) => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(catalog(source, "auth_required"))));
     const onChange = vi.fn();
     const login = vi.fn();
     render(<ModelIdPicker token="tok" settings={settings()} provider="openai_codex"
-      value="" showProviderLogos onChange={onChange} onProviderOAuthLogin={login} />);
-    await openPopover(screen.getByRole("button", { name: "Select model" }));
+      value="openai-codex/saved-model" showProviderLogos onChange={onChange} onProviderOAuthLogin={login} />);
+    await openPopover(screen.getByRole("button", { name: "openai-codex/saved-model" }));
     const notice = await screen.findByRole("status");
     expect(notice).toHaveTextContent("Authorization expired. Please sign in again.");
+    expect(notice).not.toHaveTextContent("out of date");
+    expect(screen.queryByText(/private upstream/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "openai-codex/saved-model" })).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
+    const signIn = screen.getByRole("button", { name: "Sign in again" });
+    expect(signIn).toHaveAttribute("aria-describedby", notice.id);
+    expect(signIn).toHaveFocus();
+    fireEvent.click(signIn);
+    expect(login).toHaveBeenCalledWith("openai_codex");
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["fallback", "unavailable"], ["fallback", undefined], ["stale", "unavailable"],
+  ] as const)("keeps %s models for temporary or legacy failures (%s)", async (source, kind) => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(catalog(source, kind))));
+    const onChange = vi.fn();
+    render(<ModelIdPicker token="tok" settings={settings()} provider="openai_codex"
+      value="" showProviderLogos onChange={onChange} onProviderOAuthLogin={vi.fn()} />);
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("Could not refresh models. Try again later.");
     expect(notice).toHaveTextContent(source === "stale" ? "cached models" : "built-in models");
     expect(notice).toHaveTextContent("out of date");
-    expect(screen.queryByText(/private upstream/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign in again" })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Offline model/ })).toBeVisible();
     const search = screen.getByRole("combobox");
     expect(search).toHaveAttribute("aria-describedby", notice.id);
     fireEvent.change(search, { target: { value: "openai-codex/custom-model" } });
     fireEvent.click(screen.getByRole("option", { name: /Use.*custom-model/ }));
     expect(onChange).toHaveBeenCalledWith("openai-codex/custom-model");
-    await openPopover(screen.getByRole("button", { name: "Select model" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
-    expect(login).toHaveBeenCalledWith("openai_codex");
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
-  it.each(["unavailable", undefined] as const)("does not request login for temporary or legacy failures (%s)", async (kind) => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(catalog("fallback", kind))));
+  it("removes a pending custom choice when an auth failure arrives", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+    const onChange = vi.fn();
     render(<ModelIdPicker token="tok" settings={settings()} provider="openai_codex"
-      value="" showProviderLogos onChange={vi.fn()} onProviderOAuthLogin={vi.fn()} />);
+      value="" showProviderLogos onChange={onChange} onProviderOAuthLogin={vi.fn()} />);
     await openPopover(screen.getByRole("button", { name: "Select model" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Could not refresh models. Try again later.");
-    expect(screen.queryByRole("button", { name: "Sign in again" })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Offline model/ })).toBeVisible();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "openai-codex/custom-model" } });
+    expect(screen.getByRole("option", { name: /Use.*custom-model/ })).toBeVisible();
+    await act(async () => { finish(jsonResponse(catalog("stale", "auth_required"))); });
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in again" })).toHaveFocus();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("reloads an open picker on successful same-account login and clears stale feedback", async () => {
@@ -81,9 +108,12 @@ describe("OAuth catalog feedback", () => {
     const view = render(<ModelIdPicker {...props} settings={settings()} />);
     await openPopover(screen.getByRole("button", { name: "Select model" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Authorization expired");
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
     // Login produces a new settings snapshot, even when the account is unchanged.
     view.rerender(<ModelIdPicker {...props} settings={settings()} />);
     expect(await screen.findByRole("option", { name: /New model/ })).toBeVisible();
+    expect(screen.getByRole("combobox")).toBeVisible();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

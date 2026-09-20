@@ -187,6 +187,7 @@ export function ModelIdPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const catalogNoticeId = useId();
+  const catalogSignInRef = useRef<HTMLButtonElement>(null);
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
   const hasConcreteProvider = Boolean(effectiveProvider && effectiveProvider !== "auto");
@@ -233,20 +234,25 @@ export function ModelIdPicker({
   const waitingForModelSearch =
     open && canFetchModels && defersModelList && !hasDeferredSearchQuery;
   const hasModelList = hasStaticModels || payload?.status === "available";
+  const catalogNeedsSignIn = !hasStaticModels && payload?.error_kind === "auth_required";
   const showModels = Boolean(
-    hasModelList && (hasStaticModels || (payload && (!isCatalog || normalizedQuery))),
+    !catalogNeedsSignIn && hasModelList
+      && (hasStaticModels || (payload && (!isCatalog || normalizedQuery))),
   );
   const customCandidate = query.trim();
-  const allowCustomModel = !providerRequiresConfiguration;
+  const allowCustomModel = !providerRequiresConfiguration && !catalogNeedsSignIn;
   const exactQueryMatch = providerModels.some((model) => model.id === customCandidate);
   const showCustomModel = Boolean(
     allowCustomModel && customCandidate && !exactQueryMatch && customCandidate !== value,
   );
   const providerModelCount = payload?.model_count ?? providerModels.length;
   const modelUnconfigured = !value.trim() || !providerConfigured;
-  const showCatalogNotice = !loading && payload?.status === "available"
-    && (payload.source === "stale" || payload.source === "fallback");
-  const catalogNeedsSignIn = payload?.error_kind === "auth_required";
+  const showCatalogNotice = !loading && payload && (catalogNeedsSignIn
+    || (payload.status === "available" && (payload.source === "stale" || payload.source === "fallback")));
+
+  useEffect(() => {
+    if (open && catalogNeedsSignIn && !loading) catalogSignInRef.current?.focus();
+  }, [open, catalogNeedsSignIn, loading]);
 
   useEffect(() => {
     if (!open) return;
@@ -370,7 +376,7 @@ export function ModelIdPicker({
         align="end"
         className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-1.5"
       >
-        <div className="p-1 pb-1.5">
+        {!catalogNeedsSignIn ? <div className="p-1 pb-1.5">
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
@@ -390,43 +396,51 @@ export function ModelIdPicker({
               className="h-8 rounded-full pl-8 pr-3 text-[12px]"
             />
           </div>
-        </div>
+        </div> : null}
 
         {showCatalogNotice ? (
-          <div className="mx-1 mb-1.5 rounded-control bg-muted/60 px-2.5 py-2 text-[11px] leading-4">
-            <div id={catalogNoticeId} role="status">
-              <p className="font-medium text-foreground">
-                {catalogNeedsSignIn
-                  ? tx("settings.models.catalogAuthRequired", "Authorization expired. Please sign in again.")
-                  : tx("settings.models.catalogUnavailable", "Could not refresh models. Try again later.")}
-              </p>
-              <p className="mt-1 text-muted-foreground">
-                {payload.source === "stale"
-                  ? tx("settings.models.catalogStale", "Showing cached models; the list may be out of date.")
-                  : tx("settings.models.catalogFallback", "Showing built-in models; the list may be out of date.")}
-              </p>
+          <div className="mx-1 mb-1.5 flex items-start gap-2 rounded-control bg-muted/60 px-2.5 py-2 text-[11px] leading-4">
+            {catalogNeedsSignIn ? <ProviderPickerIcon
+              provider={effectiveProvider}
+              showBrandLogos={showProviderLogos}
+            /> : null}
+            <div className="min-w-0 flex-1">
+              <div id={catalogNoticeId} role="status">
+                <p className="font-medium text-foreground">
+                  {catalogNeedsSignIn
+                    ? tx("settings.models.catalogAuthRequired", "Authorization expired. Please sign in again.")
+                    : tx("settings.models.catalogUnavailable", "Could not refresh models. Try again later.")}
+                </p>
+                {!catalogNeedsSignIn ? <p className="mt-1 text-muted-foreground">
+                  {payload.source === "stale"
+                    ? tx("settings.models.catalogStale", "Showing cached models; the list may be out of date.")
+                    : tx("settings.models.catalogFallback", "Showing built-in models; the list may be out of date.")}
+                </p> : null}
+              </div>
+              {catalogNeedsSignIn && onProviderOAuthLogin && providerRow?.oauth_login_supported ? (
+                <Button
+                  ref={catalogSignInRef}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-2 h-7 rounded-full px-2.5 text-[11px]"
+                  disabled={providerSigningIn}
+                  aria-describedby={catalogNoticeId}
+                  onClick={() => {
+                    setOpen(false);
+                    onProviderOAuthLogin(effectiveProvider);
+                  }}
+                >
+                  {providerSigningIn
+                    ? tx("settings.oauth.signingIn", "Signing in...")
+                    : tx("settings.oauth.signInAgain", "Sign in again")}
+                </Button>
+              ) : null}
             </div>
-            {catalogNeedsSignIn && onProviderOAuthLogin && providerRow?.oauth_login_supported ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="mt-2 h-7 rounded-full px-2.5 text-[11px]"
-                disabled={providerSigningIn}
-                onClick={() => {
-                  setOpen(false);
-                  onProviderOAuthLogin(effectiveProvider);
-                }}
-              >
-                {providerSigningIn
-                  ? tx("settings.oauth.signingIn", "Signing in...")
-                  : tx("settings.oauth.signInAgain", "Sign in again")}
-              </Button>
-            ) : null}
           </div>
         ) : null}
 
-        {providerRequiresConfiguration ? (
+        {catalogNeedsSignIn ? null : providerRequiresConfiguration ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.providerNotConfigured", "Configure this provider before loading models.")}
           </div>
