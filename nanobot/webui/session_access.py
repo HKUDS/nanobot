@@ -219,7 +219,7 @@ class WebuiSessionAccess:
                 break
             raw_events = thread.get("events")
             if isinstance(raw_events, list):
-                page_messages = _visible_projection_events(raw_events)
+                page_messages = _visible_projection_events(cast(list[object], raw_events))
                 message_count += len(page_messages)
                 remaining = limit - len(matches)
                 if remaining > 0:

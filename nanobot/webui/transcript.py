@@ -1964,10 +1964,10 @@ def _normalize_tool_events(events: Any) -> list[dict[str, Any]]:
             continue
         if not isinstance(tool_event.get("name"), str):
             function = tool_event.get("function")
-            if (
-                not isinstance(function, dict)
-                or not isinstance(function.get("name"), str)
-            ):
+            if not isinstance(function, dict):
+                continue
+            typed_function = cast(dict[str, Any], function)
+            if not isinstance(typed_function.get("name"), str):
                 continue
         normalized.append(tool_event)
     return normalized
