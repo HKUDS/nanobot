@@ -331,7 +331,14 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
         assert [row["key"] for row in listing.json()["sessions"]] == [key]
         assert listing.json()["sessions"][0]["preview"] == "original question"
         assert thread.status_code == 200
-        assert [message["content"] for message in thread.json()["messages"]] == [
+        body = thread.json()
+        assert body["projection"] == "events"
+        assert "messages" not in body
+        assert [
+            event["text"]
+            for event in body["events"]
+            if event["event"] in {"user_message", "message", "stream_end"}
+        ] == [
             "original question",
             "original answer",
         ]
@@ -3152,8 +3159,11 @@ async def test_webui_thread_resigns_assistant_media_urls(
             headers=auth,
         )
         assert resp.status_code == 200
-        assistant = next(m for m in resp.json()["messages"] if m["role"] == "assistant")
-        media = assistant["media"]
+        body = resp.json()
+        assert body["projection"] == "events"
+        assert "messages" not in body
+        assistant = next(event for event in body["events"] if event["event"] == "message")
+        media = assistant["media_urls"]
         assert media[0]["kind"] == "video"
         assert media[0]["name"] == "clip.mp4"
         assert media[0]["url"].startswith("/api/media/")
@@ -3164,10 +3174,10 @@ async def test_webui_thread_resigns_assistant_media_urls(
             headers=auth,
         )
         repeated_assistant = next(
-            m for m in repeated.json()["messages"] if m["role"] == "assistant"
+            event for event in repeated.json()["events"] if event["event"] == "message"
         )
-        assert repeated_assistant["id"] == assistant["id"]
-        assert repeated_assistant["media"][0]["url"] == media[0]["url"]
+        assert repeated_assistant["projection_id"] == assistant["projection_id"]
+        assert repeated_assistant["media_urls"][0]["url"] == media[0]["url"]
         assert len(list(websocket_media.iterdir())) == 1
 
         fetched = await _http_get(f"http://127.0.0.1:29914{media[0]['url']}")
@@ -3243,7 +3253,10 @@ async def test_webui_thread_complete_transcript_skips_session_history_read(
         )
 
         assert response.status_code == 200
-        assert [message["content"] for message in response.json()["messages"]] == [
+        body = response.json()
+        assert body["projection"] == "events"
+        assert "messages" not in body
+        assert [event["text"] for event in body["events"] if "text" in event] == [
             "hi",
             "hello back",
         ]
@@ -3290,7 +3303,9 @@ async def test_webui_thread_negotiates_gzip_for_large_payloads(
         assert compressed.headers["Content-Encoding"] == "gzip"
         assert compressed.headers["Vary"] == "Accept-Encoding"
         assert int(compressed.headers["Content-Length"]) < len(compressed.content)
-        assert compressed.json()["messages"][0]["content"].startswith("compress me")
+        assert compressed.json()["projection"] == "events"
+        assert "messages" not in compressed.json()
+        assert compressed.json()["events"][0]["text"].startswith("compress me")
 
         identity = await _http_get(
             url,
@@ -3348,10 +3363,12 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
         assert first.status_code == 200
         assert first.headers["Cache-Control"] == "no-store"
         assert first.headers["ETag"] == f'"{first.json()["revision"]}"'
-        trace_message = next(
-            message for message in first.json()["messages"] if message.get("kind") == "trace"
+        assert first.json()["projection"] == "events"
+        assert "messages" not in first.json()
+        trace_event = next(
+            event for event in first.json()["events"] if event.get("kind") == "progress"
         )
-        assert trace_message["content"] == "exec(…)"
+        assert trace_event["text"] == "exec(…)"
 
         unchanged = await _http_get(
             url,
@@ -3363,11 +3380,12 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
         detail = await _http_get(
             f"http://127.0.0.1:{port}/api/sessions/"
             "websocket%3Arevalidated-thread/webui-thread/trace-detail"
-            f"?ref={trace_message['traceDetail']['ref']}",
+            f"?ref={trace_event['trace_detail']['ref']}",
             headers=auth,
         )
         assert detail.status_code == 200
-        assert detail.json()["content"] == trace
+        assert detail.json()["message_id"] == trace_event["projection_id"]
+        assert detail.json()["events"][0]["text"] == trace
 
         append_transcript_object(
             key,
