@@ -35,6 +35,7 @@ from nanobot.providers.openai_responses import (
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
 from nanobot.providers.xai_oauth import (
     XAI_CLIENT_VERSION,
+    XAIOAuthReauthRequiredError,
     get_xai_oauth_login_status,
     get_xai_oauth_storage_path,
     get_xai_oauth_token,
@@ -597,6 +598,13 @@ def _friendly_error(status_code: int, response_body: str | None = None) -> str:
 
 
 def _xai_error_response(exc: Exception) -> LLMResponse:
+    if isinstance(exc, XAIOAuthReauthRequiredError):
+        return LLMResponse(
+            content="xAI authorization expired. Please sign in again.",
+            finish_reason="error",
+            error_kind="oauth_auth_required",
+            error_should_retry=False,
+        )
     status_code = getattr(exc, "status_code", None)
     should_retry = getattr(exc, "should_retry", None)
     error_kind: str | None = None
@@ -665,8 +673,6 @@ def invalidate_xai_grok_model_catalog() -> None:
 
 
 def _fetch_xai_grok_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
-    from nanobot.providers.xai_oauth import XAIOAuthReauthRequiredError
-
     try:
         token = get_xai_oauth_token(proxy=proxy)
     except XAIOAuthReauthRequiredError:

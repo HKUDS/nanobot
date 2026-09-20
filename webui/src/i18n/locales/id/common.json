@@ -1385,6 +1385,9 @@
       "manageModels": "Kelola model",
       "fallbackNotice": "Respons ini menggunakan model cadangan: {{model}}.",
       "checkModelSettings": "Periksa pengaturan model",
+      "reauthNotice": "Otorisasi {{provider}} kedaluwarsa. Silakan masuk kembali.",
+      "reauthFallback": "Model cadangan menangani respons ini.",
+      "reauthSettings": "Buka pengaturan masuk",
       "context": {
         "tooltip": "Konteks {{percent}}%",
         "detailsLabel": "Buka penggunaan konteks",

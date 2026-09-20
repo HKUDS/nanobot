@@ -57,6 +57,7 @@ import type {
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -694,6 +695,7 @@ export function ThreadShell({
   const [modelFallback, setModelFallback] = useState<{
     chatId: string;
     model: string;
+    reauthProvider?: string;
     dismissed: boolean;
   } | null>(null);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
@@ -982,11 +984,19 @@ export function ThreadShell({
       }
       const model = event.model_name.trim();
       if (!model) return;
+      const reauthProvider = typeof event.reauth_provider === "string"
+        ? event.reauth_provider.trim() || undefined : undefined;
       // A tool loop may report the same fallback repeatedly. Closing the notice
       // lasts until the next turn/model change, without changing the actual preset.
-      setModelFallback((current) => current?.chatId === chatId && current.model === model
-        ? current
-        : { chatId, model, dismissed: false });
+      setModelFallback((current) => {
+        if (current?.chatId === chatId && current.model === model) {
+          // An explicit auth rejection is actionable even after dismissing a
+          // generic fallback. A circuit-skipped call must not erase that reason.
+          return reauthProvider && reauthProvider !== current.reauthProvider
+            ? { ...current, reauthProvider, dismissed: false } : current;
+        }
+        return { chatId, model, reauthProvider, dismissed: false };
+      });
     });
   }, [activeModelPreset, chatId, client]);
   const handleModelPresetChange = useCallback((name: string) => {
@@ -1549,6 +1559,9 @@ export function ThreadShell({
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
           model={modelFallback.model}
+          reauthProviderLabel={modelFallback.reauthProvider
+            ? providerDisplayLabel(settings?.providers ?? [], modelFallback.reauthProvider)
+            : undefined}
           onOpenSettings={onOpenModelSettings}
           onDismiss={() => setModelFallback((current) => current && { ...current, dismissed: true })}
         />

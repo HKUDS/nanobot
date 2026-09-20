@@ -1455,6 +1455,7 @@ export type InboundEvent =
       model_name: string;
       model_preset?: string | null;
       fallback?: boolean;
+      reauth_provider?: string;
     }
   | ({
       event: "turn_end";

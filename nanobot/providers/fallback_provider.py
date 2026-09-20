@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from loguru import logger
@@ -23,6 +23,8 @@ from nanobot.providers.base import (
     RetryEventCallback,
     RetryStatusCallback,
 )
+from nanobot.providers.oauth_model_catalog import oauth_catalog_auth_rejected
+from nanobot.providers.registry import find_by_name
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
@@ -35,6 +37,7 @@ _FALLBACK_ERROR_KINDS = frozenset({
     "overloaded",
 })
 _AUTHENTICATION_ERROR_KINDS = frozenset({
+    "oauth_auth_required",
     "authentication",
     "auth",
     "permission",
@@ -96,7 +99,15 @@ _FALLBACK_ERROR_TOKENS = (
 )
 
 
-FallbackModelObserver = Callable[[str], Awaitable[None]]
+@dataclass(frozen=True)
+class FallbackModelSelection:
+    """Display-safe fallback result; no upstream error text or credentials."""
+
+    model: str
+    reauth_provider: str | None = None
+
+
+FallbackModelObserver = Callable[[FallbackModelSelection], Awaitable[None]]
 
 
 class FallbackProvider(LLMProvider):
@@ -611,7 +622,7 @@ class FallbackProvider(LLMProvider):
                 # attempted.  A fallback can fail just like the primary, and
                 # the WebUI would otherwise show a misleading success signal.
                 # Publish only after this response is known to be usable.
-                await self._notify_fallback_model(fallback_model)
+                await self._notify_fallback_model(fallback_model, primary_response)
                 logger.info(
                     "Fallback '{}' succeeded after primary '{}' failed",
                     fallback_model, primary_model,
@@ -673,11 +684,22 @@ class FallbackProvider(LLMProvider):
                 response.error_kind = "authentication"
             return response, exc
 
-    async def _notify_fallback_model(self, model: str) -> None:
+    async def _notify_fallback_model(self, model: str, primary_response: LLMResponse | None) -> None:
         if self._fallback_model_observer is None:
             return
+        reauth_provider = None
+        spec = find_by_name(self._primary.provider_name)
+        if spec is not None and spec.is_oauth and primary_response is not None:
+            # Plain 403, rate limits, transport errors, and message substrings are
+            # not evidence of revoked credentials. A skipped circuit has no new
+            # auth result either; never retain credential state on this wrapper.
+            if primary_response.error_kind == "oauth_auth_required" or oauth_catalog_auth_rejected(
+                primary_response.error_status_code or 0,
+                {"error": {"code": primary_response.error_code}},
+            ):
+                reauth_provider = spec.name
         try:
-            await self._fallback_model_observer(model)
+            await self._fallback_model_observer(FallbackModelSelection(model, reauth_provider))
         except Exception:
             logger.exception("fallback model observer failed for '{}'", model)
 
@@ -692,6 +714,8 @@ class FallbackProvider(LLMProvider):
         text = (response.content or "").lower()
         structured_values = (kind, error_type, code)
 
+        if oauth_catalog_auth_rejected(status or 0, {"error": {"code": code}}):
+            return True
         if kind in _AUTHENTICATION_ERROR_KINDS:
             return True
         if any(

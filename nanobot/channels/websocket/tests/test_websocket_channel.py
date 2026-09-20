@@ -2309,11 +2309,13 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
                 model="deepseek/deepseek-chat",
                 model_preset="Deep Research",
                 fallback=True,
+                reauth_provider="openai_codex",
             ),
         )
     )
     fallback_payload = json.loads(chat_one.send.call_args.args[0])
     assert fallback_payload["fallback"] is True
+    assert fallback_payload["reauth_provider"] == "openai_codex"
     chat_two.send.assert_not_awaited()
 
 

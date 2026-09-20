@@ -1385,6 +1385,9 @@
       "manageModels": "モデルを管理",
       "fallbackNotice": "この応答では代替モデルを使用しました：{{model}}。",
       "checkModelSettings": "モデル設定を確認",
+      "reauthNotice": "{{provider}} の認証が失効しました。再ログインしてください。",
+      "reauthFallback": "今回の応答には代替モデルを使用しました。",
+      "reauthSettings": "ログイン設定を開く",
       "context": {
         "tooltip": "コンテキスト {{percent}}%",
         "detailsLabel": "コンテキスト使用量を開く",

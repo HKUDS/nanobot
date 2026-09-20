@@ -1227,6 +1227,35 @@ describe("ThreadShell", () => {
     expect(notice()).not.toBeInTheDocument();
   });
 
+  it("prioritizes the rejected provider's login over fallback details", async () => {
+    const client = makeClient();
+    const openSettings = vi.fn();
+    render(wrap(client, <ThreadShell session={session("reauth")}
+      title="Auth notice" onToggleSidebar={() => {}} onOpenModelSettings={openSettings}
+      settingsSnapshot={modelSettings("openai-codex/gpt-5.5", "openai_codex")} />));
+    await screen.findByTestId("composer-model-logo-openai_codex");
+    const emit = (reauth_provider?: string) => act(() => client._emitChat("reauth", {
+      event: "turn_model_updated", chat_id: "reauth", model_name: "xai-grok/grok-4.5",
+      fallback: true, reauth_provider,
+    }));
+    emit();
+    const generic = screen.getByText(/This response used a fallback model/).closest('[role="status"]')!;
+    fireEvent.click(within(generic as HTMLElement).getByRole("button", { name: "Dismiss" }));
+    emit("openai_codex");
+    const title = screen.getByText("OpenAI Codex authorization expired. Please sign in again.");
+    expect(title).toBeVisible();
+    expect(screen.getByText("A fallback model handled this response.")).toBeVisible();
+    expect(screen.queryByText(/This response used a fallback model/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open sign-in settings" }));
+    expect(openSettings).toHaveBeenCalledOnce();
+    fireEvent.click(within(title.closest('[role="status"]') as HTMLElement).getByRole("button", { name: "Dismiss" }));
+    emit("openai_codex");
+    emit();
+    expect(screen.queryByText(/authorization expired/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+  });
+
   it("does not show a live fallback notice just from replayed response attribution", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
       String(input).includes("/webui-thread") ? httpJson({

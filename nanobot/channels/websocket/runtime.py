@@ -1531,6 +1531,7 @@ class WebSocketChannel(BaseChannel):
         model_preset: Any = None,
         context_window_tokens: Any = None,
         fallback: bool = False,
+        reauth_provider: str | None = None,
     ) -> None:
         """Notify one chat's subscribers which model is handling its current request."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1551,6 +1552,8 @@ class WebSocketChannel(BaseChannel):
             body["context_window_tokens"] = context_window_tokens
         if fallback:
             body["fallback"] = True
+            if reauth_provider:
+                body["reauth_provider"] = reauth_provider
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_model_updated ")

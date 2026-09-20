@@ -13,8 +13,11 @@ later (failed refreshes are cached briefly). Existing presets and manual model
 IDs remain available. A successful chat may have used a fallback preset and
 does not prove that the selected provider's authorization is still valid.
 When a live chat uses a fallback model, a dismissible notice above the composer
-names that model and links to model settings. It does not change your selected
-preset or assume that every fallback means the login expired.
+names that model and links to model settings. If the provider explicitly rejected
+OAuth credentials, the notice instead names the provider that needs a new login,
+with fallback completion as secondary information. Network errors, ordinary
+permission denials, and rate limits do not request reauthentication. The notice
+does not change your selected preset.
 
 For every setup, answer three questions:
 

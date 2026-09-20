@@ -231,6 +231,29 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     assert request.headers["chatgpt-account-id"] == "account-42"
 
 
+@pytest.mark.parametrize("detail", [
+    'Token refresh failed: 400 {"error":"invalid_grant","access_token":"synthetic-secret"}',
+    "OAuth credentials not found. Please run the login command.",
+])
+def test_codex_inference_classifies_sdk_reauth_without_exposing_response(detail: str) -> None:
+    from nanobot.providers.openai_codex_provider import _codex_error_response
+
+    response = _codex_error_response(RuntimeError(detail))
+    assert response.error_kind == "oauth_auth_required"
+    assert response.error_should_retry is False
+    assert "synthetic-secret" not in str(response)
+
+
+def test_xai_inference_classifies_typed_reauth() -> None:
+    from nanobot.providers.xai_grok_provider import _xai_error_response
+    from nanobot.providers.xai_oauth import XAIOAuthReauthRequiredError
+
+    response = _xai_error_response(XAIOAuthReauthRequiredError("synthetic-secret"))
+    assert response.error_kind == "oauth_auth_required"
+    assert response.error_should_retry is False
+    assert "synthetic-secret" not in str(response)
+
+
 def test_github_copilot_catalog_only_lists_compatible_chat_models(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -1385,6 +1385,9 @@
       "manageModels": "모델 관리",
       "fallbackNotice": "이 응답은 대체 모델을 사용했습니다: {{model}}.",
       "checkModelSettings": "모델 설정 확인",
+      "reauthNotice": "{{provider}} 인증이 만료되었습니다. 다시 로그인해 주세요.",
+      "reauthFallback": "이번 응답은 대체 모델이 처리했습니다.",
+      "reauthSettings": "로그인 설정 열기",
       "context": {
         "tooltip": "컨텍스트 {{percent}}%",
         "detailsLabel": "컨텍스트 사용량 열기",

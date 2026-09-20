@@ -1725,6 +1725,7 @@ describe("NanobotClient", () => {
       model_name: "deepseek/deepseek-chat",
       model_preset: "Deep Research",
       fallback: true,
+      reauth_provider: "openai_codex",
     });
 
     expect(chatHandler).toHaveBeenCalledWith({
@@ -1733,6 +1734,7 @@ describe("NanobotClient", () => {
       model_name: "deepseek/deepseek-chat",
       model_preset: "Deep Research",
       fallback: true,
+      reauth_provider: "openai_codex",
     });
   });
 

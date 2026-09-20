@@ -1385,6 +1385,9 @@
       "manageModels": "Gérer les modèles",
       "fallbackNotice": "Cette réponse a utilisé un modèle de secours : {{model}}.",
       "checkModelSettings": "Vérifier les paramètres du modèle",
+      "reauthNotice": "L’autorisation de {{provider}} a expiré. Veuillez vous reconnecter.",
+      "reauthFallback": "Un modèle de secours a traité cette réponse.",
+      "reauthSettings": "Ouvrir les paramètres de connexion",
       "context": {
         "tooltip": "Contexte {{percent}} %",
         "detailsLabel": "Ouvrir l’utilisation du contexte",

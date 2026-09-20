@@ -17,6 +17,7 @@ describe("chat translation resources", () => {
       "chat.fallbackTitle", "chat.activity.running", "chat.rename", "chat.loading",
       "message.fallbackResponse",
       "thread.composer.fallbackNotice", "thread.composer.checkModelSettings",
+      "thread.composer.reauthNotice", "thread.composer.reauthFallback", "thread.composer.reauthSettings",
     ]) {
       expect(i18n.exists(key), key).toBe(true);
       expect(i18n.t(key), key).not.toBe(key);
