@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import openai
 import pytest
 from loguru import logger
 
@@ -20,6 +21,7 @@ from nanobot.providers.base import (
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.providers.fallback_provider import FallbackProvider
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.openai_responses import resolve_compact_threshold
 
 
@@ -422,6 +424,105 @@ class TestFallbackWhenPrimaryRaises:
         assert result.content == "fallback ok"
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
+
+    @pytest.mark.asyncio
+    async def test_nim_style_timeout_message_triggers_fallback(self) -> None:
+        """NIM reports timeouts as RuntimeError('timed out after Ns'), not *TimeoutError."""
+        primary = _RaisingProvider("primary", RuntimeError("timed out after 300s"))
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
+    @pytest.mark.asyncio
+    async def test_timeout_with_should_retry_false_still_fails_over(self) -> None:
+        """x-should-retry:false must not block failover for timeout responses."""
+        primary = _FakeProvider(
+            "primary",
+            _make_response(
+                "Error calling LLM: timed out after 300s",
+                finish_reason="error",
+                error_kind="timeout",
+                error_should_retry=False,
+            ),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+
+        assert FallbackProvider._should_fallback(primary._response) is True
+
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
+    @pytest.mark.parametrize("status", [400, 404, 422])
+    @pytest.mark.parametrize("detail", ["messages must not be empty", "Unsupported parameter: timeout"])
+    @pytest.mark.parametrize("stream", [False, True])
+    @pytest.mark.asyncio
+    async def test_client_error_text_does_not_override_no_retry(
+        self, status: int, detail: str, stream: bool,
+    ) -> None:
+        error = openai.APIStatusError(
+            detail,
+            body={"detail": detail},
+            response=httpx.Response(
+                status,
+                headers={"x-should-retry": "false"},
+                request=httpx.Request("POST", "https://example.invalid/v1/chat/completions"),
+            ),
+        )
+        response = OpenAICompatProvider._handle_error(error)
+        factory = MagicMock(return_value=_FakeProvider("fallback"))
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary", response),
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        call = fb.chat_stream if stream else fb.chat
+        result = await call(messages=[{"role": "user", "content": "hi"}])
+
+        assert result is response
+        factory.assert_not_called()
+
+    @pytest.mark.parametrize("status, expected", [(None, False), (503, True)])
+    @pytest.mark.asyncio
+    async def test_no_retry_requires_transient_metadata(
+        self, status: int | None, expected: bool,
+    ) -> None:
+        response = _make_response(
+            "empty response" if status is None else "upstream unavailable",
+            finish_reason="error",
+            error_status_code=status,
+            error_should_retry=False,
+        )
+        factory = MagicMock(return_value=_FakeProvider("fallback"))
+        fb = FallbackProvider(
+            primary=_FakeProvider("primary", response),
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert factory.called is expected
+        assert (result is response) is not expected
 
     @pytest.mark.asyncio
     async def test_primary_exception_triggers_fallback(self) -> None:
