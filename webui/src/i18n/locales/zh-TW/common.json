@@ -1387,7 +1387,7 @@
       "checkModelSettings": "檢查模型設定",
       "reauthNotice": "{{provider}} 授權已失效，請重新登入。",
       "reauthFallback": "本次已由備用模型繼續回覆。",
-      "reauthSettings": "前往登入設定",
+      "reauthSettings": "開啟模型設定",
       "context": {
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "開啟上下文用量",

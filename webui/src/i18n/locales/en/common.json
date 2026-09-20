@@ -1587,7 +1587,7 @@
       "checkModelSettings": "Check model settings",
       "reauthNotice": "{{provider}} authorization expired. Please sign in again.",
       "reauthFallback": "A fallback model handled this response.",
-      "reauthSettings": "Open sign-in settings",
+      "reauthSettings": "Open model settings",
       "context": {
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",

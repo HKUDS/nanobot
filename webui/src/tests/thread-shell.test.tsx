@@ -1246,7 +1246,7 @@ describe("ThreadShell", () => {
     expect(title).toBeVisible();
     expect(screen.getByText("A fallback model handled this response.")).toBeVisible();
     expect(screen.queryByText(/This response used a fallback model/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open sign-in settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
     expect(openSettings).toHaveBeenCalledOnce();
     fireEvent.click(within(title.closest('[role="status"]') as HTMLElement).getByRole("button", { name: "Dismiss" }));
     emit("openai_codex");

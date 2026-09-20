@@ -1387,7 +1387,7 @@
       "checkModelSettings": "Kiểm tra cài đặt mô hình",
       "reauthNotice": "Quyền truy cập {{provider}} đã hết hạn. Vui lòng đăng nhập lại.",
       "reauthFallback": "Mô hình dự phòng đã xử lý phản hồi này.",
-      "reauthSettings": "Mở cài đặt đăng nhập",
+      "reauthSettings": "Mở cài đặt mô hình",
       "context": {
         "tooltip": "Ngữ cảnh {{percent}}%",
         "detailsLabel": "Mở mức sử dụng ngữ cảnh",

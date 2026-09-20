@@ -5,9 +5,19 @@ import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { __clearLogoFallbackCacheForTests } from "@/hooks/useLogoFallback";
 import { providerBrand } from "@/lib/provider-brand";
 
-describe("model fallback notice logos", () => {
+describe("model fallback notice", () => {
   beforeEach(__clearLogoFallbackCacheForTests);
   afterEach(cleanup);
+
+  it("centers the notice contents and labels its model-settings destination", () => {
+    const onOpenSettings = vi.fn();
+    render(<ModelFallbackNotice model="xai-grok/grok-4.5" reauthProvider="openai_codex"
+      reauthProviderLabel="OpenAI Codex" onDismiss={vi.fn()} onOpenSettings={onOpenSettings} />);
+    expect(screen.getByRole("status")).toHaveClass("items-center");
+    expect(screen.getByRole("status")).not.toHaveClass("items-start");
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
 
   it.each(["openai_codex", "xai_grok", "github_copilot"])("shows the rejected %s provider, not the backup", (provider) => {
     render(<ModelFallbackNotice model="deepseek/deepseek-chat" reauthProvider={provider}

@@ -1387,7 +1387,7 @@
       "checkModelSettings": "Vérifier les paramètres du modèle",
       "reauthNotice": "L’autorisation de {{provider}} a expiré. Veuillez vous reconnecter.",
       "reauthFallback": "Un modèle de secours a traité cette réponse.",
-      "reauthSettings": "Ouvrir les paramètres de connexion",
+      "reauthSettings": "Ouvrir les paramètres du modèle",
       "context": {
         "tooltip": "Contexte {{percent}} %",
         "detailsLabel": "Ouvrir l’utilisation du contexte",

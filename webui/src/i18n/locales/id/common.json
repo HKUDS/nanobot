@@ -1387,7 +1387,7 @@
       "checkModelSettings": "Periksa pengaturan model",
       "reauthNotice": "Otorisasi {{provider}} kedaluwarsa. Silakan masuk kembali.",
       "reauthFallback": "Model cadangan menangani respons ini.",
-      "reauthSettings": "Buka pengaturan masuk",
+      "reauthSettings": "Buka pengaturan model",
       "context": {
         "tooltip": "Konteks {{percent}}%",
         "detailsLabel": "Buka penggunaan konteks",

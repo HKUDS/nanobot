@@ -1586,7 +1586,7 @@
       "checkModelSettings": "检查模型设置",
       "reauthNotice": "{{provider}} 授权已失效，请重新登录。",
       "reauthFallback": "本次已由备用模型继续回复。",
-      "reauthSettings": "前往登录设置",
+      "reauthSettings": "打开模型设置",
       "context": {
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "打开上下文用量",

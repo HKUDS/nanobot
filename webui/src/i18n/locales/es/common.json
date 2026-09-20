@@ -1388,7 +1388,7 @@
       "checkModelSettings": "Revisar ajustes del modelo",
       "reauthNotice": "La autorización de {{provider}} caducó. Vuelve a iniciar sesión.",
       "reauthFallback": "Un modelo alternativo respondió esta vez.",
-      "reauthSettings": "Abrir ajustes de inicio de sesión",
+      "reauthSettings": "Abrir ajustes del modelo",
       "context": {
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso del contexto",

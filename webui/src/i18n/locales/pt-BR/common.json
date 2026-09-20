@@ -1401,7 +1401,7 @@
       "checkModelSettings": "Verificar configurações do modelo",
       "reauthNotice": "A autorização de {{provider}} expirou. Entre novamente.",
       "reauthFallback": "Um modelo alternativo respondeu desta vez.",
-      "reauthSettings": "Abrir configurações de login",
+      "reauthSettings": "Abrir configurações do modelo",
       "context": {
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso do contexto",

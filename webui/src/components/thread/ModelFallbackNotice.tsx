@@ -16,7 +16,7 @@ export function ModelFallbackNotice({ model, reauthProvider, reauthProviderLabel
   return (
     <div
       role="status"
-      className="mx-auto mb-2 flex w-full max-w-[49.5rem] items-start gap-2 rounded-control border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground/80 animate-in fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none"
+      className="mx-auto mb-2 flex w-full max-w-[49.5rem] items-center gap-2 rounded-control border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground/80 animate-in fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none"
     >
       <PresetProviderIcon
         provider={reauthProvider}
@@ -42,7 +42,7 @@ export function ModelFallbackNotice({ model, reauthProvider, reauthProviderLabel
         {onOpenSettings ? (
           <button type="button" onClick={onOpenSettings} className="shrink-0 rounded-sm font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             {reauthProviderLabel
-              ? t("thread.composer.reauthSettings", { defaultValue: "Open sign-in settings" })
+              ? t("thread.composer.reauthSettings", { defaultValue: "Open model settings" })
               : t("thread.composer.checkModelSettings", { defaultValue: "Check model settings" })}
           </button>
         ) : null}
