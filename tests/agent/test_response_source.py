@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.runner_helpers import failed_test_consolidator
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.registry import ToolRegistry
@@ -316,6 +317,7 @@ async def test_runner_records_each_provider_when_streaming_times_out_and_recover
         runtime=runtime, max_iterations=2, max_tool_result_chars=4096,
         session_key="websocket:chat", events=turn.events,
         hook=AgentProgressHook(turn.events, streaming=True),
+        consolidate_history=failed_test_consolidator,
     ))
     assert result.final_content == "Recovered answer"
     outgoing = [bus.outbound.get_nowait() for _ in range(bus.outbound.qsize())]
