@@ -3539,7 +3539,7 @@ describe("useNanobotStream", () => {
 
 });
 
-describe("live/replay projection before canonical-event revision migration", () => {
+describe("live canonical event projection", () => {
   it.each(PROJECTION_FIXTURE_CASES)("matches the shared $name fixture", (fixtureCase) => {
     // Keep client-only elapsed-time estimates out of the transport contract.
     const clock = vi.spyOn(Date, "now").mockReturnValue(0);
