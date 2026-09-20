@@ -1202,6 +1202,16 @@ export async function completeProviderOAuth(
   );
 }
 
+export async function cancelProviderOAuth(
+  transport: WebUIMutationTransport,
+  provider: string,
+  flowId: string,
+): Promise<void> {
+  await mutation(transport, "settings.provider.oauth_complete", {
+    provider, flow_id: flowId, cancel: true,
+  });
+}
+
 export async function logoutProviderOAuth(
   transport: WebUIMutationTransport,
   provider: string,

@@ -1060,6 +1060,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Code de l’appareil",
+      "deviceCodeHelp": "Copiez ce code et saisissez-le sur GitHub. Cette fenêtre se mettra à jour automatiquement après l’autorisation.",
+      "waitingForDeviceApproval": "En attente de l’autorisation GitHub…",
+      "openGitHub": "Ouvrir GitHub",
       "authentication": "Authentification OAuth",
       "signIn": "Se connecter",
       "signingIn": "Connexion...",

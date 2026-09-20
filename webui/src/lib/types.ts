@@ -577,7 +577,8 @@ export interface ProviderOAuthAuthorizationRequired {
   flow_id: string;
   authorization_url: string;
   expires_in: number;
-  completion_input?: "authorization_code" | "callback_url";
+  completion_input?: "authorization_code" | "callback_url" | "device_code";
+  user_code?: string;
 }
 
 export interface ProviderOAuthPending {

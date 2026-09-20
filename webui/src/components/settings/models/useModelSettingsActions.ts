@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { TFunction } from "i18next";
 
 import type {
@@ -16,6 +16,7 @@ import type { ModelSettingsState } from "@/components/settings/models/useModelSe
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
 import {
   ApiError,
+  cancelProviderOAuth,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -60,7 +61,7 @@ interface ModelSettingsActionsOptions {
   setError: Dispatch<SetStateAction<string | null>>;
   onModelNameChange: (modelName: string | null) => void;
   remoteBrowserAccess: boolean;
-  closeProviderOAuthFlow: () => void;
+  closeProviderOAuthFlow: (cancelPending?: boolean) => void;
   installCapabilities: (names: string[]) => Promise<boolean>;
   modelDirty: boolean;
   configuredModelProviderOptions: Array<{ name: string; label: string }>;
@@ -82,6 +83,11 @@ export function useModelSettingsActions({
   modelDirty,
   configuredModelProviderOptions,
 }: ModelSettingsActionsOptions) {
+  const oauthMounted = useRef(true);
+  useEffect(() => {
+    oauthMounted.current = true;
+    return () => { oauthMounted.current = false; };
+  }, []);
   const {
     expandedProvider,
     form,
@@ -492,6 +498,10 @@ export function useModelSettingsActions({
             )
           : await logoutProviderOAuth(client, providerName);
       if (isProviderOAuthAuthorizationRequired(payload)) {
+        if (payload.completion_input === "device_code" && !oauthMounted.current) {
+          await cancelProviderOAuth(client, payload.provider, payload.flow_id).catch(() => {});
+          return;
+        }
         try {
           if (popup && !popup.closed) popup.location.href = payload.authorization_url;
         } catch {
@@ -505,7 +515,7 @@ export function useModelSettingsActions({
         return;
       }
       popup?.close();
-      closeProviderOAuthFlow();
+      closeProviderOAuthFlow(false);
       applyPayload(payload, { preserveAgentForm: action === "login" });
       setError(null);
     } catch (err) {
@@ -533,7 +543,7 @@ export function useModelSettingsActions({
       if (isProviderOAuthPending(payload)) return;
       applyPayload(payload, { preserveAgentForm: true });
       setError(null);
-      closeProviderOAuthFlow();
+      closeProviderOAuthFlow(false);
     } catch (err) {
       if (providerOAuthFlowRef.current?.flow_id === flow.flow_id) {
         setProviderOAuthDialogError((err as Error).message);

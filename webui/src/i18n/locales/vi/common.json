@@ -1060,6 +1060,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Mã thiết bị",
+      "deviceCodeHelp": "Sao chép mã này và nhập trên GitHub. Cửa sổ này sẽ tự động cập nhật sau khi ủy quyền.",
+      "waitingForDeviceApproval": "Đang chờ ủy quyền GitHub…",
+      "openGitHub": "Mở GitHub",
       "authentication": "Xác thực OAuth",
       "signIn": "Đăng nhập",
       "signingIn": "Đang đăng nhập...",

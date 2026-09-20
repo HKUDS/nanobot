@@ -1060,6 +1060,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "裝置碼",
+      "deviceCodeHelp": "複製此裝置碼，前往 GitHub 輸入並授權。完成後此視窗會自動更新。",
+      "waitingForDeviceApproval": "等待 GitHub 授權…",
+      "openGitHub": "前往 GitHub",
       "authentication": "OAuth 認證",
       "signIn": "登入",
       "signingIn": "登入中…",

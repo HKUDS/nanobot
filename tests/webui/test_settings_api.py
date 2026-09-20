@@ -1904,7 +1904,7 @@ def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
-        if name == "nanobot.providers.github_copilot_provider":
+        if name == "nanobot.providers.github_copilot_oauth":
             raise ImportError("missing")
         return real_import(name, *args, **kwargs)
 
@@ -2142,17 +2142,27 @@ def test_provider_models_payload_exposes_catalog_failure_with_usable_models(
 def test_copilot_explicit_login_does_not_reuse_revoked_credentials(monkeypatch, oauth_flows):
     from unittest.mock import Mock
 
-    login = Mock(return_value=SimpleNamespace(access="new-token"))
+    from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
+
+    start = Mock()
     invalidate = Mock()
     monkeypatch.setattr(
         "nanobot.providers.github_copilot_provider.get_github_copilot_login_status",
         lambda: SimpleNamespace(access="revoked-token"),
     )
-    monkeypatch.setattr("nanobot.providers.github_copilot_provider.login_github_copilot", login)
+    monkeypatch.setattr(GitHubCopilotOAuthFlow, "start", start)
+    monkeypatch.setattr(GitHubCopilotOAuthFlow, "complete", lambda _: SimpleNamespace(access="new-token"))
     monkeypatch.setattr("nanobot.webui.settings_models.invalidate_oauth_model_catalog", invalidate)
     monkeypatch.setattr("nanobot.webui.settings_api.settings_payload", lambda **_: {"ready": True})
-    assert login_oauth_provider({"provider": ["github-copilot"]}, oauth_flows=oauth_flows) == {"ready": True}
-    login.assert_called_once()
+    payload = login_oauth_provider({"provider": ["github-copilot"]}, oauth_flows=oauth_flows)
+    assert payload["status"] == "authorization_required"
+    assert payload["completion_input"] == "device_code"
+    start.assert_called_once()
+    invalidate.assert_not_called()
+    assert complete_oauth_provider(
+        {"provider": ["github-copilot"], "flow_id": [payload["flow_id"]]},
+        oauth_flows=oauth_flows,
+    ) == {"ready": True}
     invalidate.assert_called_once_with("github_copilot")
 
 

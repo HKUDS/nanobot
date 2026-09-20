@@ -1060,6 +1060,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "기기 코드",
+      "deviceCodeHelp": "이 코드를 복사하여 GitHub에 입력하고 인증하세요. 완료되면 이 창이 자동으로 업데이트됩니다.",
+      "waitingForDeviceApproval": "GitHub 인증을 기다리는 중…",
+      "openGitHub": "GitHub 열기",
       "authentication": "OAuth 인증",
       "signIn": "로그인",
       "signingIn": "로그인 중...",

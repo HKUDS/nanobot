@@ -3,7 +3,7 @@ import { useEffect, type Dispatch, type SetStateAction } from "react";
 import type { ApplySettingsPayload } from "@/components/settings/contracts";
 import { providerFormFromRow } from "@/components/settings/models/ProviderSettings";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
-import { completeProviderOAuth } from "@/lib/api";
+import { cancelProviderOAuth, completeProviderOAuth } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type {
   ProviderOAuthCompletionResult,
@@ -22,7 +22,7 @@ interface ProviderOAuthPollingOptions {
   client: NanobotClient;
   applyPayload: ApplySettingsPayload;
   setError: Dispatch<SetStateAction<string | null>>;
-  closeProviderOAuthFlow: () => void;
+  closeProviderOAuthFlow: (cancelPending?: boolean) => void;
 }
 
 export function useProviderOAuthPolling({
@@ -58,7 +58,7 @@ export function useProviderOAuthPolling({
         }
         applyPayload(payload, { preserveAgentForm: true });
         setError(null);
-        closeProviderOAuthFlow();
+        closeProviderOAuthFlow(false);
       } catch (err) {
         if (
           cancelled
@@ -72,6 +72,12 @@ export function useProviderOAuthPolling({
     return () => {
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
+      if (providerOAuthFlow.completion_input === "device_code"
+        && providerOAuthFlowRef.current?.flow_id === providerOAuthFlow.flow_id) {
+        providerOAuthFlowRef.current = null;
+        void cancelProviderOAuth(client, providerOAuthFlow.provider, providerOAuthFlow.flow_id)
+          .catch(() => {});
+      }
     };
   }, [applyPayload, client, closeProviderOAuthFlow, providerOAuthFlow]);
 }

@@ -1060,6 +1060,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Kode perangkat",
+      "deviceCodeHelp": "Salin kode ini dan masukkan di GitHub. Jendela ini akan diperbarui secara otomatis setelah otorisasi.",
+      "waitingForDeviceApproval": "Menunggu otorisasi GitHub…",
+      "openGitHub": "Buka GitHub",
       "authentication": "Autentikasi OAuth",
       "signIn": "Masuk",
       "signingIn": "Masuk...",

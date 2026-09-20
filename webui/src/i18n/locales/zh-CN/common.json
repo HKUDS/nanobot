@@ -1260,6 +1260,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "设备码",
+      "deviceCodeHelp": "复制此设备码，前往 GitHub 输入并授权。完成后此窗口会自动更新。",
+      "waitingForDeviceApproval": "等待 GitHub 授权…",
+      "openGitHub": "前往 GitHub",
       "authentication": "OAuth 认证",
       "signIn": "登录",
       "signingIn": "登录中...",

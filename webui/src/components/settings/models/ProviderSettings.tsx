@@ -51,6 +51,7 @@ import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import type {
   NanobotFeaturesPayload,
   ProviderOAuthAuthorizationRequired,
@@ -272,6 +273,8 @@ export function ProviderOAuthLoginDialog({
 }) {
   const { t } = useTranslation();
   const expectsCallbackUrl = flow?.completion_input === "callback_url";
+  const isDeviceCode = flow?.completion_input === "device_code";
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const inputId = expectsCallbackUrl ? "provider-oauth-callback" : "provider-oauth-code";
   const inputLabel = expectsCallbackUrl
     ? t("settings.oauth.callbackUrl")
@@ -295,7 +298,9 @@ export function ProviderOAuthLoginDialog({
           <DialogHeader>
             <DialogTitle>{providerLabel}</DialogTitle>
             <DialogDescription>
-              {expectsCallbackUrl
+              {isDeviceCode
+                ? t("settings.oauth.deviceCodeHelp")
+                : expectsCallbackUrl
                 ? remoteBrowserAccess
                   ? t("settings.oauth.remoteCallbackHelp")
                   : t("settings.oauth.localCallbackHelp")
@@ -311,12 +316,37 @@ export function ProviderOAuthLoginDialog({
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
             )}
             <span>
-              {expectsCallbackUrl && remoteBrowserAccess
+              {isDeviceCode
+                ? t("settings.oauth.waitingForDeviceApproval")
+                : expectsCallbackUrl && remoteBrowserAccess
                 ? t("settings.oauth.pasteCallbackToContinue")
                 : t("settings.oauth.waitingForCallback")}
             </span>
           </div>
-          <div className="space-y-2">
+          {isDeviceCode ? (
+            <div className="space-y-2">
+              <label htmlFor="provider-device-code" className="block text-xs font-medium text-foreground">
+                {t("settings.oauth.deviceCode")}
+              </label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="provider-device-code"
+                  value={flow?.user_code ?? ""}
+                  readOnly
+                  onFocus={(event) => event.target.select()}
+                  className="h-12 text-center font-mono text-xl tracking-widest"
+                />
+                <Button type="button" variant="outline" onClick={async () => {
+                  if (flow?.user_code && await copyTextToClipboard(flow.user_code)) {
+                    setCopiedCode(flow.flow_id);
+                  }
+                }}>
+                  <Clipboard className="mr-2 h-4 w-4" aria-hidden />
+                  {copiedCode === flow?.flow_id ? t("code.copied") : t("code.copy")}
+                </Button>
+              </div>
+            </div>
+          ) : <div className="space-y-2">
             <label
               htmlFor={inputId}
               className="block text-xs font-medium text-foreground"
@@ -345,7 +375,7 @@ export function ProviderOAuthLoginDialog({
                 spellCheck={false}
               />
             )}
-          </div>
+          </div>}
           {error ? (
             <p
               role="alert"
@@ -357,13 +387,15 @@ export function ProviderOAuthLoginDialog({
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onOpenAuthorization}>
               <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
-              {expectsCallbackUrl
+              {isDeviceCode
+                ? t("settings.oauth.openGitHub")
+                : expectsCallbackUrl
                 ? t("settings.oauth.openChatGPT")
                 : t("settings.oauth.signIn")}
             </Button>
-            <Button type="submit" disabled={!authorizationResponse.trim() || completing}>
+            {!isDeviceCode ? <Button type="submit" disabled={!authorizationResponse.trim() || completing}>
               {completing ? t("settings.oauth.signingIn") : t("settings.oauth.finishSignIn")}
-            </Button>
+            </Button> : null}
           </DialogFooter>
         </form>
       </DialogContent>

@@ -1060,6 +1060,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "デバイスコード",
+      "deviceCodeHelp": "このコードをコピーして GitHub で入力し、認証してください。完了すると、この画面は自動的に更新されます。",
+      "waitingForDeviceApproval": "GitHub の認証を待っています…",
+      "openGitHub": "GitHub を開く",
       "authentication": "OAuth 認証",
       "signIn": "サインイン",
       "signingIn": "サインイン中...",

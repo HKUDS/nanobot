@@ -33,7 +33,7 @@ import { useSystemSettingsEffects } from "@/components/settings/system/useSystem
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { fetchSettings, fetchSettingsUsage } from "@/lib/api";
+import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
 import {
   readLocalPreferences,
   writeLocalPreferences,
@@ -174,13 +174,17 @@ export function useSettingsController({
 
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
 
-  const closeProviderOAuthFlow = useCallback(() => {
+  const closeProviderOAuthFlow = useCallback((cancelPending = true) => {
+    const flow = providerOAuthFlowRef.current;
     providerOAuthFlowRef.current = null;
+    if (cancelPending && flow?.completion_input === "device_code") {
+      void cancelProviderOAuth(client, flow.provider, flow.flow_id).catch(() => {});
+    }
     setProviderOAuthFlow(null);
     setProviderOAuthResponse("");
     setProviderOAuthCompleting(false);
     setProviderOAuthDialogError(null);
-  }, []);
+  }, [client]);
   useProviderOAuthPolling({
     state: modelState,
     client,

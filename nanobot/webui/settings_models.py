@@ -1591,18 +1591,30 @@ def login_oauth_provider(
 
     if spec.name == "github_copilot":
         try:
-            from nanobot.providers.github_copilot_provider import (
-                login_github_copilot,
-            )
+            from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
-        # An existing token can be revoked; an explicit sign-in must replace it.
-        token = login_github_copilot(print_fn=lambda _message: None)
-        if not (token and token.access):
-            raise WebUISettingsError("OAuth login failed", status=401)
-        invalidate_oauth_model_catalog(spec.name)
-        return settings_payload(config_path=config_path)
+        # An existing token can be revoked. Expose the device prompt immediately
+        # instead of waiting for approval inside a blocking CLI login request.
+        oauth_flows.clear(spec.name)
+        copilot_flow = GitHubCopilotOAuthFlow()
+        try:
+            copilot_flow.start()
+        except Exception:
+            copilot_flow.cancel()
+            raise WebUISettingsError("GitHub sign-in failed. Start again.", status=502) from None
+        flow_id = secrets.token_urlsafe(24)
+        oauth_flows.register(spec.name, flow_id, copilot_flow)
+        return {
+            "status": "authorization_required",
+            "provider": spec.name,
+            "flow_id": flow_id,
+            "authorization_url": copilot_flow.authorization_url,
+            "user_code": copilot_flow.user_code,
+            "expires_in": copilot_flow.remaining_seconds,
+            "completion_input": "device_code",
+        }
 
     if spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import start_xai_oauth_login
@@ -1646,7 +1658,7 @@ def complete_oauth_provider(
     provider_name = (query_first(query, "provider") or "").strip()
     flow_id = (query_first(query, "flow_id") or "").strip()
     spec = find_by_name(provider_name)
-    if spec is None or spec.name not in {"openai_codex", "xai_grok"}:
+    if spec is None or spec.name not in {"openai_codex", "xai_grok", "github_copilot"}:
         raise WebUISettingsError("OAuth completion is not supported for this provider")
     if not flow_id:
         raise WebUISettingsError("flow_id is required")
@@ -1654,6 +1666,11 @@ def complete_oauth_provider(
     flow = oauth_flows.get(spec.name, flow_id)
     if flow is None:
         raise WebUISettingsError(f"{spec.label} sign-in expired. Start again.", status=410)
+
+    cancel = query_first(query, "cancel")
+    if cancel is not None and parse_bool(cancel, "cancel"):
+        oauth_flows.remove(spec.name, flow_id, flow)
+        return {"status": "cancelled", "provider": spec.name, "flow_id": flow_id}
 
     try:
         if spec.name == "openai_codex":
@@ -1666,6 +1683,12 @@ def complete_oauth_provider(
                 token = complete_openai_codex_oauth_login(flow, authorization_response)
             except OpenAICodexOAuthInputError as exc:
                 raise WebUISettingsError(str(exc), status=400) from exc
+        elif spec.name == "github_copilot":
+            from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
+
+            if not isinstance(flow, GitHubCopilotOAuthFlow):
+                raise WebUISettingsError("Invalid GitHub sign-in session. Start again.")
+            token = flow.complete()
         else:
             from nanobot.providers.xai_oauth import complete_xai_oauth_login
 
@@ -1720,6 +1743,7 @@ def logout_oauth_provider(
             from nanobot.providers.github_copilot_provider import get_storage
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
+        oauth_flows.clear(spec.name)
         token_path = get_storage().get_token_path()
     elif spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import logout_xai_oauth
@@ -1854,6 +1878,6 @@ class ModelSettingsHandler:
         except WebUISettingsError as exc:
             return SettingsRouteResult.failure(exc.status, exc.message)
 
-        if payload.get("status") in {"authorization_required", "pending"}:
+        if payload.get("status") in {"authorization_required", "pending", "cancelled"}:
             return SettingsRouteResult.success(payload)
         return SettingsRouteResult.success(payload, decorate_restart=True)

@@ -1260,6 +1260,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Device code",
+      "deviceCodeHelp": "Copy this code and enter it on GitHub. This window will update automatically after authorization.",
+      "waitingForDeviceApproval": "Waiting for GitHub authorization…",
+      "openGitHub": "Open GitHub",
       "authentication": "OAuth authentication",
       "signIn": "Sign in",
       "signingIn": "Signing in...",

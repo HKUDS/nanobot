@@ -620,6 +620,15 @@ xAI may change that upstream contract independently of nanobot.
 
 For GitHub Copilot:
 
+You can also sign in from the WebUI's model settings. The sign-in dialog shows a
+device code: copy it, select **Open GitHub**, and enter the code on GitHub. Keep
+the dialog open; nanobot detects approval and refreshes the model catalog
+automatically. Closing the dialog cancels the pending sign-in without replacing
+your saved credentials. This works from a remote browser too; no browser needs
+to open on the gateway machine.
+
+For terminal sign-in:
+
 ```bash
 nanobot provider login github-copilot --set-main
 ```
