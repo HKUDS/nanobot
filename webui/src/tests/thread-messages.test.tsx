@@ -16,6 +16,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function assistantContextActions(root: ParentNode = document): HTMLElement {
+  const actions = root.querySelector<HTMLElement>("[data-assistant-context-actions]");
+  expect(actions).not.toBeNull();
+  return actions!;
+}
+
+function assistantBlockForText(text: string): HTMLElement {
+  const block = screen.getByText(text).closest<HTMLElement>("[data-assistant-message]");
+  expect(block).not.toBeNull();
+  return block!;
+}
+
 describe("ThreadMessages", () => {
   it.each([0, -13_000, -14_000, -15_000, 15_000])(
     "keeps the optimistic timer through acknowledgement and output with %i ms server clock skew",
@@ -363,6 +375,10 @@ describe("ThreadMessages", () => {
 
     rerender(<ThreadMessages messages={messages} isStreaming={false} activeTurnId={null} />);
     const completedActivity = screen.getByRole("button", { name: /worked/i });
+    const precedingActions = assistantContextActions(assistantBlockForText("I will inspect it."));
+    expect(precedingActions).toHaveAttribute("data-context-actions-overlay", "true");
+    expect(precedingActions).toHaveClass("absolute", "end-0", "top-full");
+    expect(completedActivity).toHaveAttribute("aria-expanded", "false");
     expect(firstAnswer.compareDocumentPosition(completedActivity) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(completedActivity.compareDocumentPosition(finalAnswer) & Node.DOCUMENT_POSITION_FOLLOWING)
@@ -467,7 +483,8 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    const activityShells = screen.getAllByRole("button", { name: /worked/i });
+    const activityShells = screen.getAllByRole("button", { name: /^worked/i });
+    activityShells.forEach((disclosure) => fireEvent.click(disclosure));
     const ok = screen.getByText("ok");
     const final = screen.getByText("finished");
     expect(activityShells).toHaveLength(2);
@@ -568,7 +585,7 @@ describe("ThreadMessages", () => {
     expect(removeAllRanges).toHaveBeenCalled();
   });
 
-  it("groups consecutive reasoning and tool rows into one timeline before the answer", () => {
+  it("keeps completed activity as an inline toggle block before the answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -577,7 +594,7 @@ describe("ThreadMessages", () => {
         reasoning: "thinking",
         reasoningStreaming: false,
         isStreaming: true,
-        createdAt: Date.now(),
+        createdAt: 1_000,
       },
       {
         id: "t1",
@@ -585,7 +602,7 @@ describe("ThreadMessages", () => {
         kind: "trace",
         content: "search()",
         traces: ["search()"],
-        createdAt: Date.now(),
+        createdAt: 2_000,
       },
       {
         id: "r2",
@@ -594,13 +611,14 @@ describe("ThreadMessages", () => {
         reasoning: "more thinking",
         reasoningStreaming: false,
         isStreaming: true,
-        createdAt: Date.now(),
+        createdAt: 3_000,
       },
       {
         id: "a1",
         role: "assistant",
         content: "final answer",
-        createdAt: Date.now(),
+        latencyMs: 16_000,
+        createdAt: 4_000,
       },
     ];
 
@@ -611,7 +629,89 @@ describe("ThreadMessages", () => {
 
     expect(rows).toHaveLength(2);
     expect(rows[0]).not.toHaveClass("mt-2", "mt-4", "mt-5");
-    expect(rows[1]).toHaveClass("mt-4");
+    expect(rows[1]).not.toHaveClass("mt-4");
+    const disclosure = screen.getByRole("button", { name: "Worked for 16s" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(disclosure).toHaveAttribute("aria-controls");
+    expect(disclosure).toHaveAttribute("data-contextual-activity-disclosure", "true");
+    expect(disclosure.closest("[data-contextual-activity]"))
+      .toHaveClass("completed-activity-block");
+    expect(rows[0].compareDocumentPosition(rows[1]) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(assistantContextActions(container)).not.toHaveAttribute("data-activity-expanded");
+
+    fireEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+    fireEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+  });
+
+  it("moves the activity and message actions together with the hovered answer", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "tool-a",
+        role: "tool",
+        kind: "trace",
+        content: "first command",
+        traces: ["first command"],
+        createdAt: 1_000,
+      },
+      {
+        id: "answer-a",
+        role: "assistant",
+        content: "first answer",
+        createdAt: 2_000,
+      },
+      {
+        id: "tool-b",
+        role: "tool",
+        kind: "trace",
+        content: "second command",
+        traces: ["second command"],
+        createdAt: 3_000,
+      },
+      {
+        id: "answer-b",
+        role: "assistant",
+        content: "second answer",
+        createdAt: 4_000,
+      },
+    ];
+
+    const { container } = render(
+      <ThreadMessages messages={messages} isStreaming={false} />,
+    );
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-thread-display-unit]"),
+    );
+    const [activityA, answerA, activityB, answerB] = rows;
+
+    expect(activityA.dataset.messageContextGroup)
+      .toBe(answerA.dataset.messageContextGroup);
+    expect(activityB.dataset.messageContextGroup)
+      .toBe(answerB.dataset.messageContextGroup);
+    expect(activityA.dataset.messageContextGroup)
+      .not.toBe(activityB.dataset.messageContextGroup);
+
+    fireEvent.pointerEnter(answerA);
+    expect(activityA).toHaveAttribute("data-context-group-active", "true");
+    expect(answerA).toHaveAttribute("data-context-group-active", "true");
+    expect(activityB).not.toHaveAttribute("data-context-group-active");
+    expect(answerB).not.toHaveAttribute("data-context-group-active");
+
+    fireEvent.pointerEnter(answerB);
+    expect(activityA).not.toHaveAttribute("data-context-group-active");
+    expect(answerA).not.toHaveAttribute("data-context-group-active");
+    expect(activityB).toHaveAttribute("data-context-group-active", "true");
+    expect(answerB).toHaveAttribute("data-context-group-active", "true");
+
+    fireEvent.pointerLeave(answerB);
+    expect(activityB).not.toHaveAttribute("data-context-group-active");
+    expect(answerB).not.toHaveAttribute("data-context-group-active");
   });
 
   it("renders a fork boundary divider after the copied history", () => {
@@ -1018,9 +1118,15 @@ describe("ThreadMessages", () => {
       expect(units[1].message).not.toHaveProperty("reasoning");
     }
 
-    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    const { container } = render(
+      <ThreadMessages messages={messages} isStreaming={false} />,
+    );
     expect(screen.queryByRole("button", { name: /^thinking$/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Worked for 9s")).toBeInTheDocument();
+    const disclosure = screen.getByRole("button", { name: "Worked for 9s" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    assistantContextActions(container);
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("final answer")).toBeInTheDocument();
   });
 
@@ -1056,9 +1162,14 @@ describe("ThreadMessages", () => {
 
     expect(units[0].type === "activity" ? units[0].turnLatencyMs : undefined).toBe(20_000);
 
-    render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getByText("Worked for 20s")).toBeInTheDocument();
-    expect(screen.queryByText("Worked for 3s")).not.toBeInTheDocument();
+    const { container } = render(
+      <ThreadMessages messages={messages} isStreaming={false} />,
+    );
+    assistantContextActions(container);
+    expect(screen.getByRole("button", { name: "Worked for 20s" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Worked for 3s" }))
+      .not.toBeInTheDocument();
   });
 
   it("keeps a streamed answer outside late activity when the prompt snapshot is absent", () => {
@@ -1197,11 +1308,13 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
-    const activities = screen.getAllByRole("button", { name: /worked/i });
     const answer = screen.getByText("知道，IEM Cologne Major 2026 今天开打了。");
+    const activities = screen.getAllByRole("button", { name: /worked/i });
     expect(activities).toHaveLength(2);
-    expect(activities[0].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(answer.compareDocumentPosition(activities[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(activities[0].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(answer.compareDocumentPosition(activities[1]) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
   });
 
   it("preserves a completed prior turn's order while the next turn is streaming", () => {
@@ -1376,10 +1489,15 @@ describe("ThreadMessages", () => {
       },
     ];
 
-    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    const { container } = render(
+      <ThreadMessages messages={messages} isStreaming={false} />,
+    );
 
-    expect(screen.getByText("Worked for 15s")).toBeInTheDocument();
-    expect(screen.queryByText("Worked for 0s")).not.toBeInTheDocument();
+    assistantContextActions(container);
+    expect(screen.getByRole("button", { name: "Worked for 15s" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Worked for 0s" }))
+      .not.toBeInTheDocument();
   });
 
   it("keeps answer slices on either side of activity in generation order", () => {
@@ -1431,8 +1549,10 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: "Fork" })).toHaveLength(1);
+    expect(document.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
+      .toHaveLength(2);
+    expect(document.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
+      .toHaveLength(1);
     expect(screen.getByText("starting…").closest("[data-testid='activity-model-message']")).toBeNull();
     expect(screen.getByText("final reply").closest("[data-testid='activity-model-message']")).toBeNull();
   });
@@ -1489,6 +1609,8 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
     expect(screen.getByText("result.csv")).toBeInTheDocument();
+    assistantContextActions(assistantBlockForText("result.csv"));
+    expect(screen.getByRole("button", { name: "Worked" })).toBeInTheDocument();
   });
 
   it("hides current turn actions until turn_end", () => {
@@ -1530,18 +1652,23 @@ describe("ThreadMessages", () => {
       .closest<HTMLElement>("[data-thread-display-unit]")!;
     const finalAnswer = screen.getByText("second answer slice")
       .closest<HTMLElement>("[data-thread-display-unit]")!;
-    expect(firstAnswer.querySelector("[data-assistant-footer]")).not.toBeInTheDocument();
-    expect(finalAnswer.querySelector("[data-assistant-footer]"))
-      .toHaveAttribute("data-state", "reserved");
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
+    expect(firstAnswer.querySelector("[data-assistant-context-actions]"))
+      .not.toBeInTheDocument();
+    expect(finalAnswer.querySelector("[data-assistant-context-actions]"))
+      .not.toBeInTheDocument();
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
+      .toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
+      .toHaveLength(1);
 
     rerender(<ThreadMessages {...props} isStreaming={false} activeTurnId={null} />);
 
-    expect(firstAnswer.querySelector("[data-assistant-footer]"))
-      .toHaveAttribute("data-state", "visible");
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(3);
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(2);
+    expect(firstAnswer.querySelector("[data-assistant-context-actions]"))
+      .toBeInTheDocument();
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
+      .toHaveLength(3);
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
+      .toHaveLength(2);
   });
 
   it("keeps active turn actions hidden across guidance and failed user rows", () => {
@@ -1570,8 +1697,10 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
+      .toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
+      .toHaveLength(1);
   });
 
   it("only hides the active assistant-only automation turn", () => {
@@ -1593,8 +1722,10 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
+      .toHaveLength(1);
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
+      .toHaveLength(0);
   });
 
   it("falls back to the latest user boundary for untagged active slices", () => {
@@ -1610,9 +1741,9 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(container.querySelector('[data-assistant-footer] [aria-label="Copy"]'))
+    expect(container.querySelector('[data-assistant-context-actions][data-copy-action="true"]'))
       .not.toBeInTheDocument();
-    expect(container.querySelector('[data-assistant-footer] [aria-label="Fork"]'))
+    expect(container.querySelector('[data-assistant-context-actions][data-fork-action="true"]'))
       .not.toBeInTheDocument();
   });
 
@@ -1631,9 +1762,9 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Copy"]'))
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
       .toHaveLength(1);
-    expect(container.querySelectorAll('[data-assistant-footer] [aria-label="Fork"]'))
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
       .toHaveLength(1);
   });
 
@@ -1642,8 +1773,11 @@ describe("ThreadMessages", () => {
       { id: "a1", role: "assistant", content: "part one", createdAt: 1 },
       { id: "a2", role: "assistant", content: "part two", createdAt: 2 },
     ];
-    render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    const { container } = render(
+      <ThreadMessages messages={messages} isStreaming={false} />,
+    );
+    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
+      .toHaveLength(1);
     expect(screen.getByText("part one")).toBeInTheDocument();
     expect(screen.getByText("part two")).toBeInTheDocument();
   });
@@ -1672,7 +1806,8 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Fork" }).at(-1)!);
+    const actions = assistantContextActions(assistantBlockForText("answer two"));
+    fireEvent.click(actions.querySelector("[data-assistant-fork-action]")!);
     expect(onForkFromMessage).toHaveBeenCalledWith(2);
   });
 

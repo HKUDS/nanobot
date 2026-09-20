@@ -4,6 +4,7 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
@@ -109,6 +110,23 @@ export function ThreadMessages({
     ? activeTurnStartIndex(units, activeTurnId)
     : units.length;
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
+  const [expandedActivityKeys, setExpandedActivityKeys] = useState<Set<string>>(() => new Set());
+  const [activeContextGroupKey, setActiveContextGroupKey] = useState<string | null>(null);
+  const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
+    setExpandedActivityKeys((current) => {
+      if (current.has(key) === expanded) return current;
+      const next = new Set(current);
+      if (expanded) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+  const setContextGroupActive = useCallback((key: string, active: boolean) => {
+    setActiveContextGroupKey((current) => {
+      if (active) return current === key ? current : key;
+      return current === key ? null : current;
+    });
+  }, []);
   let nextUserIndex = hiddenUserMessageCount;
 
   return (
@@ -119,15 +137,41 @@ export function ThreadMessages({
       />
       {units.map((unit, index) => {
         const prev = units[index - 1];
-        const marginTop =
-          index > 0
-            ? marginAfterPrevUnit(prev)
-            : "";
         const next = units[index + 1];
         const hasBodyBelow =
           unit.type === "activity"
           && next?.type === "message"
           && next.message.role === "assistant";
+        const followingActivitySharesContextRow =
+          unit.type === "message"
+          && unit.message.role === "assistant"
+          && activityLinksToFollowingAnswer(
+            units,
+            index + 1,
+            liveActivityClusterIndices,
+          );
+        const linksToFollowingAnswer = activityLinksToFollowingAnswer(
+          units,
+          index,
+          liveActivityClusterIndices,
+        );
+        const linksFromPreviousActivity = activityLinksToFollowingAnswer(
+          units,
+          index - 1,
+          liveActivityClusterIndices,
+        );
+        const linkedActivityKey = linksToFollowingAnswer ? unitKeys[index] : undefined;
+        const contextGroupKey = linksToFollowingAnswer
+          ? unitKeys[index]
+          : linksFromPreviousActivity
+            ? unitKeys[index - 1]
+            : undefined;
+        const linkedActivityExpanded = linkedActivityKey !== undefined
+          && expandedActivityKeys.has(linkedActivityKey);
+        let marginTop = index > 0 ? marginAfterPrevUnit(prev) : "";
+        if (linksFromPreviousActivity) {
+          marginTop = "";
+        }
         const deferOffscreenRender =
           index < units.length - 1
           && (
@@ -150,7 +194,6 @@ export function ThreadMessages({
                 ? unit.message.turnId === activeTurnId
                 : index > currentTurnStartIndex
             );
-        const isThreadTail = index === units.length - 1;
         if (
           unit.type === "message"
           && unit.message.role === "user"
@@ -165,9 +208,15 @@ export function ThreadMessages({
             marginTop={marginTop}
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
+            linkedActivityKey={linkedActivityKey}
+            linkedActivityExpanded={linkedActivityExpanded}
+            overlayContextActions={followingActivitySharesContextRow}
+            contextGroupKey={contextGroupKey}
+            contextGroupActive={
+              contextGroupKey !== undefined && contextGroupKey === activeContextGroupKey
+            }
             deferOffscreenRender={deferOffscreenRender}
             isTurnStreaming={unitTurnStreaming}
-            isThreadTail={isThreadTail}
             retryStatus={
               unit.type === "activity" && liveActivityClusterIndices.has(index)
                 ? retryStatus
@@ -184,11 +233,13 @@ export function ThreadMessages({
             onLoadTraceDetails={onLoadTraceDetails}
             onOpenFilePreview={onOpenFilePreview}
             onForkFromMessage={onForkFromMessage}
+            onActivityExpandedChange={setActivityExpanded}
+            onContextGroupActiveChange={setContextGroupActive}
           />
         );
       })}
       {pendingActivity ? (
-        <div className={units.length > 0 ? "mt-5" : undefined}>
+        <div className={cn(units.length > 0 && "mt-5")}>
           <AgentActivityCluster
             messages={[]}
             isTurnStreaming
@@ -255,9 +306,13 @@ interface ThreadDisplayUnitProps {
   marginTop: string;
   userPromptId?: string;
   hasBodyBelow: boolean;
+  linkedActivityKey?: string;
+  linkedActivityExpanded: boolean;
+  overlayContextActions: boolean;
+  contextGroupKey?: string;
+  contextGroupActive: boolean;
   deferOffscreenRender: boolean;
   isTurnStreaming: boolean;
-  isThreadTail: boolean;
   retryStatus: RetryStatus | null;
   forkIndex?: number;
   showForkBoundary: boolean;
@@ -270,6 +325,8 @@ interface ThreadDisplayUnitProps {
   onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
+  onActivityExpandedChange: (key: string, expanded: boolean) => void;
+  onContextGroupActiveChange: (key: string, active: boolean) => void;
 }
 
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
@@ -278,9 +335,13 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   marginTop,
   userPromptId,
   hasBodyBelow,
+  linkedActivityKey,
+  linkedActivityExpanded,
+  overlayContextActions,
+  contextGroupKey,
+  contextGroupActive,
   deferOffscreenRender,
   isTurnStreaming,
-  isThreadTail,
   retryStatus,
   forkIndex,
   showForkBoundary,
@@ -293,6 +354,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   onLoadTraceDetails,
   onOpenFilePreview,
   onForkFromMessage,
+  onActivityExpandedChange,
+  onContextGroupActiveChange,
 }: ThreadDisplayUnitProps) {
   const elementRef = useRef<HTMLDivElement>(null);
   const heightRef = useRef(0);
@@ -317,6 +380,11 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   const onForkFromHere = useCallback(() => {
     if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
   }, [forkIndex, onForkFromMessage]);
+  const onLinkedActivityExpandedChange = useCallback((expanded: boolean) => {
+    if (linkedActivityKey !== undefined) {
+      onActivityExpandedChange(linkedActivityKey, expanded);
+    }
+  }, [linkedActivityKey, onActivityExpandedChange]);
   return (
     <>
       <div
@@ -324,9 +392,25 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         className={marginTop}
         style={retainContent ? undefined : { height: heightRef.current }}
         onPointerDownCapture={() => setInteracted(true)}
-        onFocusCapture={() => setInteracted(true)}
         data-thread-display-unit={unitKey}
         data-user-prompt-id={userPromptId}
+        data-message-context-group={contextGroupKey}
+        data-context-group-active={contextGroupActive || undefined}
+        onPointerEnter={contextGroupKey ? () => {
+          onContextGroupActiveChange(contextGroupKey, true);
+        } : undefined}
+        onPointerLeave={contextGroupKey ? (event) => {
+          if (contextGroupKeyForTarget(event.relatedTarget) === contextGroupKey) return;
+          onContextGroupActiveChange(contextGroupKey, false);
+        } : undefined}
+        onFocusCapture={contextGroupKey ? () => {
+          setInteracted(true);
+          onContextGroupActiveChange(contextGroupKey, true);
+        } : () => setInteracted(true)}
+        onBlurCapture={contextGroupKey ? (event) => {
+          if (contextGroupKeyForTarget(event.relatedTarget) === contextGroupKey) return;
+          onContextGroupActiveChange(contextGroupKey, false);
+        } : undefined}
       >
         {retainContent ? unit.type === "activity" ? (
           <AgentActivityCluster
@@ -334,6 +418,10 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             isTurnStreaming={isTurnStreaming}
             retryStatus={retryStatus}
             hasBodyBelow={hasBodyBelow}
+            expanded={linkedActivityKey !== undefined ? linkedActivityExpanded : undefined}
+            onExpandedChange={
+              linkedActivityKey !== undefined ? onLinkedActivityExpandedChange : undefined
+            }
             turnLatencyMs={unit.turnLatencyMs}
             startedAtMs={unit.startedAtMs}
             cliApps={cliApps}
@@ -346,13 +434,13 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           <MessageBubble
             message={unit.message}
             isTurnStreaming={isTurnStreaming}
-            isThreadTail={isThreadTail}
             temporary={temporary}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
             onOpenFilePreview={onOpenFilePreview}
             onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
+            overlayContextActions={overlayContextActions}
           />
         ) : null}
       </div>
@@ -370,9 +458,13 @@ function threadDisplayUnitPropsEqual(
     && previous.marginTop === next.marginTop
     && previous.userPromptId === next.userPromptId
     && previous.hasBodyBelow === next.hasBodyBelow
+    && previous.linkedActivityKey === next.linkedActivityKey
+    && previous.linkedActivityExpanded === next.linkedActivityExpanded
+    && previous.overlayContextActions === next.overlayContextActions
+    && previous.contextGroupKey === next.contextGroupKey
+    && previous.contextGroupActive === next.contextGroupActive
     && previous.deferOffscreenRender === next.deferOffscreenRender
     && previous.isTurnStreaming === next.isTurnStreaming
-    && previous.isThreadTail === next.isThreadTail
     && previous.retryStatus === next.retryStatus
     && previous.forkIndex === next.forkIndex
     && previous.showForkBoundary === next.showForkBoundary
@@ -385,6 +477,30 @@ function threadDisplayUnitPropsEqual(
     && previous.onLoadTraceDetails === next.onLoadTraceDetails
     && previous.onOpenFilePreview === next.onOpenFilePreview
     && previous.onForkFromMessage === next.onForkFromMessage
+    && previous.onActivityExpandedChange === next.onActivityExpandedChange
+    && previous.onContextGroupActiveChange === next.onContextGroupActiveChange
+  );
+}
+
+function contextGroupKeyForTarget(target: EventTarget | null): string | undefined {
+  return target instanceof Element
+    ? target.closest<HTMLElement>("[data-message-context-group]")?.dataset.messageContextGroup
+    : undefined;
+}
+
+function activityLinksToFollowingAnswer(
+  units: DisplayUnit[],
+  activityIndex: number,
+  liveActivityClusterIndices: ReadonlySet<number>,
+): boolean {
+  if (activityIndex < 0 || liveActivityClusterIndices.has(activityIndex)) return false;
+  const activity = units[activityIndex];
+  const answer = units[activityIndex + 1];
+  return (
+    activity?.type === "activity"
+    && answer?.type === "message"
+    && answer.message.role === "assistant"
+    && answer.message.kind !== "compaction"
   );
 }
 
@@ -542,6 +658,10 @@ function marginAfterPrevUnit(prev: DisplayUnit): string {
     );
   if (denseP) {
     return "mt-2";
+  }
+  if (p.role === "assistant" && !p.isStreaming && p.content.trim().length > 0) {
+    // The completed assistant's contextual row now provides the inter-message rhythm.
+    return "";
   }
   return "mt-5";
 }

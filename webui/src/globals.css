@@ -762,7 +762,91 @@
   margin-inline-start: -0.5rem;
 }
 
+.assistant-context-actions {
+  transition: opacity 120ms ease-out;
+}
+
+.assistant-context-controls {
+  transition: opacity 120ms ease-out;
+}
+
+.completed-activity-block [data-contextual-activity-disclosure] {
+  transition-duration: 120ms;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-assistant-message] .assistant-context-actions {
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  [data-assistant-message] .assistant-context-actions[data-context-actions-pinned] {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
+  [data-assistant-message] .assistant-context-actions[data-context-actions-pinned]
+    .assistant-context-controls {
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  [data-assistant-message]:hover .assistant-context-actions,
+  [data-assistant-message]:focus-within .assistant-context-actions,
+  [data-context-group-active] .assistant-context-actions {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
+  [data-assistant-message]:hover
+    .assistant-context-actions[data-context-actions-pinned]
+    .assistant-context-controls,
+  [data-assistant-message]:focus-within
+    .assistant-context-actions[data-context-actions-pinned]
+    .assistant-context-controls,
+  [data-context-group-active]
+    .assistant-context-actions[data-context-actions-pinned]
+    .assistant-context-controls {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
+  .completed-activity-block [data-contextual-activity-disclosure] {
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  .completed-activity-block:hover [data-contextual-activity-disclosure],
+  .completed-activity-block:focus-within [data-contextual-activity-disclosure],
+  [data-context-group-active] .completed-activity-block [data-contextual-activity-disclosure],
+  .completed-activity-block [data-contextual-activity-disclosure][aria-expanded="true"] {
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-context-actions {
+    transition: none;
+  }
+
+  .assistant-context-controls {
+    transition: none;
+  }
+
+  .completed-activity-block [data-contextual-activity-disclosure] {
+    transition: none;
+  }
+}
+
 @media (pointer: coarse) {
+  .assistant-context-actions {
+    width: fit-content;
+    background: transparent;
+    padding: 0;
+    backdrop-filter: none;
+  }
+
   .message-actions > button:first-child {
     margin-inline-start: -0.875rem;
   }

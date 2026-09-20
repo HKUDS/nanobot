@@ -164,6 +164,9 @@ interface AgentActivityClusterProps {
   traceDetailScope?: string | null;
   onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
+  /** Optional controlled expansion state for a completed inline activity block. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 export function AgentActivityCluster(props: AgentActivityClusterProps) {
@@ -173,7 +176,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
     [messages, props.isTurnStreaming],
   );
-  if (displayMode === "summary" || !editsByMessage.size) {
+  if (props.expanded !== undefined || displayMode === "summary" || !editsByMessage.size) {
     return <FoldedAgentActivity {...props} />;
   }
 
@@ -237,6 +240,8 @@ function FoldedAgentActivity({
   traceDetailScope = null,
   onLoadTraceDetails,
   onOpenFilePreview,
+  expanded,
+  onExpandedChange,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEditDisplayMode = useFileEditDisplayMode();
@@ -283,9 +288,11 @@ function FoldedAgentActivity({
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
   /** Live work stays open; completed work briefly shows the done state, then tucks away. */
-  const outerExpanded = userToggledOuter
-    ? outerOpenLocal
-    : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
+  const outerExpanded = expanded ?? (
+    userToggledOuter
+      ? outerOpenLocal
+      : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming)
+  );
   const deferredTraceRefs = useMemo(
     () => Array.from(new Set(
       messages
@@ -319,6 +326,7 @@ function FoldedAgentActivity({
     startedAtMs,
   );
   const activityDuration = formatActivityDuration(durationMs);
+  const isCompletedDisclosure = !isTurnStreaming && expanded !== undefined;
   const retryError = retryStatus?.error_kind === "connection"
     ? t("message.retryConnection", { defaultValue: "Connection failed" })
     : retryStatus?.error_kind === "timeout"
@@ -395,6 +403,10 @@ function FoldedAgentActivity({
   }, [cancelActivityScrollFrame, scrollActivityToBottom]);
 
   const toggleOuter = () => {
+    if (expanded !== undefined) {
+      onExpandedChange?.(!expanded);
+      return;
+    }
     const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
     if (nextOpen) {
       autoFollowActivityRef.current = true;
@@ -464,7 +476,7 @@ function FoldedAgentActivity({
 
   if (!hasVisibleActivity && !isTurnStreaming) return null;
 
-  if (hasOnlyFileActivity) {
+  if (hasOnlyFileActivity && expanded === undefined) {
     return (
       <div className={cn("w-full", hasBodyBelow && "mb-2")}>
         <FileEditGroup
@@ -481,6 +493,7 @@ function FoldedAgentActivity({
       <ThinkingReasoningShell
         active={isTurnStreaming}
         expanded={outerExpanded}
+        contextual={isCompletedDisclosure}
         label={activityLabel}
         viewportRef={activityScrollRef}
         contentRef={activityContentRef}

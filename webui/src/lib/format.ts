@@ -151,6 +151,15 @@ export function fmtDateTime(
   return date ? dateTimeFormatter(activeLocale(locale)).format(date) : "";
 }
 
+/** Format a timestamp as local clock time, leaving the full date to surrounding context. */
+export function formatClockTime(
+  value: string | number | null | undefined,
+  locale?: string,
+): string {
+  const date = parseDate(value);
+  return date ? clockTimeFormatter(activeLocale(locale)).format(date) : "";
+}
+
 /**
  * Format a completion timestamp in the browser's local timezone.
  * Today's messages stay compact; older messages include their date for orientation.

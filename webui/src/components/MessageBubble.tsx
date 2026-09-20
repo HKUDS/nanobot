@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import {
   fmtDateTime,
+  formatClockTime,
   formatMessageEndTime,
 } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
@@ -67,13 +68,13 @@ interface MessageBubbleProps {
   temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
   showCopyAction?: boolean;
-  /** Whether this message is the final display unit in the thread. */
-  isThreadTail?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
   onForkFromHere?: () => void;
+  /** Share the following activity block's reserved contextual row. */
+  overlayContextActions?: boolean;
 }
 
 function ForkArrowIcon({ className }: { className?: string }) {
@@ -119,7 +120,7 @@ function MessageTimestamp({
           dateTime={new Date(timestamp).toISOString()}
           tabIndex={0}
           className={cn(
-            "cursor-help text-[11px] leading-none text-muted-foreground/70 tabular-nums",
+            "inline-flex h-8 items-end pb-2 cursor-help text-[11px] leading-none text-muted-foreground/70 tabular-nums",
             "focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             className,
           )}
@@ -132,7 +133,7 @@ function MessageTimestamp({
   );
 }
 
-function MessageCopyButton({ content }: { content: string }) {
+function useMessageCopy(content: string) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
@@ -160,6 +161,11 @@ function MessageCopyButton({ content }: { content: string }) {
   }, [content]);
 
   const label = copied ? t("message.copiedReply") : t("message.copyReply");
+  return { copied, label, onCopy };
+}
+
+function MessageCopyButton({ content }: { content: string }) {
+  const { copied, label, onCopy } = useMessageCopy(content);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -168,7 +174,7 @@ function MessageCopyButton({ content }: { content: string }) {
           onClick={onCopy}
           aria-label={label}
           className={cn(
-            "touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+            "touch-target inline-flex h-8 w-8 shrink-0 items-end justify-center rounded-full pb-2",
             "transition-colors hover:bg-muted/55 hover:text-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           )}
@@ -182,6 +188,126 @@ function MessageCopyButton({ content }: { content: string }) {
       </TooltipTrigger>
       <TooltipContent side="top" align="center">{label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+interface AssistantContextActionsProps {
+  content: string;
+  showCopy: boolean;
+  forkLabel: string;
+  fallbackSources?: NonNullable<UIMessage["responseSources"]>;
+  onForkFromHere?: () => void;
+  overlay?: boolean;
+  timestamp?: {
+    value: number;
+    label: string;
+    completed: boolean;
+  };
+  automation?: {
+    label: string;
+    sourceLabel: string;
+  };
+}
+
+function AssistantContextActions({
+  content,
+  showCopy,
+  forkLabel,
+  fallbackSources = [],
+  onForkFromHere,
+  overlay = false,
+  timestamp,
+  automation,
+}: AssistantContextActionsProps) {
+  const { copied, label: copyLabel, onCopy } = useMessageCopy(content);
+  return (
+    <TooltipProvider>
+      <div
+        data-assistant-context-actions
+        data-context-actions-overlay={overlay || undefined}
+        data-context-actions-pinned={fallbackSources.length > 0 || undefined}
+        data-copy-action={showCopy || undefined}
+        data-fork-action={onForkFromHere ? true : undefined}
+        className={cn(
+          "assistant-context-actions z-10 flex min-h-7 items-center gap-0.5 whitespace-nowrap",
+          "rounded-lg bg-background/90 p-0.5 text-muted-foreground backdrop-blur-sm",
+          overlay ? "absolute end-0 top-full mt-0.5" : "relative mt-0.5",
+        )}
+      >
+        <div className="flex min-w-0 max-w-full items-center gap-0.5">
+          {timestamp ? (
+            <MessageTimestamp
+              data-message-timestamp
+              {...(timestamp.completed ? { "data-assistant-completed-at": true } : {})}
+              {...(automation ? { "data-automation-trigger": true } : {})}
+              timestamp={timestamp.value}
+              tooltipLabel={automation
+                ? `${timestamp.label} — ${automation.label} — ${automation.sourceLabel}`
+                : timestamp.label}
+              className={cn(
+                "h-7 items-center rounded-md px-1.5 pb-0 text-[11px]",
+                "transition-colors hover:bg-muted/70 hover:text-foreground",
+              )}
+            >
+              {formatClockTime(timestamp.value)}
+            </MessageTimestamp>
+          ) : null}
+          {fallbackSources.length > 0 ? (
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1">
+              {fallbackSources.map((source) => (
+                <ResponseSourceBadge key={JSON.stringify(source)} source={source} />
+              ))}
+            </div>
+          ) : null}
+          <div className="assistant-context-controls flex items-center gap-0.5">
+            {showCopy ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-assistant-copy-action
+                    onClick={onCopy}
+                    aria-label={copyLabel}
+                    className={cn(
+                      "touch-target inline-flex h-7 w-7 items-center justify-center rounded-md",
+                      "transition-colors hover:bg-muted/70 hover:text-foreground",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    )}
+                  >
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center">{copyLabel}</TooltipContent>
+              </Tooltip>
+            ) : null}
+            {onForkFromHere ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-assistant-fork-action
+                    onClick={onForkFromHere}
+                    aria-label={forkLabel}
+                    className={cn(
+                      "touch-target inline-flex h-7 w-7 items-center justify-center rounded-md",
+                      "transition-colors hover:bg-muted/70 hover:text-foreground",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    )}
+                  >
+                    <ForkArrowIcon className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -333,12 +459,12 @@ export function MessageBubble({
   isTurnStreaming = false,
   temporary = false,
   showCopyAction = true,
-  isThreadTail = true,
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
   onOpenFilePreview,
   onForkFromHere,
+  overlayContextActions = false,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mentionCliApps = useMemo(
@@ -499,16 +625,14 @@ export function MessageBubble({
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
   const fallbackSources = message.responseSources?.filter((source) => source.fallback === true) ?? [];
-  const showAssistantFooterRow =
+  const showAssistantContextActions =
     showCopyButton || showForkButton || showAssistantTimestamp || fallbackSources.length > 0;
-  const hasAssistantFooterContent =
-    message.role === "assistant"
-    && (!empty || hasReasoning || media.length > 0);
-  const showAssistantFooterSlot =
-    hasAssistantFooterContent
-    && (showAssistantFooterRow || ((message.isStreaming || isTurnStreaming) && isThreadTail));
   return (
-    <div className="w-full text-[15px]" style={{ lineHeight: "var(--cjk-line-height)" }}>
+    <div
+      data-assistant-message
+      className="group/assistant relative w-full text-[15px]"
+      style={{ lineHeight: "var(--cjk-line-height)" }}
+    >
       {hasReasoning ? (
         <ReasoningBubble
           text={reasoning}
@@ -533,67 +657,24 @@ export function MessageBubble({
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
         </>
       )}
-      {showAssistantFooterSlot ? (
-        <TooltipProvider>
-          <div
-            data-assistant-footer
-            data-state={showAssistantFooterRow ? "visible" : "reserved"}
-            aria-hidden={showAssistantFooterRow ? undefined : true}
-            className={cn(
-              "message-actions mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
-              "transition-opacity duration-300 ease-out motion-reduce:transition-none",
-              showAssistantFooterRow
-                ? "opacity-100"
-                : "pointer-events-none opacity-0",
-            )}
-          >
-            {showCopyButton ? (
-              <MessageCopyButton content={assistantContent} />
-            ) : null}
-            {showForkButton ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={onForkFromHere}
-                    aria-label={forkLabel}
-                    className={cn(
-                      "touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                      "transition-colors hover:bg-muted/55 hover:text-foreground",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    )}
-                  >
-                    <ForkArrowIcon className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
-              </Tooltip>
-            ) : null}
-            {showAssistantTimestamp ? (
-              <MessageTimestamp
-                {...(showCompletedAt ? { "data-assistant-completed-at": true } : {})}
-                data-message-timestamp
-                timestamp={assistantTimestamp}
-                tooltipLabel={assistantTimestampTitle}
-              >
-                {assistantTimestampLabel}
-              </MessageTimestamp>
-            ) : null}
-            {fallbackSources.length > 0 ? (
-              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1">
-                {fallbackSources.map((source) => (
-                  <ResponseSourceBadge key={JSON.stringify(source)} source={source} />
-                ))}
-              </div>
-            ) : null}
-            {showAutomationTrigger ? (
-              <AutomationTriggerMeta
-                label={automationTriggeredLabel}
-                sourceLabel={automationSourceLabel}
-              />
-            ) : null}
-          </div>
-        </TooltipProvider>
+      {showAssistantContextActions ? (
+        <AssistantContextActions
+          content={assistantContent}
+          showCopy={showCopyButton}
+          forkLabel={forkLabel}
+          fallbackSources={fallbackSources}
+          onForkFromHere={showForkButton ? onForkFromHere : undefined}
+          overlay={overlayContextActions}
+          timestamp={showAssistantTimestamp ? {
+            value: assistantTimestamp,
+            label: assistantTimestampTitle,
+            completed: showCompletedAt,
+          } : undefined}
+          automation={showAutomationTrigger ? {
+            label: automationTriggeredLabel,
+            sourceLabel: automationSourceLabel,
+          } : undefined}
+        />
       ) : null}
     </div>
   );
@@ -613,26 +694,6 @@ function UserQuotedContext({ text, label }: { text: string; label: string }) {
         {text}
       </p>
     </blockquote>
-  );
-}
-
-function AutomationTriggerMeta({ label, sourceLabel }: { label: string; sourceLabel: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          data-automation-trigger
-          tabIndex={0}
-          className={cn(
-            "shrink-0 cursor-help text-[11px] leading-none text-muted-foreground/70 tabular-nums",
-            "focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          )}
-        >
-          {label}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top" align="center">{sourceLabel}</TooltipContent>
-    </Tooltip>
   );
 }
 
