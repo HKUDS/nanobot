@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.agent.context import TranscriptInput
+from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
@@ -648,7 +649,7 @@ async def test_terminal_drain_timeout(tmp_path):
     async def fake_runner_run(spec):
         nonlocal terminal_injection_callback
         terminal_injection_callback = spec.terminal_injection_callback
-        return SimpleNamespace(
+        return AgentRunResult(
             stop_reason="done",
             final_content="done",
             error=None,
@@ -724,7 +725,7 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
     async def fake_runner_run(spec):
         nonlocal terminal_injection_callback
         terminal_injection_callback = spec.terminal_injection_callback
-        return SimpleNamespace(
+        return AgentRunResult(
             stop_reason="done",
             final_content="done",
             error=None,

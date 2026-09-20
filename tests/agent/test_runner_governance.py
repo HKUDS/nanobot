@@ -26,6 +26,7 @@ from nanobot.providers.base import (
     ToolCallRequest,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
+from nanobot.providers.input_usage import InputSnapshot, InputUsage
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
@@ -925,6 +926,9 @@ async def test_matching_reported_provider_usage_avoids_local_estimate(
     expected_fitted,
 ):
     provider = MagicMock(spec=LLMProvider)
+    provider.input_snapshot.side_effect = lambda messages, tools, model, **kwargs: (
+        InputSnapshot.from_chat_request("test", {"messages": messages, "tools": tools})
+    )
     tools = MagicMock()
     tools.get_definitions.return_value = []
     spec = make_run_spec(
@@ -952,6 +956,9 @@ async def test_matching_reported_provider_usage_avoids_local_estimate(
             provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
         ),
         usage=LLMUsage.reported(input_tokens=input_tokens, output_tokens=10),
+        input_usage=InputUsage(
+            provider.input_snapshot(spec.initial_messages, [], spec.runtime.model), input_tokens,
+        ),
         messages=spec.initial_messages,
         tool_definitions=[],
     )

@@ -34,6 +34,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
+from nanobot.providers.input_usage import InputSnapshot
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
     build_responses_compaction_state,
@@ -1953,6 +1954,24 @@ class OpenAICompatProvider(LLMProvider):
             provider_context=provider_context,
         )
 
+    def input_snapshot(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str,
+        *,
+        max_tokens: int,
+        temperature: float,
+        reasoning_effort: str | None,
+    ) -> InputSnapshot | None:
+        if self._should_use_responses_api(model, reasoning_effort):
+            # Native continuation/compaction owns its own context accounting.
+            return None
+        body = self._build_kwargs(
+            messages, tools, model, max_tokens, temperature, reasoning_effort, None,
+        )
+        return InputSnapshot.from_chat_request(self._input_usage_scope, body)
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -2004,11 +2023,14 @@ class OpenAICompatProvider(LLMProvider):
                 reasoning_effort, tool_choice,
                 extra_headers=affinity,
             )
+            input_snapshot = InputSnapshot.from_chat_request(self._input_usage_scope, kwargs)
             chat_raw = cast(
                 Any,
                 await client.chat.completions.create(**kwargs),
             )
-            return self._parse(chat_raw)
+            result = self._parse(chat_raw)
+            result.input_snapshot = input_snapshot
+            return result
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
@@ -2124,6 +2146,7 @@ class OpenAICompatProvider(LLMProvider):
             kwargs["stream"] = True
             kwargs["timeout"] = idle_timeout_s
             kwargs["stream_options"] = {"include_usage": True}
+            input_snapshot = InputSnapshot.from_chat_request(self._input_usage_scope, kwargs)
             chat_stream = cast(
                 Any,
                 await client.chat.completions.create(**kwargs),
@@ -2187,7 +2210,9 @@ class OpenAICompatProvider(LLMProvider):
                             })
             if not completed:
                 raise ConnectionError("Model stream ended before a finish reason was received")
-            return self._parse_chunks(chunks)
+            result = self._parse_chunks(chunks)
+            result.input_snapshot = input_snapshot
+            return result
         except asyncio.TimeoutError:
             return LLMResponse(
                 content=(

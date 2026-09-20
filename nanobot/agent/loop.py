@@ -1224,6 +1224,7 @@ class AgentLoop:
                     message_metadata=request_metadata,
                 ),
                 provider_state=provider_state,
+                input_usage=session.input_usage if session is not None and not ephemeral else None,
                 llm_usage_source=source_from_request(
                     active_session_key,
                     channel=request_ctx.channel,
@@ -1238,6 +1239,7 @@ class AgentLoop:
             reset_file_states(file_state_token)
         if session is not None and not ephemeral:
             session.provider_state = result.provider_state
+            session.input_usage = result.input_usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
             should_stream = turn_continuation.should_stream_budget_response(

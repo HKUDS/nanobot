@@ -413,6 +413,7 @@ class TestEphemeralDirect:
                 context_window_tokens=32_000,
             )
 
+        loop.sessions.get_or_create.return_value.input_usage = None
         return loop, store
 
     def test_dream_runtime_uses_preset_without_changing_default(self, _make_loop):
@@ -696,6 +697,7 @@ class TestEphemeralHooks:
                 hooks=[spy],
             )
 
+        loop.sessions.get_or_create.return_value.input_usage = None
         return loop, spy
 
     async def test_extra_hooks_skipped_when_ephemeral(self, tmp_path, _make_loop_with_spy):
