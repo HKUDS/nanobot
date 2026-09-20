@@ -270,6 +270,8 @@ class SessionPolicy:
     persist: bool = True
     log_content: bool = True
     disabled_tools: frozenset[str] = frozenset()
+    include_memory: bool = True
+    enable_compaction: bool = True
 
 
 @dataclass
@@ -1770,6 +1772,7 @@ class SessionManager:
             persist=False,
             log_content=False,
             disabled_tools=frozenset(disabled_tools),
+            include_memory=False,
         )
         session = self.get_cached(key)
         if session is None or session.policy != policy:
