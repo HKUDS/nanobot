@@ -1599,13 +1599,15 @@ def login_oauth_provider(
         # instead of waiting for approval inside a blocking CLI login request.
         oauth_flows.clear(spec.name)
         copilot_flow = GitHubCopilotOAuthFlow()
+        flow_id = secrets.token_urlsafe(24)
+        # Own the flow before network I/O, so logout/replacement also cancels a
+        # login that is still waiting for GitHub to return its device prompt.
+        oauth_flows.register(spec.name, flow_id, copilot_flow)
         try:
             copilot_flow.start()
         except Exception:
-            copilot_flow.cancel()
+            oauth_flows.remove(spec.name, flow_id, copilot_flow)
             raise WebUISettingsError("GitHub sign-in failed. Start again.", status=502) from None
-        flow_id = secrets.token_urlsafe(24)
-        oauth_flows.register(spec.name, flow_id, copilot_flow)
         return {
             "status": "authorization_required",
             "provider": spec.name,

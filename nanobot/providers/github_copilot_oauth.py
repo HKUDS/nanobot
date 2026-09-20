@@ -39,6 +39,7 @@ class GitHubCopilotOAuthFlow:
     def cancel(self) -> None:
         with self._commit_lock:
             self._cancelled.set()
+            self._ready.set()
 
     def _authorize(self, url: str, code: str, expires_in: int) -> None:
         self.authorization_url = url
@@ -66,6 +67,8 @@ class GitHubCopilotOAuthFlow:
         if not self._ready.wait(timeout=15):
             self.cancel()
             raise RuntimeError("GitHub sign-in timed out. Start again.")
+        if self.expired:
+            raise RuntimeError("GitHub sign-in expired or cancelled. Start again.")
         if self._error is not None:
             raise RuntimeError("GitHub sign-in failed. Start again.") from None
 
