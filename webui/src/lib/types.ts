@@ -1576,8 +1576,6 @@ export interface OutboundMcpPresetMention {
 interface WebuiThreadPagePayload {
   before_cursor?: string | null;
   has_more_before?: boolean;
-  loaded_message_count?: number;
-  total_known_message_count?: number;
   user_message_offset?: number;
   loaded_event_count?: number;
 }
@@ -1588,12 +1586,9 @@ export interface WebuiThreadPersistedPayload {
   savedAt?: string;
   /** Cheap server revision used for application-managed conditional revalidation. */
   revision?: string;
-  /** Legacy server-projected snapshots, retained as a compatibility fallback. */
-  messages?: UIMessage[];
   /** Canonical transcript events projected by the same reducer as live events. */
-  events?: ThreadProjectionEvent[];
-  projection?: "events";
-  fork_boundary_message_count?: number;
+  events: ThreadProjectionEvent[];
+  projection: "events";
   fork_boundary_event_index?: number;
   /** Turn ids backed by an explicit persisted ``turn_end`` event. */
   completed_turn_ids?: string[];
@@ -1606,9 +1601,7 @@ export interface WebuiThreadPersistedPayload {
 
 export interface WebuiThreadTraceDetailPayload {
   message_id: string;
-  content: string;
-  traces?: string[];
-  toolEvents?: ToolProgressEvent[];
+  events: ThreadProjectionEvent[];
 }
 
 export interface FilePreviewPayload {

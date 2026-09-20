@@ -24,8 +24,8 @@ from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.transcript import (
     WebUITranscriptRecorder,
+    append_transcript_object,
     build_webui_thread_response,
-    replay_transcript_to_ui_messages,
     webui_transcript_path,
 )
 
@@ -64,7 +64,13 @@ def delivery(chat="chat", *, streaming=True):
 
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize("failures", [0, 1, 2, 3])
-async def test_actual_candidate_is_delivered_and_replayed(streaming, failures):
+async def test_actual_candidate_is_delivered_and_replayed(
+    streaming,
+    failures,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     bus, turn = delivery(streaming=streaming)
     candidates = [AnswerProvider(
         f"provider-{i}", fail=i < failures,
@@ -104,16 +110,29 @@ async def test_actual_candidate_is_delivered_and_replayed(streaming, failures):
         recorder.prepare_event("chat", record, metadata=msg.metadata, phase="answer", include_source=True)
         records.append(record)
     # Completed segment is the durable record; token-sized deltas aren't needed on replay.
-    replay = replay_transcript_to_ui_messages([r for r in records if r["event"] != "delta"])
+    for record in (r for r in records if r["event"] != "delta"):
+        append_transcript_object("websocket:chat", record)
+    replay = build_webui_thread_response("websocket:chat")
     if failures == 3:
         assert all(not r.get("response_sources") for r in records)
-        assert all(not r.get("responseSources") for r in replay)
+        if replay is None:
+            return
+        replayed_answers = [
+            event for event in replay["events"]
+            if event["event"] in {"message", "stream_end"}
+        ]
+        assert all(not event.get("response_sources") for event in replayed_answers)
     else:
+        assert replay is not None
+        replayed_answers = [
+            event for event in replay["events"]
+            if event["event"] in {"message", "stream_end"}
+        ]
         expected = [{"provider": f"provider-{failures}", "model": "same-model",
                      "preset": ["chosen", "backup-one", "backup-two"][failures],
                      "fallback": failures > 0}]
         assert all(r.get("response_sources") == expected for r in records)
-        assert replay[-1]["responseSources"] == expected
+        assert replayed_answers[-1]["response_sources"] == expected
 
 
 async def test_fallback_flag_is_call_scoped_even_with_identical_identity():
@@ -280,8 +299,9 @@ def test_factory_captures_names_even_when_models_and_settings_are_identical():
     assert make_provider(config)._fallback_preset_names == ("renamed",)
 
 
-def test_old_history_and_malformed_identity_are_not_guessed():
-    messages = replay_transcript_to_ui_messages([
+def test_old_history_and_malformed_identity_are_not_guessed(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    records = [
         {"event": "message", "text": "legacy"},
         {"event": "message", "text": "invalid", "response_sources": [{"model": "gpt"}]},
         {"event": "message", "text": "recorded", "response_sources": [
@@ -290,12 +310,17 @@ def test_old_history_and_malformed_identity_are_not_guessed():
         {"event": "message", "text": "invalid flag", "response_sources": [
             {"provider": "xai", "model": "grok", "preset": "old name", "fallback": "true"},
         ]},
-    ])
-    assert "responseSources" not in messages[0]
-    assert messages[1]["responseSources"] == []
+    ]
+    for record in records:
+        append_transcript_object("websocket:source-history", record)
+    replay = build_webui_thread_response("websocket:source-history")
+    assert replay is not None
+    events = replay["events"]
+    assert "response_sources" not in events[0]
+    assert events[1]["response_sources"] == []
     expected = [{"provider": "xai", "model": "grok", "preset": "old name", "fallback": False}]
-    assert messages[2]["responseSources"] == expected
-    assert messages[3]["responseSources"] == expected
+    assert events[2]["response_sources"] == expected
+    assert events[3]["response_sources"] == expected
 
 
 async def test_runner_records_each_provider_when_streaming_times_out_and_recovers():
@@ -350,9 +375,6 @@ async def test_websocket_wire_and_disk_replay_preserve_sources(tmp_path, monkeyp
         sources[0]["preset"] = "renamed later"
         replay = build_webui_thread_response("websocket:source-chat")
         assert replay is not None
-        assert replay["messages"][0]["responseSources"][0]["preset"] == "snapshot name"
-        assert replay["messages"][0]["responseSources"][0]["fallback"] is True
-        event_replay = build_webui_thread_response("websocket:source-chat", projection="events")
-        assert event_replay is not None
-        end = next(e for e in event_replay["events"] if e["event"] == "stream_end")
-        assert end["response_sources"] == replay["messages"][0]["responseSources"]
+        end = next(e for e in replay["events"] if e["event"] == "stream_end")
+        assert end["response_sources"][0]["preset"] == "snapshot name"
+        assert end["response_sources"][0]["fallback"] is True

@@ -38,36 +38,20 @@ function isAbortError(error: unknown): boolean {
 
 export type SessionHistoryContinuity = "initial" | "overlap" | "reset";
 
-function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
-  return messages.map((m, idx) => ({
-    ...m,
-    id: m.id ?? `hist-${idx}`,
-    createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
-  }));
-}
-
 function projectPersistedThread(body: WebuiThreadPersistedPayload | null): {
   messages: UIMessage[];
   forkBoundaryMessageCount: number | null;
 } {
-  if (body?.events) {
-    const messages = projectThreadEvents(body.events);
-    const boundaryIndex = body.fork_boundary_event_index;
-    const forkBoundaryMessageCount = typeof boundaryIndex === "number"
-      && Number.isInteger(boundaryIndex)
-      && boundaryIndex >= 0
-      && boundaryIndex <= body.events.length
-        ? projectThreadEvents(body.events.slice(0, boundaryIndex)).length
-        : null;
-    return { messages, forkBoundaryMessageCount };
-  }
-  const messages = persistedMessagesToUi(body?.messages ?? []);
-  return {
-    messages,
-    forkBoundaryMessageCount: typeof body?.fork_boundary_message_count === "number"
-      ? Math.max(0, Math.min(body.fork_boundary_message_count, messages.length))
-      : null,
-  };
+  const events = body?.events ?? [];
+  const messages = projectThreadEvents(events);
+  const boundaryIndex = body?.fork_boundary_event_index;
+  const forkBoundaryMessageCount = typeof boundaryIndex === "number"
+    && Number.isInteger(boundaryIndex)
+    && boundaryIndex >= 0
+    && boundaryIndex <= events.length
+      ? projectThreadEvents(events.slice(0, boundaryIndex)).length
+      : null;
+  return { messages, forkBoundaryMessageCount };
 }
 
 function sameSemanticMessage(a: UIMessage, b: UIMessage): boolean {

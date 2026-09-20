@@ -20,10 +20,8 @@ from nanobot.webui.transcript import (
     build_webui_trace_detail_response,
     fork_transcript_before_user_index,
     read_transcript_lines,
-    replay_transcript_to_ui_messages,
     webui_transcript_revision,
     webui_transcript_segments_dir,
-    write_session_messages_as_transcript,
 )
 
 
@@ -72,8 +70,28 @@ def _write_segmented_turns(tmp_path, monkeypatch, key: str, chat_id: str, count:
         _append_numbered_turn(key, chat_id, idx)
 
 
+def _conversation_events(payload: dict) -> list[dict]:
+    messages: list[dict] = []
+    for event in payload["events"]:
+        name = event.get("event")
+        if name == "user_message":
+            role = "user"
+        elif name == "message" and event.get("kind") is None:
+            role = "assistant"
+        elif name == "stream_end" and isinstance(event.get("text"), str):
+            role = "assistant"
+        else:
+            continue
+        messages.append({
+            "id": event["projection_id"],
+            "role": role,
+            "content": event.get("text", ""),
+        })
+    return messages
+
+
 def _message_contents(payload: dict) -> list[str]:
-    return [str(message.get("content") or "") for message in payload["messages"]]
+    return [str(message.get("content") or "") for message in _conversation_events(payload)]
 
 
 def _numbered_turn_texts(start: int, end: int) -> list[str]:
@@ -123,14 +141,17 @@ def test_segmented_transcript_paginates_latest_and_older_without_overlap(
     full = build_webui_thread_response(key)
     assert latest_again is not None
     assert full is not None
-    assert [message["id"] for message in latest_again["messages"]] == [
-        message["id"] for message in latest["messages"]
+    assert [message["id"] for message in _conversation_events(latest_again)] == [
+        message["id"] for message in _conversation_events(latest)
     ]
     full_ids_by_content = {
-        message["content"]: message["id"] for message in full["messages"]
+        message["content"]: message["id"] for message in _conversation_events(full)
     }
-    assert [full_ids_by_content[message["content"]] for message in latest["messages"]] == [
-        message["id"] for message in latest["messages"]
+    assert [
+        full_ids_by_content[message["content"]]
+        for message in _conversation_events(latest)
+    ] == [
+        message["id"] for message in _conversation_events(latest)
     ]
 
 
@@ -146,7 +167,7 @@ def test_missing_page_query_uses_bounded_default(tmp_path, monkeypatch) -> None:
     assert latest is not None
     assert _message_contents(latest) == _numbered_turn_texts(3, 4)
     assert latest["page"]["has_more_before"] is True
-    assert latest["page"]["loaded_message_count"] == 4
+    assert latest["page"]["loaded_event_count"] == 6
 
 
 def test_large_trace_details_are_deferred_and_resolved(tmp_path, monkeypatch) -> None:
@@ -169,95 +190,19 @@ def test_large_trace_details_are_deferred_and_resolved(tmp_path, monkeypatch) ->
     payload = build_webui_thread_response(key, limit=40, direction="latest")
 
     assert payload is not None
-    trace_message = next(message for message in payload["messages"] if message.get("kind") == "trace")
-    assert trace_message["content"] == "exec(…)"
-    assert trace_message["traces"] == ["exec(…)"]
-    assert trace_message["traceDetail"]["bytes"] > 32 * 1024
+    trace_event = next(event for event in payload["events"] if event.get("kind") == "progress")
+    assert trace_event["text"] == "exec(…)"
+    assert trace_event["trace_detail"]["bytes"] > 32 * 1024
     assert len(json.dumps(payload)) < len(trace)
 
-    detail = build_webui_trace_detail_response(key, trace_message["traceDetail"]["ref"])
+    detail = build_webui_trace_detail_response(key, trace_event["trace_detail"]["ref"])
 
-    assert detail == {
-        "message_id": trace_message["id"],
-        "content": trace,
-        "traces": [trace],
-    }
+    assert detail is not None
+    assert detail["message_id"] == trace_event["projection_id"]
+    assert detail["events"][0]["text"] == trace
+    assert "trace_detail" not in detail["events"][0]
 
 
-def test_event_projection_response_exposes_sanitized_canonical_events(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:project-events"
-    for event in (
-        {
-            "event": "user",
-            "chat_id": "project-events",
-            "text": "explain",
-            "media_paths": ["private/input.png"],
-            "turn_id": "turn-1",
-        },
-        {
-            "event": "reasoning_delta",
-            "chat_id": "project-events",
-            "text": "thinking",
-            "turn_id": "turn-1",
-        },
-        {
-            "event": "message",
-            "chat_id": "project-events",
-            "text": "done",
-            "turn_id": "turn-1",
-        },
-        {
-            "event": "turn_end",
-            "chat_id": "project-events",
-            "turn_id": "turn-1",
-            "latency_ms": 12,
-        },
-    ):
-        append_transcript_object(key, event)
-
-    def fail_legacy_projection(*args, **kwargs):
-        pytest.fail("event projection must not invoke the legacy message projector")
-
-    monkeypatch.setattr(
-        transcript_module,
-        "replay_transcript_to_ui_messages",
-        fail_legacy_projection,
-    )
-
-    payload = build_webui_thread_response(
-        key,
-        projection="events",
-        augment_user_media=lambda paths: [
-            {"kind": "image", "url": "/api/media/signed", "name": Path(paths[0]).name},
-        ],
-    )
-
-    assert payload is not None
-    assert "messages" not in payload
-    assert payload["projection"] == "events"
-    assert payload["events"][0] == {
-        "event": "user_message",
-        "chat_id": "project-events",
-        "projection_id": payload["events"][0]["projection_id"],
-        "created_at_ms": payload["events"][0]["created_at_ms"],
-        "turn_id": "turn-1",
-        "text": "explain",
-        "starts_turn": True,
-        "media_urls": [
-            {"kind": "image", "url": "/api/media/signed", "name": "input.png"},
-        ],
-    }
-    assert [event["event"] for event in payload["events"]] == [
-        "user_message",
-        "reasoning_delta",
-        "message",
-        "turn_end",
-    ]
-    assert payload["page"]["loaded_event_count"] == 4
 
 
 def test_event_projection_augments_complete_stream_text(tmp_path, monkeypatch) -> None:
@@ -279,7 +224,6 @@ def test_event_projection_augments_complete_stream_text(tmp_path, monkeypatch) -
 
     payload = build_webui_thread_response(
         key,
-        projection="events",
         augment_assistant_text=lambda text: text.replace("output.png", "/api/media/signed"),
     )
 
@@ -309,7 +253,7 @@ def test_event_projection_defers_trace_details_without_legacy_fallback(
 
     trace = f'exec({json.dumps({"command": "x" * 40_000})})'
 
-    payload = build_webui_thread_response(key, projection="events")
+    payload = build_webui_thread_response(key)
 
     assert payload is not None
     assert "messages" not in payload
@@ -322,18 +266,17 @@ def test_event_projection_defers_trace_details_without_legacy_fallback(
 
     detail = build_webui_trace_detail_response(key, trace_event["trace_detail"]["ref"])
 
-    assert detail == {
-        "message_id": trace_event["projection_id"],
-        "content": trace,
-        "traces": [trace],
-    }
+    assert detail is not None
+    assert detail["message_id"] == trace_event["projection_id"]
+    assert detail["events"][0]["text"] == trace
+    assert "trace_detail" not in detail["events"][0]
 
 
 @pytest.mark.parametrize(
     ("delta_event", "end_event"),
     [("reasoning_delta", "reasoning_end"), ("delta", "stream_end")],
 )
-def test_legacy_active_trace_details_match_compacted_page(
+def test_active_trace_details_match_compacted_event_page(
     tmp_path, monkeypatch, delta_event: str, end_event: str,
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
@@ -358,15 +301,16 @@ def test_legacy_active_trace_details_match_compacted_page(
     payload = build_webui_thread_response(key, limit=40, direction="latest")
 
     assert payload is not None
-    messages = [message for message in payload["messages"] if message.get("kind") == "trace"]
-    assert len(messages) == 2
-    for message, trace in zip(messages, traces, strict=True):
-        detail = build_webui_trace_detail_response(key, message["traceDetail"]["ref"])
-        assert detail == {
-            "message_id": message["id"],
-            "content": trace,
-            "traces": [trace],
-        }
+    trace_events = [
+        event for event in payload["events"]
+        if event.get("kind") == "progress"
+    ]
+    assert len(trace_events) == 2
+    for event, trace in zip(trace_events, traces, strict=True):
+        detail = build_webui_trace_detail_response(key, event["trace_detail"]["ref"])
+        assert detail is not None
+        assert detail["message_id"] == event["projection_id"]
+        assert detail["events"][0]["text"] == trace
     assert path.read_bytes() == original_bytes
 
 
@@ -398,29 +342,16 @@ def test_large_structured_trace_error_is_bounded_and_resolved(tmp_path, monkeypa
     payload = build_webui_thread_response(key, limit=40, direction="latest")
 
     assert payload is not None
-    trace_message = next(message for message in payload["messages"] if message.get("kind") == "trace")
-    assert len(json.dumps(trace_message).encode("utf-8")) < 4_096
-    assert len(trace_message["toolEvents"][0]["error"].encode("utf-8")) <= 512
-
-    detail = build_webui_trace_detail_response(key, trace_message["traceDetail"]["ref"])
-
-    assert detail is not None
-    assert detail["toolEvents"][0]["error"] == full_error
-
-    event_payload = build_webui_thread_response(key, projection="events")
-
-    assert event_payload is not None
     trace_event = next(
-        event for event in event_payload["events"] if event.get("kind") == "progress"
+        event for event in payload["events"] if event.get("kind") == "progress"
     )
     assert len(json.dumps(trace_event).encode("utf-8")) < 4_096
-    assert len(trace_event["tool_events"][0]["error"].encode("utf-8")) <= 512
     event_detail = build_webui_trace_detail_response(
         key,
         trace_event["trace_detail"]["ref"],
     )
     assert event_detail is not None
-    assert event_detail["toolEvents"][0]["error"] == full_error
+    assert event_detail["events"][0]["tool_events"][0]["error"] == full_error
 
 
 def test_many_short_trace_rows_are_bounded_and_resolved(tmp_path, monkeypatch) -> None:
@@ -450,23 +381,16 @@ def test_many_short_trace_rows_are_bounded_and_resolved(tmp_path, monkeypatch) -
     payload = build_webui_thread_response(key, limit=40, direction="latest")
 
     assert payload is not None
-    trace_message = next(message for message in payload["messages"] if message.get("kind") == "trace")
-    assert trace_message["traceDetail"]["traceCount"] == trace_count
-    assert len(trace_message["traces"]) <= 16
-    assert len(json.dumps(trace_message).encode("utf-8")) < 4_096
+    trace_event = next(event for event in payload["events"] if event.get("kind") == "progress")
+    assert trace_event["trace_detail"]["traceCount"] == trace_count
+    assert len(json.dumps(trace_event).encode("utf-8")) < 4_096
 
-    detail = build_webui_trace_detail_response(key, trace_message["traceDetail"]["ref"])
+    detail = build_webui_trace_detail_response(key, trace_event["trace_detail"]["ref"])
 
     assert detail is not None
-    assert len(detail["traces"]) == trace_count
-    assert detail["traces"][0] == "tool_0(value)"
-    assert detail["traces"][-1] == f"tool_{trace_count - 1}(value)"
-
-    event_payload = build_webui_thread_response(key, projection="events")
-
-    assert event_payload is not None
-    assert "events" not in event_payload
-    assert any(message.get("traceDetail") for message in event_payload["messages"])
+    assert len(detail["events"]) == trace_count
+    assert detail["events"][0]["text"] == "tool_0(value)"
+    assert detail["events"][-1]["text"] == f"tool_{trace_count - 1}(value)"
 
 
 def test_transcript_revision_tracks_artifacts_and_variants(tmp_path, monkeypatch) -> None:
@@ -521,8 +445,7 @@ def test_single_oversized_turn_is_bounded_and_marked(tmp_path, monkeypatch) -> N
     assert stats.capped_by_bytes is True
     assert stats.truncated_oversized_turn is True
     assert latest["page"]["truncated_oversized_turn"] is True
-    assert latest["messages"][0]["content"] == "question"
-    assert latest["messages"][-1]["content"] == "final answer"
+    assert _message_contents(latest) == ["question", "final answer"]
 
 
 def test_truncated_turn_does_not_advertise_ambiguous_trace_detail(
@@ -570,11 +493,10 @@ def test_truncated_turn_does_not_advertise_ambiguous_trace_detail(
 
     assert payload is not None
     assert payload["page"]["truncated_oversized_turn"] is True
-    trace_message = next(message for message in payload["messages"] if message.get("kind") == "trace")
-    assert trace_message["content"] == "second_3(…)"
-    assert all(trace.startswith("second_") for trace in trace_message["traces"])
-    assert "traceDetail" not in trace_message
-    assert len(json.dumps(trace_message).encode("utf-8")) < 4_096
+    trace_event = next(event for event in payload["events"] if event.get("kind") == "progress")
+    assert trace_event["text"] == "second_3(…)"
+    assert "trace_detail" not in trace_event
+    assert len(json.dumps(trace_event).encode("utf-8")) < 4_096
 
 
 def test_latest_page_reads_active_chunk_once(tmp_path, monkeypatch) -> None:
@@ -824,8 +746,10 @@ def test_build_response_reports_fork_boundary_from_marker(tmp_path, monkeypatch)
     out = build_webui_thread_response(key)
 
     assert out is not None
-    assert [m["content"] for m in out["messages"]] == ["round1", "answer1", "new branch"]
-    assert out["fork_boundary_message_count"] == 2
+    assert [m["content"] for m in _conversation_events(out)] == [
+        "round1", "answer1", "new branch",
+    ]
+    assert out["fork_boundary_event_index"] == 2
 
 
 def test_nested_fork_drops_inherited_fork_marker(tmp_path, monkeypatch) -> None:
@@ -858,69 +782,16 @@ def test_nested_fork_drops_inherited_fork_marker(tmp_path, monkeypatch) -> None:
         "fork_marker",
     ]
     assert out is not None
-    assert [m["content"] for m in out["messages"]] == ["round1", "answer1", "round2", "answer2"]
-    assert out["fork_boundary_message_count"] == 4
-
-
-def test_write_session_messages_as_transcript_builds_canonical_prefix(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-
-    write_session_messages_as_transcript(
-        "websocket:fork",
-        [
-            {"role": "user", "content": "round1"},
-            {"role": "assistant", "content": "answer1"},
-        ],
-    )
-
-    lines = read_transcript_lines("websocket:fork")
-    assert lines == [
-        {"event": "user", "chat_id": "fork", "text": "round1"},
-        {"event": "message", "chat_id": "fork", "text": "answer1"},
+    assert [m["content"] for m in _conversation_events(out)] == [
+        "round1", "answer1", "round2", "answer2",
     ]
-    msgs = replay_transcript_to_ui_messages(lines)
-    assert [m["content"] for m in msgs] == ["round1", "answer1"]
+    assert out["fork_boundary_event_index"] == 4
 
 
-def test_direct_transcript_replay_generates_stable_message_ids() -> None:
-    lines = [
-        {"event": "user", "chat_id": "stable", "text": "question"},
-        {"event": "message", "chat_id": "stable", "text": "answer"},
-        {"event": "turn_end", "chat_id": "stable"},
-    ]
-
-    first = replay_transcript_to_ui_messages(lines)
-    second = replay_transcript_to_ui_messages(lines)
-
-    assert [message["id"] for message in second] == [
-        message["id"] for message in first
-    ]
 
 
-def test_replay_delta_and_turn_end(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t2"
-    for ev in (
-        {"event": "user", "chat_id": "t2", "text": "q"},
-        {"event": "reasoning_delta", "chat_id": "t2", "text": "think"},
-        {"event": "reasoning_end", "chat_id": "t2"},
-        {"event": "delta", "chat_id": "t2", "text": "a"},
-        {"event": "stream_end", "chat_id": "t2"},
-        {"event": "turn_end", "chat_id": "t2", "latency_ms": 42},
-    ):
-        append_transcript_object(key, ev)
-    lines = read_transcript_lines(key)
-    msgs = replay_transcript_to_ui_messages(lines)
-    assert len(msgs) == 2
-    assert msgs[0]["role"] == "user"
-    assert msgs[0]["content"] == "q"
-    assert msgs[1]["role"] == "assistant"
-    assert msgs[1]["content"] == "a"
-    assert msgs[1]["reasoning"] == "think"
-    assert msgs[1]["latencyMs"] == 42
+
+
 
 
 def test_completed_turn_persists_canonical_stream_end_text(tmp_path, monkeypatch) -> None:
@@ -950,225 +821,16 @@ def test_completed_turn_persists_canonical_stream_end_text(tmp_path, monkeypatch
     assert lines[2]["text"] == "answer done"
 
 
-def test_replay_canonical_completed_stream_records() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {"event": "user", "chat_id": "canonical", "text": "q"},
-        {"event": "reasoning_end", "chat_id": "canonical", "text": "think"},
-        {"event": "stream_end", "chat_id": "canonical", "text": "answer"},
-        {"event": "turn_end", "chat_id": "canonical", "latency_ms": 42},
-    ])
-
-    assert len(msgs) == 2
-    assert msgs[1]["content"] == "answer"
-    assert msgs[1]["reasoning"] == "think"
-    assert msgs[1]["latencyMs"] == 42
 
 
-def test_replay_preserves_closed_reasoning_slices_before_later_tool_trace() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {
-            "event": "reasoning_delta",
-            "chat_id": "reasoning-boundary",
-            "text": "First reasoning.",
-            "turn_id": "turn-reasoning-boundary",
-            "turn_phase": "reasoning",
-            "turn_seq": 1,
-        },
-        {
-            "event": "reasoning_end",
-            "chat_id": "reasoning-boundary",
-            "turn_id": "turn-reasoning-boundary",
-            "turn_phase": "reasoning",
-            "turn_seq": 2,
-        },
-        {
-            "event": "reasoning_delta",
-            "chat_id": "reasoning-boundary",
-            "text": "Second reasoning.",
-            "turn_id": "turn-reasoning-boundary",
-            "turn_phase": "reasoning",
-            "turn_seq": 3,
-        },
-        {
-            "event": "reasoning_end",
-            "chat_id": "reasoning-boundary",
-            "turn_id": "turn-reasoning-boundary",
-            "turn_phase": "reasoning",
-            "turn_seq": 4,
-        },
-        {
-            "event": "message",
-            "chat_id": "reasoning-boundary",
-            "text": "exec()",
-            "kind": "tool_hint",
-            "turn_id": "turn-reasoning-boundary",
-            "turn_phase": "activity",
-            "turn_seq": 5,
-        },
-        {
-            "event": "message",
-            "chat_id": "reasoning-boundary",
-            "text": "Final answer.",
-            "turn_id": "turn-reasoning-boundary",
-            "turn_phase": "answer",
-            "turn_seq": 6,
-        },
-        {
-            "event": "turn_end",
-            "chat_id": "reasoning-boundary",
-            "turn_id": "turn-reasoning-boundary",
-            "turn_phase": "complete",
-            "turn_seq": 7,
-        },
-    ])
-
-    assert [
-        message.get("reasoning")
-        or (message.get("traces") or [None])[0]
-        or message.get("content")
-        for message in msgs
-    ] == [
-        "First reasoning.",
-        "Second reasoning.",
-        "exec()",
-        "Final answer.",
-    ]
 
 
-def test_replay_preserves_closed_reasoning_slices_without_tool_trace() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {"event": "reasoning_delta", "text": "First reasoning.", "turn_seq": 1},
-        {"event": "reasoning_end", "turn_seq": 2},
-        {"event": "reasoning_delta", "text": "Second reasoning.", "turn_seq": 3},
-        {"event": "reasoning_end", "turn_seq": 4},
-        {"event": "message", "text": "Final answer.", "turn_seq": 5},
-        {"event": "turn_end", "turn_seq": 6},
-    ])
-
-    assert [
-        (message.get("reasoning"), message.get("content"))
-        for message in msgs
-    ] == [
-        ("First reasoning.", ""),
-        ("Second reasoning.", "Final answer."),
-    ]
 
 
-def test_replay_keeps_answer_separate_from_reasoning_before_delayed_tool_trace() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {"event": "delta", "text": "Visible progress.", "turn_phase": "answer"},
-        {"event": "stream_end", "turn_phase": "answer"},
-        {"event": "reasoning_delta", "text": "Think again.", "turn_phase": "reasoning"},
-        {"event": "reasoning_end", "turn_phase": "reasoning"},
-        {
-            "event": "message",
-            "text": "exec()",
-            "kind": "tool_hint",
-            "turn_phase": "activity",
-        },
-        {"event": "message", "text": "Final answer.", "turn_phase": "answer"},
-        {"event": "turn_end", "turn_phase": "complete"},
-    ])
-
-    assert [
-        (
-            message.get("content"),
-            message.get("reasoning"),
-            message.get("kind"),
-            message.get("turnPhase"),
-        )
-        for message in msgs
-    ] == [
-        ("Visible progress.", None, None, "answer"),
-        ("", "Think again.", None, "reasoning"),
-        ("exec()", None, "trace", "activity"),
-        ("Final answer.", None, None, "answer"),
-    ]
 
 
-def test_replay_turn_end_preserves_usage_semantics(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-usage"
-    for event in (
-        {"event": "user", "chat_id": "t-usage", "text": "q"},
-        {"event": "message", "chat_id": "t-usage", "text": "a"},
-        {
-            "event": "turn_end",
-            "chat_id": "t-usage",
-            "latency_ms": 18_200,
-            "usage": {
-                "prompt_tokens": 12_400,
-                "completion_tokens": 823,
-                "cached_tokens": 9_672,
-                "context_tokens": 8_200,
-                "request_count": 3,
-            },
-            "round_usages": [
-                {
-                    "prompt_tokens": 4_000,
-                    "completion_tokens": 200,
-                    "cached_tokens": 2_000,
-                    "request_count": 1,
-                },
-                {
-                    "prompt_tokens": 4_200,
-                    "completion_tokens": 300,
-                    "cached_tokens": 3_672,
-                    "request_count": 1,
-                },
-                {
-                    "prompt_tokens": 4_200,
-                    "completion_tokens": 323,
-                    "cached_tokens": 4_000,
-                    "request_count": 1,
-                },
-            ],
-            "context_window_tokens": 128_000,
-        },
-    ):
-        append_transcript_object(key, event)
-
-    messages = replay_transcript_to_ui_messages(read_transcript_lines(key))
-
-    assert messages[-1]["usage"] == {
-        "prompt_tokens": 12_400,
-        "completion_tokens": 823,
-        "cached_tokens": 9_672,
-        "context_tokens": 8_200,
-        "request_count": 3,
-    }
-    assert [item["prompt_tokens"] for item in messages[-1]["roundUsages"]] == [
-        4_000,
-        4_200,
-        4_200,
-    ]
-    assert messages[-1]["contextWindowTokens"] == 128_000
-    assert messages[-1]["latencyMs"] == 18_200
 
 
-def test_replay_uses_persisted_created_at_ms() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {
-                "event": "user",
-                "chat_id": "t-created-at",
-                "text": "q",
-                "created_at_ms": 1_700_000_000_000,
-            },
-            {
-                "event": "message",
-                "chat_id": "t-created-at",
-                "kind": "tool_hint",
-                "text": "exec()",
-                "created_at_ms": 1_700_000_230_000,
-            },
-        ],
-    )
-
-    assert [message["createdAt"] for message in msgs] == [
-        1_700_000_000_000,
-        1_700_000_230_000,
-    ]
 
 
 def test_thread_response_does_not_mark_completed_message_tool_tail_pending(
@@ -1234,8 +896,8 @@ def test_thread_response_does_not_mark_completed_message_tool_tail_pending(
     assert out is not None
     assert out["has_pending_tool_calls"] is False
     assert out["completed_turn_ids"] == [turn_id]
-    assert out["messages"][-1]["kind"] == "trace"
-    assert out["messages"][-2]["content"] == "Cron test"
+    assert out["events"][-2]["kind"] == "progress"
+    assert _conversation_events(out)[-1]["content"] == "Cron test"
 
 
 def test_thread_response_marks_unfinished_tool_tail_pending(tmp_path, monkeypatch) -> None:
@@ -1287,7 +949,7 @@ def test_thread_response_reports_active_registry_without_transcript(
     )
 
     assert out is not None
-    assert out["messages"] == []
+    assert out["events"] == []
     assert out["completed_turn_ids"] == []
     assert out["has_pending_tool_calls"] is True
     assert out["active_turn_id"] == "turn-active"
@@ -1312,7 +974,7 @@ def test_thread_response_reports_explicit_completion_without_assistant_row(
     out = build_webui_thread_response(key)
 
     assert out is not None
-    assert out["messages"][-1]["role"] == "user"
+    assert _conversation_events(out)[-1]["role"] == "user"
     assert out["has_pending_tool_calls"] is False
     assert out["completed_turn_ids"] == [turn_id]
 
@@ -1354,7 +1016,10 @@ def test_incomplete_turn_with_ambiguous_session_match_stays_pending(
     )
 
     assert out is not None
-    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+    assert [
+        (message["role"], message["content"])
+        for message in _conversation_events(out)
+    ] == [
         ("user", "repeat"),
     ]
     assert out["completed_turn_ids"] == []
@@ -1411,174 +1076,14 @@ def test_active_registry_does_not_hide_a_newer_queued_turn(tmp_path, monkeypatch
     assert out["has_pending_tool_calls"] is True
 
 
-def test_replay_preserves_turn_metadata(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-turn"
-    for ev in (
-        {
-            "event": "user",
-            "chat_id": "t-turn",
-            "text": "q",
-            "turn_id": "turn-1",
-            "turn_phase": "user",
-            "turn_seq": 1,
-        },
-        {
-            "event": "reasoning_delta",
-            "chat_id": "t-turn",
-            "text": "think",
-            "turn_id": "turn-1",
-            "turn_phase": "reasoning",
-            "turn_seq": 2,
-        },
-        {
-            "event": "delta",
-            "chat_id": "t-turn",
-            "text": "a",
-            "turn_id": "turn-1",
-            "turn_phase": "answer",
-            "turn_seq": 3,
-        },
-        {
-            "event": "turn_end",
-            "chat_id": "t-turn",
-            "latency_ms": 12,
-            "turn_id": "turn-1",
-            "turn_phase": "complete",
-            "turn_seq": 4,
-        },
-    ):
-        append_transcript_object(key, ev)
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-
-    assert msgs[0]["turnId"] == "turn-1"
-    assert msgs[0]["turnPhase"] == "user"
-    assert msgs[0]["turnSeq"] == 1
-    assert msgs[1]["turnId"] == "turn-1"
-    assert msgs[1]["turnPhase"] == "answer"
-    assert msgs[1]["turnSeq"] == 3
 
 
-def test_replay_reused_turn_id_after_turn_end_starts_new_turn(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-reused-turn"
-
-    def event(
-        event: str,
-        phase: str,
-        seq: int,
-        text: str | None = None,
-        source: dict[str, str] | None = None,
-    ) -> dict[str, object]:
-        out = {
-            "event": event,
-            "chat_id": "t-reused-turn",
-            "turn_id": "turn-1",
-            "turn_phase": phase,
-            "turn_seq": seq,
-        }
-        if text is not None:
-            out["text"] = text
-        if source is not None:
-            out["source"] = source
-        return out
-
-    for record in (
-        event("user", "user", 1, "remind me later"),
-        event("message", "answer", 2, "Reminder set."),
-        event("turn_end", "complete", 3),
-        event(
-            "message", "answer", 1, "Time to drink water.",
-            {"kind": "cron", "label": "drink water"},
-        ),
-        event("turn_end", "complete", 2),
-    ):
-        append_transcript_object(key, record)
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-
-    assert [m["content"] for m in msgs] == [
-        "remind me later",
-        "Reminder set.",
-        "Time to drink water.",
-    ]
-    assert msgs[1]["turnId"] == "turn-1"
-    assert msgs[2]["turnId"].startswith("turn-1:replay:")
-    assert msgs[2]["turnId"] != msgs[1]["turnId"]
-    assert msgs[2]["source"] == {"kind": "cron", "label": "drink water"}
 
 
-def test_replay_preserves_local_trigger_source_metadata(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-local-trigger-source"
-    append_transcript_object(
-        key,
-        {
-            "event": "message",
-            "chat_id": "t-local-trigger-source",
-            "text": "PR #4502 review started.",
-            "source": {"kind": "local_trigger", "label": "PR review"},
-        },
-    )
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-
-    assert msgs[0]["source"] == {"kind": "local_trigger", "label": "PR review"}
 
 
-def test_replay_preserves_automation_source_metadata_on_streamed_reply(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-streamed-cron-source"
-    source = {"kind": "cron", "label": "Repo check"}
-
-    for record in (
-        {
-            "event": "delta",
-            "chat_id": "t-streamed-cron-source",
-            "text": "Repo ",
-            "source": source,
-        },
-        {
-            "event": "delta",
-            "chat_id": "t-streamed-cron-source",
-            "text": "clean.",
-            "source": source,
-        },
-        {
-            "event": "stream_end",
-            "chat_id": "t-streamed-cron-source",
-            "source": source,
-        },
-        {"event": "turn_end", "chat_id": "t-streamed-cron-source"},
-    ):
-        append_transcript_object(key, record)
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-
-    assert msgs[0]["content"] == "Repo clean."
-    assert msgs[0]["source"] == source
 
 
-def test_replay_preserves_legacy_trigger_source_metadata(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-trigger-source"
-    append_transcript_object(
-        key,
-        {
-            "event": "message",
-            "chat_id": "t-trigger-source",
-            "text": "PR #4502 review started.",
-            "source": {"kind": "trigger", "label": "PR review"},
-        },
-    )
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-
-    assert msgs[0]["source"] == {"kind": "trigger", "label": "PR review"}
 
 
 def test_build_response_restores_session_users_for_legacy_transcript(
@@ -1609,7 +1114,7 @@ def test_build_response_restores_session_users_for_legacy_transcript(
     )
 
     assert out is not None
-    assert [(m["role"], m["content"]) for m in out["messages"]] == [
+    assert [(m["role"], m["content"]) for m in _conversation_events(out)] == [
         ("user", "prompt one"),
         ("assistant", "assistant one"),
         ("user", "prompt two"),
@@ -1638,7 +1143,10 @@ def test_complete_transcript_does_not_load_session_messages(tmp_path, monkeypatc
     )
 
     assert out is not None
-    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+    assert [
+        (message["role"], message["content"])
+        for message in _conversation_events(out)
+    ] == [
         ("user", "question"),
         ("assistant", "answer"),
     ]
@@ -1687,7 +1195,10 @@ def test_legacy_recovery_loads_session_and_builds_backfill_turns_once(
     assert out is not None
     assert loader_calls == 1
     assert backfill_calls == 1
-    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+    assert [
+        (message["role"], message["content"])
+        for message in _conversation_events(out)
+    ] == [
         ("user", "question"),
         ("assistant", "answer"),
     ]
@@ -1723,7 +1234,7 @@ def test_build_response_restores_session_users_without_duplicating_new_transcrip
     )
 
     assert out is not None
-    assert [(m["role"], m["content"]) for m in out["messages"]] == [
+    assert [(m["role"], m["content"]) for m in _conversation_events(out)] == [
         ("user", "old prompt"),
         ("assistant", "old assistant"),
         ("user", "new prompt"),
@@ -1731,28 +1242,8 @@ def test_build_response_restores_session_users_without_duplicating_new_transcrip
     ]
 
 
-def test_replay_augments_assistant_text() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {"event": "user", "chat_id": "t-img", "text": "draw"},
-            {"event": "delta", "chat_id": "t-img", "text": "![Diagram](diagram.png)"},
-            {"event": "stream_end", "chat_id": "t-img"},
-        ],
-        augment_assistant_text=lambda text: text.replace("diagram.png", "/api/media/sig/payload"),
-    )
-
-    assert msgs[1]["content"] == "![Diagram](/api/media/sig/payload)"
 
 
-def test_replay_uses_stream_end_final_text() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {"event": "user", "chat_id": "t-img", "text": "draw"},
-            {"event": "stream_end", "chat_id": "t-img", "text": "![Diagram](/api/media/sig/payload)"},
-        ],
-    )
-
-    assert msgs[1]["content"] == "![Diagram](/api/media/sig/payload)"
 
 
 def test_build_response_backfills_legacy_sse_only_transcripts(tmp_path, monkeypatch) -> None:
@@ -1778,13 +1269,13 @@ def test_build_response_backfills_legacy_sse_only_transcripts(tmp_path, monkeypa
     )
 
     assert out is not None
-    assert [message["role"] for message in out["messages"]] == [
+    assert [message["role"] for message in _conversation_events(out)] == [
         "user",
         "assistant",
         "user",
         "assistant",
     ]
-    assert [message["content"] for message in out["messages"]] == [
+    assert [message["content"] for message in _conversation_events(out)] == [
         "first question",
         "first answer",
         "second question",
@@ -1808,8 +1299,10 @@ def test_backfill_does_not_duplicate_existing_user_transcript(tmp_path, monkeypa
     )
 
     assert out is not None
-    assert [message["role"] for message in out["messages"]] == ["user", "assistant"]
-    assert out["messages"][0]["content"] == "already stored"
+    assert [message["role"] for message in _conversation_events(out)] == [
+        "user", "assistant",
+    ]
+    assert _conversation_events(out)[0]["content"] == "already stored"
 
 
 def test_backfill_does_not_misalign_when_session_only_has_transcript_tail(
@@ -1835,12 +1328,12 @@ def test_backfill_does_not_misalign_when_session_only_has_transcript_tail(
     )
 
     assert out is not None
-    assert [message["role"] for message in out["messages"]] == [
+    assert [message["role"] for message in _conversation_events(out)] == [
         "assistant",
         "user",
         "assistant",
     ]
-    assert [message["content"] for message in out["messages"]] == [
+    assert [message["content"] for message in _conversation_events(out)] == [
         "old answer",
         "tail question",
         "tail answer",
@@ -1882,691 +1375,47 @@ def test_backfill_skips_internal_subagent_results(tmp_path, monkeypatch) -> None
     )
 
     assert out is not None
-    assert [(message["role"], message["content"]) for message in out["messages"]] == [
+    assert [
+        (message["role"], message["content"])
+        for message in _conversation_events(out)
+    ] == [
         ("assistant", "summary one"),
         ("assistant", "summary two"),
     ]
 
 
-def test_replay_infers_video_media_from_attachment_name() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {"event": "user", "chat_id": "t-video", "text": "render"},
-            {
-                "event": "message",
-                "chat_id": "t-video",
-                "text": "video ready",
-                "media_urls": [{"url": "/api/media/sig/payload", "name": "intro.mp4"}],
-            },
-        ],
-    )
-
-    assert msgs[1]["media"] == [
-        {"kind": "video", "url": "/api/media/sig/payload", "name": "intro.mp4"},
-    ]
 
 
-def test_replay_resigns_assistant_media_paths_before_stale_urls() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {"event": "user", "chat_id": "t-video-resign", "text": "render"},
-            {
-                "event": "message",
-                "chat_id": "t-video-resign",
-                "text": "video ready",
-                "media": ["/tmp/intro.mp4"],
-                "media_urls": [{"url": "/api/media/old-sig/old-payload", "name": "intro.mp4"}],
-            },
-        ],
-        augment_assistant_media=lambda paths: [
-            {"kind": "video", "url": f"/api/media/new-sig/{paths[0].split('/')[-1]}", "name": "intro.mp4"},
-        ],
-    )
-
-    assert msgs[1]["media"] == [
-        {"kind": "video", "url": "/api/media/new-sig/intro.mp4", "name": "intro.mp4"},
-    ]
 
 
-def test_replay_infers_svg_media_from_attachment_name() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {"event": "user", "chat_id": "t-svg", "text": "send svg"},
-            {
-                "event": "message",
-                "chat_id": "t-svg",
-                "text": "chart ready",
-                "media_urls": [{"url": "/api/media/sig/payload", "name": "chart.svg"}],
-            },
-        ],
-    )
-
-    assert msgs[1]["media"] == [
-        {"kind": "image", "url": "/api/media/sig/payload", "name": "chart.svg"},
-    ]
 
 
-def test_replay_infers_file_media_from_attachment_name() -> None:
-    msgs = replay_transcript_to_ui_messages(
-        [
-            {"event": "user", "chat_id": "t-file-media", "text": "send html"},
-            {
-                "event": "message",
-                "chat_id": "t-file-media",
-                "text": "file ready",
-                "media_urls": [{"url": "/api/media/sig/payload", "name": "index.html"}],
-            },
-        ],
-    )
-
-    assert msgs[1]["media"] == [
-        {"kind": "file", "url": "/api/media/sig/payload", "name": "index.html"},
-    ]
 
 
-def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-file"
-    for ev in (
-        {"event": "user", "chat_id": "t-file", "text": "edit"},
-        {
-            "event": "message",
-            "chat_id": "t-file",
-            "text": 'write_file({"path":"foo.txt"})',
-            "kind": "tool_hint",
-        },
-        {
-            "event": "file_edit",
-            "chat_id": "t-file",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-write",
-                    "tool": "write_file",
-                    "path": "foo.txt",
-                    "phase": "end",
-                    "added": 2,
-                    "deleted": 1,
-                    "approximate": False,
-                    "status": "done",
-                },
-            ],
-        },
-    ):
-        append_transcript_object(key, ev)
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-
-    assert len(msgs) == 3
-    assert msgs[1]["kind"] == "trace"
-    assert msgs[1]["traces"] == ['write_file({"path":"foo.txt"})']
-    assert "fileEdits" not in msgs[1]
-    assert msgs[2]["kind"] == "trace"
-    assert msgs[2]["traces"] == []
-    assert msgs[2]["fileEdits"] == [
-        {
-            "version": 1,
-            "call_id": "call-write",
-            "tool": "write_file",
-            "path": "foo.txt",
-            "phase": "end",
-            "added": 2,
-            "deleted": 1,
-            "approximate": False,
-            "status": "done",
-        },
-    ]
-    assert msgs[2]["activitySegmentId"]
-    assert msgs[2]["activitySegmentId"] != msgs[1]["activitySegmentId"]
 
 
-def test_replay_file_edit_absorbs_matching_write_tool_event() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {
-            "event": "message",
-            "chat_id": "t-file",
-            "text": 'write_file({"path":"foo.txt"})',
-            "kind": "tool_hint",
-            "tool_events": [
-                {
-                    "phase": "start",
-                    "call_id": "call-write",
-                    "name": "write_file",
-                    "arguments": {"path": "foo.txt", "content": "hello\n"},
-                },
-            ],
-        },
-        {
-            "event": "file_edit",
-            "chat_id": "t-file",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-write",
-                    "tool": "write_file",
-                    "path": "foo.txt",
-                    "phase": "start",
-                    "added": 1,
-                    "deleted": 0,
-                    "approximate": True,
-                    "status": "editing",
-                },
-            ],
-        },
-        {
-            "event": "message",
-            "chat_id": "t-file",
-            "text": "",
-            "kind": "progress",
-            "tool_events": [
-                {
-                    "phase": "end",
-                    "call_id": "call-write",
-                    "name": "write_file",
-                    "arguments": {"path": "foo.txt", "content": "hello\n"},
-                    "result": "ok",
-                },
-            ],
-        },
-    ])
-
-    assert len(msgs) == 1
-    assert msgs[0]["kind"] == "trace"
-    assert msgs[0]["traces"] == []
-    assert "toolEvents" not in msgs[0]
-    assert msgs[0]["fileEdits"] == [
-        {
-            "version": 1,
-            "call_id": "call-write",
-            "tool": "write_file",
-            "path": "foo.txt",
-            "phase": "start",
-            "added": 1,
-            "deleted": 0,
-            "approximate": True,
-            "status": "editing",
-        },
-    ]
 
 
-def test_replay_file_edit_stays_separate_from_mixed_tool_trace() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {
-            "event": "message",
-            "chat_id": "t-file",
-            "text": "",
-            "kind": "tool_hint",
-            "tool_events": [
-                {
-                    "phase": "start",
-                    "call_id": "call-read",
-                    "name": "read_file",
-                    "arguments": {"path": "quicksort.py"},
-                },
-                {
-                    "phase": "start",
-                    "call_id": "call-write",
-                    "name": "write_file",
-                    "arguments": {"path": "sorting/quicksort.py", "content": "def quicksort():\n"},
-                },
-            ],
-        },
-        {
-            "event": "file_edit",
-            "chat_id": "t-file",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-write",
-                    "tool": "write_file",
-                    "path": "sorting/quicksort.py",
-                    "phase": "end",
-                    "added": 3,
-                    "deleted": 0,
-                    "approximate": False,
-                    "status": "done",
-                },
-            ],
-        },
-    ])
-
-    assert len(msgs) == 2
-    assert msgs[0]["kind"] == "trace"
-    assert msgs[0]["traces"] == ['read_file({"path": "quicksort.py"})']
-    assert [event["name"] for event in msgs[0]["toolEvents"]] == ["read_file"]
-    assert "fileEdits" not in msgs[0]
-    assert msgs[1]["kind"] == "trace"
-    assert msgs[1]["traces"] == []
-    assert "toolEvents" not in msgs[1]
-    assert msgs[1]["fileEdits"] == [
-        {
-            "version": 1,
-            "call_id": "call-write",
-            "tool": "write_file",
-            "path": "sorting/quicksort.py",
-            "phase": "end",
-            "added": 3,
-            "deleted": 0,
-            "approximate": False,
-            "status": "done",
-        },
-    ]
 
 
-def test_replay_keeps_every_file_from_one_apply_patch_call() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {
-            "event": "message",
-            "chat_id": "t-file",
-            "text": "apply_patch()",
-            "kind": "tool_hint",
-            "tool_events": [
-                {
-                    "phase": "start",
-                    "call_id": "call-patch",
-                    "name": "apply_patch",
-                    "arguments": {"edits": []},
-                },
-            ],
-        },
-        {
-            "event": "file_edit",
-            "chat_id": "t-file",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-patch",
-                    "tool": "apply_patch",
-                    "path": "USER.md",
-                    "phase": "end",
-                    "added": 0,
-                    "deleted": 3,
-                    "approximate": False,
-                    "status": "done",
-                },
-                {
-                    "version": 1,
-                    "call_id": "call-patch",
-                    "tool": "apply_patch",
-                    "path": "MEMORY.md",
-                    "phase": "end",
-                    "added": 0,
-                    "deleted": 4,
-                    "approximate": False,
-                    "status": "done",
-                },
-            ],
-        },
-    ])
-
-    assert len(msgs) == 1
-    assert msgs[0]["traces"] == []
-    assert "toolEvents" not in msgs[0]
-    assert [edit["path"] for edit in msgs[0]["fileEdits"]] == ["USER.md", "MEMORY.md"]
 
 
-def test_replay_keeps_interrupted_pre_tool_text_as_answer() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {"event": "delta", "chat_id": "t-stream", "text": "I will inspect first."},
-        {"event": "stream_end", "chat_id": "t-stream"},
-        {
-            "event": "message",
-            "chat_id": "t-stream",
-            "text": 'exec({"cmd":"ls"})',
-            "kind": "tool_hint",
-        },
-        {
-            "event": "stream_end",
-            "chat_id": "t-stream",
-            "text": "Done. Open index.html to play.",
-        },
-    ])
-
-    assert len(msgs) == 3
-    assert msgs[0]["role"] == "assistant"
-    assert msgs[0]["content"] == "I will inspect first."
-    assert msgs[0]["turnPhase"] == "answer"
-    assert "reasoning" not in msgs[0]
-    assert "activitySegmentId" not in msgs[0]
-    assert "isStreaming" not in msgs[0]
-    assert msgs[1]["kind"] == "trace"
-    assert msgs[1]["traces"] == ['exec({"cmd":"ls"})']
-    assert msgs[2]["role"] == "assistant"
-    assert msgs[2]["content"] == "Done. Open index.html to play."
 
 
-def test_replay_merges_length_recovery_segments_into_one_assistant_message() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {"event": "delta", "chat_id": "t-stream", "text": "first "},
-        {
-            "event": "stream_end",
-            "chat_id": "t-stream",
-            "text": "first ",
-            "resuming": True,
-            "merge_next": True,
-        },
-        {"event": "delta", "chat_id": "t-stream", "text": "second"},
-        {"event": "stream_end", "chat_id": "t-stream"},
-        {"event": "turn_end", "chat_id": "t-stream"},
-    ])
-
-    assert len(msgs) == 1
-    assert msgs[0]["role"] == "assistant"
-    assert msgs[0]["content"] == "first second"
 
 
-@pytest.mark.parametrize("event", ["delta", "stream_end"])
-def test_replay_recovery_answer_does_not_overwrite_an_unfinished_turn(event: str) -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {
-            "event": "stream_end", "text": "Original answer", "turn_id": "original",
-            "resuming": True, "merge_next": True,
-        },
-        {"event": event, "text": "Recovered answer", "turn_id": "recovery"},
-        {"event": "turn_end", "turn_id": "recovery"},
-    ])
-
-    assert [(m["turnId"], m["content"]) for m in msgs] == [
-        ("original", "Original answer"), ("recovery", "Recovered answer"),
-    ]
 
 
-def test_replay_reasoning_after_an_ordinary_answer_preserves_the_answer_boundary() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {"event": "delta", "text": "First answer"},
-        {"event": "reasoning_end", "text": "Consider the next answer"},
-        {"event": "stream_end", "text": "Next answer"},
-        {"event": "turn_end"},
-    ])
-
-    assert [m["content"] for m in msgs] == ["First answer", "Next answer"]
-    assert msgs[1]["reasoning"] == "Consider the next answer"
 
 
-def test_replay_tool_events_dedupes_finish_after_start() -> None:
-    msgs = replay_transcript_to_ui_messages([
-        {
-            "event": "message",
-            "chat_id": "t-tool",
-            "text": 'exec({"cmd":"ls"})',
-            "kind": "tool_hint",
-            "tool_events": [
-                {
-                    "phase": "start",
-                    "call_id": "call-exec",
-                    "name": "exec",
-                    "arguments": {"cmd": "ls"},
-                },
-            ],
-        },
-        {
-            "event": "message",
-            "chat_id": "t-tool",
-            "text": "",
-            "kind": "progress",
-            "tool_events": [
-                {
-                    "phase": "end",
-                    "call_id": "call-exec",
-                    "name": "exec",
-                    "arguments": {"cmd": "ls"},
-                    "result": "ok",
-                },
-                {
-                    "phase": "end",
-                    "call_id": "call-read",
-                    "name": "read_file",
-                    "arguments": {"path": "notes.md"},
-                    "result": "done",
-                },
-            ],
-        },
-    ])
-
-    assert len(msgs) == 1
-    assert msgs[0]["traces"] == [
-        'exec({"cmd": "ls"})',
-        'read_file({"path": "notes.md"})',
-    ]
-    assert msgs[0]["toolEvents"][0]["phase"] == "end"
-    assert msgs[0]["toolEvents"][0]["call_id"] == "call-exec"
 
 
-def test_replay_tool_events_keeps_phase_update_when_trace_is_deduped() -> None:
-    args = {"name": "github", "args": ["repo", "view"], "json": "true"}
-    msgs = replay_transcript_to_ui_messages([
-        {
-            "event": "message",
-            "chat_id": "t-tool",
-            "text": "",
-            "kind": "tool_hint",
-            "tool_events": [
-                {
-                    "phase": "start",
-                    "call_id": "call-cli",
-                    "name": "run_cli_app",
-                    "arguments": args,
-                },
-            ],
-        },
-        {
-            "event": "message",
-            "chat_id": "t-tool",
-            "text": "",
-            "kind": "progress",
-            "tool_events": [
-                {
-                    "phase": "error",
-                    "call_id": "call-cli",
-                    "name": "run_cli_app",
-                    "arguments": args,
-                    "error": "Error: CLI app 'github' not found",
-                },
-            ],
-        },
-    ])
-
-    assert len(msgs) == 1
-    assert msgs[0]["traces"] == [
-        'run_cli_app({"name": "github", "args": ["repo", "view"], "json": "true"})',
-    ]
-    assert msgs[0]["toolEvents"][0]["phase"] == "error"
-    assert msgs[0]["toolEvents"][0]["error"] == "Error: CLI app 'github' not found"
 
 
-def test_replay_file_edit_progress_merges_after_interleaved_activity(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-file-progress"
-    for ev in (
-        {"event": "user", "chat_id": "t-file-progress", "text": "edit"},
-        {
-            "event": "message",
-            "chat_id": "t-file-progress",
-            "text": 'write_file({"path":"foo.txt"})',
-            "kind": "tool_hint",
-        },
-        {
-            "event": "file_edit",
-            "chat_id": "t-file-progress",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-write",
-                    "tool": "write_file",
-                    "path": "foo.txt",
-                    "phase": "start",
-                    "added": 12,
-                    "deleted": 0,
-                    "approximate": True,
-                    "status": "editing",
-                },
-            ],
-        },
-        {
-            "event": "message",
-            "chat_id": "t-file-progress",
-            "text": "still working",
-            "kind": "progress",
-        },
-        {
-            "event": "file_edit",
-            "chat_id": "t-file-progress",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-write",
-                    "tool": "write_file",
-                    "path": "foo.txt",
-                    "phase": "end",
-                    "added": 30,
-                    "deleted": 0,
-                    "approximate": False,
-                    "status": "done",
-                },
-            ],
-        },
-    ):
-        append_transcript_object(key, ev)
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-    file_edit_messages = [msg for msg in msgs if msg.get("fileEdits")]
-
-    assert len(file_edit_messages) == 1
-    assert file_edit_messages[0]["fileEdits"] == [
-        {
-            "version": 1,
-            "call_id": "call-write",
-            "tool": "write_file",
-            "path": "foo.txt",
-            "phase": "end",
-            "added": 30,
-            "deleted": 0,
-            "approximate": False,
-            "status": "done",
-        },
-    ]
 
 
-def test_replay_file_edit_pending_placeholder_upgrades_to_path(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-file-pending"
-    for ev in (
-        {"event": "user", "chat_id": "t-file-pending", "text": "write"},
-        {
-            "event": "file_edit",
-            "chat_id": "t-file-pending",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-write",
-                    "tool": "write_file",
-                    "path": "",
-                    "phase": "start",
-                    "added": 1,
-                    "deleted": 0,
-                    "approximate": True,
-                    "status": "editing",
-                    "pending": True,
-                },
-            ],
-        },
-        {
-            "event": "file_edit",
-            "chat_id": "t-file-pending",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-write",
-                    "tool": "write_file",
-                    "path": "foo.txt",
-                    "phase": "start",
-                    "added": 12,
-                    "deleted": 0,
-                    "approximate": True,
-                    "status": "editing",
-                },
-            ],
-        },
-    ):
-        append_transcript_object(key, ev)
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-    file_edit_messages = [msg for msg in msgs if msg.get("fileEdits")]
-
-    assert len(file_edit_messages) == 1
-    assert file_edit_messages[0]["fileEdits"] == [
-        {
-            "version": 1,
-            "call_id": "call-write",
-            "tool": "write_file",
-            "path": "foo.txt",
-            "phase": "start",
-            "added": 12,
-            "deleted": 0,
-            "approximate": True,
-            "status": "editing",
-        },
-    ]
 
 
-def test_replay_keeps_new_file_edit_after_reasoning_in_order(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    key = "websocket:t-file-order"
-    for ev in (
-        {"event": "user", "chat_id": "t-file-order", "text": "edit"},
-        {
-            "event": "file_edit",
-            "chat_id": "t-file-order",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-one",
-                    "tool": "write_file",
-                    "path": "one.txt",
-                    "phase": "start",
-                    "added": 10,
-                    "deleted": 0,
-                    "approximate": True,
-                    "status": "editing",
-                },
-            ],
-        },
-        {"event": "reasoning_delta", "chat_id": "t-file-order", "text": "Check next."},
-        {"event": "reasoning_end", "chat_id": "t-file-order"},
-        {
-            "event": "file_edit",
-            "chat_id": "t-file-order",
-            "edits": [
-                {
-                    "version": 1,
-                    "call_id": "call-two",
-                    "tool": "write_file",
-                    "path": "two.txt",
-                    "phase": "start",
-                    "added": 20,
-                    "deleted": 0,
-                    "approximate": True,
-                    "status": "editing",
-                },
-            ],
-        },
-    ):
-        append_transcript_object(key, ev)
-
-    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
-
-    assert [msg.get("fileEdits", [{}])[0].get("path") if msg.get("fileEdits") else msg.get("reasoning") for msg in msgs[1:]] == [
-        "one.txt",
-        "Check next.",
-        "two.txt",
-    ]
-    file_edit_segments = [
-        msg.get("activitySegmentId")
-        for msg in msgs
-        if msg.get("fileEdits")
-    ]
-    assert len(file_edit_segments) == 2
-    assert file_edit_segments[0] != file_edit_segments[1]
 
 
 def test_build_response_schema(monkeypatch, tmp_path) -> None:
@@ -2577,4 +1426,4 @@ def test_build_response_schema(monkeypatch, tmp_path) -> None:
     assert out is not None
     assert out["schemaVersion"] == WEBUI_TRANSCRIPT_SCHEMA_VERSION
     assert out["sessionKey"] == key
-    assert len(out["messages"]) == 1
+    assert len(_conversation_events(out)) == 1

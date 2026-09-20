@@ -6,6 +6,7 @@ import { sessionTitle, useSessionHistory, useSessions } from "@/hooks/useSession
 import * as api from "@/lib/api";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
+import { canonicalThreadPayload } from "./thread-test-payload";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -16,6 +17,16 @@ vi.mock("@/lib/api", async (importOriginal) => {
     fetchWebuiThread: vi.fn(),
   };
 });
+
+const fetchThreadMock = vi.mocked(api.fetchWebuiThread);
+const rawMockResolvedValue = fetchThreadMock.mockResolvedValue.bind(fetchThreadMock);
+const rawMockResolvedValueOnce = fetchThreadMock.mockResolvedValueOnce.bind(fetchThreadMock);
+fetchThreadMock.mockResolvedValue = ((value) => rawMockResolvedValue(
+  canonicalThreadPayload(value as never),
+)) as typeof fetchThreadMock.mockResolvedValue;
+fetchThreadMock.mockResolvedValueOnce = ((value) => rawMockResolvedValueOnce(
+  canonicalThreadPayload(value as never),
+)) as typeof fetchThreadMock.mockResolvedValueOnce;
 
 function fakeClient() {
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
@@ -1246,7 +1257,7 @@ describe("useSessions", () => {
     expect(result.current.lineage).toBeGreaterThan(oldLineage);
 
     await act(async () => {
-      resolveOlder?.({
+      resolveOlder?.(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "stale-prefix", role: "user", content: "stale prefix", createdAt: 1 },
@@ -1255,7 +1266,7 @@ describe("useSessions", () => {
           before_cursor: null,
           has_more_before: false,
         },
-      });
+      }));
       await olderRequest;
     });
 

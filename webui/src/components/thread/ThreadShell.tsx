@@ -53,7 +53,8 @@ import type {
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
-import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
+import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
@@ -771,17 +772,14 @@ export function ThreadShell({
       const request = fetchWebuiThreadTraceDetail(getToken(), requestKey, ref)
         .then((detail) => {
           if (activeHistoryKeyRef.current !== requestKey) return;
-          setMessages((current) => current.map((message) => (
-            message.traceDetail?.ref === ref
-              ? {
-                  ...message,
-                  content: detail.content,
-                  traces: detail.traces,
-                  toolEvents: detail.toolEvents,
-                  traceDetail: undefined,
-                }
-              : message
-          )));
+          const projected = projectThreadEvents(detail.events);
+          setMessages((current) => current.flatMap((message) => {
+            if (message.traceDetail?.ref !== ref) return [message];
+            return projected.map((replacement) => ({
+              ...replacement,
+              activitySegmentId: message.activitySegmentId ?? replacement.activitySegmentId,
+            }));
+          }));
         })
         .catch((error: unknown) => {
           if (activeHistoryKeyRef.current !== requestKey) return;
