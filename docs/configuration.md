@@ -2108,6 +2108,27 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 For API keys, tokens, and other secrets, see [Environment Variables for Secrets](#environment-variables-for-secrets) — avoid storing them directly in `config.json`.
 
+The optional Jev safeguard can add a model-based review before model-generated shell commands run. It uses OpenRouter's Decisions API and the `providers.openrouter` API key and proxy settings:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}"
+    }
+  },
+  "tools": {
+    "exec": {
+      "jevGuard": {
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+When enabled, nanobot sends each command, shell, execution flags, and effective working directory to OpenRouter in batches of up to 16 by default. Non-empty input and stdin closure through `exec_session` are also reviewed with the running session's original command, recent input, and context. To prevent split-input bypasses, a session whose retained stdin context exceeds 4,096 characters rejects further input while this safeguard is enabled; start a new session to continue. This can expose command contents, session input, and local path names to a third party and incurs OpenRouter usage, so it is disabled by default. Invalid, missing, timed-out, and failed decisions block only calls without a completed decision unless `onError` is explicitly set to `"allow"`; completed interception decisions are always enforced. Jev is an additional probabilistic check, not a replacement for workspace restriction, allow/deny patterns, least privilege, or an OS sandbox.
+
 > [!NOTE]
 > When a restricted WebUI chat selects a project outside the configured agent
 > workspace, that project becomes the normal file and shell boundary. Nanobot
@@ -2125,6 +2146,12 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. `"bwrap"` (Linux) or `"seatbelt"` (macOS) restricts filesystem access to the workspace (read-write), media (read-only), required system paths and configured extra binds. The workspace's parent is denied except for allowed roots; keep secrets outside the workspace and binds. Automatically enables workspace restriction for file tools. `"bwrap"` requires bubblewrap (`apt install bubblewrap`; pre-installed in Docker). `"seatbelt"` uses macOS `sandbox-exec(1)`; it sets `HOME` and `TMPDIR` to the workspace rather than sharing host temporary directories. Use `mktemp "$TMPDIR/job.XXXXXX"` for macOS shell scratch files. Neither backend restricts network access. Windows logs a warning and runs commands without OS sandboxing. |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
+| `tools.exec.jevGuard.enabled` | `false` | Review model-generated shell calls, `exec_session` input, and stdin closure with OpenRouter Jev before execution. Requires `providers.openrouter.apiKey` or `OPENROUTER_API_KEY`. |
+| `tools.exec.jevGuard.model` | `"~typesafe/jev-latest"` | OpenRouter Decisions model used for shell review. Pin a versioned Jev model ID if you need stable model behavior. |
+| `tools.exec.jevGuard.threshold` | `0.5` | Block a command when Jev's interception probability is greater than or equal to this value. |
+| `tools.exec.jevGuard.timeoutS` | `15` | Timeout in seconds for each Decisions API request. |
+| `tools.exec.jevGuard.batchSize` | `16` | Commands or session inputs reviewed per Decisions API request (1–32). A model response with more reviews is split into multiple requests before any tool executes. |
+| `tools.exec.jevGuard.onError` | `"block"` | Behavior for calls without a valid Jev decision. `"block"` fails closed; `"allow"` explicitly fails open. Completed interception decisions remain enforced. |
 | `tools.exec.pathPrepend` | `""` | Extra directories to prepend to `PATH` when running shell commands. Use this when configured tools should win executable lookup precedence, such as a Python virtual environment's `bin` or `Scripts` directory. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `tools.exec.sandboxRoBinds` | `[]` | Extra absolute paths to expose read-only inside the exec sandbox (`--ro-bind-try` for `"bwrap"`, an SBPL `file-read*` rule for `"seatbelt"`), such as `/home/user/.local/bin` or `/home/user/.cargo/bin` when those paths are also in `pathPrepend`/`pathAppend`. These roots are also accepted by the shell absolute-path guard only while a sandbox is active. Bind only directories whose contents are safe for agent commands to read; paths equal to or containing the active workspace are ignored so they cannot uncover its masked parent directory. |

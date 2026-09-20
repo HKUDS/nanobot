@@ -13,7 +13,7 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 from urllib.parse import unquote
 
 from loguru import logger
@@ -31,6 +31,11 @@ from nanobot.agent.tools.exec_session import (
     clamp_session_int,
     format_session_poll,
 )
+from nanobot.agent.tools.jev_guard import (
+    JevShellGuard,
+    ShellCommandReview,
+    preflight_shell_reviews,
+)
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import (
     BooleanSchema,
@@ -42,6 +47,9 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
+
+if TYPE_CHECKING:
+    from nanobot.providers.base import ToolCallRequest
 
 _IS_WINDOWS = sys.platform == "win32"
 _PROCESS_TREE_OWNER_ATTR = "_nanobot_process_tree_owner"
@@ -91,6 +99,17 @@ _WORKSPACE_BOUNDARY_NOTE = (
 )
 
 
+class JevGuardConfig(Base):
+    """Optional Jev shell-command safeguard configuration."""
+
+    enabled: bool = False
+    model: str = "~typesafe/jev-latest"
+    threshold: float = Field(default=0.5, ge=0, le=1)
+    timeout_s: float = Field(default=15.0, gt=0, le=120)
+    batch_size: int = Field(default=16, ge=1, le=32)
+    on_error: Literal["block", "allow"] = "block"
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
     enable: bool = True
@@ -103,12 +122,43 @@ class ExecToolConfig(Base):
     allowed_env_keys: list[str] = Field(default_factory=list)
     allow_patterns: list[str] = Field(default_factory=list)
     deny_patterns: list[str] = Field(default_factory=list)
+    jev_guard: JevGuardConfig = Field(default_factory=JevGuardConfig)
+
+
+def create_jev_shell_guard(
+    ctx: ToolContext,
+) -> tuple[JevShellGuard | None, float, Literal["block", "allow"]]:
+    """Build the shared Jev client and policy used by exec and exec_session."""
+    jev = ctx.config.exec.jev_guard
+    if not jev.enabled:
+        return None, jev.threshold, jev.on_error
+
+    openrouter = ctx.openrouter_provider_config
+    configured_api_key = (
+        openrouter.api_key.strip()
+        if openrouter is not None and openrouter.api_key
+        else ""
+    )
+    api_key = configured_api_key or os.environ.get("OPENROUTER_API_KEY")
+    return (
+        JevShellGuard(
+            api_key=api_key,
+            model=jev.model,
+            timeout_s=jev.timeout_s,
+            batch_size=jev.batch_size,
+            proxy=openrouter.proxy if openrouter is not None else None,
+        ),
+        jev.threshold,
+        jev.on_error,
+    )
 
 
 @dataclass(slots=True)
 class _PreparedCommand:
     command: str
+    submitted_command: str
     cwd: str
+    shell_cwd: str
     env: dict[str, str]
     timeout: int | None
     shell_program: str | None
@@ -176,6 +226,7 @@ class ExecTool(Tool):
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
         cfg = ctx.config.exec
+        jev_guard, jev_threshold, jev_on_error = create_jev_shell_guard(ctx)
         return cls(
             working_dir=ctx.workspace,
             timeout=cfg.timeout,
@@ -189,6 +240,9 @@ class ExecTool(Tool):
             allowed_env_keys=cfg.allowed_env_keys,
             allow_patterns=cfg.allow_patterns,
             deny_patterns=cfg.deny_patterns,
+            jev_guard=jev_guard,
+            jev_threshold=jev_threshold,
+            jev_on_error=jev_on_error,
             session_manager=ctx.exec_session_manager,
         )
 
@@ -207,6 +261,9 @@ class ExecTool(Tool):
         sandbox_ro_binds: list[str] | None = None,
         sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
+        jev_guard: JevShellGuard | None = None,
+        jev_threshold: float = 0.5,
+        jev_on_error: Literal["block", "allow"] = "block",
         session_manager: ExecSessionManager | None = None,
     ):
         self.timeout = timeout
@@ -241,6 +298,9 @@ class ExecTool(Tool):
         self.sandbox_ro_binds = self._normalize_bind_roots(sandbox_ro_binds)
         self.sandbox_rw_binds = self._normalize_bind_roots(sandbox_rw_binds)
         self.allowed_env_keys = allowed_env_keys or []
+        self._jev_guard = jev_guard
+        self._jev_threshold = jev_threshold
+        self._jev_on_error: Literal["block", "allow"] = jev_on_error
         self._session_manager = session_manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @property
@@ -270,6 +330,64 @@ class ExecTool(Tool):
     @property
     def exclusive(self) -> bool:
         return True
+
+    async def preflight_tool_calls(
+        self,
+        calls: list[ToolCallRequest],
+    ) -> dict[str, ToolResult]:
+        """Batch-review valid commands before any tool call in this model response runs."""
+        if self._jev_guard is None:
+            return {}
+
+        reviews: list[ShellCommandReview] = []
+        for call in calls:
+            if not isinstance(call.arguments, dict):
+                continue
+            params = self.cast_params(cast(dict[str, Any], call.arguments))
+            if self.validate_params(params):
+                continue
+            command = params.get("command") or params.get("cmd")
+            if not isinstance(command, str) or not command:
+                continue
+
+            working_dir = params.get("working_dir") or params.get("workdir")
+            timeout = params.get("timeout")
+            shell = params.get("shell")
+            login = params.get("login")
+            prepared = self._prepare_command(
+                command,
+                working_dir if isinstance(working_dir, str) else None,
+                timeout if isinstance(timeout, int) and not isinstance(timeout, bool) else None,
+                shell if isinstance(shell, str) else None,
+                login if isinstance(login, bool) else None,
+            )
+            if isinstance(prepared, str):
+                # The deterministic guard or parameter checks will return this
+                # error through the normal execution path without a Jev request.
+                continue
+
+            reviews.append(ShellCommandReview(
+                call_id=call.id,
+                command=command,
+                shell=(
+                    shell
+                    if isinstance(shell, str) and shell
+                    else "PowerShell" if _IS_WINDOWS else "Bash"
+                ),
+                working_dir=prepared.shell_cwd,
+                login=prepared.login,
+                persistent_session=params.get("yield_time_ms") is not None,
+            ))
+
+        if not reviews:
+            return {}
+
+        return await preflight_shell_reviews(
+            self._jev_guard,
+            reviews,
+            threshold=self._jev_threshold,
+            on_error=self._jev_on_error,
+        )
 
     async def execute(
         self, command: str | None = None, cmd: str | None = None,
@@ -371,6 +489,8 @@ class ExecTool(Tool):
                 login=prepared.login,
                 yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
                 owner_session_key=current_request_session_key(),
+                submitted_command=prepared.submitted_command,
+                shell_cwd=prepared.shell_cwd,
                 max_output_chars=clamp_session_int(
                     max_output_chars,
                     DEFAULT_MAX_OUTPUT_CHARS,
@@ -405,6 +525,7 @@ class ExecTool(Tool):
         shell: str | None = None,
         login: bool | None = None,
     ) -> _PreparedCommand | str:
+        submitted_command = command
         access = current_tool_workspace(
             self.working_dir,
             restrict_to_workspace=self.restrict_to_workspace,
@@ -453,6 +574,7 @@ class ExecTool(Tool):
             if guard_error:
                 return guard_error
 
+        shell_cwd = cwd
         if self.sandbox:
             if _IS_WINDOWS:
                 logger.warning(
@@ -486,7 +608,9 @@ class ExecTool(Tool):
 
         return _PreparedCommand(
             command=command,
+            submitted_command=submitted_command,
             cwd=cwd,
+            shell_cwd=shell_cwd,
             env=env,
             timeout=effective_timeout,
             shell_program=shell_program,
