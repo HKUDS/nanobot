@@ -42,9 +42,7 @@ from nanobot.session.summary import (
     SessionSummaryCheckpoint,
 )
 from nanobot.utils.helpers import (
-    estimate_message_tokens,
     estimate_prompt_tokens_chain,
-    find_legal_message_start,
     maybe_persist_tool_result,
     truncate_text,
 )
@@ -55,6 +53,7 @@ if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
 TranscriptBuilder = Callable[[TranscriptInput], list[dict[str, Any]]]
+SummaryTranscriptBuilder = Callable[[str], list[dict[str, Any]]]
 HistoryConsolidator = Callable[
     [list[dict[str, Any]], str | None],
     Awaitable[str | None],
@@ -64,7 +63,7 @@ ProviderCompactionConsolidator = Callable[
     Awaitable[str | None],
 ]
 
-SNIP_SAFETY_BUFFER = 1024
+CONTEXT_SAFETY_BUFFER = 1024
 # read_file has its own bound; exempt it to avoid persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
@@ -74,7 +73,7 @@ PLACEHOLDER_TEXTS = frozenset({
 
 
 class ContextWindowExceededError(RuntimeError):
-    """Raised before a locally fitted request that still exceeds its budget."""
+    """Raised before a request that exceeds its local context budget."""
 
     def __init__(
         self,
@@ -89,7 +88,7 @@ class ContextWindowExceededError(RuntimeError):
         self.input_budget = input_budget
         self.source = source
         super().__init__(
-            "Model input still exceeds the local context budget after request fitting "
+            "Model input exceeds the local context budget "
             f"for {session_key or 'default'}: {estimated_tokens}/{input_budget} via {source}"
         )
 
@@ -129,8 +128,7 @@ class ContextCompactionState:
     accepted_messages: list[dict[str, Any]]
     raw_accepted_boundary: int
     active_summary: str | None
-    transcript_input: TranscriptInput
-    transcript_builder: TranscriptBuilder
+    summary_transcript_builder: SummaryTranscriptBuilder
     consolidate_history: HistoryConsolidator
     consolidate_provider_compaction: ProviderCompactionConsolidator | None
     summary_checkpoint: SessionSummaryCheckpoint | None = None
@@ -148,6 +146,22 @@ class ContextCompactionState:
         if consolidate_history is None:
             return messages, None
         accepted_history_boundary = 1 + len(transcript_input.history)
+
+        def build_summary_transcript(summary: str) -> list[dict[str, Any]]:
+            return transcript_builder(
+                replace(
+                    transcript_input,
+                    history=[],
+                    current_message=None,
+                    media=None,
+                    session_summary={
+                        "text": summary,
+                        "last_active": datetime.now().astimezone().isoformat(),
+                    },
+                    runtime_context_blocks=None,
+                )
+            )
+
         return messages, cls(
             raw_messages=messages,
             accepted_messages=deepcopy(messages[:accepted_history_boundary]),
@@ -157,8 +171,48 @@ class ContextCompactionState:
                 if transcript_input.session_summary is not None
                 else None
             ),
-            transcript_input=transcript_input,
-            transcript_builder=transcript_builder,
+            summary_transcript_builder=build_summary_transcript,
+            consolidate_history=consolidate_history,
+            consolidate_provider_compaction=consolidate_provider_compaction,
+        )
+
+    @classmethod
+    def from_messages(
+        cls,
+        messages: list[dict[str, Any]],
+        consolidate_history: HistoryConsolidator,
+        consolidate_provider_compaction: ProviderCompactionConsolidator | None,
+    ) -> ContextCompactionState:
+        """Create compaction state for a standalone runner transcript."""
+        raw_messages = list(messages)
+        instruction_prefix: list[dict[str, Any]] = []
+        for message in raw_messages:
+            if message.get("role") not in {"system", "developer"}:
+                break
+            instruction_prefix.append(dict(message))
+
+        def build_summary_transcript(summary: str) -> list[dict[str, Any]]:
+            archived_context = (
+                "[Archived Context Summary]\n\n"
+                "Previous conversation summary:\n"
+                f"{summary}"
+            )
+            prefix = deepcopy(instruction_prefix)
+            for index in range(len(prefix) - 1, -1, -1):
+                content = prefix[index].get("content")
+                if isinstance(content, str):
+                    prefix[index]["content"] = (
+                        f"{content}\n\n---\n\n{archived_context}"
+                    )
+                    return prefix
+            return [{"role": "system", "content": archived_context}, *prefix]
+
+        return cls(
+            raw_messages=raw_messages,
+            accepted_messages=deepcopy(raw_messages),
+            raw_accepted_boundary=len(raw_messages),
+            active_summary=None,
+            summary_transcript_builder=build_summary_transcript,
             consolidate_history=consolidate_history,
             consolidate_provider_compaction=consolidate_provider_compaction,
         )
@@ -333,28 +387,6 @@ class ContextGovernor:
         updated = self.backfill_missing_tool_results(updated)
         return self.apply_tool_result_budget(config, updated)
 
-    def fit_to_budget(
-        self,
-        config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
-        *,
-        tool_definitions: list[dict[str, Any]] | None,
-    ) -> list[dict[str, Any]]:
-        """Fit a model-facing copy while keeping the source transcript intact."""
-        updated = self.snip_history(
-            config,
-            messages,
-            tool_definitions=tool_definitions,
-            force=True,
-        )
-        updated = self.drop_orphan_tool_results(updated)
-        updated = self.backfill_missing_tool_results(updated)
-        return self.ensure_request_fits(
-            config,
-            updated,
-            tool_definitions=tool_definitions,
-        )
-
     def ensure_request_fits(
         self,
         config: ContextGovernanceConfig,
@@ -422,19 +454,7 @@ class ContextGovernor:
         summary: str,
     ) -> list[dict[str, Any]]:
         """Rebuild only the stable system prefix around a replacement summary."""
-        return compaction.transcript_builder(
-            replace(
-                compaction.transcript_input,
-                history=[],
-                current_message=None,
-                media=None,
-                session_summary={
-                    "text": summary,
-                    "last_active": datetime.now().astimezone().isoformat(),
-                },
-                runtime_context_blocks=None,
-            )
-        )
+        return compaction.summary_transcript_builder(summary)
 
     async def summarize_provider_compaction(
         self,
@@ -605,7 +625,7 @@ class ContextGovernor:
         tool_definitions: list[dict[str, Any]] | None,
         transcript: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], ProviderCallContext | None]:
-        """Prepare, compact or fit, and record the exact provider payload."""
+        """Prepare or compact and record the exact provider payload."""
         prepared = self.prepare_messages_for_model(state.config, messages)
         model_messages: list[dict[str, Any]] | None = prepared
         supplemental_messages: list[dict[str, Any]] | None = None
@@ -625,7 +645,6 @@ class ContextGovernor:
             and prepared == state.messages
             and tool_definitions == state.tool_definitions
         )
-        request_was_fitted = False
         compaction = state.compaction
         if compaction is None:
             pressure = self.request_pressure(
@@ -637,25 +656,13 @@ class ContextGovernor:
                 request_context_tokens=request_context_tokens,
             )
             if pressure is not None:
-                compaction_id = uuid4().hex
-                await state.events.emit(
-                    ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+                measured, source = pressure
+                raise ContextWindowExceededError(
+                    session_key=state.config.session_key,
+                    estimated_tokens=measured,
+                    input_budget=self.input_budget(state.config),
+                    source=source,
                 )
-                try:
-                    prepared = self.fit_to_budget(
-                        state.config,
-                        prepared,
-                        tool_definitions=tool_definitions,
-                    )
-                except Exception:
-                    await state.events.emit(
-                        ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
-                    )
-                    raise
-                await state.events.emit(
-                    ContextCompactionEvent(compaction_id=compaction_id, phase="succeeded"),
-                )
-                request_was_fitted = True
         else:
             pressure = self.request_pressure(
                 state.config,
@@ -681,7 +688,6 @@ class ContextGovernor:
                 context_window_tokens=state.config.context_window_tokens,
                 model_messages=model_messages,
                 supplemental_messages=supplemental_messages,
-                resume_state=not request_was_fitted,
             )
             if transcript is not None
             else state.conversation.independent_request_context(
@@ -709,7 +715,7 @@ class ContextGovernor:
         max_output = config.max_tokens if isinstance(config.max_tokens, int) else (
             provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
         )
-        budget = config.context_window_tokens - max_output - SNIP_SAFETY_BUFFER
+        budget = config.context_window_tokens - max_output - CONTEXT_SAFETY_BUFFER
         return budget if budget > 0 else 0
 
     @staticmethod
@@ -954,72 +960,3 @@ class ContextGovernor:
                     updated = [dict(m) for m in messages]
                 updated[idx]["content"] = normalized
         return updated
-
-    def snip_history(
-        self,
-        config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
-        *,
-        tool_definitions: list[dict[str, Any]] | None,
-        force: bool = False,
-    ) -> list[dict[str, Any]]:
-        if not messages or not config.context_window_tokens:
-            return messages
-
-        budget = self.input_budget(config)
-        if budget <= 0:
-            return messages
-
-        if not force:
-            estimate, _ = estimate_prompt_tokens_chain(
-                config.provider,
-                config.model,
-                messages,
-                tool_definitions,
-            )
-            if estimate <= budget:
-                return messages
-
-        system_messages = [dict(msg) for msg in messages if msg.get("role") == "system"]
-        non_system = [dict(msg) for msg in messages if msg.get("role") != "system"]
-        if not non_system:
-            return messages
-
-        system_tokens = sum(estimate_message_tokens(msg) for msg in system_messages)
-        fixed_tokens, _ = estimate_prompt_tokens_chain(
-            config.provider,
-            config.model,
-            system_messages,
-            tool_definitions,
-        )
-        remaining_budget = max(0, budget - max(system_tokens, fixed_tokens))
-        kept: list[dict[str, Any]] = []
-        kept_tokens = 0
-        for message in reversed(non_system):
-            msg_tokens = estimate_message_tokens(message)
-            if kept and kept_tokens + msg_tokens > remaining_budget:
-                break
-            kept.append(message)
-            kept_tokens += msg_tokens
-        kept.reverse()
-
-        return system_messages + self._legal_history_tail(kept, non_system)
-
-    def _legal_history_tail(
-        self,
-        kept: list[dict[str, Any]],
-        non_system: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        fallback = kept if kept else (non_system[-1:] if non_system else [])
-        kept = self._user_tail(kept) or self._user_tail(non_system, last=True) or fallback
-
-        start = find_legal_message_start(kept)
-        return kept[start:] if start else kept
-
-    @staticmethod
-    def _user_tail(messages: list[dict[str, Any]], *, last: bool = False) -> list[dict[str, Any]]:
-        indexes = range(len(messages) - 1, -1, -1) if last else range(len(messages))
-        for idx in indexes:
-            if messages[idx].get("role") == "user":
-                return messages[idx:]
-        return []

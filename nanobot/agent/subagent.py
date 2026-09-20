@@ -7,8 +7,9 @@ import uuid
 import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 from loguru import logger
 
@@ -38,6 +39,9 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
+
+if TYPE_CHECKING:
+    from nanobot.agent.memory import Consolidator
 
 
 class _SubagentOrigin(TypedDict):
@@ -105,6 +109,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
+        consolidator: Consolidator | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -147,6 +152,7 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
+        self.consolidator = consolidator
         self._run_slots = asyncio.Semaphore(self.max_concurrent_subagents)
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
@@ -424,6 +430,29 @@ class SubagentManager:
             ))
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
+                tool_definitions = tools.get_definitions()
+                consolidate_history = (
+                    partial(
+                        self.consolidator.summarize_transcript,
+                        runtime=runtime,
+                        session_key=f"subagent:{task_id}",
+                        tools=tool_definitions,
+                        persist=False,
+                    )
+                    if self.consolidator is not None
+                    else None
+                )
+                consolidate_provider_compaction = (
+                    partial(
+                        self.consolidator.summarize_provider_compaction,
+                        runtime=runtime,
+                        session_key=f"subagent:{task_id}",
+                        tools=tool_definitions,
+                        persist=False,
+                    )
+                    if self.consolidator is not None
+                    else None
+                )
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,
                     tools=tools,
@@ -441,6 +470,8 @@ class SubagentManager:
                         "llm_usage_source",
                         current_llm_usage_source(),
                     ),
+                    consolidate_history=consolidate_history,
+                    consolidate_provider_compaction=consolidate_provider_compaction,
                 ))
             finally:
                 if token is not None:

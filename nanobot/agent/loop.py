@@ -378,6 +378,16 @@ class AgentLoop:
         self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         self._exec_session_manager = ExecSessionManager()
         self.runner = AgentRunner()
+        self.consolidator = Consolidator(
+            store=self.context.memory,
+            sessions=self.sessions,
+            build_messages=self.context.build_messages,
+            get_tool_definitions=self.tools.get_definitions,
+            resolve_prompt_context=PersistedPromptContextResolver(
+                workspace_scopes=self.workspace_scopes,
+                unified_session=unified_session,
+            ),
+        )
         self.subagents = SubagentManager(
             workspace=workspace,
             bus=bus,
@@ -387,6 +397,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
+            consolidator=self.consolidator,
         )
         self._unified_session = unified_session
         self._running = False
@@ -420,16 +431,6 @@ class AgentLoop:
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "0"))
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
-        )
-        self.consolidator = Consolidator(
-            store=self.context.memory,
-            sessions=self.sessions,
-            build_messages=self.context.build_messages,
-            get_tool_definitions=self.tools.get_definitions,
-            resolve_prompt_context=PersistedPromptContextResolver(
-                workspace_scopes=self.workspace_scopes,
-                unified_session=unified_session,
-            ),
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -1222,8 +1223,9 @@ class AgentLoop:
                         runtime=runtime,
                         session_key=session.key,
                         tools=effective_tools.get_definitions(),
+                        persist=not ephemeral,
                     )
-                    if session is not None and not ephemeral
+                    if session is not None
                     else None
                 ),
                 consolidate_provider_compaction=(
@@ -1232,8 +1234,9 @@ class AgentLoop:
                         runtime=runtime,
                         session_key=session.key,
                         tools=effective_tools.get_definitions(),
+                        persist=not ephemeral,
                     )
-                    if session is not None and not ephemeral
+                    if session is not None
                     else None
                 ),
                 injection_callback=_drain_pending,
@@ -2114,7 +2117,7 @@ class AgentLoop:
         self._save_turn(
             session, ctx.all_messages, ctx.save_skip,
             turn_latency_ms=ctx.turn_latency_ms,
-            summary_checkpoint=ctx.summary_checkpoint,
+            summary_checkpoint=None if ctx.ephemeral else ctx.summary_checkpoint,
             input_persisted_early=ctx.input_persisted_early,
         )
         if (

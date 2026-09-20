@@ -1185,9 +1185,8 @@ class LLMProvider(ABC):
 
         # Safety net: ensure the first non-system message is not a bare
         # ``assistant`` message.  Providers like GLM reject system→assistant
-        # with error 1214.  This can happen when upstream truncation (e.g.
-        # _snip_history) drops the only user message.  Insert a synthetic
-        # user message to keep the sequence valid.
+        # with error 1214.  Insert a synthetic user message to keep the
+        # sequence valid when replayed history starts at an assistant turn.
         for i, msg in enumerate(merged):
             if msg.get("role") != "system":
                 if msg.get("role") == "assistant" and not msg.get("tool_calls"):

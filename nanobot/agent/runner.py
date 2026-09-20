@@ -344,9 +344,14 @@ class AgentRunner:
             )
         if spec.initial_messages is None:
             raise ValueError("initial_messages is required without transcript_input")
-        if spec.consolidate_history is not None:
-            raise ValueError("consolidate_history requires transcript_input")
-        return list(spec.initial_messages), None
+        messages = list(spec.initial_messages)
+        if spec.consolidate_history is None:
+            return messages, None
+        return messages, ContextCompactionState.from_messages(
+            messages,
+            spec.consolidate_history,
+            spec.consolidate_provider_compaction,
+        )
 
     async def _run_core(
         self,
