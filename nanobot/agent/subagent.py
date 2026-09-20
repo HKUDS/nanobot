@@ -432,22 +432,28 @@ class SubagentManager:
             ))
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
-                if self.consolidator is None:
-                    raise RuntimeError("Subagent execution requires a context consolidator")
                 tool_definitions = tools.get_definitions()
-                consolidate_history = partial(
-                    self.consolidator.summarize_transcript,
-                    runtime=runtime,
-                    session_key=f"subagent:{task_id}",
-                    tools=tool_definitions,
-                    persist=False,
+                consolidate_history = (
+                    partial(
+                        self.consolidator.summarize_transcript,
+                        runtime=runtime,
+                        session_key=f"subagent:{task_id}",
+                        tools=tool_definitions,
+                        persist=False,
+                    )
+                    if self.consolidator is not None
+                    else None
                 )
-                consolidate_provider_compaction = partial(
-                    self.consolidator.summarize_provider_compaction,
-                    runtime=runtime,
-                    session_key=f"subagent:{task_id}",
-                    tools=tool_definitions,
-                    persist=False,
+                consolidate_provider_compaction = (
+                    partial(
+                        self.consolidator.summarize_provider_compaction,
+                        runtime=runtime,
+                        session_key=f"subagent:{task_id}",
+                        tools=tool_definitions,
+                        persist=False,
+                    )
+                    if self.consolidator is not None
+                    else None
                 )
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,

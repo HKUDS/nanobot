@@ -28,7 +28,6 @@ def _manager(tmp_path: Path, **kw) -> SubagentManager:
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
-        consolidator=MagicMock(),
     )
     defaults.update(kw)
     return SubagentManager(**defaults)
@@ -131,7 +130,6 @@ class TestLegacyCompatibility:
                 bus=MessageBus(),
                 max_tool_result_chars=16_000,
                 model="legacy-model",
-                consolidator=MagicMock(),
             )
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",

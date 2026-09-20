@@ -91,7 +91,6 @@ class AgentRunSpec:
     runtime: LLMRuntime
     max_iterations: int
     max_tool_result_chars: int
-    consolidate_history: HistoryConsolidator
     transcript_input: TranscriptInput | None = None
     transcript_builder: TranscriptBuilder | None = None
     hook: AgentHook | None = None
@@ -102,6 +101,7 @@ class AgentRunSpec:
     session_key: str | None = None
     provider_retry_mode: str = "standard"
     checkpoint_callback: CheckpointCallback | None = None
+    consolidate_history: HistoryConsolidator | None = None
     consolidate_provider_compaction: ProviderCompactionConsolidator | None = None
     injection_callback: InjectionCallback | None = None
     terminal_injection_callback: InjectionCallback | None = None
@@ -329,6 +329,9 @@ class AgentRunner:
         spec: AgentRunSpec,
     ) -> tuple[list[dict[str, Any]], ContextCompactionState]:
         """Build the initial transcript and its compaction state."""
+        consolidate_history = spec.consolidate_history
+        if consolidate_history is None:
+            raise ValueError("consolidate_history is required")
         transcript_input = spec.transcript_input
         if transcript_input is not None:
             if spec.initial_messages is not None:
@@ -339,7 +342,7 @@ class AgentRunner:
             return ContextCompactionState.from_transcript(
                 transcript_input,
                 transcript_builder,
-                spec.consolidate_history,
+                consolidate_history,
                 spec.consolidate_provider_compaction,
             )
         if spec.initial_messages is None:
@@ -347,7 +350,7 @@ class AgentRunner:
         messages = list(spec.initial_messages)
         return messages, ContextCompactionState.from_messages(
             messages,
-            spec.consolidate_history,
+            consolidate_history,
             spec.consolidate_provider_compaction,
         )
 
