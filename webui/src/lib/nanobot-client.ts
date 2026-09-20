@@ -1300,6 +1300,10 @@ export class NanobotClient {
       this.pendingInboundByChat.set(chatId, q);
     }
     q.push(ev);
+    // Temporary chats have no canonical history to recover evicted events from.
+    // Like their pinned message snapshots, retain them until resubscribe, close
+    // or disconnect. Disk-backed chats keep the bounded replay tail below.
+    if (this.temporaryChatIds.has(chatId)) return;
     const over = q.length - NanobotClient.PENDING_INBOUND_MAX;
     if (over > 0) {
       q.splice(0, over);

@@ -395,6 +395,7 @@ interface ThreadShellProps {
   title: string;
   temporary?: boolean;
   temporaryChatIds?: readonly string[];
+  messageCache?: ThreadMessageCache;
   temporaryChatEnabled?: boolean;
   onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
@@ -609,6 +610,7 @@ export function ThreadShell({
   title,
   temporary = false,
   temporaryChatIds = [],
+  messageCache,
   temporaryChatEnabled = false,
   onTemporaryChatEnabledChange,
   onToggleSidebar,
@@ -715,9 +717,11 @@ export function ThreadShell({
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const knownTemporaryChatIdsRef = useRef(new Set<string>());
-  const messageCacheRef = useRef(new ThreadMessageCache(
+  const localMessageCacheRef = useRef(new ThreadMessageCache(
     (key) => knownTemporaryChatIdsRef.current.has(key),
   ));
+  const messageCacheRef = useRef(messageCache ?? localMessageCacheRef.current);
+  messageCacheRef.current = messageCache ?? localMessageCacheRef.current;
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */
@@ -747,6 +751,9 @@ export function ThreadShell({
     setSubmittedViewportTurnId(null);
     onTurnEnd?.();
   }, [chatId, onTurnEnd]);
+  const handleStreamDetach = useCallback((snapshot: UIMessage[]) => {
+    if (chatId) messageCacheRef.current.set(chatId, projectWebuiThreadMessages(snapshot));
+  }, [chatId]);
   const {
     messages,
     messagesReady,
@@ -764,7 +771,7 @@ export function ThreadShell({
     setMessages,
     streamError,
     dismissStreamError,
-  } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
+  } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd, handleStreamDetach);
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const requestKey = historyKey;
@@ -843,12 +850,13 @@ export function ThreadShell({
     for (const chatId of retained) knownTemporaryChatIdsRef.current.add(chatId);
     for (const cachedChatId of knownTemporaryChatIdsRef.current) {
       if (!retained.has(cachedChatId)) {
-        messageCacheRef.current.delete(cachedChatId);
+        // Shared caches are retained/pruned by the app, not by individual panes.
+        if (!messageCache) messageCacheRef.current.delete(cachedChatId);
         activeViewportTurnByChatIdRef.current.delete(cachedChatId);
         knownTemporaryChatIdsRef.current.delete(cachedChatId);
       }
     }
-  }, [temporaryChatIds]);
+  }, [messageCache, temporaryChatIds]);
 
   const handleQuoteSelection = useCallback((text: string) => {
     setQuotedContext(text);

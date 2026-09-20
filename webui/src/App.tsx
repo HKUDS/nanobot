@@ -63,6 +63,7 @@ import {
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type {
   BootstrapResponse,
@@ -1212,6 +1213,19 @@ function Shell({
     () => temporarySessionList.map((session) => session.chatId),
     [temporarySessionList],
   );
+  // Pane shells can unmount during navigation. Keep replay state for this app
+  // session, pinning temporary chats because they cannot reload disk history.
+  const retainedTemporaryChatIdsRef = useRef(new Set<string>());
+  const [threadMessageCache] = useState(() => new ThreadMessageCache(
+    (key) => retainedTemporaryChatIdsRef.current.has(key),
+  ));
+  useEffect(() => {
+    const retained = new Set(temporaryChatIds);
+    for (const chatId of retainedTemporaryChatIdsRef.current) {
+      if (!retained.has(chatId)) threadMessageCache.delete(chatId);
+    }
+    retainedTemporaryChatIdsRef.current = retained;
+  }, [temporaryChatIds, threadMessageCache]);
 
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean }) => {
@@ -2830,6 +2844,7 @@ function Shell({
                             title={headerTitle}
                             temporary={temporaryChatRequested}
                             temporaryChatIds={temporaryChatIds}
+                            messageCache={threadMessageCache}
                             temporaryChatEnabled={temporaryChatEnabled}
                             onTemporaryChatEnabledChange={
                               !activeKey ? onTemporaryChatEnabledChange : undefined
@@ -2874,6 +2889,8 @@ function Shell({
                           session={paneSession}
                           sessions={sessions}
                           title={pane.title}
+                          temporaryChatIds={temporaryChatIds}
+                          messageCache={threadMessageCache}
                           onToggleSidebar={toggleSidebar}
                           onNewChat={onNewChat}
                           onCreateChat={onCreateChat}

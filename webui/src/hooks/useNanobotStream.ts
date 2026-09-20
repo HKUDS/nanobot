@@ -1,5 +1,5 @@
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
@@ -135,6 +135,7 @@ export function useNanobotStream(
   initialMessages: UIMessage[] = [],
   hasPendingToolCalls = false,
   onTurnEnd?: () => void,
+  onStreamDetach?: (messages: UIMessage[]) => void,
 ): {
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
@@ -173,6 +174,8 @@ export function useNanobotStream(
   const { t } = useTranslation();
   const initialRunStartedAt = chatId ? client.getRunStartedAt(chatId) : null;
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages);
+  const committedMessagesRef = useRef(messages);
+  useLayoutEffect(() => { committedMessagesRef.current = messages; }, [messages]);
   const [messageOwnerChatId, setMessageOwnerChatId] = useState(chatId);
   /** If history ends in unfinished agent activity, keep the loading spinner alive. */
   const initialStreaming = hasPendingAgentActivity(initialMessages);
@@ -884,11 +887,20 @@ export function useNanobotStream(
     const unsub = client.onChat(chatId, handle);
     return () => {
       unsub();
+      // Navigation may happen before the throttled paint. Snapshot the pending
+      // deltas synchronously while they still belong to this subscription.
+      const pending = pendingStreamEventsRef.current;
+      const snapshot = pending.length > 0
+        ? applyPendingStreamEvents(committedMessagesRef.current, pending)
+        : committedMessagesRef.current;
+      onStreamDetach?.(snapshot);
+      if (pending.length > 0) setMessages(snapshot);
       projectionRef.current = resetThreadProjectionCursor(projectionRef.current);
       clearPendingStreamWork();
     };
   }, [
     applyProjectionEvent,
+    applyPendingStreamEvents,
     applyStreamError,
     chatId,
     closeActiveAssistantStream,
@@ -899,6 +911,7 @@ export function useNanobotStream(
     isSideChannelEvent,
     notifyInBackground,
     onTurnEnd,
+    onStreamDetach,
     schedulePendingStreamFlush,
     t,
   ]);

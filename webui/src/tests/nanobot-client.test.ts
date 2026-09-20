@@ -71,6 +71,38 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("bounds regular replay tails but retains temporary events until discard", async () => {
+    const client = new NanobotClient({
+      url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const created = client.newTemporaryChat();
+    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true });
+    await created;
+    for (let index = 0; index < 2_010; index++) {
+      for (const chatId of ["regular", "temporary"]) {
+        socket.fakeMessage({ event: "delta", chat_id: chatId, text: String(index) });
+      }
+    }
+    const regular = vi.fn();
+    const temporary = vi.fn();
+    client.onChat("regular", regular);
+    const unsubscribe = client.onChat("temporary", temporary);
+    expect(regular).toHaveBeenCalledTimes(2_000);
+    expect(regular.mock.calls[0][0].text).toBe("10");
+    expect(temporary.mock.calls.filter(([event]) => event.event === "delta")).toHaveLength(2_010);
+    unsubscribe();
+    socket.fakeMessage({ event: "delta", chat_id: "temporary", text: "discard me" });
+    client.discardTemporaryChat("temporary");
+    const discarded = vi.fn();
+    client.onChat("temporary", discarded);
+    expect(discarded).not.toHaveBeenCalled();
+    client.close();
+  });
+
   it("reconciles simultaneous client submissions to the gateway-owned turn", () => {
     const client = new NanobotClient({
       url: "ws://test",
