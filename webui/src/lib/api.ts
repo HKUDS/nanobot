@@ -271,6 +271,15 @@ function hasValidProjectionMetadata(value: Record<string, unknown>): boolean {
     ].includes(String(value.turn_phase)))
     && (value.turn_seq === undefined || typeof value.turn_seq === "number")
     && (
+      value.response_sources === undefined
+      || (isRecordArray(value.response_sources) && value.response_sources.every((source) => (
+        typeof source.provider === "string" && source.provider.length > 0
+        && typeof source.model === "string" && source.model.length > 0
+        && typeof source.preset === "string" && source.preset.length > 0
+        && (source.fallback === undefined || typeof source.fallback === "boolean")
+      )))
+    )
+    && (
       value.source === undefined
       || (
         isRecord(value.source)

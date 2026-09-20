@@ -29,6 +29,7 @@ const SEMANTIC_MESSAGE_FIELDS = [
   "reasoning",
   "latencyMs",
   "source",
+  "responseSources",
   "turnId",
   "turnPhase",
   "turnSeq",
@@ -72,6 +73,27 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
 }
 
 describe("canonical thread event projection", () => {
+  it.each(["message", "stream_end"] as const)("preserves recorded sources in %s replay", (event) => {
+    const source = { provider: "xai", model: "grok", preset: "saved backup", fallback: true };
+    const messages = projectThreadEvents([
+      { event, chat_id: "chat", text: "Recovered", response_sources: [source] },
+      { event: "turn_end", chat_id: "chat" },
+      { event: "message", chat_id: "chat", text: "Legacy response" },
+    ]);
+    expect(messages[0].responseSources).toEqual([source]);
+    expect(messages[1].responseSources).toBeUndefined();
+  });
+
+  it("clears unknown source metadata on a textless stream end", () => {
+    const source = { provider: "xai", model: "grok", preset: "backup", fallback: true };
+    const messages = projectThreadEvents([
+      { event: "delta", chat_id: "chat", text: "Mixed answer", response_sources: [source] },
+      { event: "stream_end", chat_id: "chat", response_sources: [] },
+      { event: "turn_end", chat_id: "chat" },
+    ]);
+    expect(messages[0].responseSources).toEqual([]);
+  });
+
   it.each(cases)("projects persisted $name events", (fixtureCase) => {
     const messages = projectThreadEvents(fixtureEvents(fixtureCase.transcript));
     expect(normalizeProjection(messages)).toEqual(fixtureCase.expected);

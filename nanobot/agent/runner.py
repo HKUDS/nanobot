@@ -6,7 +6,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -36,6 +36,7 @@ from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     LLMUsage,
+    ProviderCallContext,
     ProviderConversationState,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
@@ -885,6 +886,10 @@ class AgentRunner:
             tools=tool_definitions,
         )
         wants_streaming = hook.wants_streaming()
+        provider_context = replace(
+            provider_context or ProviderCallContext(),
+            response_preset=spec.runtime.model_preset or "",
+        )
 
         active_hosted_tools: dict[str, dict[str, Any]] = {}
         native_reasoning_open = False
@@ -1235,7 +1240,10 @@ class AgentRunner:
         )
         response = await spec.runtime.provider.chat_stream_with_retry(
             **kwargs,
-            provider_context=provider_context,
+            provider_context=replace(
+                provider_context or ProviderCallContext(),
+                response_preset=spec.runtime.model_preset or "",
+            ),
         )
         await self.context_governor.summarize_provider_compaction(
             request_state,

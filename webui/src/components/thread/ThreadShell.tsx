@@ -672,7 +672,6 @@ export function ThreadShell({
     );
     return typeof response.path === "string" ? response.path : null;
   }, [client]);
-  const [fallbackModelName, setFallbackModelName] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const cliApps = useInstalledSettingItems({
@@ -737,7 +736,6 @@ export function ThreadShell({
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
     setSubmittedViewportTurnId(null);
-    setFallbackModelName(null);
     onTurnEnd?.();
   }, [chatId, onTurnEnd]);
   const {
@@ -1030,18 +1028,6 @@ export function ThreadShell({
       void refreshModelSettings();
     });
   }, [client, refreshModelSettings]);
-
-  useEffect(() => {
-    if (!chatId) {
-      setFallbackModelName(null);
-      return;
-    }
-    setFallbackModelName(null);
-    return client.onChat(chatId, (event) => {
-      if (event.event !== "turn_model_updated" || event.fallback !== true) return;
-      setFallbackModelName(event.model_name);
-    });
-  }, [chatId, client]);
 
   useEffect(() => {
     if (!historyKey || !chatId || loading) return;
@@ -1421,7 +1407,6 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
-      setFallbackModelName(null);
       const submitted = send(content, images, withWorkspaceScope(options));
       if (
         chatId
@@ -1570,7 +1555,6 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
@@ -1620,7 +1604,6 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}

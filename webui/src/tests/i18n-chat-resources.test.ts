@@ -15,6 +15,7 @@ describe("chat translation resources", () => {
     for (const key of [
       "chat.groups.all", "chat.groups.projects", "chat.newChat",
       "chat.fallbackTitle", "chat.activity.running", "chat.rename", "chat.loading",
+      "message.fallbackResponse",
     ]) {
       expect(i18n.exists(key), key).toBe(true);
       expect(i18n.t(key), key).not.toBe(key);

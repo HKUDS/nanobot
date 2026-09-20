@@ -39,7 +39,7 @@ import type {
 } from "@/lib/types";
 
 type PendingStreamEvent =
-  | { kind: "delta"; text: string; turn: UIMessageTurnFields; source?: UIMessage["source"] }
+  | { kind: "delta"; text: string; turn: UIMessageTurnFields; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"] }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
 
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
@@ -318,7 +318,9 @@ export function useNanobotStream(
           if (nextEvent.kind !== event.kind
             || nextEvent.turn.turnId !== event.turn.turnId
             || nextEvent.turn.turnPhase !== event.turn.turnPhase
-            || (nextEvent.kind === "delta" && event.kind === "delta" && nextEvent.source !== event.source)) break;
+            || (nextEvent.kind === "delta" && event.kind === "delta"
+              && (nextEvent.source !== event.source
+                || JSON.stringify(nextEvent.responseSources) !== JSON.stringify(event.responseSources)))) break;
           chunks.push(nextEvent.text);
           turn = { ...turn, ...nextEvent.turn };
           index++;
@@ -333,6 +335,7 @@ export function useNanobotStream(
               turn_phase: turn.turnPhase,
               turn_seq: turn.turnSeq,
               source: event.source,
+              response_sources: event.responseSources,
             }
           : {
               event: "reasoning_delta",
@@ -359,6 +362,7 @@ export function useNanobotStream(
     finalAnswerText?: string;
     turn?: UIMessageTurnFields;
     source?: UIMessage["source"];
+    responseSources?: UIMessage["responseSources"];
   }) => {
     lastStreamFlushRef.current = 0;
     if (streamFrameRef.current !== null) {
@@ -373,7 +377,8 @@ export function useNanobotStream(
     const finalAnswerText = options?.finalAnswerText;
     const turn = options?.turn ?? {};
     const source = options?.source;
-    if (events.length === 0 && finalAnswerText === undefined && source === undefined
+    const responseSources = options?.responseSources;
+    if (events.length === 0 && finalAnswerText === undefined && source === undefined && responseSources === undefined
       && !options?.mergeReasoning) {
       if (options?.closeAnswerSegment) closeActiveAssistantStream();
       return;
@@ -385,6 +390,7 @@ export function useNanobotStream(
       if (
         finalAnswerText !== undefined
         || source !== undefined
+        || responseSources !== undefined
         || options?.mergeReasoning
         || options?.closeAnswerSegment
       ) {
@@ -393,6 +399,7 @@ export function useNanobotStream(
           chat_id: chatId ?? "",
           ...(finalAnswerText !== undefined ? { text: finalAnswerText } : {}),
           ...(source ? { source } : {}),
+          ...(responseSources !== undefined ? { response_sources: responseSources } : {}),
           ...(options?.mergeReasoning ? { resuming: true, merge_next: true } : {}),
           turn_id: turn.turnId,
           turn_phase: turn.turnPhase,
@@ -661,6 +668,7 @@ export function useNanobotStream(
           text: chunk,
           turn: turnFieldsFromEvent(ev, "answer"),
           source: ev.source,
+          responseSources: ev.response_sources,
         });
         schedulePendingStreamFlush();
         return;
@@ -689,6 +697,7 @@ export function useNanobotStream(
           ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
           turn,
           source: ev.source,
+          responseSources: ev.response_sources,
         });
         if (projectionRef.current.suppressUntilTurnEnd) return;
         if (ev.resuming) {

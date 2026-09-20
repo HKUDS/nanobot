@@ -1601,6 +1601,7 @@
     "skill": "Habilidad: {{name}}",
     "askAboutSelection": "Preguntar sobre esto",
     "forkFromHere": "Bifurcar",
+    "fallbackResponse": "Esta respuesta usa un modelo de respaldo: {{preset}}.",
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",

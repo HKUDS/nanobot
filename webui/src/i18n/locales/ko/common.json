@@ -1600,6 +1600,7 @@
     "skill": "스킬: {{name}}",
     "askAboutSelection": "이 내용에 대해 질문하기",
     "forkFromHere": "분기",
+    "fallbackResponse": "이 응답은 대체 모델로 전환되어 {{preset}}이(가) 답변합니다.",
     "copyReply": "복사",
     "copiedReply": "복사됨",
     "turnLatencyTitle": "응답 시간(엔드투엔드)",

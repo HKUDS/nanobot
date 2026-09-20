@@ -17,6 +17,28 @@ function usage(days: Usage["days"]): Usage {
 }
 
 describe("Token usage card", () => {
+  it("uses the same plot box for stacked bars and the zero baseline, with dates outside", () => {
+    const days = Array.from({ length: 30 }, (_, index) => {
+      const date = `2026-09-${String(index + 1).padStart(2, "0")}`;
+      return { date, usage: day(date, index === 0 ? 30_000_000 : index === 1 ? 1 : 0) };
+    });
+    const { container } = render(<TokenUsageModelTrend days={days} modelDays={[
+      { date: days[0].date, provider: "openai", model: "a", total_tokens: 20_000_000 },
+      { date: days[0].date, provider: "xai", model: "b", total_tokens: 10_000_000 },
+      { date: days[1].date, provider: "openai", model: "a", total_tokens: 1 },
+    ]} />);
+    const plot = container.querySelector("[data-model-usage-plot]")!;
+    const bars = within(screen.getByRole("group", { name: "Model usage over time" })).getAllByRole("img");
+    expect(plot).toContainElement(bars[0]);
+    const baseline = container.querySelector('[data-model-usage-gridline="2"]')!;
+    expect(plot).toContainElement(baseline);
+    expect(baseline.parentElement).toHaveStyle({ top: "100%" });
+    expect(plot).not.toContainElement(screen.getByText("09-01"));
+    expect(bars[0].firstElementChild).toHaveStyle({ height: "100%" });
+    expect(bars[0].firstElementChild?.children).toHaveLength(2);
+    expect(bars[1].firstElementChild).toHaveStyle({ height: `${1 / 30_000_000 * 100}%` });
+    expect(bars[2].children).toHaveLength(0);
+  });
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-09T12:00:00Z"));

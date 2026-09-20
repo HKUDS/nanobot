@@ -521,6 +521,7 @@ function appendAnswerText(
     isStreaming: true,
     ...turn,
     ...(event.source ? { source: event.source } : {}),
+    ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
   };
   state.closedAssistantIds.delete(merged.id);
   state.activeAssistantId = merged.id;
@@ -832,6 +833,7 @@ export function projectThreadEvent(
             isStreaming: true,
             ...turn,
             ...(event.source ? { source: event.source } : {}),
+            ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
             createdAt: projectionCreatedAt(event, options),
           },
         ];
@@ -844,13 +846,15 @@ export function projectThreadEvent(
           isStreaming: true,
           ...turn,
           ...(event.source ? { source: event.source } : {}),
+          ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
         });
       }
-    } else if (event.source && targetIndex !== null) {
+    } else if ((event.source || event.response_sources !== undefined) && targetIndex !== null) {
       state.messages = replaceMessageAt(state.messages, targetIndex, {
         ...state.messages[targetIndex],
         ...turn,
-        source: event.source,
+        ...(event.source ? { source: event.source } : {}),
+        ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
       });
     }
     if (targetIndex !== null) state.activeAssistantId = state.messages[targetIndex].id;
@@ -936,6 +940,7 @@ export function projectThreadEvent(
       ...(media?.length ? { media } : {}),
       ...(latencyMs !== undefined ? { latencyMs } : {}),
       ...(event.source ? { source: event.source } : {}),
+      ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
       ...turnFieldsForProjection(state, event, "answer"),
     };
     if (options.sideChannel) {

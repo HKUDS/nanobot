@@ -88,6 +88,26 @@ _SESSION_MENTION_NAME_RE = re.compile(r"^[\w-]+$")
 _SESSION_HANDLE_ID_RE = re.compile(r"^handle_[0-9a-f]{32}$")
 
 
+def _response_sources(value: object) -> list[dict[str, str | bool]]:
+    """Allow only recorded display identity, never settings or credential blobs."""
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, str | bool]] = []
+    keys = ("provider", "model", "preset")
+    for item in cast(list[object], value):
+        if not isinstance(item, dict):
+            return []
+        fields = cast(dict[str, object], item)
+        if any(not isinstance(fields.get(key), str) or not fields[key] for key in keys):
+            return []
+        source: dict[str, str | bool] = {key: cast(str, fields[key]) for key in keys}
+        # Old records without an explicit fallback flag must not guess from model names.
+        source["fallback"] = fields.get("fallback") is True
+        if source not in result:
+            result.append(source)
+    return result
+
+
 def _sanitize_turn_usage(value: object) -> dict[str, int] | None:
     if not isinstance(value, dict):
         return None
@@ -1186,6 +1206,8 @@ class WebUITranscriptRecorder:
     ) -> None:
         if include_source and (source := webui_message_source(metadata)):
             event["source"] = source
+        if include_source and metadata is not None and "response_sources" in metadata:
+            event["response_sources"] = _response_sources(metadata["response_sources"])
         self._annotate_turn(chat_id, event, metadata, phase)
 
     def prepare_and_append(
@@ -2265,14 +2287,17 @@ def replay_transcript_to_ui_messages(
         return fields
 
     def _source_fields(rec: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if "response_sources" in rec:
+            out["responseSources"] = _response_sources(rec["response_sources"])
         source = rec.get("source")
         if not isinstance(source, dict):
-            return {}
+            return out
         source_data = cast(dict[str, Any], source)
         kind = source_data.get("kind")
         if not isinstance(kind, str) or not is_automation_kind(kind):
-            return {}
-        out: dict[str, Any] = {"source": {"kind": kind}}
+            return out
+        out["source"] = {"kind": kind}
         label = source_data.get("label")
         if isinstance(label, str) and label.strip():
             out["source"]["label"] = label.strip()
@@ -3241,6 +3266,8 @@ def _client_projection_event(
 ) -> dict[str, Any] | None:
     event = record.get("event")
     common = _client_projection_common_fields(record)
+    if event in {"delta", "stream_end", "message"} and "response_sources" in record:
+        common["response_sources"] = _response_sources(record["response_sources"])
     if event == "user":
         projected: dict[str, Any] = {
             "event": "user_message",

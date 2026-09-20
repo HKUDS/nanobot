@@ -92,7 +92,6 @@ interface ModelPresetBadgeProps {
   providerLabel?: string | null;
   needsSetup?: boolean;
   attentionRequest?: number;
-  fallbackModelName?: string | null;
   isHero: boolean;
   onClick?: () => void;
 }
@@ -109,7 +108,6 @@ export function ModelPresetBadge({
   providerLabel,
   needsSetup = false,
   attentionRequest = 0,
-  fallbackModelName,
   isHero,
   onClick,
 }: ModelPresetBadgeProps) {
@@ -128,22 +126,10 @@ export function ModelPresetBadge({
     model: modelDetail ?? modelPresets[listedIndex]?.model,
     provider: provider || modelPresets[listedIndex]?.provider,
   };
-  const fallbackPreset = fallbackModelName
-    ? modelPresets.find((preset) => preset.model?.trim() === fallbackModelName.trim())
-    : undefined;
-  const fallbackDisplayLabel = fallbackPreset?.name
-    || fallbackModelName?.trim().split(/[/:]/).pop()
-    || null;
-  const displayLabel = needsSetup ? label : fallbackDisplayLabel || label;
-  const displayModelDetail = fallbackPreset
-    ? fallbackPreset.model
-    : fallbackModelName || modelDetail;
-  const displayProvider = fallbackPreset?.provider
-    || (fallbackModelName ? inferProviderFromModelName(fallbackModelName) : provider);
   const tooltipLabel = needsSetup ? label : [...new Set([
-    displayLabel,
-    displayModelDetail,
-    fallbackModelName ? null : providerLabel,
+    label,
+    modelDetail,
+    providerLabel,
   ].filter(Boolean))].join(" · ");
   const presets = !activeName
     ? modelPresets
@@ -280,12 +266,11 @@ export function ModelPresetBadge({
   const pill = (
     <PresetPill
       key={needsSetup ? attentionRequest : undefined}
-      label={displayLabel}
-      modelDetail={displayModelDetail}
-      provider={displayProvider}
+      label={label}
+      modelDetail={modelDetail}
+      provider={provider}
       needsSetup={needsSetup}
       needsAttention={needsSetup && attentionRequest > 0}
-      fallbackModelName={needsSetup ? null : fallbackModelName}
       isHero={isHero}
     />
   );
@@ -294,7 +279,7 @@ export function ModelPresetBadge({
   const badge = !canSwitch ? (
     <TooltipTrigger asChild>
       <Container
-        aria-label={displayLabel}
+        aria-label={label}
         tabIndex={opensSetup ? undefined : 0}
         type={opensSetup ? "button" : undefined}
         onClick={opensSetup ? onClick : undefined}
@@ -320,7 +305,7 @@ export function ModelPresetBadge({
           <button
             type="button"
             data-switching={motion ? "true" : undefined}
-            aria-label={displayLabel}
+            aria-label={label}
             aria-expanded={open}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -510,7 +495,6 @@ function PresetPill({
   provider,
   needsSetup = false,
   needsAttention = false,
-  fallbackModelName,
   isHero,
   offset,
   scale,
@@ -520,7 +504,6 @@ function PresetPill({
   provider?: string | null;
   needsSetup?: boolean;
   needsAttention?: boolean;
-  fallbackModelName?: string | null;
   isHero: boolean;
   offset?: number;
   scale?: number;
@@ -543,7 +526,6 @@ function PresetPill({
 
   return (
     <span
-      data-fallback={fallbackModelName ? "true" : undefined}
       data-needs-setup={needsSetup ? "true" : undefined}
       data-preset-offset={offset}
       className={cn(

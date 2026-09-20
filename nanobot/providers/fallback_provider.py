@@ -128,12 +128,18 @@ class FallbackProvider(LLMProvider):
         provider_factory: Callable[[Any], LLMProvider],
         fallback_model_observer: FallbackModelObserver | None = None,
         primary_context_window_tokens: int | None = None,
+        fallback_preset_names: list[str | None] | None = None,
     ):
         primary_generation = primary.generation
         self._primary = primary
         super().__init__(provider_name=primary.provider_name)
         self._primary.generation = primary_generation
         self._fallback_presets = list(fallback_presets)
+        self._fallback_preset_names = tuple(
+            fallback_preset_names or [None] * len(fallback_presets)
+        )
+        if len(self._fallback_preset_names) != len(self._fallback_presets):
+            raise ValueError("fallback preset names must match fallback candidates")
         self._provider_factory = provider_factory
         self._fallback_model_observer = fallback_model_observer
         self._primary_context_window_tokens = primary_context_window_tokens
@@ -188,6 +194,8 @@ class FallbackProvider(LLMProvider):
             context_window_tokens=context_window_tokens,
             session_id=provider_context.session_id,
             events=provider_context.events,
+            response_preset=provider_context.response_preset,
+            response_is_fallback=provider_context.response_is_fallback,
         )
 
     def _primary_available(self) -> bool:
@@ -579,6 +587,11 @@ class FallbackProvider(LLMProvider):
                     context_window_tokens=context_window_tokens,
                     session_id=provider_context.session_id,
                     events=provider_context.events,
+                    response_preset=(
+                        self._fallback_preset_names[idx] or ""
+                        if provider_context.response_preset is not None else None
+                    ),
+                    response_is_fallback=provider_context.response_preset is not None,
                 )
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)

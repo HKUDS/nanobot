@@ -6032,9 +6032,15 @@ def test_handle_webui_thread_get_accepts_pagination_query(tmp_path, monkeypatch)
     assert body["page"]["before_cursor"]
 
 
+@pytest.mark.parametrize("sources", [
+    None,
+    [],
+    [{"provider": "xai", "model": "grok", "preset": "saved backup", "fallback": True}],
+])
 def test_handle_webui_thread_get_negotiates_client_event_projection(
     tmp_path,
     monkeypatch,
+    sources,
 ) -> None:
     from urllib.parse import quote
 
@@ -6051,7 +6057,10 @@ def test_handle_webui_thread_get_negotiates_client_event_projection(
     )
     append_transcript_object(
         key,
-        {"event": "message", "chat_id": "event-route", "text": "answer"},
+        {
+            "event": "message", "chat_id": "event-route", "text": "answer",
+            **({"response_sources": sources} if sources is not None else {}),
+        },
     )
     append_transcript_object(key, {"event": "turn_end", "chat_id": "event-route"})
 
@@ -6074,6 +6083,11 @@ def test_handle_webui_thread_get_negotiates_client_event_projection(
         "message",
         "turn_end",
     ]
+    answer = body["events"][1]
+    if sources is None:
+        assert "response_sources" not in answer
+    else:
+        assert answer["response_sources"] == sources
 
 
 def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:

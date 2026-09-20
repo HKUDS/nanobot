@@ -43,6 +43,7 @@ const SEMANTIC_MESSAGE_FIELDS = [
   "reasoning",
   "latencyMs",
   "source",
+  "responseSources",
   "turnId",
   "turnPhase",
   "turnSeq",
@@ -201,6 +202,42 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("keeps invocation snapshots across streaming, recovery segments, completion and reload", async () => {
+    const fake = fakeClient();
+    const a = { provider: "openai_codex", model: "gpt", preset: "writer", fallback: false };
+    const b = { provider: "xai", model: "grok", preset: "reviewer", fallback: true };
+    const { result, unmount } = renderHook(() => useNanobotStream("sources", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => fake.emit("sources", { event: "delta", chat_id: "sources", text: "First", response_sources: [a] }));
+    await flushStreamFrame();
+    expect(result.current.messages[0].responseSources).toEqual([a]);
+    act(() => {
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", resuming: true, response_sources: [a] });
+      fake.emit("sources", { event: "delta", chat_id: "sources", text: "Recovered", response_sources: [b] });
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", response_sources: [b] });
+      fake.emit("sources", { event: "turn_end", chat_id: "sources" });
+    });
+    expect(result.current.messages.map(m => m.responseSources)).toEqual([[a], [b]]);
+    const history = result.current.messages;
+    unmount();
+    const reloaded = renderHook(() => useNanobotStream("sources", history), { wrapper: wrap(fake.client) });
+    expect(reloaded.result.current.messages.map(m => m.responseSources)).toEqual([[a], [b]]);
+  });
+
+  it("honors complete and end-only sources and clears an ambiguous merged attribution", () => {
+    const fake = fakeClient();
+    const a = { provider: "openai", model: "shared-model", preset: "primary", fallback: false };
+    const b = { provider: "openai", model: "shared-model", preset: "backup", fallback: true };
+    const { result } = renderHook(() => useNanobotStream("sources", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("sources", { event: "message", chat_id: "sources", text: "Complete", response_sources: [b] });
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", text: "Mixed", response_sources: [a, b], resuming: true, merge_next: true });
+    });
+    expect(result.current.messages.map(m => m.responseSources)).toEqual([[b], [a, b]]);
+    act(() => fake.emit("sources", { event: "stream_end", chat_id: "sources", response_sources: [] }));
+    expect(result.current.messages[1].responseSources).toEqual([]);
+  });
   it.each(["succeeded", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
     const fake = fakeClient();
     const { result } = renderHook(
