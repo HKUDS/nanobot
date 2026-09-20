@@ -174,8 +174,47 @@ class SessionSearchIndex:
 
     # -- reconciliation ------------------------------------------------------
 
+    def _transcript_texts(self, session_key: str) -> list[str]:
+        """Extract text from WebUI transcript events (active + segments).
+
+        WebUI transcripts are a separate store from the JSONL session file;
+        legacy search reads both, so the index must cover both. Any string
+        ``text`` field from any event is included (over-indexing is harmless:
+        the legacy excerpt generator still filters exactly).
+        """
+        from nanobot.webui.transcript import (
+            webui_transcript_path,
+            webui_transcript_segments_dir,
+        )
+
+        paths = [webui_transcript_path(session_key)]
+        segments_dir = webui_transcript_segments_dir(session_key)
+        if segments_dir.is_dir():
+            paths.extend(sorted(segments_dir.glob("*.jsonl")))
+        texts: list[str] = []
+        for path in paths:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except ValueError:
+                            continue
+                        if not isinstance(record, dict):
+                            continue
+                        text = record.get("text")
+                        if isinstance(text, str) and text.strip():
+                            texts.append(text.strip())
+            except OSError:
+                continue
+        return texts
+
     def _session_content(self, row: dict[str, Any]) -> str:
-        """Full searchable text for a session: title plus all visible messages."""
+        """Full searchable text for a session: title, visible messages, and
+        WebUI transcript texts."""
         parts: list[str] = []
         title = row.get("title")
         if isinstance(title, str) and title.strip():
@@ -192,6 +231,7 @@ class SessionSearchIndex:
                         text = _message_text(cast(dict[str, Any], message))
                         if text:
                             parts.append(text)
+            parts.extend(self._transcript_texts(key))
         return "\n".join(parts)
 
     def _reconcile(self, conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
