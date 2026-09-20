@@ -365,7 +365,6 @@ v0.3.5 brings the workbench to the terminal and makes conversations easier to co
 
 ## Recent Updates
 
-- **2026-09-20** 🔀 Replies show the fallback model preset that actually handled the request.
 - **2026-09-19** 🔎 Searchable provider setup, consistent provider identities, and smoother Linear onboarding.
 - **2026-09-18** ♻️ Clearer recovery for interrupted work and Discord reply-context support.
 - **2026-09-16** 📦 Platform wheels bundle the version-matched native terminal UI.

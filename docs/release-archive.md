@@ -6,7 +6,6 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
-- **2026-09-20** 🔀 Replies show the fallback model preset that handled the request; live and replayed WebUI events share one projection path; stopped follow-ups stay canceled after restart.
 - **2026-09-19** 🔌 Native Linear agent channel support, searchable provider setup, and consistent provider and channel identities across the WebUI.
 - **2026-09-18** ♻️ Explicit recovery continuations, Discord reply-context support, and clearer channel setup before model configuration is complete.
 - **2026-09-17** 📬 Per-session inbox serialization preserves message order and queued-turn completion; stale compaction continuations and canceled automations no longer leak into later work.
