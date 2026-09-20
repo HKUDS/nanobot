@@ -1600,6 +1600,7 @@
     "skill": "スキル: {{name}}",
     "askAboutSelection": "この内容について質問",
     "forkFromHere": "分岐",
+    "fallbackResponse": "この返信では代替モデルに切り替わり、{{preset}} が回答しています。",
     "copyReply": "コピー",
     "copiedReply": "コピー済み",
     "turnLatencyTitle": "応答時間（全行程）",

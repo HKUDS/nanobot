@@ -1001,6 +1001,9 @@ class GatewayHTTPHandler:
         if direction is not None and direction not in {"latest"}:
             return _http_error(400, "invalid direction")
         before = _query_first(query, "before")
+        projection = _query_first(query, "projection")
+        if projection is not None and projection not in {"events"}:
+            return _http_error(400, "invalid projection")
         from nanobot.session.webui_turns import (
             websocket_turn_id,
             websocket_turn_transcript_persistence_failed,
@@ -1028,6 +1031,7 @@ class GatewayHTTPHandler:
             "direction": direction,
             "gateway_instance": self.tokens.instance_id,
             "limit": limit,
+            "projection": projection,
             "session_updated_at": (
                 session_metadata.get("updated_at") if session_metadata is not None else None
             ),
@@ -1062,6 +1066,7 @@ class GatewayHTTPHandler:
             limit=limit,
             direction=direction,
             before=before,
+            projection=projection or "messages",
             stats=diagnostics.transcript if diagnostics is not None else None,
         )
         if diagnostics is not None:

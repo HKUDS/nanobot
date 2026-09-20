@@ -1600,6 +1600,7 @@
     "skill": "Compétence : {{name}}",
     "askAboutSelection": "Poser une question à ce sujet",
     "forkFromHere": "Bifurquer",
+    "fallbackResponse": "Cette réponse utilise un modèle de secours : {{preset}}.",
     "copyReply": "Copier",
     "copiedReply": "Copié",
     "turnLatencyTitle": "Temps de réponse (de bout en bout)",

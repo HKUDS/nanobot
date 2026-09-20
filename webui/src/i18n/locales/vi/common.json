@@ -1600,6 +1600,7 @@
     "skill": "Kỹ năng: {{name}}",
     "askAboutSelection": "Hỏi về nội dung này",
     "forkFromHere": "Tách nhánh",
+    "fallbackResponse": "Phản hồi này đã chuyển sang mô hình dự phòng, do {{preset}} trả lời.",
     "copyReply": "Sao chép",
     "copiedReply": "Đã sao chép",
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",

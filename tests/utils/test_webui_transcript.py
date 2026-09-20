@@ -184,6 +184,134 @@ def test_large_trace_details_are_deferred_and_resolved(tmp_path, monkeypatch) ->
     }
 
 
+def test_event_projection_response_exposes_sanitized_canonical_events(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:project-events"
+    for event in (
+        {
+            "event": "user",
+            "chat_id": "project-events",
+            "text": "explain",
+            "media_paths": ["private/input.png"],
+            "turn_id": "turn-1",
+        },
+        {
+            "event": "reasoning_delta",
+            "chat_id": "project-events",
+            "text": "thinking",
+            "turn_id": "turn-1",
+        },
+        {
+            "event": "message",
+            "chat_id": "project-events",
+            "text": "done",
+            "turn_id": "turn-1",
+        },
+        {
+            "event": "turn_end",
+            "chat_id": "project-events",
+            "turn_id": "turn-1",
+            "latency_ms": 12,
+        },
+    ):
+        append_transcript_object(key, event)
+
+    def fail_legacy_projection(*args, **kwargs):
+        pytest.fail("event projection must not invoke the legacy message projector")
+
+    monkeypatch.setattr(
+        transcript_module,
+        "replay_transcript_to_ui_messages",
+        fail_legacy_projection,
+    )
+
+    payload = build_webui_thread_response(
+        key,
+        projection="events",
+        augment_user_media=lambda paths: [
+            {"kind": "image", "url": "/api/media/signed", "name": Path(paths[0]).name},
+        ],
+    )
+
+    assert payload is not None
+    assert "messages" not in payload
+    assert payload["projection"] == "events"
+    assert payload["events"][0] == {
+        "event": "user_message",
+        "chat_id": "project-events",
+        "projection_id": payload["events"][0]["projection_id"],
+        "created_at_ms": payload["events"][0]["created_at_ms"],
+        "turn_id": "turn-1",
+        "text": "explain",
+        "starts_turn": True,
+        "media_urls": [
+            {"kind": "image", "url": "/api/media/signed", "name": "input.png"},
+        ],
+    }
+    assert [event["event"] for event in payload["events"]] == [
+        "user_message",
+        "reasoning_delta",
+        "message",
+        "turn_end",
+    ]
+    assert payload["page"]["loaded_event_count"] == 4
+
+
+def test_event_projection_augments_complete_stream_text(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:project-stream-media"
+    for event in (
+        {
+            "event": "delta",
+            "chat_id": "project-stream-media",
+            "text": "![plot](output.png)",
+        },
+        {
+            "event": "stream_end",
+            "chat_id": "project-stream-media",
+            "text": "![plot](output.png)",
+        },
+    ):
+        append_transcript_object(key, event)
+
+    payload = build_webui_thread_response(
+        key,
+        projection="events",
+        augment_assistant_text=lambda text: text.replace("output.png", "/api/media/signed"),
+    )
+
+    assert payload is not None
+    assert [event["text"] for event in payload["events"]] == [
+        "![plot](output.png)",
+        "![plot](/api/media/signed)",
+    ]
+
+
+def test_event_projection_falls_back_for_deferred_trace_details(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:event-trace-fallback"
+    for event in (
+        {"event": "user", "chat_id": "event-trace-fallback", "text": "run"},
+        {
+            "event": "message",
+            "chat_id": "event-trace-fallback",
+            "kind": "progress",
+            "text": f'exec({json.dumps({"command": "x" * 40_000})})',
+        },
+        {"event": "turn_end", "chat_id": "event-trace-fallback"},
+    ):
+        append_transcript_object(key, event)
+
+    payload = build_webui_thread_response(key, projection="events")
+
+    assert payload is not None
+    assert "events" not in payload
+    assert any(message.get("traceDetail") for message in payload["messages"])
+
+
 @pytest.mark.parametrize(
     ("delta_event", "end_event"),
     [("reasoning_delta", "reasoning_end"), ("delta", "stream_end")],
