@@ -3657,7 +3657,7 @@ def build_webui_thread_response(
     }
     # TODO: Remove the server-owned UI-message projection after the event protocol
     # batches grouped trace details and the unnegotiated ``messages`` contract is retired.
-    deferred_trace_indexes = (
+    deferred_trace_indexes: set[int] = (
         _client_projection_deferred_trace_indexes(lines)
         if projection == "events"
         else set()
