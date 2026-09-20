@@ -777,6 +777,7 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=4096,
+        consolidator=MagicMock(),
     )
     captured: dict[str, list[str]] = {}
 

@@ -10,6 +10,7 @@ from agent.runner_helpers import make_run_spec
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.context_governance import (
     BACKFILL_CONTENT,
+    ContextCompactionState,
     ContextGovernanceConfig,
     ContextGovernor,
     ContextWindowExceededError,
@@ -57,6 +58,15 @@ def _governance_config(
         max_tool_result_chars=spec.max_tool_result_chars,
         context_window_tokens=spec.runtime.context_window_tokens,
         max_tokens=spec.runtime.generation.max_tokens,
+    )
+
+
+def _compaction_state(spec: AgentRunSpec) -> ContextCompactionState:
+    assert spec.initial_messages is not None
+    return ContextCompactionState.from_messages(
+        spec.initial_messages,
+        spec.consolidate_history,
+        spec.consolidate_provider_compaction,
     )
 
 
@@ -649,6 +659,7 @@ async def test_matching_reported_provider_usage_avoids_local_estimate(
         conversation=ProviderConversationStateController(
             provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
         ),
+        compaction=_compaction_state(spec),
         usage=LLMUsage.reported(input_tokens=input_tokens, output_tokens=10),
         messages=spec.initial_messages,
         tool_definitions=[],
@@ -695,6 +706,7 @@ async def test_changed_messages_use_local_estimate_after_reported_usage(monkeypa
         conversation=ProviderConversationStateController(
             provider=provider, model=spec.runtime.model, messages=spec.initial_messages,
         ),
+        compaction=_compaction_state(spec),
         usage=LLMUsage.reported(input_tokens=900, output_tokens=10),
         messages=[{"role": "user", "content": "previous request"}],
         tool_definitions=[],

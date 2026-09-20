@@ -1147,6 +1147,7 @@ class AgentLoop:
             runtime=runtime,
         )
         active_session_key = session.key if session else request_ctx.session_key
+        consolidation_session_key = active_session_key or "agent:transient"
         request_metadata = request_ctx.metadata
         effective_scope = self.workspace_scopes.for_turn(
             channel=request_ctx.channel,
@@ -1217,27 +1218,19 @@ class AgentLoop:
                 session_key=session.key if session else None,
                 provider_retry_mode=self.provider_retry_mode,
                 checkpoint_callback=_checkpoint,
-                consolidate_history=(
-                    partial(
-                        self.consolidator.summarize_transcript,
-                        runtime=runtime,
-                        session_key=session.key,
-                        tools=effective_tools.get_definitions(),
-                        persist=not ephemeral,
-                    )
-                    if session is not None
-                    else None
+                consolidate_history=partial(
+                    self.consolidator.summarize_transcript,
+                    runtime=runtime,
+                    session_key=consolidation_session_key,
+                    tools=effective_tools.get_definitions(),
+                    persist=session is not None and not ephemeral,
                 ),
-                consolidate_provider_compaction=(
-                    partial(
-                        self.consolidator.summarize_provider_compaction,
-                        runtime=runtime,
-                        session_key=session.key,
-                        tools=effective_tools.get_definitions(),
-                        persist=not ephemeral,
-                    )
-                    if session is not None
-                    else None
+                consolidate_provider_compaction=partial(
+                    self.consolidator.summarize_provider_compaction,
+                    runtime=runtime,
+                    session_key=consolidation_session_key,
+                    tools=effective_tools.get_definitions(),
+                    persist=session is not None and not ephemeral,
                 ),
                 injection_callback=_drain_pending,
                 terminal_injection_callback=_wait_for_pending,

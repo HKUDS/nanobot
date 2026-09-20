@@ -62,7 +62,8 @@ def test_initial_transcript_is_built_from_structured_turn_input() -> None:
     messages, compaction = AgentRunner._initial_transcript_and_compaction(spec)
 
     assert messages == expected
-    assert compaction is None
+    assert compaction is not None
+    assert compaction.raw_messages == expected
     transcript_builder.assert_called_once_with(transcript_input)
 
 

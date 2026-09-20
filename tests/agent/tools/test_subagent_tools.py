@@ -32,6 +32,7 @@ async def test_run_inline_returns_result_without_announcement(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
     )
     manager.runner.run = AsyncMock(return_value=SimpleNamespace(
         stop_reason="done",
@@ -65,6 +66,7 @@ async def test_run_inline_returns_structured_error(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
     )
     manager.runner.run = AsyncMock(return_value=SimpleNamespace(
         stop_reason="error",
@@ -100,6 +102,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
         tools_config=ToolsConfig(exec=ExecToolConfig(allowed_env_keys=["GOPATH", "JAVA_HOME"])),
     )
     mgr._announce_result = AsyncMock()
@@ -145,6 +148,7 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
         max_iterations=37,
     )
     mgr._announce_result = AsyncMock()
@@ -188,6 +192,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
     )
     mgr._announce_result = AsyncMock()
 
@@ -225,6 +230,7 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
         max_concurrent_subagents=1,
     )
     mgr._announce_result = AsyncMock()
@@ -325,6 +331,7 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
         max_concurrent_subagents=1,
     )
     first_entered = asyncio.Event()
@@ -390,6 +397,7 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
         max_concurrent_subagents=2,
     )
     both_entered = asyncio.Event()
@@ -459,6 +467,7 @@ async def test_cancel_by_session_cancels_inline_subagent(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
     )
     entered = asyncio.Event()
 

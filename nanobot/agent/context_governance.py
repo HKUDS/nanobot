@@ -138,13 +138,11 @@ class ContextCompactionState:
         cls,
         transcript_input: TranscriptInput,
         transcript_builder: TranscriptBuilder,
-        consolidate_history: HistoryConsolidator | None,
+        consolidate_history: HistoryConsolidator,
         consolidate_provider_compaction: ProviderCompactionConsolidator | None,
-    ) -> tuple[list[dict[str, Any]], ContextCompactionState | None]:
+    ) -> tuple[list[dict[str, Any]], ContextCompactionState]:
         """Build the raw transcript and its initial H/delta boundary."""
         messages = list(transcript_builder(transcript_input))
-        if consolidate_history is None:
-            return messages, None
         accepted_history_boundary = 1 + len(transcript_input.history)
 
         def build_summary_transcript(summary: str) -> list[dict[str, Any]]:
@@ -249,10 +247,10 @@ class ModelRequestState:
 
     config: ContextGovernanceConfig
     conversation: ProviderConversationStateController
+    compaction: ContextCompactionState
     usage: LLMUsage | None = None
     messages: list[dict[str, Any]] | None = None
     tool_definitions: list[dict[str, Any]] | None = None
-    compaction: ContextCompactionState | None = None
     provider_compaction_applied: bool = False
     compacted_tool_results: set[str] = field(default_factory=set)
     events: EventSink = NO_EVENTS
@@ -470,7 +468,7 @@ class ContextGovernor:
             # their full text. They no longer prove what the model can read.
             replaced_messages = (
                 compaction.accepted_messages
-                if response.provider_compaction_scope == "prior_context" and compaction is not None
+                if response.provider_compaction_scope == "prior_context"
                 else state.messages or []
             )
             state.compacted_tool_results.update(
@@ -481,7 +479,6 @@ class ContextGovernor:
         if (
             not response.provider_compaction_applied
             or response.provider_compaction_state is None
-            or compaction is None
             or compaction.consolidate_provider_compaction is None
         ):
             return
@@ -645,43 +642,24 @@ class ContextGovernor:
             and prepared == state.messages
             and tool_definitions == state.tool_definitions
         )
-        compaction = state.compaction
-        if compaction is None:
-            pressure = self.request_pressure(
-                state.config,
-                prepared,
-                state.usage,
-                usage_matches_messages=usage_matches_messages,
+        pressure = self.request_pressure(
+            state.config,
+            prepared,
+            state.usage,
+            usage_matches_messages=usage_matches_messages,
+            tool_definitions=tool_definitions,
+            request_context_tokens=request_context_tokens,
+        )
+        if pressure is not None:
+            prepared = await self._compact_request_history(
+                state,
+                state.compaction,
+                messages,
+                pressure,
                 tool_definitions=tool_definitions,
-                request_context_tokens=request_context_tokens,
             )
-            if pressure is not None:
-                measured, source = pressure
-                raise ContextWindowExceededError(
-                    session_key=state.config.session_key,
-                    estimated_tokens=measured,
-                    input_budget=self.input_budget(state.config),
-                    source=source,
-                )
-        else:
-            pressure = self.request_pressure(
-                state.config,
-                prepared,
-                state.usage,
-                usage_matches_messages=usage_matches_messages,
-                tool_definitions=tool_definitions,
-                request_context_tokens=request_context_tokens,
-            )
-            if pressure is not None:
-                prepared = await self._compact_request_history(
-                    state,
-                    compaction,
-                    messages,
-                    pressure,
-                    tool_definitions=tool_definitions,
-                )
-                model_messages = prepared
-                supplemental_messages = None
+            model_messages = prepared
+            supplemental_messages = None
         provider_context = (
             state.conversation.prepare_request(
                 transcript,
