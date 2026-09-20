@@ -329,6 +329,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.novita.ai/openai",
     ),
 
+    # Unifically: OpenAI-compatible gateway for hosted model APIs.
+    ProviderSpec(
+        name="unifically",
+        keywords=("unifically",),
+        env_key="UNIFICALLY_API_KEY",
+        display_name="Unifically",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="unifically",
+        default_api_base="https://api.unifically.com/v1",
+    ),
+
     # VolcEngine (火山引擎): OpenAI-compatible gateway, pay-per-use models
     ProviderSpec(
         name="volcengine",
