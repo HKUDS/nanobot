@@ -290,7 +290,9 @@ def test_event_projection_augments_complete_stream_text(tmp_path, monkeypatch) -
     ]
 
 
-def test_event_projection_falls_back_for_deferred_trace_details(tmp_path, monkeypatch) -> None:
+def test_event_projection_defers_trace_details_without_legacy_fallback(
+    tmp_path, monkeypatch,
+) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:event-trace-fallback"
     for event in (
@@ -305,11 +307,26 @@ def test_event_projection_falls_back_for_deferred_trace_details(tmp_path, monkey
     ):
         append_transcript_object(key, event)
 
+    trace = f'exec({json.dumps({"command": "x" * 40_000})})'
+
     payload = build_webui_thread_response(key, projection="events")
 
     assert payload is not None
-    assert "events" not in payload
-    assert any(message.get("traceDetail") for message in payload["messages"])
+    assert "messages" not in payload
+    assert payload["projection"] == "events"
+    trace_event = next(event for event in payload["events"] if event.get("kind") == "progress")
+    assert trace_event["text"] == "exec(…)"
+    assert trace_event["trace_detail"]["bytes"] > 32 * 1024
+    assert trace_event["trace_detail"]["traceCount"] == 1
+    assert len(json.dumps(payload)) < len(trace)
+
+    detail = build_webui_trace_detail_response(key, trace_event["trace_detail"]["ref"])
+
+    assert detail == {
+        "message_id": trace_event["projection_id"],
+        "content": trace,
+        "traces": [trace],
+    }
 
 
 @pytest.mark.parametrize(
@@ -390,6 +407,21 @@ def test_large_structured_trace_error_is_bounded_and_resolved(tmp_path, monkeypa
     assert detail is not None
     assert detail["toolEvents"][0]["error"] == full_error
 
+    event_payload = build_webui_thread_response(key, projection="events")
+
+    assert event_payload is not None
+    trace_event = next(
+        event for event in event_payload["events"] if event.get("kind") == "progress"
+    )
+    assert len(json.dumps(trace_event).encode("utf-8")) < 4_096
+    assert len(trace_event["tool_events"][0]["error"].encode("utf-8")) <= 512
+    event_detail = build_webui_trace_detail_response(
+        key,
+        trace_event["trace_detail"]["ref"],
+    )
+    assert event_detail is not None
+    assert event_detail["toolEvents"][0]["error"] == full_error
+
 
 def test_many_short_trace_rows_are_bounded_and_resolved(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
@@ -429,6 +461,12 @@ def test_many_short_trace_rows_are_bounded_and_resolved(tmp_path, monkeypatch) -
     assert len(detail["traces"]) == trace_count
     assert detail["traces"][0] == "tool_0(value)"
     assert detail["traces"][-1] == f"tool_{trace_count - 1}(value)"
+
+    event_payload = build_webui_thread_response(key, projection="events")
+
+    assert event_payload is not None
+    assert "events" not in event_payload
+    assert any(message.get("traceDetail") for message in event_payload["messages"])
 
 
 def test_transcript_revision_tracks_artifacts_and_variants(tmp_path, monkeypatch) -> None:

@@ -71,6 +71,12 @@ export interface ResponseSource {
   fallback?: boolean;
 }
 
+export interface UITraceDetail {
+  ref: string;
+  bytes: number;
+  traceCount: number;
+}
+
 export interface RetryStatus extends WireRetryStatus {
   next_retry_at?: number;
   turn_id?: string;
@@ -91,11 +97,7 @@ export interface UIMessage {
    * distinguish running, completed, and failed tool phases. */
   toolEvents?: ToolProgressEvent[];
   /** Oversized persisted trace content that can be fetched when activity is expanded. */
-  traceDetail?: {
-    ref: string;
-    bytes: number;
-    traceCount: number;
-  };
+  traceDetail?: UITraceDetail;
   /** Activity rows: explicit file edits emitted by edit tools. */
   fileEdits?: UIFileEdit[];
   /** Activity rows created during the same agent phase share one collapsible block. */
@@ -1387,6 +1389,8 @@ export type InboundEvent =
       media?: string[];
       media_urls?: Array<{ url: string; name?: string }>;
       tool_events?: ToolProgressEvent[];
+      /** Oversized persisted activity detail, fetched only when the trace is expanded. */
+      trace_detail?: UITraceDetail;
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress" | "reasoning";

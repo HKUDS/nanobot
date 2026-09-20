@@ -50,7 +50,9 @@ _WEBUI_REPLAY_IDENTITY_KEY = "_webui_replay_identity"
 _WEBUI_TRACE_DETAIL_REF_KEY = "_webui_trace_detail_ref"
 _WEBUI_TRACE_DETAIL_UNSAFE_KEY = "_webui_trace_detail_unsafe"
 _WEBUI_TRACE_DETAIL_REF_RE = re.compile(
-    r"^(?P<turn>\d{1,12})\.(?P<message>tr-[0-9a-f]{16}(?:-\d+)?)$"
+    r"^(?P<turn>\d{1,12})\.(?P<message>"
+    r"tr-[0-9a-f]{16}(?:-\d+)?|history-[0-9a-f]{20}"
+    r")$"
 )
 _MARKDOWN_LOCAL_IMAGE_RE = re.compile(
     r"!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(\s+(?:\"[^\"]*\"|'[^']*'))?\)"
@@ -2163,6 +2165,24 @@ def _trace_summary(line: str) -> str:
     return f"{_truncate_utf8(match.group(1), 240)}(…)" if match else _truncate_utf8(line, 240)
 
 
+def _summarized_tool_events(events: Any) -> list[dict[str, Any]]:
+    if not isinstance(events, list):
+        return []
+    summarized: list[dict[str, Any]] = []
+    for item in cast(list[Any], events)[-_MAX_DEFERRED_TOOL_EVENT_SUMMARY_ROWS:]:
+        if not isinstance(item, dict):
+            continue
+        event = cast(dict[str, Any], item)
+        summarized.append(
+            {
+                key: _truncate_utf8(value, 512)
+                for key in ("call_id", "name", "phase", "error")
+                if isinstance((value := event.get(key)), str)
+            }
+        )
+    return summarized
+
+
 def _defer_large_trace_details(messages: list[dict[str, Any]]) -> None:
     for message in messages:
         if message.get("kind") != "trace":
@@ -2189,19 +2209,7 @@ def _defer_large_trace_details(messages: list[dict[str, Any]]) -> None:
             ]
         events = message.get("toolEvents")
         if isinstance(events, list):
-            summarized_events: list[dict[str, Any]] = []
-            for item in cast(list[Any], events)[-_MAX_DEFERRED_TOOL_EVENT_SUMMARY_ROWS:]:
-                if not isinstance(item, dict):
-                    continue
-                event = cast(dict[str, Any], item)
-                summarized_events.append(
-                    {
-                        key: _truncate_utf8(value, 512)
-                        for key in ("call_id", "name", "phase", "error")
-                        if isinstance((value := event.get(key)), str)
-                    }
-                )
-            message["toolEvents"] = summarized_events
+            message["toolEvents"] = _summarized_tool_events(events)
         trace_count = len(cast(list[Any], traces)) if isinstance(traces, list) else int(bool(content))
         if isinstance(detail_ref, str):
             message["traceDetail"] = {
@@ -3192,6 +3200,15 @@ def build_webui_trace_detail_response(
         return None
     turn, _ = _compact_completed_stream_deltas(turn)
     lines = _records_with_replay_identity(turn, turn_ordinal=ordinal)
+    if message_id.startswith("history-"):
+        for record in lines:
+            if _client_projection_event_id(record) != message_id:
+                continue
+            detail = _client_projection_trace_detail(record)
+            if detail is None:
+                return None
+            return {"message_id": message_id, **detail}
+        return None
     for message in replay_transcript_to_ui_messages(lines):
         if message.get("id") != message_id or message.get("kind") != "trace":
             continue
@@ -3263,6 +3280,7 @@ def _client_projection_event(
     augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None,
     augment_assistant_text: Callable[[str], str] | None,
+    defer_trace_detail: bool = False,
 ) -> dict[str, Any] | None:
     event = record.get("event")
     common = _client_projection_common_fields(record)
@@ -3335,6 +3353,18 @@ def _client_projection_event(
         tool_events = _normalize_tool_events(record.get("tool_events"))
         if tool_events:
             projected["tool_events"] = tool_events
+        if defer_trace_detail and kind in {"tool_hint", "progress"}:
+            detail = _client_projection_trace_detail(record)
+            detail_ref = _trace_detail_ref(_client_projection_event_id(record), record)
+            if detail is not None and detail_ref is not None:
+                projected["text"] = _trace_summary(content)
+                if tool_events:
+                    projected["tool_events"] = _summarized_tool_events(tool_events)
+                projected["trace_detail"] = {
+                    "ref": detail_ref,
+                    "bytes": len(_record_json_line(detail).encode("utf-8")),
+                    "traceCount": len(cast(list[Any], detail.get("traces", []))),
+                }
         raw_media = record.get("media")
         media_paths = [
             path
@@ -3408,20 +3438,67 @@ def _client_projection_event(
     return None
 
 
-def _client_projection_requires_legacy_messages(lines: list[dict[str, Any]]) -> bool:
-    """Keep the established deferred-detail response for unusually large traces."""
+def _client_projection_trace_detail(record: Mapping[str, Any]) -> dict[str, Any] | None:
+    if record.get("event") != "message" or record.get("kind") not in {
+        "tool_hint",
+        "progress",
+    }:
+        return None
+    tool_events = _normalize_tool_events(record.get("tool_events"))
+    traces = tool_trace_lines_from_events(tool_events)
+    text = record.get("text")
+    if not traces and not tool_events and isinstance(text, str) and text:
+        traces = [text]
+    if not traces:
+        return None
+    detail: dict[str, Any] = {
+        "content": traces[-1],
+        "traces": traces,
+    }
+    if tool_events:
+        detail["toolEvents"] = tool_events
+    return detail
+
+
+def _client_projection_deferred_trace_indexes(lines: list[dict[str, Any]]) -> set[int]:
+    """Identify individually oversized activity rows safe to defer as events."""
+    deferred: set[int] = set()
+    for index, record in enumerate(lines):
+        detail = _client_projection_trace_detail(record)
+        if (
+            detail is not None
+            and len(_record_json_line(detail).encode("utf-8")) > _MAX_INLINE_TRACE_DETAIL_BYTES
+            and _trace_detail_ref(_client_projection_event_id(record), record) is not None
+        ):
+            deferred.add(index)
+    return deferred
+
+
+def _client_projection_requires_legacy_messages(
+    lines: list[dict[str, Any]],
+    deferred_trace_indexes: set[int],
+) -> bool:
+    """Retain grouped deferral until the event protocol can batch detail refs."""
     trace_bytes = 0
+    deferred_count = 0
     conservative_limit = _MAX_INLINE_TRACE_DETAIL_BYTES // 2
-    for record in lines:
+    for index, record in enumerate(lines):
         if record.get("event") == "message" and record.get("kind") in {
             "tool_hint",
             "progress",
         }:
+            if index in deferred_trace_indexes:
+                deferred_count += 1
+                trace_bytes = 0
+                if deferred_count > _MAX_DEFERRED_TRACE_SUMMARY_ROWS:
+                    return True
+                continue
             trace_bytes += len(_record_json_line(record).encode("utf-8"))
             if trace_bytes > conservative_limit:
                 return True
         elif record.get("event") in {"user", "delta", "stream_end", "turn_end"}:
             trace_bytes = 0
+            deferred_count = 0
     return False
 
 
@@ -3498,10 +3575,11 @@ def _client_projection_events(
     augment_user_media: Callable[[list[str]], list[dict[str, Any]]] | None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None,
     augment_assistant_text: Callable[[str], str] | None,
+    deferred_trace_indexes: set[int],
 ) -> tuple[list[dict[str, Any]], int | None]:
     events: list[dict[str, Any]] = []
     fork_boundary_event_index: int | None = None
-    for record in lines:
+    for index, record in enumerate(lines):
         if record.get("event") == WEBUI_FORK_MARKER_EVENT:
             if fork_boundary_event_index is None:
                 fork_boundary_event_index = len(events)
@@ -3511,6 +3589,7 @@ def _client_projection_events(
             augment_user_media=augment_user_media,
             augment_assistant_media=augment_assistant_media,
             augment_assistant_text=augment_assistant_text,
+            defer_trace_detail=index in deferred_trace_indexes,
         )
         if event is not None:
             events.append(event)
@@ -3576,11 +3655,15 @@ def build_webui_thread_response(
         ),
         "active_turn_id": active_turn_id,
     }
-    # TODO: Remove the server-owned UI-message projection after the event response
-    # owns deferred trace details and the unnegotiated ``messages`` contract ends.
-    use_client_projection = (
-        projection == "events"
-        and not _client_projection_requires_legacy_messages(lines)
+    # TODO: Remove the server-owned UI-message projection after the event protocol
+    # batches grouped trace details and the unnegotiated ``messages`` contract is retired.
+    deferred_trace_indexes = (
+        _client_projection_deferred_trace_indexes(lines)
+        if projection == "events"
+        else set()
+    )
+    use_client_projection = projection == "events" and not (
+        _client_projection_requires_legacy_messages(lines, deferred_trace_indexes)
     )
     if use_client_projection:
         events, fork_boundary_event_index = _client_projection_events(
@@ -3588,6 +3671,7 @@ def build_webui_thread_response(
             augment_user_media=augment_user_media,
             augment_assistant_media=augment_assistant_media,
             augment_assistant_text=augment_assistant_text,
+            deferred_trace_indexes=deferred_trace_indexes,
         )
         payload["projection"] = "events"
         payload["events"] = events

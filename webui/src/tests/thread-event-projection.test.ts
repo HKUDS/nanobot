@@ -20,6 +20,7 @@ const SEMANTIC_MESSAGE_FIELDS = [
   "kind",
   "traces",
   "toolEvents",
+  "traceDetail",
   "fileEdits",
   "images",
   "media",
@@ -97,5 +98,36 @@ describe("canonical thread event projection", () => {
   it.each(cases)("projects persisted $name events", (fixtureCase) => {
     const messages = projectThreadEvents(fixtureEvents(fixtureCase.transcript));
     expect(normalizeProjection(messages)).toEqual(fixtureCase.expected);
+  });
+
+  it("keeps deferred activity rows separately addressable in one segment", () => {
+    const firstDetail = { ref: "2.history-aaaaaaaaaaaaaaaaaaaa", bytes: 40_000, traceCount: 1 };
+    const secondDetail = { ref: "2.history-bbbbbbbbbbbbbbbbbbbb", bytes: 41_000, traceCount: 1 };
+
+    const messages = projectThreadEvents([
+      {
+        event: "message",
+        chat_id: "chat-1",
+        text: "exec(…)",
+        kind: "progress",
+        projection_id: "history-aaaaaaaaaaaaaaaaaaaa",
+        trace_detail: firstDetail,
+      },
+      {
+        event: "message",
+        chat_id: "chat-1",
+        text: "read_file(…)",
+        kind: "tool_hint",
+        projection_id: "history-bbbbbbbbbbbbbbbbbbbb",
+        trace_detail: secondDetail,
+      },
+    ]);
+
+    expect(messages).toHaveLength(2);
+    expect(messages.map((message) => message.traceDetail)).toEqual([
+      firstDetail,
+      secondDetail,
+    ]);
+    expect(messages[0].activitySegmentId).toBe(messages[1].activitySegmentId);
   });
 });

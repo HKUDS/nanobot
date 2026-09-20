@@ -204,6 +204,54 @@ describe("webui API helpers", () => {
     await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({ events: [event] });
   });
 
+  it("accepts validated deferred trace metadata on canonical thread events", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{
+          event: "message",
+          chat_id: "chat-1",
+          text: "exec(…)",
+          kind: "progress",
+          trace_detail: {
+            ref: "2.history-aaaaaaaaaaaaaaaaaaaa",
+            bytes: 40_000,
+            traceCount: 1,
+          },
+        }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({
+      events: [{ trace_detail: { bytes: 40_000, traceCount: 1 } }],
+    });
+  });
+
+  it("rejects malformed deferred trace metadata at the HTTP boundary", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{
+          event: "message",
+          chat_id: "chat-1",
+          text: "exec(…)",
+          kind: "progress",
+          trace_detail: { ref: "bad", bytes: "many", traceCount: 1 },
+        }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread projection event: message",
+    );
+  });
+
   it("fetches deferred trace details with encoded session and ref", async () => {
     await fetchWebuiThreadTraceDetail("tok", "websocket:chat-1", "9.tr-deadbeefdeadbeef");
 

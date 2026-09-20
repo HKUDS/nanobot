@@ -290,6 +290,18 @@ function hasValidProjectionMetadata(value: Record<string, unknown>): boolean {
   );
 }
 
+function isProjectionTraceDetail(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.ref === "string"
+    && /^\d{1,12}\.history-[0-9a-f]{20}$/.test(value.ref)
+    && typeof value.bytes === "number"
+    && Number.isFinite(value.bytes)
+    && value.bytes >= 0
+    && typeof value.traceCount === "number"
+    && Number.isInteger(value.traceCount)
+    && value.traceCount >= 0;
+}
+
 function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
   if (!isRecord(value) || typeof value.event !== "string" || typeof value.chat_id !== "string") {
     throw new Error("Invalid WebUI thread event");
@@ -328,6 +340,10 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
     case "message":
       if (typeof value.text !== "string") break;
       if (value.tool_events !== undefined && !isRecordArray(value.tool_events)) break;
+      if (value.trace_detail !== undefined && (
+        !["tool_hint", "progress"].includes(String(value.kind))
+        || !isProjectionTraceDetail(value.trace_detail)
+      )) break;
       if (value.media_urls !== undefined && (
         !Array.isArray(value.media_urls) || !value.media_urls.every(isProjectionMedia)
       )) break;

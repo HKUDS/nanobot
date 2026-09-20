@@ -643,6 +643,7 @@ function projectToolActivity(
         : [];
   if (lines.length === 0) return;
 
+  const deferredDetail = event.trace_detail;
   const segmentId = ensureProjectionActivitySegment(state);
   const turn = turnFieldsForProjection(state, event, "activity");
   const last = state.messages[state.messages.length - 1];
@@ -650,6 +651,8 @@ function projectToolActivity(
     last
     && last.kind === "trace"
     && !last.isStreaming
+    && !last.traceDetail
+    && !deferredDetail
     && (!last.activitySegmentId || last.activitySegmentId === segmentId)
   ) {
     const previousTraces = last.traces?.length
@@ -692,6 +695,7 @@ function projectToolActivity(
       content: lines[lines.length - 1],
       traces: lines,
       ...(visibleEvents.length ? { toolEvents: visibleEvents } : {}),
+      ...(deferredDetail ? { traceDetail: deferredDetail } : {}),
       activitySegmentId: segmentId,
       ...turn,
       createdAt: projectionCreatedAt(event, options),
