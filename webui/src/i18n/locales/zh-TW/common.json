@@ -616,7 +616,16 @@
       "checking": "正在檢查…",
       "checkForUpdates": "檢查更新",
       "upToDate": "已是最新版本",
-      "updateAvailable": "已有 v{{version}} 版更新"
+      "updateAvailable": "已有 v{{version}} 版更新",
+      "updateTitle": "更新 nanobot",
+      "updateDescription": "安裝最新穩定版，安裝完成後重新啟動 nanobot 即可套用。",
+      "updateAdvanced": "進階選項",
+      "updateDev": "從原始碼安裝",
+      "updateDevDescription": "使用開發版，需要 Git；缺少 Bun 時會自動下載。已有原始碼儲存庫將繼續使用目前分支。",
+      "updateAction": "安裝最新穩定版",
+      "updateDevAction": "安裝開發版",
+      "updateSuccess": "已安裝 v{{version}}，重新啟動 nanobot 後即可套用更新。",
+      "updateLocalOnly": "請在伺服器本機開啟 WebUI，或啟用遠端套件安裝後再更新。"
     },
     "mcp": {
       "allCategories": "全部分類",

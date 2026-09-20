@@ -24,6 +24,7 @@ from nanobot.config.schema import Config
 from nanobot.llm_usage import llm_usage_payload
 from nanobot.optional_features import OptionalFeatureError, with_channel_runtime_status
 from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.update import UpdateError
 from nanobot.webui.settings_capabilities import network_safety_payload
 from nanobot.webui.settings_contracts import (
     QueryParams,
@@ -34,6 +35,7 @@ from nanobot.webui.settings_contracts import (
     query_first_alias,
 )
 from nanobot.webui.settings_runtime import runtime_config_payload
+from nanobot.webui.update_service import UpdateService
 
 if TYPE_CHECKING:
     from nanobot.webui.settings_services import WebUISettingsServices
@@ -387,9 +389,11 @@ class SystemSettingsHandler:
         self.settings = settings
         self.logger = logger
         self._channel_connectors: dict[str, Any] = {}
+        self._updates = UpdateService()
 
     async def close(self) -> None:
         """Release channel-owned setup sessions during gateway shutdown."""
+        await self._updates.close()
         connectors = tuple(self._channel_connectors.items())
         self._channel_connectors.clear()
         for channel_name, connector in connectors:
@@ -476,6 +480,23 @@ class SystemSettingsHandler:
             )
         if action == "version-check":
             return await self._version_check(operations)
+        if action == "update-status":
+            return SettingsRouteResult.success({
+                **self._updates.status(),
+                "can_update": self.allow_feature_package_install(request),
+            }, decorate_restart=True, restart_section="runtime")
+        if action == "update-start":
+            if not self.allow_feature_package_install(request):
+                return SettingsRouteResult.failure(
+                    403, "Updating from a remote WebUI is disabled. Use localhost or enable remote package installation.",
+                )
+            dev = (request.payload or {}).get("dev", False)
+            if not isinstance(dev, bool):
+                return SettingsRouteResult.failure(400, "dev must be boolean")
+            try:
+                return SettingsRouteResult.success({**self._updates.start(dev=dev), "can_update": True})
+            except UpdateError as exc:
+                return SettingsRouteResult.failure(409, str(exc))
         return SettingsRouteResult.failure(404, "unknown settings action")
 
     async def _cli_apps(

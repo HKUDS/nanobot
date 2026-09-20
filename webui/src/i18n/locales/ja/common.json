@@ -616,7 +616,16 @@
       "checking": "確認中...",
       "checkForUpdates": "アップデートを確認",
       "upToDate": "最新の状態です",
-      "updateAvailable": "アップデートがあります v{{version}}"
+      "updateAvailable": "アップデートがあります v{{version}}",
+      "updateTitle": "nanobot を更新",
+      "updateDescription": "最新の安定版をインストールします。インストール後に nanobot を再起動してください。",
+      "updateAdvanced": "詳細オプション",
+      "updateDev": "ソースからインストール",
+      "updateDevDescription": "開発版を使用します。Git が必要です。Bun がない場合は自動的にダウンロードします。既存のソースチェックアウトでは現在のブランチを使用します。",
+      "updateAction": "最新リリースをインストール",
+      "updateDevAction": "開発版をインストール",
+      "updateSuccess": "v{{version}} をインストールしました。更新を適用するには nanobot を再起動してください。",
+      "updateLocalOnly": "更新するにはサーバー上で WebUI を開くか、リモートパッケージのインストールを有効にしてください。"
     },
     "mcp": {
       "allCategories": "すべてのカテゴリ",

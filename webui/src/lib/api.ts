@@ -703,6 +703,23 @@ export async function fetchWorkspaces(
   );
 }
 
+export interface NanobotUpdateStatus {
+  state: "idle" | "running" | "succeeded" | "failed";
+  mode: "release" | "dev";
+  message: string;
+  version: string | null;
+  requires_restart: boolean;
+  can_update: boolean;
+}
+
+export function fetchNanobotUpdate(token: string): Promise<NanobotUpdateStatus> {
+  return request<NanobotUpdateStatus>("/api/settings/nanobot-update", token, undefined, API_READ_TIMEOUT_MS);
+}
+
+export function updateNanobot(transport: WebUIMutationTransport, dev: boolean): Promise<NanobotUpdateStatus> {
+  return mutation<NanobotUpdateStatus>(transport, "settings.nanobot.update", { dev });
+}
+
 export async function fetchCliApps(
   token: string,
   base: string = "",

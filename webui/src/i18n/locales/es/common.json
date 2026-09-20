@@ -616,7 +616,16 @@
       "checking": "Buscando actualizaciones...",
       "checkForUpdates": "Buscar actualizaciones",
       "upToDate": "Estás al día",
-      "updateAvailable": "Actualización disponible v{{version}}"
+      "updateAvailable": "Actualización disponible v{{version}}",
+      "updateTitle": "Actualizar nanobot",
+      "updateDescription": "Instala la última versión estable. Reinicia nanobot después de la instalación.",
+      "updateAdvanced": "Opciones avanzadas",
+      "updateDev": "Instalar desde el código fuente",
+      "updateDevDescription": "Usa la versión de desarrollo. Requiere Git; Bun se descarga automáticamente cuando es necesario. Los repositorios de código fuente existentes conservan su rama actual.",
+      "updateAction": "Instalar la última versión",
+      "updateDevAction": "Instalar versión de desarrollo",
+      "updateSuccess": "Se instaló v{{version}}. Reinicia nanobot para aplicar la actualización.",
+      "updateLocalOnly": "Abre WebUI en el servidor local o habilita la instalación remota de paquetes para actualizar."
     },
     "mcp": {
       "allCategories": "Todas las categorías",

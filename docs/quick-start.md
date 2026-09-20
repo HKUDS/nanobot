@@ -155,8 +155,9 @@ If pip reports `externally-managed-environment`, use the recommended installer, 
 
 **Current source**
 
-Clone the repository and install it in editable mode. Bun is required so the checkout can run
-its matching native TUI instead of mixing current Python with an older release binary.
+Clone the repository and install it in editable mode. The checkout uses Bun to run
+its matching native TUI; nanobot downloads the pinned Bun runtime when needed.
+Node is not required.
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -220,7 +221,21 @@ Replace the provider, endpoint, and model together. Do not pair a credential fro
 
 ## Updating
 
-Upgrade with the same method you used to install:
+Update the active Python installation:
+
+```bash
+nanobot update --check
+nanobot update
+# Or explicitly update/build source (requires Git):
+nanobot update --dev
+```
+
+You can also use **Settings → About → Update nanobot** in WebUI. Source installation
+is an advanced option. Restart nanobot after installation. Existing source checkouts
+must be clean and able to fast-forward to their upstream; updates never discard local edits.
+See [Updating](./cli-reference.md#updating) for dependency handling and deployment limits.
+
+For older versions without this command, use the same method you used to install:
 
 ```bash
 # Recommended installer

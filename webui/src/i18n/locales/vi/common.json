@@ -616,7 +616,16 @@
       "checking": "Đang kiểm tra...",
       "checkForUpdates": "Kiểm tra bản cập nhật",
       "upToDate": "Bạn đang dùng phiên bản mới nhất",
-      "updateAvailable": "Có bản cập nhật v{{version}}"
+      "updateAvailable": "Có bản cập nhật v{{version}}",
+      "updateTitle": "Cập nhật nanobot",
+      "updateDescription": "Cài đặt bản ổn định mới nhất. Hãy khởi động lại nanobot sau khi cài đặt.",
+      "updateAdvanced": "Tùy chọn nâng cao",
+      "updateDev": "Cài đặt từ mã nguồn",
+      "updateDevDescription": "Sử dụng phiên bản phát triển. Cần Git; Bun sẽ được tự động tải xuống khi cần. Các bản sao mã nguồn hiện có vẫn giữ nhánh hiện tại.",
+      "updateAction": "Cài đặt bản phát hành mới nhất",
+      "updateDevAction": "Cài đặt bản phát triển",
+      "updateSuccess": "Đã cài đặt v{{version}}. Hãy khởi động lại nanobot để áp dụng cập nhật.",
+      "updateLocalOnly": "Mở WebUI trên máy chủ cục bộ hoặc bật cài đặt gói từ xa để cập nhật."
     },
     "mcp": {
       "allCategories": "Tất cả danh mục",
