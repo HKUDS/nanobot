@@ -389,6 +389,46 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(("session_id", "chat_id"), [
+    ("chat-a", "chat-a"),
+    (" chat-a ", " chat-a "),
+    ("  ", "  "),
+    ("api:chat-a", "api:chat-a"),
+    ("会话:a", "会话:a"),
+    ("default", "default"),
+    (None, "default"),
+    ("", "default"),
+    (0, "default"),
+    (42, "42"),
+    ({"id": 1}, "{'id': 1}"),
+])
+async def test_session_route_preserves_existing_json_identity(
+    aiohttp_client, mock_agent, session_id, chat_id, stream,
+) -> None:
+    """Routing must not normalize or reject previously accepted session IDs."""
+    app = create_app(mock_agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={
+            "messages": [{"role": "user", "content": "hi"}],
+            "session_id": session_id, "stream": stream,
+        },
+    )
+
+    assert resp.status == 200
+    await resp.read()
+    call_kwargs = mock_agent.process_direct.call_args.kwargs
+    assert call_kwargs["session_key"] == f"api:{chat_id}"
+    assert call_kwargs["channel"] == "api"
+    assert call_kwargs["chat_id"] == chat_id
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     order: list[str] = []
     first_started = asyncio.Event()

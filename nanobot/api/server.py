@@ -1,7 +1,8 @@
-"""OpenAI-compatible HTTP API server for a fixed nanobot session.
+"""OpenAI-compatible HTTP API server for nanobot sessions.
 
 Provides /v1/chat/completions and /v1/models endpoints.
-All requests route to a single persistent API session.
+Requests without ``session_id`` share one persistent default session; each
+``session_id`` owns an isolated session with its own chat route.
 """
 
 from __future__ import annotations
@@ -316,6 +317,8 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
+    # Keep the existing history identity; derive its route without normalizing the ID.
+    chat_id = session_key.removeprefix("api:")
     session_locks: dict[str, asyncio.Lock] = request.app[_SESSION_LOCKS_KEY]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
@@ -359,7 +362,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                             media=media_paths if media_paths else None,
                             session_key=session_key,
                             channel="api",
-                            chat_id=API_CHAT_ID,
+                            chat_id=chat_id,
                             on_stream=_on_stream,
                             on_stream_end=_on_stream_end,
                         )
@@ -403,7 +406,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                         media=media_paths if media_paths else None,
                         session_key=session_key,
                         channel="api",
-                        chat_id=API_CHAT_ID,
+                        chat_id=chat_id,
                         hooks=[usage_capture],
                     )
                 response_text = _response_text(response)

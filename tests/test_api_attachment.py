@@ -322,7 +322,12 @@ async def test_multipart_defaults_text_when_missing(aiohttp_client, mock_agent, 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_multipart_with_session_id(aiohttp_client, mock_agent, tmp_path) -> None:
+@pytest.mark.parametrize(("session_id", "chat_id"), [
+    ("my-session", "my-session"), (" my-session ", "my-session"), ("  ", "default"),
+])
+async def test_multipart_with_session_id(
+    aiohttp_client, mock_agent, tmp_path, session_id, chat_id,
+) -> None:
     """Multipart upload with session_id uses custom session key."""
     import os
     original_cwd = os.getcwd()
@@ -338,11 +343,12 @@ async def test_multipart_with_session_id(aiohttp_client, mock_agent, tmp_path) -
         resp = await client.post(
             "/v1/chat/completions",
             headers=AUTH_HEADERS,
-            data={"message": "hello", "session_id": "my-session", "files": data},
+            data={"message": "hello", "session_id": session_id, "files": data},
         )
         assert resp.status == 200
         call_kwargs = mock_agent.process_direct.call_args.kwargs
-        assert call_kwargs["session_key"] == "api:my-session"
+        assert call_kwargs["session_key"] == f"api:{chat_id}"
+        assert call_kwargs["chat_id"] == chat_id
     finally:
         os.chdir(original_cwd)
 
