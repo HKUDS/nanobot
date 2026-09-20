@@ -429,7 +429,7 @@ def test_baizhi_preset_preserves_and_hides_complete_header(
     assert "synthetic-baizhi-key" not in json.dumps(updated)
     assert load_config().tools.mcp_servers["baizhi"].headers == server.headers
     mcp_presets_action("remove", {"name": ["baizhi"]})
-    assert "synthetic-baizhi-key" not in (tmp_path / "config.json").read_text()
+    assert "synthetic-baizhi-key" not in (tmp_path / "config.json").read_text(encoding="utf-8")
 
 
 def test_baizhi_preset_resolves_authorization_env_without_persisting_secret(
@@ -441,7 +441,7 @@ def test_baizhi_preset_resolves_authorization_env_without_persisting_secret(
     payload = mcp_presets_action("enable", {"name": ["baizhi"]})
 
     assert "synthetic-environment-key" not in json.dumps(payload)
-    stored = json.loads((tmp_path / "config.json").read_text())
+    stored = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
     assert stored["tools"]["mcpServers"]["baizhi"]["headers"] == {
         "Authorization": "${BAIZHI_AUTHORIZATION}",
     }
