@@ -247,8 +247,9 @@ export function ModelIdPicker({
   );
   const providerModelCount = payload?.model_count ?? providerModels.length;
   const modelUnconfigured = !value.trim() || !providerConfigured;
-  const showCatalogNotice = !loading && payload && (catalogNeedsSignIn
-    || (payload.status === "available" && (payload.source === "stale" || payload.source === "fallback")));
+  const showCatalogNotice = payload && (catalogNeedsSignIn
+    || (!loading && payload.status === "available"
+      && (payload.source === "stale" || payload.source === "fallback")));
 
   useEffect(() => {
     if (open && catalogNeedsSignIn && !loading) catalogSignInRef.current?.focus();
@@ -260,16 +261,16 @@ export function ModelIdPicker({
   }, [open, effectiveProvider, hasConcreteProvider, providerUsesManualModelIds, value]);
 
   useEffect(() => {
+    // Reopening does not restore authorization. Keep a confirmed rejection until
+    // discovery completes, without carrying it into another provider's picker.
+    setPayload((current) => shouldFetchModels && current?.provider === effectiveProvider
+      && current.error_kind === "auth_required" ? current : null);
+    setError(null);
+    setLoading(open && shouldFetchModels);
     if (!open || !shouldFetchModels) {
-      setPayload(null);
-      setError(null);
-      setLoading(false);
       return;
     }
     let cancelled = false;
-    setPayload(null);
-    setError(null);
-    setLoading(true);
     fetchProviderModels(tokenRef.current, effectiveProvider)
       .then((nextPayload) => {
         if (!cancelled) setPayload(nextPayload);

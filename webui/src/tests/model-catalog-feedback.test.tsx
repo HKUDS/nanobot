@@ -96,6 +96,50 @@ describe("OAuth catalog feedback", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("keeps a known auth failure hidden from selection while reopening and refreshing", async () => {
+    let finish!: (response: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(catalog("fallback", "auth_required")))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const onChange = vi.fn();
+    render(<ModelIdPicker token="tok" settings={settings()} provider="openai_codex"
+      value="" showProviderLogos onChange={onChange} onProviderOAuthLogin={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: "Select model" });
+    await openPopover(trigger);
+    await screen.findByRole("button", { name: "Sign in again" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    await openPopover(trigger);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in again" })).toBeVisible();
+    await act(async () => { finish(jsonResponse(catalog("remote", null))); });
+    expect(screen.getByRole("combobox")).toBeVisible();
+    expect(screen.getByRole("option", { name: /Offline model/ })).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("does not carry a rejected provider's sign-in state into another provider", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(catalog("fallback", "auth_required")))
+      .mockImplementationOnce(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+    const payload = settings();
+    payload.providers.push({ ...payload.providers[0], name: "xai_grok", label: "xAI Grok" });
+    const props = { token: "tok", settings: payload, value: "", showProviderLogos: true, onChange: vi.fn() };
+    const view = render(<ModelIdPicker {...props} provider="openai_codex" />);
+    await openPopover(screen.getByRole("button", { name: "Select model" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Authorization expired");
+    view.rerender(<ModelIdPicker {...props} provider="xai_grok" />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toBeVisible();
+    expect(screen.getByText("Loading models...")).toBeVisible();
+  });
+
   it("reloads an open picker on successful same-account login and clears stale feedback", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(catalog("stale", "auth_required")))
