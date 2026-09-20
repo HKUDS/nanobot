@@ -205,7 +205,8 @@ class SessionSearchIndex:
                             continue
                         if not isinstance(record, dict):
                             continue
-                        text = record.get("text")
+                        record_dict = cast(dict[str, Any], record)
+                        text = record_dict.get("text")
                         if isinstance(text, str) and text.strip():
                             texts.append(text.strip())
             except OSError:
