@@ -260,6 +260,36 @@ def test_event_projection_response_exposes_sanitized_canonical_events(
     assert payload["page"]["loaded_event_count"] == 4
 
 
+def test_event_projection_augments_complete_stream_text(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:project-stream-media"
+    for event in (
+        {
+            "event": "delta",
+            "chat_id": "project-stream-media",
+            "text": "![plot](output.png)",
+        },
+        {
+            "event": "stream_end",
+            "chat_id": "project-stream-media",
+            "text": "![plot](output.png)",
+        },
+    ):
+        append_transcript_object(key, event)
+
+    payload = build_webui_thread_response(
+        key,
+        projection="events",
+        augment_assistant_text=lambda text: text.replace("output.png", "/api/media/signed"),
+    )
+
+    assert payload is not None
+    assert [event["text"] for event in payload["events"]] == [
+        "![plot](output.png)",
+        "![plot](/api/media/signed)",
+    ]
+
+
 def test_event_projection_falls_back_for_deferred_trace_details(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:event-trace-fallback"

@@ -3283,6 +3283,8 @@ def _client_projection_event(
         projected = {"event": event, **common}
         text = record.get("text")
         if isinstance(text, str):
+            if event == "stream_end" and augment_assistant_text is not None:
+                text = augment_assistant_text(text)
             projected["text"] = text
         if event == "stream_end":
             if record.get("resuming") is True:
