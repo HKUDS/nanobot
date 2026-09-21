@@ -27,6 +27,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
+from nanobot.session.subtask_outputs import public_subtasks
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -779,6 +780,32 @@ class WebUICommandRouter:
                 status=400,
                 message="WebUI mutation payload must be an object",
             )
+            return
+
+        if action == "subtasks.snapshot":
+            # Read outside the replay cache: private snapshots die with their owner.
+            chat_id = cast(dict[str, object], payload).get("chat_id")
+            sessions = self.gateway.session_manager
+            if not is_valid_webui_chat_id(chat_id) or sessions is None:
+                await self.send_webui_response(connection, request_id, status=404,
+                                               message="session_unavailable")
+                return
+            try:
+                self._temporary_chats.message_policy(connection, chat_id, "")
+            except TemporaryChatError:
+                await self.send_webui_response(connection, request_id, status=404,
+                                               message="session_unavailable")
+                return
+            key = webui_session_key(chat_id)
+            session = sessions.get_cached(key)
+            metadata: object
+            if session is not None:
+                metadata = session.metadata
+            else:
+                saved = await asyncio.to_thread(sessions.read_session_metadata, key)
+                metadata = saved.get("metadata") if saved is not None else None
+            await self.send_webui_response(connection, request_id,
+                result={"tasks": public_subtasks(metadata)})
             return
 
         payload_digest = hashlib.sha256(

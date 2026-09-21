@@ -22,6 +22,7 @@ from nanobot.agent.tools.context import (
     RequestContext,
     ToolContext,
     bind_request_context,
+    current_request_context,
     reset_request_context,
 )
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -39,11 +40,13 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+from nanobot.session.subtask_outputs import SubtaskOutput
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
+    from nanobot.session.manager import SessionManager
 
 
 class _SubagentOrigin(TypedDict):
@@ -73,13 +76,31 @@ class SubagentStatus:
 class _SubagentHook(AgentHook):
     """Hook for subagent execution — logs tool calls and updates status."""
 
-    def __init__(self, task_id: str, status: SubagentStatus | None = None) -> None:
+    def __init__(self, task_id: str, status: SubagentStatus | None = None,
+                 output: SubtaskOutput | None = None) -> None:
         super().__init__()
         self._task_id = task_id
         self._status = status
+        self._output = output
+        self._visible_text = ""
+
+    def wants_streaming(self) -> bool:
+        return self._output is not None and self._output.enabled
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        self._visible_text = ""
+        if self._output is not None:
+            self._output.update(state="running", iteration=context.iteration)
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        if self._output is not None:
+            self._visible_text = (self._visible_text + delta)[-12_001:]
+            self._output.update(output=self._visible_text)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         for tool_call in context.tool_calls:
+            if self._output is not None:
+                self._output.update(tool=tool_call.name)
             args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
             logger.debug(
                 "Subagent [{}] executing: {} with arguments: {}",
@@ -87,6 +108,8 @@ class _SubagentHook(AgentHook):
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        if self._output is not None and context.response is not None and context.response.content:
+            self._output.update(output=context.response.content)
         if self._status is None:
             return
         self._status.iteration = context.iteration
@@ -112,6 +135,7 @@ class SubagentManager:
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
         consolidator: Consolidator | None = None,
+        sessions: SessionManager | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -155,6 +179,7 @@ class SubagentManager:
             else defaults.max_concurrent_subagents
         )
         self.consolidator = consolidator
+        self._sessions = sessions
         self._run_slots = asyncio.Semaphore(self.max_concurrent_subagents)
         self.runner = AgentRunner()
         self._exec_session_manager = ExecSessionManager()
@@ -373,20 +398,21 @@ class SubagentManager:
         announce: bool = True,
     ) -> str:
         """Wait for capacity, then execute one subagent task."""
+        request = current_request_context()
+        output = SubtaskOutput(self._sessions, origin.get("session_key"), task_id, label,
+                               request.turn_id if request is not None else None)
         status.phase = "queued"
-        async with self._run_slots:
-            status.phase = "initializing"
-            return await self._run_admitted_subagent(
-                task_id,
-                task,
-                label,
-                origin,
-                status,
-                runtime,
-                origin_message_id,
-                workspace_scope,
-                announce=announce,
-            )
+        try:
+            async with self._run_slots:
+                status.phase = "initializing"
+                output.update(state="running")
+                return await self._run_admitted_subagent(
+                    task_id, task, label, origin, status, runtime, origin_message_id,
+                    workspace_scope, announce=announce, output=output,
+                )
+        except asyncio.CancelledError:
+            output.update(state="cancelled")
+            raise
 
     async def _run_admitted_subagent(
         self,
@@ -400,6 +426,7 @@ class SubagentManager:
         workspace_scope: WorkspaceScope | None = None,
         *,
         announce: bool = True,
+        output: SubtaskOutput | None = None,
     ) -> str:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -461,7 +488,7 @@ class SubagentManager:
                     runtime=runtime,
                     max_iterations=self.max_iterations,
                     max_tool_result_chars=self.max_tool_result_chars,
-                    hook=_SubagentHook(task_id, status),
+                    hook=_SubagentHook(task_id, status, output),
                     max_iterations_message="Task completed but no final response was generated.",
                     finalize_on_max_iterations=False,
                     error_message=None,
@@ -489,6 +516,10 @@ class SubagentManager:
                 final_result = result.final_content or "Task completed but no final response was generated."
                 final_status = "ok"
                 logger.info("Subagent [{}] completed successfully", task_id)
+            if output is not None:
+                # Error strings, prompts and raw tool arguments stay internal.
+                output.update(state="failed" if final_status == "error" else "completed",
+                              output="" if final_status == "error" else final_result)
             if announce:
                 await self._announce_result(
                     task_id,
@@ -506,6 +537,8 @@ class SubagentManager:
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
             final_result = f"Error: {e}"
+            if output is not None:
+                output.update(state="failed", output="")
             if announce:
                 await self._announce_result(
                     task_id,

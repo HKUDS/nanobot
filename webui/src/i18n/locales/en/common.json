@@ -1464,6 +1464,22 @@
     "error": "Connection error"
   },
   "thread": {
+    "subtasks": {
+      "retry": "Retry",
+      "title": "Subtasks",
+      "retention": "Most recent 32 tasks. Output is limited to the latest 12,000 characters.",
+      "stale": "Connection unavailable. Showing the last snapshot.",
+      "queued": "Queued",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "interrupted": "Interrupted",
+      "unknown": "Status unavailable",
+      "round": "Round {{count}}",
+      "noOutput": "No visible output yet.",
+      "truncated": "Earlier output was omitted."
+    },
     "compaction": {
       "cancelled": "Context compaction cancelled",
       "empty": "Nothing to compact.",

@@ -1264,6 +1264,22 @@
     "error": "接続エラー"
   },
   "thread": {
+    "subtasks": {
+      "retry": "再試行",
+      "title": "サブタスク",
+      "retention": "最新32件のタスク、出力は末尾12,000文字まで。",
+      "stale": "接続できません。最後のスナップショットを表示しています。",
+      "queued": "待機中",
+      "running": "実行中",
+      "completed": "完了",
+      "failed": "失敗",
+      "cancelled": "キャンセル済み",
+      "interrupted": "中断",
+      "unknown": "状態不明",
+      "round": "ラウンド {{count}}",
+      "noOutput": "表示できる出力はまだありません。",
+      "truncated": "以前の出力は省略されました。"
+    },
     "compaction": {
       "cancelled": "コンテキストの圧縮をキャンセルしました",
       "empty": "圧縮するコンテキストはありません。",

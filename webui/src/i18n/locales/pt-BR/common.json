@@ -1278,6 +1278,22 @@
     "error": "Erro de conexão"
   },
   "thread": {
+    "subtasks": {
+      "retry": "Tentar novamente",
+      "title": "Subtarefas",
+      "retention": "Últimas 32 tarefas; últimos 12.000 caracteres de cada saída.",
+      "stale": "Conexão indisponível. Exibindo o último registro.",
+      "queued": "Na fila",
+      "running": "Em execução",
+      "completed": "Concluída",
+      "failed": "Falhou",
+      "cancelled": "Cancelada",
+      "interrupted": "Interrompida",
+      "unknown": "Estado desconhecido",
+      "round": "Rodada {{count}}",
+      "noOutput": "Ainda não há saída visível.",
+      "truncated": "A saída anterior foi omitida."
+    },
     "compaction": {
       "cancelled": "Compactação do contexto cancelada",
       "empty": "Não há contexto para compactar.",

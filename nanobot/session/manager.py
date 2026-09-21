@@ -58,6 +58,7 @@ _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 _RUNTIME_CHECKPOINT_VERSION = 1
 _RUNTIME_CHECKPOINT_SUFFIX = ".checkpoint.json"
 _FORK_VOLATILE_METADATA_KEYS = {
+    "subtask_outputs.v1",
     "goal_state",
     "pending_user_turn",
     "pending_user_followups",

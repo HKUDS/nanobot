@@ -1464,6 +1464,22 @@
     "error": "连接出错"
   },
   "thread": {
+    "subtasks": {
+      "retry": "重试",
+      "title": "子任务",
+      "retention": "保留最近 32 个任务，每个任务显示最后 12,000 个字符。",
+      "stale": "连接不可用，当前显示上次快照。",
+      "queued": "排队中",
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "interrupted": "已中断",
+      "unknown": "状态未知",
+      "round": "第 {{count}} 轮",
+      "noOutput": "暂无可见输出。",
+      "truncated": "较早的输出已省略。"
+    },
     "compaction": {
       "cancelled": "上下文压缩已取消",
       "empty": "无需压缩上下文",
