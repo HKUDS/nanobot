@@ -1464,6 +1464,32 @@
     "error": "Connection error"
   },
   "thread": {
+    "backgroundCommands": {
+      "title": "Commands",
+      "retention": "Live logs are kept only in this gateway: up to 100k characters per command, with up to 32 finished commands for 30 minutes. Restarting clears them.",
+      "stale": "Connection lost. Status and output may be stale.",
+      "retry": "Retry",
+      "unknown": "Unknown",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "stopped": "Stopped",
+      "timed_out": "Timed out",
+      "exit": "Exit",
+      "pauseFollow": "Pause auto-scroll",
+      "follow": "Follow output",
+      "copy": "Copy output",
+      "copied": "Copied",
+      "stop": "Stop command",
+      "confirmStop": "Stop this command and its child processes? Other commands will keep running.",
+      "stopping": "Stopping…",
+      "cancel": "Cancel",
+      "actionFailed": "The action failed. Please try again.",
+      "output": "Command output",
+      "noOutput": "No output yet.",
+      "loading": "Loading output…",
+      "truncated": "Showing the retained tail; {{count}} earlier characters omitted."
+    },
     "compaction": {
       "cancelled": "Context compaction cancelled",
       "empty": "Nothing to compact.",

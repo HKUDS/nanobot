@@ -729,6 +729,7 @@ def _run_gateway(
         webui_mcp_reload=mcp_provider.reload,
         webui_skill_state_action=_webui_skill_state_action,
         webui_recovery_action=recovery.handle_action,
+        exec_sessions=agent.exec_sessions,
         config_path=Path(config_path),
     )
 

@@ -1264,6 +1264,32 @@
     "error": "接続エラー"
   },
   "thread": {
+    "backgroundCommands": {
+      "title": "コマンド",
+      "retention": "ログは現在の gateway のメモリ内のみです。各コマンド最大10万文字、終了済み最大32件を30分間保持します。再起動で消去されます。",
+      "stale": "接続が切れました。状態と出力が古い可能性があります。",
+      "retry": "再試行",
+      "unknown": "不明",
+      "running": "実行中",
+      "completed": "完了",
+      "failed": "失敗",
+      "stopped": "停止済み",
+      "timed_out": "タイムアウト",
+      "exit": "終了コード",
+      "pauseFollow": "自動スクロールを一時停止",
+      "follow": "出力を追従",
+      "copy": "出力をコピー",
+      "copied": "コピー済み",
+      "stop": "コマンドを停止",
+      "confirmStop": "このコマンドと子プロセスを停止しますか？他のコマンドは継続します。",
+      "stopping": "停止中…",
+      "cancel": "キャンセル",
+      "actionFailed": "操作に失敗しました。再試行してください。",
+      "output": "コマンド出力",
+      "noOutput": "まだ出力がありません。",
+      "loading": "出力を読み込み中…",
+      "truncated": "保持された末尾を表示しています。先頭の{{count}}文字は省略されています。"
+    },
     "compaction": {
       "cancelled": "コンテキストの圧縮をキャンセルしました",
       "empty": "圧縮するコンテキストはありません。",

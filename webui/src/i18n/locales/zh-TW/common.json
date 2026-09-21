@@ -1264,6 +1264,32 @@
     "error": "連線錯誤"
   },
   "thread": {
+    "backgroundCommands": {
+      "title": "命令",
+      "retention": "日誌僅保存在目前 gateway：每條命令最多 10 萬字元，最多保留 32 條已結束命令、30 分鐘。重新啟動後清空。",
+      "stale": "連線中斷，狀態和輸出可能不是最新的。",
+      "retry": "重試",
+      "unknown": "狀態未知",
+      "running": "執行中",
+      "completed": "已完成",
+      "failed": "失敗",
+      "stopped": "已停止",
+      "timed_out": "已逾時",
+      "exit": "結束代碼",
+      "pauseFollow": "暫停自動捲動",
+      "follow": "跟隨輸出",
+      "copy": "複製輸出",
+      "copied": "已複製",
+      "stop": "停止命令",
+      "confirmStop": "停止這條命令及其子程序？其他命令將繼續執行。",
+      "stopping": "正在停止…",
+      "cancel": "取消",
+      "actionFailed": "操作失敗，請重試。",
+      "output": "命令輸出",
+      "noOutput": "尚無輸出。",
+      "loading": "正在載入輸出…",
+      "truncated": "僅顯示保留的末尾內容，已省略前面的 {{count}} 個字元。"
+    },
     "compaction": {
       "cancelled": "上下文壓縮已取消",
       "empty": "無需壓縮上下文",

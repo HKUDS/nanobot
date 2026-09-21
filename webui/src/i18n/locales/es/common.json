@@ -1265,6 +1265,32 @@
     "error": "Error de conexión"
   },
   "thread": {
+    "backgroundCommands": {
+      "title": "Comandos",
+      "retention": "Los registros solo se guardan en este gateway: hasta 100 mil caracteres por comando y 32 comandos terminados durante 30 minutos. Se borran al reiniciar.",
+      "stale": "Conexión perdida. El estado y la salida pueden estar desactualizados.",
+      "retry": "Reintentar",
+      "unknown": "Desconocido",
+      "running": "En ejecución",
+      "completed": "Completado",
+      "failed": "Fallido",
+      "stopped": "Detenido",
+      "timed_out": "Tiempo agotado",
+      "exit": "Salida",
+      "pauseFollow": "Pausar desplazamiento",
+      "follow": "Seguir salida",
+      "copy": "Copiar salida",
+      "copied": "Copiado",
+      "stop": "Detener comando",
+      "confirmStop": "¿Detener este comando y sus procesos secundarios? Los demás seguirán ejecutándose.",
+      "stopping": "Deteniendo…",
+      "cancel": "Cancelar",
+      "actionFailed": "La acción falló. Inténtalo de nuevo.",
+      "output": "Salida del comando",
+      "noOutput": "Aún no hay salida.",
+      "loading": "Cargando salida…",
+      "truncated": "Se muestra el final conservado; se omitieron {{count}} caracteres anteriores."
+    },
     "compaction": {
       "cancelled": "Compresión de contexto cancelada",
       "empty": "No hay contexto que comprimir.",

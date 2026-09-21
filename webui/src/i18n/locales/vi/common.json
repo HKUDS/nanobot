@@ -1264,6 +1264,32 @@
     "error": "Lỗi kết nối"
   },
   "thread": {
+    "backgroundCommands": {
+      "title": "Lệnh",
+      "retention": "Nhật ký chỉ lưu trong gateway này: tối đa 100 nghìn ký tự mỗi lệnh và 32 lệnh đã kết thúc trong 30 phút. Khởi động lại sẽ xóa nhật ký.",
+      "stale": "Mất kết nối. Trạng thái và đầu ra có thể đã cũ.",
+      "retry": "Thử lại",
+      "unknown": "Không rõ",
+      "running": "Đang chạy",
+      "completed": "Hoàn tất",
+      "failed": "Thất bại",
+      "stopped": "Đã dừng",
+      "timed_out": "Hết thời gian",
+      "exit": "Mã thoát",
+      "pauseFollow": "Tạm dừng cuộn",
+      "follow": "Theo dõi đầu ra",
+      "copy": "Sao chép đầu ra",
+      "copied": "Đã sao chép",
+      "stop": "Dừng lệnh",
+      "confirmStop": "Dừng lệnh này và các tiến trình con? Các lệnh khác sẽ tiếp tục chạy.",
+      "stopping": "Đang dừng…",
+      "cancel": "Hủy",
+      "actionFailed": "Thao tác thất bại. Vui lòng thử lại.",
+      "output": "Đầu ra lệnh",
+      "noOutput": "Chưa có đầu ra.",
+      "loading": "Đang tải đầu ra…",
+      "truncated": "Hiển thị phần cuối được giữ lại; đã bỏ qua {{count}} ký tự trước đó."
+    },
     "compaction": {
       "cancelled": "Đã hủy nén ngữ cảnh",
       "empty": "Không có ngữ cảnh cần nén.",

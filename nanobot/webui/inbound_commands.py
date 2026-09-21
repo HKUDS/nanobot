@@ -36,6 +36,7 @@ from nanobot.session.webui_turns import (
 )
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
+from nanobot.webui.background_commands import BackgroundCommandError, background_command
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -779,6 +780,18 @@ class WebUICommandRouter:
                 status=400,
                 message="WebUI mutation payload must be an object",
             )
+            return
+
+        if action in {"background.list", "background.read", "background.stop"}:
+            # These live snapshots must not outlive their owner in the mutation replay cache.
+            try:
+                result = await background_command(self.gateway, connection, action,
+                                                  cast(dict[str, object], payload))
+            except BackgroundCommandError as exc:
+                await self.send_webui_response(connection, request_id, status=exc.status,
+                                               message=str(exc))
+            else:
+                await self.send_webui_response(connection, request_id, result=result)
             return
 
         payload_digest = hashlib.sha256(

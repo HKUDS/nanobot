@@ -6,13 +6,14 @@ import asyncio
 import codecs
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext, current_request_session_key
+from nanobot.agent.tools.exec_output import ExecCommandDetail, ExecCommandSummary, ExecOutputLog
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -140,13 +141,20 @@ class _ExecSession:
         self._stderr = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
         self._lock = asyncio.Lock()
         self._timed_out = False
-        self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, self._stdout))
-        self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, self._stderr))
+        self._ui_log = ExecOutputLog()
+        self._retainable = True
+        self._terminated = False
+        self._finished_at: float | None = None
+        self._kill_lock = asyncio.Lock()
+        self._killed = False
+        self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, self._stdout, "stdout"))
+        self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, self._stderr, "stderr"))
 
     async def _read_stream(
         self,
         stream: asyncio.StreamReader | None,
         buffer: _BoundedOutputBuffer,
+        stream_name: Literal["stdout", "stderr"],
     ) -> None:
         if stream is None:
             return
@@ -156,6 +164,8 @@ class _ExecSession:
             text = decoder.decode(chunk, final=not chunk)
             async with self._lock:
                 buffer.append(text)
+                if self._retainable:
+                    self._ui_log.append(text, stream_name)
             if not chunk:
                 break
 
@@ -236,12 +246,27 @@ class _ExecSession:
             exit_code=self.process.returncode,
             elapsed_s=max(0.0, time.monotonic() - self.started_at),
             timed_out=self._timed_out,
-            terminated=terminated,
+            terminated=terminated or self._terminated,
             stdin_closed=stdin_closed,
             truncated_chars=stdout_truncated + stderr_truncated + response_truncated,
         )
 
+    @property
+    def retains_output(self) -> bool:
+        return self._retainable
+
+    async def stop(self) -> None:
+        self._terminated = True
+        await self.kill()
+
     async def kill(self) -> None:
+        async with self._kill_lock:
+            if self._killed:
+                return
+            await self._kill_once()
+            self._killed = True
+
+    async def _kill_once(self) -> None:
         from nanobot.agent.tools.shell import ExecTool
 
         try:
@@ -268,12 +293,36 @@ class _ExecSession:
                     return
             await asyncio.sleep(0.01)
 
+    def summary(self) -> ExecCommandSummary:
+        code = self.process.returncode
+        if code is not None and self._finished_at is None:
+            self._finished_at = time.monotonic()
+        return {
+            "session_id": self.session_id, "command": self.command[:8192], "cwd": self.cwd[:4096],
+            "state": ("running" if code is None else "timed_out" if self._timed_out
+                      else "stopped" if self._terminated else "completed" if code == 0 else "failed"),
+            "elapsed_ms": max(0, int(((self._finished_at or time.monotonic()) - self.started_at) * 1000)),
+            "exit_code": code,
+        }
+
+    async def inspect(self, after: int = 0) -> ExecCommandDetail:
+        async with self._lock:
+            if not self._retainable:
+                raise KeyError(self.session_id)
+            return {**self.summary(), **self._ui_log.read(after)}
+
+    def forget_output(self) -> None:
+        self._retainable = False
+        self._ui_log.clear()
+
 
 class ExecSessionManager:
     def __init__(self, *, max_sessions: int = 8, idle_timeout: int = 1800) -> None:
         self.max_sessions = max_sessions
         self.idle_timeout = idle_timeout
         self._sessions: dict[str, _ExecSession] = {}
+        self._completed: OrderedDict[str, tuple[float, _ExecSession]] = OrderedDict()
+        self._expiry: dict[str, asyncio.TimerHandle] = {}
         self._lock = asyncio.Lock()
         self._closed = False
 
@@ -313,6 +362,7 @@ class ExecSessionManager:
         if poll.done:
             async with self._lock:
                 self._sessions.pop(session_id, None)
+                self._retain_completed(session)
         return session_id, poll
 
     async def write(
@@ -345,7 +395,7 @@ class ExecSessionManager:
                 raise RuntimeError(error)
             stdin_closed = True
         if terminate:
-            await session.kill()
+            await session.stop()
         poll = await session.poll(
             yield_time_ms,
             max_output_chars,
@@ -355,7 +405,56 @@ class ExecSessionManager:
         if poll.done:
             async with self._lock:
                 self._sessions.pop(session_id, None)
+                self._retain_completed(session)
         return poll
+
+    def _retain_completed(self, session: _ExecSession) -> None:
+        if not self._closed and session.retains_output:
+            session.summary()
+            self._completed[session.session_id] = (time.monotonic(), session)
+            previous = self._expiry.pop(session.session_id, None)
+            if previous is not None:
+                previous.cancel()
+            self._expiry[session.session_id] = asyncio.get_running_loop().call_later(
+                1800, self._expire_completed, session.session_id)
+            self._prune_completed()
+
+    def _expire_completed(self, session_id: str) -> None:
+        # Runs on the manager's event loop; no await means removal is atomic with reads.
+        handle = self._expiry.pop(session_id, None)
+        if handle is not None:
+            handle.cancel()
+        retained = self._completed.pop(session_id, None)
+        if retained is not None:
+            retained[1].forget_output()
+
+    def _prune_completed(self) -> None:
+        now = time.monotonic()
+        for session_id, (finished, _) in list(self._completed.items()):
+            if now - finished > 1800 or len(self._completed) > 32:
+                self._expire_completed(session_id)
+
+    async def inspect_commands(self, owner_session_key: str) -> list[ExecCommandSummary]:
+        """Read this owner's commands without extending idle life or draining output."""
+        async with self._lock:
+            self._prune_completed()
+            sessions = [item[1] for item in self._completed.values()] + list(self._sessions.values())
+            return [session.summary() for session in sessions
+                    if session.owner_session_key == owner_session_key and session.retains_output]
+
+    async def inspect_output(self, owner_session_key: str, session_id: str,
+                             after: int = 0, *, stop: bool = False) -> ExecCommandDetail:
+        """Stop only the addressed process tree; leave final agent output pollable."""
+        async with self._lock:
+            self._prune_completed()
+            session = self._sessions.get(session_id)
+            if session is None and session_id in self._completed:
+                session = self._completed[session_id][1]
+            if session is None or session.owner_session_key != owner_session_key:
+                raise KeyError(session_id)
+        if stop and session.process.returncode is None:
+            await session.stop()
+        return await session.inspect(after)
 
     async def list(self, *, owner_session_key: str | None = None) -> list[ExecSessionInfo]:
         async with self._lock:
@@ -381,6 +480,10 @@ class ExecSessionManager:
         async with self._lock:
             self._closed = True
             sessions: list[_ExecSession] = list(self._sessions.values())
+            for session_id in list(self._completed):
+                self._expire_completed(session_id)
+            for session in sessions:
+                session.forget_output()
             self._sessions.clear()
         results: list[None | BaseException] = list(await asyncio.gather(
             *(session.kill() for session in sessions),
@@ -407,8 +510,12 @@ class ExecSessionManager:
         """Terminate all sessions owned by owner_session_key. Returns count."""
         async with self._lock:
             victims: list[_ExecSession] = []
+            for sid, (_, completed) in list(self._completed.items()):
+                if completed.owner_session_key == owner_session_key:
+                    self._expire_completed(sid)
             for sid, s in list(self._sessions.items()):
                 if s.owner_session_key == owner_session_key:
+                    s.forget_output()
                     victims.append(self._sessions.pop(sid))
         results: list[None | BaseException] = list(await asyncio.gather(
             *(s.kill() for s in victims),
@@ -440,8 +547,9 @@ class ExecSessionManager:
         ]
         for session_id in stale:
             session = self._sessions[session_id]
-            await session.kill()
+            await session.stop()
             self._sessions.pop(session_id, None)
+            self._retain_completed(session)
 
     async def _spawn(
         self,
