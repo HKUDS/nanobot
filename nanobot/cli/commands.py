@@ -524,15 +524,16 @@ def channels_status(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Show channel status."""
-    from nanobot.channels.registry import discover_all
+    from nanobot.channels.registry import discover_plugins
 
     _, loaded = _load_inspection_config(config=config)
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled")
+    table.add_column("Available")
 
-    for name, cls in sorted(discover_all().items()):
+    for name, plugin in sorted(discover_plugins().items()):
         section = getattr(loaded.channels, name, None)
         if section is None:
             enabled = False
@@ -540,9 +541,18 @@ def channels_status(
             enabled = cast(dict[str, Any], section).get("enabled", False)
         else:
             enabled = getattr(section, "enabled", False)
+        try:
+            plugin.load_channel_class()
+        except ModuleNotFoundError:
+            available = "[yellow]Missing dependency[/yellow]"
+        except Exception:
+            available = "[yellow]Unavailable[/yellow]"
+        else:
+            available = "[green]✓[/green]"
         table.add_row(
-            cls.display_name,
+            plugin.display_name,
             "[green]\u2713[/green]" if enabled else "[dim]\u2717[/dim]",
+            available,
         )
 
     console.print(table)

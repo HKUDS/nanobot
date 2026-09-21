@@ -1293,12 +1293,52 @@ def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
         "nanobot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
     )
-    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
 
     result = runner.invoke(app, ["channels", "status", "--config", str(config_path)])
 
     assert result.exit_code == 0
     assert seen["config_path"] == config_path.resolve()
+
+
+def test_channels_status_lists_plugins_with_unavailable_runtimes(monkeypatch):
+    from typer.testing import CliRunner
+
+    from nanobot.channels.plugin import ChannelPlugin
+    from nanobot.cli import commands
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+
+    available = _channel_plugin(_FakePlugin)
+    unavailable = ChannelPlugin(
+        name="unavailable",
+        display_name="Unavailable Channel",
+        runtime="missing_channel_runtime:Channel",
+    )
+    invalid = ChannelPlugin(
+        name="invalid",
+        display_name="Invalid Channel",
+        runtime=f"{__name__}:NotAChannel",
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda: {
+            "fakeplugin": available,
+            "unavailable": unavailable,
+            "invalid": invalid,
+        },
+    )
+    monkeypatch.setattr(commands, "_load_inspection_config", lambda **_kwargs: (None, Config()))
+
+    result = CliRunner().invoke(app, ["channels", "status"])
+
+    assert result.exit_code == 0
+    assert "Fake Plugin" in result.stdout
+    assert "Unavailable Channel" in result.stdout
+    assert "Invalid Channel" in result.stdout
+    assert "Available" in result.stdout
+    assert "Missing dependency" in result.stdout
+    assert "Unavailable" in result.stdout
 
 
 def test_plugins_list_shows_available_features(monkeypatch):
