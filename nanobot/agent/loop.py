@@ -732,6 +732,7 @@ class AgentLoop:
             sender_id=ctx.msg.sender_id,
             turn_id=ctx.turn_id,
             workspace=scope.project_path,
+            log_content=ctx.session.policy.log_content and not ctx.ephemeral,
         )
 
     async def _resolve_runtime_context_for_turn(
@@ -814,6 +815,7 @@ class AgentLoop:
                 sender_id=ctx.msg.sender_id,
                 turn_id=metadata.get("webui_turn_id"),
                 workspace=scope.project_path,
+                log_content=session.policy.log_content,
             ))
             workspace_token = bind_workspace_scope(scope)
             turn_scope_stack = ExitStack()
@@ -983,6 +985,8 @@ class AgentLoop:
         """
         self._sync_subagent_runtime_limits()
 
+        ephemeral = ephemeral or (session is not None and not session.policy.persist)
+
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
                 return
@@ -1058,6 +1062,7 @@ class AgentLoop:
                         sender_id=pending_msg.sender_id,
                         turn_id=request_ctx.turn_id,
                         workspace=scope.project_path,
+                        log_content=request_ctx.log_content,
                     )
                     blocks = await self._resolve_runtime_context_for_request(
                         pending_request,
@@ -1165,6 +1170,13 @@ class AgentLoop:
                 request_ctx,
                 workspace=effective_scope.project_path,
             )
+        request_ctx = dataclasses.replace(
+            request_ctx,
+            log_content=(
+                request_ctx.log_content and not ephemeral
+                and (session is None or session.policy.log_content)
+            ),
+        )
         effective_tools = tools or self.tools
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
@@ -1203,6 +1215,7 @@ class AgentLoop:
                 turn_hooks=list(hooks or []),
                 ephemeral=ephemeral,
                 run_extra_hooks_for_ephemeral=run_extra_hooks_for_ephemeral,
+                log_content=request_ctx.log_content,
             ))
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=None,
@@ -1214,7 +1227,9 @@ class AgentLoop:
                 transcript_builder=transcript_builder,
                 hook=hook,
                 concurrent_tools=True,
-                workspace=effective_scope.project_path,
+                # Temporary turns use the governor's bounded in-memory results;
+                # never create durable spill files, even before discard/cancellation.
+                workspace=None if ephemeral else effective_scope.project_path,
                 session_key=session.key if session else None,
                 provider_retry_mode=self.provider_retry_mode,
                 checkpoint_callback=_checkpoint,
@@ -1274,7 +1289,10 @@ class AgentLoop:
                 await events.publish(StreamDeltaEvent(content=stream_content))
                 await events.publish(StreamEndEvent())
         elif result.stop_reason == "error":
-            logger.error("LLM returned error: {}", (result.final_content or "")[:200])
+            logger.error(
+                "LLM returned error: {}",
+                (result.final_content or "")[:200] if request_ctx.log_content else "[content hidden]",
+            )
         return result
 
     def _check_expired_sessions_if_due(self) -> None:

@@ -2,17 +2,21 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from loguru import logger
 
 from agent.session_helpers import run_session
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import current_request_context
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
     RUNTIME_CONTROL_SESSION_DISCARD,
     InboundMessage,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import GenerationSettings, LLMResponse
+from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
 from nanobot.session.keys import UNIFIED_SESSION_KEY
+from nanobot.session.manager import SessionPolicy
 
 
 def _message(key: str, content: str) -> InboundMessage:
@@ -71,6 +75,99 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
         "assistant",
     ]
     assert loop.sessions.read_session_file(key) is None
+
+
+@pytest.mark.parametrize("privacy", ["temporary", "quiet", "ordinary"])
+@pytest.mark.parametrize("structured", [True, False])
+async def test_session_policy_controls_tool_logs_and_result_offload(
+    tmp_path, privacy, structured,
+) -> None:
+    loop = _loop(tmp_path, [])
+    loop.max_tool_result_chars = 2048
+    key = "websocket:privacy-regression"
+    if privacy == "temporary":
+        loop.sessions.get_or_create_transient(key)
+    else:
+        session = loop.sessions.get_or_create(key)
+        session.policy = SessionPolicy(log_content=privacy != "quiet")
+    secret = "synthetic-private-query-测试"
+    text = "synthetic-private-result-" * 1000
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,c3ludGhldGlj"}}
+    result = [{"type": "text", "text": text}, image] if structured else text
+    loop.tools.prepare_call = MagicMock(return_value=(None, {"query": secret}, None))
+    loop.tools.execute = AsyncMock(return_value=result)
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[
+            ToolCallRequest(id="private_result", name="web_search", arguments={"query": secret}),
+        ]),
+        LLMResponse(content="done"),
+    ])
+    logs: list[str] = []
+    sink = logger.add(lambda message: logs.append(str(message)), format="{message}")
+    try:
+        await loop._process_message(_message(key, "synthetic question"))
+    finally:
+        logger.remove(sink)
+
+    assert loop.tools.execute.await_count == 1
+    messages = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
+    content = next(m["content"] for m in messages if m["role"] == "tool")
+    preview = content[0]["text"] if structured else content
+    offload_root = tmp_path / ".nanobot" / "tool-results"
+    assert (secret in "\n".join(logs)) is (privacy == "ordinary")
+    if structured:
+        assert content[1] == image
+    if privacy == "temporary":
+        assert not offload_root.exists()
+        assert preview.endswith("... (truncated)")
+        assert len(preview) < len(text)
+        await loop.discard_session(key)
+        assert loop.sessions.get_cached(key) is None
+        assert loop.sessions.read_session_file(key) is None
+        assert not offload_root.exists()
+    else:
+        assert "[tool output persisted]" in preview
+        assert [p.read_text() for p in offload_root.rglob("*.txt")] == [text]
+
+
+async def test_direct_transient_run_never_spills_before_cancellation(tmp_path) -> None:
+    loop = _loop(tmp_path, [])
+    session = loop.sessions.get_or_create_transient("websocket:cancel-private")
+    loop.max_tool_result_chars = 100
+    loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
+    loop.tools.execute = AsyncMock(return_value="synthetic large result" * 1000)
+    second_call = asyncio.Event()
+    count = 0
+
+    async def respond(**kwargs):
+        nonlocal count
+        count += 1
+        request = current_request_context()
+        assert request is not None and request.workspace == tmp_path
+        assert request.log_content is False
+        if count == 1:
+            return LLMResponse(content="", tool_calls=[
+                ToolCallRequest(id="cancel-result", name="web_search", arguments={}),
+            ])
+        second_call.set()
+        await asyncio.Event().wait()
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    # The session policy must suffice even without passing ephemeral=True.
+    task = asyncio.create_task(loop._run_agent_loop(
+        TranscriptInput(history=[], current_message="synthetic question"),
+        runtime=loop.llm_runtime(), session=session,
+    ))
+    try:
+        await asyncio.wait_for(second_call.wait(), timeout=2)
+        assert not (tmp_path / ".nanobot" / "tool-results").exists()
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    await loop.discard_session(session.key)
+    assert not (tmp_path / ".nanobot" / "tool-results").exists()
+    assert current_request_context() is None
 
 
 @pytest.mark.asyncio
