@@ -607,6 +607,11 @@
   .thread-workspace {
     container: thread-workspace / inline-size;
   }
+  /* The full-width toolbar must not cover the preview breadcrumb or close button. */
+  .thread-workspace:has([data-file-preview-panel]) > * {
+    --thread-header-position: relative;
+    --thread-prompt-inset: 1rem;
+  }
   /* Keep room for the 49.5rem message column and controls in the side margin. */
   @container thread-workspace (max-width: 72rem) {
     .thread-workspace > * {

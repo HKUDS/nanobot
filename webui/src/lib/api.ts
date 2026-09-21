@@ -455,7 +455,7 @@ export async function fetchFilePreview(
   return request<FilePreviewPayload>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
-    undefined,
+    { cache: "no-store" },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -472,7 +472,7 @@ export async function fetchFilePreviewAvailability(
   const payload = await request<{ available?: boolean }>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
-    undefined,
+    { cache: "no-store" },
     API_READ_TIMEOUT_MS,
   );
   return payload.available !== false;

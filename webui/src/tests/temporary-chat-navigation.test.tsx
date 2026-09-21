@@ -3,9 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import type { InboundEvent, Outbound } from "@/lib/types";
+import { canonicalThreadPayload } from "./thread-test-payload";
 
 let groupedTopics = false;
+let withFiles = false;
+const previewFile = (path: string) => ({
+  path: `/workspace/${path}`, display_path: path, project_path: "/workspace",
+  language: "text", content: `Preview of ${path}`, size: 20, truncated: false,
+});
 
 vi.mock("@/lib/bootstrap", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/bootstrap")>(),
@@ -49,6 +56,11 @@ class TestSocket {
       queueMicrotask(() => this.receive({ event: "attached", chat_id: chatId, temporary: true }));
     } else if (frame.type === "set_sidebar_state") {
       queueMicrotask(() => this.receive({ event: "sidebar_state_updated", state: frame.state }));
+    } else if (frame.type === "webui_request" && frame.action === "temporary_chat.file_preview") {
+      queueMicrotask(() => this.receive({
+        event: "webui_response", request_id: frame.request_id, ok: true,
+        result: frame.payload.probe ? { available: true } : previewFile(String(frame.payload.path)),
+      }));
     }
   }
 }
@@ -82,6 +94,7 @@ async function selectTopic(name: string) {
 describe("temporary chat navigation", () => {
   beforeEach(() => {
     groupedTopics = false;
+    withFiles = false;
     localStorage.clear();
     sessionStorage.clear();
     window.history.replaceState(null, "", "/");
@@ -104,15 +117,120 @@ describe("temporary chat navigation", () => {
           },
         } } });
       }
+      if (path.includes("/file-preview?")) {
+        const query = new URL(path, "http://test").searchParams;
+        return Response.json(query.has("probe") ? { available: true } : previewFile(query.get("path")!));
+      }
+      if (withFiles && path.includes("/webui-thread")) {
+        return Response.json(canonicalThreadPayload({
+          schemaVersion: 3,
+          messages: [{
+            id: "file-reply", role: "assistant", createdAt: 1,
+            content: "Files: [notes.txt](notes.txt) and [second.txt](second.txt)",
+          }],
+        }));
+      }
       return new Response(null, { status: 404 });
     }));
   });
 
   afterEach(() => {
     cleanup();
+    if (vi.isFakeTimers()) vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each([false, true])("restores file previews after pane navigation (temporary=%s)", async (temporary) => {
+    withFiles = true;
+    groupedTopics = true;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("max-width: 767px"), media: query,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    }));
+    render(<App />);
+    await screen.findByRole("button", { name: "Temporary chat" });
+    act(() => TestSocket.current.open());
+    if (temporary) {
+      const chatId = await startTemporaryChat("Show example files");
+      act(() => TestSocket.current.receive({
+        event: "message", chat_id: chatId,
+        text: "Files: [notes.txt](notes.txt) and [second.txt](second.txt)",
+      }));
+    } else {
+      await selectTopic("Regular topic");
+    }
+    fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
+    await screen.findByText("Preview of notes.txt");
+    await selectTopic("Second pane");
+    expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "second.txt" }));
+    await screen.findByText("Preview of second.txt");
+    await selectTopic(temporary ? "Show example files" : "Regular topic");
+    await screen.findByText("Preview of notes.txt");
+    expect(screen.queryByText("Preview of second.txt")).not.toBeInTheDocument();
+
+    // Explicit close must stick even if switching interrupts the close animation.
+    fireEvent.click(screen.getByRole("button", { name: "Close file preview" }));
+    await selectTopic("Second pane");
+    await selectTopic(temporary ? "Show example files" : "Regular topic");
+    expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
+
+    if (temporary) {
+      const requests = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+      expect(requests.some((url) => url.includes("00000000-"))).toBe(false);
+    }
+    for (const storage of [localStorage, sessionStorage]) {
+      const values = Array.from({ length: storage.length }, (_, i) => storage.getItem(storage.key(i)!));
+      expect(JSON.stringify(values)).not.toContain("/workspace/notes.txt");
+      expect(JSON.stringify(values)).not.toContain("Preview of notes.txt");
+    }
+  });
+
+  it("toggles the current file, switches files, and only handles Escape below dialogs", async () => {
+    withFiles = true;
+    render(<App />);
+    await screen.findByRole("button", { name: "Temporary chat" });
+    act(() => TestSocket.current.open());
+    await selectTopic("Regular topic");
+    fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
+    await screen.findByText("Preview of notes.txt");
+    fireEvent.click(screen.getByRole("button", { name: "second.txt" }));
+    await screen.findByText("Preview of second.txt");
+    fireEvent.click(screen.getByRole("button", { name: "second.txt" }));
+    await waitFor(() => expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
+    await screen.findByText("Preview of notes.txt");
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.append(dialog);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByTestId("file-preview-panel")).toBeInTheDocument();
+    dialog.remove();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument());
+  });
+
+  it("forgets preview paths on temporary close and disconnect", async () => {
+    const update = vi.spyOn(FilePreviewStore.prototype, "update");
+    render(<App />);
+    await screen.findByRole("button", { name: "Temporary chat" });
+    act(() => TestSocket.current.open());
+    const chatId = await startTemporaryChat("Show example files");
+    act(() => TestSocket.current.receive({
+      event: "message", chat_id: chatId, text: "[notes.txt](notes.txt)",
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
+    await screen.findByText("Preview of notes.txt");
+    const store = update.mock.contexts.find((value) => value.get(`websocket:${chatId}`).path)!;
+    expect(store.get(`websocket:${chatId}`).path).toBe("notes.txt");
+    await selectTopic("Close temporary chat: Show example files");
+    expect(store.get(`websocket:${chatId}`).path).toBeNull();
+    act(() => store.update("websocket:regular", { path: "notes.txt" }));
+    vi.useFakeTimers();
+    act(() => TestSocket.current.close());
+    expect(store.get("websocket:regular").path).toBeNull();
   });
 
   it("keeps messages when navigating to a regular workbench and back", async () => {

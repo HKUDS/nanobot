@@ -13,6 +13,7 @@ interface FilePreviewPanelProps {
   sessionKey: string;
   path: string;
   token: string;
+  loadPreview?: (path: string) => Promise<FilePreviewPayload>;
   desktopWidth?: number;
   isClosing?: boolean;
   onResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -28,6 +29,7 @@ export function FilePreviewPanel({
   sessionKey,
   path,
   token,
+  loadPreview,
   desktopWidth = 544,
   isClosing = false,
   onResizeStart,
@@ -38,6 +40,8 @@ export function FilePreviewPanel({
   const [entered, setEntered] = useState(false);
   const tokenRef = useRef(token);
   tokenRef.current = token;
+  const loadPreviewRef = useRef(loadPreview);
+  loadPreviewRef.current = loadPreview;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true));
@@ -47,7 +51,7 @@ export function FilePreviewPanel({
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
-    fetchFilePreview(tokenRef.current, sessionKey, path)
+    (loadPreviewRef.current?.(path) ?? fetchFilePreview(tokenRef.current, sessionKey, path))
       .then((payload) => {
         if (!cancelled) setState({ status: "ready", payload });
       })
@@ -102,9 +106,10 @@ export function FilePreviewPanel({
       style={{
         "--file-preview-width": `${desktopWidth}px`,
         "--file-preview-slot-width": !entered || isClosing ? "0px" : `${desktopWidth}px`,
+        "--file-preview-mobile-width": !entered || isClosing ? "0px" : "100%",
       } as CSSProperties}
       className={cn(
-        "absolute inset-y-0 right-0 z-30 w-[min(100vw,var(--file-preview-slot-width))] overflow-hidden",
+        "absolute inset-y-0 right-0 z-30 w-[var(--file-preview-mobile-width)] overflow-hidden",
         "transition-[width] duration-300 ease-out will-change-[width]",
         "md:relative md:z-auto md:w-[var(--file-preview-slot-width)] md:min-w-0 md:shrink-0",
         isClosing && "pointer-events-none",
@@ -114,7 +119,7 @@ export function FilePreviewPanel({
     >
       <div
         className={cn(
-          "absolute inset-y-0 right-0 flex w-[min(100vw,var(--file-preview-width))] flex-col overflow-hidden pb-[env(safe-area-inset-bottom)] md:w-[var(--file-preview-width)] md:pb-0",
+          "absolute inset-y-0 right-0 flex w-screen flex-col overflow-hidden pb-[env(safe-area-inset-bottom)] md:w-[var(--file-preview-width)] md:pb-0",
           "border-l border-border/70 bg-background shadow-2xl md:shadow-none",
           "transition-[opacity,transform] duration-300 ease-out will-change-transform",
           !entered || isClosing ? "translate-x-full opacity-0" : "translate-x-0 opacity-100",
@@ -227,6 +232,15 @@ export function FilePreviewPanel({
                   />
                   <p>{errorMessage}</p>
                 </div>
+              </div>
+            ) : state.payload.kind === "image" ? (
+              <div className="flex min-h-full items-center justify-center p-4">
+                <img
+                  src={state.payload.data_url}
+                  alt={fileName}
+                  className="max-h-full max-w-full object-contain"
+                  onError={() => setState({ status: "error", error: new Error("Invalid image") })}
+                />
               </div>
             ) : (
               <div className="min-h-full">

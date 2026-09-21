@@ -1129,10 +1129,10 @@ class GatewayHTTPHandler:
             else:
                 payload = file_preview_payload(path, scope=scope)
         except WebUIFilePreviewError as e:
-            if is_probe and e.status in {400, 403, 404, 415}:
-                return _http_json_response({"available": False})
+            if is_probe and e.status in {400, 403, 404, 413, 415}:
+                return _http_json_response({"available": False}, extra_headers=_NO_STORE_HEADERS)
             return _http_error(e.status, e.message)
-        return _http_json_response(payload)
+        return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
 
     def _handle_session_automations(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):

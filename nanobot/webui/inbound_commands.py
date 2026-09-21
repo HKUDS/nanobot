@@ -37,6 +37,11 @@ from nanobot.session.webui_turns import (
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
+from nanobot.webui.file_preview import (
+    WebUIFilePreviewError,
+    file_preview_availability_payload,
+    file_preview_payload,
+)
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
@@ -779,6 +784,41 @@ class WebUICommandRouter:
                 status=400,
                 message="WebUI mutation payload must be an object",
             )
+            return
+
+        if action == "temporary_chat.file_preview":
+            # Connection-owned, read-only, and deliberately outside the mutation
+            # replay cache: private paths/content must not outlive this request.
+            preview_payload = cast(dict[str, object], payload)
+            chat_id = preview_payload.get("chat_id")
+            path = preview_payload.get("path")
+            probe = preview_payload.get("probe") is True
+            if not isinstance(chat_id, str) or not isinstance(path, str):
+                await self.send_webui_response(
+                    connection, request_id, status=400, message="invalid preview request",
+                )
+                return
+            try:
+                policy = self._temporary_chats.message_policy(connection, chat_id, "")
+                if policy is None:
+                    raise TemporaryChatError("temporary_chat_unavailable")
+                preview = file_preview_availability_payload if probe else file_preview_payload
+                result = preview(path, scope=policy.workspace_scope)
+            except TemporaryChatError as exc:
+                await self.send_webui_response(
+                    connection, request_id, status=404, message=exc.detail,
+                )
+            except WebUIFilePreviewError as exc:
+                if probe and exc.status in {400, 403, 404, 413, 415}:
+                    await self.send_webui_response(
+                        connection, request_id, result={"available": False},
+                    )
+                else:
+                    await self.send_webui_response(
+                        connection, request_id, status=exc.status, message=exc.message,
+                    )
+            else:
+                await self.send_webui_response(connection, request_id, result=result)
             return
 
         payload_digest = hashlib.sha256(

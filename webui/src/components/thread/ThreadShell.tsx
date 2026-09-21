@@ -24,6 +24,7 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
+import { useFilePreviewState, type FilePreviewStore } from "@/hooks/useFilePreviewState";
 import {
   ApiError,
   fetchFilePreviewAvailability,
@@ -46,6 +47,7 @@ import {
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import type {
   ChatSummary,
+  FilePreviewPayload,
   RoundUsage,
   SettingsPayload,
   SlashCommand,
@@ -383,9 +385,12 @@ function clampFilePreviewWidth(width: number, maxWidth: number): number {
 }
 
 function maxFilePreviewWidth(containerWidth: number): number {
-  return Math.max(
-    FILE_PREVIEW_MIN_WIDTH,
-    Math.min(FILE_PREVIEW_MAX_WIDTH, containerWidth - FILE_PREVIEW_MIN_MAIN_WIDTH),
+  return Math.min(
+    containerWidth > 0 ? containerWidth : FILE_PREVIEW_MIN_WIDTH,
+    Math.max(
+      FILE_PREVIEW_MIN_WIDTH,
+      Math.min(FILE_PREVIEW_MAX_WIDTH, containerWidth - FILE_PREVIEW_MIN_MAIN_WIDTH),
+    ),
   );
 }
 
@@ -396,6 +401,7 @@ interface ThreadShellProps {
   temporary?: boolean;
   temporaryChatIds?: readonly string[];
   messageCache?: ThreadMessageCache;
+  filePreviewStore?: FilePreviewStore;
   temporaryChatEnabled?: boolean;
   onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
@@ -611,6 +617,7 @@ export function ThreadShell({
   temporary = false,
   temporaryChatIds = [],
   messageCache,
+  filePreviewStore,
   temporaryChatEnabled = false,
   onTemporaryChatEnabledChange,
   onToggleSidebar,
@@ -647,6 +654,7 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
+  const previewSessionKey = session?.key ?? null;
   const mentionSessions = useMemo(
     () => sessions.filter((candidate) => candidate.key !== historyKey),
     [historyKey, sessions],
@@ -702,15 +710,21 @@ export function ThreadShell({
   } | null>(null);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
-  const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
-  const [filePreviewClosing, setFilePreviewClosing] = useState(false);
-  const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const { state: previewState, setPath: setFilePreviewPath, setWidth: setFilePreviewWidth } =
+    useFilePreviewState(previewSessionKey, filePreviewStore);
+  const [closingPreview, setClosingPreview] = useState<{ key: string; path: string } | null>(null);
+  const filePreviewClosing = closingPreview?.key === previewSessionKey;
+  const filePreviewPath = previewState.path
+    ?? (filePreviewClosing ? closingPreview?.path ?? null : null);
+  const [filePreviewMaxWidth, setFilePreviewMaxWidth] = useState(FILE_PREVIEW_MAX_WIDTH);
+  const filePreviewWidth = clampFilePreviewWidth(previewState.width, filePreviewMaxWidth);
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
   const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
+  const filePreviewResizeCleanupRef = useRef<(() => void) | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
   const consumedPendingFirstMessageIdRef = useRef<string | null>(null);
@@ -835,15 +849,15 @@ export function ThreadShell({
   }, [filePreviewWidth]);
 
   useEffect(() => {
+    filePreviewResizeCleanupRef.current?.();
     if (filePreviewCloseTimerRef.current !== null) {
       window.clearTimeout(filePreviewCloseTimerRef.current);
       filePreviewCloseTimerRef.current = null;
     }
-    setFilePreviewClosing(false);
-    setFilePreviewPath(null);
+    setClosingPreview(null);
     setQuotedContext(null);
     setSubmittedViewportTurnId(null);
-  }, [historyKey]);
+  }, [previewSessionKey]);
 
   useEffect(() => {
     const retained = new Set(temporaryChatIds);
@@ -865,6 +879,7 @@ export function ThreadShell({
 
   useEffect(() => {
     return () => {
+      filePreviewResizeCleanupRef.current?.();
       if (filePreviewCloseTimerRef.current !== null) {
         window.clearTimeout(filePreviewCloseTimerRef.current);
       }
@@ -917,11 +932,11 @@ export function ThreadShell({
   }, [chatId, messagesReady, rememberedViewportTurnId, turnActive]);
   const filePreviewAvailabilityCache = useMemo(
     () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
-    [historyKey],
+    [previewSessionKey],
   );
   const filePreviewAvailabilityRevision = displayMessages.length;
   const resolveFilePreviewAvailability = useCallback((path: string) => {
-    if (!historyKey) return Promise.resolve(false);
+    if (!previewSessionKey) return Promise.resolve(false);
     const cached = filePreviewAvailabilityCache.get(path);
     if (
       cached
@@ -929,13 +944,18 @@ export function ThreadShell({
     ) {
       return cached.promise;
     }
-    const pending = fetchFilePreviewAvailability(getToken(), historyKey, path).catch(
+    const request = temporary
+      ? client.requestMutation<{ available: boolean }>("temporary_chat.file_preview", {
+          chat_id: chatId, path, probe: true,
+        }).then((result) => result.available)
+      : fetchFilePreviewAvailability(getToken(), previewSessionKey, path);
+    const pending = request.catch(
       (error: unknown) => {
         if (error instanceof ApiError) {
           if (error.status === 404 && /API route not found/i.test(error.message)) {
             return true;
           }
-          if ([400, 403, 404, 415].includes(error.status)) return false;
+          if ([400, 403, 404, 413, 415].includes(error.status)) return false;
         }
         return false;
       },
@@ -955,7 +975,10 @@ export function ThreadShell({
     filePreviewAvailabilityCache,
     filePreviewAvailabilityRevision,
     getToken,
-    historyKey,
+    previewSessionKey,
+    temporary,
+    client,
+    chatId,
   ]);
 
   const showHeroComposer = displayMessages.length === 0 && !loading;
@@ -1462,26 +1485,62 @@ export function ThreadShell({
     [chatId, send, withWorkspaceScope],
   );
 
+  const loadTemporaryFilePreview = useCallback((path: string) =>
+    client.requestMutation<FilePreviewPayload>("temporary_chat.file_preview", {
+      chat_id: chatId, path,
+    }).catch((error: unknown) => {
+      if (error instanceof Error && "status" in error && typeof error.status === "number") {
+        throw new ApiError(error.status, error.message);
+      }
+      throw error;
+    }), [client, chatId]);
+
+  const handleCloseFilePreview = useCallback(() => {
+    if (!previewSessionKey || !filePreviewPath || filePreviewClosing) return;
+    filePreviewResizeCleanupRef.current?.();
+    setClosingPreview({ key: previewSessionKey, path: filePreviewPath });
+    // Record the closed state immediately, even if navigation interrupts the animation.
+    setFilePreviewPath(null);
+    filePreviewCloseTimerRef.current = window.setTimeout(() => {
+      filePreviewCloseTimerRef.current = null;
+      setClosingPreview(null);
+    }, FILE_PREVIEW_CLOSE_ANIMATION_MS);
+  }, [previewSessionKey, filePreviewClosing, filePreviewPath, setFilePreviewPath]);
+
   const handleOpenFilePreview = useCallback((path: string) => {
+    if (path === filePreviewPath && !filePreviewClosing) {
+      handleCloseFilePreview();
+      return;
+    }
     if (filePreviewCloseTimerRef.current !== null) {
       window.clearTimeout(filePreviewCloseTimerRef.current);
       filePreviewCloseTimerRef.current = null;
     }
-    setFilePreviewClosing(false);
+    setClosingPreview(null);
     setFilePreviewPath(path);
-  }, []);
+  }, [filePreviewPath, filePreviewClosing, handleCloseFilePreview, setFilePreviewPath]);
 
-  const handleCloseFilePreview = useCallback(() => {
-    if (!filePreviewPath || filePreviewClosing) return;
-    setFilePreviewClosing(true);
-    filePreviewCloseTimerRef.current = window.setTimeout(() => {
-      filePreviewCloseTimerRef.current = null;
-      setFilePreviewPath(null);
-      setFilePreviewClosing(false);
-    }, FILE_PREVIEW_CLOSE_ANIMATION_MS);
-  }, [filePreviewClosing, filePreviewPath]);
+  // Markdown blocks can retain rendered links while their text is unchanged.
+  // Keep their callback stable, but always act on the current pane/session state.
+  const openFilePreviewRef = useRef(handleOpenFilePreview);
+  openFilePreviewRef.current = handleOpenFilePreview;
+  const openFilePreview = useCallback((path: string) => openFilePreviewRef.current(path), []);
+
+  useEffect(() => {
+    if (!filePreviewPath || !headerActive) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      // Let a dialog/menu above the pane consume Escape without closing this preview.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]')) return;
+      event.preventDefault();
+      handleCloseFilePreview();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [filePreviewPath, headerActive, handleCloseFilePreview]);
 
   const handleFilePreviewResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    filePreviewResizeCleanupRef.current?.();
     event.preventDefault();
     event.stopPropagation();
     const panel = event.currentTarget.closest<HTMLElement>("[data-file-preview-panel]");
@@ -1512,7 +1571,7 @@ export function ThreadShell({
       moveEvent.preventDefault();
       applyWidth(moveEvent.clientX);
     };
-    const handlePointerUp = () => {
+    const stopResize = (commit: boolean) => {
       if (frame !== null) {
         window.cancelAnimationFrame(frame);
         frame = null;
@@ -1520,32 +1579,36 @@ export function ThreadShell({
       panel?.style.setProperty("--file-preview-width", `${nextWidth}px`);
       panel?.style.setProperty("--file-preview-slot-width", `${nextWidth}px`);
       if (panel) panel.style.transition = originalPanelTransition;
-      setFilePreviewWidth(nextWidth);
+      if (commit) setFilePreviewWidth(nextWidth);
       document.body.style.cursor = originalBodyCursor;
       document.body.style.userSelect = originalBodyUserSelect;
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
+      filePreviewResizeCleanupRef.current = null;
     };
+    const handlePointerUp = () => stopResize(true);
+    filePreviewResizeCleanupRef.current = () => stopResize(false);
 
     applyWidth(event.clientX);
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
-  }, []);
+  }, [setFilePreviewWidth]);
 
   useEffect(() => {
     if (!filePreviewPath) return;
     const clampToShell = () => {
       const shellWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
       const maxWidth = maxFilePreviewWidth(shellWidth);
-      const nextWidth = clampFilePreviewWidth(filePreviewWidthRef.current, maxWidth);
-      filePreviewWidthRef.current = nextWidth;
-      setFilePreviewWidth(nextWidth);
+      setFilePreviewMaxWidth(maxWidth);
     };
     clampToShell();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clampToShell);
+    if (shellRef.current) observer?.observe(shellRef.current);
     window.addEventListener("resize", clampToShell);
     return () => {
+      observer?.disconnect();
       window.removeEventListener("resize", clampToShell);
     };
   }, [filePreviewPath]);
@@ -1749,7 +1812,7 @@ export function ThreadShell({
         ) : null}
         {headerPortalTarget === undefined ? threadHeader : null}
         <FilePreviewAvailabilityProvider
-          resolve={historyKey ? resolveFilePreviewAvailability : undefined}
+          resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
           <ThreadViewport
             ref={viewportRef}
@@ -1775,7 +1838,7 @@ export function ThreadShell({
             onLoadOlder={loadOlder}
             traceDetailScope={historyKey}
             onLoadTraceDetails={messagesReady ? loadTraceDetails : undefined}
-            onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
+            onOpenFilePreview={previewSessionKey ? openFilePreview : undefined}
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
@@ -1794,11 +1857,13 @@ export function ThreadShell({
         </div>,
         composerPortalTarget,
       ) : null}
-      {filePreviewPath && historyKey ? (
+      {filePreviewPath && previewSessionKey ? (
         <FilePreviewPanel
-          sessionKey={historyKey}
+          key={`${previewSessionKey}:${filePreviewPath}`}
+          sessionKey={previewSessionKey}
           path={filePreviewPath}
           token={token}
+          loadPreview={temporary ? loadTemporaryFilePreview : undefined}
           desktopWidth={filePreviewWidth}
           isClosing={filePreviewClosing}
           onResizeStart={handleFilePreviewResizeStart}

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,6 +38,36 @@ describe("FilePreviewPanel", () => {
   beforeEach(async () => {
     await setAppLanguage("en");
     vi.mocked(fetchFilePreview).mockReset();
+  });
+
+  it("renders a raster instead of source and reports failed image decoding", async () => {
+    const dataUrl = "data:image/png;base64,example";
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      kind: "image", path: "/workspace/chart.png", display_path: "chart.png",
+      project_path: "/workspace", size: 42, mime_type: "image/png", data_url: dataUrl,
+    });
+    render(<FilePreviewPanel sessionKey="websocket:a" path="chart.png" token="test" onClose={() => {}} />);
+    const img = await screen.findByRole("img", { name: "chart.png" });
+    expect(img).toHaveAttribute("src", dataUrl);
+    expect(screen.queryByTestId("mock-code-block")).not.toBeInTheDocument();
+    fireEvent.error(img);
+    expect(await screen.findByText("Could not preview this file.")).toBeInTheDocument();
+  });
+
+  it("ignores a late response after changing session", async () => {
+    let resolveFirst!: (payload: import("@/lib/types").FilePreviewPayload) => void;
+    vi.mocked(fetchFilePreview).mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }));
+    const payload = {
+      path: "/workspace/b.txt", display_path: "b.txt", project_path: "/workspace",
+      language: "text", content: "session B", truncated: false, size: 9,
+    };
+    vi.mocked(fetchFilePreview).mockResolvedValueOnce(payload);
+    const view = (key: string) => <FilePreviewPanel key={key} sessionKey={key} path="notes.txt" token="test" onClose={() => {}} />;
+    const { rerender } = render(view("a"));
+    rerender(view("b"));
+    await screen.findByText("session B");
+    await act(async () => resolveFirst({ ...payload, content: "session A" }));
+    expect(screen.queryByText("session A")).not.toBeInTheDocument();
   });
 
   it("shows a compact breadcrumb with one file name and a visible close action", async () => {

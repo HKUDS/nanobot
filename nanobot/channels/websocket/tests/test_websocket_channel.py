@@ -305,6 +305,53 @@ async def _new_temporary_chat(
 
 
 @pytest.mark.asyncio
+async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("synthetic preview")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    sessions = SessionManager(workspace)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(
+            bus, session_manager=sessions, workspace_path=workspace,
+            default_restrict_to_workspace=False,
+        ),
+    )
+    owner, other = AsyncMock(), AsyncMock()
+    chat_id = await _new_temporary_chat(channel, owner)
+    channel._webui_connections.add(other)
+    disk_before = {path for path in tmp_path.rglob("*") if path.is_file()}
+
+    async def preview(connection, path="notes.txt", probe=False):
+        await channel._dispatch_envelope(connection, "webui-client", {
+            "type": "webui_request", "request_id": "private-preview",
+            "action": "temporary_chat.file_preview",
+            "payload": {"chat_id": chat_id, "path": path, "probe": probe},
+        })
+        return json.loads(connection.send.await_args.args[0])
+
+    result = await preview(owner)
+    assert result["ok"] is True
+    assert result["result"]["content"] == "synthetic preview"
+    assert (await preview(owner, probe=True))["result"] == {"available": True}
+    assert (await preview(other))["error"]["status"] == 404
+    assert (await preview(owner, str(outside)))["error"]["status"] == 403
+    assert (await preview(owner, str(outside), probe=True))["result"] == {"available": False}
+    assert (await preview(AsyncMock()))["error"]["status"] == 403
+    assert not channel._webui_request_operations
+    assert {path for path in tmp_path.rglob("*") if path.is_file()} == disk_before
+    assert sessions.list_sessions() == []
+
+    await channel._dispatch_envelope(owner, "webui-client", {
+        "type": "discard_temporary_chat", "chat_id": chat_id,
+    })
+    assert (await preview(owner))["error"]["status"] == 404
+    assert not channel._webui_request_operations
+
+
+@pytest.mark.asyncio
 async def test_attach_exposes_the_session_canonical_model_preset(bus, tmp_path) -> None:
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:pinned-model")
@@ -6157,6 +6204,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     assert body["language"] == "python"
     assert body["content"].splitlines() == ["print('hello')"]
     assert body["truncated"] is False
+    assert resp.headers["Cache-Control"] == "no-store"
 
 
 def test_handle_file_preview_probe_checks_availability_without_content(tmp_path) -> None:
@@ -6184,6 +6232,7 @@ def test_handle_file_preview_probe_checks_availability_without_content(tmp_path)
 
     assert resp.status_code == 200
     assert json.loads(resp.body.decode()) == {"available": True}
+    assert resp.headers["Cache-Control"] == "no-store"
 
 
 def test_handle_file_preview_probe_reports_missing_file_as_unavailable(tmp_path) -> None:
