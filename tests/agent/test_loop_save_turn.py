@@ -2028,9 +2028,26 @@ async def test_turn_usage_is_persisted_with_the_saved_session(tmp_path: Path) ->
         )
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
-    await loop._process_message(
-        InboundMessage(channel="cli", sender_id="user", chat_id="usage", content="hello")
-    )
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="DEBUG")
+    try:
+        await loop._process_message(
+            InboundMessage(channel="cli", sender_id="user", chat_id="usage", content="hello")
+        )
+    finally:
+        logger.remove(sink_id)
+
+    build_substage_records = [
+        record for record in records if record["extra"].get("event") == "turn_build_substage"
+    ]
+    assert {
+        "history_load",
+        "runtime_context_resolution",
+        "provider_state_staging",
+        "user_message_persist",
+        "transcript_assembly",
+    } <= {record["extra"]["substage"] for record in build_substage_records}
+    assert {record["extra"]["session_key"] for record in build_substage_records} == {"cli:usage"}
 
     loop.sessions.invalidate("cli:usage")
     assert loop.sessions.get_or_create("cli:usage").metadata["_last_usage"] == (
@@ -2145,6 +2162,32 @@ async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Pat
     }
     assert {record["extra"]["session_key"] for record in stage_records} == {"cli:test"}
     assert len({record["extra"]["turn_id"] for record in stage_records}) == 1
+    build_substage_records = [
+        record for record in records if record["extra"].get("event") == "turn_build_substage"
+    ]
+    substages = {record["extra"]["substage"] for record in build_substage_records}
+    assert {
+        "runtime_resolution",
+        "runtime_admission",
+        "session_prepare",
+        "history_load",
+        "subagent_followup_persist",
+        "delivery_runtime_admission",
+        "request_context_resolution",
+        "provider_state_staging",
+        "transcript_assembly",
+    } <= substages
+    assert all(record["extra"]["stage"] == "build" for record in build_substage_records)
+    assert all(record["extra"]["duration_ms"] >= 0 for record in build_substage_records)
+    assert {record["extra"]["session_key"] for record in build_substage_records} == {"cli:test"}
+    assert len({record["extra"]["turn_id"] for record in build_substage_records}) == 1
+    runtime_resolution = next(
+        record
+        for record in build_substage_records
+        if record["extra"]["substage"] == "runtime_resolution"
+    )
+    assert runtime_resolution["extra"]["model"] == "test-model"
+    assert runtime_resolution["extra"]["context_window_tokens"] > 0
     completion = next(
         record for record in records if record["extra"].get("event") == "turn_completed"
     )

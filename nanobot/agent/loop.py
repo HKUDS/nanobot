@@ -9,8 +9,8 @@ import dataclasses
 import os
 import time
 import weakref
-from collections.abc import Coroutine, Iterable, Mapping
-from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
+from collections.abc import Coroutine, Generator, Iterable, Mapping
+from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
@@ -2013,29 +2013,67 @@ class AgentLoop:
             return True
         return False
 
+    @contextmanager
+    def _measure_build_substage(self, name: str) -> Generator[dict[str, Any], None, None]:
+        """Record timing for one BUILD sub-stage without logging message content."""
+        started_at = time.perf_counter()
+        details: dict[str, Any] = {}
+        outcome = "error"
+        try:
+            yield details
+        except BaseException:
+            raise
+        else:
+            outcome = "success"
+        finally:
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            logger.bind(
+                event="turn_build_substage",
+                stage="build",
+                substage=name,
+                outcome=outcome,
+                duration_ms=round(duration_ms, 1),
+                **details,
+            ).debug(
+                "BUILD substage {} {} in {:.1f}ms",
+                name,
+                "completed" if outcome == "success" else "failed",
+                duration_ms,
+            )
+
     async def _build_turn(self, ctx: TurnContext) -> None:
-        session = ctx.require_session()
-        runtime = ctx.runtime
-        if runtime is None:
-            runtime = self.runtime_for_session(session)
-            ctx.runtime = runtime
+        with self._measure_build_substage("runtime_resolution") as details:
+            session = ctx.require_session()
+            runtime = ctx.runtime
+            if runtime is None:
+                runtime = self.runtime_for_session(session)
+                ctx.runtime = runtime
+            details.update(
+                model=runtime.model,
+                context_window_tokens=runtime.context_window_tokens,
+            )
         if ctx.session_key.startswith("dream:"):
             logger.info(
                 "Dream run using model={} (preset={})",
                 runtime.model,
                 runtime.model_preset or "default",
             )
-        if ctx.on_runtime_admitted is not None:
-            await ctx.on_runtime_admitted(runtime)
+        with self._measure_build_substage("runtime_admission"):
+            if ctx.on_runtime_admitted is not None:
+                await ctx.on_runtime_admitted(runtime)
         if not ctx.ephemeral:
-            ctx.session, ctx.pending_summary = self.auto_compact.prepare_session(
-                session,
-                ctx.session_key,
-            )
+            with self._measure_build_substage("session_prepare") as details:
+                ctx.session, ctx.pending_summary = self.auto_compact.prepare_session(
+                    session,
+                    ctx.session_key,
+                )
+                details["summary_available"] = ctx.pending_summary is not None
             session = ctx.require_session()
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
 
-        ctx.history = session.get_history(extend_to_user=is_subagent)
+        with self._measure_build_substage("history_load") as details:
+            ctx.history = session.get_history(extend_to_user=is_subagent)
+            details["message_count"] = len(ctx.history)
         stored_state = session.provider_state
         subagent_followup_persisted = False
         if is_subagent:
@@ -2044,83 +2082,95 @@ class AgentLoop:
             # Providers without assistant-prefill support drop trailing
             # assistant messages, so using the persisted record as the current
             # prompt would hide an independently dispatched subagent result.
-            subagent_followup_persisted = self._persist_subagent_followup(
-                session,
-                ctx.msg,
-            )
+            with self._measure_build_substage("subagent_followup_persist") as details:
+                subagent_followup_persisted = self._persist_subagent_followup(
+                    session,
+                    ctx.msg,
+                )
+                details["persisted"] = subagent_followup_persisted
             if subagent_followup_persisted:
                 logger.debug("Subagent result persisted for session {}", ctx.session_key)
                 # Establish a durable, replay-safe baseline before any fallible
                 # provider compatibility or prompt assembly work. A compatible
                 # staged state replaces this in a second atomic save below.
-                session.provider_state = None
-                self.sessions.save(session)
+                with self._measure_build_substage("subagent_checkpoint_save"):
+                    session.provider_state = None
+                    self.sessions.save(session)
             ctx.input_persisted_early = True
-        await ctx.delivery.runtime_admitted(runtime)
+        with self._measure_build_substage("delivery_runtime_admission"):
+            await ctx.delivery.runtime_admitted(runtime)
 
-        ctx.request_context = self._request_context_for_turn(ctx)
+        with self._measure_build_substage("request_context_resolution"):
+            ctx.request_context = self._request_context_for_turn(ctx)
         if ctx.kind is TurnKind.USER:
-            ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
+            with self._measure_build_substage("runtime_context_resolution") as details:
+                ctx.runtime_context_blocks = await self._resolve_runtime_context_for_turn(ctx)
+                details["block_count"] = len(ctx.runtime_context_blocks)
         staged_provider_state = False
-        if stored_state is not None and runtime.provider.can_resume_conversation_state(
-            stored_state,
-            runtime.model,
-        ):
-            current_provider_message = self.context.build_current_message(
-                ctx.msg.content,
-                media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
-                runtime_context_blocks=ctx.runtime_context_blocks,
-            )
-            task_id = ctx.msg.metadata.get("subagent_task_id") if is_subagent else None
-            already_staged = False
-            if isinstance(task_id, str) and task_id:
-                internal_meta = current_provider_message.get("_meta")
-                current_provider_message["_meta"] = {
-                    **(
-                        cast(dict[str, Any], internal_meta)
-                        if isinstance(internal_meta, dict)
-                        else {}
-                    ),
-                    _SUBAGENT_PROVIDER_TASK_META: task_id,
-                }
-                already_staged = any(
-                    isinstance(message.get("_meta"), dict)
-                    and cast(dict[str, Any], message["_meta"]).get(
-                        _SUBAGENT_PROVIDER_TASK_META
-                    )
-                    == task_id
-                    for message in stored_state.pending_messages
-                )
-            ctx.provider_state = (
-                stored_state
-                if already_staged
-                else stored_state.with_pending_messages([
-                    *stored_state.pending_messages,
-                    current_provider_message,
-                ])
-            )
-            if (
-                not ctx.ephemeral
-                and (ctx.kind is TurnKind.USER or subagent_followup_persisted)
+        with self._measure_build_substage("provider_state_staging") as details:
+            if stored_state is not None and runtime.provider.can_resume_conversation_state(
+                stored_state,
+                runtime.model,
             ):
-                session.provider_state = ctx.provider_state
-                staged_provider_state = True
-        elif stored_state is not None:
-            session.provider_state = None
+                current_provider_message = self.context.build_current_message(
+                    ctx.msg.content,
+                    media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
+                    runtime_context_blocks=ctx.runtime_context_blocks,
+                )
+                task_id = ctx.msg.metadata.get("subagent_task_id") if is_subagent else None
+                already_staged = False
+                if isinstance(task_id, str) and task_id:
+                    internal_meta = current_provider_message.get("_meta")
+                    current_provider_message["_meta"] = {
+                        **(
+                            cast(dict[str, Any], internal_meta)
+                            if isinstance(internal_meta, dict)
+                            else {}
+                        ),
+                        _SUBAGENT_PROVIDER_TASK_META: task_id,
+                    }
+                    already_staged = any(
+                        isinstance(message.get("_meta"), dict)
+                        and cast(dict[str, Any], message["_meta"]).get(_SUBAGENT_PROVIDER_TASK_META)
+                        == task_id
+                        for message in stored_state.pending_messages
+                    )
+                ctx.provider_state = (
+                    stored_state
+                    if already_staged
+                    else stored_state.with_pending_messages(
+                        [
+                            *stored_state.pending_messages,
+                            current_provider_message,
+                        ]
+                    )
+                )
+                if not ctx.ephemeral and (ctx.kind is TurnKind.USER or subagent_followup_persisted):
+                    session.provider_state = ctx.provider_state
+                    staged_provider_state = True
+                details["resumed"] = True
+            elif stored_state is not None:
+                session.provider_state = None
+                details["resumed"] = False
+            details["stored_state"] = stored_state is not None
         if ctx.kind is TurnKind.USER:
-            ctx.input_persisted_early = self._persist_user_message_early(
-                ctx.msg,
-                session,
-                runtime_context_blocks=ctx.runtime_context_blocks,
-            )
+            with self._measure_build_substage("user_message_persist") as details:
+                ctx.input_persisted_early = self._persist_user_message_early(
+                    ctx.msg,
+                    session,
+                    runtime_context_blocks=ctx.runtime_context_blocks,
+                )
+                details["persisted"] = ctx.input_persisted_early
             if staged_provider_state and not ctx.input_persisted_early:
                 session.provider_state = stored_state
         elif subagent_followup_persisted and staged_provider_state:
             # Upgrade the replay-safe baseline to the resumable state before
             # prompt assembly and the first model checkpoint.
-            self.sessions.save(session)
-        ctx.transcript_input = self._build_transcript_input(ctx)
-
+            with self._measure_build_substage("provider_state_checkpoint_save"):
+                self.sessions.save(session)
+        with self._measure_build_substage("transcript_assembly") as details:
+            ctx.transcript_input = self._build_transcript_input(ctx)
+            details["message_count"] = ctx.transcript_input.message_count
 
     async def _run_turn(self, ctx: TurnContext) -> None:
         runtime = ctx.require_runtime()
