@@ -1125,6 +1125,7 @@ function Shell({
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const mobileSidebarRef = useRef<HTMLDivElement>(null);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
   const workbenchState = sidebarState.workbench;
@@ -2739,6 +2740,12 @@ function Shell({
               onOpenChange={(open) => setMobileSidebarOpen(open)}
             >
               <SheetContent
+                ref={mobileSidebarRef}
+                onOpenAutoFocus={(event) => {
+                  // Keep opening navigation from focusing the search tooltip trigger.
+                  event.preventDefault();
+                  mobileSidebarRef.current?.focus({ preventScroll: true });
+                }}
                 side="left"
                 showCloseButton={false}
                 aria-describedby={undefined}

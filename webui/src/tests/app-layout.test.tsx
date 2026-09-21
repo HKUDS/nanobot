@@ -287,8 +287,10 @@ import {
   fetchBootstrap,
 } from "@/lib/bootstrap";
 import App from "@/App";
+import { mockBrowserFocus } from "./browser-focus";
 
 describe("App layout", () => {
+  let restoreBrowserFocus: (() => void) | undefined;
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     mockSessions = [];
@@ -342,6 +344,8 @@ describe("App layout", () => {
 
   afterEach(() => {
     cleanup();
+    restoreBrowserFocus?.();
+    restoreBrowserFocus = undefined;
     Reflect.deleteProperty(window, "nanobotHost");
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -2200,6 +2204,7 @@ describe("App layout", () => {
   }, 15_000);
 
   it("opens a mobile topic with one click and closes the drawer without a search tooltip", async () => {
+    restoreBrowserFocus = mockBrowserFocus();
     const user = userEvent.setup();
     mockSessions = ["First", "Second"].map((title, index) => ({
       key: `websocket:mobile-${index}`,

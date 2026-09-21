@@ -74,33 +74,16 @@ const SheetContent = React.forwardRef<
     children,
     closeButtonClassName,
     showCloseButton = true,
-    onOpenAutoFocus,
     ...props
   },
   ref,
 ) => {
   const { t } = useTranslation();
-  const contentNode = React.useRef<HTMLDivElement | null>(null);
-  const contentRef = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      contentNode.current = node;
-      if (typeof ref === "function") ref(node);
-      else if (ref) ref.current = node;
-    },
-    [ref],
-  );
   return (
     <SheetPortal>
       <SheetOverlay />
       <DialogPrimitive.Content
-        ref={contentRef}
-        onOpenAutoFocus={(event) => {
-          if (onOpenAutoFocus) onOpenAutoFocus(event);
-          else {
-            event.preventDefault();
-            contentNode.current?.focus({ preventScroll: true });
-          }
-        }}
+        ref={ref}
         className={cn(
           sheetVariants({ side }),
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
