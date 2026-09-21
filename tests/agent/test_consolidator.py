@@ -25,6 +25,7 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import Session
+from nanobot.utils.helpers import estimate_prompt_tokens_chain
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -187,6 +188,46 @@ class TestTurnTranscriptSummary:
         assert "[RAW]" in result
         assert "accepted history" in result
         assert store.read_unprocessed_history(since_cursor=0) == []
+
+    async def test_oversized_transcript_summarizes_a_bounded_recent_tail(
+        self,
+        consolidator,
+        mock_provider,
+        runtime,
+    ):
+        accepted = [
+            {"role": "system", "content": "stable system"},
+            *(
+                {"role": "user", "content": f"overflow-{index} " + "x" * 800}
+                for index in range(40)
+            ),
+        ]
+        mock_provider.chat_stream_with_retry.return_value = LLMResponse(
+            content="Bounded checkpoint.",
+        )
+        runtime = replace(runtime, context_window_tokens=5_000)
+
+        result = await consolidator.summarize_transcript(
+            accepted,
+            None,
+            runtime=runtime,
+            session_key="test:oversized-turn",
+            tools=[],
+        )
+
+        assert result == "Bounded checkpoint."
+        call = mock_provider.chat_stream_with_retry.await_args.kwargs
+        history = call["messages"][:-1]
+        assert history[0] == accepted[0]
+        assert history[-1]["content"].startswith("overflow-39")
+        assert "overflow-0" not in [message["content"] for message in history]
+        estimated, _source = estimate_prompt_tokens_chain(
+            mock_provider,
+            runtime.model,
+            call["messages"],
+            call["tools"],
+        )
+        assert estimated <= runtime.context_window_tokens - runtime.generation.max_tokens
 
     async def test_native_compaction_appends_only_archive_prompt(
         self,
