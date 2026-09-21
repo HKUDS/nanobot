@@ -38,6 +38,21 @@ def test_rotating_output_rotates_oversized_existing_file_before_append(tmp_path:
     assert (tmp_path / "gateway.log.1").read_text(encoding="utf-8") == "existing output"
 
 
+def test_rotating_output_splits_one_oversized_write_at_utf8_boundaries(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "gateway.log"
+    output = RotatingTextOutput(log_path, max_bytes=8, backup_count=2)
+    text = "A世界BC🙂DEF界G"
+
+    assert output.write(text) == len(text)
+    output.close()
+
+    paths = [tmp_path / "gateway.log.2", tmp_path / "gateway.log.1", log_path]
+    assert all(path.stat().st_size <= 8 for path in paths)
+    assert "".join(path.read_text(encoding="utf-8") for path in paths) == text
+
+
 def test_rotating_output_falls_back_when_active_log_cannot_be_renamed(
     tmp_path: Path,
     monkeypatch,

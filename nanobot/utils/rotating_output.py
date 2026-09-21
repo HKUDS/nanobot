@@ -20,7 +20,7 @@ DEFAULT_BACKUP_COUNT = 5
 
 
 class RotatingTextOutput(io.TextIOBase):
-    """A UTF-8 text stream that rotates a file before it exceeds its size cap."""
+    """A UTF-8 text stream that keeps each retained file within its size cap."""
 
     def __init__(self, path: Path, *, max_bytes: int, backup_count: int) -> None:
         super().__init__()
@@ -57,14 +57,53 @@ class RotatingTextOutput(io.TextIOBase):
         data = text.encode(self.encoding, errors=self.errors)
         with self._lock:
             self._ensure_open()
-            if self._size and self._size + len(data) > self._max_bytes:
+            if len(data) <= self._max_bytes:
+                if self._size and self._size + len(data) > self._max_bytes:
+                    self._rotate()
+                    self._ensure_open()
+                assert self._handle is not None
+                self._handle.write(data)
+                self._handle.flush()
+                self._size += len(data)
+                return len(text)
+
+            if self._size:
                 self._rotate()
+            offset = 0
+            while offset < len(data):
                 self._ensure_open()
-            assert self._handle is not None
-            self._handle.write(data)
-            self._handle.flush()
-            self._size += len(data)
+                capacity = self._max_bytes - self._size
+                if capacity <= 0:
+                    self._rotate()
+                    continue
+
+                chunk_size = self._utf8_chunk_size(data[offset:], capacity)
+                if chunk_size == 0 and self._size:
+                    self._rotate()
+                    continue
+                # A configured cap smaller than one UTF-8 code point cannot
+                # satisfy both constraints. Keep the byte cap in that degenerate
+                # case; normal caps split only at code-point boundaries.
+                chunk_size = chunk_size or min(capacity, len(data) - offset)
+                chunk = data[offset : offset + chunk_size]
+                assert self._handle is not None
+                self._handle.write(chunk)
+                self._handle.flush()
+                self._size += chunk_size
+                offset += chunk_size
+                if offset < len(data):
+                    self._rotate()
         return len(text)
+
+    @staticmethod
+    def _utf8_chunk_size(data: bytes, capacity: int) -> int:
+        """Return the largest prefix within capacity that ends on a UTF-8 boundary."""
+        end = min(len(data), capacity)
+        if end == len(data):
+            return end
+        while end > 0 and data[end] & 0xC0 == 0x80:
+            end -= 1
+        return end
 
     def flush(self) -> None:
         with self._lock:
