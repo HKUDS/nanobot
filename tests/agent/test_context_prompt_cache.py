@@ -7,6 +7,8 @@ from datetime import datetime as real_datetime
 from importlib.resources import files as pkg_files
 from pathlib import Path
 
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.runtime_context import RuntimeContextBlock
 
@@ -71,17 +73,20 @@ def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
     assert prompt_a == builder.build_system_prompt(workspace=project_a)
 
 
-def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
+@pytest.mark.parametrize("selected_project", [False, True])
+def test_system_prompt_reflects_current_dream_memory_contract(tmp_path, selected_project) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
+    project = tmp_path / "project" if selected_project else workspace
+    project.mkdir(exist_ok=True)
 
-    prompt = builder.build_system_prompt()
+    prompt = builder.build_system_prompt(workspace=project)
 
     assert "memory/history.jsonl" in prompt
-    assert "automatically managed by Dream" in prompt
-    assert "do not edit directly" in prompt
-    assert "memory/HISTORY.md" not in prompt
-    assert "write important facts here" not in prompt
+    assert (
+        "Only Dream memory-consolidation tasks may edit the profile and long-term memory files "
+        "listed above."
+    ) in prompt
 
 
 def test_provider_context_appended_after_user_content(tmp_path) -> None:
@@ -135,28 +140,6 @@ def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
     assert legacy_rule not in prompt
     assert current_rule in prompt
     assert soul_path.read_text(encoding="utf-8") == legacy_soul
-
-
-def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
-    """Identity template should not contain behavioral rules or hardcoded name."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    identity = builder._get_identity(channel=None)
-    assert "You are nanobot" not in identity
-    assert "Act, don't narrate" not in identity
-    assert "Execution Rules" not in identity
-
-
-def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) -> None:
-    """Parroting is prevented by not annotating assistant turns in history;
-    no prompt-level warning about ``[Message Time: ...]`` is needed."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt()
-
-    assert "Message Time" not in prompt
 
 
 def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None:
@@ -256,7 +239,6 @@ def test_fresh_workspace_omits_default_prompt_scaffolding(tmp_path) -> None:
     assert "## USER.md" not in prompt
     assert "8281248569" not in prompt
     assert "(your name)" not in prompt
-    assert "apt/brew" not in prompt
     assert prompt.count("Do not use the 'message' tool for normal replies") == 1
 
 

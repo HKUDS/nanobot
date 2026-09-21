@@ -30,7 +30,7 @@ describe("generic tool activity semantics", () => {
     ['create_goal({"objective":"private objective","ui_summary":"Benchmark memory"})', "Started long task", "Benchmark memory"],
     ['update_goal({"action":"complete","recap":"private recap"})', "Updated long task", "complete"],
     ['exec_session({"session_id":"session-1234567890-secret","until_exit":true})', "Continued command", "session…ecret"],
-    ['write_stdin({"session_id":"legacy-1234567890-secret","chars":"private input"})', "Continued command", "legacy-…ecret"],
+    ['write_stdin({"session_id":"legacy-1234567890-secret","chars":"private input"})', "Completed Write stdin", ""],
     ['list_exec_sessions({})', "Checked running commands", ""],
     ['screenshot({"path":"artifacts/home.png"})', "Captured screenshot", ""],
     ['third_party_sync({"token":"secret","payload":"private payload"})', "Completed Third party sync", ""],

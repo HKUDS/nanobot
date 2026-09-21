@@ -1,17 +1,8 @@
 {
-  "description": "Gunakan nanobot dari percakapan WhatsApp.",
-  "requirements": "Setup koneksi WhatsApp dan gateway",
   "setup": {
     "primaryAction": "Hubungkan WhatsApp",
     "docsLabel": "Buka panduan WhatsApp",
     "officialLabel": "Buka bantuan WhatsApp",
-    "tryIt": "Setelah login terminal selesai, kirim DM ke akun yang terhubung.",
-    "summary": "WhatsApp terhubung dengan memindai kode QR dari akun yang akan menjalankan bot.",
-    "steps": [
-      "Jalankan perintah login WhatsApp yang ditampilkan di bawah.",
-      "Pindai kode QR di terminal dengan WhatsApp di ponsel.",
-      "Kembali ke sini setelah login, aktifkan WhatsApp, lalu kirim pesan langsung uji."
-    ],
     "fields": {
       "allowFrom": {
         "label": "Kontak yang diizinkan",
@@ -20,11 +11,26 @@
       "groupPolicy": {
         "label": "Perilaku grup",
         "choices": {
-          "mention": "Hanya sebutan",
+          "mention": "Hanya saat disebut",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
+      },
+      "proxy": {
+        "label": "Proxy jaringan",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
+  },
+  "custom": {
+    "qrAlt": "Kode QR penautan WhatsApp",
+    "scanTitle": "Tautkan WhatsApp",
+    "scanDescription": "Di WhatsApp, buka Perangkat tertaut, pilih Tautkan perangkat, lalu pindai kode ini.",
+    "waiting": "Menunggu WhatsApp…",
+    "connected": "WhatsApp terhubung.",
+    "stopped": "Upaya koneksi berhenti. Mulai lagi untuk mendapatkan kode baru.",
+    "connecting": "Menghubungkan…",
+    "scanAgain": "Tautkan akun lain",
+    "connect": "Tautkan WhatsApp"
   }
 }

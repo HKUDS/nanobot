@@ -1,10 +1,10 @@
-import { memo, useCallback, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
-import type { CliAppInfo, McpPresetInfo, SlashCommand, UIMessage } from "@/lib/types";
+import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
@@ -14,11 +14,14 @@ interface ThreadMessagesProps {
   activeTurnId?: string | null;
   /** Optimistic or canonical active-turn start, in unix seconds. */
   runStartedAt?: number | null;
+  retryStatus?: RetryStatus | null;
   hiddenUserMessageCount?: number;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
+  traceDetailScope?: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onQuoteSelection?: (text: string) => void;
@@ -39,6 +42,16 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
       hasLaterUnitBeforeUser = false;
       continue;
     }
+    if (
+      unit.type === "message"
+      && unit.message.role === "assistant"
+      && unit.message.kind === "compaction"
+    ) {
+      // Compaction notices are session lifecycle markers, not assistant answers.
+      // They must neither expose nor displace the answer-level fork action.
+      flags[i] = false;
+      continue;
+    }
     if (unit.type === "message" && unit.message.role === "assistant") {
       flags[i] = !hasLaterUnitBeforeUser;
     }
@@ -53,11 +66,14 @@ export function ThreadMessages({
   isStreaming = false,
   activeTurnId = null,
   runStartedAt = null,
+  retryStatus = null,
   hiddenUserMessageCount = 0,
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
   forkBoundaryMessageCount = null,
+  traceDetailScope = null,
+  onLoadTraceDetails,
   onOpenFilePreview,
   onForkFromMessage,
   onQuoteSelection,
@@ -87,7 +103,7 @@ export function ThreadMessages({
     isStreaming
     && liveActivityClusterIndices.size === 0
     && pendingTurn !== null
-    && !pendingTurn.hasVisibleOutput
+    && (retryStatus !== null || !pendingTurn.hasVisibleOutput)
   ) ? pendingTurn : null;
   const currentTurnStartIndex = isStreaming
     ? activeTurnStartIndex(units, activeTurnId)
@@ -127,6 +143,14 @@ export function ThreadMessages({
           unit.type === "message" && unit.message.role === "assistant" && forkFlags[index]
             ? nextUserIndex
             : undefined;
+        const unitTurnStreaming = unit.type === "activity"
+          ? liveActivityClusterIndices.has(index)
+          : isStreaming && (
+              unit.message.turnId && activeTurnId !== null
+                ? unit.message.turnId === activeTurnId
+                : index > currentTurnStartIndex
+            );
+        const isThreadTail = index === units.length - 1;
         if (
           unit.type === "message"
           && unit.message.role === "user"
@@ -142,14 +166,12 @@ export function ThreadMessages({
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             deferOffscreenRender={deferOffscreenRender}
-            isTurnStreaming={
-              unit.type === "activity"
-                ? liveActivityClusterIndices.has(index)
-                : isStreaming && (
-                    unit.message.turnId && activeTurnId !== null
-                      ? unit.message.turnId === activeTurnId
-                      : index > currentTurnStartIndex
-                  )
+            isTurnStreaming={unitTurnStreaming}
+            isThreadTail={isThreadTail}
+            retryStatus={
+              unit.type === "activity" && liveActivityClusterIndices.has(index)
+                ? retryStatus
+                : null
             }
             forkIndex={forkIndex}
             showForkBoundary={index === forkBoundaryAfterUnitIndex}
@@ -158,6 +180,8 @@ export function ThreadMessages({
             cliApps={cliApps}
             mcpPresets={mcpPresets}
             slashCommands={slashCommands}
+            traceDetailScope={traceDetailScope}
+            onLoadTraceDetails={onLoadTraceDetails}
             onOpenFilePreview={onOpenFilePreview}
             onForkFromMessage={onForkFromMessage}
           />
@@ -169,10 +193,10 @@ export function ThreadMessages({
             messages={[]}
             isTurnStreaming
             hasBodyBelow={false}
+            retryStatus={retryStatus}
             startedAtMs={
-              runStartedAt != null
-                ? runStartedAt * 1000
-                : pendingActivity.startedAtMs
+              // Match the activity timeline's prompt-based clock across the first output.
+              pendingActivity.startedAtMs ?? (runStartedAt != null ? runStartedAt * 1000 : undefined)
             }
           />
         </div>
@@ -233,6 +257,8 @@ interface ThreadDisplayUnitProps {
   hasBodyBelow: boolean;
   deferOffscreenRender: boolean;
   isTurnStreaming: boolean;
+  isThreadTail: boolean;
+  retryStatus: RetryStatus | null;
   forkIndex?: number;
   showForkBoundary: boolean;
   forkBoundaryLabel: string;
@@ -240,6 +266,8 @@ interface ThreadDisplayUnitProps {
   cliApps: CliAppInfo[];
   mcpPresets: McpPresetInfo[];
   slashCommands: SlashCommand[];
+  traceDetailScope: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
 }
@@ -252,6 +280,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   hasBodyBelow,
   deferOffscreenRender,
   isTurnStreaming,
+  isThreadTail,
+  retryStatus,
   forkIndex,
   showForkBoundary,
   forkBoundaryLabel,
@@ -259,41 +289,64 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   cliApps,
   mcpPresets,
   slashCommands,
+  traceDetailScope,
+  onLoadTraceDetails,
   onOpenFilePreview,
   onForkFromMessage,
 }: ThreadDisplayUnitProps) {
-  // Introducing content-visibility after a unit has painted can move the
-  // browser's scroll anchor. Only units deferred on their first render may
-  // remain deferred.
-  const hasRenderedEagerlyRef = useRef(!deferOffscreenRender);
-  if (!deferOffscreenRender) hasRenderedEagerlyRef.current = true;
-  const stableDeferOffscreenRender =
-    deferOffscreenRender && !hasRenderedEagerlyRef.current;
+  const elementRef = useRef<HTMLDivElement>(null);
+  const heightRef = useRef(0);
+  const [nearViewport, setNearViewport] = useState(true);
+  const [interacted, setInteracted] = useState(false);
+  const retainContent = !deferOffscreenRender || interacted || nearViewport;
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element || !deferOffscreenRender || interacted || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry) return;
+      if (!entry.isIntersecting) {
+        const height = element.getBoundingClientRect().height;
+        if (height <= 0) return;
+        heightRef.current = height;
+      }
+      setNearViewport(entry.isIntersecting);
+    }, { rootMargin: "1000px 0px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [deferOffscreenRender, interacted]);
   const onForkFromHere = useCallback(() => {
     if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
   }, [forkIndex, onForkFromMessage]);
   return (
     <>
       <div
-        className={`${marginTop}${stableDeferOffscreenRender ? " thread-render-unit" : ""}`}
+        ref={elementRef}
+        className={marginTop}
+        style={retainContent ? undefined : { height: heightRef.current }}
+        onPointerDownCapture={() => setInteracted(true)}
+        onFocusCapture={() => setInteracted(true)}
         data-thread-display-unit={unitKey}
         data-user-prompt-id={userPromptId}
       >
-        {unit.type === "activity" ? (
+        {retainContent ? unit.type === "activity" ? (
           <AgentActivityCluster
             messages={unit.messages}
             isTurnStreaming={isTurnStreaming}
+            retryStatus={retryStatus}
             hasBodyBelow={hasBodyBelow}
             turnLatencyMs={unit.turnLatencyMs}
             startedAtMs={unit.startedAtMs}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
+            traceDetailScope={traceDetailScope}
+            onLoadTraceDetails={onLoadTraceDetails}
             onOpenFilePreview={onOpenFilePreview}
           />
         ) : (
           <MessageBubble
             message={unit.message}
             isTurnStreaming={isTurnStreaming}
+            isThreadTail={isThreadTail}
             temporary={temporary}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
@@ -301,7 +354,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             onOpenFilePreview={onOpenFilePreview}
             onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
           />
-        )}
+        ) : null}
       </div>
       {showForkBoundary ? <ForkBoundaryDivider label={forkBoundaryLabel} /> : null}
     </>
@@ -319,6 +372,8 @@ function threadDisplayUnitPropsEqual(
     && previous.hasBodyBelow === next.hasBodyBelow
     && previous.deferOffscreenRender === next.deferOffscreenRender
     && previous.isTurnStreaming === next.isTurnStreaming
+    && previous.isThreadTail === next.isThreadTail
+    && previous.retryStatus === next.retryStatus
     && previous.forkIndex === next.forkIndex
     && previous.showForkBoundary === next.showForkBoundary
     && previous.forkBoundaryLabel === next.forkBoundaryLabel
@@ -326,6 +381,8 @@ function threadDisplayUnitPropsEqual(
     && previous.cliApps === next.cliApps
     && previous.mcpPresets === next.mcpPresets
     && previous.slashCommands === next.slashCommands
+    && previous.traceDetailScope === next.traceDetailScope
+    && previous.onLoadTraceDetails === next.onLoadTraceDetails
     && previous.onOpenFilePreview === next.onOpenFilePreview
     && previous.onForkFromMessage === next.onForkFromMessage
   );

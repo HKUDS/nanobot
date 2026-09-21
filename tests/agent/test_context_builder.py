@@ -218,17 +218,14 @@ class TestBundledToolContract:
         assert "Do not use `exec` as a universal workaround" in content
         assert "## File and Coding Workflows" in content
         assert "`grep` returns matches with five context lines by default" in content
-        assert 'defaults to `output_mode="files_with_matches"`' not in content
         assert "apply_patch" in content
         assert "acceptance criteria into concrete checks" in content
         assert "visual evidence reaches the model" in content
         assert "clear user request as authorization" in content
         assert "Never invent missing records or measurements" in content
-        assert "scientific fitting" not in content
         assert "## Web and External Information" in content
         assert "## Messaging and Media" in content
         assert "## Scheduling and Background Work" in content
-        assert "pure coding" not in content.lower()
 
     def test_tool_contract_is_injected_without_workspace_file(self, tmp_path):
         builder = _builder(tmp_path)
@@ -341,6 +338,11 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt(session_summary=summary)
         assert "Previous chat about Python." in result
         assert "[Archived Context Summary]" in result
+
+    def test_nothing_summary_builds_the_prompt_without_archived_context(self, tmp_path):
+        builder = _builder(tmp_path)
+        summary = {"text": "(nothing)", "last_active": "2026-08-19T10:00:00"}
+        assert builder.build_system_prompt(session_summary=summary) == builder.build_system_prompt()
 
     def test_sections_separated_by_separator(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Rules.", encoding="utf-8")

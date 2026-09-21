@@ -87,6 +87,71 @@ def _visible_messages(raw_messages: object) -> list[SessionMessage]:
     return visible
 
 
+def _visible_projection_events(raw_events: object) -> list[SessionMessage]:
+    """Extract searchable conversation text from the event protocol.
+
+    This is intentionally narrower than the WebUI projector: session tools
+    expose only user and assistant answer text, never reasoning or activity.
+    """
+    if not isinstance(raw_events, list):
+        return []
+    visible: list[SessionMessage] = []
+    stream_parts: list[str] = []
+    stream_timestamp: str | int | None = None
+
+    def append(role: str, text: object, timestamp: object) -> None:
+        content = text.strip() if isinstance(text, str) else ""
+        if not content:
+            return
+        visible.append({
+            "message_index": len(visible),
+            "role": role,
+            "timestamp": timestamp if isinstance(timestamp, (str, int)) else None,
+            "content": content,
+        })
+
+    def flush_stream(final_text: object = None) -> None:
+        nonlocal stream_timestamp
+        text = final_text if isinstance(final_text, str) else "".join(stream_parts)
+        append("assistant", text, stream_timestamp)
+        stream_parts.clear()
+        stream_timestamp = None
+
+    for raw_event in cast(list[object], raw_events):
+        if not isinstance(raw_event, dict):
+            continue
+        event = cast(dict[str, Any], raw_event)
+        name = event.get("event")
+        timestamp = event.get("created_at_ms")
+        if name == "user_message":
+            flush_stream()
+            append("user", event.get("text"), timestamp)
+        elif name == "delta":
+            text = event.get("text")
+            if isinstance(text, str):
+                if not stream_parts:
+                    stream_timestamp = timestamp if isinstance(timestamp, (str, int)) else None
+                stream_parts.append(text)
+        elif name == "stream_end":
+            if event.get("resuming") is True and event.get("merge_next") is True:
+                text = event.get("text")
+                if isinstance(text, str):
+                    stream_parts[:] = [text]
+                continue
+            flush_stream(event.get("text"))
+        elif name == "message":
+            kind = event.get("kind")
+            if kind in {"tool_hint", "progress", "reasoning"}:
+                flush_stream()
+                continue
+            flush_stream()
+            append("assistant", event.get("text"), timestamp)
+        elif name in {"reasoning_delta", "reasoning_end", "file_edit", "turn_end"}:
+            flush_stream()
+    flush_stream()
+    return visible
+
+
 def _text(value: object) -> str:
     return value.strip()[:160] if isinstance(value, str) else ""
 
@@ -117,7 +182,7 @@ class WebuiSessionAccess:
             return None
         return self._sessions.read_session_metadata(session_key)
 
-    def _messages(self, session_key: str) -> list[SessionMessage]:
+    def _messages(self, session_key: str, *, needle: str, limit: int) -> list[SessionMessage]:
         @cache
         def load_session_messages() -> list[dict[str, Any]] | None:
             payload = self._sessions.read_session_file(session_key)
@@ -130,13 +195,57 @@ class WebuiSessionAccess:
                 if isinstance(message, dict)
             ]
 
-        thread = build_webui_thread_response(
-            session_key,
-            session_messages_loader=load_session_messages,
-        )
-        if thread is not None:
-            return _visible_messages(thread.get("messages"))
-        return _visible_messages(load_session_messages())
+        def matching(raw_messages: object) -> list[SessionMessage]:
+            return [
+                message for message in _visible_messages(raw_messages)
+                if not needle or needle in message["content"].casefold()
+            ]
+
+        # The WebUI replay API returns one page, even when no limit is given.
+        # Session tools need the older pages too, including turns no longer in
+        # the compacted model history. Keep the UI's per-page replay budgets.
+        matches: list[SessionMessage] = []
+        message_count = 0
+        before: str | None = None
+        while True:
+            thread = build_webui_thread_response(
+                session_key,
+                session_messages_loader=load_session_messages,
+                before=before,
+            )
+            if thread is None:
+                if before is None:
+                    return matching(load_session_messages())[-limit:]
+                break
+            raw_events = thread.get("events")
+            if isinstance(raw_events, list):
+                page_messages = _visible_projection_events(cast(list[object], raw_events))
+                message_count += len(page_messages)
+                remaining = limit - len(matches)
+                if remaining > 0:
+                    page_matches = [
+                        message for message in page_messages
+                        if not needle or needle in message["content"].casefold()
+                    ][-remaining:]
+                    for message in page_matches:
+                        # Index relative to the conversation's end until we
+                        # know the total number of raw messages across pages.
+                        message["message_index"] -= message_count
+                    matches = page_matches + matches
+            raw_page = thread.get("page")
+            if not isinstance(raw_page, dict):
+                break
+            page = cast(dict[str, Any], raw_page)
+            cursor = page.get("before_cursor")
+            if not page.get("has_more_before") or not isinstance(cursor, str) or cursor == before:
+                break
+            before = cursor
+
+        # Global indexes still require counting older pages, but retain only
+        # the requested matches, never the full conversation's raw traces.
+        for message in matches:
+            message["message_index"] += message_count
+        return matches
 
     def search(
         self,
@@ -179,11 +288,7 @@ class WebuiSessionAccess:
             if needed <= 0:
                 break
             key = cast(str, row["key"])
-            matches = [
-                message
-                for message in self._messages(key)
-                if needle in message["content"].casefold()
-            ]
+            matches = self._messages(key, needle=needle, limit=2)
             if not matches:
                 continue
             updated = row.get("updated_at")
@@ -191,7 +296,7 @@ class WebuiSessionAccess:
                 "session_key": key,
                 "title": _row_title(row),
                 "updated_at": updated if isinstance(updated, str) else None,
-                "messages": matches[-2:],
+                "messages": matches,
             }))
             needed -= 1
         return [item[1] for item in ranked[:limit]]
@@ -207,16 +312,13 @@ class WebuiSessionAccess:
         payload = self._metadata(session_key, exclude_session_key=exclude_session_key)
         if payload is None:
             return None
-        messages = self._messages(session_key)
-        needle = query.casefold()
-        if needle:
-            messages = [message for message in messages if needle in message["content"].casefold()]
+        messages = self._messages(session_key, needle=query.casefold(), limit=limit)
         updated = payload.get("updated_at")
         return {
             "session_key": session_key,
             "title": _text(_session_metadata(payload).get("title")),
             "updated_at": updated if isinstance(updated, str) else None,
-            "messages": messages[-limit:],
+            "messages": messages,
         }
 
     def normalize_mentions(

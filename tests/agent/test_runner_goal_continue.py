@@ -28,7 +28,7 @@ async def test_runner_exits_normally_without_continuation_callback():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="all done", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
@@ -53,7 +53,7 @@ async def test_runner_exits_normally_when_continuation_callback_returns_none():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="all done", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
@@ -85,7 +85,7 @@ async def test_runner_continues_when_callback_returns_message():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
@@ -115,7 +115,7 @@ async def test_runner_respects_max_iterations_with_continuation():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
@@ -135,17 +135,17 @@ async def test_runner_respects_max_iterations_with_continuation():
 
 
 @pytest.mark.asyncio
-async def test_runner_continuation_not_limited_by_injection_cycle_cap():
+async def test_runner_continuation_is_governed_by_max_iterations():
     """Caller-requested continuation is governed by max_iterations."""
-    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner
+    from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
     tools.get_definitions.return_value = []
-    max_iterations = _MAX_INJECTION_CYCLES + 3
+    max_iterations = 8
 
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
@@ -159,7 +159,7 @@ async def test_runner_continuation_not_limited_by_injection_cycle_cap():
     ))
 
     assert result.stop_reason == "max_iterations"
-    assert provider.chat_with_retry.await_count == max_iterations
+    assert provider.chat_stream_with_retry.await_count == max_iterations
 
 
 @pytest.mark.asyncio
@@ -168,7 +168,7 @@ async def test_runner_does_not_continue_on_error():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content=None, tool_calls=[], usage=None,
         finish_reason="error",
     ))
@@ -194,7 +194,7 @@ async def test_runner_injects_continuation_callback_message():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()
@@ -222,7 +222,7 @@ async def test_runner_resolves_continuation_callback_lazily():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="still working", tool_calls=[], usage=None,
     ))
     tools = MagicMock()

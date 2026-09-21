@@ -29,44 +29,28 @@ describe("footerHints", () => {
     expect(active.chunks).toHaveLength(0)
   })
 
-  test("groups the cache ratio with input telemetry", () => {
-    const result = footerTelemetry({
-      prompt_tokens: 1200,
-      completion_tokens: 80,
-      cached_tokens: 900,
-      generation_ms: 1600,
-      measured_completion_tokens: 80,
-      ttft_ms: 500,
-      timed_requests: 2,
-    }, 120, theme)
+  test("shows the measured request's context-window percentage", () => {
+    const result = footerTelemetry(14_700, 128_000, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
-      .toBe("50 tok/s · 1.2K in (75% cached) · 80 out")
+      .toBe("11% context")
     expect(result.chunks[0]?.fg?.toInts().slice(0, 3)).toEqual([239, 142, 48])
   })
 
-  test("uses familiar compact units for large token counts", () => {
-    const result = footerTelemetry({
-      prompt_tokens: 4_500_000,
-      completion_tokens: 19_000,
-      cached_tokens: 3_600_000,
-      generation_ms: 135_714,
-      measured_completion_tokens: 19_000,
-    }, 120, theme)
+  test("clamps usage above the configured window", () => {
+    const result = footerTelemetry(220_000, 200_000, theme)
 
     expect(result.chunks.map(({ text }) => text).join(""))
-      .toBe("140 tok/s · 4.5M in (80% cached) · 19K out")
+      .toBe("100% context")
   })
 
-  test("degrades telemetry instead of guessing missing provider metrics", () => {
-    const compact = footerTelemetry({
-      prompt_tokens: 1000,
-      completion_tokens: 20,
-      cached_tokens: 0,
-    }, 60, theme)
-    const unsupported = footerTelemetry({ prompt_tokens: 1000, completion_tokens: 20 }, 60, theme)
+  test("does not guess without measured context or a valid window", () => {
+    const missingContext = footerTelemetry(null, 128_000, theme)
+    const missingWindow = footerTelemetry(1000, null, theme)
+    const invalidWindow = footerTelemetry(1000, 0, theme)
 
-    expect(compact.chunks.map(({ text }) => text).join("")).toBe("0% cached")
-    expect(unsupported.chunks).toHaveLength(0)
+    expect(missingContext.chunks).toHaveLength(0)
+    expect(missingWindow.chunks).toHaveLength(0)
+    expect(invalidWindow.chunks).toHaveLength(0)
   })
 })

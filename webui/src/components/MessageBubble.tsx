@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -18,13 +19,16 @@ import {
   Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
+import { ResponseSourceBadge } from "@/components/ResponseSourceBadge";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
+import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
 import {
   Tooltip,
@@ -36,7 +40,6 @@ import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import {
   fmtDateTime,
-  formatCompactTokenCount,
   formatMessageEndTime,
 } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
@@ -54,7 +57,6 @@ import type {
   UIMessage,
   MessageDeliveryErrorKind,
   MessageDeliveryStatus,
-  TurnUsage,
 } from "@/lib/types";
 
 interface MessageBubbleProps {
@@ -65,6 +67,8 @@ interface MessageBubbleProps {
   temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
   showCopyAction?: boolean;
+  /** Whether this message is the final display unit in the thread. */
+  isThreadTail?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
@@ -177,71 +181,6 @@ function MessageCopyButton({ content }: { content: string }) {
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" align="center">{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function compactDuration(milliseconds: number): string {
-  const seconds = milliseconds / 1_000;
-  if (seconds < 10) return `${seconds.toFixed(1)}s`;
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${Math.round(seconds % 60)}s`;
-}
-
-function TurnUsageMeta({
-  usage,
-  latencyMs,
-}: {
-  usage: TurnUsage;
-  latencyMs?: number;
-}) {
-  const { t } = useTranslation();
-  const prompt = usage.prompt_tokens;
-  const completion = usage.completion_tokens;
-  const approximate = (usage.estimated_tokens ?? 0) > 0 ? "~" : "";
-  const parts: string[] = [];
-  if (typeof prompt === "number") parts.push(`${approximate}${formatCompactTokenCount(prompt)} in`);
-  if (typeof completion === "number") parts.push(`${approximate}${formatCompactTokenCount(completion)} out`);
-  if (
-    typeof usage.cached_tokens === "number"
-    && typeof prompt === "number"
-    && prompt > 0
-  ) {
-    parts.push(`${Math.round(Math.min(1, usage.cached_tokens / prompt) * 100)}% cached`);
-  }
-  if (typeof latencyMs === "number" && latencyMs >= 0) parts.push(compactDuration(latencyMs));
-  if (parts.length === 0) return null;
-
-  const details: string[] = [];
-  if (approximate) {
-    details.push(t("message.usage.estimated", { defaultValue: "Includes estimated usage" }));
-  }
-  const usageMeta = (
-    <span
-      data-turn-usage
-      tabIndex={details.length ? 0 : undefined}
-      className={cn(
-        "text-[11px] leading-none text-muted-foreground/70 tabular-nums",
-        details.length && "cursor-help",
-      )}
-    >
-      {parts.join(" · ")}
-    </span>
-  );
-
-  if (details.length === 0) return usageMeta;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{usageMeta}</TooltipTrigger>
-      <TooltipContent
-        side="top"
-        align="start"
-        className="max-w-96 whitespace-nowrap"
-      >
-        {details.join(" · ")}
-      </TooltipContent>
     </Tooltip>
   );
 }
@@ -368,9 +307,9 @@ function IncomingSessionMessage({
         </div>
       </div>
       {createdAtLabel || showCopyAction ? (
-        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <TooltipProvider>
           <div
-            className="mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
+            className="message-actions mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
           >
             {showCopyAction ? <MessageCopyButton content={message.content} /> : null}
             {createdAtLabel ? (
@@ -394,6 +333,7 @@ export function MessageBubble({
   isTurnStreaming = false,
   temporary = false,
   showCopyAction = true,
+  isThreadTail = true,
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
@@ -409,6 +349,10 @@ export function MessageBubble({
     () => mergeMcpMentionPresets(mcpPresets, message.mcpPresets),
     [mcpPresets, message.mcpPresets],
   );
+
+  if (message.kind === "compaction" && message.compaction) {
+    return <ContextCompactionNotice compaction={message.compaction} />;
+  }
 
   if (message.kind === "trace") {
     return <TraceGroup message={message} />;
@@ -484,7 +428,7 @@ export function MessageBubble({
           </p>
         ) : null}
         {showDeliveryStatus || showCreatedAt || (hasText && showCopyAction) ? (
-          <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+          <TooltipProvider>
             <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
               {showCreatedAt ? (
                 <MessageTimestamp
@@ -507,7 +451,12 @@ export function MessageBubble({
     );
   }
 
-  const empty = message.content.trim().length === 0;
+  const assistantContent = message.compactReply === "empty"
+    ? t("thread.compaction.empty")
+    : message.compactReply === "failed"
+      ? t("thread.compaction.failed")
+      : message.content;
+  const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
@@ -538,7 +487,7 @@ export function MessageBubble({
       ? completedAt
       : message.createdAt;
   const assistantTimestampLabel =
-    message.role === "assistant" && !message.isStreaming
+    message.role === "assistant" && !message.isStreaming && !isTurnStreaming
       ? formatMessageEndTime(assistantTimestamp)
       : "";
   const showCompletedAt =
@@ -549,12 +498,15 @@ export function MessageBubble({
     && (!empty || hasReasoning || media.length > 0);
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
-  const showUsage = message.role === "assistant" && !!message.usage && !message.isStreaming;
+  const fallbackSources = message.responseSources?.filter((source) => source.fallback === true) ?? [];
   const showAssistantFooterRow =
-    showCopyButton || showForkButton || showAssistantTimestamp || showUsage;
-  const showAssistantFooterSlot =
+    showCopyButton || showForkButton || showAssistantTimestamp || fallbackSources.length > 0;
+  const hasAssistantFooterContent =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
+  const showAssistantFooterSlot =
+    hasAssistantFooterContent
+    && (showAssistantFooterRow || ((message.isStreaming || isTurnStreaming) && isThreadTail));
   return (
     <div className="w-full text-[15px]" style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
@@ -575,20 +527,20 @@ export function MessageBubble({
               preserveStreamingLayout
               onOpenFilePreview={onOpenFilePreview}
             >
-              {message.content}
+              {assistantContent}
             </MarkdownText>
           </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
         </>
       )}
       {showAssistantFooterSlot ? (
-        <TooltipProvider delayDuration={220} skipDelayDuration={80}>
+        <TooltipProvider>
           <div
             data-assistant-footer
             data-state={showAssistantFooterRow ? "visible" : "reserved"}
             aria-hidden={showAssistantFooterRow ? undefined : true}
             className={cn(
-              "mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
+              "message-actions mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground",
               "transition-opacity duration-300 ease-out motion-reduce:transition-none",
               showAssistantFooterRow
                 ? "opacity-100"
@@ -596,7 +548,7 @@ export function MessageBubble({
             )}
           >
             {showCopyButton ? (
-              <MessageCopyButton content={message.content} />
+              <MessageCopyButton content={assistantContent} />
             ) : null}
             {showForkButton ? (
               <Tooltip>
@@ -617,12 +569,6 @@ export function MessageBubble({
                 <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
               </Tooltip>
             ) : null}
-            {showUsage ? (
-              <TurnUsageMeta
-                usage={message.usage!}
-                latencyMs={message.latencyMs}
-              />
-            ) : null}
             {showAssistantTimestamp ? (
               <MessageTimestamp
                 {...(showCompletedAt ? { "data-assistant-completed-at": true } : {})}
@@ -632,6 +578,13 @@ export function MessageBubble({
               >
                 {assistantTimestampLabel}
               </MessageTimestamp>
+            ) : null}
+            {fallbackSources.length > 0 ? (
+              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1">
+                {fallbackSources.map((source) => (
+                  <ResponseSourceBadge key={JSON.stringify(source)} source={source} />
+                ))}
+              </div>
             ) : null}
             {showAutomationTrigger ? (
               <AutomationTriggerMeta
@@ -951,8 +904,8 @@ export function StreamingLabelSheen({
       <span
         data-sheen-text={active ? sheenText : undefined}
         className={cn(
-          "block w-fit max-w-full truncate font-medium leading-normal",
-          active ? "streaming-text-sheen" : "text-muted-foreground",
+          "block w-fit max-w-full truncate pr-0.5 font-medium leading-normal",
+          active ? "streaming-text-sheen after:pr-0.5" : "text-muted-foreground",
         )}
       >
         {children}
@@ -998,16 +951,23 @@ function TraceGroup({ message }: TraceGroupProps) {
   const lines = message.traces ?? [message.content];
   const count = lines.length;
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
+  const releaseContent = useCallback(() => setHasOpened(false), []);
+  const contentId = useId();
   return (
     <div className="w-full">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) setHasOpened(true);
+          setOpen((value) => !value);
+        }}
         className={cn(
           "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
           "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
         )}
         aria-expanded={open}
+        aria-controls={contentId}
       >
         <Wrench className="h-3.5 w-3.5" aria-hidden />
         <span className="font-medium">
@@ -1018,17 +978,14 @@ function TraceGroup({ message }: TraceGroupProps) {
         <ChevronRight
           aria-hidden
           className={cn(
-            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
+            "ml-auto h-3.5 w-3.5 transition-transform duration-200 motion-reduce:transition-none",
             open && "rotate-90",
           )}
         />
       </button>
-      {open && (
-        <ul
-          className={cn(
-            "mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3",
-            "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-          )}
+      <DisclosureContent id={contentId} open={open} onExitComplete={releaseContent}>
+        {hasOpened && <ul
+          className="mt-1 space-y-0.5 border-l border-muted-foreground/20 pl-3"
         >
           {lines.map((line, i) => (
             <li
@@ -1038,8 +995,8 @@ function TraceGroup({ message }: TraceGroupProps) {
               {line}
             </li>
           ))}
-        </ul>
-      )}
+        </ul>}
+      </DisclosureContent>
     </div>
   );
 }

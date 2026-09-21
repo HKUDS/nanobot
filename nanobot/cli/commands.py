@@ -23,6 +23,7 @@ if sys.platform == "win32":
 # Keep console encoding setup before importing CLI UI/logging libraries.
 import typer  # noqa: E402
 from loguru import logger  # noqa: E402
+from typer.core import TyperGroup  # noqa: E402
 
 # Remove default handler and re-add with unified nanobot format
 logger.remove()
@@ -83,7 +84,16 @@ from nanobot.utils.helpers import (  # noqa: E402
 SafeFileHistory = cli_terminal.SafeFileHistory
 
 
+class _DesktopAwareGroup(TyperGroup):
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        # Keep exact arguments: explicitly passing even a default-valued option
+        # must bypass the picker. Also covers older commands:app launchers.
+        ctx.meta["desktop_target_args"] = list(args)
+        return super().parse_args(ctx, args)
+
+
 app = typer.Typer(
+    cls=_DesktopAwareGroup,
     name="nanobot",
     context_settings={"help_option_names": ["-h", "--help"]},
     help=f"{__logo__} nanobot - Personal AI Assistant",
@@ -116,6 +126,13 @@ def main(
     # role identity correct until that launcher is regenerated.
     command = ctx.invoked_subcommand
     set_cli_process_identity([command] if command else ["agent"])
+    from nanobot.cli.desktop_target import dispatch_bare_desktop_target
+
+    raw_args = ctx.meta.get("desktop_target_args")
+    if isinstance(raw_args, list):
+        desktop_exit = dispatch_bare_desktop_target(cast(list[str], raw_args))
+        if desktop_exit is not None:
+            raise typer.Exit(desktop_exit)
     if command is None:
         from nanobot.cli.entry import _run_agent
 

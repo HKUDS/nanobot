@@ -4,6 +4,23 @@ Use this page when the first reply fails because of provider/model mismatch, or 
 
 For normal local setup, open **Settings → Models** in the WebUI to add provider credentials, create a model preset, and select the active model. Use the JSON below for manual deployments, local endpoints, provider-specific fields, or diagnosis.
 
+The model picker fetches online catalogs for OpenAI Codex, xAI Grok, and GitHub
+Copilot. An explicit authorization failure hides the picker’s search and model
+list and offers **Sign in again** using the existing provider login flow.
+Successful WebUI sign-in clears the catalog cache and restores model selection.
+Existing presets, selected models, and unsaved preset details are preserved.
+Network, rate-limit, and service failures instead keep cached or built-in lists
+available, label them as potentially out of date, and ask you to try again later
+(failed refreshes are cached briefly). Manual model IDs remain available for
+these temporary failures. A successful chat may have used a fallback preset and
+does not prove that the selected provider's authorization is still valid.
+When a live chat uses a fallback model, a dismissible notice above the composer
+names that model and links to model settings. If the provider explicitly rejected
+OAuth credentials, the notice instead names the provider that needs a new login,
+with fallback completion as secondary information. Network errors, ordinary
+permission denials, and rate limits do not request reauthentication. The notice
+does not change your selected preset.
+
 For every setup, answer three questions:
 
 1. Which provider owns the credential or endpoint?
@@ -641,6 +658,15 @@ public client contract documented and implemented by
 xAI may change that upstream contract independently of nanobot.
 
 For GitHub Copilot:
+
+You can also sign in from the WebUI's model settings. The sign-in dialog shows a
+device code: copy it, select **Open GitHub**, and enter the code on GitHub. Keep
+the dialog open; nanobot detects approval and refreshes the model catalog
+automatically. Closing the dialog cancels the pending sign-in without replacing
+your saved credentials. This works from a remote browser too; no browser needs
+to open on the gateway machine.
+
+For terminal sign-in:
 
 ```bash
 nanobot provider login github-copilot --set-main

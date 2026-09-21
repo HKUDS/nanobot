@@ -26,8 +26,8 @@ from nanobot.cli.webui_support import (
     _open_webui_browser,
     _prepare_webui_bundle_for_gateway,
     _print_foreground_port_conflict,
+    _print_webui_manual_access,
     _resolve_webui_config_path,
-    _run_quick_start_for_webui,
     _tcp_endpoint_reachable,
     _warn_webui_bind_scope,
     _webui_browser_url,
@@ -143,22 +143,12 @@ def webui(
         raise typer.Exit(1) from exc
 
     provider_error = _provider_setup_error(resolved_setup_config)
-    settings_setup_error = provider_error if provider_error and created_config else None
-    if settings_setup_error:
+    if provider_error:
         console.print(f"[yellow]Model setup is incomplete: {provider_error}[/yellow]")
         console.print("Configure a provider and model in WebUI Settings → Models.")
-    elif provider_error:
-        console.print(f"[dim]Provider check: {provider_error}[/dim]")
-        setup_config = _run_quick_start_for_webui(
-            setup_config,
-            yes=yes,
-            config_path=config_path,
-        )
-        if workspace:
-            setup_config.agents.defaults.workspace = workspace
 
     try:
-        changed_webui, generated_bootstrap_secret = _ensure_local_webui_channel(
+        changed_webui = _ensure_local_webui_channel(
             setup_config,
             port=port,
             yes=yes,
@@ -207,20 +197,12 @@ def webui(
     )
     if no_open:
         console.print("[dim]Browser opening disabled by --no-open.[/dim]")
-        if generated_bootstrap_secret:
-            console.print(
-                "[yellow]A WebUI bootstrap secret was generated and saved in this config.[/yellow]"
-            )
-            console.print(
-                "[dim]Open the WebUI and enter channels.websocket.tokenIssueSecret from "
-                f"{config_path}, or rerun without --no-open to open the authenticated URL.[/dim]"
-            )
+        if not dev:
+            _print_webui_manual_access(runtime_config, config_path, webui_url)
 
-    webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
-    _prepare_webui_bundle_for_gateway(
-        runtime_config,
-        mode="skip" if dev else webui_bundle_mode,
-    )
+    if not dev:
+        webui_bundle_mode = _webui_build_mode_for_interactive(yes=yes)
+        _prepare_webui_bundle_for_gateway(runtime_config, mode=webui_bundle_mode)
 
     instance = GatewayInstance.resolve(
         config_path=config_path,
@@ -290,8 +272,8 @@ def webui(
                     "Restart the gateway if you need it to pick up local source changes: "
                     f"[cyan]{_gateway_instance_command('restart', config_path=config_path, workspace=workspace)}[/cyan]"
                 )
-                if not no_open:
-                    _open_webui_browser(webui_url, wait=False)
+                if not no_open and not _open_webui_browser(webui_url, wait=False):
+                    _print_webui_manual_access(runtime_config, config_path, webui_url)
                 if runtime.status().running:
                     _attach_to_background_gateway(runtime)
                 else:
@@ -365,8 +347,8 @@ def webui(
                 raise typer.Exit(1) from exc
             return
 
-        if not no_open:
-            _open_webui_browser(webui_url)
+        if not no_open and not _open_webui_browser(webui_url):
+            _print_webui_manual_access(runtime_config, config_path, webui_url)
         _attach_to_background_gateway(runtime)
     finally:
         lease.release(wait_for_stop=False)

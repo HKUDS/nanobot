@@ -9,6 +9,7 @@ type TuiCommandAction =
   | "sessions"
   | "new-chat"
   | "context"
+  | "usage"
   | "diff"
   | "branch"
   | "detach"

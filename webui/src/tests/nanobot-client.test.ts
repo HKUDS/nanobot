@@ -1725,6 +1725,7 @@ describe("NanobotClient", () => {
       model_name: "deepseek/deepseek-chat",
       model_preset: "Deep Research",
       fallback: true,
+      reauth_provider: "openai_codex",
     });
 
     expect(chatHandler).toHaveBeenCalledWith({
@@ -1733,6 +1734,7 @@ describe("NanobotClient", () => {
       model_name: "deepseek/deepseek-chat",
       model_preset: "Deep Research",
       fallback: true,
+      reauth_provider: "openai_codex",
     });
   });
 
@@ -1972,6 +1974,30 @@ describe("NanobotClient", () => {
       quoted_context: "selected answer excerpt",
       webui: true,
     });
+  });
+
+  it("sends automation intent separately from the user's text", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage("chat-x", "每天八点提醒我喝水", undefined, {
+      intent: "create_automation",
+    });
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "message",
+      chat_id: "chat-x",
+      content: "每天八点提醒我喝水",
+      intent: "create_automation",
+      webui: true,
+    });
+
+    client.sendMessage("chat-x", "Thanks");
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).not.toHaveProperty("intent");
   });
 
   it("includes CLI app attachments in outbound messages", () => {

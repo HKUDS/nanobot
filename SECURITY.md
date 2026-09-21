@@ -69,7 +69,7 @@ chmod 600 ~/.nanobot/config.json
 
 The `exec` tool can execute shell commands. While dangerous command patterns are blocked, you should:
 
-- ✅ **Enable the bwrap sandbox** (`"tools.exec.sandbox": "bwrap"`) for kernel-level isolation (Linux only)
+- ✅ **Enable the exec sandbox** (`"tools.exec.sandbox": "bwrap"` on Linux, `"seatbelt"` on macOS) for kernel-level isolation
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
 - ✅ Use a dedicated user account with limited privileges
@@ -77,16 +77,28 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 - ❌ Don't disable security checks
 - ❌ Don't run on systems with sensitive data without careful review
 
-**Exec sandbox (bwrap):**
+**Exec sandbox (bwrap on Linux, seatbelt on macOS):**
 
-On Linux, set `"tools.exec.sandbox": "bwrap"` to wrap every shell command in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox. This uses Linux kernel namespaces to restrict what the process can see:
+Set `"tools.exec.sandbox"` to wrap every shell command in an OS sandbox. Both backends restrict filesystem access:
 
 - Workspace directory → **read-write** (agent works normally)
 - Media directory → **read-only** (can read uploaded attachments)
 - System directories (`/usr`, `/bin`, `/lib`) → **read-only** (commands still work)
-- Config files and API keys (`~/.nanobot/config.json`) → **hidden** (masked by tmpfs)
+- The workspace's parent, which holds `~/.nanobot/config.json` in the default layout → **denied**, except for explicitly exposed roots
+- Unlisted paths, including `~/.ssh` in the default layout → **denied**
 
-Requires `bwrap` installed (`apt install bubblewrap`). Pre-installed in the official Docker image. **Not available on macOS or Windows** — bubblewrap depends on Linux kernel namespaces.
+| Backend | Value | Platform | Requires |
+|---------|-------|----------|----------|
+| [bubblewrap](https://github.com/containers/bubblewrap) | `"bwrap"` | Linux | `bwrap` (`apt install bubblewrap`). Pre-installed in the official Docker image. |
+| Seatbelt | `"seatbelt"` | macOS | `sandbox-exec(1)`, shipped with macOS. |
+
+**Windows has no backend**: nanobot logs a warning and runs the command unsandboxed.
+
+The backends protect the workspace's parent differently. `bwrap` masks it with a tmpfs and re-exposes the workspace and allowed binds. Seatbelt has no mount namespace: it denies the parent, re-allows traversal metadata, and exposes the workspace and allowed roots. Keep configuration and credentials outside the workspace and extra binds; choosing an overly broad workspace or explicitly exposing secret-bearing paths defeats that separation.
+
+Seatbelt does **not** expose the host's shared `/tmp`, `/var/folders`, `/Library`, or `/etc` trees. It allows system code, device reads and selected system configuration/certificate paths. `HOME` and `TMPDIR` point to the workspace. Tools must use that scratch location; on macOS use an explicit template such as `mktemp "$TMPDIR/job.XXXXXX"`, since bare `mktemp` may prefer the host's system temp directory. Tools that require other installations or caches need narrow `sandboxRoBinds` / `sandboxRwBinds`. Read-only binds revoke workspace writes beneath them; explicit read-write binds take precedence, matching bwrap's operator-controlled policy. Seatbelt also prevents renaming or removing ancestor directories of media and read-only roots, so moving a writable parent cannot bypass a read-only rule; unrelated children of those ancestors remain writable where otherwise allowed. An explicit read-write bind covering an entire read-only root overrides that root's protection, but a writable descendant does not unlock its ancestors. This is filesystem containment, not a VM or separate user identity.
+
+Neither backend restricts network access.
 
 Enabling the sandbox also automatically activates `restrictToWorkspace` for file tools.
 

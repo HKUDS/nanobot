@@ -25,7 +25,7 @@ export function FeishuConnectFlow({
     <ChannelQrConnectFlow
       token={token}
       channelName="feishu"
-      startOptions={{ domain: "feishu", instanceId, mode }}
+      startParams={{ domain: "feishu", instance_id: instanceId, mode }}
       idleLabel={idleLabel}
       connectRequestId={connectRequestId}
       onFeaturesUpdate={onFeaturesUpdate}

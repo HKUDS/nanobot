@@ -791,6 +791,14 @@ class TestHandleDataMessageDM:
         assert len(handled) == 1
 
     @pytest.mark.asyncio
+    async def test_dm_allowlist_wildcard_preserves_content(self):
+        ch, handled = self._make_dm_channel(policy="allowlist", allow_from=["*"])
+        params = _dm_envelope(source_number="+19995550001", message="wildcard DM")
+        await ch._handle_receive_notification(params)
+        assert len(handled) == 1
+        assert handled[0]["content"] == "wildcard DM"
+
+    @pytest.mark.asyncio
     async def test_dm_allowlist_rejected_triggers_pairing(self):
         # Denied DM senders go through super()._handle_message which checks
         # is_allowed → sends pairing code via self.send().
@@ -1024,6 +1032,16 @@ class TestHandleDataMessageGroup:
         params = _group_envelope(group_id="grp==", message="hi")
         await ch._handle_receive_notification(params)
         assert len(handled) == 1
+
+    @pytest.mark.asyncio
+    async def test_group_allowlist_wildcard_preserves_content(self):
+        ch, handled = self._make_group_channel(
+            policy="allowlist", allow_from=["*"], require_mention=False
+        )
+        params = _group_envelope(group_id="grp==", source_name="Alice", message="wildcard group")
+        await ch._handle_receive_notification(params)
+        assert len(handled) == 1
+        assert "[Alice]: wildcard group" in handled[0]["content"]
 
     @pytest.mark.asyncio
     async def test_group_allowlist_rejected(self):
@@ -1488,6 +1506,15 @@ async def test_handle_notification_no_source_skipped() -> None:
 # ---------------------------------------------------------------------------
 # Config: allow_from property aggregation
 # ---------------------------------------------------------------------------
+
+
+def test_default_config_enables_private_dms_with_pairing() -> None:
+    config = SignalConfig(phone_number="+10000000000")
+
+    assert config.dm.enabled is True
+    assert config.dm.policy == "allowlist"
+    assert config.dm.allow_from == []
+    assert config.group.enabled is False
 
 
 def test_config_allow_from_aggregates_dm_and_group() -> None:

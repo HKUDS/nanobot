@@ -1,30 +1,19 @@
 {
-  "description": "Microsoft Teams のチャットから nanobot を利用します。",
-  "requirements": "Azure ボットアプリの認証情報と公開コールバックエンドポイント",
   "setup": {
     "docsLabel": "Teams 設定ガイドを開く",
     "officialLabel": "Teams 開発者ポータルを開く",
-    "tryIt": "Teams アプリをインストールし、テストメッセージを送信します。",
-    "summary": "Teams は Bot Framework のコールバック URL でメッセージを受信します。本番環境では到達可能な HTTPS エンドポイントが必要です。",
-    "steps": [
-      "Azure Bot または Teams アプリを作成し、App ID とクライアントシークレットをコピーします。",
-      "コールバックパスを HTTPS で公開し、ボットのメッセージングエンドポイントに設定します。",
-      "保存して Teams を有効にし、アプリをインストールしてテストメッセージを送信します。"
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
-        "placeholder": "Microsoft App ID",
-        "help": "Azure Bot または Teams アプリ登録からコピーします。"
+        "placeholder": "Microsoft App ID"
       },
       "appPassword": {
         "label": "クライアントシークレット",
-        "placeholder": "••••••",
-        "help": "Microsoft アプリ用のクライアントシークレットを作成します。"
+        "placeholder": "••••••"
       },
       "tenantId": {
         "label": "テナント ID",
-        "placeholder": "任意のテナント ID"
+        "placeholder": "テナント ID（任意）"
       },
       "path": {
         "label": "コールバックパス",
@@ -33,6 +22,52 @@
       "allowFrom": {
         "label": "許可するユーザー",
         "placeholder": "Teams ユーザー ID（カンマ区切り）"
+      },
+      "host": {
+        "label": "リッスンホスト"
+      },
+      "port": {
+        "label": "リッスンポート"
+      },
+      "replyInThread": {
+        "label": "スレッド内で返信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "メンションのみの返信"
+      },
+      "validateInboundAuth": {
+        "label": "受信リクエストを検証する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "refTtlDays": {
+        "label": "会話の存続期間"
+      },
+      "pruneWebChatRefs": {
+        "label": "Web チャットの会話を削除する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "個人的ではない会話を削除する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "会話の更新間隔"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "信頼できるサービスホスト"
       }
     }
   }

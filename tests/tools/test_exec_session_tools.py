@@ -20,6 +20,7 @@ from nanobot.agent.tools.exec_session import (
     ExecSessionTool,
     ListExecSessionsTool,
     _BoundedOutputBuffer,
+    _ExecSession,
     _SessionPoll,
     _truncate_output,
 )
@@ -149,6 +150,32 @@ def test_bounded_output_buffer_keeps_head_tail_and_exact_drop_count():
     assert buffer.retained_chars == 10
     assert buffer.drain() == ("01234BCDEF", 6)
     assert buffer.retained_chars == 0
+
+
+async def test_exec_session_preserves_utf8_across_stdout_and_stderr_chunks():
+    stdout = asyncio.StreamReader()
+    stderr = asyncio.StreamReader()
+    stdout_bytes = b"a" * 4095 + "你好🙂".encode() + b"\xe2\x82"
+    stderr_bytes = b"b" * 4094 + "🙂é".encode() + b"\xff"
+    stdout.feed_data(stdout_bytes[:4096])
+    stderr.feed_data(stderr_bytes[:4096])
+    session = _ExecSession(
+        session_id="utf8-output",
+        process=SimpleNamespace(stdout=stdout, stderr=stderr),
+        command="test",
+        cwd=".",
+        timeout=None,
+    )
+
+    await asyncio.sleep(0)
+    stdout.feed_data(stdout_bytes[4096:])
+    stderr.feed_data(stderr_bytes[4096:])
+    stdout.feed_eof()
+    stderr.feed_eof()
+    await asyncio.gather(session._stdout_task, session._stderr_task)
+
+    assert session._stdout.drain() == ("a" * 4095 + "你好🙂\ufffd", 0)
+    assert session._stderr.drain() == ("b" * 4094 + "🙂é\ufffd", 0)
 
 
 def test_exec_session_bounds_unpolled_stdout_and_stderr(tmp_path):

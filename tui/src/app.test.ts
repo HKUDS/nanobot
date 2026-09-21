@@ -9,11 +9,17 @@ import {
 } from "@opentui/core"
 import {
   MockTreeSitterClient,
+  TestRecorder,
   createTestRenderer,
   type TestRendererSetup,
 } from "@opentui/core/testing"
 
-import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
+import {
+  NanobotTui,
+  sessionExitMessage,
+  terminalModelFailureLine,
+  type AppOptions,
+} from "./app"
 import type {
   MessageOptions,
   RecoveryState,
@@ -23,7 +29,7 @@ import type {
 } from "./protocol"
 import type { TuiHost } from "./host"
 import type { ClipboardImageReader } from "./clipboard-image"
-import { userMessageText, type Transcript } from "./transcript"
+import type { Transcript } from "./transcript"
 
 const options: AppOptions = {
   wsUrl: "ws://localhost.invalid/ws",
@@ -59,20 +65,16 @@ test("formats a reusable session ID after exit", () => {
   )
 })
 
-test("projects image media as stable placeholders without exposing filenames", () => {
-  expect(userMessageText("What is this?", [
-    { name: "clipboard-image-2.png" },
-    { kind: "image", name: "screenshot.png" },
-    { kind: "file", name: "report.pdf" },
-  ])).toBe([
-    "What is this? [Image #2] [Image #1]",
-    "Attachments: report.pdf",
-  ].join("\n"))
-  expect(userMessageText("What is this?", [
-    { name: "clipboard-image-1.png" },
-  ], "What is this? [Image #1]")).toBe("What is this? [Image #1]")
+test("formats actionable terminal model failures without inventing retries", () => {
+  expect(terminalModelFailureLine("billing")).toBe(
+    "Model provider quota is unavailable. "
+      + "Add credit or check billing for the provider account, then try again.",
+  )
+  expect(terminalModelFailureLine("unknown")).toBe(
+    "Model provider request failed. "
+      + "Check the provider configuration or service status, then try again.",
+  )
 })
-
 function contrastRatio(foreground: string, background: string): number {
   const luminance = (color: string) => {
     const channel = (offset: number) => {
@@ -486,6 +488,17 @@ describe("NanobotTui layout", () => {
 
     setup.mockInput.pressArrow("right", { shift: true })
     await waitUntil(() => ui.composer.cursorOffset === 10)
+    await setup.mockInput.typeText("replacement")
+    await waitUntil(() => ui.draft.imageCount === 0)
+    expect(ui.composer.plainText).toContain("replacement")
+    expect(ui.composer.plainText).not.toContain("Image #1")
+
+    ui.composer.setText("")
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.composer.plainText === "[Image #1] ")
+    ui.composer.cursorOffset = 10
+    setup.mockInput.pressArrow("left", { shift: true })
+    await waitUntil(() => ui.composer.cursorOffset === 0)
     await setup.mockInput.typeText("replacement")
     await waitUntil(() => ui.draft.imageCount === 0)
     expect(ui.composer.plainText).toContain("replacement")
@@ -2052,6 +2065,86 @@ describe("NanobotTui layout", () => {
     }
   })
 
+  test("keeps streamed fenced code visible while completing the response", async () => {
+    setup = await createRenderer({ width: 100, height: 30, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const response = [
+      "Commit types:",
+      "",
+      "```text",
+      "feat:",
+      "fix:",
+      "perf:",
+      "docs:",
+      "test:",
+      "refactor:",
+      "chore:",
+      "```",
+      "",
+      "Include the reason in the body.",
+    ].join("\n")
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "delta", chat_id: "chat", text: response })
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("feat:")
+
+    const recorder = new TestRecorder(setup.renderer)
+    recorder.rec()
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    await setup.flush()
+    recorder.stop()
+
+    expect(recorder.recordedFrames.length).toBeGreaterThan(0)
+    expect(recorder.recordedFrames.every(({ frame }) => frame.includes("feat:"))).toBeTrue()
+    expect(recorder.recordedFrames.every(({ frame }) => /│\s+feat:/u.test(frame))).toBeTrue()
+    expect(recorder.recordedFrames.every(({ frame }) => (
+      frame.includes("Include the reason in the body.")
+    ))).toBeTrue()
+  })
+
+  test("renders fenced plain text from light-theme history", async () => {
+    setup = await createRenderer({ width: 100, height: 30, screenMode: "alternate-screen" })
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, theme: "light" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    const response = [
+      "Commit types:",
+      "",
+      "```text",
+      "feat:",
+      "fix:",
+      "perf:",
+      "docs:",
+      "test:",
+      "refactor:",
+      "chore:",
+      "```",
+      "",
+      "Include the reason in the body.",
+    ].join("\n")
+    const transcript = (app as unknown as { transcript: Transcript }).transcript
+
+    transcript.history([{ role: "assistant", content: response }])
+    await setup.flush()
+
+    const codeLine = setup.captureSpans().lines.find((line) => (
+      line.spans.some((span) => span.text.includes("feat:"))
+    ))
+    const code = codeLine?.spans.find((span) => span.text.includes("feat:"))
+    const rail = codeLine?.spans.find((span) => span.text.includes("│"))
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("feat:")
+    expect(frame).toMatch(/│\s+feat:/u)
+    expect(code?.fg.toInts().slice(0, 3)).toEqual([24, 24, 27])
+    expect(rail?.fg.toInts().slice(0, 3)).toEqual([212, 212, 216])
+  })
+
   test("renders assistant LaTeX as Unicode text without changing code", async () => {
     setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)
@@ -2102,7 +2195,7 @@ describe("NanobotTui layout", () => {
         syntaxStyle: { getStyle(name: string): { fg?: { toInts(): number[] } } | undefined } | null
       }
       transcript: {
-        markdown: Set<{ syntaxStyle: object }>
+        markdown: Set<{ fg?: { toInts(): number[] }; syntaxStyle: object }>
         frames: Set<{ borderColor: { toInts(): number[] } }>
         userRows: Set<{ backgroundColor: { intent: string; toInts(): number[] } }>
         userMessages: Set<{ renderable: TextRenderable }>
@@ -2136,6 +2229,7 @@ describe("NanobotTui layout", () => {
     expect(internals.composer.textColor.toInts().slice(0, 3)).toEqual([24, 24, 27])
     expect(sessionFrame?.borderColor.toInts().slice(0, 3)).toEqual([212, 212, 216])
     expect(userRow?.backgroundColor.toInts().slice(0, 3)).toEqual([240, 240, 240])
+    expect(markdown?.fg?.toInts().slice(0, 3)).toEqual([24, 24, 27])
     expect(markdown?.syntaxStyle).not.toBe(darkSyntax)
     expect(internals.composer.syntaxStyle).not.toBe(darkComposerSyntax)
     expect(internals.composer.syntaxStyle?.getStyle("image.placeholder")?.fg?.toInts().slice(0, 3))
@@ -2231,7 +2325,7 @@ describe("NanobotTui layout", () => {
     expect(assistantMarker?.renderable.fg.toInts().slice(0, 3)).toEqual([161, 161, 170])
   })
 
-  test("uses the idle footer for model telemetry instead of permanent shortcuts", async () => {
+  test("shows context usage in the idle footer", async () => {
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)
     app.accept({ event: "attached", chat_id: "chat" })
@@ -2240,13 +2334,7 @@ describe("NanobotTui layout", () => {
       chat_id: "chat",
       latency_ms: 1700,
       usage: {
-        prompt_tokens: 1200,
-        completion_tokens: 80,
-        cached_tokens: 900,
-        generation_ms: 1600,
-        measured_completion_tokens: 80,
-        ttft_ms: 240,
-        timed_requests: 1,
+        context_tokens: 14_700,
       },
       context_window_tokens: 128_000,
     })
@@ -2254,18 +2342,7 @@ describe("NanobotTui layout", () => {
 
     const footer = setup.captureCharFrame().split("\n").find((line) => line.includes("Ready · 1.7s")) || ""
     expect(footer).toContain("Ready · 1.7s")
-    expect(footer).toContain("50 tok/s")
-    expect(footer).toContain("1.2K in (75% cached) · 80 out")
-    expect(footer).not.toContain("TTFT")
-    expect(footer).not.toContain("enter send")
-
-    app.accept({ event: "reasoning_delta", chat_id: "chat", text: "hidden" })
-    await Bun.sleep(130)
-    await setup.renderOnce()
-    const activeFooter = setup.captureCharFrame().split("\n").find((line) => line.includes("Thinking")) || ""
-    expect(activeFooter).not.toContain("ctrl+c stop")
-    expect(activeFooter).not.toContain("enter steer")
-    app.accept({ event: "turn_end", chat_id: "chat" })
+    expect(footer).toContain("11% context")
   })
 
   test("keeps an explicit theme stable when the terminal reports another mode", async () => {
@@ -2540,6 +2617,77 @@ describe("NanobotTui layout", () => {
     expect(ui.composer.placeholder).toBe("Ask nanobot anything")
   })
 
+  test("updates retry state in place and ends failed turns explicitly", async () => {
+    setup = await createRenderer({ width: 96, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({
+      event: "goal_status",
+      chat_id: "chat",
+      status: "running",
+      turn_id: "turn-1",
+    })
+    const ui = app as unknown as { status: { plainText: string } }
+
+    app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "waiting",
+      attempt: 1,
+      max_attempts: 4,
+      error_kind: "connection",
+      retry_after_s: 5,
+    })
+    expect(ui.status.plainText).toMatch(
+      /^Could not connect to the model provider · retrying in [45]s · attempt 1\/4/u,
+    )
+
+    app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "waiting",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+      retry_after_s: 3,
+    })
+    expect(ui.status.plainText).toContain("attempt 2/4")
+
+    app.accept({
+      event: "retry_status",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      state: "cleared",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+    })
+    expect(ui.status.plainText).not.toContain("retrying")
+
+    app.accept({
+      event: "turn_end",
+      chat_id: "chat",
+      turn_id: "turn-1",
+      outcome: "failed",
+      failure_kind: "model",
+      failure_error_kind: "connection",
+      failure_attempts: 4,
+      failure_message: "Unlocalized server failure",
+    })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    const terminalFailure = "Could not connect to the model provider. The request still failed "
+      + "on attempt 4, so retries stopped. Check the provider configuration or service status, "
+      + "then try again."
+    expect(frame).toContain("Could not connect to the model provider.")
+    expect(frame.replace(/\s+/gu, " ")).toContain(terminalFailure)
+    expect(frame).not.toContain("Unlocalized server failure")
+    expect(frame).not.toContain("Last turn failed")
+    expect(ui.status.plainText).toBe("Ready")
+  })
+
   test("folds long tool traces without discarding their details", async () => {
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)
@@ -2785,6 +2933,136 @@ describe("NanobotTui layout", () => {
     expect(ui.status.plainText).not.toContain("attempt")
   })
 
+  test.each([
+    ["succeeded", "Conversation compacted"],
+    ["cancelled", "Conversation compaction cancelled"],
+  ] as const)("updates idle compaction in place to %s", async (phase, copy) => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const ui = app as unknown as {
+      activeTurn: boolean
+      transcript: Transcript
+      composer: TextareaRenderable
+    }
+    ui.composer.setText("unfinished draft")
+    const event = { event: "context_compaction", chat_id: "chat", compaction_id: "idle" } as const
+    app.accept({ ...event, phase: "started" })
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("Compacting conversation…")
+    const rows = ui.transcript.root.getChildren()
+    app.accept({ ...event, phase })
+    app.accept({ ...event, phase })
+    app.accept({ ...event, phase: "started" })
+    app.accept({ ...event, chat_id: "another-chat", compaction_id: "other", phase: "failed" })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(occurrences(frame, copy)).toBe(1)
+    expect(frame).not.toContain("Compacting conversation")
+    expect(frame).not.toContain("Could not compact")
+    expect(ui.transcript.root.getChildren()).toEqual(rows)
+    expect(ui.activeTurn).toBe(false)
+    expect(ui.composer.plainText).toBe("unfinished draft")
+  })
+
+  test("keeps compaction separate from progress and streamed answers", async () => {
+    setup = await createRenderer({ width: 80, height: 30, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "delta", chat_id: "chat", text: "Answer before " })
+    app.accept({ event: "message", chat_id: "chat", text: "First step", kind: "progress" })
+    const event = { event: "context_compaction", chat_id: "chat", compaction_id: "capacity" } as const
+    app.accept({ ...event, phase: "started" })
+    app.accept({ event: "message", chat_id: "chat", text: "Second step", kind: "progress" })
+    app.accept({ ...event, phase: "succeeded" })
+    app.accept({ event: "delta", chat_id: "chat", text: "and after compaction" })
+    expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(true)
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    await setup.flush()
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("Answer before and after compaction")
+    expect(frame.indexOf("First step")).toBeLessThan(frame.indexOf("Conversation compacted"))
+    expect(frame.indexOf("Conversation compacted")).toBeLessThan(frame.indexOf("Second step"))
+    expect(occurrences(frame, "Conversation compacted")).toBe(1)
+  })
+
+  test("preserves compaction rows through pagination, theming, and session reset", async () => {
+    setup = await createRenderer({ width: 80, height: 28, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    const ui = app as unknown as {
+      transcript: Transcript
+      palette: { error: string }
+    }
+    ui.transcript.history([
+      { role: "activity", content: "", compaction: { id: "recent", phase: "succeeded" } },
+      { role: "assistant", content: "Recent answer" },
+    ])
+    await setup.flush()
+    await ui.transcript.prependHistory([
+      { role: "assistant", content: "Earlier answer" },
+      { role: "activity", content: "", compaction: { id: "older", phase: "failed" } },
+      { role: "activity", content: "", compaction: { id: "recent", phase: "started" } },
+    ])
+    await setup.flush()
+    ui.transcript.scrollToEdge("top")
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(occurrences(frame, "Conversation compacted")).toBe(1)
+    expect(frame).not.toContain("Compacting conversation")
+    expect(frame).toContain("Earlier answer")
+    expect(frame.indexOf("Earlier answer")).toBeLessThan(frame.indexOf("Could not compact conversation"))
+    expect(frame).toContain("Recent answer")
+    expect(frame.indexOf("Could not compact conversation")).toBeLessThan(frame.indexOf("Recent answer"))
+    setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
+    await setup.flush()
+    const failure = ui.transcript.root.getChildren()
+      .flatMap((row) => row.getChildren())
+      .find((child) => child instanceof TextRenderable && child.plainText.includes("Could not compact"))
+    expect(failure).toBeInstanceOf(TextRenderable)
+    expect((failure as TextRenderable).fg.toInts().slice(0, 3)).toEqual([
+      1, 3, 5,
+    ].map((offset) => Number.parseInt(ui.palette.error.slice(offset, offset + 2), 16)))
+    ui.transcript.reset({ model: "model", workspace: "workspace", version: "test", access: "workspace" })
+    app.accept({ event: "context_compaction", chat_id: "chat", compaction_id: "recent", phase: "started" })
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("Compacting conversation…")
+    expect(setup.captureCharFrame()).not.toContain("Conversation compacted")
+  })
+
+  test("deduplicates compaction history against events queued during hydration", async () => {
+    setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
+    const original = globalThis.fetch
+    let resolveFetch: (value: Response) => void = () => undefined
+    globalThis.fetch = (() => new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    })) as unknown as typeof fetch
+    const app = NanobotTui.mount(
+      setup.renderer,
+      { ...options, apiUrl: "http://nanobot.test", apiToken: "token", chatId: "chat" },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    try {
+      app.accept({ event: "attached", chat_id: "chat" })
+      const event = { event: "context_compaction", chat_id: "chat", compaction_id: "idle" } as const
+      app.accept({ ...event, phase: "started" })
+      app.accept({ ...event, phase: "succeeded" })
+      resolveFetch(Response.json({
+        messages: [{
+          role: "assistant", kind: "compaction", content: "",
+          compaction: { id: "idle", phase: "succeeded" },
+        }],
+      }))
+      await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+      await setup.renderOnce()
+      const frame = setup.captureCharFrame()
+      expect(occurrences(frame, "Conversation compacted")).toBe(1)
+      expect(frame).not.toContain("Compacting conversation")
+      expect((app as unknown as { activeTurn: boolean }).activeTurn).toBe(false)
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
   test("replays events after asynchronous history hydration", async () => {
     setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
     const original = globalThis.fetch
@@ -2888,6 +3166,8 @@ describe("NanobotTui layout", () => {
     const app = mount(setup, sent)
     const composer = (app as unknown as { composer: TextareaRenderable }).composer
     const connection = app as unknown as {
+      ready: boolean
+      submitPending: boolean
       handleStatus(
         status: "reconnecting" | "connected",
         detail?: string,
@@ -2896,7 +3176,7 @@ describe("NanobotTui layout", () => {
     }
 
     app.accept({ event: "attached", chat_id: "chat" })
-    await Bun.sleep(1)
+    await waitUntil(() => connection.ready)
     connection.handleStatus("reconnecting", "connection closed", {
       endpoint: "127.0.0.1:8769",
       attempt: 1,
@@ -2905,16 +3185,16 @@ describe("NanobotTui layout", () => {
     connection.handleStatus("connected")
     composer.setText("draft before attach")
     composer.submit()
-    await Bun.sleep(5)
+    await waitUntil(() => !connection.submitPending)
     composer.submit()
-    await Bun.sleep(5)
+    await waitUntil(() => !connection.submitPending)
 
     expect(sent).toEqual([])
     expect(composer.plainText).toBe("draft before attach")
 
     app.accept({ event: "attached", chat_id: "chat" })
     app.accept({ event: "attached", chat_id: "chat" })
-    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    await waitUntil(() => connection.ready)
     expect(sent).toEqual([])
     composer.submit()
     await waitUntil(() => sent.length === 1)
