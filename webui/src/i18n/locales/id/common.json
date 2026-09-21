@@ -1,4 +1,26 @@
 {
+  "webPreview": {
+    "original": "Tautan asli",
+    "actions": "Tindakan tautan",
+    "open": "Pratinjau situs",
+    "external": "Buka di browser",
+    "copy": "Salin tautan",
+    "copied": "Tautan disalin",
+    "copyFailed": "Tidak dapat menyalin tautan",
+    "title": "Pratinjau situs",
+    "resize": "Ubah lebar pratinjau",
+    "refresh": "Muat ulang situs",
+    "close": "Tutup pratinjau situs",
+    "isolated": "Pratinjau terisolasi dan terbatas. Login dan beberapa interaksi mungkin tidak berfungsi.",
+    "blockedHint": "Beberapa situs memblokir penyematan. Jika kosong atau gagal, buka di browser.",
+    "loopback": "Localhost merujuk ke perangkat browser ini, bukan gateway jarak jauh. Port tidak diteruskan.",
+    "native": "Aplikasi native tidak mendukung pratinjau tertanam. Buka tautan ini di browser.",
+    "unsupported": "Browser ini tidak mendukung pratinjau dengan kredensial terisolasi. Buka di tab baru.",
+    "sameOrigin": "Aplikasi nanobot sendiri tidak dapat disematkan di sini. Buka di tab baru.",
+    "mixedContent": "Halaman HTTPS tidak dapat menampilkan situs HTTP di sini. Buka di tab baru.",
+    "invalid": "Alamat ini tidak dapat dipratinjau.",
+    "frame": "Pratinjau situs: {{host}}"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

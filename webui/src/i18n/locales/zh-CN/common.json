@@ -1,4 +1,26 @@
 {
+  "webPreview": {
+    "original": "原始链接",
+    "actions": "链接操作",
+    "open": "预览网页",
+    "external": "在浏览器中打开",
+    "copy": "复制链接",
+    "copied": "链接已复制",
+    "copyFailed": "无法复制链接",
+    "title": "网页预览",
+    "resize": "调整网页预览宽度",
+    "refresh": "刷新网页",
+    "close": "关闭网页预览",
+    "isolated": "受限的隔离预览，登录及部分交互功能可能无法使用。",
+    "blockedHint": "部分网站禁止嵌入。如果页面空白或加载失败，请在浏览器中打开。",
+    "loopback": "localhost 指向当前浏览器所在设备，而非远程网关。不会自动转发端口。",
+    "native": "原生客户端暂不支持嵌入预览，请在浏览器中打开此链接。",
+    "unsupported": "此浏览器不支持凭据隔离预览，请在新标签页中打开。",
+    "sameOrigin": "不能在此嵌入 nanobot 应用自身，请在新标签页中打开。",
+    "mixedContent": "HTTPS 页面不能在此预览 HTTP 网站，请在新标签页中打开。",
+    "invalid": "无法预览此地址。",
+    "frame": "网页预览：{{host}}"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

@@ -126,7 +126,7 @@ describe("temporary chat navigation", () => {
           schemaVersion: 3,
           messages: [{
             id: "file-reply", role: "assistant", createdAt: 1,
-            content: "Files: [notes.txt](notes.txt) and [second.txt](second.txt)",
+            content: "Files: [notes.txt](notes.txt) and [second.txt](second.txt). [Website](https://example.com/demo)",
           }],
         }));
       }
@@ -185,6 +185,43 @@ describe("temporary chat navigation", () => {
       const values = Array.from({ length: storage.length }, (_, i) => storage.getItem(storage.key(i)!));
       expect(JSON.stringify(values)).not.toContain("/workspace/notes.txt");
       expect(JSON.stringify(values)).not.toContain("Preview of notes.txt");
+    }
+  });
+
+  it("restores website targets per session, switches to files, and closes below menus", async () => {
+    withFiles = true;
+    render(<App />);
+    await screen.findByRole("button", { name: "Temporary chat" });
+    act(() => TestSocket.current.open());
+    await startTemporaryChat("Synthetic separate session");
+    await selectTopic("Regular topic");
+    fireEvent.contextMenu(await screen.findByRole("link", { name: "Website" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
+    await screen.findByTestId("web-preview-panel");
+    await selectTopic("Synthetic separate session");
+    expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument();
+    await selectTopic("Regular topic");
+    await screen.findByTestId("web-preview-panel");
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
+    await screen.findByRole("menu");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.getByTestId("web-preview-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
+    fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
+    expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument();
+    await screen.findByText("Preview of notes.txt");
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
+    expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close website preview" }));
+    expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument();
+    for (const storage of [localStorage, sessionStorage]) {
+      const values = Array.from({ length: storage.length }, (_, i) => storage.getItem(storage.key(i)!));
+      expect(JSON.stringify(values)).not.toContain("https://example.com/demo");
     }
   });
 

@@ -15,6 +15,7 @@ import { Streamdown, type Components, type StreamdownProps } from "streamdown";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
+import { WebLink } from "@/components/WebLink";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
@@ -451,7 +452,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
     : link.title;
 
   return (
-    <a
+    <WebLink
       href={link.href}
       target="_blank"
       rel="noreferrer noopener"
@@ -487,7 +488,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       <span className="min-w-0 [overflow-wrap:anywhere] leading-normal sm:truncate">
         {label}
       </span>
-    </a>
+    </WebLink>
   );
 }
 
@@ -672,7 +673,7 @@ export default function MarkdownTextRenderer({
           return <>{markdownChildren}</>;
         }
         return (
-          <a
+          <WebLink
             href={href}
             target="_blank"
             rel="noreferrer noopener"
@@ -680,7 +681,7 @@ export default function MarkdownTextRenderer({
             {...props}
           >
             {markdownChildren}
-          </a>
+          </WebLink>
         );
       },
       // Streamdown decorates emphasis with spans by default. Preserve native

@@ -2,6 +2,7 @@ import { useCallback, useState, useSyncExternalStore } from "react";
 
 interface FilePreviewState {
   path: string | null;
+  webUrl?: string | null;
   width: number;
 }
 
@@ -24,7 +25,9 @@ export class FilePreviewStore {
   update(key: string, patch: Partial<FilePreviewState>) {
     const previous = this.get(key);
     const next = { ...previous, ...patch };
-    if (previous.path === next.path && previous.width === next.width) return;
+    if (patch.path) next.webUrl = null;
+    if (patch.webUrl) next.path = null;
+    if (previous.path === next.path && previous.width === next.width && previous.webUrl === next.webUrl) return;
     this.states.set(key, next);
     this.listeners.forEach((listener) => listener());
   }
@@ -50,5 +53,8 @@ export function useFilePreviewState(key: string | null, sharedStore?: FilePrevie
   const setWidth = useCallback((width: number) => {
     if (key) store.update(key, { width });
   }, [key, store]);
-  return { state, setPath, setWidth };
+  const setWebUrl = useCallback((webUrl: string | null) => {
+    if (key) store.update(key, { webUrl });
+  }, [key, store]);
+  return { state, setPath, setWidth, setWebUrl };
 }
