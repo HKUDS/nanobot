@@ -299,6 +299,8 @@ in normal skill discovery and can be invoked with `$skill-name`.
 
 ## Skills
 
+The **Commands** tab manages reusable user and default-workspace prompts. They appear in the existing `/` menu and run as normal agent input without bypassing tool permissions. See [custom prompt commands](./prompt-commands.md) for scopes, literal arguments, file format and backup behavior.
+
 Open **Skills → Installed** to review built-in and workspace-provided skills.
 You can search and filter them, inspect their instructions and setup
 requirements, enable or disable them, and delete workspace skills you no longer

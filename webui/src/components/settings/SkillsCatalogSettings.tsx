@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { PromptCommandsSettings } from "@/components/settings/PromptCommandsSettings";
 import { ToggleButton } from "@/components/settings/ToggleButton";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
 import { notifySkillsChanged } from "@/lib/skill-events";
@@ -41,7 +42,7 @@ import { useClient } from "@/providers/ClientProvider";
 export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
   const { t } = useTranslation();
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
-  const [view, setView] = useState<"installed" | "discover">("installed");
+  const [view, setView] = useState<"installed" | "discover" | "commands">("installed");
   const [installingSkill, setInstallingSkill] = useState("");
   const [installedQuery, setInstalledQuery] = useState("");
   const [installedFilter, setInstalledFilter] = useState<"all" | "enabled" | "disabled">(
@@ -96,6 +97,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
             value: "discover",
             label: t("settings.skills.discoverTab", { defaultValue: "Discover" }),
           },
+          { value: "commands", label: t("promptCommands.title") },
         ]}
         onChange={setView}
       />
@@ -179,7 +181,7 @@ export function SkillsCatalogSettings({ skills }: { skills: SkillSummary[] }) {
             </div>
           )}
         </section>
-      ) : (
+      ) : view === "commands" ? <PromptCommandsSettings /> : (
         <SkillsMarketplace
           installedSkills={skills}
           installing={installingSkill}

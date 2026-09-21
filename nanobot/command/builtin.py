@@ -1026,10 +1026,18 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
+    from nanobot.command.prompts import PromptCommands
+
+    scope = ctx.loop.workspace_scopes.for_message(ctx.msg, ctx.session.metadata if ctx.session else {})
+    prompts = await asyncio.to_thread(PromptCommands(scope.project_path).effective)
+    custom_help = "\n".join(
+        f"/{prompt.name} {prompt.argument_hint} — {prompt.description} ({prompt.source})"
+        for prompt in prompts
+    )
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        content=build_help_text(),
+        content=build_help_text() + (f"\n\nCustom prompts:\n{custom_help}" if custom_help else ""),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 

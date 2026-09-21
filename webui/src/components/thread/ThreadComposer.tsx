@@ -1247,6 +1247,9 @@ export function ThreadComposer({
         });
         let detail = description;
         let badge: string | undefined;
+        if (command.source) {
+          badge = t(`promptCommands.${command.source}`);
+        }
         if (command.command === "/model" && modelLabel) {
           detail = modelLabel;
           badge = t("thread.composer.slash.badges.current");

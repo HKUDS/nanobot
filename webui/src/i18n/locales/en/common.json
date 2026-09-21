@@ -1,4 +1,33 @@
 {
+  "promptCommands": {
+    "title": "Commands",
+    "intro": "Save reusable prompts. User commands belong to this instance; workspace commands here belong to the default workspace. A workspace command overrides a user command with the same name, even when disabled.",
+    "refresh": "Refresh",
+    "add": "New command",
+    "loading": "Loading commands…",
+    "empty": "No custom commands yet.",
+    "invalid": "{{count}} command files could not be loaded. Check their names and frontmatter.",
+    "edit": "Edit command",
+    "hint": "Use $ARGUMENTS for literal text after the command. Without it, arguments are appended. No shell expansion or file interpolation.",
+    "name": "Name",
+    "source": "Scope",
+    "user": "User",
+    "workspace": "Workspace",
+    "description": "Description",
+    "argumentHint": "Argument hint",
+    "body": "Prompt",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "shadowed": "Overridden",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "save": "Save",
+    "discard": "Discard changes?",
+    "deleteHint": "Delete this saved prompt? Existing conversations are unchanged. A user command may become active after deleting its workspace override.",
+    "discardHint": "Your unsaved changes will be lost.",
+    "confirm": "Confirm"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

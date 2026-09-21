@@ -1328,6 +1328,7 @@ export type SlashCommandLifecycle =
   | "agent_turn_with_args";
 
 export interface SlashCommand {
+  source?: "user" | "workspace";
   command: string;
   title: string;
   description: string;

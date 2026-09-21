@@ -1,4 +1,33 @@
 {
+  "promptCommands": {
+    "title": "Commandes",
+    "intro": "Enregistrez des prompts réutilisables. Les commandes utilisateur appartiennent à cette instance ; celles de cet espace concernent l’espace par défaut. Une commande d’espace du même nom prime, même désactivée.",
+    "refresh": "Actualiser",
+    "add": "Nouvelle commande",
+    "loading": "Chargement…",
+    "empty": "Aucune commande personnalisée.",
+    "invalid": "{{count}} fichiers illisibles. Vérifiez leur nom et leur frontmatter.",
+    "edit": "Modifier la commande",
+    "hint": "$ARGUMENTS insère le texte après la commande. Sinon, il est ajouté à la fin. Aucune exécution shell ni insertion de fichier.",
+    "name": "Nom",
+    "source": "Portée",
+    "user": "Utilisateur",
+    "workspace": "Espace de travail",
+    "description": "Description",
+    "argumentHint": "Indication des arguments",
+    "body": "Prompt",
+    "enabled": "Activée",
+    "disabled": "Désactivée",
+    "shadowed": "Remplacée",
+    "delete": "Supprimer",
+    "cancel": "Annuler",
+    "saving": "Enregistrement…",
+    "save": "Enregistrer",
+    "discard": "Abandonner les modifications ?",
+    "deleteHint": "Supprimer ce prompt ? Les conversations restent inchangées. Supprimer une commande d’espace peut réactiver celle de l’utilisateur portant le même nom.",
+    "discardHint": "Les modifications non enregistrées seront perdues.",
+    "confirm": "Confirmer"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

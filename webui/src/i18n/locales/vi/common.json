@@ -1,4 +1,33 @@
 {
+  "promptCommands": {
+    "title": "Lệnh",
+    "intro": "Lưu lời nhắc để dùng lại. Lệnh người dùng thuộc phiên bản này; lệnh không gian ở đây thuộc không gian mặc định. Lệnh không gian cùng tên được ưu tiên, kể cả khi bị tắt.",
+    "refresh": "Tải lại",
+    "add": "Lệnh mới",
+    "loading": "Đang tải…",
+    "empty": "Chưa có lệnh tùy chỉnh.",
+    "invalid": "Không tải được {{count}} tệp. Kiểm tra tên và frontmatter.",
+    "edit": "Sửa lệnh",
+    "hint": "$ARGUMENTS chèn nguyên văn phần sau lệnh. Nếu không có, văn bản được thêm vào cuối. Không thực thi shell hay chèn tệp.",
+    "name": "Tên",
+    "source": "Phạm vi",
+    "user": "Người dùng",
+    "workspace": "Không gian làm việc",
+    "description": "Mô tả",
+    "argumentHint": "Gợi ý tham số",
+    "body": "Lời nhắc",
+    "enabled": "Bật",
+    "disabled": "Đã tắt",
+    "shadowed": "Đã ghi đè",
+    "delete": "Xóa",
+    "cancel": "Hủy",
+    "saving": "Đang lưu…",
+    "save": "Lưu",
+    "discard": "Bỏ thay đổi?",
+    "deleteHint": "Xóa lời nhắc này? Hội thoại cũ không thay đổi. Xóa lệnh không gian có thể kích hoạt lại lệnh người dùng cùng tên.",
+    "discardHint": "Các thay đổi chưa lưu sẽ bị mất.",
+    "confirm": "Xác nhận"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

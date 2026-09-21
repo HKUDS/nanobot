@@ -1030,6 +1030,7 @@ export async function updateMcpServerTools(
 export async function listSlashCommands(
   token: string,
   base: string = "",
+  sessionKey?: string,
 ): Promise<SlashCommand[]> {
   type Row = {
     command: string;
@@ -1039,9 +1040,10 @@ export async function listSlashCommands(
     arg_hint?: string;
     lifecycle?: unknown;
     accepts_args?: unknown;
+    source?: "user" | "workspace";
   };
   const body = await request<{ commands: Row[] }>(
-    `${base}/api/commands`,
+    `${base}/api/commands${sessionKey ? `?session_key=${encodeURIComponent(sessionKey)}` : ""}`,
     token,
     undefined,
     API_READ_TIMEOUT_MS,
@@ -1057,8 +1059,28 @@ export async function listSlashCommands(
         argHint: command.arg_hint ?? "",
         lifecycle: command.lifecycle,
         acceptsArgs: command.accepts_args === true,
+        ...(command.source ? { source: command.source } : {}),
       }];
     });
+}
+
+export interface PromptCommand {
+  name: string;
+  source: "user" | "workspace";
+  description: string;
+  argument_hint: string;
+  body: string;
+  enabled: boolean;
+  revision: string;
+  shadowed?: boolean;
+}
+export interface PromptCommandsPayload { commands: PromptCommand[]; invalid: number }
+export const PROMPT_COMMANDS_CHANGED = "nanobot:prompt-commands-changed";
+export function fetchPromptCommands(token: string): Promise<PromptCommandsPayload> {
+  return request<PromptCommandsPayload>("/api/commands/manage", token, undefined, API_READ_TIMEOUT_MS);
+}
+export function savePromptCommand(transport: WebUIMutationTransport, command: PromptCommand, remove = false) {
+  return mutation<PromptCommandsPayload>(transport, remove ? "prompt.delete" : "prompt.save", { ...command });
 }
 
 export async function fetchSidebarState(

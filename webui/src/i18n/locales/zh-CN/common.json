@@ -1,4 +1,33 @@
 {
+  "promptCommands": {
+    "title": "命令",
+    "intro": "保存常用提示词。用户命令属于当前实例；此处的工作区命令属于默认工作区。工作区同名命令优先，即使它已禁用。",
+    "refresh": "刷新",
+    "add": "新建命令",
+    "loading": "正在加载命令…",
+    "empty": "还没有自定义命令。",
+    "invalid": "有 {{count}} 个命令文件无法加载，请检查名称和 frontmatter。",
+    "edit": "编辑命令",
+    "hint": "用 $ARGUMENTS 表示命令后的原始文本；未使用时会附加在末尾。不展开 shell 表达式，也不插入其他文件。",
+    "name": "名称",
+    "source": "作用域",
+    "user": "用户",
+    "workspace": "工作区",
+    "description": "说明",
+    "argumentHint": "参数提示",
+    "body": "提示词",
+    "enabled": "启用",
+    "disabled": "已禁用",
+    "shadowed": "已被覆盖",
+    "delete": "删除",
+    "cancel": "取消",
+    "saving": "正在保存…",
+    "save": "保存",
+    "discard": "放弃修改？",
+    "deleteHint": "删除此提示词？已有会话不受影响。删除工作区覆盖后，同名用户命令可能恢复生效。",
+    "discardHint": "未保存的修改将丢失。",
+    "confirm": "确认"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

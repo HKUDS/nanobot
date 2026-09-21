@@ -1019,7 +1019,7 @@ export function ThreadShell({
   );
   const availableSlashCommands = useMemo(
     () => temporary
-      ? slashCommands.filter(({ command }) => command === "/model" || command === "/stop")
+      ? slashCommands.filter(({ command, source }) => source || command === "/model" || command === "/stop")
       : slashCommands,
     [slashCommands, temporary],
   );
@@ -1411,18 +1411,25 @@ export function ThreadShell({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let generation = 0;
+    const refresh = async () => {
+      const current = ++generation;
       try {
-        const commands = await listSlashCommands(getToken());
-        if (!cancelled) setSlashCommands(commands);
+        const commands = await listSlashCommands(getToken(), "", temporary || !chatId ? undefined : `websocket:${chatId}`);
+        if (!cancelled && current === generation) setSlashCommands(commands);
       } catch {
-        if (!cancelled) setSlashCommands([]);
+        if (!cancelled && current === generation) setSlashCommands([]);
       }
-    })();
+    };
+    void refresh();
+    window.addEventListener("nanobot:prompt-commands-changed", refresh);
+    window.addEventListener("focus", refresh);
     return () => {
       cancelled = true;
+      window.removeEventListener("nanobot:prompt-commands-changed", refresh);
+      window.removeEventListener("focus", refresh);
     };
-  }, [getToken]);
+  }, [getToken, chatId, temporary, workspaceScope?.project_path]);
 
   const handleWelcomeSend = useCallback(
     async (content: string, images?: SendAttachment[], options?: SendOptions) => {

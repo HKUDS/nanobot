@@ -1,4 +1,33 @@
 {
+  "promptCommands": {
+    "title": "Perintah",
+    "intro": "Simpan prompt yang dapat digunakan kembali. Perintah pengguna milik instans ini; perintah ruang kerja di sini milik ruang kerja bawaan. Nama yang sama di ruang kerja diutamakan, meskipun nonaktif.",
+    "refresh": "Muat ulang",
+    "add": "Perintah baru",
+    "loading": "Memuat…",
+    "empty": "Belum ada perintah khusus.",
+    "invalid": "{{count}} berkas tidak dapat dimuat. Periksa nama dan frontmatter.",
+    "edit": "Edit perintah",
+    "hint": "$ARGUMENTS menyisipkan teks setelah perintah. Tanpanya, teks ditambahkan di akhir. Tidak menjalankan shell atau menyisipkan berkas.",
+    "name": "Nama",
+    "source": "Cakupan",
+    "user": "Pengguna",
+    "workspace": "Ruang kerja",
+    "description": "Deskripsi",
+    "argumentHint": "Petunjuk argumen",
+    "body": "Prompt",
+    "enabled": "Aktif",
+    "disabled": "Nonaktif",
+    "shadowed": "Ditimpa",
+    "delete": "Hapus",
+    "cancel": "Batal",
+    "saving": "Menyimpan…",
+    "save": "Simpan",
+    "discard": "Buang perubahan?",
+    "deleteHint": "Hapus prompt ini? Percakapan lama tidak berubah. Menghapus perintah ruang kerja dapat mengaktifkan perintah pengguna dengan nama yang sama.",
+    "discardHint": "Perubahan yang belum disimpan akan hilang.",
+    "confirm": "Konfirmasi"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

@@ -914,6 +914,22 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
+    async def _expand_prompt_command(self, msg: InboundMessage) -> InboundMessage:
+        """Snapshot an explicitly submitted prompt before normal turn/queue admission."""
+        if (not msg.is_user_input or not msg.content.lstrip().startswith("/")
+                or turn_continuation.internal_continuation_inbound(msg.metadata)
+                or any(owner.owns_turn(msg) for owner in self._automation_turn_coordinators)):
+            return msg
+        from nanobot.command.prompts import PromptCommands
+
+        session = self.sessions.get_cached(self._effective_session_key(msg))
+        scope = self.workspace_scopes.for_message(msg, session.metadata if session else {})
+        match = await asyncio.to_thread(PromptCommands(scope.project_path).lookup, msg.content)
+        if match is None:
+            return msg
+        command, arguments = match
+        return dataclasses.replace(msg, content=command.expand(arguments))
+
     def _can_inject_message(self, msg: InboundMessage) -> bool:
         """Keep independent turns and controls out of user-input batches."""
         if turn_continuation.internal_continuation_inbound(msg.metadata) or any(
@@ -1349,6 +1365,8 @@ class AgentLoop:
                         self.commands.dispatch_priority,
                     )
                     continue
+                msg = await self._expand_prompt_command(msg)
+                raw = msg.content.strip()
                 routed_msg = msg
                 if effective_key != msg.session_key:
                     routed_msg = dataclasses.replace(
@@ -1723,6 +1741,7 @@ class AgentLoop:
             delivery = self.turn_delivery_factory.create(msg, key)
         elif delivery.session_key != key:
             raise ValueError("turn delivery session does not match the processing session")
+        msg = await self._expand_prompt_command(msg)
         t0 = time.time()
         ctx = TurnContext(
             msg=msg,

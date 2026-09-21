@@ -1,4 +1,33 @@
 {
+  "promptCommands": {
+    "title": "Comandos",
+    "intro": "Guarda prompts reutilizables. Los comandos de usuario pertenecen a esta instancia; los de espacio, al espacio predeterminado. Un comando de espacio del mismo nombre tiene prioridad, aunque esté desactivado.",
+    "refresh": "Actualizar",
+    "add": "Nuevo comando",
+    "loading": "Cargando…",
+    "empty": "No hay comandos personalizados.",
+    "invalid": "No se pudieron cargar {{count}} archivos. Revisa sus nombres y frontmatter.",
+    "edit": "Editar comando",
+    "hint": "$ARGUMENTS inserta el texto después del comando. Sin él, se añade al final. No se ejecuta shell ni se insertan archivos.",
+    "name": "Nombre",
+    "source": "Ámbito",
+    "user": "Usuario",
+    "workspace": "Espacio de trabajo",
+    "description": "Descripción",
+    "argumentHint": "Indicación de argumentos",
+    "body": "Prompt",
+    "enabled": "Activado",
+    "disabled": "Desactivado",
+    "shadowed": "Reemplazado",
+    "delete": "Eliminar",
+    "cancel": "Cancelar",
+    "saving": "Guardando…",
+    "save": "Guardar",
+    "discard": "¿Descartar cambios?",
+    "deleteHint": "¿Eliminar este prompt? Las conversaciones no cambian. Eliminar el comando de espacio puede reactivar el de usuario con el mismo nombre.",
+    "discardHint": "Se perderán los cambios sin guardar.",
+    "confirm": "Confirmar"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

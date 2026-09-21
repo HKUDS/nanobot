@@ -437,6 +437,30 @@ async def test_temporary_chat_rejects_persistent_commands(bus, tmp_path, content
 
 
 @pytest.mark.asyncio
+async def test_temporary_chat_accepts_prompt_without_changing_policy(bus, tmp_path, monkeypatch):
+    from nanobot.command.prompts import PromptCommands
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    commands = PromptCommands(tmp_path)
+    commands.save({"name": "explain", "source": "user", "revision": "", "body": "Explain $ARGUMENTS"})
+    before = (tmp_path / "commands/explain.md").read_bytes()
+    sessions = SessionManager(tmp_path)
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path))
+    connection = AsyncMock()
+    connection.remote_address = ("127.0.0.1", 5000)
+    chat_id = await _new_temporary_chat(channel, connection)
+    await channel._dispatch_envelope(connection, "webui-client", {
+        "type": "message", "chat_id": chat_id, "content": "/explain synthetic example", "webui": True,
+    })
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert inbound.require_existing_session
+    assert inbound.metadata["workspace_scope"]["access_mode"] == "restricted"
+    session = sessions.get_cached(inbound.session_key)
+    assert session and not session.policy.persist
+    assert (tmp_path / "commands/explain.md").read_bytes() == before
+
+
+@pytest.mark.asyncio
 async def test_disconnect_discards_temporary_chat(bus, tmp_path) -> None:
     sessions = SessionManager(tmp_path)
     channel = WebSocketChannel(
@@ -4683,6 +4707,39 @@ async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> No
     finally:
         await channel.stop()
         await server_task
+
+
+@pytest.mark.asyncio
+async def test_prompt_command_management_and_palette(bus, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    channel = _ch(bus, port=29892)
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
+    task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    client = None
+    try:
+        base = "http://127.0.0.1:29892"
+        assert (await _http_get(base + "/api/commands/manage")).status_code == 401
+        token = channel.gateway.tokens.issue_token(300, audience="webui")
+        client = await websockets.connect(f"ws://127.0.0.1:29892/ws?token={token}&client_id=prompt-check")
+        assert json.loads(await client.recv())["event"] == "ready"
+        command = {"name": "review", "source": "user", "revision": "", "body": "Review $ARGUMENTS", "enabled": True}
+        saved = await _webui_mutate(client, "prompt.save", command)
+        assert saved.status_code == 200
+        item = saved.json()["commands"][0]
+        response = await _http_get(base + "/api/commands", headers={"Authorization": "Bearer tok"})
+        assert any(row["command"] == "/review" and row["lifecycle"] == "agent_turn" for row in response.json()["commands"])
+        stale = await _webui_mutate(client, "prompt.save", command)
+        assert stale.status_code == 409
+        assert (await _http_get(base + "/api/commands/delete?name=review", headers={"Authorization": "Bearer tok"})).status_code == 405
+        deleted = await _webui_mutate(client, "prompt.delete", item)
+        assert deleted.status_code == 200
+        assert deleted.json()["commands"] == []
+    finally:
+        if client is not None:
+            await client.close()
+        await channel.stop()
+        await task
 
 
 @pytest.mark.asyncio

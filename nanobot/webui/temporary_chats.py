@@ -121,7 +121,9 @@ class WebUITemporaryChats:
 
         command = content.strip().split(maxsplit=1)[0].lower() if content.strip() else ""
         if command.startswith("/") and command not in _TEMPORARY_CHAT_COMMANDS:
-            raise TemporaryChatError("temporary_chat_command_rejected")
+            from nanobot.command.prompts import PromptCommands
+            if PromptCommands(self._workspaces.restricted_default_scope().project_path).lookup(content) is None:
+                raise TemporaryChatError("temporary_chat_command_rejected")
 
         return TemporaryChatMessagePolicy(
             session_key=self._session_key(chat_id),

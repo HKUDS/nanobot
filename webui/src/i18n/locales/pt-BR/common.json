@@ -1,4 +1,33 @@
 {
+  "promptCommands": {
+    "title": "Comandos",
+    "intro": "Salve prompts reutilizáveis. Comandos do usuário pertencem a esta instância; os do espaço, ao espaço padrão. Um comando do espaço com o mesmo nome tem prioridade, mesmo desativado.",
+    "refresh": "Atualizar",
+    "add": "Novo comando",
+    "loading": "Carregando…",
+    "empty": "Nenhum comando personalizado.",
+    "invalid": "Não foi possível carregar {{count}} arquivos. Verifique nomes e frontmatter.",
+    "edit": "Editar comando",
+    "hint": "$ARGUMENTS insere o texto após o comando. Sem ele, o texto é acrescentado ao final. Não executa shell nem insere arquivos.",
+    "name": "Nome",
+    "source": "Escopo",
+    "user": "Usuário",
+    "workspace": "Espaço de trabalho",
+    "description": "Descrição",
+    "argumentHint": "Dica de argumentos",
+    "body": "Prompt",
+    "enabled": "Ativado",
+    "disabled": "Desativado",
+    "shadowed": "Substituído",
+    "delete": "Excluir",
+    "cancel": "Cancelar",
+    "saving": "Salvando…",
+    "save": "Salvar",
+    "discard": "Descartar alterações?",
+    "deleteHint": "Excluir este prompt? As conversas não mudam. Excluir o comando do espaço pode reativar o do usuário com o mesmo nome.",
+    "discardHint": "As alterações não salvas serão perdidas.",
+    "confirm": "Confirmar"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

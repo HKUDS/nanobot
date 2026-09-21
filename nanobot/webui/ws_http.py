@@ -165,6 +165,8 @@ class _WebUIThreadDiagnostics:
     event_loop_lag_ms: float = 0.0
 
 _WEBUI_MUTATION_PATHS = {
+    "prompt.save": "/api/commands/save",
+    "prompt.delete": "/api/commands/delete",
     "automation.enable": "/api/webui/automations/enable",
     "automation.disable": "/api/webui/automations/disable",
     "automation.delete": "/api/webui/automations/delete",
@@ -522,6 +524,8 @@ class GatewayHTTPHandler:
         if path in {"/api/webui/recovery/continue", "/api/webui/recovery/dismiss"}:
             return True
         return path in {
+            "/api/commands/save",
+            "/api/commands/delete",
             "/api/webui/skills/install",
             "/api/webui/skills/update",
             "/api/webui/skills/delete",
@@ -1429,7 +1433,9 @@ class GatewayHTTPHandler:
         if got == "/api/sessions":
             return await self._handle_sessions_list(request)
         if got == "/api/commands":
-            return self._handle_commands(request)
+            return await asyncio.to_thread(self._handle_commands, request)
+        if got in {"/api/commands/manage", "/api/commands/save", "/api/commands/delete"}:
+            return await asyncio.to_thread(self._handle_prompt_commands, connection, request, got)
         if got == "/api/workspaces/pick-folder":
             return await self._handle_workspace_folder_picker(connection, request)
         if got == "/api/workspaces":
@@ -1460,7 +1466,41 @@ class GatewayHTTPHandler:
     def _handle_commands(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        return _http_json_response({"commands": builtin_command_palette()})
+        from nanobot.command.prompts import PromptCommands
+        key = _query_first(_parse_query(request.path), "session_key")
+        if key and not is_webui_session_key(key):
+            return _http_error(400, "invalid session key")
+        scope = (self.workspaces.scope_for_session_key(key) if key
+                 else self.workspaces.default_scope())
+        commands = PromptCommands(scope.project_path, self.settings.config.path)
+        return _http_json_response({"commands": [*builtin_command_palette(),
+                                   *(command.palette() for command in commands.effective())]})
+
+    def _handle_prompt_commands(self, connection: Any, request: WsRequest, path: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        # Management changes future model instructions, like local skill installation.
+        if not _is_local_browser_request(connection, request.headers):
+            return _http_error(403, "prompt management is available only on the gateway device")
+        from yaml import YAMLError
+
+        from nanobot.command.prompts import PromptCommandError, PromptCommands
+
+        def operation(config_path: Path) -> dict[str, Any]:
+            commands = PromptCommands(self.skills_workspace_path, config_path)
+            if path != "/api/commands/manage":
+                payload = _mutation_payload(request)
+                if payload is None:
+                    raise PromptCommandError("WebSocket mutation required")
+                commands.save(payload, delete=path.endswith("/delete"))
+            return commands.payload()
+        try:
+            payload = self.settings.config.run_serialized(operation)
+        except PromptCommandError as exc:
+            return _http_error(exc.status, str(exc))
+        except (OSError, ValueError, YAMLError):
+            return _http_error(400, "could not read or save prompt commands")
+        return _http_json_response(payload)
 
     def _handle_workspaces(self, connection: Any, request: WsRequest) -> Response:
         if not self.check_api_token(request):
