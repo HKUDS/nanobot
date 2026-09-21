@@ -660,7 +660,7 @@ describe("ThreadMessages", () => {
     expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
   });
 
-  it("moves the activity and message actions together with the hovered answer", () => {
+  it("activates only the hovered answer's surrounding controls", () => {
     const messages: UIMessage[] = [
       {
         id: "tool-a",

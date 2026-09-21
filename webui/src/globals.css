@@ -766,6 +766,10 @@
   transition: opacity 120ms ease-out;
 }
 
+.assistant-context-actions[data-context-actions-overlay] {
+  transition: none;
+}
+
 @media (hover: hover) and (pointer: fine) {
   [data-assistant-message] .assistant-context-actions {
     pointer-events: none;
@@ -780,6 +784,17 @@
   [data-assistant-message]:hover .assistant-context-actions,
   [data-assistant-message]:focus-within .assistant-context-actions,
   [data-context-group-active] .assistant-context-actions {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
+  [data-contextual-activity] [data-contextual-activity-disclosure] {
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  [data-context-group-active] [data-contextual-activity-disclosure],
+  [data-contextual-activity-disclosure][aria-expanded="true"] {
     pointer-events: auto;
     opacity: 1;
   }
