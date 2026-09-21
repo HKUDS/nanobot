@@ -1,4 +1,3 @@
-import { History } from "lucide-react";
 import { useId, useState, type ReactNode, type Ref } from "react";
 
 import { cn } from "@/lib/utils";
@@ -50,7 +49,7 @@ export function ThinkingReasoningShell({
             data-thread-disclosure=""
             data-contextual-activity-disclosure={contextual || undefined}
             className={cn(
-              "touch-target group inline-flex h-5 min-w-0 items-center gap-1 bg-transparent p-0",
+              "touch-target inline-flex h-5 min-w-0 items-center bg-transparent p-0",
               "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
             onClick={onToggle}
@@ -59,11 +58,6 @@ export function ThinkingReasoningShell({
             aria-label={label}
             aria-live={active ? "polite" : undefined}
           >
-            <History
-              className="h-3 w-3 shrink-0 text-muted-foreground/60 transition-colors duration-200 group-hover:text-muted-foreground motion-reduce:transition-none"
-              strokeWidth={1.5}
-              aria-hidden
-            />
             <span
               className={cn(
                 "min-w-0 truncate text-[12px] font-normal leading-4 text-muted-foreground/65",

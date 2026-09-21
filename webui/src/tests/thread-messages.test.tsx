@@ -643,7 +643,8 @@ describe("ThreadMessages", () => {
     expect(disclosure).toHaveAttribute("aria-controls");
     expect(disclosure).toHaveAttribute("data-contextual-activity-disclosure", "true");
     const activityBlock = disclosure.closest("[data-contextual-activity]");
-    expect(disclosure).toHaveClass("h-5", "gap-1", "p-0");
+    expect(disclosure).toHaveClass("h-5", "p-0");
+    expect(disclosure).not.toHaveClass("gap-1");
     expect(activityBlock?.parentElement).not.toHaveClass("mb-2");
     expect(rows[0].compareDocumentPosition(rows[1]) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();

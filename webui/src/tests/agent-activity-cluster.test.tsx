@@ -504,13 +504,12 @@ describe("AgentActivityCluster", () => {
 
     const button = screen.getByRole("button", { name: "Worked" });
     expect(button).toHaveAttribute("data-thread-disclosure");
-    const historyIcon = button.querySelector("svg");
-    expect(historyIcon).toBeInTheDocument();
-    expect(button).toHaveClass("h-5", "gap-1", "p-0");
+    expect(button.querySelector("svg")).not.toBeInTheDocument();
+    expect(button).toHaveClass("h-5", "p-0");
+    expect(button).not.toHaveClass("gap-1");
     expect(button).not.toHaveClass("min-h-7", "rounded-md", "px-1");
-    expect(historyIcon).toHaveClass("h-3", "w-3", "transition-colors", "duration-200");
     fireEvent.click(button);
-    expect(historyIcon).not.toHaveClass("rotate-180");
+    expect(button).toHaveAttribute("aria-expanded", "true");
   });
 
   it("uses persisted turn latency for completed history instead of replay timestamps", () => {
