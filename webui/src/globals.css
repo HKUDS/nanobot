@@ -762,6 +762,10 @@
   margin-inline-start: -0.5rem;
 }
 
+.assistant-context-controls > button:first-child {
+  margin-inline-start: -0.25rem;
+}
+
 .assistant-context-actions {
   transition: opacity 120ms ease-out;
 }
