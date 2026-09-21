@@ -634,8 +634,9 @@ describe("ThreadMessages", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     expect(disclosure).toHaveAttribute("aria-controls");
     expect(disclosure).toHaveAttribute("data-contextual-activity-disclosure", "true");
-    expect(disclosure.closest("[data-contextual-activity]"))
-      .toHaveClass("completed-activity-block");
+    const activityBlock = disclosure.closest("[data-contextual-activity]");
+    expect(activityBlock).toHaveClass("completed-activity-block");
+    expect(activityBlock?.parentElement).not.toHaveClass("mb-2");
     expect(rows[0].compareDocumentPosition(rows[1]) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(assistantContextActions(container)).not.toHaveAttribute("data-activity-expanded");
@@ -643,10 +644,12 @@ describe("ThreadMessages", () => {
     fireEvent.click(disclosure);
 
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(activityBlock?.parentElement).toHaveClass("mb-2");
     expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
     fireEvent.click(disclosure);
 
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(activityBlock?.parentElement).not.toHaveClass("mb-2");
     expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
   });
 

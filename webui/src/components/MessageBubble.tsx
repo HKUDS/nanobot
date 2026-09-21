@@ -235,30 +235,6 @@ function AssistantContextActions({
         )}
       >
         <div className="flex min-w-0 max-w-full items-center gap-0.5">
-          {timestamp ? (
-            <MessageTimestamp
-              data-message-timestamp
-              {...(timestamp.completed ? { "data-assistant-completed-at": true } : {})}
-              {...(automation ? { "data-automation-trigger": true } : {})}
-              timestamp={timestamp.value}
-              tooltipLabel={automation
-                ? `${timestamp.label} — ${automation.label} — ${automation.sourceLabel}`
-                : timestamp.label}
-              className={cn(
-                "h-7 items-center rounded-md px-1.5 pb-0 text-[11px]",
-                "transition-colors hover:bg-muted/70 hover:text-foreground",
-              )}
-            >
-              {formatClockTime(timestamp.value)}
-            </MessageTimestamp>
-          ) : null}
-          {fallbackSources.length > 0 ? (
-            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1">
-              {fallbackSources.map((source) => (
-                <ResponseSourceBadge key={JSON.stringify(source)} source={source} />
-              ))}
-            </div>
-          ) : null}
           <div className="assistant-context-controls flex items-center gap-0.5">
             {showCopy ? (
               <Tooltip>
@@ -305,6 +281,30 @@ function AssistantContextActions({
               </Tooltip>
             ) : null}
           </div>
+          {timestamp ? (
+            <MessageTimestamp
+              data-message-timestamp
+              {...(timestamp.completed ? { "data-assistant-completed-at": true } : {})}
+              {...(automation ? { "data-automation-trigger": true } : {})}
+              timestamp={timestamp.value}
+              tooltipLabel={automation
+                ? `${timestamp.label} — ${automation.label} — ${automation.sourceLabel}`
+                : timestamp.label}
+              className={cn(
+                "h-7 items-center rounded-md px-1.5 pb-0 text-[11px]",
+                "transition-colors hover:bg-muted/70 hover:text-foreground",
+              )}
+            >
+              {formatClockTime(timestamp.value)}
+            </MessageTimestamp>
+          ) : null}
+          {fallbackSources.length > 0 ? (
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1">
+              {fallbackSources.map((source) => (
+                <ResponseSourceBadge key={JSON.stringify(source)} source={source} />
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     </TooltipProvider>

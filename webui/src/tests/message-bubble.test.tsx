@@ -572,8 +572,11 @@ describe("MessageBubble", () => {
     const answer = container.querySelector("[data-assistant-selectable]");
     expect(answer?.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector("[data-thread-disclosure]")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
+    const copy = screen.getByRole("button", { name: "Copy" });
+    const fork = screen.getByRole("button", { name: "Fork" });
+    const timestamp = container.querySelector<HTMLElement>("[data-message-timestamp]")!;
+    expect(copy.compareDocumentPosition(fork) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fork.compareDocumentPosition(timestamp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector("[data-assistant-footer]")).not.toBeInTheDocument();
   });
 

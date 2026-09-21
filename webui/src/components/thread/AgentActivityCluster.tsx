@@ -489,7 +489,7 @@ function FoldedAgentActivity({
   }
 
   return (
-    <div className={cn("w-full", hasBodyBelow && "mb-2")}>
+    <div className={cn("w-full", hasBodyBelow && expanded !== false && "mb-2")}>
       <ThinkingReasoningShell
         active={isTurnStreaming}
         expanded={outerExpanded}

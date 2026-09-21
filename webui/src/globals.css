@@ -766,10 +766,6 @@
   transition: opacity 120ms ease-out;
 }
 
-.assistant-context-controls {
-  transition: opacity 120ms ease-out;
-}
-
 .completed-activity-block [data-contextual-activity-disclosure] {
   transition-duration: 120ms;
 }
@@ -785,28 +781,9 @@
     opacity: 1;
   }
 
-  [data-assistant-message] .assistant-context-actions[data-context-actions-pinned]
-    .assistant-context-controls {
-    pointer-events: none;
-    opacity: 0;
-  }
-
   [data-assistant-message]:hover .assistant-context-actions,
   [data-assistant-message]:focus-within .assistant-context-actions,
   [data-context-group-active] .assistant-context-actions {
-    pointer-events: auto;
-    opacity: 1;
-  }
-
-  [data-assistant-message]:hover
-    .assistant-context-actions[data-context-actions-pinned]
-    .assistant-context-controls,
-  [data-assistant-message]:focus-within
-    .assistant-context-actions[data-context-actions-pinned]
-    .assistant-context-controls,
-  [data-context-group-active]
-    .assistant-context-actions[data-context-actions-pinned]
-    .assistant-context-controls {
     pointer-events: auto;
     opacity: 1;
   }
@@ -827,10 +804,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .assistant-context-actions {
-    transition: none;
-  }
-
-  .assistant-context-controls {
     transition: none;
   }
 
