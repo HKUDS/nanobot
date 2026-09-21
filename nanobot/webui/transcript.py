@@ -132,7 +132,10 @@ def rewrite_local_markdown_images(
         if not url or url.startswith(("/api/media/", "#")):
             return None
         parsed = urlparse(url)
-        if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        # A native Windows drive prefix is a path, not a URL scheme. Still use
+        # the same resolved workspace/owned-artifact checks below.
+        native_drive = os.name == "nt" and re.match(r"^[A-Za-z]:[\\/]", url) is not None
+        if (parsed.scheme and not native_drive) or parsed.netloc or parsed.query or parsed.fragment:
             return None
         path_text = unquote(url)
         if Path(path_text).suffix.lower() not in _INLINE_MARKDOWN_MEDIA_EXTS:
