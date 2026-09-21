@@ -25,20 +25,10 @@ import typer  # noqa: E402
 from loguru import logger  # noqa: E402
 from typer.core import TyperGroup  # noqa: E402
 
+from nanobot.utils.log_config import configure_console_logging  # noqa: E402
+
 # Remove default handler and re-add with unified nanobot format
-logger.remove()
-_log_handler_id = logger.add(
-    sys.stderr,
-    format=(
-        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-        "<level>{level: <5}</level> | "
-        "<cyan>{extra[channel]}</cyan> | "
-        "<level>{message}</level>"
-    ),
-    level="INFO",
-    colorize=None,
-    filter=lambda record: record["extra"].setdefault("channel", "-") or True,
-)
+_log_handler_id = configure_console_logging(sys.stderr)
 
 
 from rich.console import Console  # noqa: E402

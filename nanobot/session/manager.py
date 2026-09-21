@@ -1750,7 +1750,7 @@ class SessionManager:
                 self.save(session, fsync=True)
                 flushed += 1
             except Exception:
-                logger.warning("Failed to flush session {}", key, exc_info=True)
+                logger.opt(exception=True).warning("Failed to flush session {}", key)
         return flushed
 
     def invalidate(self, key: str) -> None:

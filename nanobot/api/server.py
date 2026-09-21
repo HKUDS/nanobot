@@ -51,6 +51,7 @@ _MODEL_NAME_KEY = web.AppKey[str]("model_name")
 _REQUEST_TIMEOUT_KEY = web.AppKey[float]("request_timeout")
 _SESSION_LOCKS_KEY = web.AppKey[dict[str, asyncio.Lock]]("session_locks")
 _PREPARE_AGENT_KEY = web.AppKey[Callable[[], Awaitable[None]] | None]("prepare_agent")
+_REQUEST_ID_KEY = web.RequestKey[str]("request_id")
 _MISSING = object()
 
 
@@ -499,6 +500,60 @@ def create_app(
     app[_PREPARE_AGENT_KEY] = prepare_agent
 
     @web.middleware
+    async def request_logging_middleware(
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        request_id = uuid.uuid4().hex[:16]
+        request[_REQUEST_ID_KEY] = request_id
+        started_at = time.perf_counter()
+        with logger.contextualize(request_id=request_id):
+            try:
+                response = await handler(request)
+            except Exception:
+                duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+                logger.opt(exception=True).bind(
+                    event="http_request",
+                    outcome="error",
+                    duration_ms=duration_ms,
+                    method=request.method,
+                    path=request.path,
+                ).error(
+                    "HTTP request failed method={} path={} duration_ms={}",
+                    request.method,
+                    request.path,
+                    duration_ms,
+                )
+                raise
+
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+            request_log = logger.bind(
+                event="http_request",
+                outcome="success" if response.status < 400 else "error",
+                duration_ms=duration_ms,
+                method=request.method,
+                path=request.path,
+                status_code=response.status,
+            )
+            log_method = request_log.debug if request.path == "/health" else request_log.info
+            log_method(
+                "HTTP request completed method={} path={} status={} duration_ms={}",
+                request.method,
+                request.path,
+                response.status,
+                duration_ms,
+            )
+            return response
+
+    async def add_request_id_header(
+        request: web.Request,
+        response: web.StreamResponse,
+    ) -> None:
+        request_id = request.get(_REQUEST_ID_KEY)
+        if request_id:
+            response.headers["X-Request-ID"] = request_id
+
+    @web.middleware
     async def auth_middleware(
         request: web.Request,
         handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
@@ -515,7 +570,8 @@ def create_app(
             return _error_json(401, "Invalid API key")
         return await handler(request)
 
-    app.middlewares.append(auth_middleware)
+    app.middlewares.extend((request_logging_middleware, auth_middleware))
+    app.on_response_prepare.append(add_request_id_header)
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_get("/v1/models", handle_models)

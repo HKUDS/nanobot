@@ -275,7 +275,9 @@ async def maybe_generate_webui_title(
                 retry_mode="standard",
             )
     except Exception:
-        logger.debug("Failed to generate webui session title for {}", session_key, exc_info=True)
+        logger.opt(exception=True).debug(
+            "Failed to generate webui session title for {}", session_key
+        )
         return False
 
     title = clean_generated_title(response.content)
@@ -650,10 +652,9 @@ class WebuiTurnCoordinator:
                 session_message=public_metadata,
             )
         except (OSError, TypeError, ValueError):
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "Failed to persist session input {}",
                 envelope["message_id"],
-                exc_info=True,
             )
         await self.bus.publish_outbound(outbound_message_for_event(
             channel="websocket",

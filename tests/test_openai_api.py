@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.api.server import (
@@ -126,8 +127,33 @@ async def test_api_key_protects_api_routes_but_not_health(aiohttp_client, mock_a
     assert missing.status == 401
     assert wrong.status == 401
     assert ok.status == 200
+    assert health.headers["X-Request-ID"]
+    assert ok.headers["X-Request-ID"]
+    assert health.headers["X-Request-ID"] != ok.headers["X-Request-ID"]
     assert (await missing.json())["error"]["message"].startswith("Missing Authorization")
     assert (await wrong.json())["error"]["message"] == "Invalid API key"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_api_request_log_has_correlation_and_completion_fields(
+    aiohttp_client, mock_agent
+) -> None:
+    records = []
+    sink = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        client = await aiohttp_client(create_app(mock_agent, api_key=API_KEY))
+        response = await client.get("/v1/models", headers=AUTH_HEADERS)
+    finally:
+        logger.remove(sink)
+
+    completion = next(
+        record for record in records if record["extra"].get("event") == "http_request"
+    )
+    assert completion["extra"]["request_id"] == response.headers["X-Request-ID"]
+    assert completion["extra"]["outcome"] == "success"
+    assert completion["extra"]["status_code"] == 200
+    assert completion["extra"]["duration_ms"] >= 0
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")

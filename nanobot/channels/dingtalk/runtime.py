@@ -188,7 +188,9 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                 )
                 return AckMessage.STATUS_OK, "OK"
 
-            self.channel.logger.info("Received message from {} ({}): {}", sender_name, sender_id, content)
+            self.channel.logger.debug(
+                "Received DingTalk message from {} ({})", sender_name, sender_id
+            )
 
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
@@ -367,7 +369,7 @@ class DingTalkChannel(BaseChannel):
             if isawaitable(result):
                 await result
         except Exception:
-            self.logger.debug("DingTalk stream client close failed", exc_info=True)
+            self.logger.opt(exception=True).debug("DingTalk stream client close failed")
 
     async def _get_access_token(self) -> str | None:
         """Get or refresh Access Token."""
@@ -824,7 +826,6 @@ class DingTalkChannel(BaseChannel):
         permission checks before publishing to the bus.
         """
         try:
-            self.logger.info("inbound: {} from {}", content, sender_name)
             if not sender_id:
                 self.logger.warning("dropping DingTalk message without a sender ID")
                 return
