@@ -167,9 +167,6 @@ interface AgentActivityClusterProps {
   /** Optional controlled expansion state for a completed inline activity block. */
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
-  /** Turn-level actions that share the completed activity footer row. */
-  actions?: ReactNode;
-  contextPinned?: boolean;
 }
 
 export function AgentActivityCluster(props: AgentActivityClusterProps) {
@@ -245,8 +242,6 @@ function FoldedAgentActivity({
   onOpenFilePreview,
   expanded,
   onExpandedChange,
-  actions,
-  contextPinned = false,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEditDisplayMode = useFileEditDisplayMode();
@@ -505,8 +500,6 @@ function FoldedAgentActivity({
         fadeTop={activityScrollFade.top}
         fadeBottom={activityScrollFade.bottom}
         hasDetails={hasVisibleActivity}
-        actions={actions}
-        contextPinned={contextPinned}
         onToggle={toggleOuter}
         onScroll={onActivityScroll}
       >

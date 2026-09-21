@@ -164,6 +164,7 @@ export function ThreadMessages({
           : marginAfterPrevUnit(
               units[previousVisibleIndex],
               turnFooters.ownerIndices.has(previousVisibleIndex),
+              showTurnFooter && turnFooterActivity !== undefined,
             );
         const turnFooterExpanded = showTurnFooter
           && contextGroupKey !== undefined
@@ -439,18 +440,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           )
         ) : (
           <>
-            <MessageBubble
-              message={unit.message}
-              isTurnStreaming={isTurnStreaming}
-              temporary={temporary}
-              cliApps={cliApps}
-              mcpPresets={mcpPresets}
-              slashCommands={slashCommands}
-              onOpenFilePreview={onOpenFilePreview}
-              onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
-              showAssistantContextActions={contextGroupKey === undefined}
-            />
-            {showTurnFooter ? turnFooterActivity ? (
+            {showTurnFooter && turnFooterActivity ? (
               <AgentActivityCluster
                 messages={turnFooterActivity.messages}
                 isTurnStreaming={false}
@@ -465,10 +455,20 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
                 traceDetailScope={traceDetailScope}
                 onLoadTraceDetails={onLoadTraceDetails}
                 onOpenFilePreview={onOpenFilePreview}
-                actions={turnActions}
-                contextPinned={turnContextPinned}
               />
-            ) : (
+            ) : null}
+            <MessageBubble
+              message={unit.message}
+              isTurnStreaming={isTurnStreaming}
+              temporary={temporary}
+              cliApps={cliApps}
+              mcpPresets={mcpPresets}
+              slashCommands={slashCommands}
+              onOpenFilePreview={onOpenFilePreview}
+              onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
+              showAssistantContextActions={contextGroupKey === undefined}
+            />
+            {showTurnFooter ? (
               <div
                 data-turn-context-rail
                 data-turn-context-pinned={turnContextPinned || undefined}
@@ -665,7 +665,11 @@ function stableTurnMessageKey(message: UIMessage | undefined, fallbackPhase?: st
   return `turn-${message.turnId}-${phase}`;
 }
 
-function marginAfterPrevUnit(prev: DisplayUnit, hasTurnFooter: boolean): string {
+function marginAfterPrevUnit(
+  prev: DisplayUnit,
+  hasTurnFooter: boolean,
+  currentHasActivityHeader: boolean,
+): string {
   if (prev.type === "activity") {
     return "mt-4";
   }
@@ -681,9 +685,9 @@ function marginAfterPrevUnit(prev: DisplayUnit, hasTurnFooter: boolean): string 
     return "mt-2";
   }
   if (p.role === "assistant" && !p.isStreaming && p.content.trim().length > 0) {
-    // Only the final answer owns the turn footer. Intermediate commentary keeps
-    // normal paragraph rhythm instead of reserving empty control rows.
-    return hasTurnFooter ? "" : "mt-5";
+    // The lower action row or the next answer's upper activity row supplies
+    // the normal inter-message rhythm without stacking extra whitespace.
+    return hasTurnFooter || currentHasActivityHeader ? "" : "mt-5";
   }
   return "mt-5";
 }

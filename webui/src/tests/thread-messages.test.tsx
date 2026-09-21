@@ -376,8 +376,7 @@ describe("ThreadMessages", () => {
     rerender(<ThreadMessages messages={messages} isStreaming={false} activeTurnId={null} />);
     const completedActivity = screen.getByRole("button", { name: /worked/i });
     const finalRow = finalAnswer.closest<HTMLElement>("[data-thread-display-unit]")!;
-    const turnFooter = finalRow.querySelector<HTMLElement>("[data-turn-context-rail]")!;
-    const turnActions = assistantContextActions(turnFooter);
+    const turnActions = assistantContextActions(finalRow);
     expect(assistantBlockForText("I will inspect it."))
       .not.toContainElement(turnActions);
     expect(assistantBlockForText("I will inspect it.")
@@ -387,9 +386,11 @@ describe("ThreadMessages", () => {
     expect(turnActions).toHaveClass("relative", "min-h-5");
     expect(completedActivity).toHaveClass("h-5");
     expect(completedActivity).toHaveAttribute("aria-expanded", "false");
-    expect(finalAnswer.compareDocumentPosition(completedActivity) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(completedActivity.compareDocumentPosition(finalAnswer) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(document.querySelectorAll("[data-turn-context-rail]")).toHaveLength(1);
+    expect(finalAnswer.compareDocumentPosition(turnActions) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(document.querySelectorAll("[data-turn-context-rail]")).toHaveLength(2);
   });
 
   it("ignores a completed empty answer frame without splitting contiguous activity", () => {
@@ -497,7 +498,7 @@ describe("ThreadMessages", () => {
     expect(activityShells).toHaveLength(1);
     expect(ok.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(final.compareDocumentPosition(activityShells[0]) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(activityShells[0].compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(screen.getByTestId("agent-activity-scroll")).toHaveTextContent("Completed First");
     expect(screen.getByTestId("agent-activity-scroll")).toHaveTextContent("Completed Second");
@@ -592,7 +593,7 @@ describe("ThreadMessages", () => {
     expect(removeAllRanges).toHaveBeenCalled();
   });
 
-  it("keeps one completed activity footer after the final answer", () => {
+  it("keeps one completed activity row above the final answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -646,7 +647,7 @@ describe("ThreadMessages", () => {
     expect(activityBlock?.parentElement).not.toHaveClass("mb-2");
     expect(rows[0].compareDocumentPosition(rows[1]) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(screen.getByText("final answer").compareDocumentPosition(disclosure)
+    expect(disclosure.compareDocumentPosition(screen.getByText("final answer"))
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(assistantContextActions(container)).not.toHaveAttribute("data-activity-expanded");
 
@@ -1253,7 +1254,7 @@ describe("ThreadMessages", () => {
     expect(answer.compareDocumentPosition(liveActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("keeps late activity after a completed assistant answer", () => {
+  it("summarizes late activity above the completed assistant answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -1299,10 +1300,10 @@ describe("ThreadMessages", () => {
     const answer = screen.getByText("Hong Kong is hot today.");
     const laterActivity = screen.getAllByRole("button", { name: /worked/i }).at(-1);
     expect(laterActivity).toBeTruthy();
-    expect(answer.compareDocumentPosition(laterActivity!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(laterActivity!.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("folds completed web-search activity into one footer after the answer", () => {
+  it("folds completed web-search activity into one row above the answer", () => {
     const messages: UIMessage[] = [
       {
         id: "user",
@@ -1341,7 +1342,7 @@ describe("ThreadMessages", () => {
     const answer = screen.getByText("知道，IEM Cologne Major 2026 今天开打了。");
     const activities = screen.getAllByRole("button", { name: /worked/i });
     expect(activities).toHaveLength(1);
-    expect(answer.compareDocumentPosition(activities[0]) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(activities[0].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
   });
 

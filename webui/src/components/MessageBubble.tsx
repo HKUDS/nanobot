@@ -252,9 +252,9 @@ function AssistantContextActions({
                     )}
                   >
                     {copied ? (
-                      <Check className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                      <Check className="h-3 w-3" strokeWidth={1.75} aria-hidden />
                     ) : (
-                      <Copy className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                      <Copy className="h-3 w-3" strokeWidth={1.75} aria-hidden />
                     )}
                   </button>
                 </TooltipTrigger>
@@ -275,7 +275,7 @@ function AssistantContextActions({
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     )}
                   >
-                    <ForkArrowIcon className="h-3.5 w-3.5" />
+                    <ForkArrowIcon className="h-3 w-3" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>

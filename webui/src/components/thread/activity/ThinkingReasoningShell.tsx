@@ -14,8 +14,6 @@ interface ThinkingReasoningShellProps {
   fadeTop: boolean;
   fadeBottom: boolean;
   hasDetails?: boolean;
-  actions?: ReactNode;
-  contextPinned?: boolean;
   onToggle: () => void;
   onScroll: () => void;
 }
@@ -31,8 +29,6 @@ export function ThinkingReasoningShell({
   fadeTop,
   fadeBottom,
   hasDetails = true,
-  actions,
-  contextPinned = false,
   onToggle,
   onScroll,
 }: ThinkingReasoningShellProps) {
@@ -46,7 +42,6 @@ export function ThinkingReasoningShell({
       data-contextual-activity={contextual || undefined}
       data-turn-context-rail={contextual || undefined}
       data-turn-context-expanded={contextual && expanded ? true : undefined}
-      data-turn-context-pinned={contextual && contextPinned ? true : undefined}
     >
       <div className="flex min-h-5 items-center gap-1.5">
         {hasDetails ? (
@@ -55,7 +50,7 @@ export function ThinkingReasoningShell({
             data-thread-disclosure=""
             data-contextual-activity-disclosure={contextual || undefined}
             className={cn(
-              "group inline-flex h-5 min-w-0 items-center gap-1 bg-transparent p-0",
+              "touch-target group inline-flex h-5 min-w-0 items-center gap-1 bg-transparent p-0",
               "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
             onClick={onToggle}
@@ -66,12 +61,12 @@ export function ThinkingReasoningShell({
           >
             <History
               className="h-3 w-3 shrink-0 text-muted-foreground/60 transition-colors duration-200 group-hover:text-muted-foreground motion-reduce:transition-none"
-              strokeWidth={1.8}
+              strokeWidth={1.5}
               aria-hidden
             />
             <span
               className={cn(
-                "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
+                "min-w-0 truncate text-[12px] font-normal leading-4 text-muted-foreground/65",
                 active && "animate-pulse motion-reduce:animate-none",
               )}
             >
@@ -87,7 +82,7 @@ export function ThinkingReasoningShell({
           >
             <span
               className={cn(
-                "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
+                "min-w-0 truncate text-[12px] font-normal leading-4 text-muted-foreground/65",
                 active && "animate-pulse motion-reduce:animate-none",
               )}
             >
@@ -95,7 +90,6 @@ export function ThinkingReasoningShell({
             </span>
           </div>
         )}
-        {actions ? <div className="min-w-0">{actions}</div> : null}
       </div>
 
       {hasDetails ? (
