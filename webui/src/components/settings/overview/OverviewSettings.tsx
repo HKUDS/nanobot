@@ -37,7 +37,7 @@ import type {
   LocalPreferences,
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
-import type { SettingsPayload } from "@/lib/types";
+import type { SettingsPayload, UsageDetails, UsageRange } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -45,10 +45,12 @@ export function OverviewSettings({
   settings,
   onSelectSection,
   showBrandLogos,
+  loadUsage,
 }: {
   settings: SettingsPayload;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
+  loadUsage?: (range: UsageRange) => Promise<UsageDetails>;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -82,7 +84,7 @@ export function OverviewSettings({
   return (
     <div className="settings-stack">
       <section className="rounded-panel bg-settings-surface p-6">
-        <TokenUsageCard usage={settings.usage} timeZone={settings.agent.timezone} />
+        <TokenUsageCard usage={settings.usage} timeZone={settings.agent.timezone} loadDetails={loadUsage} />
       </section>
 
       <section>

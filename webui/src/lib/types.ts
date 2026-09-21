@@ -1617,6 +1617,29 @@ export interface FilePreviewPayload {
   truncated: boolean;
 }
 
+export type UsageRange = "7" | "30" | "365" | "retained";
+export type UsageTotals = Omit<NonNullable<SettingsPayload["usage"]>["days"][number], "date" | "sources">;
+export interface UsageDetails {
+  start_date: string;
+  end_date: string;
+  timezone: string;
+  days: NonNullable<SettingsPayload["usage"]>["days"];
+  totals: UsageTotals;
+  models: NonNullable<NonNullable<SettingsPayload["usage"]>["providers_30d"]>;
+  other_models: UsageTotals;
+  model_days: NonNullable<NonNullable<SettingsPayload["usage"]>["model_days_30d"]>;
+  active_days: number;
+  current_streak_days: number;
+  longest_streak_days: number;
+  coverage: {
+    first_call_at_ms: number | null;
+    last_call_at_ms: number | null;
+    retained_requests: number;
+    max_days: number;
+    max_requests: number;
+  };
+}
+
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "new_temporary_chat" }

@@ -320,6 +320,7 @@ export function SettingsPage({
         return (
           <OverviewSettings
             settings={settings}
+            loadUsage={controller.loadUsage}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
           />

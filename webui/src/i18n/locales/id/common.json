@@ -1,4 +1,27 @@
 {
+  "usageDashboard": {
+    "range": "Rentang waktu",
+    "retained": "Tersimpan · 400h",
+    "days": "{{count}} hari",
+    "refresh": "Muat ulang",
+    "unavailable": "Rincian penggunaan gagal dimuat. Muat ulang untuk mencoba lagi; gateway lama mungkin perlu diperbarui.",
+    "loading": "Memuat penggunaan…",
+    "cached": "Token input cache",
+    "failed": "Permintaan gagal",
+    "activeDays": "Hari aktif",
+    "streaks": "Dalam rentang ini: saat ini {{current}} hari berturut-turut · terlama {{longest}} hari. Hari aktif memiliki setidaknya satu permintaan model; hitungan saat ini berakhir hari ini.",
+    "models": "Rincian model",
+    "model": "Penyedia / model",
+    "noCalls": "Tidak ada permintaan model dalam rentang ini.",
+    "dailyData": "Data harian",
+    "date": "Tanggal",
+    "coverage": "Catatan tersimpan: {{records}} · Pertama: {{first}} · Terbaru: {{last}}.",
+    "retention": "Target retensi: {{days}} hari atau {{requests}} panggilan. Riwayat yang dihapus tidak dapat dipulihkan di sini.",
+    "accounting": "Menghitung panggilan nyata ke penyedia, termasuk kegagalan dan percobaan model cadangan. Data token atau cache yang tidak ada bukan berarti penggunaan nol. Ini pengukuran lokal, bukan tagihan atau kuota langganan.",
+    "observation": "Dilaporkan penyedia: {{reported}} token · Perkiraan: {{estimated}} token · {{unknown}} permintaan tanpa data penggunaan.",
+    "activity": "Aktivitas harian",
+    "heatmapHelp": "Pilih hari untuk melihat rincian. Tombol panah berpindah hari; gulir horizontal untuk rentang panjang. Intensitas warna menunjukkan penggunaan token."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

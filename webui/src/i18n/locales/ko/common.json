@@ -1,4 +1,27 @@
 {
+  "usageDashboard": {
+    "range": "기간",
+    "retained": "보관분 · 400일",
+    "days": "{{count}}일",
+    "refresh": "새로 고침",
+    "unavailable": "사용량을 불러올 수 없습니다. 새로 고침해 다시 시도하세요. 이전 게이트웨이는 업데이트가 필요할 수 있습니다.",
+    "loading": "사용량 로딩 중…",
+    "cached": "캐시 입력 토큰",
+    "failed": "실패한 요청",
+    "activeDays": "활성 일수",
+    "streaks": "선택한 기간: 현재 {{current}}일 연속 · 최장 {{longest}}일 연속. 모델 요청이 있는 날을 계산하며 현재 연속 일수는 오늘까지입니다.",
+    "models": "모델별 사용량",
+    "model": "공급자 / 모델",
+    "noCalls": "이 기간에 모델 요청이 없습니다.",
+    "dailyData": "일별 데이터",
+    "date": "날짜",
+    "coverage": "보관된 기록: {{records}} · 최초: {{first}} · 최근: {{last}}.",
+    "retention": "보관 목표: {{days}}일 또는 {{requests}}회 호출. 삭제된 기록은 복원할 수 없습니다.",
+    "accounting": "실패 및 대체 모델 시도를 포함한 실제 공급자 호출을 계산합니다. 토큰 또는 캐시 정보가 없다고 사용량이 0인 것은 아닙니다. 로컬 측정값이며 공급자 청구서나 구독 한도가 아닙니다.",
+    "observation": "공급자 보고: {{reported}} 토큰 · 추정: {{estimated}} 토큰 · 사용량 정보 없는 요청: {{unknown}}회.",
+    "activity": "일별 활동",
+    "heatmapHelp": "날짜를 선택하여 세부 정보를 확인하세요. 방향키로 날짜를 이동하고 긴 기간은 가로로 스크롤하세요. 색상 강도는 토큰 사용량을 나타냅니다."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

@@ -141,9 +141,9 @@ def system_settings_payload(
     }
 
 
-def settings_usage_payload(config: Config) -> dict[str, Any]:
+def settings_usage_payload(config: Config, *, detail_days: int | None = None) -> dict[str, Any]:
     """Return the lightweight token usage slice for Overview refreshes."""
-    return llm_usage_payload(timezone_name=config.agents.defaults.timezone)
+    return llm_usage_payload(timezone_name=config.agents.defaults.timezone, detail_days=detail_days)
 
 
 def update_agent_system_settings(config: Config, query: QueryParams) -> tuple[bool, bool]:

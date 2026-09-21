@@ -1,4 +1,27 @@
 {
+  "usageDashboard": {
+    "range": "Time range",
+    "retained": "Retained · 400d",
+    "days": "{{count}} days",
+    "refresh": "Refresh",
+    "unavailable": "Could not load usage details. Refresh to retry; older gateways may need an update.",
+    "loading": "Loading usage…",
+    "cached": "Cached input tokens",
+    "failed": "Failed requests",
+    "activeDays": "Active days",
+    "streaks": "In this range: current streak {{current}} days · longest {{longest}} days. Activity means at least one model request; the current streak ends today.",
+    "models": "Model breakdown",
+    "model": "Provider / model",
+    "noCalls": "No model requests in this range.",
+    "dailyData": "Daily data",
+    "date": "Date",
+    "coverage": "Retained records: {{records}} · First: {{first}} · Latest: {{last}}.",
+    "retention": "Retention target: {{days}} days or {{requests}} calls. Pruned history cannot be reconstructed here.",
+    "accounting": "Counts physical provider calls, including failures and fallback attempts. Missing token or cache measurements are not zero usage. These are local measurements, not a provider bill or subscription quota.",
+    "observation": "Provider-reported: {{reported}} tokens · Estimated: {{estimated}} tokens · {{unknown}} requests without token usage.",
+    "activity": "Daily activity",
+    "heatmapHelp": "Select a day for details. Arrow keys move between days; scroll horizontally for longer ranges. Color intensity reflects token usage."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

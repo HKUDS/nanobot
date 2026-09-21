@@ -33,14 +33,14 @@ import { useSystemSettingsEffects } from "@/components/settings/system/useSystem
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
+import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage, fetchUsageDetails } from "@/lib/api";
 import {
   readLocalPreferences,
   writeLocalPreferences,
   type LocalPreferences,
 } from "@/lib/local-preferences";
 import { isLoopbackHost } from "@/lib/network";
-import type { SettingsPayload } from "@/lib/types";
+import type { SettingsPayload, UsageRange } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
 interface SettingsControllerOptions {
@@ -224,6 +224,7 @@ export function useSettingsController({
   }, [applyPayload, getToken]);
 
   const hasSettings = settings !== null;
+  const loadUsage = useCallback((range: UsageRange) => fetchUsageDetails(getToken(), range), [getToken]);
   useEffect(() => {
     if (activeSection !== "overview" || !hasSettings || !pageVisible) return;
     let cancelled = false;
@@ -469,6 +470,7 @@ export function useSettingsController({
 
   return {
     activeSection,
+    loadUsage,
     capabilityErrors: capabilityState.capabilityErrors,
     runtimeConfigState,
     apiService,

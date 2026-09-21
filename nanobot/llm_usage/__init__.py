@@ -64,11 +64,13 @@ def llm_usage_payload(
     *,
     days: int = 371,
     timezone_name: str | None = None,
+    detail_days: int | None = None,
 ) -> dict[str, Any]:
     try:
         return get_llm_usage_store().usage_payload(
             days=days,
             timezone_name=timezone_name,
+            detail_days=detail_days,
         )
     except Exception:
         logger.exception("failed to query LLM usage")

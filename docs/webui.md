@@ -147,6 +147,27 @@ a bar for input tokens, output tokens, generation time, and the KV cache hit
 rate when reported. Provider usage may be estimated or unavailable; these
 figures are not a billing statement.
 
+**Settings → Overview → Token usage → View details** opens local usage analytics.
+Choose 7, 30, or 365 days, or the retained 400-day window. The totals, activity
+calendar, model chart and table all use that same window in the configured agent
+timezone. Select a day or chart bar for details, or expand **Daily data** for a
+numeric table. The activity calendar supports arrow keys, Home and End; long
+ranges scroll horizontally. Refresh reloads the selected range.
+
+These records count physical provider calls, including failed primary calls and
+fallback attempts, under the provider and model that actually ran. An active day
+has at least one call, even if it failed without reporting tokens. Reported and
+estimated tokens are identified separately; missing usage is not proof of zero
+consumption, and the cache hit rate excludes input with unknown cache status.
+This is neither subscription quota tracking nor cost estimation.
+
+Details are fetched only when opened. The model table includes up to 50 models
+plus a remainder; the chart shows the five leading models plus a remainder.
+Coverage shows the first and latest retained calls. Local retention targets 400
+days or 100,000 calls (pruned in batches), so this view cannot reconstruct deleted
+history. It reads the existing content-free usage database, not chat messages,
+and does not introduce a new data store or migration.
+
 When nanobot compacts context, the timeline shows its progress and outcome.
 The compacted summary keeps earlier work available while recent messages remain
 in context. See [Memory](./memory.md) for compaction and Dream consolidation.

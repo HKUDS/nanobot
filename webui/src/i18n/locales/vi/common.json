@@ -1,4 +1,27 @@
 {
+  "usageDashboard": {
+    "range": "Khoảng thời gian",
+    "retained": "Đã lưu · 400 ngày",
+    "days": "{{count}} ngày",
+    "refresh": "Làm mới",
+    "unavailable": "Không tải được chi tiết sử dụng. Hãy làm mới để thử lại; gateway cũ có thể cần cập nhật.",
+    "loading": "Đang tải mức sử dụng…",
+    "cached": "Token đầu vào trong bộ nhớ đệm",
+    "failed": "Yêu cầu thất bại",
+    "activeDays": "Ngày hoạt động",
+    "streaks": "Trong khoảng này: hiện tại {{current}} ngày liên tiếp · dài nhất {{longest}} ngày. Ngày hoạt động có ít nhất một yêu cầu mô hình; chuỗi hiện tại kết thúc hôm nay.",
+    "models": "Chi tiết theo mô hình",
+    "model": "Nhà cung cấp / mô hình",
+    "noCalls": "Không có yêu cầu mô hình trong khoảng này.",
+    "dailyData": "Dữ liệu hàng ngày",
+    "date": "Ngày",
+    "coverage": "Bản ghi đã lưu: {{records}} · Đầu tiên: {{first}} · Mới nhất: {{last}}.",
+    "retention": "Mục tiêu lưu giữ: {{days}} ngày hoặc {{requests}} lượt gọi. Lịch sử đã xóa không thể khôi phục tại đây.",
+    "accounting": "Đếm các lượt gọi thực tế tới nhà cung cấp, gồm lỗi và lần thử mô hình dự phòng. Thiếu dữ liệu token hoặc bộ nhớ đệm không có nghĩa là mức sử dụng bằng không. Đây là số đo cục bộ, không phải hóa đơn hay hạn mức đăng ký.",
+    "observation": "Nhà cung cấp báo cáo: {{reported}} token · Ước tính: {{estimated}} token · {{unknown}} yêu cầu không có dữ liệu sử dụng.",
+    "activity": "Hoạt động hàng ngày",
+    "heatmapHelp": "Chọn ngày để xem chi tiết. Dùng phím mũi tên để chuyển ngày; cuộn ngang với khoảng dài. Cường độ màu biểu thị mức sử dụng token."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

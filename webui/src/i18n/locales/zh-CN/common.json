@@ -1,4 +1,27 @@
 {
+  "usageDashboard": {
+    "range": "时间范围",
+    "retained": "已保留 · 400天",
+    "days": "{{count}} 天",
+    "refresh": "刷新",
+    "unavailable": "无法加载用量明细。请刷新重试；旧版网关可能需要升级。",
+    "loading": "正在加载用量…",
+    "cached": "缓存输入 Token",
+    "failed": "失败请求",
+    "activeDays": "活跃天数",
+    "streaks": "所选范围内：当前连续 {{current}} 天 · 最长连续 {{longest}} 天。当天有模型请求即算活跃；当前连续天数截至今天。",
+    "models": "模型用量明细",
+    "model": "服务商 / 模型",
+    "noCalls": "此范围内没有模型请求。",
+    "dailyData": "每日数据",
+    "date": "日期",
+    "coverage": "已保留 {{records}} 条记录 · 最早：{{first}} · 最新：{{last}}。",
+    "retention": "保留目标为 {{days}} 天或 {{requests}} 次调用。已清理的历史无法在此还原。",
+    "accounting": "按实际服务商调用计数，包含失败和备用模型尝试。未返回 Token 或缓存信息不等于零用量。这是本地统计，不是服务商账单或订阅额度。",
+    "observation": "服务商报告：{{reported}} Token · 估算：{{estimated}} Token · {{unknown}} 次请求未返回用量。",
+    "activity": "每日活动",
+    "heatmapHelp": "选择一天查看详情。方向键切换日期；较长时间范围可横向滚动。颜色强度表示 Token 用量。"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

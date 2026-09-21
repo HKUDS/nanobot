@@ -190,8 +190,10 @@ def settings_payload(
     )
 
 
-def settings_usage_payload(*, config_path: Path | None = None) -> dict[str, Any]:
-    return system.settings_usage_payload(_load_settings_config(config_path))
+def settings_usage_payload(
+    *, config_path: Path | None = None, detail_days: int | None = None,
+) -> dict[str, Any]:
+    return system.settings_usage_payload(_load_settings_config(config_path), detail_days=detail_days)
 
 
 def update_agent_settings(

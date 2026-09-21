@@ -1,4 +1,27 @@
 {
+  "usageDashboard": {
+    "range": "Période",
+    "retained": "Conservé · 400j",
+    "days": "{{count}} jours",
+    "refresh": "Actualiser",
+    "unavailable": "Impossible de charger les détails. Actualisez pour réessayer ; les anciennes passerelles peuvent nécessiter une mise à jour.",
+    "loading": "Chargement de l’utilisation…",
+    "cached": "Tokens d’entrée en cache",
+    "failed": "Requêtes échouées",
+    "activeDays": "Jours actifs",
+    "streaks": "Sur cette période : série actuelle de {{current}} jours · maximum de {{longest}} jours. Un jour actif comprend au moins une requête ; la série actuelle se termine aujourd’hui.",
+    "models": "Détail par modèle",
+    "model": "Fournisseur / modèle",
+    "noCalls": "Aucune requête de modèle sur cette période.",
+    "dailyData": "Données quotidiennes",
+    "date": "Date",
+    "coverage": "Enregistrements conservés : {{records}} · Premier : {{first}} · Dernier : {{last}}.",
+    "retention": "Objectif de conservation : {{days}} jours ou {{requests}} appels. L’historique supprimé ne peut pas être reconstitué ici.",
+    "accounting": "Compte les appels réels au fournisseur, y compris les échecs et les tentatives de repli. L’absence de données sur les tokens ou le cache ne signifie pas une utilisation nulle. Ce sont des mesures locales, pas une facture ni un quota d’abonnement.",
+    "observation": "Signalé par le fournisseur : {{reported}} tokens · Estimé : {{estimated}} tokens · {{unknown}} requêtes sans données d’utilisation.",
+    "activity": "Activité quotidienne",
+    "heatmapHelp": "Sélectionnez un jour pour les détails. Les flèches changent de jour ; défilez horizontalement pour les longues périodes. L’intensité des couleurs reflète l’utilisation des tokens."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

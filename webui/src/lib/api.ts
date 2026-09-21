@@ -8,6 +8,8 @@ import type {
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
+  UsageDetails,
+  UsageRange,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   McpOAuthFlowPayload,
@@ -669,6 +671,15 @@ export async function fetchSettingsUsage(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export async function fetchUsageDetails(token: string, range: UsageRange): Promise<UsageDetails> {
+  const payload = await request<{ details?: UsageDetails }>(
+    `/api/settings/usage?range=${encodeURIComponent(range)}`, token,
+    { cache: "no-store" }, API_READ_TIMEOUT_MS,
+  );
+  if (!payload.details) throw new Error("Usage details are unavailable");
+  return payload.details;
 }
 
 export interface VersionCheckResult {

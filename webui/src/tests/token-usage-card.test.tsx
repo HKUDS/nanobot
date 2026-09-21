@@ -28,7 +28,7 @@ describe("Token usage card", () => {
       { date: days[1].date, provider: "openai", model: "a", total_tokens: 1 },
     ]} />);
     const plot = container.querySelector("[data-model-usage-plot]")!;
-    const bars = within(screen.getByRole("group", { name: "Model usage over time" })).getAllByRole("img");
+    const bars = Array.from(screen.getByRole("group", { name: "Model usage over time" }).querySelectorAll<HTMLElement>("[data-model-usage-column]"));
     expect(plot).toContainElement(bars[0]);
     const baseline = container.querySelector('[data-model-usage-gridline="2"]')!;
     expect(plot).toContainElement(baseline);
@@ -104,12 +104,13 @@ describe("Token usage card", () => {
         reported_requests: 1, estimated_requests: 0, generation_ms: 0, measured_output_tokens: 0,
         ttft_ms: 0, timed_requests: 0, duration_ms: 0 }]}
       modelDays={Array.from({ length: 6 }, (_, index) => ({ date: "2026-09-09", provider: "provider", model: `model-${index}`, total_tokens: (index + 1) * 100 }))} />);
-    const column = screen.getAllByRole("img")[29];
-    expect(screen.getAllByRole("img").filter((bar) => bar.tabIndex === 0)).toEqual([column]);
+    const bars = Array.from(screen.getByRole("group", { name: "Model usage over time" }).querySelectorAll<HTMLElement>("[data-model-usage-column]"));
+    const column = bars[29];
+    expect(within(screen.getByRole("group", { name: "Model usage over time" })).getAllByRole("button")).toEqual([column]);
     expect(column).toHaveAccessibleName(/2026-09-09: 2,200 tokens/);
     expect(column).toHaveAccessibleName(/model-5: 600/);
     expect(column).toHaveAccessibleName(/Other \/ unattributed: 200/);
-    const legend = screen.getByLabelText("model-5: Total tokens: 600 · 27.3%, Cache hit rate: 80%");
+    const legend = screen.getByLabelText("provider/model-5: Total tokens: 600 · 27.3%, Cache hit rate: 80%");
     expect(legend).toHaveAttribute("tabindex", "0");
   });
 });

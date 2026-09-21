@@ -296,7 +296,11 @@ class WebUISettingsRouter:
         if route == ("root", "settings"):
             return await asyncio.to_thread(self._handle_settings)
         if route == ("root", "usage"):
-            return await asyncio.to_thread(self._handle_settings_usage)
+            ranges = {"7": 7, "30": 30, "365": 365, "retained": 400}
+            selected_range = self._query(request).get("range", [""])[0]
+            if selected_range and selected_range not in ranges:
+                return self._error_response(400, "invalid usage range")
+            return await asyncio.to_thread(self._handle_settings_usage, ranges.get(selected_range))
 
         domain, action = route
         restart_before = (
@@ -470,8 +474,12 @@ class WebUISettingsRouter:
             )
         )
 
-    def _handle_settings_usage(self) -> Response:
-        return self._json_response(self.settings.read(settings_usage_payload))
+    def _handle_settings_usage(self, detail_days: int | None = None) -> Response:
+        response = self._json_response(
+            self.settings.read(settings_usage_payload, detail_days=detail_days),
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     def _model_operations(self) -> model_domain.ModelSettingsOperations:
         return model_domain.ModelSettingsOperations(

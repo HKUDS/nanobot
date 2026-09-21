@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { SettingsPayload } from "@/lib/types";
+import type { SettingsPayload, UsageDetails, UsageRange } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { TokenUsageDetails } from "@/components/settings/TokenUsageDetails";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
@@ -42,7 +42,10 @@ function todayInTimeZone(timeZone?: string): string {
   return now.toISOString().slice(0, 10);
 }
 
-export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: string }) {
+export function TokenUsageCard({ usage, timeZone, loadDetails }: {
+  usage?: Usage; timeZone?: string;
+  loadDetails?: (range: UsageRange) => Promise<UsageDetails>;
+}) {
   const { t, i18n } = useTranslation();
   const today = todayInTimeZone(timeZone);
   const byDate = new Map(usage?.days.map(day => [day.date, day]));
@@ -97,7 +100,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
             {usage ? compact.format(total) : "—"}
           </p>
         </div>
-        {usage && <TokenUsageDetails days={days} models={usage.providers_30d} modelDays={usage.model_days_30d} />}
+        {usage && <TokenUsageDetails days={days} models={usage.providers_30d} modelDays={usage.model_days_30d} loadDetails={loadDetails} />}
       </div>
 
       {!usage || total === 0 ? (

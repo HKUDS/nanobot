@@ -1,4 +1,27 @@
 {
+  "usageDashboard": {
+    "range": "Período",
+    "retained": "Conservado · 400d",
+    "days": "{{count}} días",
+    "refresh": "Actualizar",
+    "unavailable": "No se pudo cargar el uso. Actualiza para reintentar; las puertas de enlace antiguas pueden necesitar una actualización.",
+    "loading": "Cargando uso…",
+    "cached": "Tokens de entrada en caché",
+    "failed": "Solicitudes fallidas",
+    "activeDays": "Días activos",
+    "streaks": "En este período: racha actual de {{current}} días · máxima de {{longest}} días. Un día activo tiene al menos una solicitud; la racha actual termina hoy.",
+    "models": "Desglose por modelo",
+    "model": "Proveedor / modelo",
+    "noCalls": "No hay solicitudes de modelo en este período.",
+    "dailyData": "Datos diarios",
+    "date": "Fecha",
+    "coverage": "Registros conservados: {{records}} · Primero: {{first}} · Último: {{last}}.",
+    "retention": "Objetivo de retención: {{days}} días o {{requests}} llamadas. El historial eliminado no se puede reconstruir aquí.",
+    "accounting": "Cuenta llamadas reales al proveedor, incluidos fallos e intentos de respaldo. La ausencia de datos de tokens o caché no equivale a un uso cero. Son mediciones locales, no una factura ni una cuota de suscripción.",
+    "observation": "Informado por el proveedor: {{reported}} tokens · Estimado: {{estimated}} tokens · {{unknown}} solicitudes sin datos de uso.",
+    "activity": "Actividad diaria",
+    "heatmapHelp": "Selecciona un día para ver detalles. Usa las flechas para moverte y desplázate horizontalmente en períodos largos. La intensidad del color refleja el uso de tokens."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

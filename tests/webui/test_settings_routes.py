@@ -136,6 +136,37 @@ async def test_usage_query_runs_off_the_event_loop(monkeypatch) -> None:
     assert worker_threads and worker_threads[0] != calling_thread
 
 
+@pytest.mark.parametrize(("value", "expected"), [("7", 7), ("30", 30), ("365", 365), ("retained", 400)])
+async def test_usage_range_is_explicit_bounded_and_not_cached(monkeypatch, tmp_path, value, expected):
+    config = tmp_path / "custom-instance" / "config.json"
+    read = MagicMock(return_value={"details": {"days": []}})
+    monkeypatch.setattr("nanobot.webui.settings_routes.settings_usage_payload", read)
+    request = SimpleNamespace(path=f"/api/settings/usage?range={value}", headers=Headers())
+    response = await _router(config_path=config).dispatch(None, request, "/api/settings/usage")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    read.assert_called_once_with(config_path=config, detail_days=expected)
+
+
+@pytest.mark.parametrize("value", ["-1", "0", "100000", "all", "bad"])
+async def test_usage_range_rejects_invalid_values(monkeypatch, value):
+    read = MagicMock()
+    monkeypatch.setattr("nanobot.webui.settings_routes.settings_usage_payload", read)
+    request = SimpleNamespace(path=f"/api/settings/usage?range={value}", headers=Headers())
+    response = await _router().dispatch(None, request, "/api/settings/usage")
+    assert response.status_code == 400
+    read.assert_not_called()
+
+
+async def test_usage_details_require_gateway_auth(monkeypatch):
+    read = MagicMock()
+    monkeypatch.setattr("nanobot.webui.settings_routes.settings_usage_payload", read)
+    request = SimpleNamespace(path="/api/settings/usage?range=365", headers=Headers())
+    response = await _router(authorized=False).dispatch(None, request, "/api/settings/usage")
+    assert response.status_code == 401
+    read.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_full_settings_query_runs_off_the_event_loop(monkeypatch) -> None:
     calling_thread = threading.get_ident()
