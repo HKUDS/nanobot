@@ -67,6 +67,34 @@ describe("ChatList", () => {
     expect(onTogglePin).toHaveBeenCalledWith("websocket:review");
   });
 
+  it("does not let the hidden action trigger consume a session row tap", () => {
+    const onSelect = vi.fn();
+    render(
+      <ChatList
+        sessions={[session({ chatId: "review", title: "Review the patch" })]}
+        activeKey="websocket:other"
+        onSelect={onSelect}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+      />,
+    );
+
+    const rowButton = screen.getByRole("button", { name: "Review the patch" });
+    const actionTrigger = screen.getByRole("button", {
+      name: "Topic actions for Review the patch",
+    });
+
+    expect(actionTrigger).toHaveClass(
+      "pointer-events-none",
+      "group-hover:pointer-events-auto",
+    );
+    fireEvent.click(rowButton);
+
+    expect(onSelect).toHaveBeenCalledWith("websocket:review");
+  });
+
   it("restores the colored handle underline and animated active track", () => {
     render(
       <ChatList
