@@ -124,8 +124,8 @@ class MessageTool(Tool):
             "Do not use this for the normal reply in the current chat: answer naturally instead. "
             "If channel/chat_id would target the current runtime conversation, do not call this tool "
             "unless the user explicitly asked you to proactively send an existing file attachment. "
-            "When generate_image creates images in the current chat, use the message tool "
-            "with the artifact paths in the media parameter to deliver the images to the user. "
+            "WebUI displays generated images automatically; do not resend them. "
+            "For other channels, use the artifact paths in media to deliver generated images. "
             "For proactive attachment delivery, use the 'media' parameter with file paths. "
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
@@ -138,8 +138,11 @@ class MessageTool(Tool):
             restrict_to_workspace=self._restrict_to_workspace,
         )
         workspace = access.project_path or self._workspace
+        request = current_request_context()
         for p in media:
-            if p.startswith(("http://", "https://")):
+            if request and request.ephemeral_images and request.ephemeral_images.contains(p):
+                resolved.append(str(Path(p).resolve()))
+            elif p.startswith(("http://", "https://")):
                 resolved.append(p)
             elif not access.restrict_to_workspace:
                 path = Path(p).expanduser()

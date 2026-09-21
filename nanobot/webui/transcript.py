@@ -119,6 +119,7 @@ def rewrite_local_markdown_images(
     *,
     workspace_path: Path,
     sign_path: Callable[[Path], Mapping[str, Any] | None],
+    sign_extra_path: Callable[[Path], Mapping[str, Any] | None] | None = None,
 ) -> str:
     """Rewrite markdown media paths inside the workspace to signed WebUI media URLs."""
     if "![" not in text:
@@ -141,12 +142,17 @@ def rewrite_local_markdown_images(
             candidate = workspace_path / candidate
         try:
             resolved = candidate.resolve(strict=False)
-            resolved.relative_to(workspace_path)
         except (OSError, ValueError):
             return None
         if not resolved.is_file():
             return None
-        signed = sign_path(resolved)
+        try:
+            resolved.relative_to(workspace_path)
+        except ValueError:
+            # The optional owner must validate its own narrow image capability.
+            signed = sign_extra_path(resolved) if sign_extra_path is not None else None
+        else:
+            signed = sign_path(resolved)
         return str(signed.get("url")) if signed and signed.get("url") else None
 
     def replace(match: re.Match[str]) -> str:
@@ -2257,7 +2263,7 @@ def _client_projection_event(
             content = augment_assistant_text(content)
         projected = {"event": "message", **common, "text": content}
         kind = record.get("kind")
-        if kind in {"tool_hint", "progress", "reasoning"}:
+        if kind in {"tool_hint", "progress", "reasoning", "artifacts"}:
             projected["kind"] = kind
         tool_events = _normalize_tool_events(record.get("tool_events"))
         if tool_events:
@@ -2270,9 +2276,16 @@ def _client_projection_event(
         ] if isinstance(raw_media, list) else []
         media = (
             augment_assistant_media(media_paths)
-            if media_paths and augment_assistant_media is not None
+            if kind != "artifacts" and media_paths and augment_assistant_media is not None
             else []
         )
+        if kind == "artifacts" and media_paths:
+            # Preserve identity even if a signer omits one of several missing files.
+            media = list[dict[str, Any]]()
+            for path in media_paths:
+                signed = (augment_assistant_media([path])
+                          if augment_assistant_media is not None and Path(path).is_file() else [])
+                media.extend(signed or [{"url": "", "name": Path(path).name, "kind": "image"}])
         if not media and (not media_paths or augment_assistant_media is None):
             media = _media_from_signed_urls(record.get("media_urls"))
         if media:

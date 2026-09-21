@@ -36,6 +36,30 @@ class FakeImageClient:
         return GeneratedImageResponse(images=[PNG_DATA_URL], content="", raw={})
 
 
+async def test_temporary_generation_and_followup_edit_reuse_owned_image(tmp_path, monkeypatch):
+    from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.utils.image_artifacts import EphemeralImageStore, ImageArtifactResult
+
+    monkeypatch.setattr("nanobot.agent.tools.image_generation.get_image_gen_provider", lambda _: FakeImageClient)
+    store = EphemeralImageStore()
+    tool = ImageGenerationTool(workspace=tmp_path, config=ImageGenerationToolConfig(enabled=True),
+                               provider_config=ProviderConfig(api_key="fixture"))
+    try:
+        with request_context(RequestContext(channel="websocket", chat_id="fixture", ephemeral_images=store)):
+            result = await tool.execute(prompt="Synthetic chart")
+            assert isinstance(result, ImageArtifactResult)
+            path = result.artifacts[0].path
+            edited = await tool.execute(prompt="Make it blue", reference_images=[path])
+            assert isinstance(edited, ImageArtifactResult)
+            assert Path(path).exists()
+            assert not Path(path).with_suffix(".json").exists()
+            assert "automatically" in result
+        store.close()
+        assert not Path(path).exists()
+    finally:
+        store.close()
+
+
 @pytest.mark.asyncio
 async def test_generate_image_tool_stores_artifact_and_source_images(
     tmp_path: Path,

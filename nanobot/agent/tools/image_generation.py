@@ -10,6 +10,7 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.schema import (
     ArraySchema,
@@ -148,6 +149,9 @@ class ImageGenerationTool(Tool):
         return cls(**kwargs)
 
     def _resolve_reference_image(self, value: str) -> str:
+        request = current_request_context()
+        if request and request.ephemeral_images and request.ephemeral_images.contains(value):
+            return value
         access = current_tool_workspace(self.workspace, restrict_to_workspace=True)
         workspace = access.project_path or self.workspace
         try:
@@ -197,6 +201,7 @@ class ImageGenerationTool(Tool):
             )
 
         try:
+            request = current_request_context()
             refs = self._resolve_reference_images(reference_images)
             artifacts: list[dict[str, Any]] = []
             while len(artifacts) < requested:
@@ -215,11 +220,14 @@ class ImageGenerationTool(Tool):
                         source_images=refs,
                         save_dir=self.config.save_dir,
                         provider=self.config.provider,
+                        ephemeral_store=request.ephemeral_images if request else None,
                     )
                     artifacts.append(artifact)
                     if len(artifacts) >= requested:
                         break
-            return generated_image_tool_result(artifacts)
+            return generated_image_tool_result(
+                artifacts, automatic_delivery=request is not None and request.channel == "websocket",
+            )
         except (ArtifactError, ImageGenerationError, OSError) as exc:
             return ToolResult.error(f"Error: {exc}")
 

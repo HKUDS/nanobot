@@ -733,6 +733,7 @@ class AgentLoop:
             turn_id=ctx.turn_id,
             workspace=scope.project_path,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
+            ephemeral_images=ctx.session.ephemeral_images,
         )
 
     async def _resolve_runtime_context_for_turn(
@@ -1059,6 +1060,7 @@ class AgentLoop:
                         runtime=runtime,
                         metadata=dict(metadata),
                         attributes=dict(request_ctx.attributes),
+                        ephemeral_images=request_ctx.ephemeral_images,
                         sender_id=pending_msg.sender_id,
                         turn_id=request_ctx.turn_id,
                         workspace=scope.project_path,

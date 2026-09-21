@@ -5,7 +5,7 @@ type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
  * progress pings) that should not be rendered as conversational replies. */
-type MessageKind = "message" | "trace" | "compaction";
+type MessageKind = "message" | "trace" | "compaction" | "artifacts";
 
 export interface UIContextCompaction extends ContextCompaction {
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
@@ -1395,7 +1395,7 @@ export type InboundEvent =
       trace_detail?: UITraceDetail;
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
-      kind?: "tool_hint" | "progress" | "reasoning";
+      kind?: "tool_hint" | "progress" | "reasoning" | "artifacts";
       /** Server-measured turn wall time when this frame finishes an assistant reply. */
       latency_ms?: number;
       /** Lightweight provenance for proactive assistant messages. */

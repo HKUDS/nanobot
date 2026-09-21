@@ -33,6 +33,7 @@ from nanobot.session.webui_turns import (
     mark_websocket_turn_transcript_persistence_failed,
     websocket_turn_transcript_persistence_failed,
 )
+from nanobot.utils.image_artifacts import ImageArtifactsEvent
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -1175,6 +1176,35 @@ class WebSocketChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)
 
+    async def send_image_artifacts(self, msg: OutboundMessage, event: ImageArtifactsEvent) -> None:
+        """Project trusted tool outputs, never paths scraped from tool text."""
+        temporary = not self._temporary_chats.should_persist_transcript(msg.chat_id)
+        conns = list(self._subs.get(msg.chat_id, ()))
+        if temporary:
+            conns = [conn for conn in conns if self._temporary_chats.owns(conn, msg.chat_id)]
+            if not conns:
+                return
+        for artifact in event.artifacts:
+            if temporary:
+                attachment = self._temporary_chats.image_attachment(msg.chat_id, artifact.path)
+            else:
+                # Generated artifacts already live in the media root: never stage an arbitrary path.
+                attachment = self._media.sign_media_path(Path(artifact.path))
+            if attachment is None:
+                continue
+            payload: dict[str, Any] = {
+                "event": "message", "kind": "artifacts", "chat_id": msg.chat_id, "text": "",
+                "media_urls": [attachment],
+            }
+            if not temporary:
+                payload["media"] = [artifact.path]
+            self._persist_turn_transcript_event(
+                msg.chat_id, payload, metadata=msg.metadata, phase="answer",
+            )
+            raw = json.dumps(payload, ensure_ascii=False)
+            for connection in conns:
+                await self._safe_send_to(connection, raw, label="image artifact")
+
     async def send_projected_message(
         self,
         msg: OutboundMessage,
@@ -1183,7 +1213,29 @@ class WebSocketChannel(BaseChannel):
         """Serialize one ordinary outbound message selected by the projector."""
         conns = list(self._subs.get(msg.chat_id, ()))
         text = msg.content
-        wire_text = self._media.rewrite_local_markdown_images(text)
+        temporary = not self._temporary_chats.should_persist_transcript(msg.chat_id)
+        if temporary:
+            conns = [conn for conn in conns if self._temporary_chats.owns(conn, msg.chat_id)]
+            if not conns:
+                return
+        def attachment(path: Path) -> dict[str, str] | None:
+            if temporary:
+                owned = self._temporary_chats.image_attachment(msg.chat_id, str(path))
+                if owned is not None:
+                    return owned
+            return self._media.sign_or_stage_media_path(path)
+
+        if temporary:
+            from nanobot.webui.transcript import rewrite_local_markdown_images
+            wire_text = rewrite_local_markdown_images(
+                text, workspace_path=self._media.workspace_path, sign_path=attachment,
+                sign_extra_path=lambda path: (
+                    self._temporary_chats.image_attachment(msg.chat_id, str(path))
+                    or self._media.sign_media_path(path)
+                ),
+            )
+        else:
+            wire_text = self._media.rewrite_local_markdown_images(text)
         payload: dict[str, Any] = {
             "event": "message",
             "chat_id": msg.chat_id,
@@ -1196,7 +1248,7 @@ class WebSocketChannel(BaseChannel):
             payload["media"] = msg.media
             urls: list[dict[str, str]] = []
             for entry in msg.media:
-                signed = self._media.sign_or_stage_media_path(Path(entry))
+                signed = attachment(Path(entry))
                 if signed is not None:
                     urls.append(signed)
             if urls:

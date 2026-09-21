@@ -21,6 +21,7 @@ from nanobot.bus.outbound_events import (
     UserInputEvent,
 )
 from nanobot.session.webui_turns import clear_websocket_turn_if_current
+from nanobot.utils.image_artifacts import ImageArtifactsEvent
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
@@ -43,6 +44,8 @@ class WebUIOutboundTransport(Protocol):
     """Wire operations required by the outbound application projector."""
 
     def webui_subscribers(self, chat_id: str) -> tuple[ServerConnection, ...]: ...
+
+    async def send_image_artifacts(self, msg: OutboundMessage, event: ImageArtifactsEvent) -> None: ...
 
     async def send_runtime_model_updated(
         self,
@@ -137,6 +140,9 @@ class WebUIOutboundProjector:
 
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
+        if isinstance(event, ImageArtifactsEvent):
+            await self._transport.send_image_artifacts(msg, event)
+            return
         if isinstance(event, RetryWaitEvent):
             return
         progress_event = event if isinstance(event, ProgressEvent) else None

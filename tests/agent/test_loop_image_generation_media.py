@@ -29,11 +29,11 @@ class FakeImageClient:
 
 
 @pytest.mark.asyncio
-async def test_outbound_no_longer_carries_generated_media(
+async def test_image_delivery_uses_a_typed_event_without_a_second_model_tool_call(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Media delivery is now the LLM's responsibility via the message tool."""
+    """Display metadata stays outside the model transcript and the final text reply."""
     set_config_path(tmp_path / "config.json")
     monkeypatch.setattr(
         "nanobot.agent.tools.image_generation.get_image_gen_provider",
@@ -80,6 +80,17 @@ async def test_outbound_no_longer_carries_generated_media(
 
     assert result is not None
     assert result.content == "Done"
-    # OutboundMessage no longer carries generated media —
-    # the LLM sends images via the message tool instead.
+    # The final text reply remains unchanged; the hook owns image delivery.
     assert result.media == []
+    from nanobot.utils.image_artifacts import ImageArtifactsEvent
+
+    delivered = []
+    while loop.bus.outbound_size:
+        message = await loop.bus.consume_outbound()
+        if isinstance(message.event, ImageArtifactsEvent):
+            delivered.append(message)
+    assert len(delivered) == 1
+    assert delivered[0].chat_id == "chat-image"
+    assert delivered[0].event.tool_call_id == "call_img"
+    assert Path(delivered[0].event.artifacts[0].path).is_file()
+    assert provider.chat_stream_with_retry.await_count == 2

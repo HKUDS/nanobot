@@ -128,6 +128,7 @@ function projectOrderedTurn(
   let answers: UIMessage[] = [];
   let answerSourceMessageCount = 0;
   let leadingNoopSourceMessageCount = 0;
+  const artifacts = messages.filter((message) => message.kind === "artifacts");
 
   const flushActivity = () => {
     if (!activity.length) return;
@@ -175,6 +176,7 @@ function projectOrderedTurn(
   };
 
   for (const message of messages) {
+    if (message.kind === "artifacts") continue;
     if (message.kind === "compaction") {
       flushActivity();
       flushAnswers();
@@ -210,6 +212,33 @@ function projectOrderedTurn(
 
   flushActivity();
   flushAnswers();
+
+  if (artifacts.length) {
+    const shown = new Set(messages.filter((message) => message.kind !== "artifacts")
+      .flatMap((message) => [...(message.media ?? []), ...(message.images ?? [])])
+      .map((item) => item.url));
+    const markdown = messages.filter((message) => message.kind !== "artifacts")
+      .map((message) => message.content).join("\n");
+    const media = artifacts.flatMap((message) => message.media ?? []).filter((item) => {
+      if (!item.url) return true; // A missing-file placeholder remains visible on replay.
+      if (shown.has(item.url) || markdown.includes(`](${item.url})`)) return false;
+      shown.add(item.url);
+      return true;
+    });
+    const last = units.at(-1);
+    if (last?.type === "message" && last.message.role === "assistant"
+      && last.message.kind !== "compaction") {
+      units[units.length - 1] = {
+        ...last, sourceMessageCount: last.sourceMessageCount + artifacts.length,
+        message: { ...last.message, media: [...(last.message.media ?? []), ...media] },
+      };
+    } else if (media.length) {
+      units.push({ type: "message", sourceMessageCount: artifacts.length,
+        message: { ...artifacts[0], kind: "message", turnPhase: "answer", media } });
+    } else if (last) {
+      units[units.length - 1] = { ...last, sourceMessageCount: last.sourceMessageCount + artifacts.length };
+    }
+  }
 
   let lastActivityIndex = -1;
   for (let index = units.length - 1; index >= 0; index -= 1) {

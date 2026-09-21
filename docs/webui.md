@@ -239,6 +239,28 @@ For image generation, configure an image provider first and then use the WebUI
 image mode from the composer. See [`image-generation.md`](./image-generation.md)
 for provider setup and output behavior.
 
+Completed image-generation results appear below the turn's reply automatically,
+without requiring another model tool call. Click an image to enlarge it. Image
+delivery does not interrupt the rest of a streaming answer, and persisted chats
+restore the same images from their transcript. Repeated image deliveries are
+deduplicated within a turn.
+
+MCP screenshot/image results are automatically displayed only when their content
+block explicitly includes `annotations.audience: ["user"]`. Unannotated images
+and assistant-only inspection screenshots are observations, not automatic
+deliverables; ask the agent to send a specific image when needed. Nothing is
+automatically forwarded to other channels.
+
+In Temporary chats, generated/MCP image files are held in a private temporary
+directory, without prompt sidecars or durable transcript entries. Only the owning
+connection receives the image, and closing the chat or disconnecting removes its
+owned files. This does not delete files explicitly exported to the workspace.
+Temporary images are limited to 4 MiB each and 32 images / 64 MiB per chat;
+ordinary image artifacts are limited to 32 MiB each. MCP calls retain at most
+eight images, and automatic display is capped at 32 unique images per turn.
+An operating-system crash can leave temporary files for the OS to clean up;
+these limits and cleanup do not provide secure erasure or control provider retention.
+
 ## Channels
 
 Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
