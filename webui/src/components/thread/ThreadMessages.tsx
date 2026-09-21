@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MessageBubble } from "@/components/MessageBubble";
+import { AssistantMessageActions, MessageBubble } from "@/components/MessageBubble";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
@@ -110,6 +110,16 @@ export function ThreadMessages({
     ? activeTurnStartIndex(units, activeTurnId)
     : units.length;
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
+  const turnFooters = useMemo(
+    () => completedTurnFooters(
+      units,
+      unitKeys,
+      isStreaming,
+      activeTurnId,
+      currentTurnStartIndex,
+    ),
+    [activeTurnId, currentTurnStartIndex, isStreaming, unitKeys, units],
+  );
   const [expandedActivityKeys, setExpandedActivityKeys] = useState<Set<string>>(() => new Set());
   const [activeContextGroupKey, setActiveContextGroupKey] = useState<string | null>(null);
   const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
@@ -136,42 +146,28 @@ export function ThreadMessages({
         onQuoteSelection={onQuoteSelection}
       />
       {units.map((unit, index) => {
-        const prev = units[index - 1];
         const next = units[index + 1];
         const hasBodyBelow =
           unit.type === "activity"
           && next?.type === "message"
           && next.message.role === "assistant";
-        const followingActivitySharesContextRow =
-          unit.type === "message"
-          && unit.message.role === "assistant"
-          && activityLinksToFollowingAnswer(
-            units,
-            index + 1,
-            liveActivityClusterIndices,
-          );
-        const linksToFollowingAnswer = activityLinksToFollowingAnswer(
-          units,
+        const contextGroupKey = turnFooters.contextKeys[index];
+        const showTurnFooter = turnFooters.ownerIndices.has(index);
+        const turnFooterActivity = turnFooters.activityByOwner.get(index);
+        const suppressActivity = turnFooters.suppressedActivityIndices.has(index);
+        const previousVisibleIndex = previousVisibleUnitIndex(
           index,
-          liveActivityClusterIndices,
+          turnFooters.suppressedActivityIndices,
         );
-        const linksFromPreviousActivity = activityLinksToFollowingAnswer(
-          units,
-          index - 1,
-          liveActivityClusterIndices,
-        );
-        const linkedActivityKey = linksToFollowingAnswer ? unitKeys[index] : undefined;
-        const contextGroupKey = linksToFollowingAnswer
-          ? unitKeys[index]
-          : linksFromPreviousActivity
-            ? unitKeys[index - 1]
-            : undefined;
-        const linkedActivityExpanded = linkedActivityKey !== undefined
-          && expandedActivityKeys.has(linkedActivityKey);
-        let marginTop = index > 0 ? marginAfterPrevUnit(prev) : "";
-        if (linksFromPreviousActivity) {
-          marginTop = "";
-        }
+        const marginTop = suppressActivity || previousVisibleIndex < 0
+          ? ""
+          : marginAfterPrevUnit(
+              units[previousVisibleIndex],
+              turnFooters.ownerIndices.has(previousVisibleIndex),
+            );
+        const turnFooterExpanded = showTurnFooter
+          && contextGroupKey !== undefined
+          && expandedActivityKeys.has(contextGroupKey);
         const deferOffscreenRender =
           index < units.length - 1
           && (
@@ -208,9 +204,10 @@ export function ThreadMessages({
             marginTop={marginTop}
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
-            linkedActivityKey={linkedActivityKey}
-            linkedActivityExpanded={linkedActivityExpanded}
-            overlayContextActions={followingActivitySharesContextRow}
+            suppressActivity={suppressActivity}
+            showTurnFooter={showTurnFooter}
+            turnFooterActivity={turnFooterActivity}
+            turnFooterExpanded={turnFooterExpanded}
             contextGroupKey={contextGroupKey}
             contextGroupActive={
               contextGroupKey !== undefined && contextGroupKey === activeContextGroupKey
@@ -306,9 +303,10 @@ interface ThreadDisplayUnitProps {
   marginTop: string;
   userPromptId?: string;
   hasBodyBelow: boolean;
-  linkedActivityKey?: string;
-  linkedActivityExpanded: boolean;
-  overlayContextActions: boolean;
+  suppressActivity: boolean;
+  showTurnFooter: boolean;
+  turnFooterActivity?: Extract<DisplayUnit, { type: "activity" }>;
+  turnFooterExpanded: boolean;
   contextGroupKey?: string;
   contextGroupActive: boolean;
   deferOffscreenRender: boolean;
@@ -335,9 +333,10 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   marginTop,
   userPromptId,
   hasBodyBelow,
-  linkedActivityKey,
-  linkedActivityExpanded,
-  overlayContextActions,
+  suppressActivity,
+  showTurnFooter,
+  turnFooterActivity,
+  turnFooterExpanded,
   contextGroupKey,
   contextGroupActive,
   deferOffscreenRender,
@@ -380,11 +379,21 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   const onForkFromHere = useCallback(() => {
     if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
   }, [forkIndex, onForkFromMessage]);
-  const onLinkedActivityExpandedChange = useCallback((expanded: boolean) => {
-    if (linkedActivityKey !== undefined) {
-      onActivityExpandedChange(linkedActivityKey, expanded);
+  const onTurnFooterExpandedChange = useCallback((expanded: boolean) => {
+    if (contextGroupKey !== undefined) {
+      onActivityExpandedChange(contextGroupKey, expanded);
     }
-  }, [linkedActivityKey, onActivityExpandedChange]);
+  }, [contextGroupKey, onActivityExpandedChange]);
+  const turnContextPinned = unit.type === "message"
+    && !!unit.message.responseSources?.some((source) => source.fallback === true);
+  const turnActions = unit.type === "message" && showTurnFooter ? (
+    <AssistantMessageActions
+      message={unit.message}
+      isTurnStreaming={isTurnStreaming}
+      onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
+      inline
+    />
+  ) : null;
   return (
     <>
       <div
@@ -413,35 +422,62 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         } : undefined}
       >
         {retainContent ? unit.type === "activity" ? (
-          <AgentActivityCluster
-            messages={unit.messages}
-            isTurnStreaming={isTurnStreaming}
-            retryStatus={retryStatus}
-            hasBodyBelow={hasBodyBelow}
-            expanded={linkedActivityKey !== undefined ? linkedActivityExpanded : undefined}
-            onExpandedChange={
-              linkedActivityKey !== undefined ? onLinkedActivityExpandedChange : undefined
-            }
-            turnLatencyMs={unit.turnLatencyMs}
-            startedAtMs={unit.startedAtMs}
-            cliApps={cliApps}
-            mcpPresets={mcpPresets}
-            traceDetailScope={traceDetailScope}
-            onLoadTraceDetails={onLoadTraceDetails}
-            onOpenFilePreview={onOpenFilePreview}
-          />
+          suppressActivity ? null : (
+            <AgentActivityCluster
+              messages={unit.messages}
+              isTurnStreaming={isTurnStreaming}
+              retryStatus={retryStatus}
+              hasBodyBelow={hasBodyBelow}
+              turnLatencyMs={unit.turnLatencyMs}
+              startedAtMs={unit.startedAtMs}
+              cliApps={cliApps}
+              mcpPresets={mcpPresets}
+              traceDetailScope={traceDetailScope}
+              onLoadTraceDetails={onLoadTraceDetails}
+              onOpenFilePreview={onOpenFilePreview}
+            />
+          )
         ) : (
-          <MessageBubble
-            message={unit.message}
-            isTurnStreaming={isTurnStreaming}
-            temporary={temporary}
-            cliApps={cliApps}
-            mcpPresets={mcpPresets}
-            slashCommands={slashCommands}
-            onOpenFilePreview={onOpenFilePreview}
-            onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
-            overlayContextActions={overlayContextActions}
-          />
+          <>
+            <MessageBubble
+              message={unit.message}
+              isTurnStreaming={isTurnStreaming}
+              temporary={temporary}
+              cliApps={cliApps}
+              mcpPresets={mcpPresets}
+              slashCommands={slashCommands}
+              onOpenFilePreview={onOpenFilePreview}
+              onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
+              showAssistantContextActions={contextGroupKey === undefined}
+            />
+            {showTurnFooter ? turnFooterActivity ? (
+              <AgentActivityCluster
+                messages={turnFooterActivity.messages}
+                isTurnStreaming={false}
+                retryStatus={null}
+                hasBodyBelow={false}
+                expanded={turnFooterExpanded}
+                onExpandedChange={onTurnFooterExpandedChange}
+                turnLatencyMs={turnFooterActivity.turnLatencyMs}
+                startedAtMs={turnFooterActivity.startedAtMs}
+                cliApps={cliApps}
+                mcpPresets={mcpPresets}
+                traceDetailScope={traceDetailScope}
+                onLoadTraceDetails={onLoadTraceDetails}
+                onOpenFilePreview={onOpenFilePreview}
+                actions={turnActions}
+                contextPinned={turnContextPinned}
+              />
+            ) : (
+              <div
+                data-turn-context-rail
+                data-turn-context-pinned={turnContextPinned || undefined}
+                className="flex min-h-5 max-w-[45rem] items-center"
+              >
+                {turnActions}
+              </div>
+            ) : null}
+          </>
         ) : null}
       </div>
       {showForkBoundary ? <ForkBoundaryDivider label={forkBoundaryLabel} /> : null}
@@ -458,9 +494,10 @@ function threadDisplayUnitPropsEqual(
     && previous.marginTop === next.marginTop
     && previous.userPromptId === next.userPromptId
     && previous.hasBodyBelow === next.hasBodyBelow
-    && previous.linkedActivityKey === next.linkedActivityKey
-    && previous.linkedActivityExpanded === next.linkedActivityExpanded
-    && previous.overlayContextActions === next.overlayContextActions
+    && previous.suppressActivity === next.suppressActivity
+    && previous.showTurnFooter === next.showTurnFooter
+    && previous.turnFooterActivity === next.turnFooterActivity
+    && previous.turnFooterExpanded === next.turnFooterExpanded
     && previous.contextGroupKey === next.contextGroupKey
     && previous.contextGroupActive === next.contextGroupActive
     && previous.deferOffscreenRender === next.deferOffscreenRender
@@ -486,22 +523,6 @@ function contextGroupKeyForTarget(target: EventTarget | null): string | undefine
   return target instanceof Element
     ? target.closest<HTMLElement>("[data-message-context-group]")?.dataset.messageContextGroup
     : undefined;
-}
-
-function activityLinksToFollowingAnswer(
-  units: DisplayUnit[],
-  activityIndex: number,
-  liveActivityClusterIndices: ReadonlySet<number>,
-): boolean {
-  if (activityIndex < 0 || liveActivityClusterIndices.has(activityIndex)) return false;
-  const activity = units[activityIndex];
-  const answer = units[activityIndex + 1];
-  return (
-    activity?.type === "activity"
-    && answer?.type === "message"
-    && answer.message.role === "assistant"
-    && answer.message.kind !== "compaction"
-  );
 }
 
 function activeTurnStartIndex(units: DisplayUnit[], activeTurnId: string | null): number {
@@ -644,7 +665,7 @@ function stableTurnMessageKey(message: UIMessage | undefined, fallbackPhase?: st
   return `turn-${message.turnId}-${phase}`;
 }
 
-function marginAfterPrevUnit(prev: DisplayUnit): string {
+function marginAfterPrevUnit(prev: DisplayUnit, hasTurnFooter: boolean): string {
   if (prev.type === "activity") {
     return "mt-4";
   }
@@ -660,8 +681,123 @@ function marginAfterPrevUnit(prev: DisplayUnit): string {
     return "mt-2";
   }
   if (p.role === "assistant" && !p.isStreaming && p.content.trim().length > 0) {
-    // The completed assistant's contextual row now provides the inter-message rhythm.
-    return "";
+    // Only the final answer owns the turn footer. Intermediate commentary keeps
+    // normal paragraph rhythm instead of reserving empty control rows.
+    return hasTurnFooter ? "" : "mt-5";
   }
   return "mt-5";
+}
+
+interface CompletedTurnFooters {
+  contextKeys: Array<string | undefined>;
+  ownerIndices: Set<number>;
+  suppressedActivityIndices: Set<number>;
+  activityByOwner: Map<number, Extract<DisplayUnit, { type: "activity" }>>;
+}
+
+function completedTurnFooters(
+  units: DisplayUnit[],
+  unitKeys: string[],
+  isStreaming: boolean,
+  activeTurnId: string | null,
+  currentTurnStartIndex: number,
+): CompletedTurnFooters {
+  const result: CompletedTurnFooters = {
+    contextKeys: new Array<string | undefined>(units.length),
+    ownerIndices: new Set<number>(),
+    suppressedActivityIndices: new Set<number>(),
+    activityByOwner: new Map(),
+  };
+  let groupStart = 0;
+  let groupTurnId: string | undefined;
+
+  const flushGroup = (end: number) => {
+    if (groupStart >= end) return;
+    const indices = Array.from({ length: end - groupStart }, (_, offset) => groupStart + offset);
+    const ownerIndex = [...indices].reverse().find((index) => {
+      const unit = units[index];
+      return unit.type === "message"
+        && unit.message.role === "assistant"
+        && unit.message.kind !== "compaction";
+    });
+    if (ownerIndex === undefined) return;
+
+    const groupIsStreaming = isStreaming && indices.some((index) => {
+      const unit = units[index];
+      const turnId = displayUnitTurnId(unit);
+      if (activeTurnId && turnId) return turnId === activeTurnId;
+      return index > currentTurnStartIndex;
+    });
+    if (groupIsStreaming) return;
+
+    const contextKey = `turn-context-${groupTurnId ?? unitKeys[ownerIndex]}`;
+    result.ownerIndices.add(ownerIndex);
+    for (const index of indices) {
+      const unit = units[index];
+      if (unit.type === "activity" || (
+        unit.type === "message"
+        && unit.message.role === "assistant"
+        && unit.message.kind !== "compaction"
+      )) {
+        result.contextKeys[index] = contextKey;
+      }
+    }
+
+    const activityUnits = indices
+      .map((index) => ({ index, unit: units[index] }))
+      .filter((entry): entry is {
+        index: number;
+        unit: Extract<DisplayUnit, { type: "activity" }>;
+      } => entry.unit.type === "activity");
+    if (!activityUnits.length) return;
+    for (const { index } of activityUnits) result.suppressedActivityIndices.add(index);
+    result.activityByOwner.set(ownerIndex, {
+      type: "activity",
+      messages: activityUnits.flatMap(({ unit }) => unit.messages),
+      sourceMessageCount: activityUnits.reduce(
+        (count, { unit }) => count + unit.sourceMessageCount,
+        0,
+      ),
+      turnLatencyMs: [...activityUnits].reverse().find(({ unit }) => unit.turnLatencyMs !== undefined)
+        ?.unit.turnLatencyMs,
+      startedAtMs: activityUnits.find(({ unit }) => unit.startedAtMs !== undefined)
+        ?.unit.startedAtMs,
+    });
+  };
+
+  for (let index = 0; index < units.length; index += 1) {
+    const unit = units[index];
+    if (unit.type === "message" && unit.message.role === "user") {
+      flushGroup(index);
+      groupStart = index + 1;
+      groupTurnId = unit.message.turnId;
+      continue;
+    }
+    const turnId = displayUnitTurnId(unit);
+    if (turnId && groupTurnId && turnId !== groupTurnId) {
+      flushGroup(index);
+      groupStart = index;
+      groupTurnId = turnId;
+    } else if (turnId && !groupTurnId) {
+      groupTurnId = turnId;
+    }
+  }
+  flushGroup(units.length);
+  return result;
+}
+
+function displayUnitTurnId(unit: DisplayUnit): string | undefined {
+  return unit.type === "activity"
+    ? unit.messages.find((message) => message.turnId)?.turnId
+    : unit.message.turnId;
+}
+
+function previousVisibleUnitIndex(
+  index: number,
+  suppressedActivityIndices: ReadonlySet<number>,
+): number {
+  for (let previous = index - 1; previous >= 0; previous -= 1) {
+    if (!suppressedActivityIndices.has(previous)) return previous;
+  }
+  return -1;
 }

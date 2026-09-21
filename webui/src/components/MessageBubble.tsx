@@ -73,8 +73,8 @@ interface MessageBubbleProps {
   slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
   onForkFromHere?: () => void;
-  /** Share the following activity block's reserved contextual row. */
-  overlayContextActions?: boolean;
+  /** Render the assistant message's own footer controls. */
+  showAssistantContextActions?: boolean;
 }
 
 function ForkArrowIcon({ className }: { className?: string }) {
@@ -197,7 +197,7 @@ interface AssistantContextActionsProps {
   forkLabel: string;
   fallbackSources?: NonNullable<UIMessage["responseSources"]>;
   onForkFromHere?: () => void;
-  overlay?: boolean;
+  inline?: boolean;
   timestamp?: {
     value: number;
     label: string;
@@ -215,7 +215,7 @@ function AssistantContextActions({
   forkLabel,
   fallbackSources = [],
   onForkFromHere,
-  overlay = false,
+  inline = false,
   timestamp,
   automation,
 }: AssistantContextActionsProps) {
@@ -224,15 +224,14 @@ function AssistantContextActions({
     <TooltipProvider>
       <div
         data-assistant-context-actions
-        data-context-actions-overlay={overlay || undefined}
         data-context-actions-pinned={fallbackSources.length > 0 || undefined}
         data-copy-action={showCopy || undefined}
         data-fork-action={onForkFromHere ? true : undefined}
         className={cn(
           "assistant-context-actions z-10 flex min-h-5 items-center gap-0.5 whitespace-nowrap",
           "rounded-md bg-background/90 text-muted-foreground backdrop-blur-sm",
-          overlay
-            ? "absolute start-0 top-full bg-background backdrop-blur-none"
+          inline
+            ? "relative bg-transparent backdrop-blur-none"
             : "relative mt-0.5",
         )}
       >
@@ -311,6 +310,91 @@ function AssistantContextActions({
       </div>
     </TooltipProvider>
   );
+}
+
+interface AssistantMessageActionsProps {
+  message: UIMessage;
+  isTurnStreaming?: boolean;
+  showCopyAction?: boolean;
+  onForkFromHere?: () => void;
+  inline?: boolean;
+}
+
+/** The compact controls associated with one completed assistant turn. */
+export function AssistantMessageActions({
+  message,
+  isTurnStreaming = false,
+  showCopyAction = true,
+  onForkFromHere,
+  inline = false,
+}: AssistantMessageActionsProps) {
+  const { t } = useTranslation();
+  const assistantContent = message.compactReply === "empty"
+    ? t("thread.compaction.empty")
+    : message.compactReply === "failed"
+      ? t("thread.compaction.failed")
+      : message.content;
+  const empty = assistantContent.trim().length === 0;
+  const media = message.media ?? [];
+  const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
+  const hasReasoning = reasoning.length > 0 || !!message.reasoningStreaming;
+  const showAssistantActions =
+    message.role === "assistant" && !message.isStreaming && !isTurnStreaming && !empty;
+  const showCopyButton = showCopyAction && showAssistantActions;
+  const showForkButton = showAssistantActions && !!onForkFromHere;
+  const completedAt = message.completedAt;
+  const completedAtLabel =
+    message.role === "assistant" && !message.isStreaming
+      ? formatMessageEndTime(completedAt)
+      : "";
+  const assistantTimestamp =
+    typeof completedAt === "number" && Number.isFinite(completedAt)
+      ? completedAt
+      : message.createdAt;
+  const assistantTimestampLabel =
+    message.role === "assistant" && !message.isStreaming && !isTurnStreaming
+      ? formatMessageEndTime(assistantTimestamp)
+      : "";
+  const showCompletedAt =
+    completedAtLabel.length > 0
+    && (!empty || hasReasoning || media.length > 0);
+  const showAssistantTimestamp =
+    assistantTimestampLabel.length > 0
+    && (!empty || hasReasoning || media.length > 0);
+  const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
+  const automationSourceKind = message.source?.kind;
+  const automationSourceName = message.source?.label?.trim();
+  const automationSourceLabel = (
+    automationSourceKind === "cron"
+    || automationSourceKind === "local_trigger"
+    || automationSourceKind === "trigger"
+  )
+    ? (automationSourceName || t("message.automationSourceFallback"))
+    : "";
+  const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
+  const fallbackSources = message.responseSources?.filter((source) => source.fallback === true) ?? [];
+  const showAssistantContextActions =
+    showCopyButton || showForkButton || showAssistantTimestamp || fallbackSources.length > 0;
+
+  return showAssistantContextActions ? (
+    <AssistantContextActions
+      content={assistantContent}
+      showCopy={showCopyButton}
+      forkLabel={t("message.forkFromHere")}
+      fallbackSources={fallbackSources}
+      onForkFromHere={showForkButton ? onForkFromHere : undefined}
+      inline={inline}
+      timestamp={showAssistantTimestamp ? {
+        value: assistantTimestamp,
+        label: assistantTimestampTitle,
+        completed: showCompletedAt,
+      } : undefined}
+      automation={showAutomationTrigger ? {
+        label: t("message.automationTriggered"),
+        sourceLabel: automationSourceLabel,
+      } : undefined}
+    />
+  ) : null;
 }
 
 function deliveryErrorCopy(
@@ -466,7 +550,7 @@ export function MessageBubble({
   slashCommands = [],
   onOpenFilePreview,
   onForkFromHere,
-  overlayContextActions = false,
+  showAssistantContextActions = true,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mentionCliApps = useMemo(
@@ -589,46 +673,6 @@ export function MessageBubble({
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
   const hasReasoning = reasoning.length > 0 || reasoningStreaming;
-  const automationSourceKind = message.source?.kind;
-  const automationSourceName = message.source?.label?.trim();
-  const automationSourceLabel = (
-    automationSourceKind === "cron"
-    || automationSourceKind === "local_trigger"
-    || automationSourceKind === "trigger"
-  )
-    ? (automationSourceName || t("message.automationSourceFallback"))
-    : "";
-  const automationTriggeredLabel = t("message.automationTriggered");
-
-  const showAssistantActions =
-    message.role === "assistant" && !message.isStreaming && !isTurnStreaming && !empty;
-  const showCopyButton = showCopyAction && showAssistantActions;
-  const showForkButton = showAssistantActions && !!onForkFromHere;
-  const forkLabel = t("message.forkFromHere");
-  const completedAt = message.completedAt;
-  const completedAtLabel =
-    message.role === "assistant" && !message.isStreaming
-      ? formatMessageEndTime(completedAt)
-      : "";
-  const assistantTimestamp =
-    typeof completedAt === "number" && Number.isFinite(completedAt)
-      ? completedAt
-      : message.createdAt;
-  const assistantTimestampLabel =
-    message.role === "assistant" && !message.isStreaming && !isTurnStreaming
-      ? formatMessageEndTime(assistantTimestamp)
-      : "";
-  const showCompletedAt =
-    completedAtLabel.length > 0
-    && (!empty || hasReasoning || media.length > 0);
-  const showAssistantTimestamp =
-    assistantTimestampLabel.length > 0
-    && (!empty || hasReasoning || media.length > 0);
-  const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
-  const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
-  const fallbackSources = message.responseSources?.filter((source) => source.fallback === true) ?? [];
-  const showAssistantContextActions =
-    showCopyButton || showForkButton || showAssistantTimestamp || fallbackSources.length > 0;
   return (
     <div
       data-assistant-message
@@ -660,22 +704,11 @@ export function MessageBubble({
         </>
       )}
       {showAssistantContextActions ? (
-        <AssistantContextActions
-          content={assistantContent}
-          showCopy={showCopyButton}
-          forkLabel={forkLabel}
-          fallbackSources={fallbackSources}
-          onForkFromHere={showForkButton ? onForkFromHere : undefined}
-          overlay={overlayContextActions}
-          timestamp={showAssistantTimestamp ? {
-            value: assistantTimestamp,
-            label: assistantTimestampTitle,
-            completed: showCompletedAt,
-          } : undefined}
-          automation={showAutomationTrigger ? {
-            label: automationTriggeredLabel,
-            sourceLabel: automationSourceLabel,
-          } : undefined}
+        <AssistantMessageActions
+          message={message}
+          isTurnStreaming={isTurnStreaming}
+          showCopyAction={showCopyAction}
+          onForkFromHere={onForkFromHere}
         />
       ) : null}
     </div>

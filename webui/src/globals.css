@@ -770,11 +770,20 @@
   transition: opacity 120ms ease-out;
 }
 
-.assistant-context-actions[data-context-actions-overlay] {
-  transition: none;
-}
-
 @media (hover: hover) and (pointer: fine) {
+  [data-turn-context-rail] {
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+  }
+
+  [data-context-group-active] [data-turn-context-rail],
+  [data-turn-context-rail][data-turn-context-expanded],
+  [data-turn-context-rail][data-turn-context-pinned] {
+    pointer-events: auto;
+    opacity: 1;
+  }
+
   [data-assistant-message] .assistant-context-actions {
     pointer-events: none;
     opacity: 0;
@@ -792,20 +801,14 @@
     opacity: 1;
   }
 
-  [data-contextual-activity] [data-contextual-activity-disclosure] {
-    pointer-events: none;
-    opacity: 0;
-  }
-
-  [data-context-group-active] [data-contextual-activity-disclosure],
-  [data-contextual-activity-disclosure][aria-expanded="true"] {
-    pointer-events: auto;
-    opacity: 1;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .assistant-context-actions {
+    transition: none;
+  }
+
+  [data-turn-context-rail] {
     transition: none;
   }
 }
@@ -816,13 +819,6 @@
     background: transparent;
     padding: 0;
     backdrop-filter: none;
-  }
-
-  .assistant-context-actions[data-context-actions-overlay] {
-    position: relative;
-    inset-block-start: auto;
-    inset-inline-start: auto;
-    margin-block-start: 0.125rem;
   }
 
   .message-actions > button:first-child {

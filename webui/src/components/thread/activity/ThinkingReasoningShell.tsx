@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-react";
+import { History } from "lucide-react";
 import { useId, useState, type ReactNode, type Ref } from "react";
 
 import { cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ interface ThinkingReasoningShellProps {
   fadeTop: boolean;
   fadeBottom: boolean;
   hasDetails?: boolean;
+  actions?: ReactNode;
+  contextPinned?: boolean;
   onToggle: () => void;
   onScroll: () => void;
 }
@@ -29,6 +31,8 @@ export function ThinkingReasoningShell({
   fadeTop,
   fadeBottom,
   hasDetails = true,
+  actions,
+  contextPinned = false,
   onToggle,
   onScroll,
 }: ThinkingReasoningShellProps) {
@@ -40,61 +44,59 @@ export function ThinkingReasoningShell({
       className="flex w-full max-w-[45rem] animate-in flex-col fade-in duration-300 motion-reduce:animate-none"
       data-state={active ? "thinking" : "done"}
       data-contextual-activity={contextual || undefined}
+      data-turn-context-rail={contextual || undefined}
+      data-turn-context-expanded={contextual && expanded ? true : undefined}
+      data-turn-context-pinned={contextual && contextPinned ? true : undefined}
     >
-      {hasDetails ? (
-        <button
-          type="button"
-          data-thread-disclosure=""
-          data-contextual-activity-disclosure={contextual || undefined}
-          className="group inline-flex min-h-5 items-center self-start gap-1.5 bg-transparent p-0"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          aria-controls={contentId}
-          aria-label={label}
-          aria-live={active ? "polite" : undefined}
-        >
-          <span
+      <div className="flex min-h-5 items-center gap-1.5">
+        {hasDetails ? (
+          <button
+            type="button"
+            data-thread-disclosure=""
+            data-contextual-activity-disclosure={contextual || undefined}
             className={cn(
-              "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
-              active && "animate-pulse motion-reduce:animate-none",
+              "group inline-flex h-5 min-w-0 items-center gap-1 bg-transparent p-0",
+              "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
+            onClick={onToggle}
+            aria-expanded={expanded}
+            aria-controls={contentId}
+            aria-label={label}
+            aria-live={active ? "polite" : undefined}
           >
-            {label}
-          </span>
-          <span
-            className={cn(
-              "inline-flex shrink-0 transition-transform [transition-duration:220ms] ease-out",
-              "motion-reduce:transition-none",
-              expanded && "rotate-180",
-            )}
-          >
-            <ChevronDown
-              className={cn(
-                "h-3 w-3 text-muted-foreground/60 transition-colors duration-200",
-                "group-hover:text-muted-foreground motion-reduce:transition-none",
-              )}
+            <History
+              className="h-3 w-3 shrink-0 text-muted-foreground/60 transition-colors duration-200 group-hover:text-muted-foreground motion-reduce:transition-none"
               strokeWidth={1.8}
               aria-hidden
             />
-          </span>
-        </button>
-      ) : (
-        <div
-          className="inline-flex min-h-5 items-center self-start"
-          role="status"
-          aria-label={label}
-          aria-live={active ? "polite" : undefined}
-        >
-          <span
-            className={cn(
-              "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
-              active && "animate-pulse motion-reduce:animate-none",
-            )}
+            <span
+              className={cn(
+                "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
+                active && "animate-pulse motion-reduce:animate-none",
+              )}
+            >
+              {label}
+            </span>
+          </button>
+        ) : (
+          <div
+            className="inline-flex h-5 min-w-0 items-center"
+            role="status"
+            aria-label={label}
+            aria-live={active ? "polite" : undefined}
           >
-            {label}
-          </span>
-        </div>
-      )}
+            <span
+              className={cn(
+                "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
+                active && "animate-pulse motion-reduce:animate-none",
+              )}
+            >
+              {label}
+            </span>
+          </div>
+        )}
+        {actions ? <div className="min-w-0">{actions}</div> : null}
+      </div>
 
       {hasDetails ? (
         <div

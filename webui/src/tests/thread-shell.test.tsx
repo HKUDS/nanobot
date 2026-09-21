@@ -2061,7 +2061,9 @@ describe("ThreadShell", () => {
     );
 
     const targetText = await screen.findByText("answer 100");
-    fireEvent.click(within(targetText.closest(".w-full") as HTMLElement).getByRole("button", {
+    fireEvent.click(within(
+      targetText.closest("[data-thread-display-unit]") as HTMLElement,
+    ).getByRole("button", {
       name: "Fork",
     }));
 

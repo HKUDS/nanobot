@@ -46,7 +46,7 @@ describe("ThinkingReasoningShell", () => {
   it("makes collapsed descendants inert as well as visually hidden", () => {
     const { rerender } = renderShell(false);
     const disclosure = screen.getByRole("button", { name: "Thought" });
-    const collapsible = disclosure.nextElementSibling;
+    const collapsible = disclosure.parentElement?.nextElementSibling;
 
     expect(collapsible).toHaveAttribute("inert");
     expect(collapsible).toHaveAttribute("aria-hidden", "true");
@@ -67,7 +67,8 @@ describe("ThinkingReasoningShell", () => {
       </ThinkingReasoningShell>,
     );
 
-    expect(disclosure.nextElementSibling).not.toHaveAttribute("inert");
-    expect(disclosure.nextElementSibling).toHaveAttribute("aria-hidden", "false");
+    const expandedCollapsible = disclosure.parentElement?.nextElementSibling;
+    expect(expandedCollapsible).not.toHaveAttribute("inert");
+    expect(expandedCollapsible).toHaveAttribute("aria-hidden", "false");
   });
 });
