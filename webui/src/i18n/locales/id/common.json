@@ -1405,8 +1405,9 @@
         "duration": "Waktu pembuatan"
       },
       "queued": {
-        "label": "Panduan antrean",
-        "guide": "Pandu",
+        "label": "Menunggu dikirim",
+        "hint": "Kirim sekarang atau tunggu hingga respons saat ini selesai.",
+        "guide": "Kirim sekarang",
         "delete": "Hapus panduan",
         "edit": "Ubah panduan",
         "drag": "Seret untuk mengurutkan"

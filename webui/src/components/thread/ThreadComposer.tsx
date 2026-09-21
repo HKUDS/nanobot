@@ -2379,6 +2379,7 @@ export function ThreadComposer({
             prompts={queuedPrompts}
             isHero={isHero}
             label={t("thread.composer.queued.label")}
+            hint={t("thread.composer.queued.hint")}
             guideLabel={t("thread.composer.queued.guide")}
             deleteLabel={t("thread.composer.queued.delete")}
             dragLabel={t("thread.composer.queued.drag")}
@@ -2688,6 +2689,7 @@ function QueuedPromptStack({
   prompts,
   isHero,
   label,
+  hint,
   guideLabel,
   deleteLabel,
   dragLabel,
@@ -2702,6 +2704,7 @@ function QueuedPromptStack({
   prompts: QueuedPrompt[];
   isHero: boolean;
   label: string;
+  hint: string;
   guideLabel: string;
   deleteLabel: string;
   dragLabel: string;
@@ -2713,7 +2716,10 @@ function QueuedPromptStack({
   onDragEnd: () => void;
   onDrop: (targetId: string) => void;
 }) {
-  const stripMaxHeight = Math.min(240, 14 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4);
+  const stripMaxHeight = Math.min(
+    320,
+    96 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4,
+  );
 
   return (
     <div
@@ -2729,6 +2735,10 @@ function QueuedPromptStack({
       style={{ "--composer-strip-max-height": `${stripMaxHeight}px` } as CSSProperties}
       aria-label={label}
     >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-2 pb-1">
+        <span className="text-[11.5px] font-semibold text-foreground/75">{label}</span>
+        <span className="text-[11px] text-muted-foreground">{hint}</span>
+      </div>
       <div className="flex max-h-[216px] flex-col gap-1 overflow-y-auto">
         {prompts.map((prompt) => (
           <QueuedPromptRow

@@ -1406,8 +1406,9 @@
         "duration": "Tiempo de generación"
       },
       "queued": {
-        "label": "Guía en cola",
-        "guide": "Guiar",
+        "label": "Pendiente de envío",
+        "hint": "Envía ahora o espera a que termine la respuesta actual.",
+        "guide": "Enviar ahora",
         "delete": "Eliminar guía",
         "edit": "Editar guía",
         "drag": "Arrastrar para reordenar"

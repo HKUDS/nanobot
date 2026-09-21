@@ -1405,8 +1405,9 @@
         "duration": "Temps de génération"
       },
       "queued": {
-        "label": "Guidage en attente",
-        "guide": "Guider",
+        "label": "En attente d’envoi",
+        "hint": "Envoyez maintenant ou attendez la fin de la réponse en cours.",
+        "guide": "Envoyer",
         "delete": "Supprimer le guidage",
         "edit": "Modifier le guidage",
         "drag": "Faire glisser pour réordonner"

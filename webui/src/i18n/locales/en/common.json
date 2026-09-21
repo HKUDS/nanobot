@@ -1605,8 +1605,9 @@
         "duration": "Generation time"
       },
       "queued": {
-        "label": "Queued guidance",
-        "guide": "Guide",
+        "label": "Waiting to send",
+        "hint": "Send now, or wait for the current response to finish.",
+        "guide": "Send now",
         "delete": "Delete guidance",
         "edit": "Edit guidance",
         "drag": "Drag to reorder"
