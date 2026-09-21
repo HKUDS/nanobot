@@ -770,20 +770,20 @@
   transition: opacity 120ms ease-out;
 }
 
+[data-turn-context-rail] {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+[data-context-group-active] [data-turn-context-rail],
+[data-turn-context-rail][data-turn-context-expanded],
+[data-turn-context-rail][data-turn-context-pinned] {
+  pointer-events: auto;
+  opacity: 1;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  [data-turn-context-rail] {
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 120ms ease-out;
-  }
-
-  [data-context-group-active] [data-turn-context-rail],
-  [data-turn-context-rail][data-turn-context-expanded],
-  [data-turn-context-rail][data-turn-context-pinned] {
-    pointer-events: auto;
-    opacity: 1;
-  }
-
   [data-assistant-message] .assistant-context-actions {
     pointer-events: none;
     opacity: 0;

@@ -131,11 +131,8 @@ export function ThreadMessages({
       return next;
     });
   }, []);
-  const setContextGroupActive = useCallback((key: string, active: boolean) => {
-    setActiveContextGroupKey((current) => {
-      if (active) return current === key ? current : key;
-      return current === key ? null : current;
-    });
+  const setContextGroupActive = useCallback((key: string | null) => {
+    setActiveContextGroupKey((current) => current === key ? current : key);
   }, []);
   let nextUserIndex = hiddenUserMessageCount;
 
@@ -325,7 +322,7 @@ interface ThreadDisplayUnitProps {
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onActivityExpandedChange: (key: string, expanded: boolean) => void;
-  onContextGroupActiveChange: (key: string, active: boolean) => void;
+  onContextGroupActiveChange: (key: string | null) => void;
 }
 
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
@@ -401,26 +398,31 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         ref={elementRef}
         className={marginTop}
         style={retainContent ? undefined : { height: heightRef.current }}
-        onPointerDownCapture={() => setInteracted(true)}
+        onPointerDownCapture={(event) => {
+          setInteracted(true);
+          if (event.pointerType === "touch") {
+            onContextGroupActiveChange(contextGroupKey ?? null);
+          }
+        }}
         data-thread-display-unit={unitKey}
         data-user-prompt-id={userPromptId}
         data-message-context-group={contextGroupKey}
         data-context-group-active={contextGroupActive || undefined}
-        onPointerEnter={contextGroupKey ? () => {
-          onContextGroupActiveChange(contextGroupKey, true);
-        } : undefined}
-        onPointerLeave={contextGroupKey ? (event) => {
-          if (contextGroupKeyForTarget(event.relatedTarget) === contextGroupKey) return;
-          onContextGroupActiveChange(contextGroupKey, false);
-        } : undefined}
-        onFocusCapture={contextGroupKey ? () => {
+        onPointerEnter={(event) => {
+          if (event.pointerType === "touch") return;
+          onContextGroupActiveChange(contextGroupKey ?? null);
+        }}
+        onPointerLeave={(event) => {
+          if (event.pointerType === "touch") return;
+          onContextGroupActiveChange(contextGroupKeyForTarget(event.relatedTarget) ?? null);
+        }}
+        onFocusCapture={() => {
           setInteracted(true);
-          onContextGroupActiveChange(contextGroupKey, true);
-        } : () => setInteracted(true)}
-        onBlurCapture={contextGroupKey ? (event) => {
-          if (contextGroupKeyForTarget(event.relatedTarget) === contextGroupKey) return;
-          onContextGroupActiveChange(contextGroupKey, false);
-        } : undefined}
+          onContextGroupActiveChange(contextGroupKey ?? null);
+        }}
+        onBlurCapture={(event) => {
+          onContextGroupActiveChange(contextGroupKeyForTarget(event.relatedTarget) ?? null);
+        }}
       >
         {retainContent ? unit.type === "activity" ? (
           suppressActivity ? null : (

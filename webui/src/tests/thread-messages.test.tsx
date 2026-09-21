@@ -729,21 +729,79 @@ describe("ThreadMessages", () => {
     expect(activityA.dataset.messageContextGroup)
       .not.toBe(activityB.dataset.messageContextGroup);
 
-    fireEvent.pointerEnter(answerA);
+    fireEvent.pointerEnter(answerA, { pointerType: "mouse" });
     expect(activityA).toHaveAttribute("data-context-group-active", "true");
     expect(answerA).toHaveAttribute("data-context-group-active", "true");
     expect(activityB).not.toHaveAttribute("data-context-group-active");
     expect(answerB).not.toHaveAttribute("data-context-group-active");
 
-    fireEvent.pointerEnter(answerB);
+    fireEvent.pointerEnter(answerB, { pointerType: "mouse" });
     expect(activityA).not.toHaveAttribute("data-context-group-active");
     expect(answerA).not.toHaveAttribute("data-context-group-active");
     expect(activityB).toHaveAttribute("data-context-group-active", "true");
     expect(answerB).toHaveAttribute("data-context-group-active", "true");
 
-    fireEvent.pointerLeave(answerB);
+    fireEvent.pointerLeave(answerB, { pointerType: "mouse" });
     expect(activityB).not.toHaveAttribute("data-context-group-active");
     expect(answerB).not.toHaveAttribute("data-context-group-active");
+  });
+
+  it("clears completed turn controls when the pointer enters an ungrouped message", () => {
+    const messages: UIMessage[] = [
+      { id: "user-a", role: "user", content: "first prompt", createdAt: 500 },
+      {
+        id: "tool-a",
+        role: "tool",
+        kind: "trace",
+        content: "first command",
+        traces: ["first command"],
+        createdAt: 1_000,
+      },
+      { id: "answer-a", role: "assistant", content: "first answer", createdAt: 2_000 },
+      { id: "user-b", role: "user", content: "current prompt", createdAt: 3_000 },
+      {
+        id: "answer-b",
+        role: "assistant",
+        content: "current answer",
+        isStreaming: true,
+        createdAt: 4_000,
+      },
+    ];
+
+    render(<ThreadMessages messages={messages} isStreaming activeTurnId={null} />);
+    const completedAnswer = screen.getByText("first answer")
+      .closest<HTMLElement>("[data-thread-display-unit]")!;
+    const currentAnswer = screen.getByText("current answer")
+      .closest<HTMLElement>("[data-thread-display-unit]")!;
+
+    fireEvent.pointerEnter(completedAnswer, { pointerType: "mouse" });
+    expect(completedAnswer).toHaveAttribute("data-context-group-active", "true");
+
+    fireEvent.pointerEnter(currentAnswer, { pointerType: "mouse" });
+    expect(completedAnswer).not.toHaveAttribute("data-context-group-active");
+  });
+
+  it("keeps only the last tapped turn controls active on touch", () => {
+    const messages: UIMessage[] = [
+      { id: "user-a", role: "user", content: "first prompt", createdAt: 500 },
+      { id: "answer-a", role: "assistant", content: "first answer", createdAt: 1_000 },
+      { id: "user-b", role: "user", content: "second prompt", createdAt: 1_500 },
+      { id: "answer-b", role: "assistant", content: "second answer", createdAt: 2_000 },
+    ];
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    const answerA = screen.getByText("first answer")
+      .closest<HTMLElement>("[data-thread-display-unit]")!;
+    const answerB = screen.getByText("second answer")
+      .closest<HTMLElement>("[data-thread-display-unit]")!;
+
+    fireEvent.pointerDown(answerA, { pointerType: "touch" });
+    fireEvent.pointerLeave(answerA, { pointerType: "touch" });
+    expect(answerA).toHaveAttribute("data-context-group-active", "true");
+
+    fireEvent.pointerDown(answerB, { pointerType: "touch" });
+    expect(answerA).not.toHaveAttribute("data-context-group-active");
+    expect(answerB).toHaveAttribute("data-context-group-active", "true");
   });
 
   it("renders a fork boundary divider after the copied history", () => {
