@@ -766,10 +766,6 @@
   transition: opacity 120ms ease-out;
 }
 
-.completed-activity-block [data-contextual-activity-disclosure] {
-  transition-duration: 120ms;
-}
-
 @media (hover: hover) and (pointer: fine) {
   [data-assistant-message] .assistant-context-actions {
     pointer-events: none;
@@ -787,27 +783,10 @@
     pointer-events: auto;
     opacity: 1;
   }
-
-  .completed-activity-block [data-contextual-activity-disclosure] {
-    pointer-events: none;
-    opacity: 0;
-  }
-
-  .completed-activity-block:hover [data-contextual-activity-disclosure],
-  .completed-activity-block:focus-within [data-contextual-activity-disclosure],
-  [data-context-group-active] .completed-activity-block [data-contextual-activity-disclosure],
-  .completed-activity-block [data-contextual-activity-disclosure][aria-expanded="true"] {
-    pointer-events: auto;
-    opacity: 1;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .assistant-context-actions {
-    transition: none;
-  }
-
-  .completed-activity-block [data-contextual-activity-disclosure] {
     transition: none;
   }
 }

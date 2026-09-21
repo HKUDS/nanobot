@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useId, useState, type ReactNode, type Ref } from "react";
 
 import { cn } from "@/lib/utils";
@@ -37,10 +37,7 @@ export function ThinkingReasoningShell({
   if (expanded && !hasExpanded) setHasExpanded(true);
   return (
     <div
-      className={cn(
-        "flex w-full max-w-[45rem] animate-in flex-col fade-in duration-300 motion-reduce:animate-none",
-        contextual && "completed-activity-block",
-      )}
+      className="flex w-full max-w-[45rem] animate-in flex-col fade-in duration-300 motion-reduce:animate-none"
       data-state={active ? "thinking" : "done"}
       data-contextual-activity={contextual || undefined}
     >
@@ -49,38 +46,36 @@ export function ThinkingReasoningShell({
           type="button"
           data-thread-disclosure=""
           data-contextual-activity-disclosure={contextual || undefined}
-          className={cn(
-            "touch-target group -ms-1 inline-flex min-h-7 items-center self-start gap-1 rounded-md px-1",
-            "bg-transparent text-muted-foreground/70 transition-[background-color,color,opacity,transform]",
-            "duration-150 ease-out hover:bg-muted/55 hover:text-muted-foreground",
-            "active:scale-[0.96] motion-reduce:active:scale-100 motion-reduce:transition-none",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          )}
+          className="group inline-flex min-h-5 items-center self-start gap-1.5 bg-transparent p-0"
           onClick={onToggle}
           aria-expanded={expanded}
           aria-controls={contentId}
+          aria-label={label}
           aria-live={active ? "polite" : undefined}
         >
           <span
             className={cn(
-              "inline-flex shrink-0 transition-transform duration-150 ease-out",
-              "motion-reduce:transition-none",
-              expanded ? "rotate-90" : "rtl:rotate-180",
-            )}
-          >
-            <ChevronRight
-              className="h-3.5 w-3.5"
-              strokeWidth={1.5}
-              aria-hidden
-            />
-          </span>
-          <span
-            className={cn(
-              "min-w-0 truncate text-[12px] font-normal leading-5 tabular-nums",
+              "min-w-0 truncate text-[13px] font-medium leading-[18px] text-muted-foreground/70",
               active && "animate-pulse motion-reduce:animate-none",
             )}
           >
             {label}
+          </span>
+          <span
+            className={cn(
+              "inline-flex shrink-0 transition-transform [transition-duration:220ms] ease-out",
+              "motion-reduce:transition-none",
+              expanded && "rotate-180",
+            )}
+          >
+            <ChevronDown
+              className={cn(
+                "h-3 w-3 text-muted-foreground/60 transition-colors duration-200",
+                "group-hover:text-muted-foreground motion-reduce:transition-none",
+              )}
+              strokeWidth={1.8}
+              aria-hidden
+            />
           </span>
         </button>
       ) : (

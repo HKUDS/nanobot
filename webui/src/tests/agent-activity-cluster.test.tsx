@@ -487,7 +487,7 @@ describe("AgentActivityCluster", () => {
     }
   });
 
-  it("rotates a Notion-style disclosure chevron toward its inline details", () => {
+  it("keeps the main disclosure treatment for completed inline activity", () => {
     render(
       <AgentActivityCluster
         messages={[{
@@ -506,13 +506,15 @@ describe("AgentActivityCluster", () => {
     expect(button).toHaveAttribute("data-thread-disclosure");
     const chevron = button.querySelector("svg");
     expect(chevron).toBeInTheDocument();
-    expect(chevron).toHaveClass("h-3.5", "w-3.5");
+    expect(button).toHaveClass("min-h-5", "gap-1.5", "p-0");
+    expect(button).not.toHaveClass("min-h-7", "rounded-md", "px-1");
+    expect(chevron).toHaveClass("h-3", "w-3", "transition-colors", "duration-200");
     expect(chevron?.parentElement).toHaveClass(
       "transition-transform",
-      "duration-150",
+      "[transition-duration:220ms]",
     );
     fireEvent.click(button);
-    expect(chevron?.parentElement).toHaveClass("rotate-90");
+    expect(chevron?.parentElement).toHaveClass("rotate-180");
   });
 
   it("uses persisted turn latency for completed history instead of replay timestamps", () => {
