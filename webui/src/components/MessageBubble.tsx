@@ -320,7 +320,7 @@ interface AssistantMessageActionsProps {
   inline?: boolean;
 }
 
-/** The compact controls associated with one completed assistant turn. */
+/** The compact controls associated with one completed assistant message block. */
 export function AssistantMessageActions({
   message,
   isTurnStreaming = false,

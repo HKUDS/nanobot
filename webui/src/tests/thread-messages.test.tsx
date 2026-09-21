@@ -22,12 +22,6 @@ function assistantContextActions(root: ParentNode = document): HTMLElement {
   return actions!;
 }
 
-function assistantBlockForText(text: string): HTMLElement {
-  const block = screen.getByText(text).closest<HTMLElement>("[data-assistant-message]");
-  expect(block).not.toBeNull();
-  return block!;
-}
-
 describe("ThreadMessages", () => {
   it.each([0, -13_000, -14_000, -15_000, 15_000])(
     "keeps the optimistic timer through acknowledgement and output with %i ms server clock skew",
@@ -375,22 +369,22 @@ describe("ThreadMessages", () => {
 
     rerender(<ThreadMessages messages={messages} isStreaming={false} activeTurnId={null} />);
     const completedActivity = screen.getByRole("button", { name: /worked/i });
+    const firstRow = firstAnswer.closest<HTMLElement>("[data-thread-display-unit]")!;
     const finalRow = finalAnswer.closest<HTMLElement>("[data-thread-display-unit]")!;
-    const turnActions = assistantContextActions(finalRow);
-    expect(assistantBlockForText("I will inspect it."))
-      .not.toContainElement(turnActions);
-    expect(assistantBlockForText("I will inspect it.")
-      .querySelector("[data-assistant-context-actions]"))
-      .not.toBeInTheDocument();
-    expect(turnActions).not.toHaveAttribute("data-context-actions-overlay");
-    expect(turnActions).toHaveClass("relative", "min-h-5");
+    const firstActions = assistantContextActions(firstRow);
+    const finalActions = assistantContextActions(finalRow);
+    expect(firstRow).toContainElement(firstActions);
+    expect(finalRow).toContainElement(finalActions);
+    expect(firstActions).not.toBe(finalActions);
+    expect(finalActions).not.toHaveAttribute("data-context-actions-overlay");
+    expect(finalActions).toHaveClass("relative", "min-h-5");
     expect(completedActivity).toHaveClass("h-5");
     expect(completedActivity).toHaveAttribute("aria-expanded", "false");
     expect(completedActivity.compareDocumentPosition(finalAnswer) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(finalAnswer.compareDocumentPosition(turnActions) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(finalAnswer.compareDocumentPosition(finalActions) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(document.querySelectorAll("[data-turn-context-rail]")).toHaveLength(2);
+    expect(document.querySelectorAll("[data-block-context-rail]")).toHaveLength(3);
   });
 
   it("ignores a completed empty answer frame without splitting contiguous activity", () => {
@@ -492,13 +486,15 @@ describe("ThreadMessages", () => {
     render(<ThreadMessages messages={messages} isStreaming={false} />);
 
     const activityShells = screen.getAllByRole("button", { name: /^worked/i });
-    fireEvent.click(activityShells[0]);
+    fireEvent.click(activityShells[1]);
     const ok = screen.getByText("ok");
     const final = screen.getByText("finished");
-    expect(activityShells).toHaveLength(1);
+    expect(activityShells).toHaveLength(2);
     expect(ok.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(activityShells[0].compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(activityShells[0].compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(activityShells[1].compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(screen.getByTestId("agent-activity-scroll")).toHaveTextContent("Completed First");
     expect(screen.getByTestId("agent-activity-scroll")).toHaveTextContent("Completed Second");
@@ -664,12 +660,12 @@ describe("ThreadMessages", () => {
     expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
   });
 
-  it("activates only the hovered turn's footer controls", () => {
+  it("activates only the hovered visual message block within one logical turn", () => {
     const messages: UIMessage[] = [
       {
-        id: "user-a",
+        id: "user",
         role: "user",
-        content: "first prompt",
+        content: "prompt",
         createdAt: 500,
       },
       {
@@ -685,12 +681,6 @@ describe("ThreadMessages", () => {
         role: "assistant",
         content: "first answer",
         createdAt: 2_000,
-      },
-      {
-        id: "user-b",
-        role: "user",
-        content: "second prompt",
-        createdAt: 2_500,
       },
       {
         id: "tool-b",
@@ -722,31 +712,36 @@ describe("ThreadMessages", () => {
     const answerB = screen.getByText("second answer")
       .closest<HTMLElement>("[data-thread-display-unit]")!;
 
-    expect(activityA.dataset.messageContextGroup)
-      .toBe(answerA.dataset.messageContextGroup);
-    expect(activityB.dataset.messageContextGroup)
-      .toBe(answerB.dataset.messageContextGroup);
-    expect(activityA.dataset.messageContextGroup)
-      .not.toBe(activityB.dataset.messageContextGroup);
+    expect(activityA).not.toHaveAttribute("data-message-context-block");
+    expect(activityB).not.toHaveAttribute("data-message-context-block");
+    expect(answerA.dataset.messageContextBlock).toBeTruthy();
+    expect(answerB.dataset.messageContextBlock).toBeTruthy();
+    expect(answerA.dataset.messageContextBlock)
+      .not.toBe(answerB.dataset.messageContextBlock);
+    expect(answerA.querySelector("[data-contextual-activity]")).toBeInTheDocument();
+    expect(answerB.querySelector("[data-contextual-activity]")).toBeInTheDocument();
+    expect(answerB.querySelector("[data-contextual-activity]")?.parentElement?.parentElement)
+      .toHaveClass("pointer-events-none", "-mt-5");
 
     fireEvent.pointerEnter(answerA, { pointerType: "mouse" });
-    expect(activityA).toHaveAttribute("data-context-group-active", "true");
-    expect(answerA).toHaveAttribute("data-context-group-active", "true");
-    expect(activityB).not.toHaveAttribute("data-context-group-active");
-    expect(answerB).not.toHaveAttribute("data-context-group-active");
+    expect(answerA).toHaveAttribute("data-context-block-active", "true");
+    expect(answerB).not.toHaveAttribute("data-context-block-active");
 
     fireEvent.pointerEnter(answerB, { pointerType: "mouse" });
-    expect(activityA).not.toHaveAttribute("data-context-group-active");
-    expect(answerA).not.toHaveAttribute("data-context-group-active");
-    expect(activityB).toHaveAttribute("data-context-group-active", "true");
-    expect(answerB).toHaveAttribute("data-context-group-active", "true");
+    expect(answerA).not.toHaveAttribute("data-context-block-active");
+    expect(answerB).toHaveAttribute("data-context-block-active", "true");
 
     fireEvent.pointerLeave(answerB, { pointerType: "mouse" });
-    expect(activityB).not.toHaveAttribute("data-context-group-active");
-    expect(answerB).not.toHaveAttribute("data-context-group-active");
+    expect(answerB).not.toHaveAttribute("data-context-block-active");
+
+    fireEvent.focus(answerA.querySelector<HTMLElement>("[data-assistant-copy-action]")!);
+    expect(answerA).toHaveAttribute("data-context-block-active", "true");
+    fireEvent.focus(answerB.querySelector<HTMLElement>("[data-assistant-copy-action]")!);
+    expect(answerA).not.toHaveAttribute("data-context-block-active");
+    expect(answerB).toHaveAttribute("data-context-block-active", "true");
   });
 
-  it("clears completed turn controls when the pointer enters an ungrouped message", () => {
+  it("clears completed block controls when the pointer enters an ungrouped message", () => {
     const messages: UIMessage[] = [
       { id: "user-a", role: "user", content: "first prompt", createdAt: 500 },
       {
@@ -775,13 +770,13 @@ describe("ThreadMessages", () => {
       .closest<HTMLElement>("[data-thread-display-unit]")!;
 
     fireEvent.pointerEnter(completedAnswer, { pointerType: "mouse" });
-    expect(completedAnswer).toHaveAttribute("data-context-group-active", "true");
+    expect(completedAnswer).toHaveAttribute("data-context-block-active", "true");
 
     fireEvent.pointerEnter(currentAnswer, { pointerType: "mouse" });
-    expect(completedAnswer).not.toHaveAttribute("data-context-group-active");
+    expect(completedAnswer).not.toHaveAttribute("data-context-block-active");
   });
 
-  it("keeps only the last tapped turn controls active on touch", () => {
+  it("keeps only the last tapped message block controls active on touch", () => {
     const messages: UIMessage[] = [
       { id: "user-a", role: "user", content: "first prompt", createdAt: 500 },
       { id: "answer-a", role: "assistant", content: "first answer", createdAt: 1_000 },
@@ -797,11 +792,11 @@ describe("ThreadMessages", () => {
 
     fireEvent.pointerDown(answerA, { pointerType: "touch" });
     fireEvent.pointerLeave(answerA, { pointerType: "touch" });
-    expect(answerA).toHaveAttribute("data-context-group-active", "true");
+    expect(answerA).toHaveAttribute("data-context-block-active", "true");
 
     fireEvent.pointerDown(answerB, { pointerType: "touch" });
-    expect(answerA).not.toHaveAttribute("data-context-group-active");
-    expect(answerB).toHaveAttribute("data-context-group-active", "true");
+    expect(answerA).not.toHaveAttribute("data-context-block-active");
+    expect(answerB).toHaveAttribute("data-context-block-active", "true");
   });
 
   it("renders a fork boundary divider after the copied history", () => {
@@ -1638,7 +1633,7 @@ describe("ThreadMessages", () => {
     );
 
     expect(document.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(1);
+      .toHaveLength(2);
     expect(document.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
       .toHaveLength(1);
     expect(screen.getByText("starting…").closest("[data-testid='activity-model-message']")).toBeNull();
@@ -1754,9 +1749,9 @@ describe("ThreadMessages", () => {
     rerender(<ThreadMessages {...props} isStreaming={false} activeTurnId={null} />);
 
     expect(firstAnswer.querySelector("[data-assistant-context-actions]"))
-      .not.toBeInTheDocument();
+      .toBeInTheDocument();
     expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(2);
+      .toHaveLength(3);
     expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
       .toHaveLength(2);
   });

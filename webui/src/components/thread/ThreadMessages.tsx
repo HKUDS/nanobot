@@ -110,8 +110,8 @@ export function ThreadMessages({
     ? activeTurnStartIndex(units, activeTurnId)
     : units.length;
   const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
-  const turnFooters = useMemo(
-    () => completedTurnFooters(
+  const messageBlocks = useMemo(
+    () => completedMessageBlocks(
       units,
       unitKeys,
       isStreaming,
@@ -121,7 +121,7 @@ export function ThreadMessages({
     [activeTurnId, currentTurnStartIndex, isStreaming, unitKeys, units],
   );
   const [expandedActivityKeys, setExpandedActivityKeys] = useState<Set<string>>(() => new Set());
-  const [activeContextGroupKey, setActiveContextGroupKey] = useState<string | null>(null);
+  const [activeContextBlockKey, setActiveContextBlockKey] = useState<string | null>(null);
   const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
     setExpandedActivityKeys((current) => {
       if (current.has(key) === expanded) return current;
@@ -131,8 +131,8 @@ export function ThreadMessages({
       return next;
     });
   }, []);
-  const setContextGroupActive = useCallback((key: string | null) => {
-    setActiveContextGroupKey((current) => current === key ? current : key);
+  const setContextBlockActive = useCallback((key: string | null) => {
+    setActiveContextBlockKey((current) => current === key ? current : key);
   }, []);
   let nextUserIndex = hiddenUserMessageCount;
 
@@ -148,24 +148,27 @@ export function ThreadMessages({
           unit.type === "activity"
           && next?.type === "message"
           && next.message.role === "assistant";
-        const contextGroupKey = turnFooters.contextKeys[index];
-        const showTurnFooter = turnFooters.ownerIndices.has(index);
-        const turnFooterActivity = turnFooters.activityByOwner.get(index);
-        const suppressActivity = turnFooters.suppressedActivityIndices.has(index);
+        const contextBlockKey = messageBlocks.blockKeys[index];
+        const showBlockContext = messageBlocks.blockIndices.has(index);
+        const blockActivity = messageBlocks.activityByBlock.get(index);
+        const suppressActivity = messageBlocks.suppressedActivityIndices.has(index);
         const previousVisibleIndex = previousVisibleUnitIndex(
           index,
-          turnFooters.suppressedActivityIndices,
+          messageBlocks.suppressedActivityIndices,
         );
+        const shareUpperContextRail = blockActivity !== undefined
+          && previousVisibleIndex >= 0
+          && messageBlocks.blockIndices.has(previousVisibleIndex);
         const marginTop = suppressActivity || previousVisibleIndex < 0
           ? ""
           : marginAfterPrevUnit(
               units[previousVisibleIndex],
-              turnFooters.ownerIndices.has(previousVisibleIndex),
-              showTurnFooter && turnFooterActivity !== undefined,
+              messageBlocks.blockIndices.has(previousVisibleIndex),
+              showBlockContext && blockActivity !== undefined,
             );
-        const turnFooterExpanded = showTurnFooter
-          && contextGroupKey !== undefined
-          && expandedActivityKeys.has(contextGroupKey);
+        const blockActivityExpanded = showBlockContext
+          && contextBlockKey !== undefined
+          && expandedActivityKeys.has(contextBlockKey);
         const deferOffscreenRender =
           index < units.length - 1
           && (
@@ -203,12 +206,13 @@ export function ThreadMessages({
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             suppressActivity={suppressActivity}
-            showTurnFooter={showTurnFooter}
-            turnFooterActivity={turnFooterActivity}
-            turnFooterExpanded={turnFooterExpanded}
-            contextGroupKey={contextGroupKey}
-            contextGroupActive={
-              contextGroupKey !== undefined && contextGroupKey === activeContextGroupKey
+            showBlockContext={showBlockContext}
+            blockActivity={blockActivity}
+            blockActivityExpanded={blockActivityExpanded}
+            shareUpperContextRail={shareUpperContextRail}
+            contextBlockKey={contextBlockKey}
+            contextBlockActive={
+              contextBlockKey !== undefined && contextBlockKey === activeContextBlockKey
             }
             deferOffscreenRender={deferOffscreenRender}
             isTurnStreaming={unitTurnStreaming}
@@ -229,7 +233,7 @@ export function ThreadMessages({
             onOpenFilePreview={onOpenFilePreview}
             onForkFromMessage={onForkFromMessage}
             onActivityExpandedChange={setActivityExpanded}
-            onContextGroupActiveChange={setContextGroupActive}
+            onContextBlockActiveChange={setContextBlockActive}
           />
         );
       })}
@@ -302,11 +306,12 @@ interface ThreadDisplayUnitProps {
   userPromptId?: string;
   hasBodyBelow: boolean;
   suppressActivity: boolean;
-  showTurnFooter: boolean;
-  turnFooterActivity?: Extract<DisplayUnit, { type: "activity" }>;
-  turnFooterExpanded: boolean;
-  contextGroupKey?: string;
-  contextGroupActive: boolean;
+  showBlockContext: boolean;
+  blockActivity?: Extract<DisplayUnit, { type: "activity" }>;
+  blockActivityExpanded: boolean;
+  shareUpperContextRail: boolean;
+  contextBlockKey?: string;
+  contextBlockActive: boolean;
   deferOffscreenRender: boolean;
   isTurnStreaming: boolean;
   retryStatus: RetryStatus | null;
@@ -322,7 +327,7 @@ interface ThreadDisplayUnitProps {
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onActivityExpandedChange: (key: string, expanded: boolean) => void;
-  onContextGroupActiveChange: (key: string | null) => void;
+  onContextBlockActiveChange: (key: string | null) => void;
 }
 
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
@@ -332,11 +337,12 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   userPromptId,
   hasBodyBelow,
   suppressActivity,
-  showTurnFooter,
-  turnFooterActivity,
-  turnFooterExpanded,
-  contextGroupKey,
-  contextGroupActive,
+  showBlockContext,
+  blockActivity,
+  blockActivityExpanded,
+  shareUpperContextRail,
+  contextBlockKey,
+  contextBlockActive,
   deferOffscreenRender,
   isTurnStreaming,
   retryStatus,
@@ -352,7 +358,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   onOpenFilePreview,
   onForkFromMessage,
   onActivityExpandedChange,
-  onContextGroupActiveChange,
+  onContextBlockActiveChange,
 }: ThreadDisplayUnitProps) {
   const elementRef = useRef<HTMLDivElement>(null);
   const heightRef = useRef(0);
@@ -377,14 +383,14 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   const onForkFromHere = useCallback(() => {
     if (forkIndex !== undefined) onForkFromMessage?.(forkIndex);
   }, [forkIndex, onForkFromMessage]);
-  const onTurnFooterExpandedChange = useCallback((expanded: boolean) => {
-    if (contextGroupKey !== undefined) {
-      onActivityExpandedChange(contextGroupKey, expanded);
+  const onBlockActivityExpandedChange = useCallback((expanded: boolean) => {
+    if (contextBlockKey !== undefined) {
+      onActivityExpandedChange(contextBlockKey, expanded);
     }
-  }, [contextGroupKey, onActivityExpandedChange]);
-  const turnContextPinned = unit.type === "message"
+  }, [contextBlockKey, onActivityExpandedChange]);
+  const blockContextPinned = unit.type === "message"
     && !!unit.message.responseSources?.some((source) => source.fallback === true);
-  const turnActions = unit.type === "message" && showTurnFooter ? (
+  const blockActions = unit.type === "message" && showBlockContext ? (
     <AssistantMessageActions
       message={unit.message}
       isTurnStreaming={isTurnStreaming}
@@ -401,27 +407,27 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
         onPointerDownCapture={(event) => {
           setInteracted(true);
           if (event.pointerType === "touch") {
-            onContextGroupActiveChange(contextGroupKey ?? null);
+            onContextBlockActiveChange(contextBlockKey ?? null);
           }
         }}
         data-thread-display-unit={unitKey}
         data-user-prompt-id={userPromptId}
-        data-message-context-group={contextGroupKey}
-        data-context-group-active={contextGroupActive || undefined}
+        data-message-context-block={contextBlockKey}
+        data-context-block-active={contextBlockActive || undefined}
         onPointerEnter={(event) => {
           if (event.pointerType === "touch") return;
-          onContextGroupActiveChange(contextGroupKey ?? null);
+          onContextBlockActiveChange(contextBlockKey ?? null);
         }}
         onPointerLeave={(event) => {
           if (event.pointerType === "touch") return;
-          onContextGroupActiveChange(contextGroupKeyForTarget(event.relatedTarget) ?? null);
+          onContextBlockActiveChange(contextBlockKeyForTarget(event.relatedTarget) ?? null);
         }}
         onFocusCapture={() => {
           setInteracted(true);
-          onContextGroupActiveChange(contextGroupKey ?? null);
+          onContextBlockActiveChange(contextBlockKey ?? null);
         }}
         onBlurCapture={(event) => {
-          onContextGroupActiveChange(contextGroupKeyForTarget(event.relatedTarget) ?? null);
+          onContextBlockActiveChange(contextBlockKeyForTarget(event.relatedTarget) ?? null);
         }}
       >
         {retainContent ? unit.type === "activity" ? (
@@ -442,22 +448,24 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           )
         ) : (
           <>
-            {showTurnFooter && turnFooterActivity ? (
-              <AgentActivityCluster
-                messages={turnFooterActivity.messages}
-                isTurnStreaming={false}
-                retryStatus={null}
-                hasBodyBelow={false}
-                expanded={turnFooterExpanded}
-                onExpandedChange={onTurnFooterExpandedChange}
-                turnLatencyMs={turnFooterActivity.turnLatencyMs}
-                startedAtMs={turnFooterActivity.startedAtMs}
-                cliApps={cliApps}
-                mcpPresets={mcpPresets}
-                traceDetailScope={traceDetailScope}
-                onLoadTraceDetails={onLoadTraceDetails}
-                onOpenFilePreview={onOpenFilePreview}
-              />
+            {showBlockContext && blockActivity ? (
+              <div className={cn("pointer-events-none", shareUpperContextRail && "-mt-5")}>
+                <AgentActivityCluster
+                  messages={blockActivity.messages}
+                  isTurnStreaming={false}
+                  retryStatus={null}
+                  hasBodyBelow={false}
+                  expanded={blockActivityExpanded}
+                  onExpandedChange={onBlockActivityExpandedChange}
+                  turnLatencyMs={blockActivity.turnLatencyMs}
+                  startedAtMs={blockActivity.startedAtMs}
+                  cliApps={cliApps}
+                  mcpPresets={mcpPresets}
+                  traceDetailScope={traceDetailScope}
+                  onLoadTraceDetails={onLoadTraceDetails}
+                  onOpenFilePreview={onOpenFilePreview}
+                />
+              </div>
             ) : null}
             <MessageBubble
               message={unit.message}
@@ -468,15 +476,15 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
               slashCommands={slashCommands}
               onOpenFilePreview={onOpenFilePreview}
               onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
-              showAssistantContextActions={contextGroupKey === undefined}
+              showAssistantContextActions={contextBlockKey === undefined}
             />
-            {showTurnFooter ? (
+            {showBlockContext ? (
               <div
-                data-turn-context-rail
-                data-turn-context-pinned={turnContextPinned || undefined}
+                data-block-context-rail
+                data-block-context-pinned={blockContextPinned || undefined}
                 className="flex min-h-5 max-w-[45rem] items-center"
               >
-                {turnActions}
+                {blockActions}
               </div>
             ) : null}
           </>
@@ -497,11 +505,12 @@ function threadDisplayUnitPropsEqual(
     && previous.userPromptId === next.userPromptId
     && previous.hasBodyBelow === next.hasBodyBelow
     && previous.suppressActivity === next.suppressActivity
-    && previous.showTurnFooter === next.showTurnFooter
-    && previous.turnFooterActivity === next.turnFooterActivity
-    && previous.turnFooterExpanded === next.turnFooterExpanded
-    && previous.contextGroupKey === next.contextGroupKey
-    && previous.contextGroupActive === next.contextGroupActive
+    && previous.showBlockContext === next.showBlockContext
+    && previous.blockActivity === next.blockActivity
+    && previous.blockActivityExpanded === next.blockActivityExpanded
+    && previous.shareUpperContextRail === next.shareUpperContextRail
+    && previous.contextBlockKey === next.contextBlockKey
+    && previous.contextBlockActive === next.contextBlockActive
     && previous.deferOffscreenRender === next.deferOffscreenRender
     && previous.isTurnStreaming === next.isTurnStreaming
     && previous.retryStatus === next.retryStatus
@@ -517,13 +526,13 @@ function threadDisplayUnitPropsEqual(
     && previous.onOpenFilePreview === next.onOpenFilePreview
     && previous.onForkFromMessage === next.onForkFromMessage
     && previous.onActivityExpandedChange === next.onActivityExpandedChange
-    && previous.onContextGroupActiveChange === next.onContextGroupActiveChange
+    && previous.onContextBlockActiveChange === next.onContextBlockActiveChange
   );
 }
 
-function contextGroupKeyForTarget(target: EventTarget | null): string | undefined {
+function contextBlockKeyForTarget(target: EventTarget | null): string | undefined {
   return target instanceof Element
-    ? target.closest<HTMLElement>("[data-message-context-group]")?.dataset.messageContextGroup
+    ? target.closest<HTMLElement>("[data-message-context-block]")?.dataset.messageContextBlock
     : undefined;
 }
 
@@ -669,7 +678,7 @@ function stableTurnMessageKey(message: UIMessage | undefined, fallbackPhase?: st
 
 function marginAfterPrevUnit(
   prev: DisplayUnit,
-  hasTurnFooter: boolean,
+  hasBlockActions: boolean,
   currentHasActivityHeader: boolean,
 ): string {
   if (prev.type === "activity") {
@@ -689,30 +698,30 @@ function marginAfterPrevUnit(
   if (p.role === "assistant" && !p.isStreaming && p.content.trim().length > 0) {
     // The lower action row or the next answer's upper activity row supplies
     // the normal inter-message rhythm without stacking extra whitespace.
-    return hasTurnFooter || currentHasActivityHeader ? "" : "mt-5";
+    return hasBlockActions || currentHasActivityHeader ? "" : "mt-5";
   }
   return "mt-5";
 }
 
-interface CompletedTurnFooters {
-  contextKeys: Array<string | undefined>;
-  ownerIndices: Set<number>;
+interface CompletedMessageBlocks {
+  blockKeys: Array<string | undefined>;
+  blockIndices: Set<number>;
   suppressedActivityIndices: Set<number>;
-  activityByOwner: Map<number, Extract<DisplayUnit, { type: "activity" }>>;
+  activityByBlock: Map<number, Extract<DisplayUnit, { type: "activity" }>>;
 }
 
-function completedTurnFooters(
+function completedMessageBlocks(
   units: DisplayUnit[],
   unitKeys: string[],
   isStreaming: boolean,
   activeTurnId: string | null,
   currentTurnStartIndex: number,
-): CompletedTurnFooters {
-  const result: CompletedTurnFooters = {
-    contextKeys: new Array<string | undefined>(units.length),
-    ownerIndices: new Set<number>(),
+): CompletedMessageBlocks {
+  const result: CompletedMessageBlocks = {
+    blockKeys: new Array<string | undefined>(units.length),
+    blockIndices: new Set<number>(),
     suppressedActivityIndices: new Set<number>(),
-    activityByOwner: new Map(),
+    activityByBlock: new Map(),
   };
   let groupStart = 0;
   let groupTurnId: string | undefined;
@@ -720,14 +729,6 @@ function completedTurnFooters(
   const flushGroup = (end: number) => {
     if (groupStart >= end) return;
     const indices = Array.from({ length: end - groupStart }, (_, offset) => groupStart + offset);
-    const ownerIndex = [...indices].reverse().find((index) => {
-      const unit = units[index];
-      return unit.type === "message"
-        && unit.message.role === "assistant"
-        && unit.message.kind !== "compaction";
-    });
-    if (ownerIndex === undefined) return;
-
     const groupIsStreaming = isStreaming && indices.some((index) => {
       const unit = units[index];
       const turnId = displayUnitTurnId(unit);
@@ -736,39 +737,31 @@ function completedTurnFooters(
     });
     if (groupIsStreaming) return;
 
-    const contextKey = `turn-context-${groupTurnId ?? unitKeys[ownerIndex]}`;
-    result.ownerIndices.add(ownerIndex);
-    for (const index of indices) {
+    const blockIndices = indices.filter((index) => {
       const unit = units[index];
-      if (unit.type === "activity" || (
-        unit.type === "message"
+      return unit.type === "message"
         && unit.message.role === "assistant"
-        && unit.message.kind !== "compaction"
-      )) {
-        result.contextKeys[index] = contextKey;
-      }
+        && unit.message.kind !== "compaction";
+    });
+    for (const index of blockIndices) {
+      result.blockIndices.add(index);
+      result.blockKeys[index] = `message-block-${unitKeys[index]}`;
     }
 
-    const activityUnits = indices
-      .map((index) => ({ index, unit: units[index] }))
-      .filter((entry): entry is {
-        index: number;
-        unit: Extract<DisplayUnit, { type: "activity" }>;
-      } => entry.unit.type === "activity");
-    if (!activityUnits.length) return;
-    for (const { index } of activityUnits) result.suppressedActivityIndices.add(index);
-    result.activityByOwner.set(ownerIndex, {
-      type: "activity",
-      messages: activityUnits.flatMap(({ unit }) => unit.messages),
-      sourceMessageCount: activityUnits.reduce(
-        (count, { unit }) => count + unit.sourceMessageCount,
-        0,
-      ),
-      turnLatencyMs: [...activityUnits].reverse().find(({ unit }) => unit.turnLatencyMs !== undefined)
-        ?.unit.turnLatencyMs,
-      startedAtMs: activityUnits.find(({ unit }) => unit.startedAtMs !== undefined)
-        ?.unit.startedAtMs,
-    });
+    const activityByBlock = new Map<number, Array<Extract<DisplayUnit, { type: "activity" }>>>();
+    for (const index of indices) {
+      const unit = units[index];
+      if (unit.type !== "activity") continue;
+      const blockIndex = blockIndices.find((candidate) => candidate > index) ?? blockIndices.at(-1);
+      if (blockIndex === undefined) continue;
+      result.suppressedActivityIndices.add(index);
+      const activityUnits = activityByBlock.get(blockIndex) ?? [];
+      activityUnits.push(unit);
+      activityByBlock.set(blockIndex, activityUnits);
+    }
+    for (const [blockIndex, activityUnits] of activityByBlock) {
+      result.activityByBlock.set(blockIndex, mergeActivityUnits(activityUnits));
+    }
   };
 
   for (let index = 0; index < units.length; index += 1) {
@@ -790,6 +783,19 @@ function completedTurnFooters(
   }
   flushGroup(units.length);
   return result;
+}
+
+function mergeActivityUnits(
+  units: Array<Extract<DisplayUnit, { type: "activity" }>>,
+): Extract<DisplayUnit, { type: "activity" }> {
+  return {
+    type: "activity",
+    messages: units.flatMap((unit) => unit.messages),
+    sourceMessageCount: units.reduce((count, unit) => count + unit.sourceMessageCount, 0),
+    turnLatencyMs: [...units].reverse().find((unit) => unit.turnLatencyMs !== undefined)
+      ?.turnLatencyMs,
+    startedAtMs: units.find((unit) => unit.startedAtMs !== undefined)?.startedAtMs,
+  };
 }
 
 function displayUnitTurnId(unit: DisplayUnit): string | undefined {

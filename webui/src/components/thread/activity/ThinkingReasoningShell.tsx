@@ -39,8 +39,8 @@ export function ThinkingReasoningShell({
       className="flex w-full max-w-[45rem] animate-in flex-col fade-in duration-300 motion-reduce:animate-none"
       data-state={active ? "thinking" : "done"}
       data-contextual-activity={contextual || undefined}
-      data-turn-context-rail={contextual || undefined}
-      data-turn-context-expanded={contextual && expanded ? true : undefined}
+      data-block-context-rail={contextual || undefined}
+      data-block-context-expanded={contextual && expanded ? true : undefined}
     >
       <div className="flex min-h-5 items-center gap-1.5">
         {hasDetails ? (

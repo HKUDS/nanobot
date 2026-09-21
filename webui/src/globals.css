@@ -770,15 +770,15 @@
   transition: opacity 120ms ease-out;
 }
 
-[data-turn-context-rail] {
+[data-block-context-rail] {
   pointer-events: none;
   opacity: 0;
   transition: opacity 120ms ease-out;
 }
 
-[data-context-group-active] [data-turn-context-rail],
-[data-turn-context-rail][data-turn-context-expanded],
-[data-turn-context-rail][data-turn-context-pinned] {
+[data-context-block-active] [data-block-context-rail],
+[data-block-context-rail][data-block-context-expanded],
+[data-block-context-rail][data-block-context-pinned] {
   pointer-events: auto;
   opacity: 1;
 }
@@ -796,7 +796,7 @@
 
   [data-assistant-message]:hover .assistant-context-actions,
   [data-assistant-message]:focus-within .assistant-context-actions,
-  [data-context-group-active] .assistant-context-actions {
+  [data-context-block-active] .assistant-context-actions {
     pointer-events: auto;
     opacity: 1;
   }
@@ -808,7 +808,7 @@
     transition: none;
   }
 
-  [data-turn-context-rail] {
+  [data-block-context-rail] {
     transition: none;
   }
 }
