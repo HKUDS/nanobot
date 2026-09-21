@@ -235,7 +235,7 @@ function AssistantContextActions({
         )}
       >
         <div className="flex min-w-0 max-w-full items-center gap-0.5">
-          <div className="assistant-context-controls flex items-center gap-0.5">
+          <div className="message-actions assistant-context-controls flex items-center gap-0.5">
             {showCopy ? (
               <Tooltip>
                 <TooltipTrigger asChild>

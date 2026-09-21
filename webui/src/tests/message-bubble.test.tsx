@@ -569,6 +569,7 @@ describe("MessageBubble", () => {
     const actions = assistantContextActions(container);
     expect(actions).toHaveClass("assistant-context-actions", "relative", "mt-0.5", "min-h-7");
     expect(actions).not.toHaveClass("absolute");
+    expect(actions.querySelector(".assistant-context-controls")).toHaveClass("message-actions");
     const answer = container.querySelector("[data-assistant-selectable]");
     expect(answer?.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector("[data-thread-disclosure]")).not.toBeInTheDocument();
