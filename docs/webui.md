@@ -151,6 +151,18 @@ When nanobot compacts context, the timeline shows its progress and outcome.
 The compacted summary keeps earlier work available while recent messages remain
 in context. See [Memory](./memory.md) for compaction and Dream consolidation.
 
+### Diagrams in replies
+
+Completed `mermaid` code blocks render as diagrams. Use **Source** to inspect or
+copy the definition, or **Expand diagram** to zoom, scroll, and drag around a
+larger view. Press **Esc** to close it. Diagrams follow the light/dark theme.
+
+While a reply is streaming, the block stays as source. Invalid or oversized
+definitions also keep their source instead of breaking the reply. Diagram
+configuration directives, embedded HTML, callbacks, and external resources are
+not supported; diagrams cannot execute scripts or open links. Rendering is
+loaded only when a completed diagram is encountered.
+
 ## Temporary Chats
 
 Use a temporary chat for a conversation that should not be added to nanobot's

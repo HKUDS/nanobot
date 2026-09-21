@@ -1686,6 +1686,17 @@
     "resize": "파일 미리보기 크기 조절",
     "truncated": "파일이 커서 미리보기가 잘렸습니다."
   },
+  "diagram": {
+    "title": "Mermaid 다이어그램",
+    "showDiagram": "다이어그램",
+    "showSource": "소스",
+    "expand": "다이어그램 확대",
+    "unavailable": "이 다이어그램을 안전하게 표시할 수 없어 소스를 표시합니다.",
+    "zoomOut": "축소",
+    "zoomIn": "확대",
+    "resetZoom": "확대/축소 초기화",
+    "pan": "다이어그램 — 스크롤하거나 드래그"
+  },
   "code": {
     "fallbackLanguage": "코드",
     "copyAria": "코드 복사",

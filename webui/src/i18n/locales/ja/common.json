@@ -1686,6 +1686,17 @@
     "resize": "ファイルプレビューの幅を変更",
     "truncated": "ファイルが大きいため、プレビューは途中まで表示されています。"
   },
+  "diagram": {
+    "title": "Mermaid 図",
+    "showDiagram": "図",
+    "showSource": "ソース",
+    "expand": "図を拡大",
+    "unavailable": "この図は安全に表示できません。ソースを表示しています。",
+    "zoomOut": "縮小",
+    "zoomIn": "拡大",
+    "resetZoom": "ズームをリセット",
+    "pan": "図 — スクロールまたはドラッグ"
+  },
   "code": {
     "fallbackLanguage": "コード",
     "copyAria": "コードをコピー",

@@ -1686,6 +1686,17 @@
     "resize": "Redimensionner l’aperçu du fichier",
     "truncated": "L’aperçu est tronqué car le fichier est volumineux."
   },
+  "diagram": {
+    "title": "Diagramme Mermaid",
+    "showDiagram": "Diagramme",
+    "showSource": "Source",
+    "expand": "Agrandir le diagramme",
+    "unavailable": "Ce diagramme ne peut pas être affiché en toute sécurité. Voici sa source.",
+    "zoomOut": "Dézoomer",
+    "zoomIn": "Zoomer",
+    "resetZoom": "Réinitialiser le zoom",
+    "pan": "Diagramme — faites défiler ou glisser"
+  },
   "code": {
     "fallbackLanguage": "code",
     "copyAria": "Copier le code",

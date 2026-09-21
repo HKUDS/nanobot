@@ -1686,6 +1686,17 @@
     "resize": "Đổi kích thước bản xem trước tệp",
     "truncated": "Bản xem trước bị cắt vì tệp này lớn."
   },
+  "diagram": {
+    "title": "Sơ đồ Mermaid",
+    "showDiagram": "Sơ đồ",
+    "showSource": "Mã nguồn",
+    "expand": "Mở rộng sơ đồ",
+    "unavailable": "Không thể hiển thị sơ đồ này an toàn. Mã nguồn được hiển thị bên dưới.",
+    "zoomOut": "Thu nhỏ",
+    "zoomIn": "Phóng to",
+    "resetZoom": "Đặt lại thu phóng",
+    "pan": "Sơ đồ — cuộn hoặc kéo"
+  },
   "code": {
     "fallbackLanguage": "mã",
     "copyAria": "Sao chép mã",

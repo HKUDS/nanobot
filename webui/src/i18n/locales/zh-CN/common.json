@@ -1886,6 +1886,17 @@
     "resize": "调整文件预览宽度",
     "truncated": "文件较大，当前只显示前半部分预览。"
   },
+  "diagram": {
+    "title": "Mermaid 图表",
+    "showDiagram": "图形",
+    "showSource": "源码",
+    "expand": "放大图表",
+    "unavailable": "无法安全渲染此图表，已显示源码。",
+    "zoomOut": "缩小",
+    "zoomIn": "放大",
+    "resetZoom": "重置缩放",
+    "pan": "图表 — 滚动或拖动查看"
+  },
   "code": {
     "fallbackLanguage": "代码",
     "copyAria": "复制代码",

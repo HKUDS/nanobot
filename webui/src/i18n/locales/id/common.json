@@ -1686,6 +1686,17 @@
     "resize": "Ubah ukuran pratinjau file",
     "truncated": "Pratinjau dipotong karena file ini besar."
   },
+  "diagram": {
+    "title": "Diagram Mermaid",
+    "showDiagram": "Diagram",
+    "showSource": "Sumber",
+    "expand": "Perbesar diagram",
+    "unavailable": "Diagram ini tidak dapat ditampilkan dengan aman. Sumber ditampilkan di bawah.",
+    "zoomOut": "Perkecil",
+    "zoomIn": "Perbesar",
+    "resetZoom": "Atur ulang zoom",
+    "pan": "Diagram — gulir atau seret"
+  },
   "code": {
     "fallbackLanguage": "kode",
     "copyAria": "Salin kode",

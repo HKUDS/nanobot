@@ -1700,6 +1700,17 @@
     "resize": "Redimensionar pré-visualização de arquivo",
     "truncated": "A pré-visualização foi truncada porque este arquivo é grande."
   },
+  "diagram": {
+    "title": "Diagrama Mermaid",
+    "showDiagram": "Diagrama",
+    "showSource": "Código",
+    "expand": "Ampliar diagrama",
+    "unavailable": "Não foi possível exibir este diagrama com segurança. O código é mostrado abaixo.",
+    "zoomOut": "Diminuir zoom",
+    "zoomIn": "Aumentar zoom",
+    "resetZoom": "Redefinir zoom",
+    "pan": "Diagrama — role ou arraste"
+  },
   "code": {
     "fallbackLanguage": "código",
     "copyAria": "Copiar código",

@@ -1687,6 +1687,17 @@
     "resize": "Cambiar el tamaño de la vista previa",
     "truncated": "La vista previa está truncada porque el archivo es grande."
   },
+  "diagram": {
+    "title": "Diagrama Mermaid",
+    "showDiagram": "Diagrama",
+    "showSource": "Código",
+    "expand": "Ampliar diagrama",
+    "unavailable": "No se puede representar este diagrama de forma segura. Se muestra el código.",
+    "zoomOut": "Alejar",
+    "zoomIn": "Acercar",
+    "resetZoom": "Restablecer zoom",
+    "pan": "Diagrama — desplázate o arrastra"
+  },
   "code": {
     "fallbackLanguage": "código",
     "copyAria": "Copiar código",

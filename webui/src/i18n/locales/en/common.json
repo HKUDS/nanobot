@@ -1886,6 +1886,17 @@
     "resize": "Resize file preview",
     "truncated": "Preview is truncated because this file is large."
   },
+  "diagram": {
+    "title": "Mermaid diagram",
+    "showDiagram": "Diagram",
+    "showSource": "Source",
+    "expand": "Expand diagram",
+    "unavailable": "This diagram cannot be rendered safely. The source is shown below.",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "resetZoom": "Reset zoom",
+    "pan": "Diagram — scroll or drag to pan"
+  },
   "code": {
     "fallbackLanguage": "code",
     "copyAria": "Copy code",
