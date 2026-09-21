@@ -814,6 +814,13 @@
     backdrop-filter: none;
   }
 
+  .assistant-context-actions[data-context-actions-overlay] {
+    position: relative;
+    inset-block-start: auto;
+    inset-inline-start: auto;
+    margin-block-start: 0.125rem;
+  }
+
   .message-actions > button:first-child {
     margin-inline-start: -0.875rem;
   }

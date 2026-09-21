@@ -381,10 +381,13 @@ describe("ThreadMessages", () => {
       "absolute",
       "start-0",
       "top-full",
+      "min-h-5",
       "bg-background",
       "backdrop-blur-none",
     );
+    expect(precedingActions).not.toHaveClass("mt-0.5", "min-h-7");
     expect(precedingActions).not.toHaveClass("bg-background/90", "backdrop-blur-sm");
+    expect(completedActivity).toHaveClass("min-h-5");
     expect(completedActivity).toHaveAttribute("aria-expanded", "false");
     expect(firstAnswer.compareDocumentPosition(completedActivity) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();

@@ -229,10 +229,10 @@ function AssistantContextActions({
         data-copy-action={showCopy || undefined}
         data-fork-action={onForkFromHere ? true : undefined}
         className={cn(
-          "assistant-context-actions z-10 flex min-h-7 items-center gap-0.5 whitespace-nowrap",
-          "rounded-lg bg-background/90 p-0.5 text-muted-foreground backdrop-blur-sm",
+          "assistant-context-actions z-10 flex min-h-5 items-center gap-0.5 whitespace-nowrap",
+          "rounded-md bg-background/90 text-muted-foreground backdrop-blur-sm",
           overlay
-            ? "absolute start-0 top-full mt-0.5 bg-background backdrop-blur-none"
+            ? "absolute start-0 top-full bg-background backdrop-blur-none"
             : "relative mt-0.5",
         )}
       >
@@ -247,7 +247,7 @@ function AssistantContextActions({
                     onClick={onCopy}
                     aria-label={copyLabel}
                     className={cn(
-                      "touch-target inline-flex h-7 w-7 items-center justify-center rounded-md",
+                      "touch-target inline-flex h-5 w-5 items-center justify-center rounded-sm",
                       "transition-colors hover:bg-muted/70 hover:text-foreground",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     )}
@@ -271,7 +271,7 @@ function AssistantContextActions({
                     onClick={onForkFromHere}
                     aria-label={forkLabel}
                     className={cn(
-                      "touch-target inline-flex h-7 w-7 items-center justify-center rounded-md",
+                      "touch-target inline-flex h-5 w-5 items-center justify-center rounded-sm",
                       "transition-colors hover:bg-muted/70 hover:text-foreground",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     )}
@@ -293,7 +293,7 @@ function AssistantContextActions({
                 ? `${timestamp.label} — ${automation.label} — ${automation.sourceLabel}`
                 : timestamp.label}
               className={cn(
-                "h-7 items-center rounded-md px-1.5 pb-0 text-[11px]",
+                "h-5 items-center rounded-sm px-1 pb-0 text-[11px]",
                 "transition-colors hover:bg-muted/70 hover:text-foreground",
               )}
             >

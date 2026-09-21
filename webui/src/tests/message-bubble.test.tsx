@@ -567,7 +567,7 @@ describe("MessageBubble", () => {
     );
 
     const actions = assistantContextActions(container);
-    expect(actions).toHaveClass("assistant-context-actions", "relative", "mt-0.5", "min-h-7");
+    expect(actions).toHaveClass("assistant-context-actions", "relative", "mt-0.5", "min-h-5");
     expect(actions).not.toHaveClass("absolute");
     expect(actions.querySelector(".assistant-context-controls")).toHaveClass("message-actions");
     const answer = container.querySelector("[data-assistant-selectable]");
@@ -576,6 +576,9 @@ describe("MessageBubble", () => {
     const copy = screen.getByRole("button", { name: "Copy" });
     const fork = screen.getByRole("button", { name: "Fork" });
     const timestamp = container.querySelector<HTMLElement>("[data-message-timestamp]")!;
+    expect(copy).toHaveClass("h-5", "w-5");
+    expect(fork).toHaveClass("h-5", "w-5");
+    expect(timestamp).toHaveClass("h-5");
     expect(copy.compareDocumentPosition(fork) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(fork.compareDocumentPosition(timestamp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector("[data-assistant-footer]")).not.toBeInTheDocument();
