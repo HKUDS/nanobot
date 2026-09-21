@@ -95,7 +95,10 @@ def test_symlinks_and_size(commands, tmp_path):
     outside.write_text("unchanged")
     root = tmp_path / "project/.nanobot/commands"
     root.mkdir(parents=True)
-    (root / "review.md").symlink_to(outside)
+    try:
+        (root / "review.md").symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
     with pytest.raises(PromptCommandError):
         commands.save(data(source="workspace"))
     assert outside.read_text() == "unchanged"
