@@ -231,7 +231,9 @@ function AssistantContextActions({
         className={cn(
           "assistant-context-actions z-10 flex min-h-7 items-center gap-0.5 whitespace-nowrap",
           "rounded-lg bg-background/90 p-0.5 text-muted-foreground backdrop-blur-sm",
-          overlay ? "absolute start-0 top-full mt-0.5" : "relative mt-0.5",
+          overlay
+            ? "absolute start-0 top-full mt-0.5 bg-background backdrop-blur-none"
+            : "relative mt-0.5",
         )}
       >
         <div className="flex min-w-0 max-w-full items-center gap-0.5">

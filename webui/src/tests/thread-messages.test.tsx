@@ -377,7 +377,14 @@ describe("ThreadMessages", () => {
     const completedActivity = screen.getByRole("button", { name: /worked/i });
     const precedingActions = assistantContextActions(assistantBlockForText("I will inspect it."));
     expect(precedingActions).toHaveAttribute("data-context-actions-overlay", "true");
-    expect(precedingActions).toHaveClass("absolute", "start-0", "top-full");
+    expect(precedingActions).toHaveClass(
+      "absolute",
+      "start-0",
+      "top-full",
+      "bg-background",
+      "backdrop-blur-none",
+    );
+    expect(precedingActions).not.toHaveClass("bg-background/90", "backdrop-blur-sm");
     expect(completedActivity).toHaveAttribute("aria-expanded", "false");
     expect(firstAnswer.compareDocumentPosition(completedActivity) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
