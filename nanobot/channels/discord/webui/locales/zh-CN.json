@@ -1,0 +1,63 @@
+{
+  "setup": {
+    "docsLabel": "打开 Discord 配置指南",
+    "officialLabel": "打开 Discord 开发者后台",
+    "fields": {
+      "token": {
+        "label": "机器人令牌",
+        "placeholder": "Discord 机器人令牌"
+      },
+      "allowChannels": {
+        "label": "允许的频道",
+        "placeholder": "频道 ID，用逗号分隔"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      },
+      "proxy": {
+        "label": "网络代理"
+      },
+      "proxyUsername": {
+        "label": "代理用户名"
+      },
+      "proxyPassword": {
+        "label": "代理密码"
+      },
+      "intents": {
+        "label": "Gateway Intents"
+      },
+      "readReceiptEmoji": {
+        "label": "已读表情"
+      },
+      "workingEmoji": {
+        "label": "处理中表情"
+      },
+      "workingEmojiDelay": {
+        "label": "处理中表情延迟"
+      },
+      "streaming": {
+        "label": "流式输出",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "replyToMessage": {
+        "label": "回复消息",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      }
+    }
+  }
+}

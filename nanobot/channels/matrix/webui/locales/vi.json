@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn Matrix",
+    "officialLabel": "Mở danh sách ứng dụng Matrix",
+    "fields": {
+      "homeserver": {
+        "label": "Máy chủ tài khoản",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ID người dùng",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Mật khẩu",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "Token truy cập",
+        "placeholder": "Nhập token truy cập"
+      },
+      "deviceId": {
+        "label": "ID thiết bị",
+        "placeholder": "Bắt buộc khi dùng token"
+      },
+      "groupPolicy": {
+        "label": "Hành vi trong nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép"
+      },
+      "e2eeEnabled": {
+        "label": "Mã hóa đầu cuối",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "sasVerification": {
+        "label": "Xác minh SAS",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Thời gian gia hạn dừng đồng bộ hóa"
+      },
+      "maxMediaBytes": {
+        "label": "Kích thước phương tiện tối đa"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Tải xuống phương tiện đồng thời"
+      },
+      "groupAllowFrom": {
+        "label": "Nhóm được phép"
+      },
+      "allowRoomMentions": {
+        "label": "Cho phép đề cập đến phòng",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "proxy": {
+        "label": "Proxy mạng",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}

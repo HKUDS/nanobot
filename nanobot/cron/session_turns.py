@@ -7,7 +7,6 @@ from typing import Any, Mapping
 from nanobot.cron.types import CronJob
 from nanobot.session.automation_turns import (
     AutomationTurnSpec,
-    automation_history_overrides_for_spec,
     automation_trigger,
 )
 
@@ -61,11 +60,6 @@ def cron_run_id(metadata: Mapping[str, Any] | None) -> str | None:
         return None
     value = trigger.get("run_id")
     return value if isinstance(value, str) and value else None
-
-
-def cron_history_overrides(metadata: Mapping[str, Any] | None) -> tuple[str | None, dict[str, Any]]:
-    """Return session-history text/metadata overrides for a cron turn."""
-    return automation_history_overrides_for_spec(metadata, CRON_AUTOMATION_SPEC)
 
 
 def is_bound_cron_job(job: CronJob) -> bool:

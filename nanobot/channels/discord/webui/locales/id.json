@@ -1,0 +1,63 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan Discord",
+    "officialLabel": "Buka portal Discord",
+    "fields": {
+      "token": {
+        "label": "Token bot",
+        "placeholder": "Token bot Discord"
+      },
+      "allowChannels": {
+        "label": "Kanal yang diizinkan",
+        "placeholder": "ID kanal, dipisahkan koma"
+      },
+      "groupPolicy": {
+        "label": "Perilaku grup",
+        "choices": {
+          "mention": "Hanya saat disebut",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan",
+        "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "proxy": {
+        "label": "Proksi jaringan"
+      },
+      "proxyUsername": {
+        "label": "Nama pengguna proksi"
+      },
+      "proxyPassword": {
+        "label": "Kata sandi proksi"
+      },
+      "intents": {
+        "label": "Maksud gerbang"
+      },
+      "readReceiptEmoji": {
+        "label": "Baca emoji"
+      },
+      "workingEmoji": {
+        "label": "Emoji yang berfungsi"
+      },
+      "workingEmojiDelay": {
+        "label": "Penundaan emoji yang berfungsi"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "replyToMessage": {
+        "label": "Balas pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      }
+    }
+  }
+}

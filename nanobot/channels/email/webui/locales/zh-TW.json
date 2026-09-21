@@ -1,0 +1,166 @@
+{
+  "displayName": "電子郵件",
+  "setup": {
+    "docsLabel": "開啟郵件設定指南",
+    "officialLabel": "開啟應用程式密碼指南",
+    "presetLabel": "快速填入",
+    "sections": {
+      "receiving": "接收郵件",
+      "sending": "傳送郵件"
+    },
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "允許 nanobot 讀取及傳送電子郵件",
+        "choices": {
+          "true": "已授權",
+          "false": "未授權"
+        }
+      },
+      "imapHost": {
+        "label": "IMAP 主機",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "IMAP 使用者名稱",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "IMAP 密碼",
+        "placeholder": "應用程式密碼"
+      },
+      "smtpHost": {
+        "label": "SMTP 主機",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "SMTP 使用者名稱",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "SMTP 密碼",
+        "placeholder": "應用程式密碼"
+      },
+      "imapPort": {
+        "label": "IMAP 連接埠",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "SMTP 連接埠",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "寄件地址",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "收件檢查間隔（秒）",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "允許的寄件者",
+        "placeholder": "電子郵件地址，以逗號分隔"
+      },
+      "verifyDkim": {
+        "label": "驗證 DKIM",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "verifySpf": {
+        "label": "驗證 SPF",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "imapMailbox": {
+        "label": "IMAP 信箱"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "自動回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "markSeen": {
+        "label": "標為已讀",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "postAction": {
+        "label": "處理後",
+        "choices": {
+          "delete": "刪除",
+          "move": "移動"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "移至信箱"
+      },
+      "postActionExpunge": {
+        "label": "永久執行操作",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "忽略未處理郵件",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "maxBodyChars": {
+        "label": "正文長度上限"
+      },
+      "subjectPrefix": {
+        "label": "回覆主題前綴"
+      },
+      "allowedAttachmentTypes": {
+        "label": "允許的附件類型"
+      },
+      "maxAttachmentSize": {
+        "label": "附件大小上限"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "附件數量上限"
+      },
+      "trustedAuthservIds": {
+        "label": "可信郵件驗證服務",
+        "placeholder": "mx.google.com，以逗號分隔",
+        "help": "接收郵件服務加入的正確 authserv-id。啟用 SPF 或 DKIM 驗證時必填。"
+      }
+    }
+  }
+}

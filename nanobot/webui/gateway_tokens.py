@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import secrets
 import time
+import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from websockets.http11 import Request as WsRequest
 
 from nanobot.webui.http_utils import bearer_token, parse_query, query_first
+
+IssuedTokenAudience = Literal["client", "webui"]
 
 
 @dataclass
@@ -17,7 +20,9 @@ class GatewayTokenStore:
     """Own short-lived WebSocket and WebUI API tokens for one gateway process."""
 
     max_tokens: int = 10_000
+    instance_id: str = field(default_factory=lambda: str(uuid.uuid4()), init=False)
     issued_tokens: dict[str, float] = field(default_factory=dict)
+    issued_token_audiences: dict[str, IssuedTokenAudience] = field(default_factory=dict)
     api_tokens: dict[str, float] = field(default_factory=dict)
 
     def check_api_token(self, request: WsRequest) -> bool:
@@ -42,10 +47,16 @@ class GatewayTokenStore:
             return False
         return True
 
-    def issue_token(self, ttl_s: int | float) -> str:
+    def issue_token(
+        self,
+        ttl_s: int | float,
+        *,
+        audience: IssuedTokenAudience = "client",
+    ) -> str:
         token_value = f"nbwt_{secrets.token_urlsafe(32)}"
         expiry = time.monotonic() + float(ttl_s)
         self.issued_tokens[token_value] = expiry
+        self.issued_token_audiences[token_value] = audience
         return token_value
 
     def issue_api_token(self, ttl_s: int | float) -> str:
@@ -54,19 +65,25 @@ class GatewayTokenStore:
         self.api_tokens[token_value] = expiry
         return token_value
 
-    def take_issued_token_if_valid(self, token_value: str | None) -> bool:
+    def take_issued_token_audience(
+        self,
+        token_value: str | None,
+    ) -> IssuedTokenAudience | None:
         if not token_value:
-            return False
+            return None
         self._purge_expired_issued_tokens()
         expiry = self.issued_tokens.pop(token_value, None)
         if expiry is None:
-            return False
+            self.issued_token_audiences.pop(token_value, None)
+            return None
+        audience = self.issued_token_audiences.pop(token_value, "client")
         if time.monotonic() > expiry:
-            return False
-        return True
+            return None
+        return audience
 
     def clear(self) -> None:
         self.issued_tokens.clear()
+        self.issued_token_audiences.clear()
         self.api_tokens.clear()
 
     def _purge_expired_api_tokens(self) -> None:
@@ -80,6 +97,7 @@ class GatewayTokenStore:
         for token_key, expiry in list(self.issued_tokens.items()):
             if now > expiry:
                 self.issued_tokens.pop(token_key, None)
+                self.issued_token_audiences.pop(token_key, None)
 
 
 def token_response_payload(token: str, expires_in: Any) -> dict[str, Any]:

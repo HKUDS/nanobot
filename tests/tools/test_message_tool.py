@@ -62,26 +62,6 @@ async def test_message_tool_suppresses_delivery_when_active() -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_tool_marks_channel_delivery_only_when_enabled() -> None:
-    sent: list[OutboundMessage] = []
-
-    async def _send(msg: OutboundMessage) -> None:
-        sent.append(msg)
-
-    tool = MessageTool(send_callback=_send)
-
-    await tool.execute(content="normal", channel="telegram", chat_id="1")
-    token = tool.set_record_channel_delivery(True)
-    try:
-        await tool.execute(content="cron", channel="telegram", chat_id="1")
-    finally:
-        tool.reset_record_channel_delivery(token)
-
-    assert sent[0].metadata == {}
-    assert sent[1].metadata == {"_record_channel_delivery": True}
-
-
-@pytest.mark.asyncio
 async def test_message_tool_records_media_deliveries() -> None:
     sent: list[OutboundMessage] = []
 
@@ -328,60 +308,6 @@ async def test_message_tool_resolves_mixed_media_paths() -> None:
         "https://example.com/url.png",
         "http://example.com/http.png",
     ]
-
-
-@pytest.mark.asyncio
-async def test_message_tool_tracks_turn_media_for_same_target(tmp_path) -> None:
-    sent: list[OutboundMessage] = []
-
-    async def _send(msg: OutboundMessage) -> None:
-        sent.append(msg)
-
-    tool = MessageTool(send_callback=_send)
-    f = tmp_path / "doc.md"
-    f.write_text("hello", encoding="utf-8")
-    with request_context(RequestContext(channel="websocket", chat_id="chat-1", metadata={})):
-        tool.start_turn()
-        await tool.execute(
-            content="see file",
-            channel="websocket",
-            chat_id="chat-1",
-            media=[str(f)],
-        )
-        assert tool.turn_delivered_media_paths() == [str(f.resolve())]
-
-
-@pytest.mark.asyncio
-async def test_message_tool_start_turn_clears_tracked_media(tmp_path) -> None:
-    async def _send(msg: OutboundMessage) -> None:
-        pass
-
-    tool = MessageTool(send_callback=_send)
-    f = tmp_path / "doc.md"
-    f.write_text("hello", encoding="utf-8")
-    with request_context(RequestContext(channel="websocket", chat_id="chat-1", metadata={})):
-        tool.start_turn()
-        await tool.execute(content="see file", media=[str(f)])
-        tool.start_turn()
-        assert tool.turn_delivered_media_paths() == []
-
-
-@pytest.mark.asyncio
-async def test_message_tool_cross_target_does_not_track_turn_media(tmp_path) -> None:
-    async def _send(msg: OutboundMessage) -> None:
-        pass
-
-    tool = MessageTool(send_callback=_send)
-    f = tmp_path / "doc.md"
-    f.write_text("hello", encoding="utf-8")
-    with request_context(RequestContext(channel="websocket", chat_id="chat-1", metadata={})):
-        await tool.execute(
-            content="see file",
-            channel="telegram",
-            chat_id="tg-other",
-            media=[str(f)],
-        )
-        assert tool.turn_delivered_media_paths() == []
 
 
 @pytest.mark.asyncio

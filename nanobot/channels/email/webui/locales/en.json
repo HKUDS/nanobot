@@ -1,0 +1,165 @@
+{
+  "setup": {
+    "docsLabel": "Open Email setup",
+    "officialLabel": "Open app password guide",
+    "presetLabel": "Quick fill",
+    "sections": {
+      "receiving": "Receiving mail",
+      "sending": "Sending mail"
+    },
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "Allow nanobot to read and send email",
+        "choices": {
+          "true": "Granted",
+          "false": "Not granted"
+        }
+      },
+      "imapHost": {
+        "label": "IMAP host",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "IMAP username",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "IMAP password",
+        "placeholder": "App password"
+      },
+      "smtpHost": {
+        "label": "SMTP host",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "SMTP username",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "SMTP password",
+        "placeholder": "App password"
+      },
+      "imapPort": {
+        "label": "IMAP port",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "SMTP port",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "From address",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "Check for mail every (seconds)",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "Allowed senders",
+        "placeholder": "Email addresses, comma separated"
+      },
+      "verifyDkim": {
+        "label": "Verify DKIM",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "verifySpf": {
+        "label": "Verify SPF",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "imapMailbox": {
+        "label": "IMAP mailbox"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Automatic replies",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "markSeen": {
+        "label": "Mark as read",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "postAction": {
+        "label": "After processing",
+        "choices": {
+          "delete": "Delete",
+          "move": "Move"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Move to mailbox"
+      },
+      "postActionExpunge": {
+        "label": "Permanently apply action",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Ignore skipped messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Maximum body length"
+      },
+      "subjectPrefix": {
+        "label": "Reply subject prefix"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Allowed attachment types"
+      },
+      "maxAttachmentSize": {
+        "label": "Maximum attachment size"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Maximum attachments"
+      },
+      "trustedAuthservIds": {
+        "label": "Trusted authentication services",
+        "placeholder": "mx.google.com, comma separated",
+        "help": "Exact authserv-id values added by the receiving mail service. Required when SPF or DKIM verification is on."
+      }
+    }
+  }
+}

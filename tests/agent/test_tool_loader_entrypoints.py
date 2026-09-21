@@ -140,5 +140,5 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
     assert tool.to_schema() == {"name": "api_plugin", "custom": True}
 
     result = await tool.execute(value="1")
-    assert is_tool_error_result("api_plugin", result) is True
+    assert is_tool_error_result(result) is True
     assert str(result) == "Error: plugin failed"

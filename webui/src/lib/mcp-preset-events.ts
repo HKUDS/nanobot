@@ -9,7 +9,10 @@ export function isMcpPresetsPayload(value: unknown): value is McpPresetsPayload 
 }
 
 export function installedMcpPresetsFromPayload(payload: McpPresetsPayload): McpPresetInfo[] {
-  return payload.presets.filter((preset) => preset.installed && preset.configured);
+  return payload.presets.filter(
+    (preset) => preset.source !== "agent-plugin"
+      && (preset.enabled ?? (preset.installed && preset.configured)),
+  );
 }
 
 export function notifyMcpPresetsChanged(payload: McpPresetsPayload): void {

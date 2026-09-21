@@ -31,7 +31,7 @@ def _cleanup_partial_archive(skill_filename: Path) -> None:
             skill_filename.unlink()
 
 
-def package_skill(skill_path, output_dir=None):
+def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) -> Path | None:
     """
     Package a skill folder into a .skill file.
 
@@ -80,7 +80,7 @@ def package_skill(skill_path, output_dir=None):
 
     excluded_dirs = {".git", ".svn", ".hg", "__pycache__", "node_modules"}
 
-    files_to_package = []
+    files_to_package: list[Path] = []
     resolved_archive = skill_filename.resolve()
 
     for file_path in skill_path.rglob("*"):
@@ -124,7 +124,7 @@ def package_skill(skill_path, output_dir=None):
         return None
 
 
-def main():
+def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python package_skill.py <path/to/skill-folder> [output-directory]")
         print("\nExample:")

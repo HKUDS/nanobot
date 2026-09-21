@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import find_by_name
 
@@ -44,8 +45,10 @@ def test_build_responses_body_strips_github_copilot_prefix():
         temperature=0.1,
         reasoning_effort=None,
         tool_choice=None,
+        provider_context=ProviderCallContext(context_window_tokens=128_000),
     )
     assert body["model"] == "gpt-5.4-mini"
+    assert "context_management" not in body
 
 
 @pytest.mark.asyncio

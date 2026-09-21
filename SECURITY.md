@@ -21,6 +21,11 @@ We aim to respond to security reports within 48 hours.
 **CRITICAL**: Never commit API keys to version control.
 
 ```bash
+# ✅ Best: Use environment variable references in config (never writes the key to disk)
+# In ~/.nanobot/config.json:
+#   "apiKey": "${ANTHROPIC_API_KEY}"
+# Then supply the key at runtime via env var or Docker secret.
+
 # ✅ Good: Store in config file with restricted permissions
 chmod 600 ~/.nanobot/config.json
 
@@ -28,9 +33,9 @@ chmod 600 ~/.nanobot/config.json
 ```
 
 **Recommendations:**
-- Store API keys in `~/.nanobot/config.json` with file permissions set to `0600`
-- Consider using environment variables for sensitive keys
-- Use OS keyring/credential manager for production deployments
+- **Prefer environment variable references** (`${VAR}`) in config — the config file stores the `${VAR}` placeholder, and the plaintext value only exists in memory at runtime. See [Configuration: Environment Variables for Secrets](https://nanobot.wiki/docs/latest/use-nanobot/configuration/#environment-variables-for-secrets) for details.
+- When plaintext keys are stored in `~/.nanobot/config.json`, set file permissions to `0600` (`chmod 600`)
+- Consider using an OS keyring/credential manager for production deployments
 - Rotate API keys regularly
 - Use separate API keys for development and production
 
@@ -64,7 +69,7 @@ chmod 600 ~/.nanobot/config.json
 
 The `exec` tool can execute shell commands. While dangerous command patterns are blocked, you should:
 
-- ✅ **Enable the bwrap sandbox** (`"tools.exec.sandbox": "bwrap"`) for kernel-level isolation (Linux only)
+- ✅ **Enable the exec sandbox** (`"tools.exec.sandbox": "bwrap"` on Linux, `"seatbelt"` on macOS) for kernel-level isolation
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
 - ✅ Use a dedicated user account with limited privileges
@@ -72,16 +77,28 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 - ❌ Don't disable security checks
 - ❌ Don't run on systems with sensitive data without careful review
 
-**Exec sandbox (bwrap):**
+**Exec sandbox (bwrap on Linux, seatbelt on macOS):**
 
-On Linux, set `"tools.exec.sandbox": "bwrap"` to wrap every shell command in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox. This uses Linux kernel namespaces to restrict what the process can see:
+Set `"tools.exec.sandbox"` to wrap every shell command in an OS sandbox. Both backends restrict filesystem access:
 
 - Workspace directory → **read-write** (agent works normally)
 - Media directory → **read-only** (can read uploaded attachments)
 - System directories (`/usr`, `/bin`, `/lib`) → **read-only** (commands still work)
-- Config files and API keys (`~/.nanobot/config.json`) → **hidden** (masked by tmpfs)
+- The workspace's parent, which holds `~/.nanobot/config.json` in the default layout → **denied**, except for explicitly exposed roots
+- Unlisted paths, including `~/.ssh` in the default layout → **denied**
 
-Requires `bwrap` installed (`apt install bubblewrap`). Pre-installed in the official Docker image. **Not available on macOS or Windows** — bubblewrap depends on Linux kernel namespaces.
+| Backend | Value | Platform | Requires |
+|---------|-------|----------|----------|
+| [bubblewrap](https://github.com/containers/bubblewrap) | `"bwrap"` | Linux | `bwrap` (`apt install bubblewrap`). Pre-installed in the official Docker image. |
+| Seatbelt | `"seatbelt"` | macOS | `sandbox-exec(1)`, shipped with macOS. |
+
+**Windows has no backend**: nanobot logs a warning and runs the command unsandboxed.
+
+The backends protect the workspace's parent differently. `bwrap` masks it with a tmpfs and re-exposes the workspace and allowed binds. Seatbelt has no mount namespace: it denies the parent, re-allows traversal metadata, and exposes the workspace and allowed roots. Keep configuration and credentials outside the workspace and extra binds; choosing an overly broad workspace or explicitly exposing secret-bearing paths defeats that separation.
+
+Seatbelt does **not** expose the host's shared `/tmp`, `/var/folders`, `/Library`, or `/etc` trees. It allows system code, device reads and selected system configuration/certificate paths. `HOME` and `TMPDIR` point to the workspace. Tools must use that scratch location; on macOS use an explicit template such as `mktemp "$TMPDIR/job.XXXXXX"`, since bare `mktemp` may prefer the host's system temp directory. Tools that require other installations or caches need narrow `sandboxRoBinds` / `sandboxRwBinds`. Read-only binds revoke workspace writes beneath them; explicit read-write binds take precedence, matching bwrap's operator-controlled policy. Seatbelt also prevents renaming or removing ancestor directories of media and read-only roots, so moving a writable parent cannot bypass a read-only rule; unrelated children of those ancestors remain writable where otherwise allowed. An explicit read-write bind covering an entire read-only root overrides that root's protection, but a writable descendant does not unlock its ancestors. This is filesystem containment, not a VM or separate user identity.
+
+Neither backend restricts network access.
 
 Enabling the sandbox also automatically activates `restrictToWorkspace` for file tools.
 
@@ -129,7 +146,7 @@ pip install --upgrade nanobot-ai
 
 **Important Notes:**
 - Keep `litellm` updated to the latest version for security fixes
-- Run `pip-audit` regularly, including optional channel dependencies such as `nanobot-ai[whatsapp]`
+- Run `pip-audit` regularly after enabling the channels used in production; their manifest-declared dependencies are installed into the same environment
 - Subscribe to security advisories for nanobot and its dependencies
 
 ### 7. Production Deployment
@@ -237,7 +254,7 @@ If you suspect a security breach:
 ⚠️ **Current Security Limitations:**
 
 1. **No Rate Limiting** - Users can send unlimited messages (add your own if needed)
-2. **Plain Text Config** - API keys stored in plain text (use keyring for production)
+2. **Plain Text Config** - API keys stored in plain text in `config.json` (prefer `${VAR}` env references when possible, or use keyring for production)
 3. **No Session Management** - No automatic session expiry
 4. **Limited Command Filtering** - Only blocks obvious dangerous patterns (enable the bwrap sandbox for kernel-level isolation on Linux)
 5. **No Audit Trail** - Limited security event logging (enhance as needed)
@@ -260,7 +277,7 @@ Before deploying nanobot:
 
 ## Updates
 
-**Last Updated**: 2026-04-05
+**Last Updated**: 2026-07-21
 
 For the latest security updates and announcements, check:
 - GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories

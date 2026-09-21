@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "開啟 Teams 設定指南",
+    "officialLabel": "開啟 Teams 開發者後台",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "用戶端金鑰",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "租用戶 ID",
+        "placeholder": "選填的租用戶 ID"
+      },
+      "path": {
+        "label": "回呼路徑",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "Teams 使用者 ID，以逗號分隔"
+      },
+      "host": {
+        "label": "監聽地址"
+      },
+      "port": {
+        "label": "監聽埠"
+      },
+      "replyInThread": {
+        "label": "在話題中回复",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "僅被提及時的回复"
+      },
+      "validateInboundAuth": {
+        "label": "驗證入站請求",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "refTtlDays": {
+        "label": "會話保留天數"
+      },
+      "pruneWebChatRefs": {
+        "label": "清理 Web Chat 會話",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "清理非個人會話",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "會話刷新間隔"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "可信任服務主機"
+      }
+    }
+  }
+}

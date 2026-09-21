@@ -32,16 +32,14 @@ with ones you control:
 ```json
 {
   "modelPresets": {
-    "fast": {
-      "label": "Fast",
+    "Fast": {
       "provider": "primary-provider",
       "model": "primary-model-id",
       "maxTokens": 4096,
       "contextWindowTokens": 65536,
       "temperature": 0.1
     },
-    "deep": {
-      "label": "Deep",
+    "Deep": {
       "provider": "fallback-provider",
       "model": "fallback-model-id",
       "maxTokens": 4096,
@@ -51,8 +49,8 @@ with ones you control:
   },
   "agents": {
     "defaults": {
-      "modelPreset": "fast",
-      "fallbackModels": ["deep"]
+      "modelPreset": "Fast",
+      "fallbackModels": ["Deep"]
     }
   }
 }
@@ -65,11 +63,17 @@ for common providers.
 
 ## Production notes
 
+- In the WebUI, a reply produced by a named fallback preset shows its provider
+  logo and preset name next to the reply timestamp. Hover, focus, or click the
+  badge for an explanation. The composer still shows your selected preset;
+  primary replies have no fallback badge. Saved replies retain the name used
+  for that invocation, even after a preset is renamed or deleted. Older replies
+  without recorded attribution and unnamed inline fallback objects are not labeled.
 - Keep fallback context windows realistic; smaller fallback windows constrain
   how much context can fit.
 - Put cheaper or faster fallbacks before expensive ones when acceptable.
 - Use `/model <preset>` for runtime switching without editing config.
-- Keep labels human-readable for WebUI model lists.
+- Keep preset names human-readable; the same name appears in the WebUI and `/model`.
 
 ## Security notes
 

@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "primaryAction": "Conectar WeChat",
+    "docsLabel": "Abrir guia do WeChat",
+    "officialLabel": "Abrir WeChat",
+    "fields": {
+      "allowFrom": {
+        "label": "Usuários permitidos",
+        "placeholder": "IDs de usuário separados por vírgulas"
+      },
+      "token": {
+        "label": "Token",
+        "placeholder": "Salvo pelo login via QR"
+      },
+      "sendProgress": {
+        "label": "Enviar progresso"
+      },
+      "sendToolHints": {
+        "label": "Enviar resumos da atividade das ferramentas"
+      },
+      "streaming": {
+        "label": "Usar API de streaming"
+      },
+      "replyProgressMessages": {
+        "label": "Enviar progresso estruturado"
+      },
+      "replyProgressMaxMessages": {
+        "label": "Limite de progresso estruturado"
+      },
+      "contextMessageBudget": {
+        "label": "Máximo de mensagens de contexto"
+      },
+      "blockStreaming": {
+        "label": "Enviar resposta em blocos"
+      },
+      "blockStreamingMinChars": {
+        "label": "Mínimo de caracteres por bloco"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "Limite de mensagens em blocos"
+      },
+      "baseUrl": {
+        "label": "URL da API"
+      },
+      "cdnBaseUrl": {
+        "label": "URL da CDN"
+      },
+      "routeTag": {
+        "label": "Etiqueta de rota"
+      },
+      "stateDir": {
+        "label": "Diretório de estado"
+      },
+      "pollTimeout": {
+        "label": "Tempo limite da consulta (segundos)"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "QR code de login do WeChat",
+    "scanTitle": "Escaneie com o WeChat",
+    "waiting": "Aguardando você escanear o código com o WeChat…",
+    "connected": "WeChat está conectado.",
+    "stopped": "Login do WeChat interrompido.",
+    "connecting": "Conectando...",
+    "verifyTitle": "Verificação necessária",
+    "verifyDescription": "Digite o número exibido no WeChat para continuar.",
+    "verifyMismatch": "O código não corresponde. Digite o novo número exibido no WeChat.",
+    "expired": "O login do WeChat expirou. Escaneie novamente para reconectar.",
+    "failed": "Não foi possível conectar o WeChat. Tente novamente.",
+    "verifyPlaceholder": "Código",
+    "verifySubmit": "Verificar"
+  }
+}

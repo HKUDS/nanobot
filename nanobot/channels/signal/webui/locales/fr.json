@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide Signal",
+    "officialLabel": "Ouvrir le guide signal-cli",
+    "fields": {
+      "phoneNumber": {
+        "label": "Numéro de téléphone",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "Hôte du service",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "Port du service",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "Expéditeurs de messages privés autorisés",
+        "placeholder": "Numéros ou UUID"
+      },
+      "group_allowFrom": {
+        "label": "Groupes autorisés",
+        "placeholder": "ID de groupe"
+      },
+      "groupMessageBufferSize": {
+        "label": "Messages contextuels de groupe"
+      },
+      "attachmentsDir": {
+        "label": "Répertoire des pièces jointes"
+      },
+      "dm_enabled": {
+        "label": "Activer les messages directs",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "dm_policy": {
+        "label": "Accès aux messages directs",
+        "choices": {
+          "allowlist": "Liste verte",
+          "open": "Ouvert"
+        }
+      },
+      "group_enabled": {
+        "label": "Activer les groupes",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "group_policy": {
+        "label": "Accès groupe",
+        "choices": {
+          "allowlist": "Liste verte",
+          "open": "Ouvert"
+        }
+      },
+      "group_requireMention": {
+        "label": "Exiger une mention dans les groupes",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide Mattermost",
+    "officialLabel": "Ouvrir le guide des bots Mattermost",
+    "fields": {
+      "serverUrl": {
+        "label": "URL du serveur",
+        "placeholder": "https://mattermost.example.com"
+      },
+      "token": {
+        "label": "Jeton du bot",
+        "placeholder": "Jeton du bot Mattermost"
+      },
+      "teamId": {
+        "label": "ID de l’équipe",
+        "placeholder": "ID d’équipe facultatif"
+      },
+      "groupPolicy": {
+        "label": "Comportement en canal",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages",
+          "allowlist": "Liste d'autorisation"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "Réponses dans les fils de discussion",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages (sans mention)",
+          "allowlist": "Liste d'autorisation"
+        }
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID utilisateur séparés par des virgules"
+      },
+      "allowFromMatchMode": {
+        "label": "Correspondance des utilisateurs",
+        "choices": {
+          "email": "Courriel",
+          "id": "Identifiant utilisateur",
+          "username": "Nom d'utilisateur"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "Chaînes autorisées"
+      },
+      "replyInThread": {
+        "label": "Répondre dans le fil de discussion",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "includeThreadContext": {
+        "label": "Inclure le contexte du fil de discussion",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Limite du contexte du fil de discussion"
+      },
+      "streaming": {
+        "label": "Diffusion en continu",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "reactEmoji": {
+        "label": "Lire les emoji"
+      },
+      "doneEmoji": {
+        "label": "Terminé emoji"
+      },
+      "sendProgress": {
+        "label": "Envoyer la progression",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "sendToolHints": {
+        "label": "Envoyer des conseils sur les outils",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "dm_enabled": {
+        "label": "Activer les messages directs",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "dm_policy": {
+        "label": "Accès aux messages directs",
+        "choices": {
+          "allowlist": "Liste verte",
+          "open": "Ouvert"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Utilisateurs de messagerie directe autorisés"
+      }
+    }
+  }
+}

@@ -84,10 +84,6 @@ class TestToolHintKnownTools:
         assert '"C:/Program Files/Git/project"' not in result
         assert '"' in result
 
-    def test_exec_short_command_unchanged(self):
-        result = _hint([_tc("exec", {"command": "npm install typescript"})])
-        assert result == "$ npm install typescript"
-
     def test_exec_chained_commands_truncated_not_mid_path(self):
         """Long chained commands should truncate preserving abbreviated paths."""
         cmd = "cd D:\\Documents\\GitHub\\project && npm run build && npm test"
@@ -306,6 +302,43 @@ class TestToolHintMaxLength:
         short = _hint([_tc("list_dir", {"path": long_path})], max_length=40)
         long = _hint([_tc("list_dir", {"path": long_path})], max_length=120)
         assert len(long) > len(short)
+
+    def test_plain_value_tools_respect_max_length(self):
+        """Plain-value tools must truncate like the is_path/is_command branches.
+
+        grep, web_search, x_search and find_files carry no path or command
+        structure to fold, so their raw value used to reach the progress hint
+        untruncated: a 400-char search query produced a 400-char hint.
+        """
+        for name, key in (
+            ("grep", "pattern"),
+            ("web_search", "query"),
+            ("x_search", "query"),
+            ("find_files", "query"),
+        ):
+            short = _hint([_tc(name, {key: "x" * 400})], max_length=40)
+            long = _hint([_tc(name, {key: "x" * 400})], max_length=120)
+            assert len(long) > len(short), name
+            # Longest template is 'search X "{}"' — 12 chars of overhead.
+            assert len(short) <= 40 + 12, name
+            assert "\u2026" in short, name
+
+    def test_plain_value_short_value_untouched(self):
+        """Values inside the budget must not gain an ellipsis."""
+        result = _hint([_tc("grep", {"pattern": "TODO|FIXME"})], max_length=40)
+        assert result == 'grep "TODO|FIXME"'
+
+    def test_plain_value_exactly_at_max_length_untouched(self):
+        """A value exactly at max_length already fits."""
+        query = "a" * 40
+        result = _hint([_tc("web_search", {"query": query})], max_length=40)
+        assert result == f'search "{query}"'
+        assert "\u2026" not in result
+
+    def test_plain_value_one_over_max_length_truncates(self):
+        """One character over the budget truncates instead of overflowing."""
+        result = _hint([_tc("grep", {"pattern": "a" * 41})], max_length=40)
+        assert result == 'grep "' + "a" * 39 + "\u2026" + '"'
 
 
 class TestToolHintMalformedCalls:

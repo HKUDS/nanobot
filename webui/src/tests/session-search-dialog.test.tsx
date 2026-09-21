@@ -17,6 +17,17 @@ function session(index: number): ChatSummary {
 }
 
 describe("SessionSearchDialog", () => {
+  it("windows large result sets and selects an item reached beyond the first window", () => {
+    const onSelect = vi.fn();
+    render(<SessionSearchDialog open sessions={Array.from({ length: 1000 }, (_, i) => session(i))}
+      activeKey={null} loading={false} onOpenChange={() => {}} onSelect={onSelect} />);
+    expect(screen.getAllByRole("button").length).toBeLessThanOrEqual(24);
+    const input = screen.getByRole("textbox", { name: "Search" });
+    for (let i = 0; i < 40; i++) fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("websocket:chat-40");
+    expect(screen.getAllByRole("button").length).toBeLessThanOrEqual(24);
+  });
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -25,7 +36,7 @@ describe("SessionSearchDialog", () => {
     render(
       <SessionSearchDialog
         open
-        sessions={[session(1)]}
+        sessions={[{ ...session(1), title: "Model chat", preview: "/model fast" }]}
         activeKey={null}
         loading={false}
         onOpenChange={() => {}}
@@ -38,6 +49,11 @@ describe("SessionSearchDialog", () => {
     expect(dialog.className).not.toContain("bg-popover/");
     expect(dialog.className).not.toContain("backdrop-blur");
     expect(screen.getByTestId("session-search-scroll")).toHaveClass("overflow-y-auto");
+    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), {
+      target: { value: "model fast" },
+    });
+    expect(screen.queryByText("Model chat")).not.toBeInTheDocument();
   });
 
   it("keeps keyboard navigation scrollable through long result lists", () => {

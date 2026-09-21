@@ -1,0 +1,439 @@
+from pathlib import Path
+
+import pytest
+
+from nanobot.agent.turn_delivery import TurnDeliveryFactory
+from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import ContextCompactionEvent
+from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import TurnCompleted
+from nanobot.events import RetryStatusEvent
+from nanobot.providers.base import LLMProvider, ProviderCallContext
+from nanobot.session.manager import SessionManager
+from nanobot.session.webui_turns import WebuiTurnRoutePolicy
+from nanobot.webui.metadata import (
+    WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_TURN_METADATA_KEY,
+)
+
+
+@pytest.mark.parametrize("unified", [False, True])
+@pytest.mark.parametrize(("key", "channel", "chat_id", "metadata"), [
+    ("slack:C123:1700000000.000100", "slack", "C123",
+     {"slack": {"thread_ts": "1700000000.000100"}}),
+    ("telegram:-100123:topic:42", "telegram", "-100123", {"message_thread_id": 42}),
+    ("discord:456:thread:777", "discord", "777", {}),
+    ("mattermost:channel:root", "mattermost", "channel", {"mattermost": {"root_id": "root"}}),
+    ("matrix:!room:example.org:thread:$root", "matrix", "!room:example.org",
+     {"thread_root_event_id": "$root", "thread_reply_to_event_id": "$reply"}),
+    ("feishu:chat:thread:root", "feishu", "chat",
+     {"message_id": "reply", "thread_id": "root", "chat_type": "group"}),
+    ("dingtalk:group:conversation:user", "dingtalk", "group:conversation", {}),
+])
+async def test_idle_compaction_uses_the_session_delivery_route(
+    key, channel, chat_id, metadata, unified,
+) -> None:
+    factory = TurnDeliveryFactory(MessageBus())
+    event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
+    key = "unified:default" if unified else key
+    msg = InboundMessage(
+        channel=channel, sender_id="user", chat_id=chat_id, content="hello",
+        metadata={
+            "webui_turn_id": "turn-1", "sender_name": "User",
+            "message_id": "received-1", "thread_id": "received-thread", **metadata,
+        },
+    )
+    delivery = factory.create(msg, key)
+    session_metadata = {}
+    delivery.remember_session_route(session_metadata)
+
+    sink = factory.session_events(key, session_metadata)
+    assert sink.publish is not None
+    await sink.emit(event)
+
+    outbound = factory.bus.outbound.get_nowait()
+    assert (outbound.channel, outbound.chat_id, outbound.metadata) == (channel, chat_id, metadata)
+    assert outbound.event is event
+
+
+async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() -> None:
+    factory = TurnDeliveryFactory(MessageBus())
+    key = "unified:default"
+    session_metadata = {}
+    original = InboundMessage(
+        channel="slack", sender_id="user", chat_id="C123", content="hello",
+        metadata={"slack": {"thread_ts": "1700000000.000100"}},
+    )
+    factory.create(original, key).remember_session_route(session_metadata)
+    sink = factory.session_events(key, session_metadata)
+    assert sink.publish is not None
+    await sink.emit(ContextCompactionEvent("compact-1", "started"))
+
+    latest = InboundMessage(
+        channel="telegram", sender_id="user", chat_id="42", content="next question",
+    )
+    factory.create(latest, key).remember_session_route(session_metadata)
+    await sink.emit(ContextCompactionEvent("compact-1", "succeeded"))
+
+    events = [factory.bus.outbound.get_nowait() for _ in range(2)]
+    assert [(msg.channel, msg.chat_id, msg.metadata) for msg in events] == [
+        ("slack", "C123", {"slack": {"thread_ts": "1700000000.000100"}}),
+    ] * 2
+
+
+async def test_idle_compaction_can_deliver_to_a_legacy_websocket_session() -> None:
+    factory = TurnDeliveryFactory(MessageBus())
+    event = ContextCompactionEvent(compaction_id="compact-1", phase="succeeded")
+    sink = factory.session_events("websocket:chat", {})
+    assert sink.publish is not None
+    await sink.emit(event)
+    outbound = factory.bus.outbound.get_nowait()
+    assert (outbound.channel, outbound.chat_id, outbound.event) == ("websocket", "chat", event)
+
+
+@pytest.mark.asyncio
+async def test_retry_event_uses_scoped_channel_delivery() -> None:
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+        metadata={WEBUI_TURN_METADATA_KEY: "turn-1"},
+    )
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+
+    await delivery.events.emit(RetryStatusEvent(
+        state="waiting",
+        attempt=1,
+        max_attempts=4,
+        error_kind="connection",
+        next_retry_at=123.5,
+    ))
+
+    assert bus.outbound_size == 1
+    outbound = bus.outbound.get_nowait()
+    assert isinstance(outbound.event, RetryStatusEvent)
+    assert outbound.event.error_kind == "connection"
+    assert outbound.event.next_retry_at == 123.5
+    assert outbound.metadata[WEBUI_TURN_METADATA_KEY] == "turn-1"
+
+
+@pytest.mark.asyncio
+async def test_delivery_maps_model_error_to_failed_turn_completion() -> None:
+    bus = MessageBus()
+    seen: list[TurnCompleted] = []
+    bus.subscribe(seen.append, TurnCompleted)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+    )
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery.record_stop_reason("error", failure_error_kind="billing")
+
+    await delivery.complete(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-a",
+            content="Sorry, I encountered an error calling the AI model.",
+        ),
+        publish_completion=True,
+    )
+
+    assert len(seen) == 1
+    assert seen[0].outcome == "failed"
+    assert seen[0].failure_kind == "model"
+    assert seen[0].failure_error_kind == "billing"
+    assert bus.outbound_size == 0
+
+
+@pytest.mark.asyncio
+async def test_delivery_keeps_model_error_message_for_ordinary_channels() -> None:
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="telegram",
+        sender_id="user",
+        chat_id="chat-a",
+        content="hello",
+    )
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    delivery.record_stop_reason("error")
+    response = OutboundMessage(
+        channel="telegram",
+        chat_id="chat-a",
+        content="Sorry, I encountered an error calling the AI model.",
+    )
+
+    await delivery.complete(response, publish_completion=True)
+
+    assert await bus.consume_outbound() is response
+
+
+@pytest.mark.parametrize("channel", ["telegram", "cli", "websocket"])
+async def test_background_retry_status_is_quiet(channel) -> None:
+    factory = TurnDeliveryFactory(MessageBus())
+    delivery = factory.create(InboundMessage(
+        channel="system", sender_id="job", chat_id=f"{channel}:chat", content="",
+    ), f"{channel}:chat")
+    assert not delivery.events.accepts(RetryStatusEvent)
+    await delivery.events.emit(RetryStatusEvent("waiting", 1, 4, "connection"))
+    assert factory.bus.outbound.empty()
+
+
+async def test_retry_completion_is_isolated_between_turns_in_one_session() -> None:
+    bus = MessageBus()
+    seen: list[TurnCompleted] = []
+    bus.subscribe(seen.append, TurnCompleted)
+    factory = TurnDeliveryFactory(bus)
+    deliveries = [factory.create(InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="",
+        metadata={WEBUI_TURN_METADATA_KEY: turn},
+    ), "websocket:chat") for turn in ("first", "second")]
+    await deliveries[0].events.emit(RetryStatusEvent("exhausted", 4, 4, "connection"))
+    for delivery in reversed(deliveries):
+        delivery.record_stop_reason("error")
+        await delivery.complete(None, publish_completion=True)
+    assert [(event.context.metadata[WEBUI_TURN_METADATA_KEY], event.failure_attempts)
+            for event in seen] == [("second", None), ("first", 4)]
+
+
+async def test_next_model_request_clears_exhaustion_within_the_same_turn() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from nanobot.providers.base import LLMResponse
+
+    class Provider(LLMProvider):
+        async def chat(self, **kwargs):
+            return LLMResponse(content="payment required", finish_reason="error", error_status_code=402)
+
+        def get_default_model(self):
+            return "test"
+
+    bus = MessageBus()
+    completed: list[TurnCompleted] = []
+    bus.subscribe(completed.append, TurnCompleted)
+    msg = InboundMessage(channel="websocket", sender_id="user", chat_id="chat", content="")
+    delivery = TurnDeliveryFactory(bus).create(msg, msg.session_key)
+    await delivery.events.emit(RetryStatusEvent("exhausted", 4, 4, "connection"))
+    with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
+        response = await Provider(provider_name="test").chat_stream_with_retry(
+            [{"role": "user", "content": "continue"}],
+            provider_context=ProviderCallContext(events=delivery.events),
+        )
+    delivery.record_stop_reason("error", failure_error_kind=LLMProvider.public_error_kind(response))
+    await delivery.complete(None, publish_completion=True)
+    assert completed[0].failure_error_kind == "billing"
+    assert completed[0].failure_attempts is None
+
+
+def test_websocket_lifecycles_get_distinct_internal_owners(tmp_path: Path) -> None:
+    factory = TurnDeliveryFactory(
+        MessageBus(),
+        route_policy=WebuiTurnRoutePolicy(SessionManager(tmp_path / "sessions")),
+    )
+    first_msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="first",
+        metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: "attacker-reused-owner"},
+    )
+    second_msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-a",
+        content="second",
+        metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: "attacker-reused-owner"},
+    )
+
+    first = factory.create(first_msg, first_msg.session_key)
+    second = factory.create(second_msg, second_msg.session_key)
+    first_owner = first.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+    second_owner = second.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+
+    assert first_owner == first.delivery_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+    assert first_owner != second_owner
+    assert first_owner != "attacker-reused-owner"
+    assert second_owner != "attacker-reused-owner"
+    assert WEBUI_TURN_METADATA_KEY not in first.lifecycle_message.metadata
+    assert first_msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == first_owner
+    assert second_msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == second_owner
+
+
+def test_websocket_lifecycle_reuses_registered_ingress_owner(tmp_path: Path) -> None:
+    from nanobot.session import webui_turns as wth
+
+    owner = wth.register_queued_websocket_turn_if_idle("chat-queued", "turn-queued")
+    assert owner is not None
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="chat-queued",
+        content="queued",
+        metadata={
+            WEBSOCKET_TURN_OWNER_METADATA_KEY: owner,
+            WEBUI_TURN_METADATA_KEY: "turn-queued",
+        },
+    )
+    factory = TurnDeliveryFactory(
+        MessageBus(),
+        route_policy=WebuiTurnRoutePolicy(SessionManager(tmp_path / "sessions")),
+    )
+
+    try:
+        delivery = factory.create(msg, msg.session_key)
+
+        assert delivery.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == owner
+        assert msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == owner
+    finally:
+        wth.clear_websocket_turn_if_current("chat-queued", owner)
+
+
+def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path) -> None:
+    from nanobot.session import webui_turns as wth
+
+    sessions = SessionManager(tmp_path / "sessions")
+    target = sessions.get_or_create("websocket:target")
+    target.metadata["webui"] = True
+    sessions.save(target)
+    factory = TurnDeliveryFactory(
+        MessageBus(),
+        route_policy=WebuiTurnRoutePolicy(sessions),
+    )
+    msg = InboundMessage(
+        channel="system",
+        sender_id="session",
+        chat_id="websocket:target",
+        content="Review this",
+        session_key_override="websocket:target",
+        input_role="user",
+    )
+
+    delivery = factory.create(msg, msg.session_key)
+
+    assert (delivery.route.channel, delivery.route.chat_id) == ("websocket", "target")
+    assert delivery.route.publish_lifecycle
+    assert delivery.route.metadata["_wants_stream"] is True
+    owner = delivery.route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+    wth.clear_websocket_turn_if_current("target", owner)
+
+
+@pytest.mark.asyncio
+async def test_same_chat_different_sessions_restore_previous_active_projection(
+    tmp_path: Path,
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from nanobot.session import webui_turns as wth
+
+    factory = TurnDeliveryFactory(
+        MessageBus(),
+        route_policy=WebuiTurnRoutePolicy(SessionManager(tmp_path / "sessions")),
+    )
+    first_msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="shared-chat",
+        content="first",
+        metadata={WEBUI_TURN_METADATA_KEY: "turn-first"},
+        session_key_override="websocket:session-first",
+    )
+    second_msg = InboundMessage(
+        channel="websocket",
+        sender_id="user",
+        chat_id="shared-chat",
+        content="second",
+        metadata={WEBUI_TURN_METADATA_KEY: "turn-second"},
+        session_key_override="websocket:session-second",
+    )
+    first = factory.create(first_msg, first_msg.session_key)
+    second = factory.create(second_msg, second_msg.session_key)
+    first_owner = first.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+    second_owner = second.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+
+    try:
+        await wth.publish_turn_run_status(
+            bus,
+            first.lifecycle_message,
+            "running",
+            started_at=100.0,
+        )
+        await wth.publish_turn_run_status(
+            bus,
+            second.lifecycle_message,
+            "running",
+            started_at=200.0,
+        )
+
+        assert wth.websocket_turn_wall_started_at("shared-chat") == 200.0
+        assert wth.websocket_turn_id("shared-chat") == "turn-second"
+        assert wth.clear_websocket_turn_if_current("shared-chat", second_owner) is True
+        assert wth.websocket_turn_wall_started_at("shared-chat") == 100.0
+        assert wth.websocket_turn_id("shared-chat") == "turn-first"
+        assert wth._WEBSOCKET_TURN_OWNERS["shared-chat"] == first_owner
+        assert wth.clear_websocket_turn_if_current("shared-chat", first_owner) is True
+        assert wth.websocket_turn_wall_started_at("shared-chat") is None
+    finally:
+        wth._WEBSOCKET_ACTIVE_TURNS.pop("shared-chat", None)
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop("shared-chat", None)
+        wth._WEBSOCKET_TURN_IDS.pop("shared-chat", None)
+        wth._WEBSOCKET_TURN_OWNERS.pop("shared-chat", None)
+
+
+def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> None:
+    sessions = SessionManager(tmp_path)
+    factory = TurnDeliveryFactory(
+        MessageBus(),
+        route_policy=WebuiTurnRoutePolicy(sessions),
+    )
+    session_key = "websocket:chat-a"
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id=session_key,
+        content="Background research completed",
+        session_key_override=session_key,
+        metadata={
+            "injected_event": "subagent_result",
+            "subagent_task_id": "sub-1",
+        },
+    )
+
+    hidden_route = factory.create(msg, session_key).route
+
+    assert hidden_route.channel == "websocket"
+    assert hidden_route.chat_id == "chat-a"
+    assert hidden_route.metadata == {}
+    assert hidden_route.publish_lifecycle is False
+
+    session = sessions.get_or_create(session_key)
+    session.metadata["webui"] = True
+    first_visible_route = factory.create(msg, session_key).route
+    second_visible_route = factory.create(msg, session_key).route
+
+    assert first_visible_route.publish_lifecycle is True
+    assert set(first_visible_route.metadata) == {
+        "webui",
+        "_wants_stream",
+        WEBSOCKET_TURN_OWNER_METADATA_KEY,
+        WEBUI_TURN_METADATA_KEY,
+    }
+    assert first_visible_route.metadata["webui"] is True
+    assert first_visible_route.metadata["_wants_stream"] is True
+    first_turn_id = first_visible_route.metadata[WEBUI_TURN_METADATA_KEY]
+    second_turn_id = second_visible_route.metadata[WEBUI_TURN_METADATA_KEY]
+    assert first_turn_id.startswith("subagent:")
+    assert second_turn_id.startswith("subagent:")
+    assert first_turn_id != second_turn_id
+    assert (
+        first_visible_route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+        != second_visible_route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
+    )
+    assert msg.metadata == {
+        "injected_event": "subagent_result",
+        "subagent_task_id": "sub-1",
+    }

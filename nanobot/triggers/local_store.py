@@ -10,7 +10,7 @@ import time
 import uuid
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from filelock import FileLock
 from loguru import logger
@@ -166,7 +166,8 @@ class LocalTriggerStore:
             raise ValueError("trigger message is required")
         self._ensure_dirs()
         with self._lock:
-            trigger = self._find_unlocked(self._load_triggers_unlocked(), trigger_id)
+            triggers = self._load_triggers_unlocked()
+            trigger = self._find_unlocked(triggers, trigger_id)
             if trigger is None:
                 raise TriggerNotFoundError(f"trigger not found: {trigger_id}")
             if not trigger.enabled:
@@ -180,10 +181,20 @@ class LocalTriggerStore:
             path = self.inbox_dir / f"{delivery.created_at_ms}-{delivery.id}.json"
             self._atomic_write(path, json.dumps(_delivery_payload(delivery), ensure_ascii=False))
             delivery.path = path
+            run_record_path: Path | None = None
             try:
-                self.write_delivery_run_record(delivery, trigger=trigger, status="queued")
+                run_record_path = self.write_delivery_run_record(
+                    delivery,
+                    trigger=trigger,
+                    status="queued",
+                )
+                trigger.last_message = _run_record_text(content)
+                trigger.updated_at_ms = delivery.created_at_ms
+                self._save_triggers_unlocked(triggers)
             except BaseException:
                 path.unlink(missing_ok=True)
+                if run_record_path is not None:
+                    run_record_path.unlink(missing_ok=True)
                 delivery.path = None
                 raise
             return delivery
@@ -204,7 +215,7 @@ class LocalTriggerStore:
                     logger.exception("Trigger: failed to parse delivery {}", path)
                     self._move_bad_delivery_unlocked(path)
                     continue
-                os.replace(path, delivery.path)
+                os.replace(path, cast(Path, delivery.path))
                 claimed.append(delivery)
         return claimed
 
@@ -311,9 +322,11 @@ class LocalTriggerStore:
             return []
         try:
             data = json.loads(self.store_path.read_text(encoding="utf-8"))
+            store_data = cast(dict[str, Any], data)
+            raw_triggers = cast(list[Any], store_data.get("triggers", []))
             return [
-                LocalTrigger.from_dict(raw)
-                for raw in data.get("triggers", [])
+                LocalTrigger.from_dict(cast(dict[str, Any], raw))
+                for raw in raw_triggers
                 if isinstance(raw, dict)
             ]
         except Exception as exc:
@@ -386,10 +399,12 @@ class LocalTriggerStore:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return None
-        raw = data.get("delivery", data) if isinstance(data, dict) else None
+        payload = cast(dict[str, Any], data) if isinstance(data, dict) else None
+        raw = payload.get("delivery", payload) if payload is not None else None
         if not isinstance(raw, dict):
             return None
-        trigger_id = raw.get("triggerId", raw.get("trigger_id", ""))
+        delivery_data = cast(dict[str, Any], raw)
+        trigger_id = delivery_data.get("triggerId", delivery_data.get("trigger_id", ""))
         return str(trigger_id) if trigger_id else None
 
     @staticmethod

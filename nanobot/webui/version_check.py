@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 import httpx
+from packaging.version import InvalidVersion, Version
 
 from nanobot import __version__
 
@@ -42,7 +43,13 @@ def check_for_update() -> dict[str, Any] | None:
             return None
         _cache = (now, latest)
 
-    if not latest or latest == __version__:
+    if not isinstance(latest, str) or not latest:
+        return None
+    try:
+        if Version(latest) <= Version(__version__):
+            return None
+    except InvalidVersion:
+        logger.debug("PyPI returned an invalid nanobot version: %r", latest)
         return None
     return {
         "currentVersion": __version__,

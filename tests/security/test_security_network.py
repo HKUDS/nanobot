@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 from unittest.mock import patch
+from urllib.request import getproxies_environment
 
 import pytest
 
@@ -42,6 +43,9 @@ def test_is_loopback_host_rejects_network_targets(host: str) -> None:
 def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
+    # getproxies() falls back to OS-level proxy settings (e.g. the Windows
+    # registry) when no environment variables are set; keep tests hermetic.
+    monkeypatch.setattr("nanobot.security.network.getproxies", getproxies_environment)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -148,6 +152,7 @@ def test_blocks_sampled_addresses_from_internal_networks():
         "169.254.0.0/16",
         "172.16.0.0/12",
         "192.168.0.0/16",
+        "::/128",
         "::1/128",
         "fc00::/7",
         "fe80::/10",
@@ -192,6 +197,47 @@ def test_resolve_url_target_returns_validated_public_ips():
 
     assert ok, err
     assert resolved_ips == ("93.184.216.34",)
+
+
+@pytest.mark.parametrize(
+    ("trust_remote_dns", "expected_ok"),
+    [(False, False), (True, True)],
+)
+def test_resolve_url_target_only_delegates_dns_to_trusted_proxy(
+    trust_remote_dns: bool,
+    expected_ok: bool,
+):
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        side_effect=socket.gaierror("local DNS unavailable"),
+    ):
+        ok, err, resolved_ips = resolve_url_target(
+            "https://proxy-only.example/image.png",
+            trust_remote_dns=trust_remote_dns,
+        )
+
+    assert ok is expected_ok, err
+    assert resolved_ips == ()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost/secret",
+        "http://service.localhost/secret",
+        "http://127.0.0.1/secret",
+        "http://169.254.169.254/latest",
+        "http://[::1]/secret",
+    ],
+)
+def test_resolve_url_target_does_not_delegate_local_targets(url: str):
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        side_effect=socket.gaierror("local DNS unavailable"),
+    ):
+        ok, _, _ = resolve_url_target(url, trust_remote_dns=True)
+
+    assert not ok
 
 
 def test_pin_resolved_url_dns_prevents_second_resolution_rebind():

@@ -1,7 +1,9 @@
 import { AlertTriangle, X } from "lucide-react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { cn } from "@/lib/utils";
 import type { StreamError } from "@/lib/nanobot-client";
 
@@ -11,9 +13,8 @@ interface StreamErrorNoticeProps {
 }
 
 /**
- * Dismissible banner that surfaces transport-level faults the user needs to
- * know about. Rendered above the composer so the message the fault referred
- * to remains in view just above. ``role="alert"`` + ``aria-live="assertive"``
+ * Fallback banner for transport-level faults that cannot be attached to a
+ * visible failed message. ``role="alert"`` + ``aria-live="assertive"``
  * ensures screen readers announce the failure.
  */
 export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) {
@@ -54,7 +55,7 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
 
 function resolveCopy(
   error: StreamError,
-  t: (key: string) => string,
+  t: TFunction,
 ): { title: string; body: string } {
   switch (error.kind) {
     case "message_too_big":
@@ -67,6 +68,13 @@ function resolveCopy(
         title: t("errors.workspaceScopeRejected.title"),
         body: t("errors.workspaceScopeRejected.body"),
       };
+    case "turn_rejected":
+      return {
+        title: t("errors.turnRejected.title"),
+        body: t("errors.turnRejected.body"),
+      };
+    case "model_request_failed":
+      return resolveModelRequestFailureCopy(error, t);
     default: {
       // Exhaustiveness guard: if a new StreamError kind is added, TS will
       // complain here until we add a corresponding i18n branch.

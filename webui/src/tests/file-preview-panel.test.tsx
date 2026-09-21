@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { setAppLanguage } from "@/i18n";
 import { fetchFilePreview } from "@/lib/api";
 
 vi.mock("@/components/CodeBlock", () => ({
@@ -34,7 +35,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 describe("FilePreviewPanel", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await setAppLanguage("en");
     vi.mocked(fetchFilePreview).mockReset();
   });
 
@@ -72,5 +74,33 @@ describe("FilePreviewPanel", () => {
 
     await user.click(closeButton);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates translated chrome without refetching the open file", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      path: "/workspace/notes.md",
+      display_path: "notes.md",
+      language: "markdown",
+      content: "# Notes",
+      truncated: false,
+    });
+
+    render(
+      <FilePreviewPanel
+        sessionKey="websocket:chat-1"
+        path="notes.md"
+        token="tok"
+        onClose={() => {}}
+      />,
+    );
+
+    await screen.findByTestId("mock-code-block");
+    expect(fetchFilePreview).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await setAppLanguage("zh-CN");
+    });
+
+    expect(fetchFilePreview).toHaveBeenCalledTimes(1);
   });
 });

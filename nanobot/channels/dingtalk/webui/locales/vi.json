@@ -1,0 +1,44 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn DingTalk",
+    "officialLabel": "Mở bảng điều khiển DingTalk",
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "Client ID DingTalk"
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "Cho phép chuyển hướng phương tiện",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "Máy chủ chuyển hướng phương tiện"
+      },
+      "groupUserIsolation": {
+        "label": "Các buổi nhóm riêng biệt",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "Tắt tin nhắn trực tiếp",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      }
+    }
+  }
+}

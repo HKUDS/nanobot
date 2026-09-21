@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Open Telegram setup",
+    "officialLabel": "Open BotFather",
+    "fields": {
+      "token": {
+        "label": "Bot token",
+        "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "Network proxy",
+        "placeholder": "http://127.0.0.1:7890"
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "* or Telegram user IDs"
+      },
+      "groupPolicy": {
+        "label": "Group behavior",
+        "choices": {
+          "mention": "Mention only",
+          "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      },
+      "mode": {
+        "label": "Connection mode",
+        "choices": {
+          "polling": "Long polling",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "Reply to message",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "reactEmoji": {
+        "label": "Read emoji"
+      },
+      "connectionPoolSize": {
+        "label": "Connection pool size"
+      },
+      "poolTimeout": {
+        "label": "Connection pool timeout"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "Inline keyboards",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "richMessages": {
+        "label": "Rich messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Stream update interval"
+      },
+      "webhookUrl": {
+        "label": "Webhook URL"
+      },
+      "webhookListenHost": {
+        "label": "Webhook listen host"
+      },
+      "webhookListenPort": {
+        "label": "Webhook listen port"
+      },
+      "webhookPath": {
+        "label": "Webhook path"
+      },
+      "webhookSecretToken": {
+        "label": "Webhook secret token"
+      },
+      "webhookMaxConnections": {
+        "label": "Maximum webhook connections"
+      }
+    }
+  }
+}

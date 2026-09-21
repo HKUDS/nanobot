@@ -1,10 +1,16 @@
 import animate from "tailwindcss-animate";
 import typography from "@tailwindcss/typography";
+import plugin from "tailwindcss/plugin";
 
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: [
+    "./index.html",
+    "./src/**/*.{ts,tsx}",
+    "../nanobot/channels/*/webui/**/*.{ts,tsx}",
+    "./node_modules/streamdown/dist/*.js",
+  ],
   theme: {
     container: {
       center: true,
@@ -46,6 +52,13 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        mark: "var(--radius-mark)",
+        compact: "var(--radius-compact)",
+        control: "var(--radius-control)",
+        floating: "var(--radius-floating)",
+        panel: "var(--radius-panel)",
+        modal: "var(--radius-modal)",
+        prominent: "var(--radius-prominent)",
       },
       colors: {
         background: "hsl(var(--background))",
@@ -84,9 +97,16 @@ export default {
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",
+          content: "hsl(var(--sidebar-content))",
+          "muted-foreground": "hsl(var(--sidebar-muted-foreground))",
+          selected: "hsl(var(--sidebar-selected))",
           accent: "hsl(var(--sidebar-accent))",
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
+        },
+        settings: {
+          canvas: "hsl(var(--settings-canvas))",
+          surface: "hsl(var(--settings-surface))",
         },
       },
       keyframes: {
@@ -105,5 +125,13 @@ export default {
       },
     },
   },
-  plugins: [animate, typography],
+  plugins: [
+    animate,
+    typography,
+    plugin(({ addVariant }) => {
+      // Revealing controls on emulated hover can consume the first Safari
+      // tap. Keep these sidebar hover effects on hover-capable pointers.
+      addVariant("media-hover", "@media (hover: hover)");
+    }),
+  ],
 };

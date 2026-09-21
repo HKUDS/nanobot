@@ -3,13 +3,96 @@ from pathlib import Path
 import tiktoken
 
 from nanobot.utils import helpers
-from nanobot.utils.helpers import _write_text_atomic, split_message, truncate_text_to_tokens
+from nanobot.utils.helpers import (
+    _write_text_atomic,
+    content_with_media_breadcrumbs,
+    split_message,
+    truncate_text_to_tokens,
+)
 
 
 def test_split_message_no_code_blocks_unchanged():
     content = "alpha beta gamma delta"
 
     assert split_message(content, max_len=12) == ["alpha beta", "gamma delta"]
+
+
+def test_split_message_preserves_indentation_after_newline():
+    content = "header\n    indented code"
+
+    assert split_message(content, max_len=18) == ["header", "    indented code"]
+
+
+def test_split_message_preserves_indentation_across_hard_break():
+    content = "head\n    abcdefghij"
+
+    assert split_message(content, max_len=8) == ["head", "    abcd", "efghij"]
+
+
+def test_split_message_preserves_indentation_when_newline_is_at_hard_break():
+    content = "abcdefgh\n    code"
+
+    assert split_message(content, max_len=8) == ["abcdefgh", "    code"]
+    assert split_message(content.replace("\n", "\r\n"), max_len=8) == [
+        "abcdefgh",
+        "    code",
+    ]
+
+
+def test_split_message_handles_crlf_before_hard_break():
+    content = "header\r\n    indented code"
+
+    assert split_message(content, max_len=18) == ["header", "    indented code"]
+    assert split_message("abcdefg\r\n    code", max_len=8) == [
+        "abcdefg",
+        "    code",
+    ]
+
+
+def test_split_message_preserves_indent_after_space_then_newline_boundary():
+    content = "abcdef \n    code"
+
+    assert split_message(content, max_len=7) == ["abcdef", "    cod", "e"]
+    assert split_message(content.replace("\n", "\r\n"), max_len=7) == [
+        "abcdef",
+        "    cod",
+        "e",
+    ]
+
+
+def test_split_message_drops_blank_chunks_from_long_indentation():
+    content = "head\n" + " " * 20 + "x"
+
+    chunks = split_message(content, max_len=8)
+
+    assert chunks == ["head", "    x"]
+    assert all(chunk.strip() for chunk in chunks)
+
+
+def test_split_message_drops_whitespace_only_line_at_boundary():
+    content = "    \nhello world"
+
+    assert split_message(content, max_len=8) == ["hello", "world"]
+
+
+def test_split_message_drops_whitespace_only_tail_after_hard_break():
+    prefix = "abcdefgh"
+
+    assert split_message(prefix + "\n", max_len=8) == [prefix]
+    assert split_message(prefix + " ", max_len=8) == [prefix]
+
+
+def test_split_message_keeps_one_chunk_for_all_whitespace_input():
+    content = " " * 10
+
+    assert split_message(content, max_len=4) == [" " * 4]
+
+
+def test_split_message_nonpositive_maxlen_returns_unsplit():
+    content = "alpha beta gamma delta"
+
+    assert split_message(content, max_len=0) == [content]
+    assert split_message(content, max_len=-1) == [content]
 
 
 def test_truncate_text_to_tokens_keeps_text_within_budget():
@@ -34,6 +117,33 @@ def test_truncate_text_to_tokens_non_positive_budget_returns_text():
     text = "anything"
 
     assert truncate_text_to_tokens(text, 0) == text
+
+
+def test_content_with_media_breadcrumbs_preserves_valid_paths():
+    assert content_with_media_breadcrumbs(
+        "user",
+        "review these",
+        ["/media/report.pdf", "/media/clip.mp4"],
+    ) == (
+        "review these\n"
+        "[image: /media/report.pdf]\n"
+        "[image: /media/clip.mp4]"
+    )
+
+
+def test_content_with_media_breadcrumbs_only_rewrites_plain_user_content():
+    structured = [{"type": "text", "text": "hello"}]
+
+    assert content_with_media_breadcrumbs(
+        "assistant",
+        "done",
+        ["/media/output.png"],
+    ) == "done"
+    assert content_with_media_breadcrumbs(
+        "user",
+        structured,
+        ["/media/input.png"],
+    ) is structured
 
 
 def test_write_text_atomic_fsyncs_file_and_parent_directory(

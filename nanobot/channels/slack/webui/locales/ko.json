@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Slack 설정 가이드 열기",
+    "officialLabel": "Slack 앱 열기",
+    "actions": {
+      "slack-manifest": "앱 매니페스트 복사"
+    },
+    "fields": {
+      "appToken": {
+        "label": "앱 토큰",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "봇 토큰",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "그룹 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      },
+      "mode": {
+        "label": "연결 모드",
+        "choices": {
+          "socket": "소켓 모드"
+        }
+      },
+      "webhookPath": {
+        "label": "웹훅 경로"
+      },
+      "replyInThread": {
+        "label": "스레드로 답장하기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "reactEmoji": {
+        "label": "이모티콘 읽기"
+      },
+      "doneEmoji": {
+        "label": "이모티콘 완료"
+      },
+      "includeThreadContext": {
+        "label": "스레드 컨텍스트 포함",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "threadContextLimit": {
+        "label": "스레드 컨텍스트 제한"
+      },
+      "allowFrom": {
+        "label": "허용된 사용자"
+      },
+      "groupAllowFrom": {
+        "label": "허용된 채널"
+      },
+      "groupRequireMention": {
+        "label": "채널에서 멘션 필요",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "dm_enabled": {
+        "label": "다이렉트 메시지 활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "dm_policy": {
+        "label": "다이렉트 메시지 액세스",
+        "choices": {
+          "allowlist": "허용 목록",
+          "open": "열기"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "허용된 직접 메시지 사용자"
+      },
+      "proxy": {
+        "label": "네트워크 프록시",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "setup": {
+    "primaryAction": "Feishu 연결",
+    "docsLabel": "Feishu 설정 가이드 열기",
+    "officialLabel": "Feishu 콘솔 열기",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "현재 Secret을 유지하려면 비워 두세요"
+      },
+      "domain": {
+        "label": "지역",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "그룹 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "topicIsolation": {
+        "label": "주제별 대화 분리",
+        "choices": {
+          "true": "주제별로 세션 분리",
+          "false": "그룹에서 하나의 세션 공유"
+        }
+      },
+      "name": {
+        "label": "계정 이름"
+      },
+      "encryptKey": {
+        "label": "암호화 키"
+      },
+      "verificationToken": {
+        "label": "인증 토큰"
+      },
+      "reactEmoji": {
+        "label": "이모티콘 읽기"
+      },
+      "doneEmoji": {
+        "label": "이모티콘 완료"
+      },
+      "toolHintPrefix": {
+        "label": "도구 힌트 접두사"
+      },
+      "replyToMessage": {
+        "label": "메시지에 답장하기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "{{name}} 어시스턴트 활성화",
+    "configured": "연결됨",
+    "needsSetup": "인증 필요",
+    "qrAlt": "Feishu 연결 QR 코드",
+    "scanTitle": "Feishu로 스캔",
+    "scanDescription": "휴대폰의 Feishu 또는 Lark로 스캔하세요. 승인 후 nanobot이 설정을 완료합니다.",
+    "waiting": "승인을 기다리는 중...",
+    "connected": "Feishu가 연결되었습니다.",
+    "stopped": "연결이 중지되었습니다.",
+    "connecting": "연결 중..."
+  }
+}

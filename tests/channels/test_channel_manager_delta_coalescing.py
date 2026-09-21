@@ -11,12 +11,12 @@ from nanobot.bus.outbound_events import (
     RetryWaitEvent,
     StreamDeltaEvent,
     StreamEndEvent,
-    outbound_event_from_message,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
+from nanobot.channels.mattermost.runtime import MattermostChannel
 from nanobot.config.schema import Config
 
 
@@ -49,6 +49,7 @@ class MockChannel(BaseChannel):
         stream_id=None,
         stream_end=False,
         resuming=False,
+        merge_next=False,
     ):
         return await self._send_delta_mock(
             chat_id,
@@ -57,6 +58,7 @@ class MockChannel(BaseChannel):
             stream_id=stream_id,
             stream_end=stream_end,
             resuming=resuming,
+            merge_next=merge_next,
         )
 
 
@@ -74,7 +76,7 @@ def bus():
 @pytest.fixture
 def manager(config, bus):
     manager = ChannelManager(config, bus)
-    manager.channels["mock"] = MockChannel({}, bus)
+    manager.channels["mock"] = manager._build_channel("mock", MockChannel, {})
     return manager
 
 
@@ -92,16 +94,32 @@ def _end(
     chat_id: str = "chat1",
     stream_id: str | None = None,
     resuming: bool = False,
+    merge_next: bool = False,
 ):
     return outbound_message_for_event(
         channel="mock",
         chat_id=chat_id,
-        event=StreamEndEvent(content=content, stream_id=stream_id, resuming=resuming),
+        event=StreamEndEvent(
+            content=content,
+            stream_id=stream_id,
+            resuming=resuming,
+            merge_next=merge_next,
+        ),
     )
 
 
 class TestDeltaCoalescing:
     """Tests for stream delta message coalescing."""
+
+    async def test_response_source_change_is_a_coalescing_boundary(self, manager, bus):
+        first, second = _delta("primary"), _delta("backup")
+        first.metadata["response_sources"] = [{"provider": "openai", "model": "m", "preset": "a"}]
+        second.metadata["response_sources"] = [{"provider": "openai", "model": "m", "preset": "b"}]
+        await bus.publish_outbound(second)
+        merged, pending = manager._coalesce_stream_deltas(first)
+        assert merged.content == "primary"
+        assert merged.metadata == first.metadata
+        assert pending == [second]
 
     @pytest.mark.asyncio
     async def test_single_delta_not_coalesced(self, manager, bus):
@@ -111,13 +129,13 @@ class TestDeltaCoalescing:
         async def process_one():
             try:
                 m = await asyncio.wait_for(bus.consume_outbound(), timeout=0.1)
-                event = outbound_event_from_message(m)
+                event = m.event
                 if isinstance(event, StreamDeltaEvent):
                     m, pending = manager._coalesce_stream_deltas(m)
                     for p in pending:
                         await bus.publish_outbound(p)
                 channel = manager.channels.get(m.channel)
-                event = outbound_event_from_message(m)
+                event = m.event
                 if channel and isinstance(event, StreamDeltaEvent):
                     await channel.send_delta(
                         m.chat_id,
@@ -137,6 +155,7 @@ class TestDeltaCoalescing:
             stream_id=None,
             stream_end=False,
             resuming=False,
+            merge_next=False,
         )
 
     @pytest.mark.asyncio
@@ -184,13 +203,19 @@ class TestDeltaCoalescing:
     @pytest.mark.asyncio
     async def test_stream_end_terminates_coalescing(self, manager, bus):
         await bus.publish_outbound(_delta("Hello"))
-        await bus.publish_outbound(_end(" world"))
+        await bus.publish_outbound(_end(
+            " world",
+            resuming=True,
+            merge_next=True,
+        ))
 
         first_msg = await bus.consume_outbound()
         merged, pending = manager._coalesce_stream_deltas(first_msg)
 
         assert merged.content == "Hello world"
         assert isinstance(merged.event, StreamEndEvent)
+        assert merged.event.resuming is True
+        assert merged.event.merge_next is True
         assert len(pending) == 0
 
     @pytest.mark.asyncio
@@ -258,13 +283,13 @@ class TestDispatchOutboundWithCoalescing:
         processed = []
 
         msg = pending.pop(0) if pending else await bus.consume_outbound()
-        event = outbound_event_from_message(msg)
+        event = msg.event
         if isinstance(event, StreamDeltaEvent):
             msg, extra_pending = manager._coalesce_stream_deltas(msg)
             pending.extend(extra_pending)
 
         channel = manager.channels.get(msg.channel)
-        event = outbound_event_from_message(msg)
+        event = msg.event
         if channel and isinstance(event, StreamDeltaEvent):
             await channel.send_delta(
                 msg.chat_id,
@@ -284,14 +309,49 @@ class TestProgressFiltering:
 
     def test_progress_visibility_uses_global_defaults(self, manager):
         assert manager._should_send_progress("mock", tool_hint=False) is True
-        assert manager._should_send_progress("mock", tool_hint=True) is False
+        assert manager._should_send_progress("mock", tool_hint=True) is True
 
-    def test_progress_visibility_uses_channel_overrides(self, manager):
-        manager.channels["mock"].send_progress = False
-        manager.channels["mock"].send_tool_hints = True
+    def test_progress_visibility_uses_channel_overrides(self, manager, bus):
+        manager.channels["mock"] = manager._build_channel(
+            "mock",
+            MockChannel,
+            {"sendProgress": False, "sendToolHints": False},
+        )
 
         assert manager._should_send_progress("mock", tool_hint=False) is False
-        assert manager._should_send_progress("mock", tool_hint=True) is True
+        assert manager._should_send_progress("mock", tool_hint=True) is False
+
+    def test_channel_config_defaults_do_not_override_global_policy(self, bus):
+        manager = ChannelManager.__new__(ChannelManager)
+        manager.config = Config.model_validate({
+            "channels": {
+                "sendProgress": False,
+                "sendToolHints": False,
+            },
+        })
+        manager.bus = bus
+
+        channel = manager._build_channel(
+            "mattermost",
+            MattermostChannel,
+            {"enabled": True},
+        )
+
+        assert channel.send_progress is False
+        assert channel.send_tool_hints is False
+
+        opted_in = manager._build_channel(
+            "mattermost",
+            MattermostChannel,
+            {
+                "enabled": True,
+                "sendProgress": True,
+                "sendToolHints": True,
+            },
+        )
+
+        assert opted_in.send_progress is True
+        assert opted_in.send_tool_hints is True
 
     def test_progress_visibility_returns_false_for_missing_channel(self, manager):
         assert manager._should_send_progress("nonexistent", tool_hint=False) is False
@@ -342,31 +402,6 @@ class TestProgressFiltering:
         send_mock = manager.channels["mock"]._send_mock
         assert send_mock.await_count == 1
         assert send_mock.await_args_list[0].args[0].content == "final answer"
-
-    @pytest.mark.asyncio
-    async def test_legacy_progress_flag_uses_runtime_progress_filter(self, manager, bus):
-        manager.channels["mock"].send_progress = False
-        await bus.publish_outbound(OutboundMessage(
-            channel="mock",
-            chat_id="chat1",
-            content="legacy progress-shaped message",
-            metadata={"_progress": True},
-        ))
-
-        task = asyncio.create_task(manager._dispatch_outbound())
-        try:
-            for _ in range(30):
-                if manager.channels["mock"]._send_mock.await_count >= 1:
-                    break
-                await asyncio.sleep(0.05)
-        finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-        assert manager.channels["mock"]._send_mock.await_count == 0
 
     @pytest.mark.asyncio
     async def test_channel_override_can_enable_tool_hints(self, manager, bus):

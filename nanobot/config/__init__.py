@@ -1,5 +1,6 @@
 """Configuration module for nanobot."""
 
+from nanobot.config.errors import ConfigIssue, ConfigLoadError
 from nanobot.config.loader import get_config_path, load_config
 from nanobot.config.paths import (
     get_cli_history_path,
@@ -17,6 +18,8 @@ from nanobot.config.schema import Config
 
 __all__ = [
     "Config",
+    "ConfigIssue",
+    "ConfigLoadError",
     "load_config",
     "get_config_path",
     "get_data_dir",

@@ -48,7 +48,7 @@ def get_webui_dir() -> Path:
     return get_runtime_subdir("webui")
 
 
-def get_workspace_path(workspace: str | None = None) -> Path:
+def get_workspace_path(workspace: str | Path | None = None) -> Path:
     """Resolve and ensure the agent workspace path."""
     path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
     return ensure_dir(path)

@@ -15,19 +15,20 @@ import asyncio
 import multiprocessing
 import socket
 import time
-from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools import mcp as mcp_module
-from nanobot.agent.tools.mcp import MCPToolWrapper
-from nanobot.bus.queue import MessageBus
+from nanobot.agent.tools.mcp import MCPProvider, MCPToolWrapper
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import MCPServerConfig
 from nanobot.security import network as security_network
 
-_IDLE_TIMEOUT_SECONDS = 5
+# Leave enough headroom for reconnect handshakes on slower CI hosts; each test
+# still waits beyond this deadline explicitly before exercising recovery.
+_IDLE_TIMEOUT_SECONDS = 1.0
+_IDLE_EXPIRY_GRACE_SECONDS = 0.5
 _TOOL_TIMEOUT_SECONDS = 10
 
 
@@ -43,8 +44,11 @@ def _run_mcp_server(port: int, ready_event: multiprocessing.Event) -> None:
     The server exposes a single ``greet`` tool and terminates idle sessions
     after ``_IDLE_TIMEOUT_SECONDS``.
     """
+    import uvicorn
     from mcp.server.fastmcp import FastMCP
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.responses import Response
+    from starlette.types import Receive, Scope, Send
 
     mcp = FastMCP("IdleTimeoutDemo", json_response=True, port=port)
 
@@ -61,8 +65,19 @@ def _run_mcp_server(port: int, ready_event: multiprocessing.Event) -> None:
         session_idle_timeout=_IDLE_TIMEOUT_SECONDS,
     )
 
+    app = mcp.streamable_http_app()
+
+    async def without_notification_stream(scope: Scope, receive: Receive, send: Send) -> None:
+        # A standalone GET stream keeps a session active in MCP SDK 1.30+.
+        # This fixture needs a genuinely idle session: decline the optional
+        # notification stream, but keep real POST/DELETE and lifespan handling.
+        if scope["type"] == "http" and scope["method"] == "GET":
+            await Response(status_code=405, headers={"Allow": "POST, DELETE"})(scope, receive, send)
+        else:
+            await app(scope, receive, send)
+
     ready_event.set()
-    mcp.run(transport="streamable-http")
+    uvicorn.run(without_notification_stream, host="127.0.0.1", port=port)
 
 
 async def _wait_for_server(url: str, timeout: float = 10.0) -> bool:
@@ -110,18 +125,9 @@ def mcp_server_url():
         process.join(timeout=2.0)
 
 
-def _make_loop(tmp_path, *, mcp_servers: dict) -> AgentLoop:
-    bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-    provider.generation.max_tokens = 4096
-    return AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=tmp_path,
-        model="test-model",
-        mcp_servers=mcp_servers,
-    )
+def _make_provider(*, mcp_servers: dict) -> tuple[MCPProvider, ToolRegistry]:
+    registry = ToolRegistry()
+    return MCPProvider(mcp_servers, registry), registry
 
 
 @pytest.fixture(autouse=True)
@@ -167,24 +173,25 @@ async def test_mcp_reconnect_after_session_timeout(tmp_path, mcp_server_url):
         tool_timeout=_TOOL_TIMEOUT_SECONDS,
         enabled_tools=["*"],
     )
-    loop = _make_loop(tmp_path, mcp_servers={"repro": cfg})
+    provider, registry = _make_provider(mcp_servers={"repro": cfg})
 
-    await asyncio.create_task(loop._connect_mcp())
-    assert "repro" in loop._mcp_stacks
+    await asyncio.create_task(provider.connect())
+    assert provider.connected_server_names == {"repro"}
 
-    tool = loop.tools.get("mcp_repro_greet")
+    tool = registry.get("mcp_repro_greet")
     assert isinstance(tool, MCPToolWrapper)
 
     output = await asyncio.create_task(tool.execute(name="first"))
     assert "Hello, first" in output
 
     # Wait for the server-side idle timeout to terminate the session.
-    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + 1)
+    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + _IDLE_EXPIRY_GRACE_SECONDS)
 
     output = await asyncio.create_task(tool.execute(name="second"))
     assert "Hello, second" in output
+    assert registry.get("mcp_repro_greet") is not tool  # Recovery must replace the session's wrapper.
 
-    await asyncio.create_task(loop.close_mcp())
+    await asyncio.create_task(provider.aclose())
 
 
 @pytest.mark.asyncio
@@ -200,14 +207,14 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
         tool_timeout=_TOOL_TIMEOUT_SECONDS,
         enabled_tools=["*"],
     )
-    loop = _make_loop(tmp_path, mcp_servers={"repro": cfg})
+    provider, registry = _make_provider(mcp_servers={"repro": cfg})
 
-    await asyncio.create_task(loop._connect_mcp())
-    tool = loop.tools.get("mcp_repro_greet")
+    await asyncio.create_task(provider.connect())
+    tool = registry.get("mcp_repro_greet")
     assert isinstance(tool, MCPToolWrapper)
 
     await asyncio.create_task(tool.execute(name="first"))
-    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + 1)
+    await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + _IDLE_EXPIRY_GRACE_SECONDS)
 
     reconnect_started = asyncio.Event()
     finish_reconnect = asyncio.Event()
@@ -221,7 +228,7 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
     monkeypatch.setattr(mcp_module, "connect_mcp_servers", gated_connect)
     call_task = asyncio.create_task(tool.execute(name="second"))
     await asyncio.wait_for(reconnect_started.wait(), timeout=5)
-    close_task = asyncio.create_task(loop.close_mcp())
+    close_task = asyncio.create_task(provider.aclose())
     await asyncio.sleep(0)
     finish_reconnect.set()
 
@@ -242,4 +249,4 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
         unhandled.append(exc)
 
     assert not unhandled, f"Unhandled exception leaked during reconnect/shutdown: {unhandled[0]}"
-    assert loop._mcp_stacks == {}
+    assert provider.connected_server_names == set()

@@ -58,20 +58,64 @@ def test_allow_patterns_is_whitelist_only():
     assert "allowlist" in result.lower()
 
 
-def test_allow_patterns_do_not_allow_chained_command_bypass():
-    """A partial allowlist match must not bypass deny patterns in chained commands."""
-    tool = ExecTool(allow_patterns=[r"\becho\b"])
-    result = tool._guard_command("echo hello; rm -rf /", "/tmp")
+def test_guard_allow_patterns_block_non_matching_chained_segment():
+    """Every top-level shell segment must match an allow pattern."""
+    tool = ExecTool(allow_patterns=[r"\becho\s+allowlisted\b"])
+
+    result = tool._guard_command("echo allowlisted && touch /tmp/evil", "/tmp")
+    assert result is not None
+    assert "allowlist" in result.lower()
+
+
+def test_guard_allow_patterns_block_single_ampersand_chained_segment():
+    """A backgrounded command is also a top-level shell segment."""
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted.*"])
+
+    result = tool._guard_command("echo allowlisted & touch /tmp/evil", "/tmp")
+    assert result is not None
+    assert "allowlist" in result.lower()
+
+
+def test_guard_allow_patterns_block_newline_chained_segment():
+    """A newline separates commands, so each line must match on its own."""
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted\s*.*"])
+
+    result = tool._guard_command("echo allowlisted\ntouch /tmp/evil", "/tmp")
+    assert result is not None
+    assert "allowlist" in result.lower()
+
+
+def test_guard_newline_chained_segment_still_hits_deny_patterns():
+    """An allowlisted first line does not exempt a denied later line."""
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted\s*.*"])
+
+    result = tool._guard_command("echo allowlisted\nrm -rf /", "/tmp")
     assert result is not None
     assert "deny pattern filter" in result.lower()
 
 
-def test_allow_patterns_do_not_allow_comment_tail_bypass():
-    """Comment tails must not make a non-allowlisted command match."""
-    tool = ExecTool(allow_patterns=[r"echo allowlisted"])
-    result = tool._guard_command("touch canary # echo allowlisted", "/tmp")
+def test_split_shell_segments_keep_line_continuation_intact():
+    """A backslash-escaped newline continues one command, not a new segment."""
+    assert ExecTool._split_shell_segments("echo allowlisted \\\nextra") == [
+        "echo allowlisted \\\nextra"
+    ]
+
+
+def test_guard_allow_patterns_preserve_trailing_background_operator():
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted"])
+
+    result = tool._guard_command("echo allowlisted &", "/tmp")
+
     assert result is not None
     assert "allowlist" in result.lower()
+
+
+def test_guard_allow_patterns_keep_fd_redirection_ampersand():
+    tool = ExecTool(allow_patterns=[r"echo\s+allowlisted\s+2>&1"])
+
+    result = tool._guard_command("echo allowlisted 2>&1", "/tmp")
+
+    assert result is None
 
 
 def test_deny_patterns_search_original_command_with_quoted_hash():
@@ -86,4 +130,33 @@ def test_allow_patterns_fullmatch_allows_exact_command():
     """A full-command allow pattern can still exempt an exact denied command."""
     tool = ExecTool(allow_patterns=[r"rm\s+-rf\s+/tmp/build"])
     result = tool._guard_command("rm -rf /tmp/build", "/tmp")
+    assert result is None
+
+
+def test_guard_allow_patterns_allow_single_matching_segment():
+    tool = ExecTool(allow_patterns=[r"\becho\s+allowlisted\b"])
+
+    result = tool._guard_command("echo allowlisted", "/tmp")
+
+    assert result is None
+
+
+def test_guard_allow_patterns_allow_multiple_matching_segments():
+    tool = ExecTool(
+        allow_patterns=[
+            r"\becho\s+allowlisted\b",
+            r"\becho\s+also_allowed\b",
+        ]
+    )
+
+    result = tool._guard_command("echo allowlisted && echo also_allowed", "/tmp")
+
+    assert result is None
+
+
+def test_guard_allow_patterns_keep_fullmatch_style_compatibility():
+    tool = ExecTool(allow_patterns=[r"^echo\s+allowlisted$"])
+
+    result = tool._guard_command("echo allowlisted", "/tmp")
+
     assert result is None

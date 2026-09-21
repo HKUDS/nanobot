@@ -8,6 +8,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.exec_session import ExecSessionManager
+    from nanobot.agent.tools.file_state import FileStates
+    from nanobot.agent.tools.runtime_control import RuntimeControl
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import ProviderConfig, ToolsConfig
+    from nanobot.cron.service import CronService
+    from nanobot.providers.factory import ProviderSnapshot
+    from nanobot.security.workspace_access import WorkspaceSandboxStatus
+    from nanobot.session.manager import SessionManager
     from nanobot.utils.llm_runtime import LLMRuntime
 
 _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
@@ -29,6 +39,8 @@ class RequestContext:
     sender_id: str | None = None
     turn_id: str | None = None
     workspace: Path | None = None
+    attributes: dict[str, Any] = field(default_factory=dict)
+    log_content: bool = True
 
 
 @runtime_checkable
@@ -59,6 +71,12 @@ def current_request_context() -> RequestContext | None:
     return _CURRENT_REQUEST_CONTEXT.get()
 
 
+def tool_log_content_allowed() -> bool:
+    """Whether diagnostics may include content from the current tool request."""
+    ctx = current_request_context()
+    return ctx is None or ctx.log_content
+
+
 def current_request_session_key() -> str | None:
     ctx = current_request_context()
     return ctx.session_key if ctx else None
@@ -66,15 +84,16 @@ def current_request_session_key() -> str | None:
 
 @dataclass
 class ToolContext:
-    config: Any
+    config: ToolsConfig
     workspace: str
-    bus: Any | None = None
-    subagent_manager: Any | None = None
-    cron_service: Any | None = None
-    sessions: Any | None = None
-    file_state_store: Any = field(default=None)
-    provider_snapshot_loader: Callable[[], Any] | None = None
-    image_generation_provider_configs: dict[str, Any] | None = None
+    bus: MessageBus | None = None
+    subagent_manager: SubagentManager | None = None
+    cron_service: CronService | None = None
+    exec_session_manager: ExecSessionManager | None = None
+    sessions: SessionManager | None = None
+    file_state_store: FileStates | None = None
+    provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None
+    image_generation_provider_configs: dict[str, ProviderConfig] | None = None
     timezone: str = "UTC"
-    workspace_sandbox: Any | None = None
-    runtime_events: Any | None = None
+    workspace_sandbox: WorkspaceSandboxStatus | None = None
+    runtime_control: RuntimeControl | None = None

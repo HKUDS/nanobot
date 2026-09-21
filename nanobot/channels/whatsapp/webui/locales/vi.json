@@ -1,0 +1,36 @@
+{
+  "setup": {
+    "primaryAction": "Kết nối WhatsApp",
+    "docsLabel": "Mở hướng dẫn WhatsApp",
+    "officialLabel": "Mở trợ giúp WhatsApp",
+    "fields": {
+      "allowFrom": {
+        "label": "Liên hệ được phép",
+        "placeholder": "Số điện thoại hoặc ID WhatsApp"
+      },
+      "groupPolicy": {
+        "label": "Hành vi trong nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      },
+      "proxy": {
+        "label": "Proxy mạng",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Mã QR liên kết WhatsApp",
+    "scanTitle": "Liên kết WhatsApp",
+    "scanDescription": "Trong WhatsApp, mở Thiết bị đã liên kết, chọn Liên kết thiết bị rồi quét mã này.",
+    "waiting": "Đang chờ WhatsApp…",
+    "connected": "WhatsApp đã kết nối.",
+    "stopped": "Kết nối đã dừng. Hãy bắt đầu lại để nhận mã mới.",
+    "connecting": "Đang kết nối…",
+    "scanAgain": "Liên kết tài khoản khác",
+    "connect": "Liên kết WhatsApp"
+  }
+}

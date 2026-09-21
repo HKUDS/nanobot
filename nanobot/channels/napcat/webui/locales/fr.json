@@ -1,0 +1,41 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide NapCat",
+    "officialLabel": "Ouvrir la documentation NapCat",
+    "fields": {
+      "wsUrl": {
+        "label": "URL WebSocket",
+        "placeholder": "ws://127.0.0.1:3001"
+      },
+      "accessToken": {
+        "label": "Jeton d’accès",
+        "placeholder": "Jeton facultatif"
+      },
+      "groupPolicy": {
+        "label": "Comportement en groupe",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages",
+          "allowlist": "Liste d’autorisation"
+        }
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID QQ séparés par des virgules"
+      },
+      "groupPolicyOverrides": {
+        "label": "Remplacements de comportement de groupe (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "Bienvenue aux nouveaux membres",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "maxImageBytes": {
+        "label": "Taille maximale de l'image"
+      }
+    }
+  }
+}

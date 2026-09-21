@@ -1,19 +1,22 @@
 """Cron tool for scheduling reminders and tasks."""
 
+# pyright: reportIncompatibleMethodOverride=false
+
 from __future__ import annotations
 
-from contextvars import ContextVar
+import time
 from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import ToolContext, current_request_context
 from nanobot.agent.tools.schema import (
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
 from nanobot.cron.service import CronService
+from nanobot.cron.session_turns import is_cron_turn
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 
@@ -28,7 +31,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report'). "
         "Not used for action='list' or action='remove'."
     ),
-    every_seconds=IntegerSchema(0, description="Interval in seconds (for recurring tasks)"),
+    every_seconds=IntegerSchema(description="Interval in seconds (for recurring tasks)"),
     cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
     tz=StringSchema(
         "Optional IANA timezone for cron expressions (e.g. 'America/Vancouver'). "
@@ -57,15 +60,17 @@ class CronTool(Tool):
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
         self._cron = cron_service
         self._default_timezone = default_timezone
-        self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.cron_service is not None
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls(cron_service=ctx.cron_service, default_timezone=ctx.timezone)
+    def create(cls, ctx: ToolContext) -> Tool:
+        cron_service = ctx.cron_service
+        if cron_service is None:
+            raise RuntimeError("CronTool requires an initialized cron service")
+        return cls(cron_service=cron_service, default_timezone=ctx.timezone)
 
     @staticmethod
     def _request_route() -> tuple[str, str, str, dict[str, Any]]:
@@ -78,14 +83,6 @@ class CronTool(Tool):
             raw_key if ctx.session_key == UNIFIED_SESSION_KEY else (ctx.session_key or "")
         )
         return session_key, ctx.channel or "", ctx.chat_id or "", dict(ctx.metadata or {})
-
-    def set_cron_context(self, active: bool):
-        """Mark whether the tool is executing inside a cron job callback."""
-        return self._in_cron_context.set(active)
-
-    def reset_cron_context(self, token) -> None:
-        """Restore previous cron context."""
-        self._in_cron_context.reset(token)
 
     @staticmethod
     def _validate_timezone(tz: str) -> str | None:
@@ -138,11 +135,10 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
-        deliver: bool = True,
-        **kwargs: Any,
     ) -> str:
         if action == "add":
-            if self._in_cron_context.get():
+            request = current_request_context()
+            if request is not None and is_cron_turn(request.metadata):
                 return ToolResult.error("Error: cannot schedule new jobs from within a cron job execution")
             return self._add_job(name, message, every_seconds, cron_expr, tz, at)
         elif action == "list":
@@ -177,6 +173,14 @@ class CronTool(Tool):
             if err := self._validate_timezone(tz):
                 return err
 
+        schedule_count = sum(
+            value is not None for value in (every_seconds, cron_expr, at)
+        )
+        if schedule_count != 1:
+            return ToolResult.error(
+                "Error: exactly one of every_seconds, cron_expr, or at is required"
+            )
+
         # Build schedule
         delete_after = False
         if every_seconds:
@@ -198,6 +202,11 @@ class CronTool(Tool):
                     return err
                 dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
             at_ms = int(dt.timestamp() * 1000)
+            if at_ms <= int(time.time() * 1000):
+                return ToolResult.error(
+                    f"Error: one-time job time '{at}' is not in the future. "
+                    "Retry with a future ISO datetime computed from the current time."
+                )
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True
         else:
@@ -259,7 +268,7 @@ class CronTool(Tool):
         jobs = self._cron.list_jobs()
         if not jobs:
             return "No scheduled jobs."
-        lines = []
+        lines: list[str] = []
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]

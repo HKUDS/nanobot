@@ -1,0 +1,24 @@
+{
+  "displayName": "企业微信",
+  "setup": {
+    "docsLabel": "打开企业微信配置指南",
+    "officialLabel": "打开企业微信管理后台",
+    "fields": {
+      "botId": {
+        "label": "Bot ID",
+        "placeholder": "企业微信 Bot ID"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      },
+      "welcomeMessage": {
+        "label": "欢迎消息"
+      }
+    }
+  }
+}

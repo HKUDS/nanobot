@@ -26,7 +26,8 @@ The default instance lives under `~/.nanobot/`:
 | Path | Meaning |
 |---|---|
 | `~/.nanobot/config.json` | Instance configuration: providers, model defaults, channels, tools, gateway, API, and runtime options |
-| `~/.nanobot/workspace/` | Agent workspace: memory, sessions, heartbeat tasks, cron jobs, skills, and generated artifacts |
+| `~/.nanobot/workspace/` | Agent workspace: memory, heartbeat tasks, cron jobs, skills, and generated artifacts |
+| `~/.nanobot/sessions/<workspace-id>/` | Session history stored outside the agent-accessible workspace; the opaque ID follows workspace moves |
 
 You can override both with command flags:
 
@@ -37,6 +38,23 @@ nanobot gateway --config ./bot-a/config.json --workspace ./bot-a/workspace
 ```
 
 The config file controls what nanobot may use. The workspace is where nanobot keeps state for that instance.
+
+### Agent Workspace and Project Workspace
+
+The configured workspace is the **agent workspace**. A WebUI chat can also select
+a different **project workspace** for repository-specific work without moving the
+agent's identity or durable state.
+
+| Resource | Owner when a project is selected |
+|---|---|
+| Project instructions | `AGENTS.md` from the selected project; there is no fallback to the agent workspace's `AGENTS.md` |
+| Agent profile | `SOUL.md` and `USER.md` from the agent workspace; project-local files with those names are ignored |
+| Memory and custom skills | `memory/` and `skills/` from the agent workspace |
+| Relative file paths and shell working directory | The selected project workspace |
+
+When no separate project is selected, one directory normally serves both roles.
+Selecting a project changes the working context for that chat; it does not create
+a second agent or relocate the configured agent workspace.
 
 ## Config Format
 
@@ -49,7 +67,7 @@ Most examples are partial snippets. Merge them into the existing file created by
 A normal turn follows this flow:
 
 1. A channel receives a user message and publishes it to the message bus.
-2. The agent loop chooses a session key and builds context from the workspace, skills, memory, recent messages, channel metadata, and runtime settings.
+2. The agent loop chooses a session key and builds context from the effective project workspace, agent-owned profile/skills/memory, recent messages, channel metadata, and runtime settings.
 3. The provider receives the model request.
 4. If the model asks for tools, the runner executes them and feeds results back to the model.
 5. The final reply is saved to the session and sent back through the channel.
@@ -64,9 +82,9 @@ That flow is the same whether the message starts in the CLI, WebUI, Telegram, Di
 | CLI interactive | `nanobot agent` | Terminal chat with persistent session history |
 | Gateway | `nanobot gateway` | Chat apps, WebUI, heartbeat, Dream, and long-running service mode |
 | OpenAI-compatible API | `nanobot serve` | Programmatic access through `/v1/chat/completions` |
-| WebUI | `nanobot gateway` plus WebSocket channel | Browser workbench served by the WebSocket channel on port `8765` |
+| WebUI | `nanobot webui` | Prepare the local WebUI, start the gateway, and open the browser workbench |
 
-The gateway health endpoint is on `gateway.port` (`18790` by default). The browser WebUI is served by the WebSocket channel (`8765` by default), not by the health endpoint.
+The WebUI launcher is the normal browser entry point. Underneath, the gateway keeps the WebSocket channel and other long-running services alive. The gateway health endpoint is on `gateway.port` (`18790` by default); the browser WebUI is served on `8765` by default, not by the health endpoint.
 
 ## Provider and Model Selection
 
@@ -108,12 +126,38 @@ nanobot uses two related stores:
 
 | Store | Location | Purpose |
 |---|---|---|
-| Sessions | `<workspace>/sessions/*.jsonl` | Recent conversation turns replayed into context |
+| Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` | Recent conversation turns replayed into context |
 | Memory | `<workspace>/memory/MEMORY.md` and `<workspace>/memory/history.jsonl` | Long-term facts and consolidated history |
 
 Dream is a periodic consolidation job. It reads accumulated history and updates workspace memory so useful context can survive beyond short session replay.
 
+The configured workspace contains a `.nanobot/workspace-id` file. It contains only an
+opaque random identifier—never conversation content or credentials. Keep it with workspace
+backups: it lets nanobot find the same external session namespace after the workspace is
+renamed, moved, or restored. A live copy opened alongside the original receives a new ID so
+the two workspaces do not share conversations accidentally.
+
 See [`memory.md`](./memory.md) for the detailed design.
+
+## Apps and Agent Plugins
+
+Agent Plugins are nanobot's common package and activation boundary for
+installable capabilities. They organize existing extension types instead of
+replacing them:
+
+| Part | Role |
+|---|---|
+| Agent Plugin | Installable package that can bundle skills, MCP servers, or both |
+| Skill | Workflow guidance loaded progressively or invoked with `$skill-name` |
+| MCP server | Runtime tools exposed to the agent |
+| CLI App | Locally managed executable whose adapter is packaged and activated like a plugin |
+| Apps | WebUI surface for reviewing and managing these capabilities |
+
+Native providers, channels, built-in tools, standalone workspace skills, and
+directly configured MCP servers keep their existing extension paths. See
+[`webui.md#apps`](./webui.md#apps) for the user-facing flow and
+[`configuration.md#agent-plugins-v1`](./configuration.md#agent-plugins-v1) for
+the package contract.
 
 ## Tools and Safety
 

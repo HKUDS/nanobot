@@ -6,6 +6,7 @@ import asyncio
 import json
 import socket
 from unittest.mock import patch
+from urllib.request import getproxies_environment
 
 import httpx
 import pytest
@@ -28,6 +29,9 @@ _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "http
 def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
+    # getproxies() falls back to OS-level proxy settings (e.g. the Windows
+    # registry) when no environment variables are set; keep tests hermetic.
+    monkeypatch.setattr("nanobot.security.network.getproxies", getproxies_environment)
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -78,6 +82,11 @@ def _patch_web_fetch_fake_client(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
             return FakeJinaResponse()
 
     monkeypatch.setattr(web_module.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx.AsyncHTTPTransport",
+        lambda **_kwargs: object(),
+    )
     return client_kwargs
 
 
@@ -121,27 +130,12 @@ async def test_web_fetch_blocks_localhost_even_in_full_workspace_scope(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_web_fetch_result_contains_untrusted_flag():
+async def test_web_fetch_result_contains_untrusted_flag(monkeypatch: pytest.MonkeyPatch):
     """When fetch succeeds, result JSON must include untrusted=True and the banner."""
     tool = WebFetchTool()
+    _patch_web_fetch_fake_client(monkeypatch)
 
-    fake_html = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
-
-
-    class FakeResponse:
-        status_code = 200
-        url = "https://example.com/page"
-        text = fake_html
-        headers = {"content-type": "text/html"}
-        is_redirect = False
-        def raise_for_status(self): pass
-        def json(self): return {}
-
-    async def _fake_get(self, url, **kwargs):
-        return FakeResponse()
-
-    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public), \
-         patch("httpx.AsyncClient.get", _fake_get):
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url="https://example.com/page")
 
     data = json.loads(result)
@@ -237,6 +231,11 @@ async def test_web_fetch_env_proxy_adds_proxy_mounts_and_keeps_pinned_transport(
 def test_web_fetch_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("NO_PROXY", "example.com")
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(
+        "nanobot.security.network.httpx.AsyncHTTPTransport",
+        lambda **_kwargs: object(),
+    )
 
     kwargs = web_module._fetch_client_kwargs(None, 15.0)
 
@@ -264,6 +263,16 @@ async def test_web_fetch_does_not_fallback_after_pinned_dns_rebind_rejection(mon
 
     monkeypatch.setattr(tool, "_fetch_jina", _unexpected_jina)
     monkeypatch.setattr(tool, "_fetch_readability", _unexpected_readability)
+
+    class FailTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            raise AssertionError("rebound target must be rejected before transport")
+
+    monkeypatch.setattr(
+        web_module,
+        "_pinned_dns_transport",
+        lambda: PinnedDNSAsyncTransport(inner=FailTransport()),
+    )
 
     with patch("nanobot.security.network.socket.getaddrinfo", _rebinding_resolver):
         result = await tool.execute(url="http://evil.example/page")
@@ -330,6 +339,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
     monkeypatch.setattr(tool, "_fetch_jina", _fail_jina)
     monkeypatch.setattr(tool, "_extract_readable_html", lambda html, mode: "Hello world")
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url="https://example.com/page")
@@ -373,6 +383,7 @@ async def test_web_fetch_falls_back_when_readability_dependency_is_missing(monke
 
     monkeypatch.setattr(tool, "_extract_readable_html", _missing_readability)
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool._fetch_readability("https://example.com/page", "markdown", 5000)
@@ -430,6 +441,7 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
             return FakeRedirectResponse()
 
     monkeypatch.setattr(web_module.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
 
     def resolve_public_start_only(hostname, port, family=0, type_=0):
         if hostname == "attacker.example":
@@ -475,6 +487,7 @@ async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypa
             super().__init__(*args, transport=transport, **kwargs)
 
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", TransportAsyncClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
 
     def resolve_public_start_only(hostname, port, family=0, type_=0):
         if hostname == "example.com":
@@ -515,6 +528,7 @@ async def test_web_fetch_does_not_request_private_redirect_target(monkeypatch):
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(web_module.httpx, "AsyncClient", TransportAsyncClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
 
     def resolve_public_start_only(hostname, port, family=0, type_=0):
         if hostname == "attacker.example":

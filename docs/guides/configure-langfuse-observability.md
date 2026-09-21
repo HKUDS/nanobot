@@ -27,7 +27,7 @@ nanobot agent -m "Hello!"
 Install Langfuse:
 
 ```bash
-python -m pip install langfuse
+nanobot plugins enable langfuse
 ```
 
 ## Minimal working example

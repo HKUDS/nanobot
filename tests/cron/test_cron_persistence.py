@@ -211,6 +211,7 @@ def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
         ("enable_job", lambda service: service.enable_job("missing", enabled=False)),
         ("update_job", lambda service: service.update_job("missing", name="new name")),
         ("register_system_job", lambda service: service.register_system_job(_system_job())),
+        ("remove_system_job", lambda service: service.remove_system_job("heartbeat")),
     ],
 )
 def test_public_apis_raise_clear_error_for_unavailable_corrupt_store(

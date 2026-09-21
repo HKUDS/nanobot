@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guía de Teams",
+    "officialLabel": "Abrir portal de desarrolladores de Teams",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "Secreto de cliente",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "ID del tenant",
+        "placeholder": "ID de tenant opcional"
+      },
+      "path": {
+        "label": "Ruta de callback",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Usuarios permitidos",
+        "placeholder": "ID de usuario de Teams separados por comas"
+      },
+      "host": {
+        "label": "Escuchar anfitrión"
+      },
+      "port": {
+        "label": "Puerto de escucha"
+      },
+      "replyInThread": {
+        "label": "Responder en el hilo",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Respuesta de solo mención"
+      },
+      "validateInboundAuth": {
+        "label": "Validar solicitudes entrantes",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "refTtlDays": {
+        "label": "Duración de la conversación"
+      },
+      "pruneWebChatRefs": {
+        "label": "Eliminar conversaciones de chat web",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Eliminar conversaciones no personales",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Intervalo de actualización de la conversación"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Anfitriones de servicios confiables"
+      }
+    }
+  }
+}

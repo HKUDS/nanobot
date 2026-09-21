@@ -16,8 +16,24 @@ export function formatToolCallTrace(call: unknown): string | null {
   if (!name) return null;
   const args = item.function?.arguments ?? item.arguments;
   if (typeof args === "string" && args.trim()) return `${name}(${args})`;
-  if (args && typeof args === "object") return `${name}(${JSON.stringify(args)})`;
+  if (args && typeof args === "object") {
+    const serialized = JSON.stringify(args);
+    return serialized === "{}" || serialized === "[]" ? `${name}()` : `${name}(${serialized})`;
+  }
   return `${name}()`;
+}
+
+export function canonicalToolTrace(line: string): string {
+  const trimmed = line.trim();
+  const match = /^([a-zA-Z0-9_.-]+)\((.*)\)$/.exec(trimmed);
+  if (!match) return trimmed;
+  const args = match[2].trim();
+  if (!args) return `${match[1]}()`;
+  try {
+    return `${match[1]}(${JSON.stringify(JSON.parse(args))})`;
+  } catch {
+    return trimmed;
+  }
 }
 
 const VALID_PHASES = new Set(["start", "end", "error"]);
@@ -91,14 +107,36 @@ export function mergeUniqueToolTraceLines(
   previousTraces: string[],
   lines: string[],
 ): { traces: string[]; added: boolean } {
-  const seen = new Set(previousTraces);
+  const seen = new Set(previousTraces.map(canonicalToolTrace));
   const traces = [...previousTraces];
   let added = false;
   for (const line of lines) {
-    if (seen.has(line)) continue;
-    seen.add(line);
+    const key = canonicalToolTrace(line);
+    if (seen.has(key)) continue;
+    seen.add(key);
     traces.push(line);
     added = true;
   }
   return { traces, added };
+}
+
+export function mergeToolProgressTraceLines(
+  previousTraces: string[],
+  previousEvents: ToolProgressEvent[] | undefined,
+  incomingTraces: string[],
+  incomingEvents: ToolProgressEvent[],
+): string[] {
+  const mergedEvents = mergeToolProgressEvents(previousEvents, incomingEvents);
+  const candidates = mergeUniqueToolTraceLines(previousTraces, incomingTraces).traces;
+  const eventTraceKeys = new Set([
+    ...toolTraceLinesFromEvents(previousEvents),
+    ...toolTraceLinesFromEvents(incomingEvents),
+  ].map(canonicalToolTrace));
+  const nonEventTraces = candidates.filter(
+    (line) => !eventTraceKeys.has(canonicalToolTrace(line)),
+  );
+  return mergeUniqueToolTraceLines(
+    nonEventTraces,
+    toolTraceLinesFromEvents(mergedEvents),
+  ).traces;
 }

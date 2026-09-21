@@ -1,0 +1,41 @@
+{
+  "setup": {
+    "docsLabel": "打开 NapCat 配置指南",
+    "officialLabel": "打开 NapCat 文档",
+    "fields": {
+      "wsUrl": {
+        "label": "WebSocket 地址",
+        "placeholder": "ws://127.0.0.1:3001"
+      },
+      "accessToken": {
+        "label": "访问令牌",
+        "placeholder": "可选令牌"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "QQ ID，用逗号分隔"
+      },
+      "groupPolicyOverrides": {
+        "label": "群组行为覆盖（JSON）"
+      },
+      "welcomeNewMembers": {
+        "label": "欢迎新成员",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "maxImageBytes": {
+        "label": "图片大小上限"
+      }
+    }
+  }
+}

@@ -108,7 +108,7 @@ def resolve_allowed_path(
     if allowed_root is None and not files:
         return resolve_path(path, workspace, strict=strict) if strict else resolved
 
-    roots = []
+    roots: list[str | Path] = []
     if allowed_root is not None:
         roots.append(allowed_root)
     roots.extend(extra_allowed_roots or [])

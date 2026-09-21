@@ -52,12 +52,13 @@ nanobot webui -c ~/.nanobot-telegram/config.json
 nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
 ```
 
-> `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
+> Interactive `nanobot agent` and `nanobot webui` commands with the same `--config` and explicit `--workspace` selectors share one gateway instance. Different selectors produce isolated runtime state and processes. The one-shot and `--classic` agent paths remain direct local executions.
 
 | Component | Resolved From | Example |
 |-----------|---------------|---------|
 | **Config** | `--config` path | `~/.nanobot-A/config.json` |
 | **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
+| **Sessions** | config directory + workspace ID | `~/.nanobot-A/sessions/<workspace-id>/` |
 | **Cron Jobs** | workspace directory | `~/.nanobot-A/workspace/cron/` |
 | **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
 
@@ -107,8 +108,21 @@ nanobot gateway --config ~/.nanobot-discord/config.json
 
 Each gateway instance also exposes a lightweight HTTP health endpoint on `gateway.host:gateway.port`. By default, the gateway binds to `127.0.0.1`, so the endpoint stays local unless you explicitly set `gateway.host` to a public or LAN-facing address.
 
-- `GET /health` returns `{"status":"ok"}`
-- Other paths return `404`
+`GET /health` reports process liveness and WebSocket channel readiness:
+
+- Returns `200 OK` when the WebSocket channel is disabled or running.
+- Returns `503 Service Unavailable` when the WebSocket channel is enabled but not running.
+
+The JSON response includes `status`, `process`, `ready`, and `websocket`.
+For example, with the WebSocket channel disabled:
+
+```json
+{"status":"ok","process":"alive","ready":true,"websocket":"disabled"}
+```
+
+Readiness currently reflects only the WebSocket channel. A successful response does not verify other chat channels, MCP servers, or model provider connectivity.
+
+Other paths return `404`.
 
 Override workspace for one-off runs when needed:
 
@@ -126,6 +140,6 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 ## Notes
 
 - Each instance must use a different port if they run at the same time
-- Use a different workspace per instance if you want isolated memory, sessions, and skills
+- Session data follows the active config directory; use a different workspace per instance to isolate memory, skills, and the stable session namespace ID
 - `--workspace` overrides the workspace defined in the config file
 - Cron jobs are stored in the active workspace; runtime media/state is derived from the config directory

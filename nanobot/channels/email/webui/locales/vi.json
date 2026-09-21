@@ -1,0 +1,166 @@
+{
+  "displayName": "Email",
+  "setup": {
+    "docsLabel": "Mở hướng dẫn Email",
+    "officialLabel": "Mở hướng dẫn mật khẩu ứng dụng",
+    "presetLabel": "Điền nhanh",
+    "sections": {
+      "receiving": "Nhận thư",
+      "sending": "Gửi thư"
+    },
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "Cho phép nanobot đọc và gửi email",
+        "choices": {
+          "true": "Đã đồng ý",
+          "false": "Chưa đồng ý"
+        }
+      },
+      "imapHost": {
+        "label": "Máy chủ IMAP",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "Tên người dùng IMAP",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "Mật khẩu IMAP",
+        "placeholder": "Mật khẩu ứng dụng"
+      },
+      "smtpHost": {
+        "label": "Máy chủ SMTP",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "Tên người dùng SMTP",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "Mật khẩu SMTP",
+        "placeholder": "Mật khẩu ứng dụng"
+      },
+      "imapPort": {
+        "label": "Cổng IMAP",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "Cổng SMTP",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "Địa chỉ gửi",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "Chu kỳ kiểm tra thư (giây)",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "Người gửi được phép",
+        "placeholder": "Địa chỉ email, phân tách bằng dấu phẩy"
+      },
+      "verifyDkim": {
+        "label": "Xác minh DKIM",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "verifySpf": {
+        "label": "Xác minh SPF",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "imapMailbox": {
+        "label": "Hộp thư IMAP"
+      },
+      "imapUseSsl": {
+        "label": "SSL IMAP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "smtpUseTls": {
+        "label": "TLS SMTP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SSL SMTP",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "Trả lời tự động",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "markSeen": {
+        "label": "Đánh dấu là đã đọc",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "postAction": {
+        "label": "Sau khi xử lý",
+        "choices": {
+          "delete": "Xóa",
+          "move": "Di chuyển"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "Di chuyển tới hộp thư"
+      },
+      "postActionExpunge": {
+        "label": "Áp dụng hành động vĩnh viễn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "Bỏ qua tin nhắn bị bỏ qua",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "maxBodyChars": {
+        "label": "Chiều dài cơ thể tối đa"
+      },
+      "subjectPrefix": {
+        "label": "Trả lời tiền tố chủ đề"
+      },
+      "allowedAttachmentTypes": {
+        "label": "Các loại tệp đính kèm được phép"
+      },
+      "maxAttachmentSize": {
+        "label": "Kích thước tệp đính kèm tối đa"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "Tệp đính kèm tối đa"
+      },
+      "trustedAuthservIds": {
+        "label": "Dịch vụ xác thực tin cậy",
+        "placeholder": "mx.google.com, phân tách bằng dấu phẩy",
+        "help": "Giá trị authserv-id chính xác do dịch vụ nhận thư thêm vào. Bắt buộc khi xác minh SPF hoặc DKIM."
+      }
+    }
+  }
+}

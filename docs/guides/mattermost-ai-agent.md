@@ -41,6 +41,7 @@ Merge this snippet into `~/.nanobot/config.json`:
       "token": "YOUR_MATTERMOST_TOKEN",
       "teamId": "YOUR_TEAM_ID",
       "groupPolicy": "mention",
+      "groupPolicyInThread": "open",
       "replyInThread": true,
       "dm": {
         "policy": "allowlist"
@@ -51,7 +52,15 @@ Merge this snippet into `~/.nanobot/config.json`:
 ```
 
 `teamId` scopes the channel to a Mattermost team. Keep `groupPolicy` as
-`mention` for the first test.
+`mention` for the first test. `groupPolicyInThread` can be `"mention"`,
+`"open"`, or `"allowlist"` and controls messages that reply inside a
+thread. If it is omitted, it inherits `groupPolicy`, preserving the behavior
+of existing configurations. Set it to `"open"` explicitly when follow-up
+messages in threads should not require another @mention.
+
+When `groupPolicy` is `"allowlist"`, `groupAllowFrom` remains the outer
+channel boundary for root posts and thread replies. A thread policy cannot open
+a channel that is not on that allowlist.
 
 Mattermost DMs are open by default. Setting `dm.policy` to `"allowlist"` with no
 `dm.allowFrom` entries makes new DM senders receive a pairing code. Approve the
@@ -93,8 +102,8 @@ Then DM the bot again, or mention it in a channel where the bot has access:
 - If DMs are ignored, review the `dm` policy and pairing approval state.
 - If channel messages are ignored, confirm the bot is mentioned and belongs to
   the team/channel.
-- If thread replies are surprising, review `replyInThread` and
-  `includeThreadContext`.
+- If thread replies are surprising, review `groupPolicyInThread`,
+  `replyInThread`, and `includeThreadContext`.
 
 ## Next: memory, automations, MCP tools
 

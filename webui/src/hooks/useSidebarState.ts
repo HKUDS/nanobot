@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
-import {
-  fetchSidebarState,
-  updateSidebarState as persistSidebarState,
-} from "@/lib/api";
+import { normalizeWorkbenchState } from "@/components/workbench/workbench-model";
+import { fetchSidebarState } from "@/lib/api";
 import type { ChatSummary, SidebarStatePayload } from "@/lib/types";
 
-export const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
+const DEFAULT_SIDEBAR_STATE: SidebarStatePayload = {
   schema_version: 1,
   pinned_keys: [],
   archived_keys: [],
+  session_order: [],
   title_overrides: {},
   project_name_overrides: {},
   tags_by_key: {},
   collapsed_groups: {},
+  workbench: { version: 1, tabs: {} },
   view: {
     density: "comfortable",
     show_previews: false,
@@ -74,7 +74,7 @@ function boolMap(value: unknown): Record<string, boolean> {
   return out;
 }
 
-export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
+function normalizeSidebarState(raw: unknown): SidebarStatePayload {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ...DEFAULT_SIDEBAR_STATE, view: { ...DEFAULT_SIDEBAR_STATE.view } };
   }
@@ -83,17 +83,19 @@ export function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     ? value.view
     : DEFAULT_SIDEBAR_STATE.view;
   const density = view.density === "compact" ? "compact" : "comfortable";
-  const sort = ["updated_desc", "created_desc", "title_asc"].includes(view.sort)
+  const sort = ["updated_desc", "created_desc", "title_asc", "manual"].includes(view.sort)
     ? view.sort
     : "updated_desc";
   return {
     schema_version: 1,
     pinned_keys: uniqueStrings(value.pinned_keys),
     archived_keys: uniqueStrings(value.archived_keys),
+    session_order: uniqueStrings(value.session_order),
     title_overrides: stringMap(value.title_overrides),
     project_name_overrides: stringMap(value.project_name_overrides),
     tags_by_key: tagsMap(value.tags_by_key),
     collapsed_groups: boolMap(value.collapsed_groups),
+    workbench: normalizeWorkbenchState(value.workbench),
     view: {
       density,
       show_previews: Boolean(view.show_previews),
@@ -122,6 +124,7 @@ function pruneMissingSessions(
     ...state,
     pinned_keys: filterKeys(state.pinned_keys),
     archived_keys: filterKeys(state.archived_keys),
+    session_order: filterKeys(state.session_order),
     title_overrides: filterMap(state.title_overrides),
     tags_by_key: filterMap(state.tags_by_key),
   };
@@ -141,10 +144,13 @@ export function useSidebarState(
     updater: (state: SidebarStatePayload) => SidebarStatePayload,
   ) => Promise<void>;
 } {
-  const { token } = useClient();
+  const { client, token } = useClient();
   const tokenRef = useRef(token);
   const stateRef = useRef(DEFAULT_SIDEBAR_STATE);
-  const persistVersionRef = useRef(0);
+  const connectionOpenRef = useRef(client.status === "open");
+  const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
+  const persistenceInFlightRef = useRef(false);
+  const flushPersistenceRef = useRef<() => void>(() => {});
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
   const [loading, setLoading] = useState(true);
   tokenRef.current = token;
@@ -172,26 +178,64 @@ export function useSidebarState(
     };
   }, []);
 
+  const flushPersistence = useCallback(() => {
+    if (
+      persistenceInFlightRef.current
+      || !connectionOpenRef.current
+      || pendingPersistenceRef.current === null
+    ) return;
+
+    const next = pendingPersistenceRef.current;
+    pendingPersistenceRef.current = null;
+    persistenceInFlightRef.current = true;
+    void client.setSidebarState(next)
+      .then((saved) => {
+        persistenceInFlightRef.current = false;
+        if (pendingPersistenceRef.current === null) {
+          const canonical = normalizeSidebarState(saved);
+          stateRef.current = canonical;
+          setState(canonical);
+        }
+        flushPersistenceRef.current();
+      })
+      .catch(() => {
+        persistenceInFlightRef.current = false;
+        if (pendingPersistenceRef.current === null) {
+          pendingPersistenceRef.current = next;
+        }
+      });
+  }, [client]);
+  flushPersistenceRef.current = flushPersistence;
+
+  const persist = useCallback((next: SidebarStatePayload) => {
+    pendingPersistenceRef.current = next;
+    flushPersistence();
+  }, [flushPersistence]);
+
+  useEffect(() => client.onStatus((status) => {
+    connectionOpenRef.current = status === "open";
+    if (status === "open") flushPersistence();
+  }), [client, flushPersistence]);
+
+  useEffect(() => client.onSidebarStateUpdate((incoming) => {
+    if (
+      persistenceInFlightRef.current
+      || pendingPersistenceRef.current !== null
+    ) return;
+    const loaded = normalizeSidebarState(incoming);
+    stateRef.current = loaded;
+    setState(loaded);
+  }), [client]);
+
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
       const next = normalizeSidebarState(updater(stateRef.current));
-      const version = persistVersionRef.current + 1;
-      persistVersionRef.current = version;
+      if (sameState(next, stateRef.current)) return;
       stateRef.current = next;
       setState(next);
-      try {
-        const persisted = normalizeSidebarState(
-          await persistSidebarState(tokenRef.current, next),
-        );
-        if (persistVersionRef.current !== version) return;
-        stateRef.current = persisted;
-        setState(persisted);
-      } catch {
-        // Keep the optimistic UI state. Older gateways or transient auth expiry
-        // should not break the chat list; the next refresh can try again.
-      }
+      persist(next);
     },
-    [],
+    [persist],
   );
 
   const pruned = useMemo(() => {

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  BootstrapAuthRequiredError,
   consumeUrlBootstrapSecret,
   deriveWsUrl,
   fetchBootstrap,
@@ -32,6 +31,19 @@ describe("bootstrap helpers", () => {
     );
   });
 
+  it("keeps the gateway websocket port when Vite proxies a custom target", () => {
+    vi.stubGlobal("window", {
+      location: {
+        port: "5173",
+        hostname: "127.0.0.1",
+        protocol: "http:",
+      },
+    });
+    expect(deriveWsUrl("/ws", "tok", "ws://127.0.0.1:8899/ws")).toBe(
+      "ws://127.0.0.1:8899/ws?token=tok",
+    );
+  });
+
   it("preserves the host socket bridge URL", () => {
     expect(deriveWsUrl("/", "tok en", "nanobot-host://engine/")).toBe(
       "nanobot-host://engine/?token=tok%20en",
@@ -41,6 +53,12 @@ describe("bootstrap helpers", () => {
   it("falls back to the current window host for legacy bootstrap payloads", () => {
     expect(deriveWsUrl("/", "tok")).toBe(
       "ws://localhost:3000/?token=tok",
+    );
+  });
+
+  it("does not append a token for trusted-proxy websocket URLs", () => {
+    expect(deriveWsUrl("/", undefined, "wss://proxy.example/")).toBe(
+      "wss://proxy.example/",
     );
   });
 
@@ -56,21 +74,19 @@ describe("bootstrap helpers", () => {
     await pending;
   });
 
-  it("treats bootstrap responses without an API token as auth-required", async () => {
+  it("accepts tokenless trusted-proxy bootstrap responses", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
         ok: true,
-        json: async () => ({ token: "ws-token", ws_path: "/", expires_in: 300 }),
+        json: async () => ({ ws_path: "/", ws_url: "wss://proxy.example/" }),
       })),
     );
 
-    const promise = fetchBootstrap();
-    await expect(promise).rejects.toMatchObject({
-      name: "BootstrapAuthRequiredError",
-      message: "bootstrap authentication required: missing api_token",
+    await expect(fetchBootstrap()).resolves.toMatchObject({
+      ws_path: "/",
+      ws_url: "wss://proxy.example/",
     });
-    await expect(promise).rejects.toBeInstanceOf(BootstrapAuthRequiredError);
   });
 
   it("consumes bootstrap secrets from the URL fragment", () => {

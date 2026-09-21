@@ -3,9 +3,8 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 
 def test_source_checkout_import_uses_pyproject_version_without_metadata() -> None:

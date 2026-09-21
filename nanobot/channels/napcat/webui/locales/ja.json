@@ -1,0 +1,41 @@
+{
+  "setup": {
+    "docsLabel": "NapCat 設定ガイドを開く",
+    "officialLabel": "NapCat ドキュメントを開く",
+    "fields": {
+      "wsUrl": {
+        "label": "WebSocket URL",
+        "placeholder": "ws://127.0.0.1:3001"
+      },
+      "accessToken": {
+        "label": "アクセストークン",
+        "placeholder": "アクセストークン（任意）"
+      },
+      "groupPolicy": {
+        "label": "グループでの動作",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "すべてのメッセージ",
+          "allowlist": "許可リスト"
+        }
+      },
+      "allowFrom": {
+        "label": "許可するユーザー",
+        "placeholder": "QQ ID（カンマ区切り）"
+      },
+      "groupPolicyOverrides": {
+        "label": "グループ動作のオーバーライド (JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "新しいメンバーを歓迎します",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "maxImageBytes": {
+        "label": "最大画像サイズ"
+      }
+    }
+  }
+}

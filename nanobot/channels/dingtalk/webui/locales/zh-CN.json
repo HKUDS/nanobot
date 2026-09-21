@@ -1,0 +1,45 @@
+{
+  "displayName": "钉钉",
+  "setup": {
+    "docsLabel": "打开钉钉配置指南",
+    "officialLabel": "打开钉钉开发者后台",
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "钉钉 Client ID"
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "允许媒体重定向",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "允许重定向的媒体主机"
+      },
+      "groupUserIsolation": {
+        "label": "按群成员隔离会话",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "禁用私聊",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      }
+    }
+  }
+}

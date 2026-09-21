@@ -78,6 +78,20 @@ ruff check nanobot/
 ruff format <files-you-changed>
 ```
 
+### Strict Type Checking
+
+Strict type checking covers optional providers and channels. Reproduce the CI environment
+with the same dependency sources and commands:
+
+```bash
+uv sync --all-extras --dev
+uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
+uv run --no-sync basedpyright
+```
+
+Keep `--no-sync` on the final commands: channel dependencies come from their package
+manifests and are installed explicitly by the setup step.
+
 ## Contribution License
 
 By submitting a contribution, you confirm that you have the right to submit it
@@ -121,6 +135,44 @@ GitHub Actions' free tier:
 
 If your change genuinely needs to step outside this, please call it out
 explicitly in the PR description so it can be discussed before merge.
+
+## Release Packaging Contract
+
+Use the [release checklist](./docs/releasing.md) for candidate preparation, package checks,
+documentation coordination, and the final publication handoff.
+
+A stable install must never combine Python from one version with a TUI from another. Publish in
+this order:
+
+1. Before pushing a tag, set the package version, verify the exact candidate, build the source
+   distribution, all five platform wheels and TUI archives, and review licenses, source offer, and relinking
+   materials. Obtain the maintainer's source-offer commitment before publication.
+2. Merge the release preparation, verify that its packaged sources match the checked candidate,
+   then publish the matching GitHub release tag (`vX.Y.Z`). Recheck any changed sources first.
+3. Attach the preverified TUI archives and checksums to the matching GitHub Release. Alternatively,
+   manually run **Publish Terminal UI** for the exact tag with the compliance review confirmed;
+   reverify its outputs, since a rebuild does not preserve the preflight artifact hashes.
+4. Verify every platform archive and checksum is publicly downloadable for fallback/source-built
+   installations, then publish the same `X.Y.Z` source distribution and five platform wheels to PyPI.
+
+Each platform wheel contains the built WebUI and the matching native TUI. Pip chooses the wheel
+for the user's machine; launching the installed TUI must work without a GitHub download or Bun.
+The universal wheel produced by `uv build` is only an intermediate: use
+`scripts/build_tui_wheels.py` as described in the checklist, and do not upload that intermediate.
+The source distribution remains platform-neutral and does not bundle native binaries.
+Keep the platform-specific release archives for fallback/source-built installations. Both the
+wheel's `nanobot/tui/bin/` bundle and its matching archive must contain the executable,
+target-specific third-party notices, project and runtime licenses, corresponding application
+source, a written source offer, relinking instructions, and a checksum manifest. Never upload a
+naked TUI executable. Review the minimum OS, libc, architecture and runtime CPU requirements
+when changing Bun/OpenTUI; never apply portable platform tags without checking their binaries.
+Source checkouts use an editable Python install, run `tui/` with Bun, and
+rebuild stale `webui/` assets locally.
+
+The confirmation is an operational commitment, not a cosmetic checkbox. Before accepting it,
+verify that the exact Bun/WebKit revisions remain retrievable and that the project can honor the
+archive's corresponding-source offer for its full stated period. Preserve published archives and
+their source materials.
 
 ## Questions?
 

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import time
 import uuid
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_session_key
+from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -21,7 +23,8 @@ from nanobot.agent.tools.schema import (
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
 DEFAULT_WAIT_FOR_MS = 10_000
-MAX_WAIT_FOR_MS = 120_000
+DEFAULT_UNTIL_EXIT_MS = 600_000
+MAX_WAIT_FOR_MS = 600_000
 DEFAULT_MAX_OUTPUT_CHARS = 10_000
 MAX_OUTPUT_CHARS = 50_000
 OUTPUT_DRAIN_GRACE_S = 0.1
@@ -51,6 +54,66 @@ class ExecSessionInfo:
     owner_session_key: str | None = None
 
 
+class _BoundedOutputBuffer:
+    """Keep the first and most recent characters within a fixed budget."""
+
+    def __init__(self, max_chars: int) -> None:
+        self.max_chars = max_chars
+        self._content = ""
+        self._tail: deque[str] = deque()
+        self._tail_chars = 0
+        self._total_chars = 0
+        self._truncated = False
+
+    @property
+    def has_output(self) -> bool:
+        return self._total_chars > 0
+
+    @property
+    def retained_chars(self) -> int:
+        return len(self._content) + self._tail_chars
+
+    def append(self, text: str) -> None:
+        if not text:
+            return
+        self._total_chars += len(text)
+        if not self._truncated:
+            combined = self._content + text
+            if len(combined) <= self.max_chars:
+                self._content = combined
+                return
+            head_chars = self.max_chars // 2
+            tail_chars = self.max_chars - head_chars
+            self._content = combined[:head_chars]
+            self._tail.append(combined[-tail_chars:])
+            self._tail_chars = tail_chars
+            self._truncated = True
+            return
+
+        tail_chars = self.max_chars - len(self._content)
+        self._tail.append(text)
+        self._tail_chars += len(text)
+        while self._tail_chars > tail_chars:
+            excess = self._tail_chars - tail_chars
+            first = self._tail[0]
+            if len(first) <= excess:
+                self._tail.popleft()
+                self._tail_chars -= len(first)
+            else:
+                self._tail[0] = first[excess:]
+                self._tail_chars -= excess
+
+    def drain(self) -> tuple[str, int]:
+        output = self._content + "".join(self._tail)
+        truncated_chars = self._total_chars - len(output)
+        self._content = ""
+        self._tail.clear()
+        self._tail_chars = 0
+        self._total_chars = 0
+        self._truncated = False
+        return output, truncated_chars
+
+
 class _ExecSession:
     def __init__(
         self,
@@ -61,40 +124,40 @@ class _ExecSession:
         cwd: str,
         timeout: int | None,
         owner_session_key: str | None = None,
+        process_tree: bool = False,
     ) -> None:
         self.session_id = session_id
         self.process = process
         self.command = command
         self.cwd = cwd
         self.owner_session_key = owner_session_key
+        self._process_tree = process_tree
         self.started_at = time.monotonic()
         # timeout None/0 means no limit; an infinite deadline is never reached.
         self.deadline = time.monotonic() + timeout if timeout else float("inf")
         self.last_access = time.monotonic()
-        self._chunks: list[str] = []
+        self._stdout = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
+        self._stderr = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
         self._lock = asyncio.Lock()
         self._timed_out = False
-        self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, ""))
-        self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, "STDERR:\n"))
+        self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, self._stdout))
+        self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, self._stderr))
 
     async def _read_stream(
         self,
         stream: asyncio.StreamReader | None,
-        prefix: str,
+        buffer: _BoundedOutputBuffer,
     ) -> None:
         if stream is None:
             return
-        first = True
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         while True:
             chunk = await stream.read(4096)
+            text = decoder.decode(chunk, final=not chunk)
+            async with self._lock:
+                buffer.append(text)
             if not chunk:
                 break
-            text = chunk.decode("utf-8", errors="replace")
-            if prefix and first:
-                text = prefix + text
-                first = False
-            async with self._lock:
-                self._chunks.append(text)
 
     async def write(self, chars: str) -> str | None:
         if self.process.returncode is not None:
@@ -149,16 +212,24 @@ class _ExecSession:
                     timeout=2.0,
                 )
             # Safety-net reap after normal exit.
-            from nanobot.agent.tools.shell import _reap_pid
-            _reap_pid(self.process.pid)
+            from nanobot.agent.tools.shell import (  # pyright: ignore[reportPrivateUsage]
+                ExecTool,
+                _reap_pid,  # pyright: ignore[reportPrivateUsage]
+            )
+            ExecTool._release_process_tree(self.process)  # pyright: ignore[reportPrivateUsage]
+            _reap_pid(self.process.pid)  # pyright: ignore[reportPrivateUsage]
         elif yield_time_ms > 0:
             await self._wait_for_buffered_output()
 
         async with self._lock:
-            output = "".join(self._chunks)
-            self._chunks.clear()
+            stdout, stdout_truncated = self._stdout.drain()
+            stderr, stderr_truncated = self._stderr.drain()
 
-        output, truncated = _truncate_output(output, max_output_chars)
+        output_parts = [stdout] if stdout else []
+        if stderr:
+            output_parts.append(f"STDERR:\n{stderr}")
+        output = "\n".join(output_parts)
+        output, response_truncated = _truncate_output(output, max_output_chars)
         return _SessionPoll(
             output=output,
             done=self.process.returncode is not None,
@@ -167,27 +238,33 @@ class _ExecSession:
             timed_out=self._timed_out,
             terminated=terminated,
             stdin_closed=stdin_closed,
-            truncated_chars=truncated,
+            truncated_chars=stdout_truncated + stderr_truncated + response_truncated,
         )
 
     async def kill(self) -> None:
-        if self.process.returncode is not None:
-            return
-        self.process.kill()
+        from nanobot.agent.tools.shell import ExecTool
+
         try:
-            with suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(self.process.wait(), timeout=5.0)
+            if self._process_tree:
+                await ExecTool._kill_process_tree(self.process)  # pyright: ignore[reportPrivateUsage]
+            else:
+                await ExecTool._kill_process(self.process)  # pyright: ignore[reportPrivateUsage]
         finally:
-            # Safety-net waitpid — prevent zombie if asyncio's child watcher
-            # did not reap the process (common in containers).
-            from nanobot.agent.tools.shell import _reap_pid
-            _reap_pid(self.process.pid)
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        self._stdout_task,
+                        self._stderr_task,
+                        return_exceptions=True,
+                    ),
+                    timeout=2.0,
+                )
 
     async def _wait_for_buffered_output(self) -> None:
         deadline = time.monotonic() + OUTPUT_DRAIN_GRACE_S
         while time.monotonic() < deadline:
             async with self._lock:
-                if self._chunks:
+                if self._stdout.has_output or self._stderr.has_output:
                     return
             await asyncio.sleep(0.01)
 
@@ -198,6 +275,7 @@ class ExecSessionManager:
         self.idle_timeout = idle_timeout
         self._sessions: dict[str, _ExecSession] = {}
         self._lock = asyncio.Lock()
+        self._closed = False
 
     async def start(
         self,
@@ -213,6 +291,8 @@ class ExecSessionManager:
         owner_session_key: str | None = None,
     ) -> tuple[str, _SessionPoll]:
         async with self._lock:
+            if self._closed:
+                raise RuntimeError("exec session manager is closed")
             await self._cleanup_locked()
             if len(self._sessions) >= self.max_sessions:
                 raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
@@ -225,6 +305,7 @@ class ExecSessionManager:
                 cwd=cwd,
                 timeout=timeout,
                 owner_session_key=owner_session_key,
+                process_tree=True,
             )
             self._sessions[session_id] = session
 
@@ -250,11 +331,7 @@ class ExecSessionManager:
             session = self._sessions.get(session_id)
         if session is None:
             raise KeyError(session_id)
-        if (
-            owner_session_key
-            and session.owner_session_key
-            and session.owner_session_key != owner_session_key
-        ):
+        if session.owner_session_key and session.owner_session_key != owner_session_key:
             raise KeyError(session_id)
 
         if chars:
@@ -296,10 +373,63 @@ class ExecSessionManager:
                     owner_session_key=session.owner_session_key,
                 )
                 for session_id, session in sorted(self._sessions.items())
-                if not owner_session_key
-                or not session.owner_session_key
-                or session.owner_session_key == owner_session_key
+                if session.owner_session_key == owner_session_key
             ]
+
+    async def close_all(self) -> int:
+        """Terminate and remove all active sessions during shutdown."""
+        async with self._lock:
+            self._closed = True
+            sessions: list[_ExecSession] = list(self._sessions.values())
+            self._sessions.clear()
+        results: list[None | BaseException] = list(await asyncio.gather(
+            *(session.kill() for session in sessions),
+            return_exceptions=True,
+        ))
+        failures: list[tuple[_ExecSession, BaseException]] = [
+            (session, result)
+            for session, result in zip(sessions, results, strict=True)
+            if isinstance(result, BaseException)
+        ]
+        if failures:
+            async with self._lock:
+                for session, _ in failures:
+                    self._sessions[session.session_id] = session
+            if len(failures) == 1:
+                raise failures[0][1]
+            raise BaseExceptionGroup(
+                "failed to close exec sessions",
+                [result for _, result in failures],
+            )
+        return len(sessions)
+
+    async def terminate_by_owner(self, owner_session_key: str) -> int:
+        """Terminate all sessions owned by owner_session_key. Returns count."""
+        async with self._lock:
+            victims: list[_ExecSession] = []
+            for sid, s in list(self._sessions.items()):
+                if s.owner_session_key == owner_session_key:
+                    victims.append(self._sessions.pop(sid))
+        results: list[None | BaseException] = list(await asyncio.gather(
+            *(s.kill() for s in victims),
+            return_exceptions=True,
+        ))
+        failures: list[tuple[_ExecSession, BaseException]] = [
+            (session, result)
+            for session, result in zip(victims, results, strict=True)
+            if isinstance(result, BaseException)
+        ]
+        if failures:
+            async with self._lock:
+                for session, _ in failures:
+                    self._sessions[session.session_id] = session
+            if len(failures) == 1:
+                raise failures[0][1]
+            raise BaseExceptionGroup(
+                "failed to terminate exec sessions by owner",
+                [result for _, result in failures],
+            )
+        return len(victims)
 
     async def _cleanup_locked(self) -> None:
         now = time.monotonic()
@@ -309,8 +439,9 @@ class ExecSessionManager:
             if now - session.last_access > self.idle_timeout
         ]
         for session_id in stale:
-            session = self._sessions.pop(session_id)
+            session = self._sessions[session_id]
             await session.kill()
+            self._sessions.pop(session_id, None)
 
     async def _spawn(
         self,
@@ -322,9 +453,10 @@ class ExecSessionManager:
     ) -> asyncio.subprocess.Process:
         from nanobot.agent.tools.shell import ExecTool
 
-        return await ExecTool._spawn(
+        return await ExecTool._spawn(  # pyright: ignore[reportPrivateUsage]
             command, cwd, env, shell_program, login,
             stdin=asyncio.subprocess.PIPE,
+            process_tree=True,
         )
 
 
@@ -340,20 +472,16 @@ def clamp_session_int(value: int | None, default: int, minimum: int, maximum: in
 def _truncate_output(output: str, max_output_chars: int) -> tuple[str, int]:
     if len(output) <= max_output_chars:
         return output, 0
-    half = max_output_chars // 2
+    head_chars = max_output_chars // 2
+    tail_chars = max_output_chars - head_chars
     omitted = len(output) - max_output_chars
-    return (
-        output[:half]
-        + f"\n\n... ({omitted:,} chars truncated) ...\n\n"
-        + output[-half:],
-        omitted,
-    )
+    return output[:head_chars] + output[-tail_chars:], omitted
 
 
 def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
     parts = [poll.output] if poll.output else []
     if poll.truncated_chars:
-        parts.append(f"(output truncated by {poll.truncated_chars:,} chars)")
+        parts.append(f"({poll.truncated_chars:,} chars truncated from output)")
     if poll.timed_out:
         parts.append("Error: Command timed out; session was terminated.")
     if poll.terminated and not poll.timed_out:
@@ -370,55 +498,39 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
 
 @tool_parameters(
     tool_parameters_schema(
-        session_id=StringSchema("Session id returned by exec when yield_time_ms is used."),
-        chars=StringSchema(
-            "Bytes/text to write to stdin. Omit or pass an empty string to only poll recent output.",
+        session_id=StringSchema("Session ID returned by exec."),
+        input=StringSchema(
+            "Text to send to stdin; omit to poll output.",
             nullable=True,
         ),
         close_stdin=BooleanSchema(
-            description="Close stdin after writing chars. Useful for commands waiting for EOF.",
+            description="Close stdin after sending input.",
             default=False,
         ),
         terminate=BooleanSchema(
-            description="Terminate the running exec session.",
+            description="Terminate the session; use alone.",
             default=False,
         ),
-        yield_time_ms=IntegerSchema(
-            DEFAULT_YIELD_MS,
-            description="Milliseconds to wait before returning recent output (default 1000, max 30000).",
-            minimum=0,
-            maximum=MAX_YIELD_MS,
-        ),
         wait_for=StringSchema(
-            "Optional text to wait for in output before returning. "
-            "Useful for interactive commands and dev servers.",
+            "Return when this text appears in output.",
+            min_length=1,
             nullable=True,
         ),
-        wait_timeout_ms=IntegerSchema(
-            DEFAULT_WAIT_FOR_MS,
-            description="Maximum milliseconds to wait for wait_for text (default 10000, max 120000).",
+        until_exit=BooleanSchema(
+            description="Wait for the process to exit.",
+            default=False,
+        ),
+        timeout_ms=IntegerSchema(
+            description="Maximum wait: 1s normally, 10s for wait_for, 10m for until_exit.",
             minimum=0,
             maximum=MAX_WAIT_FOR_MS,
-            nullable=True,
-        ),
-        max_output_chars=IntegerSchema(
-            DEFAULT_MAX_OUTPUT_CHARS,
-            description="Maximum output characters to return from this poll (default 10000, max 50000).",
-            minimum=1000,
-            maximum=MAX_OUTPUT_CHARS,
-        ),
-        max_output_tokens=IntegerSchema(
-            DEFAULT_MAX_OUTPUT_CHARS,
-            description="Compatibility alias for max_output_chars. The current runtime uses a character budget.",
-            minimum=1000,
-            maximum=MAX_OUTPUT_CHARS,
             nullable=True,
         ),
         required=["session_id"],
     )
 )
-class WriteStdinTool(Tool):
-    """Write to or poll a running exec session."""
+class ExecSessionTool(Tool):
+    """Interact with or wait for a running exec session."""
 
     _scopes = {"core", "subagent"}
     config_key = "exec"
@@ -430,7 +542,7 @@ class WriteStdinTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     def __init__(
@@ -441,8 +553,8 @@ class WriteStdinTool(Tool):
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls()
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(manager=ctx.exec_session_manager)
 
     @property
     def exclusive(self) -> bool:
@@ -450,113 +562,130 @@ class WriteStdinTool(Tool):
 
     @property
     def name(self) -> str:
-        return "write_stdin"
+        return "exec_session"
 
     @property
     def description(self) -> str:
-        return (
-            "Interact with a running exec session created by exec with "
-            "yield_time_ms. Use chars='' to poll without writing, chars to send "
-            "stdin, close_stdin=true to send EOF, or terminate=true to stop the "
-            "process. Use wait_for with wait_timeout_ms for dev servers, test "
-            "watchers, and prompts where you need to wait for expected output. "
-            "Do not use this to start new commands; start them with exec."
-        )
+        return "Manage a session returned by exec."
 
-    async def execute(
+    async def execute(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         session_id: str,
-        chars: str | None = None,
+        input: str | None = None,
         close_stdin: bool = False,
         terminate: bool = False,
-        yield_time_ms: int | None = None,
         wait_for: str | None = None,
-        wait_timeout_ms: int | None = None,
-        max_output_chars: int | None = None,
-        max_output_tokens: int | None = None,
+        until_exit: bool = False,
+        timeout_ms: int | None = None,
         **kwargs: Any,
     ) -> str:
         try:
-            if max_output_chars is None:
-                max_output_chars = max_output_tokens
-            output_limit = clamp_session_int(
-                max_output_chars,
-                DEFAULT_MAX_OUTPUT_CHARS,
-                1000,
-                MAX_OUTPUT_CHARS,
-            )
-            if wait_for:
-                return await self._wait_for_output(
-                    session_id=session_id,
-                    chars=chars,
-                    close_stdin=close_stdin,
-                    terminate=terminate,
-                    wait_for=wait_for,
-                    wait_timeout_ms=clamp_session_int(
-                        wait_timeout_ms,
-                        DEFAULT_WAIT_FOR_MS,
-                        0,
-                        MAX_WAIT_FOR_MS,
-                    ),
-                    max_output_chars=output_limit,
+            if wait_for == "":
+                return ToolResult.error("Error: wait_for must not be empty.")
+            if wait_for is not None and until_exit:
+                return ToolResult.error(
+                    "Error: wait_for and until_exit are mutually exclusive."
                 )
-            poll = await self._manager.write(
-                session_id=session_id,
-                chars=chars,
-                close_stdin=close_stdin,
-                terminate=terminate,
-                yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
-                max_output_chars=output_limit,
-                owner_session_key=current_request_session_key(),
+            if terminate:
+                if any(
+                    (
+                        input is not None,
+                        close_stdin,
+                        wait_for is not None,
+                        until_exit,
+                        timeout_ms is not None,
+                    )
+                ):
+                    return ToolResult.error("Error: terminate must be used alone.")
+                poll = await self._manager.write(
+                    session_id=session_id,
+                    chars=None,
+                    close_stdin=False,
+                    terminate=True,
+                    yield_time_ms=0,
+                    max_output_chars=DEFAULT_MAX_OUTPUT_CHARS,
+                    owner_session_key=current_request_session_key(),
+                )
+                result = format_session_poll(session_id, poll)
+                return ToolResult.error(result) if poll.timed_out else result
+
+            default_timeout_ms = (
+                DEFAULT_UNTIL_EXIT_MS
+                if until_exit
+                else DEFAULT_WAIT_FOR_MS
+                if wait_for is not None
+                else DEFAULT_YIELD_MS
             )
-            result = format_session_poll(session_id, poll)
-            return ToolResult.error(result) if poll.timed_out else result
+            return await self._wait(
+                session_id=session_id,
+                input=input,
+                close_stdin=close_stdin,
+                wait_for=wait_for,
+                until_exit=until_exit,
+                timeout_ms=clamp_session_int(
+                    timeout_ms,
+                    default_timeout_ms,
+                    0,
+                    MAX_WAIT_FOR_MS,
+                ),
+            )
         except KeyError:
             return ToolResult.error(f"Error: exec session not found: {session_id!r}")
         except Exception as exc:
-            return ToolResult.error(f"Error writing to exec session: {exc}")
+            return ToolResult.error(f"Error managing exec session: {exc}")
 
-    async def _wait_for_output(
+    async def _wait(
         self,
         *,
         session_id: str,
-        chars: str | None,
+        input: str | None,
         close_stdin: bool,
-        terminate: bool,
-        wait_for: str,
-        wait_timeout_ms: int,
-        max_output_chars: int,
+        wait_for: str | None,
+        until_exit: bool,
+        timeout_ms: int,
     ) -> str:
-        deadline = time.monotonic() + (wait_timeout_ms / 1000)
-        aggregate: list[str] = []
+        deadline = time.monotonic() + (timeout_ms / 1000)
+        aggregate = _BoundedOutputBuffer(DEFAULT_MAX_OUTPUT_CHARS)
+        upstream_truncated = 0
+        search_overlap = ""
         first = True
-        poll: _SessionPoll | None = None
+        matched = False
 
         while True:
             remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
-            step_ms = min(500, remaining_ms)
+            step_ms = min(MAX_YIELD_MS if until_exit else 500, remaining_ms)
             poll = await self._manager.write(
                 session_id=session_id,
-                chars=chars if first else None,
+                chars=input if first else None,
                 close_stdin=close_stdin if first else False,
-                terminate=terminate if first else False,
+                terminate=False,
                 yield_time_ms=step_ms,
-                max_output_chars=max_output_chars,
+                max_output_chars=MAX_OUTPUT_CHARS,
                 owner_session_key=current_request_session_key(),
             )
             first = False
+            upstream_truncated += poll.truncated_chars
             if poll.output:
                 aggregate.append(poll.output)
-                joined = "".join(aggregate)
-                if wait_for in joined:
-                    poll.output = joined
-                    result = format_session_poll(session_id, poll)
-                    return ToolResult.error(result) if poll.timed_out else result
-            if poll.done or remaining_ms <= 0:
-                poll.output = "".join(aggregate)
+                if wait_for is not None:
+                    searchable = search_overlap + poll.output
+                    matched = wait_for in searchable
+                    overlap_chars = len(wait_for) - 1
+                    search_overlap = searchable[-overlap_chars:] if overlap_chars else ""
+
+            expired = time.monotonic() >= deadline
+            has_activity = wait_for is None and not until_exit and bool(poll.output)
+            if poll.done or matched or has_activity or expired:
+                poll.output, aggregate_truncated = aggregate.drain()
+                poll.truncated_chars = upstream_truncated + aggregate_truncated
                 result = format_session_poll(session_id, poll)
-                if wait_for not in poll.output:
+                if wait_for is not None and not matched:
                     result += f"\nWait target not observed: {wait_for!r}"
+                elif until_exit and not poll.done:
+                    result += (
+                        f"\nWait timed out after {timeout_ms / 1000:g}s; "
+                        "session remains active."
+                    )
                 return ToolResult.error(result) if poll.timed_out else result
 
 
@@ -574,7 +703,7 @@ class ListExecSessionsTool(Tool):
         return ExecToolConfig
 
     @classmethod
-    def enabled(cls, ctx: Any) -> bool:
+    def enabled(cls, ctx: ToolContext) -> bool:
         return ctx.config.exec.enable
 
     def __init__(
@@ -585,8 +714,8 @@ class ListExecSessionsTool(Tool):
         self._manager = manager or DEFAULT_EXEC_SESSION_MANAGER
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
-        return cls()
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(manager=ctx.exec_session_manager)
 
     @property
     def name(self) -> str:
@@ -594,12 +723,7 @@ class ListExecSessionsTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "List active long-running exec sessions, including session_id, cwd, "
-            "elapsed time, idle time, remaining timeout, and command preview. "
-            "Use this to recover a session_id after context shifts before "
-            "polling, writing stdin, or terminating with write_stdin."
-        )
+        return "List active exec sessions."
 
     @property
     def read_only(self) -> bool:
@@ -612,7 +736,7 @@ class ListExecSessionsTool(Tool):
             )
             if not sessions:
                 return "No active exec sessions."
-            lines = []
+            lines: list[str] = []
             for info in sessions:
                 command = " ".join(info.command.split())
                 if len(command) > 120:

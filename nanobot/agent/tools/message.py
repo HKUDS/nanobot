@@ -1,18 +1,38 @@
 """Message tool for sending messages to users."""
 
-from contextvars import ContextVar
+# pyright: reportIncompatibleMethodOverride=false
+
+from collections.abc import Awaitable, Callable, Generator
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import ToolContext, current_request_context
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 from nanobot.security.workspace_access import current_tool_workspace
+
+_CURRENT_MESSAGE_SENDS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
+    "message_sends",
+    default=None,
+)
+
+
+@contextmanager
+def capture_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
+    """Record successful MessageTool targets within one agent run."""
+    sends: set[tuple[str, str]] = set()
+    token = _CURRENT_MESSAGE_SENDS.set(sends)
+    try:
+        yield sends
+    finally:
+        _CURRENT_MESSAGE_SENDS.reset(token)
 
 
 @tool_parameters(
@@ -66,22 +86,13 @@ class MessageTool(Tool):
         self._fallback_chat_id = default_chat_id
         self._fallback_message_id = default_message_id
         self._fallback_metadata: dict[str, Any] = {}
-        self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
-        self._turn_delivered_media_var: ContextVar[tuple[str, ...]] = ContextVar(
-            "message_turn_delivered_media",
-            default=(),
-        )
-        self._record_channel_delivery_var: ContextVar[bool] = ContextVar(
-            "message_record_channel_delivery",
-            default=False,
-        )
         self._suppress_delivery_var: ContextVar[bool] = ContextVar(
             "message_suppress_delivery",
             default=False,
         )
 
     @classmethod
-    def create(cls, ctx: Any) -> Tool:
+    def create(cls, ctx: ToolContext) -> Tool:
         send_callback = ctx.bus.publish_outbound if ctx.bus else None
         return cls(
             send_callback=send_callback,
@@ -93,38 +104,13 @@ class MessageTool(Tool):
         """Set the callback for sending messages."""
         self._send_callback = callback
 
-    def start_turn(self) -> None:
-        """Reset per-turn send tracking."""
-        self._sent_in_turn = False
-        self._turn_delivered_media_var.set(())
-
-    def turn_delivered_media_paths(self) -> list[str]:
-        """Absolute paths attached via this tool to the active chat in the current turn."""
-        return list(self._turn_delivered_media_var.get())
-
-    def set_record_channel_delivery(self, active: bool):
-        """Mark tool-sent messages as proactive channel deliveries."""
-        return self._record_channel_delivery_var.set(active)
-
-    def reset_record_channel_delivery(self, token) -> None:
-        """Restore previous proactive delivery recording state."""
-        self._record_channel_delivery_var.reset(token)
-
-    def set_suppress_delivery(self, active: bool):
+    def set_suppress_delivery(self, active: bool) -> Token[bool]:
         """Acknowledge but don't deliver tool sends (heartbeat internal check)."""
         return self._suppress_delivery_var.set(active)
 
-    def reset_suppress_delivery(self, token) -> None:
+    def reset_suppress_delivery(self, token: Token[bool]) -> None:
         """Restore previous delivery-suppression state."""
         self._suppress_delivery_var.reset(token)
-
-    @property
-    def _sent_in_turn(self) -> bool:
-        return self._sent_in_turn_var.get()
-
-    @_sent_in_turn.setter
-    def _sent_in_turn(self, value: bool) -> None:
-        self._sent_in_turn_var.set(value)
 
     @property
     def name(self) -> str:
@@ -169,19 +155,23 @@ class MessageTool(Tool):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
-        buttons: list[list[str]] | None = None,
+        buttons: Any = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
         from nanobot.utils.helpers import strip_think
 
         content = strip_think(content)
 
+        button_rows: list[list[str]] | None = None
         if buttons is not None:
-            if not isinstance(buttons, list) or any(
-                not isinstance(row, list) or any(not isinstance(label, str) for label in row)
-                for row in buttons
+            raw_buttons = cast(list[Any], buttons) if isinstance(buttons, list) else None
+            if raw_buttons is None or any(
+                not isinstance(row, list)
+                or any(not isinstance(label, str) for label in cast(list[Any], row))
+                for row in raw_buttons
             ):
                 return ToolResult.error("Error: buttons must be a list of list of strings")
+            button_rows = cast(list[list[str]], raw_buttons)
         request_ctx = current_request_context()
         default_channel = (
             request_ctx.channel if request_ctx is not None else self._fallback_channel
@@ -241,7 +231,7 @@ class MessageTool(Tool):
         metadata = dict(default_metadata) if same_target else {}
         if message_id:
             metadata["message_id"] = message_id
-        if self._record_channel_delivery_var.get() or media:
+        if media:
             metadata["_record_channel_delivery"] = True
 
         msg = OutboundMessage(
@@ -249,7 +239,7 @@ class MessageTool(Tool):
             chat_id=chat_id,
             content=content,
             media=media or [],
-            buttons=buttons or [],
+            buttons=button_rows or [],
             metadata=metadata,
         )
 
@@ -259,13 +249,15 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
-            if channel == default_channel and chat_id == default_chat_id:
-                self._sent_in_turn = True
-                if media:
-                    prev = self._turn_delivered_media_var.get()
-                    self._turn_delivered_media_var.set(prev + tuple(str(p) for p in media))
+            sends = _CURRENT_MESSAGE_SENDS.get()
+            if sends is not None:
+                sends.add((channel, chat_id))
             media_info = f" with {len(media)} attachments" if media else ""
-            button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
+            button_info = (
+                f" with {sum(len(row) for row in button_rows)} button(s)"
+                if button_rows
+                else ""
+            )
             return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
         except Exception as e:
             return ToolResult.error(f"Error sending message: {str(e)}")

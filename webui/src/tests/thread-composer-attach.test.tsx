@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import type { EncodeResponse } from "@/lib/imageEncode";
+import type { WebUIIngressLimits } from "@/lib/types";
 
 const encodeImage = vi.fn<(file: File) => Promise<EncodeResponse>>();
 
@@ -24,6 +25,14 @@ function pngFile(name = "a.png", size = 10) {
   return new File([new Uint8Array(size)], name, { type: "image/png" });
 }
 
+function pdfFile(name = "report.pdf", size = 8) {
+  return new File([new Uint8Array(size)], name, { type: "application/pdf" });
+}
+
+function csvFile(name = "report.csv", type = "application/vnd.ms-excel") {
+  return new File(["name,value\nnanobot,1"], name, { type });
+}
+
 function resolveReady(file: File): EncodeResponse {
   return {
     id: "stub",
@@ -33,6 +42,31 @@ function resolveReady(file: File): EncodeResponse {
     bytes: file.size,
     origBytes: file.size,
     normalized: false,
+  };
+}
+
+function ingressLimits({
+  maxFrameBytes = 36 * 1024 * 1024,
+  maxTextBytes = 64 * 1024,
+  maxFileBytes = 6 * 1024 * 1024,
+  maxTotalBytes = 24 * 1024 * 1024,
+}: {
+  maxFrameBytes?: number;
+  maxTextBytes?: number;
+  maxFileBytes?: number;
+  maxTotalBytes?: number;
+} = {}): WebUIIngressLimits {
+  return {
+    transport: {
+      max_frame_bytes: maxFrameBytes,
+      envelope_reserve_bytes: 64 * 1024,
+    },
+    message: { max_text_bytes: maxTextBytes },
+    attachments: {
+      max_count: 4,
+      max_file_bytes: maxFileBytes,
+      max_total_bytes: maxTotalBytes,
+    },
   };
 }
 
@@ -50,7 +84,7 @@ beforeEach(() => {
   }
 });
 
-describe("ThreadComposer — image attachments", () => {
+describe("ThreadComposer — attachments", () => {
   it("attaches a picked image and includes its data url on send", async () => {
     const file = pngFile("a.png");
     encodeImage.mockResolvedValueOnce(resolveReady(file));
@@ -81,6 +115,228 @@ describe("ThreadComposer — image attachments", () => {
     expect(images).toHaveLength(1);
     expect(images[0].media.data_url).toContain("data:image/png;base64,");
     expect(images[0].media.name).toBe("a.png");
+  });
+
+  it("attaches a picked PDF and includes its data url on send", async () => {
+    const file = pdfFile();
+    const onSend = vi.fn();
+
+    render(<ThreadComposer onSend={onSend} />);
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("composer-chip")).toHaveTextContent("report.pdf"),
+    );
+
+    const textarea = screen.getByLabelText(/message input/i);
+    fireEvent.change(textarea, { target: { value: "summarize" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(encodeImage).not.toHaveBeenCalled();
+    const [content, attachments] = onSend.mock.calls[0];
+    expect(content).toBe("summarize");
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0].media.data_url).toContain("data:application/pdf;base64,");
+    expect(attachments[0].media.name).toBe("report.pdf");
+    expect(attachments[0].preview.kind).toBe("file");
+  });
+
+  it.each(["application/vnd.ms-excel", "image/png"])(
+    "normalizes document MIME from the file extension when the browser reports %s",
+    async (browserMime) => {
+      const file = csvFile("report.csv", browserMime);
+      const onSend = vi.fn();
+
+      render(<ThreadComposer onSend={onSend} />);
+
+      const input = screen
+        .getByLabelText(/message input/i)
+        .closest("form")!
+        .querySelector('input[type="file"]') as HTMLInputElement;
+
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [file] } });
+      });
+
+      await waitFor(() =>
+        expect(screen.getByTestId("composer-chip")).toHaveTextContent("report.csv"),
+      );
+
+      const textarea = screen.getByLabelText(/message input/i);
+      fireEvent.change(textarea, { target: { value: "summarize" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      const [, attachments] = onSend.mock.calls[0];
+      expect(attachments[0].media.data_url).toMatch(/^data:text\/csv;base64,/);
+      expect(encodeImage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects empty attachments before sending them to the gateway", async () => {
+    const file = new File([], "empty.csv", { type: "application/vnd.ms-excel" });
+    const onSend = vi.fn();
+
+    render(<ThreadComposer onSend={onSend} />);
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+
+    expect(screen.getByText("Empty files cannot be attached")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+    expect(encodeImage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized document before adding a chip", async () => {
+    const file = pdfFile("oversized.pdf", 6 * 1024 * 1024 + 1);
+
+    render(<ThreadComposer onSend={vi.fn()} />);
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("File is too large");
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+  });
+
+  it("reports a transport limit separately from attachment policy", async () => {
+    const first = pdfFile("first.pdf", 400 * 1024);
+    const second = pdfFile("second.pdf", 400 * 1024);
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        ingressLimits={ingressLimits({ maxFrameBytes: 1024 * 1024 })}
+      />,
+    );
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [first, second] } });
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "gateway transport limit",
+    );
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(1);
+    expect(screen.getByText("first.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("second.pdf")).not.toBeInTheDocument();
+  });
+
+  it("enforces the decoded attachment-total policy independently", async () => {
+    const first = pdfFile("first.pdf", 400 * 1024);
+    const second = pdfFile("second.pdf", 400 * 1024);
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        ingressLimits={ingressLimits({ maxTotalBytes: 700 * 1024 })}
+      />,
+    );
+
+    const input = screen
+      .getByLabelText(/message input/i)
+      .closest("form")!
+      .querySelector('input[type="file"]') as HTMLInputElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [first, second] } });
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Attachments are too large together",
+    );
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(1);
+  });
+
+  it("enforces the text-byte policy without changing attachment limits", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        ingressLimits={ingressLimits({ maxTextBytes: 4 })}
+      />,
+    );
+
+    const textarea = screen.getByLabelText(/message input/i);
+    fireEvent.change(textarea, { target: { value: "你好" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Message text is too large (max 4 B)",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("accepts supported documents from paste and drop", async () => {
+    const pasted = pdfFile("pasted.pdf");
+    const dropped = pdfFile("dropped.pdf");
+    const onSend = vi.fn();
+
+    render(<ThreadComposer onSend={onSend} />);
+
+    const textarea = screen.getByLabelText(/message input/i);
+    const form = textarea.closest("form")!;
+
+    await act(async () => {
+      fireEvent.paste(textarea, {
+        clipboardData: {
+          files: [pasted],
+          items: [{
+            kind: "file",
+            type: pasted.type,
+            getAsFile: () => pasted,
+          }],
+          types: ["Files"],
+          getData: () => "",
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("pasted.pdf")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.drop(form, {
+        dataTransfer: {
+          files: [dropped],
+          items: [],
+          types: ["Files"],
+          dropEffect: "copy",
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("dropped.pdf")).toBeInTheDocument(),
+    );
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(2);
+    expect(encodeImage).not.toHaveBeenCalled();
   });
 
   it("blocks send while an image is still encoding", async () => {
@@ -117,7 +373,7 @@ describe("ThreadComposer — image attachments", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a non-image paste silently without adding a chip", async () => {
+  it("keeps a plain-text paste untouched without adding a chip", async () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} />);
     const textarea = screen.getByLabelText(/message input/i);

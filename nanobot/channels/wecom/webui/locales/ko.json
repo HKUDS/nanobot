@@ -1,0 +1,23 @@
+{
+  "setup": {
+    "docsLabel": "WeCom 설정 가이드 열기",
+    "officialLabel": "WeCom 콘솔 열기",
+    "fields": {
+      "botId": {
+        "label": "Bot ID",
+        "placeholder": "WeCom Bot ID"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "welcomeMessage": {
+        "label": "환영 메시지"
+      }
+    }
+  }
+}

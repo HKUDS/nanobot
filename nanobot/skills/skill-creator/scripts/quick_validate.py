@@ -6,7 +6,7 @@ Minimal validator for nanobot skill folders.
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, cast
 
 try:
     import yaml
@@ -83,7 +83,7 @@ def _parse_simple_frontmatter(frontmatter_text: str) -> Optional[dict[str, str]]
     return parsed
 
 
-def _load_frontmatter(frontmatter_text: str) -> tuple[Optional[dict], Optional[str]]:
+def _load_frontmatter(frontmatter_text: str) -> tuple[dict[str, Any] | None, str | None]:
     if yaml is not None:
         try:
             frontmatter = yaml.safe_load(frontmatter_text)
@@ -91,7 +91,7 @@ def _load_frontmatter(frontmatter_text: str) -> tuple[Optional[dict], Optional[s
             return None, f"Invalid YAML in frontmatter: {exc}"
         if not isinstance(frontmatter, dict):
             return None, "Frontmatter must be a YAML dictionary"
-        return frontmatter, None
+        return cast(dict[str, Any], frontmatter), None
 
     frontmatter = _parse_simple_frontmatter(frontmatter_text)
     if frontmatter is None:
@@ -129,7 +129,7 @@ def _validate_description(description: str) -> Optional[str]:
     return None
 
 
-def validate_skill(skill_path):
+def validate_skill(skill_path: str | Path) -> tuple[bool, str]:
     """Validate a skill folder structure and required frontmatter."""
     skill_path = Path(skill_path).resolve()
 
@@ -152,8 +152,8 @@ def validate_skill(skill_path):
         return False, "Invalid frontmatter format"
 
     frontmatter, error = _load_frontmatter(frontmatter_text)
-    if error:
-        return False, error
+    if error or frontmatter is None:
+        return False, error or "Invalid frontmatter"
 
     unexpected_keys = sorted(set(frontmatter.keys()) - ALLOWED_FRONTMATTER_KEYS)
     if unexpected_keys:

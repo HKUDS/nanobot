@@ -1,7 +1,7 @@
-from nanobot.config.schema import Config
-from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.schema import Config
 
 
 def test_tool_loader_scope_memory_only_returns_memory_tools():

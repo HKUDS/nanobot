@@ -1,260 +1,299 @@
-import { toMediaAttachment } from "@/lib/media";
-import type { ToolProgressEvent, UIMediaAttachment, UIMessage } from "@/lib/types";
+import type { UIMessage } from "@/lib/types";
 
-export type ActivityItemType = "reasoning" | "tool" | "cli" | "mcp" | "file_edit" | "media";
-export type ActivityStepStatus = "pending" | "running" | "done" | "error";
-export type ActivityStepSource = "reasoning" | "tool" | "web" | "browser" | "shell" | "mcp" | "file" | "media";
-
-export interface ActivityItem {
-  type: ActivityItemType;
-  message: UIMessage;
-}
-
-export interface ActivityEvidence {
-  id: string;
-  attachment: UIMediaAttachment;
-  caption?: string;
-  source: ActivityStepSource;
-}
-
-export interface ActivityStepItem {
-  id: string;
-  label: string;
-  detail?: string;
-  status: ActivityStepStatus;
-  source: ActivityStepSource;
-  preview?: ActivityEvidence[];
-  error?: string;
-}
-
-export interface ActivityGroup {
-  id: string;
-  title: string;
-  source: ActivityStepSource;
-  steps: ActivityStepItem[];
-}
-
+/** A turn is projected into ordered answer messages and collapsible activity
+ * runs. Folding changes presentation only; it never changes semantic order. */
 export type TurnUnit =
-  | { type: "activity"; messages: UIMessage[]; items: ActivityItem[]; turnLatencyMs?: number }
-  | { type: "message"; message: UIMessage };
-
-interface NormalizeActivityTimelineOptions {
-  preserveTrailingActivity?: boolean;
-}
+  | {
+      type: "activity";
+      messages: UIMessage[];
+      /** Number of raw UI messages represented by this display unit. */
+      sourceMessageCount: number;
+      turnLatencyMs?: number;
+      startedAtMs?: number;
+    }
+  | {
+      type: "message";
+      message: UIMessage;
+      /** Number of raw UI messages represented by this display unit. */
+      sourceMessageCount: number;
+    };
 
 export function isReasoningOnlyAssistant(message: UIMessage): boolean {
   if (message.role !== "assistant" || message.kind === "trace") return false;
-  if (message.content.trim().length > 0) return false;
+  if (
+    message.activityKind === "model"
+    || message.content.trim().length > 0
+    || !!message.media?.length
+    || !!message.images?.length
+  ) return false;
   return !!(message.reasoning?.length || message.reasoningStreaming || message.isStreaming);
 }
 
 export function isAgentActivityMember(message: UIMessage): boolean {
-  return isReasoningOnlyAssistant(message) || message.kind === "trace";
+  return isReasoningOnlyAssistant(message) || message.kind === "trace" || message.activityKind === "model";
 }
 
 export function hasPendingAgentActivity(messages: UIMessage[]): boolean {
-  if (messages.length === 0) return false;
-  const last = messages[messages.length - 1];
-  if (!isAgentActivityMember(last)) return false;
+  const last = messages.at(-1);
+  if (!last || !isAgentActivityMember(last)) return false;
+  if (last.isStreaming || last.reasoningStreaming) return true;
 
-  let trailingStart = messages.length - 1;
-  while (
-    trailingStart > 0
-    && isAgentActivityMember(messages[trailingStart - 1])
-  ) {
-    trailingStart -= 1;
-  }
-
-  const trailing = messages.slice(trailingStart);
-  if (trailing.some((message) => message.isStreaming || message.reasoningStreaming)) {
-    return true;
-  }
-
-  const previous = messages[trailingStart - 1];
-  if (!previous || previous.role !== "assistant" || isAgentActivityMember(previous)) {
-    return true;
-  }
-
-  const trailingTurnIds = new Set(
-    trailing
-      .map((message) => message.turnId)
-      .filter((turnId): turnId is string => typeof turnId === "string" && turnId.length > 0),
-  );
-  if (!previous.turnId) return trailingTurnIds.size > 0;
-  return trailingTurnIds.size > 0 && !trailingTurnIds.has(previous.turnId);
+  const lastTurnId = last.turnId;
+  const previous = messages.at(-2);
+  // A trace without a visible answer is an unfinished turn on replay. Once a
+  // final assistant answer exists after it, the activity is simply history.
+  return !previous
+    || previous.role !== "assistant"
+    || isAgentActivityMember(previous)
+    || previous.turnId !== lastTurnId;
 }
 
+/** Project gateway rows without changing their causal order.
+ *
+ * Messages use ``turnSeq`` when every row in the turn provides it and fall
+ * back to stable arrival order otherwise. Only contiguous rows of the same
+ * display class are combined: activity rows share a collapsible surface, and
+ * adjacent answer slices share an answer bubble. A visible answer is always a
+ * hard boundary between activity surfaces; completed empty transport frames
+ * have no display semantics and therefore create no boundary.
+ */
 export function normalizeActivityTimeline(
   messages: UIMessage[],
-  options: NormalizeActivityTimelineOptions = {},
 ): TurnUnit[] {
   const units: TurnUnit[] = [];
   let turnMessages: UIMessage[] = [];
   let activeTurnId: string | undefined;
+  let activeTurnStartedAtMs: number | undefined;
 
-  const flushTurn = (flushOptions: NormalizeActivityTimelineOptions = {}) => {
-    if (turnMessages.length === 0) return;
-
-    const turnUnits: TurnUnit[] = [];
-    const orderedTurnMessages = orderMessagesByTurnSeq(turnMessages);
-    const visibleMessages = visibleMessagesForTurn(orderedTurnMessages);
-    let visibleIndex = 0;
-    let activityMessages: UIMessage[] = [];
-
-    const flushActivityMessages = () => {
-      if (!activityMessages.length) return;
-      pushActivityUnits(turnUnits, activityMessages, visibleMessages.slice(visibleIndex));
-      activityMessages = [];
-    };
-
-    for (const message of orderedTurnMessages) {
-      if (isAgentActivityMember(message)) {
-        activityMessages.push(message);
-        continue;
-      }
-
-      if (assistantHasInlineReasoning(message)) {
-        activityMessages.push(reasoningOnlyMessageFromAnswer(message));
-        flushActivityMessages();
-        turnUnits.push({ type: "message", message: stripInlineReasoning(message) });
-        visibleIndex += 1;
-        continue;
-      }
-
-      flushActivityMessages();
-      turnUnits.push({ type: "message", message });
-      visibleIndex += 1;
+  const flushTurn = () => {
+    if (!turnMessages.length) {
+      activeTurnId = undefined;
+      activeTurnStartedAtMs = undefined;
+      return;
     }
 
-    flushActivityMessages();
-    units.push(...normalizeCompletedTurnUnits(turnUnits, flushOptions));
+    const projected = projectOrderedTurn(
+      orderMessagesByTurnSeq(turnMessages),
+      activeTurnStartedAtMs,
+    );
+    if (projected.length) {
+      units.push(...projected);
+    } else if (units.length) {
+      // A turn containing only completed transport placeholders has no
+      // display surface. Keep its source count on the preceding prompt so
+      // persisted fork-boundary offsets still map to a visible unit.
+      const lastIndex = units.length - 1;
+      const last = units[lastIndex];
+      units[lastIndex] = {
+        ...last,
+        sourceMessageCount: last.sourceMessageCount + turnMessages.length,
+      };
+    }
+
     turnMessages = [];
     activeTurnId = undefined;
+    activeTurnStartedAtMs = undefined;
   };
 
   for (const message of messages) {
     if (message.role === "user") {
       flushTurn();
-      units.push({ type: "message", message });
+      units.push({ type: "message", message, sourceMessageCount: 1 });
       activeTurnId = message.turnId;
+      activeTurnStartedAtMs = validCreatedAtMs(message.createdAt);
       continue;
     }
-
-    if (message.turnId && activeTurnId && message.turnId !== activeTurnId) {
-      flushTurn();
-    }
-    if (message.turnId) {
-      activeTurnId = message.turnId;
-    }
+    if (message.turnId && activeTurnId && message.turnId !== activeTurnId) flushTurn();
+    if (message.turnId) activeTurnId = message.turnId;
     turnMessages.push(message);
   }
 
-  flushTurn(options);
+  flushTurn();
   return units;
 }
 
+export function projectActivityTimeline(
+  messages: UIMessage[],
+): TurnUnit[] {
+  return normalizeActivityTimeline(messages);
+}
+
+function projectOrderedTurn(
+  messages: UIMessage[],
+  startedAtMs?: number,
+): TurnUnit[] {
+  const units: TurnUnit[] = [];
+  let activity: UIMessage[] = [];
+  let activitySourceMessageCount = 0;
+  let answers: UIMessage[] = [];
+  let answerSourceMessageCount = 0;
+  let leadingNoopSourceMessageCount = 0;
+
+  const flushActivity = () => {
+    if (!activity.length) return;
+    units.push({
+      type: "activity",
+      messages: activity,
+      sourceMessageCount: activitySourceMessageCount,
+      startedAtMs,
+    });
+    activity = [];
+    activitySourceMessageCount = 0;
+  };
+
+  const flushAnswers = () => {
+    if (!answers.length) return;
+    units.push({
+      type: "message",
+      message: mergeAssistantAnswers(answers),
+      sourceMessageCount: answerSourceMessageCount,
+    });
+    answers = [];
+    answerSourceMessageCount = 0;
+  };
+
+  const claimLeadingNoops = () => {
+    const count = leadingNoopSourceMessageCount;
+    leadingNoopSourceMessageCount = 0;
+    return count;
+  };
+
+  const appendActivity = (message: UIMessage, sourceMessageCount: number) => {
+    flushAnswers();
+    activity.push(message);
+    activitySourceMessageCount += sourceMessageCount + claimLeadingNoops();
+  };
+
+  const absorbDisplayNoop = () => {
+    if (activity.length) {
+      activitySourceMessageCount += 1;
+    } else if (answers.length) {
+      answerSourceMessageCount += 1;
+    } else {
+      leadingNoopSourceMessageCount += 1;
+    }
+  };
+
+  for (const message of messages) {
+    if (message.kind === "compaction") {
+      flushActivity();
+      flushAnswers();
+      units.push({
+        type: "message",
+        message,
+        sourceMessageCount: 1 + claimLeadingNoops(),
+      });
+      continue;
+    }
+    if (isCompletedDisplayNoop(message)) {
+      absorbDisplayNoop();
+      continue;
+    }
+    if (isRawActivity(message)) {
+      appendActivity(message, 1);
+      continue;
+    }
+    if (isAssistantAnswer(message)) {
+      if (message.reasoning?.trim() || message.reasoningStreaming) {
+        // This raw message contributes one answer source plus a synthetic
+        // reasoning row, so count it only on the answer unit.
+        appendActivity(reasoningOnlyMessageFromAnswer(message), 0);
+      }
+      flushActivity();
+      answerSourceMessageCount += claimLeadingNoops();
+      answers.push(stripInlineReasoning(message));
+      answerSourceMessageCount += 1;
+      continue;
+    }
+    appendActivity(message, 1);
+  }
+
+  flushActivity();
+  flushAnswers();
+
+  let lastActivityIndex = -1;
+  for (let index = units.length - 1; index >= 0; index -= 1) {
+    if (units[index].type !== "activity") continue;
+    lastActivityIndex = index;
+    break;
+  }
+  if (lastActivityIndex >= 0) {
+    const lastActivity = units[lastActivityIndex];
+    if (lastActivity.type === "activity") {
+      const turnLatencyMs = activityTurnLatencyMs(lastActivity.messages, messages);
+      if (turnLatencyMs !== undefined) {
+        units[lastActivityIndex] = { ...lastActivity, turnLatencyMs };
+      }
+    }
+  }
+  return units;
+}
+
+function isRawActivity(message: UIMessage): boolean {
+  return isAgentActivityMember(message);
+}
+
+/** A completed transport placeholder carries ordering/accounting metadata but
+ * no user-visible semantics, so it cannot define a display boundary. */
+function isCompletedDisplayNoop(message: UIMessage): boolean {
+  return (
+    message.role === "assistant"
+    && message.kind !== "trace"
+    && message.activityKind !== "model"
+    && !message.isStreaming
+    && !message.reasoningStreaming
+    && message.content.trim().length === 0
+    && !message.reasoning?.trim()
+    && !message.media?.length
+    && !message.images?.length
+    && !message.traces?.some((line) => line.trim().length > 0)
+    && !message.toolEvents?.length
+    && !message.fileEdits?.length
+    && !message.sessionMessage
+  );
+}
+
+function isAssistantAnswer(message: UIMessage): boolean {
+  if (message.role !== "assistant" || message.kind === "trace" || message.activityKind === "model") {
+    return false;
+  }
+  if (message.turnPhase === "reasoning" || message.turnPhase === "activity") return false;
+  return (
+    message.turnPhase === "answer"
+    || message.content.trim().length > 0
+    || !!message.media?.length
+    || !!message.images?.length
+  );
+}
+
 function orderMessagesByTurnSeq(messages: UIMessage[]): UIMessage[] {
-  if (
-    messages.length < 2
-    || !messages.every((message) => Number.isFinite(message.turnSeq))
-  ) {
+  if (messages.length < 2 || !messages.every((message) => Number.isFinite(message.turnSeq))) {
     return messages;
   }
   return messages
     .map((message, index) => ({ message, index }))
-    .sort((left, right) => {
-      const bySeq = (left.message.turnSeq ?? 0) - (right.message.turnSeq ?? 0);
-      return bySeq || left.index - right.index;
-    })
+    .sort((left, right) => (left.message.turnSeq! - right.message.turnSeq!) || (left.index - right.index))
     .map(({ message }) => message);
 }
 
-function normalizeCompletedTurnUnits(
-  turnUnits: TurnUnit[],
-  options: NormalizeActivityTimelineOptions,
-): TurnUnit[] {
-  if (options.preserveTrailingActivity || turnUnits.length < 2) return turnUnits;
-  if (turnUnits[turnUnits.length - 1]?.type !== "activity") return turnUnits;
-
-  let trailingStart = turnUnits.length - 1;
-  while (trailingStart > 0 && turnUnits[trailingStart - 1]?.type === "activity") {
-    trailingStart -= 1;
-  }
-
-  const previous = turnUnits[trailingStart - 1];
-  if (
-    !previous
-    || previous.type !== "message"
-    || previous.message.role !== "assistant"
-  ) {
-    return turnUnits;
-  }
-
-  return [
-    ...turnUnits.slice(0, trailingStart - 1),
-    ...turnUnits.slice(trailingStart),
-    previous,
-  ];
-}
-
-function visibleMessagesForTurn(messages: UIMessage[]): UIMessage[] {
-  const visibleMessages: UIMessage[] = [];
-  for (const message of messages) {
-    if (isAgentActivityMember(message)) continue;
-    visibleMessages.push(assistantHasInlineReasoning(message) ? stripInlineReasoning(message) : message);
-  }
-  return visibleMessages;
-}
-
-function pushActivityUnits(units: TurnUnit[], activityMessages: UIMessage[], visibleMessages: UIMessage[]) {
-  let runMessages: UIMessage[] = [];
-  let runBucket: "file" | "other" | undefined;
-  let runSegmentId: string | undefined;
-
-  const flushRun = () => {
-    if (!runMessages.length) return;
-    units.push({
-      type: "activity",
-      messages: runMessages,
-      items: runMessages.flatMap(activityItemsForMessage),
-      turnLatencyMs: activityTurnLatencyMs(runMessages, visibleMessages),
-    });
-    runMessages = [];
-    runBucket = undefined;
-    runSegmentId = undefined;
+function mergeAssistantAnswers(answers: UIMessage[]): UIMessage {
+  const first = answers[0];
+  const last = answers.at(-1)!;
+  const media = answers.flatMap((message) => message.media ?? []);
+  const images = answers.flatMap((message) => message.images ?? []);
+  const merged: UIMessage = {
+    ...first,
+    ...last,
+    id: first.id,
+    content: answers.map((message) => message.content.trim()).filter(Boolean).join("\n\n"),
+    createdAt: first.createdAt,
+    isStreaming: answers.some((message) => message.isStreaming),
   };
-
-  for (const message of activityMessages) {
-    const bucket = isFileEditActivityMessage(message) ? "file" : "other";
-    const segmentId = message.activitySegmentId;
-    const segmentChanged =
-      bucket === "file"
-      && runBucket === "file"
-      && !!runSegmentId
-      && !!segmentId
-      && runSegmentId !== segmentId;
-    if ((runBucket && bucket !== runBucket) || segmentChanged) {
-      flushRun();
-    }
-    runBucket = bucket;
-    if (segmentId) runSegmentId = segmentId;
-    runMessages.push(message);
-  }
-
-  flushRun();
-}
-
-function isFileEditActivityMessage(message: UIMessage): boolean {
-  return message.kind === "trace" && !!message.fileEdits?.length;
-}
-
-function assistantHasInlineReasoning(message: UIMessage): boolean {
-  return (
-    message.role === "assistant"
-    && message.kind !== "trace"
-    && message.content.trim().length > 0
-    && (!!message.reasoning?.trim() || !!message.reasoningStreaming)
-  );
+  if (media.length) merged.media = media;
+  else delete merged.media;
+  if (images.length) merged.images = images;
+  else delete merged.images;
+  return merged;
 }
 
 function reasoningOnlyMessageFromAnswer(message: UIMessage): UIMessage {
@@ -268,6 +307,9 @@ function reasoningOnlyMessageFromAnswer(message: UIMessage): UIMessage {
     isStreaming: message.reasoningStreaming,
     activitySegmentId: message.activitySegmentId,
     latencyMs: message.latencyMs,
+    turnId: message.turnId,
+    turnPhase: "reasoning",
+    turnSeq: message.turnSeq,
   };
 }
 
@@ -278,42 +320,17 @@ function stripInlineReasoning(message: UIMessage): UIMessage {
   return next;
 }
 
-function activityItemsForMessage(message: UIMessage): ActivityItem[] {
-  if (isReasoningOnlyAssistant(message)) {
-    return [{ type: "reasoning", message }];
-  }
-  if (message.kind !== "trace") return [];
-
-  const items: ActivityItem[] = [];
-  if (message.fileEdits?.length) {
-    items.push({ type: "file_edit", message });
-  }
-  for (const event of message.toolEvents ?? []) {
-    const name = String(event.name ?? "").toLowerCase();
-    if (name === "run_cli_app") {
-      items.push({ type: "cli", message });
-    } else if (name === "mcp") {
-      items.push({ type: "mcp", message });
-    } else {
-      items.push({ type: "tool", message });
-    }
-  }
-  if (items.length === 0 && (message.traces?.length || message.content.trim())) {
-    items.push({ type: "tool", message });
-  }
-  if (message.media?.length) {
-    items.push({ type: "media", message });
-  }
-  return items;
+function validCreatedAtMs(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function activityTurnLatencyMs(activityMessages: UIMessage[], visibleMessages: UIMessage[]): number | undefined {
-  for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {
-    const latency = visibleMessages[i].latencyMs;
+function activityTurnLatencyMs(activityMessages: UIMessage[], allMessages: UIMessage[]): number | undefined {
+  for (let index = allMessages.length - 1; index >= 0; index -= 1) {
+    const latency = allMessages[index].latencyMs;
     if (isValidLatency(latency)) return latency;
   }
-  for (let i = activityMessages.length - 1; i >= 0; i -= 1) {
-    const latency = activityMessages[i].latencyMs;
+  for (let index = activityMessages.length - 1; index >= 0; index -= 1) {
+    const latency = activityMessages[index].latencyMs;
     if (isValidLatency(latency)) return latency;
   }
   return undefined;
@@ -321,97 +338,4 @@ function activityTurnLatencyMs(activityMessages: UIMessage[], visibleMessages: U
 
 function isValidLatency(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-export function activityEvidenceFromToolEvent(event: ToolProgressEvent): ActivityEvidence[] {
-  const source = activitySourceFromToolName(toolEventName(event));
-  const evidence: ActivityEvidence[] = [];
-  const extras = [
-    ...unknownList((event as { embeds?: unknown }).embeds),
-    ...unknownList((event as { files?: unknown }).files),
-  ];
-  extras.forEach((value, index) => {
-    const attachment = mediaAttachmentFromUnknown(value);
-    if (!attachment) return;
-    evidence.push({
-      id: `${event.call_id || toolEventName(event) || "tool"}:${index}:${attachment.url || attachment.name || attachment.kind}`,
-      attachment,
-      caption: attachment.name,
-      source,
-    });
-  });
-  return evidence;
-}
-
-export function activityEvidenceFromMessageMedia(message: UIMessage): ActivityEvidence[] {
-  return (message.media ?? []).map((attachment, index) => ({
-    id: `${message.id}:media:${index}:${attachment.url || attachment.name || attachment.kind}`,
-    attachment,
-    caption: attachment.name,
-    source: "media",
-  }));
-}
-
-function unknownList(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function toolEventName(event: ToolProgressEvent): string {
-  return typeof (event as { function?: { name?: unknown } }).function?.name === "string"
-    ? String((event as { function?: { name?: unknown } }).function?.name)
-    : typeof event.name === "string"
-      ? event.name
-      : "";
-}
-
-function activitySourceFromToolName(name: string): ActivityStepSource {
-  const compact = name.toLowerCase();
-  if (compact.includes("browser") || compact.includes("screenshot")) return "browser";
-  if (compact.includes("web") || compact.includes("search") || compact.includes("fetch") || compact.includes("read")) return "web";
-  if (compact.includes("exec") || compact.includes("shell") || compact.includes("cli")) return "shell";
-  if (compact.startsWith("mcp_") || compact === "mcp") return "mcp";
-  if (compact.includes("file") || compact.includes("patch")) return "file";
-  if (compact.includes("image") || compact.includes("video") || compact.includes("media")) return "media";
-  return "tool";
-}
-
-function mediaAttachmentFromUnknown(value: unknown): UIMediaAttachment | null {
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (!text) return null;
-    return toMediaAttachment({ url: looksLikeUrl(text) ? text : undefined, name: baseName(text) });
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  const url = stringField(record, ["url", "href", "src", "uri", "signed_url", "thumbnail_url"]);
-  const path = stringField(record, ["path", "absolute_path", "file", "filename"]);
-  const name = stringField(record, ["name", "filename", "title", "label"]) ?? baseName(url ?? path ?? "");
-  const kind = mediaKindFromRecord(record, url, name);
-  return toMediaAttachment({ url, name, kind });
-}
-
-function stringField(record: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function mediaKindFromRecord(record: Record<string, unknown>, url?: string, name?: string): UIMediaAttachment["kind"] | undefined {
-  const raw = stringField(record, ["kind", "type", "mime", "mime_type", "content_type"])?.toLowerCase() ?? "";
-  if (raw.includes("image") || raw.includes("screenshot")) return "image";
-  if (raw.includes("video") || raw.includes("mp4") || raw.includes("quicktime")) return "video";
-  if (raw.includes("file") || raw.includes("document")) return "file";
-  return toMediaAttachment({ url, name }).kind;
-}
-
-function looksLikeUrl(value: string): boolean {
-  return /^(https?:|data:|\/api\/|blob:)/i.test(value);
-}
-
-function baseName(value: string): string | undefined {
-  const clean = value.split(/[?#]/, 1)[0] ?? "";
-  const last = clean.split(/[\\/]/).filter(Boolean).pop();
-  return last || undefined;
 }

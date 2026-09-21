@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Open Teams setup",
+    "officialLabel": "Open Teams developer portal",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "Client secret",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "Tenant ID",
+        "placeholder": "Optional tenant ID"
+      },
+      "path": {
+        "label": "Callback path",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "Teams user IDs, comma separated"
+      },
+      "host": {
+        "label": "Listen host"
+      },
+      "port": {
+        "label": "Listen port"
+      },
+      "replyInThread": {
+        "label": "Reply in thread",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Mention-only reply"
+      },
+      "validateInboundAuth": {
+        "label": "Validate incoming requests",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "refTtlDays": {
+        "label": "Conversation lifetime"
+      },
+      "pruneWebChatRefs": {
+        "label": "Remove Web Chat conversations",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Remove non-personal conversations",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Conversation refresh interval"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Trusted service hosts"
+      }
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Open Slack setup",
+    "officialLabel": "Open Slack apps",
+    "actions": {
+      "slack-manifest": "Copy app manifest"
+    },
+    "fields": {
+      "appToken": {
+        "label": "App token",
+        "placeholder": "xapp-..."
+      },
+      "botToken": {
+        "label": "Bot token",
+        "placeholder": "xoxb-..."
+      },
+      "groupPolicy": {
+        "label": "Group behavior",
+        "choices": {
+          "mention": "Mention only",
+          "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      },
+      "mode": {
+        "label": "Connection mode",
+        "choices": {
+          "socket": "Socket Mode"
+        }
+      },
+      "webhookPath": {
+        "label": "Webhook path"
+      },
+      "replyInThread": {
+        "label": "Reply in thread",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "reactEmoji": {
+        "label": "Read emoji"
+      },
+      "doneEmoji": {
+        "label": "Done emoji"
+      },
+      "includeThreadContext": {
+        "label": "Include thread context",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "threadContextLimit": {
+        "label": "Thread context limit"
+      },
+      "allowFrom": {
+        "label": "Allowed users"
+      },
+      "groupAllowFrom": {
+        "label": "Allowed channels"
+      },
+      "groupRequireMention": {
+        "label": "Require mentions in channels",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "dm_enabled": {
+        "label": "Enable direct messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "dm_policy": {
+        "label": "Direct message access",
+        "choices": {
+          "allowlist": "Allowlist",
+          "open": "Open"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "Allowed direct-message users"
+      },
+      "proxy": {
+        "label": "Network proxy",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}

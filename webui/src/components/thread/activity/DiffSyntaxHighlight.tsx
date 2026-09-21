@@ -79,7 +79,7 @@ const LazyDiffSyntaxHighlight = lazy(async () => {
                 const node = rows[index];
                 if (!node) return line.content || " ";
                 return createSyntaxElement({
-                  node: trimTrailingLineBreak(node),
+                  node: stripConflictingTableClass(trimTrailingLineBreak(node)),
                   stylesheet,
                   useInlineStyles,
                   key: `diff-code-${index}`,
@@ -183,4 +183,27 @@ function trimTrailingLineBreak(node: SyntaxNode): SyntaxNode {
   const children = [...node.children];
   children[children.length - 1] = trimTrailingLineBreak(children[children.length - 1]!);
   return { ...node, children };
+}
+
+function stripConflictingTableClass(node: SyntaxNode): SyntaxNode {
+  const className = node.properties?.className;
+  const children = node.children?.map(stripConflictingTableClass);
+  const hasTableClass = Array.isArray(className) && className.includes("table");
+
+  if (!hasTableClass && !children) return node;
+
+  return {
+    ...node,
+    ...(hasTableClass
+      ? {
+          properties: {
+            ...node.properties,
+            // Tailwind's global `.table` utility changes Prism's inline Markdown
+            // table tokens into CSS tables, splitting a single diff line vertically.
+            className: className.filter((name) => name !== "table"),
+          },
+        }
+      : {}),
+    ...(children ? { children } : {}),
+  };
 }

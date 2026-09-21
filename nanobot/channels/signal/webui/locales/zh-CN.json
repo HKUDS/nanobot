@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "打开 Signal 配置指南",
+    "officialLabel": "打开 signal-cli 指南",
+    "fields": {
+      "phoneNumber": {
+        "label": "电话号码",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "服务主机",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "服务端口",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "允许私信的用户",
+        "placeholder": "电话号码或 UUID"
+      },
+      "group_allowFrom": {
+        "label": "允许的群组",
+        "placeholder": "群组 ID"
+      },
+      "groupMessageBufferSize": {
+        "label": "群组上下文消息数"
+      },
+      "attachmentsDir": {
+        "label": "附件目录"
+      },
+      "dm_enabled": {
+        "label": "启用私聊",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "dm_policy": {
+        "label": "私聊权限",
+        "choices": {
+          "allowlist": "白名单",
+          "open": "全部"
+        }
+      },
+      "group_enabled": {
+        "label": "启用群组",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "group_policy": {
+        "label": "群组权限",
+        "choices": {
+          "allowlist": "白名单",
+          "open": "全部"
+        }
+      },
+      "group_requireMention": {
+        "label": "群组中需要提及",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      }
+    }
+  }
+}

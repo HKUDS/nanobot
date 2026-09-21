@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { AlertCircle, ChevronRight, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -21,7 +21,7 @@ interface FilePreviewPanelProps {
 
 type PreviewState =
   | { status: "loading" }
-  | { status: "error"; message: string }
+  | { status: "error"; error: unknown }
   | { status: "ready"; payload: FilePreviewPayload };
 
 export function FilePreviewPanel({
@@ -36,6 +36,8 @@ export function FilePreviewPanel({
   const { t } = useTranslation();
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const [entered, setEntered] = useState(false);
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true));
@@ -45,25 +47,17 @@ export function FilePreviewPanel({
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
-    fetchFilePreview(token, sessionKey, path)
+    fetchFilePreview(tokenRef.current, sessionKey, path)
       .then((payload) => {
         if (!cancelled) setState({ status: "ready", payload });
       })
       .catch((error: unknown) => {
-        if (cancelled) return;
-        const message = error instanceof ApiError
-          ? (error.status === 404 && /API route not found/i.test(error.message)
-            ? t("filePreview.routeMissing", {
-              defaultValue: "File preview needs the latest gateway. Restart nanobot gateway and try again.",
-            })
-            : error.message)
-          : t("filePreview.failed", { defaultValue: "Could not preview this file." });
-        setState({ status: "error", message });
+        if (!cancelled) setState({ status: "error", error });
       });
     return () => {
       cancelled = true;
     };
-  }, [path, sessionKey, t, token]);
+  }, [path, sessionKey]);
 
   const displayPath = state.status === "ready" ? state.payload.display_path : path;
   const previewPath = state.status === "ready" ? state.payload.path : displayPath;
@@ -92,6 +86,15 @@ export function FilePreviewPanel({
     ...directoryParts,
     fileName,
   ].join("/")}`;
+  const errorMessage = state.status === "error"
+    ? (state.error instanceof ApiError
+      ? (state.error.status === 404 && /API route not found/i.test(state.error.message)
+        ? t("filePreview.routeMissing", {
+          defaultValue: "File preview needs the latest gateway. Restart nanobot gateway and try again.",
+        })
+        : state.error.message)
+      : t("filePreview.failed", { defaultValue: "Could not preview this file." }))
+    : null;
 
   return (
     <aside
@@ -180,7 +183,7 @@ export function FilePreviewPanel({
                     ) : null}
                     <span
                       className={cn(
-                        "min-w-0 truncate rounded-[4px] px-1 py-0.5",
+                        "min-w-0 truncate rounded-mark px-1 py-0.5",
                         isLast
                           ? "font-medium text-foreground"
                           : "max-w-[26vw] shrink text-muted-foreground/78",
@@ -222,7 +225,7 @@ export function FilePreviewPanel({
                     className="mx-auto mb-3 h-5 w-5 text-muted-foreground/70"
                     aria-hidden
                   />
-                  <p>{state.message}</p>
+                  <p>{errorMessage}</p>
                 </div>
               </div>
             ) : (

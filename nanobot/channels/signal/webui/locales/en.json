@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Open Signal setup",
+    "officialLabel": "Open signal-cli guide",
+    "fields": {
+      "phoneNumber": {
+        "label": "Phone number",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "Daemon host",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "Daemon port",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "Allowed direct message senders",
+        "placeholder": "Phone numbers or UUIDs"
+      },
+      "group_allowFrom": {
+        "label": "Allowed groups",
+        "placeholder": "Group IDs"
+      },
+      "groupMessageBufferSize": {
+        "label": "Group context messages"
+      },
+      "attachmentsDir": {
+        "label": "Attachment directory"
+      },
+      "dm_enabled": {
+        "label": "Enable direct messages",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "dm_policy": {
+        "label": "Direct message access",
+        "choices": {
+          "allowlist": "Allowlist",
+          "open": "Open"
+        }
+      },
+      "group_enabled": {
+        "label": "Enable groups",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "group_policy": {
+        "label": "Group access",
+        "choices": {
+          "allowlist": "Allowlist",
+          "open": "Open"
+        }
+      },
+      "group_requireMention": {
+        "label": "Require mention in groups",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      }
+    }
+  }
+}

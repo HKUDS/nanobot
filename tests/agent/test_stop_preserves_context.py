@@ -12,14 +12,14 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import run_session
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
+from nanobot.session.recovery import RUNTIME_CHECKPOINT_KEY
 
 
 def _make_provider():
@@ -38,66 +38,17 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
     provider = _make_provider()
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
+        mock_subagent_manager.return_value.cancel_by_session = AsyncMock(return_value=0)
         return AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
-
-
-class TestStopPreservesContext:
-    """Verify that /stop restores partial context via checkpoint."""
-
-    def test_restore_checkpoint_method_exists(self, tmp_path):
-        """AgentLoop should have _restore_runtime_checkpoint."""
-        loop = _make_loop(tmp_path)
-        assert hasattr(loop, "_restore_runtime_checkpoint")
-
-    def test_checkpoint_key_constant(self, tmp_path):
-        """The runtime checkpoint key should be defined."""
-        loop = _make_loop(tmp_path)
-        assert loop._RUNTIME_CHECKPOINT_KEY == "runtime_checkpoint"
-
-    def test_cancel_dispatch_restores_checkpoint(self, tmp_path):
-        """When a task is cancelled, the checkpoint should be restored."""
-        loop = _make_loop(tmp_path)
-        session = MagicMock()
-        session.metadata = {
-            "runtime_checkpoint": {
-                "phase": "awaiting_tools",
-                "iteration": 0,
-                "assistant_message": {
-                    "role": "assistant",
-                    "content": "Let me search for that.",
-                    "tool_calls": [{"id": "tc_1", "type": "function",
-                                    "function": {"name": "web_search", "arguments": "{}"}}],
-                },
-                "completed_tool_results": [
-                    {"role": "tool", "tool_call_id": "tc_1",
-                     "content": "Search results: ..."},
-                ],
-                "pending_tool_calls": [],
-            }
-        }
-        session.messages = [
-            {"role": "user", "content": "Search for something"},
-        ]
-        loop.sessions.get_or_create.return_value = session
-
-        restored = loop._restore_runtime_checkpoint(session)
-        assert restored is True
-        assert len(session.messages) > 1
-        assert "runtime_checkpoint" not in session.metadata
 
 
 @pytest.mark.asyncio
 async def test_dispatch_cancellation_restores_checkpoint():
-    """Regression for #2966: /stop interrupting _dispatch must materialize the
+    """Regression for #2966: /stop interrupting a session worker must materialize the
     in-flight runtime checkpoint into session.messages before the cancellation
     unwinds, so the next turn can see the partial work.
 
-    This exercises the real _dispatch path (locks, pending queues, the
-    CancelledError handler) rather than poking _restore_runtime_checkpoint in
-    isolation, so a future refactor that drops the cancel-time restore is
-    caught by CI instead of silently regressing.
     """
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -110,11 +61,11 @@ async def test_dispatch_cancellation_restores_checkpoint():
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+         patch("nanobot.agent.loop.SubagentManager") as mock_subagent_manager:
+        mock_subagent_manager.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
 
-    checkpoint_key = loop._RUNTIME_CHECKPOINT_KEY
+    checkpoint_key = RUNTIME_CHECKPOINT_KEY
     session = SimpleNamespace(
         key="test:c1",
         metadata={
@@ -152,7 +103,7 @@ async def test_dispatch_cancellation_restores_checkpoint():
     msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="work")
 
     with pytest.raises(asyncio.CancelledError):
-        await loop._dispatch(msg)
+        await run_session(loop, msg)
 
     roles = [m.get("role") for m in session.messages]
     assert roles == ["user", "assistant", "tool"], (
@@ -163,3 +114,38 @@ async def test_dispatch_cancellation_restores_checkpoint():
         "Checkpoint metadata should be cleared after restore"
     assert loop.sessions.save.called, \
         "Session should be persisted so the restored state survives process restart"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_cancellation_keeps_checkpoint_for_gateway_shutdown(tmp_path: Path) -> None:
+    """Gateway shutdown preserves the checkpoint; an explicit stop restores it."""
+    loop = _make_loop(tmp_path)
+    loop.preserve_inflight_turns_on_shutdown()
+    checkpoint_key = RUNTIME_CHECKPOINT_KEY
+    checkpoint = {
+        "phase": "final_response",
+        "assistant_message": {"role": "assistant", "content": "finished"},
+        "completed_tool_results": [],
+        "pending_tool_calls": [],
+    }
+    session = SimpleNamespace(
+        metadata={checkpoint_key: checkpoint},
+        messages=[],
+        provider_state=None,
+    )
+    loop.sessions.get_or_create.return_value = session
+
+    async def _cancel(*_args: object, **_kwargs: object) -> None:
+        raise asyncio.CancelledError()
+
+    loop._process_message = _cancel  # type: ignore[method-assign]
+
+    from nanobot.bus.events import InboundMessage
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_session(loop,
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="work")
+        )
+
+    assert session.metadata[checkpoint_key] == checkpoint
+    assert session.messages == []

@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guia do Matrix",
+    "officialLabel": "Abrir lista de clientes Matrix",
+    "fields": {
+      "homeserver": {
+        "label": "Servidor da conta",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ID de usuário",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Senha",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "Token de acesso",
+        "placeholder": "Informe um token de acesso"
+      },
+      "deviceId": {
+        "label": "ID do dispositivo",
+        "placeholder": "Obrigatório com token"
+      },
+      "groupPolicy": {
+        "label": "Comportamento em grupos",
+        "choices": {
+          "mention": "Somente menções",
+          "open": "Todas as mensagens",
+          "allowlist": "Lista de permissão"
+        }
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos"
+      },
+      "e2eeEnabled": {
+        "label": "Criptografia ponta a ponta",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "sasVerification": {
+        "label": "Verificação SAS",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Período de carência para interrupção da sincronização"
+      },
+      "maxMediaBytes": {
+        "label": "Tamanho máximo da mídia"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Downloads simultâneos de mídia"
+      },
+      "groupAllowFrom": {
+        "label": "Grupos permitidos"
+      },
+      "allowRoomMentions": {
+        "label": "Permitir menções à sala",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "streaming": {
+        "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "proxy": {
+        "label": "Proxy de rede",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}

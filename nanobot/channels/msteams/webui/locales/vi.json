@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn Teams",
+    "officialLabel": "Mở cổng nhà phát triển Teams",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "Client secret",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "Tenant ID",
+        "placeholder": "Tenant ID tùy chọn"
+      },
+      "path": {
+        "label": "Đường dẫn callback",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng Teams, phân tách bằng dấu phẩy"
+      },
+      "host": {
+        "label": "Nghe máy chủ"
+      },
+      "port": {
+        "label": "Cổng nghe"
+      },
+      "replyInThread": {
+        "label": "Trả lời trong chủ đề",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Trả lời chỉ đề cập"
+      },
+      "validateInboundAuth": {
+        "label": "Xác thực các yêu cầu đến",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "refTtlDays": {
+        "label": "Cuộc trò chuyện trọn đời"
+      },
+      "pruneWebChatRefs": {
+        "label": "Xóa cuộc hội thoại Trò chuyện trên web",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Xóa các cuộc trò chuyện không mang tính cá nhân",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Khoảng thời gian làm mới cuộc hội thoại"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Máy chủ dịch vụ đáng tin cậy"
+      }
+    }
+  }
+}

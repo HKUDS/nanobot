@@ -16,6 +16,8 @@ webui/node_modules/
 webui/dist/
 webui/coverage/
 webui/.vite/
+tui/node_modules/
+tui/dist/
 *.tsbuildinfo
 
 # Python bytecode & caches
@@ -100,3 +102,5 @@ temp/
 exp/
 .playwright-mcp/
 bridge/node_modules/
+webui/.verify-*
+.playwright-cli/

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from types import MappingProxyType
+from typing import cast
 
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.config.schema import Config, ModelPresetConfig
@@ -24,16 +26,23 @@ class ModelRuntimeResolver:
         initial_runtime: LLMRuntime,
         *,
         model_presets: Mapping[str, ModelPresetConfig] | None = None,
+        preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
+        configured_default_preset: str | None = None,
         provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
     ) -> None:
         self._runtime = initial_runtime
         self._model_presets = dict(model_presets or {})
+        self._preset_catalog_loader = preset_catalog_loader
+        self._preset_catalog_refresh_required = False
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
+        self._refresh_required = False
+        self._resolved_presets: dict[str, LLMRuntime] = {}
         self._tracks_provider_generation = initial_runtime.model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
-            initial_runtime.snapshot_signature
+            initial_runtime.snapshot_signature,
+            configured_default_preset,
         )
 
     @property
@@ -43,7 +52,11 @@ class ModelRuntimeResolver:
 
     @property
     def model_presets(self) -> Mapping[str, ModelPresetConfig]:
-        return self._model_presets
+        self._refresh_preset_catalog()
+        return MappingProxyType({
+            name: preset.model_copy(deep=True)
+            for name, preset in self._model_presets.items()
+        })
 
     @property
     def model_preset(self) -> str | None:
@@ -60,40 +73,63 @@ class ModelRuntimeResolver:
             self._refresh_provider_generation()
         return self._runtime
 
+    def admit(self) -> LLMRuntime:
+        """Resolve the immutable runtime for the next turn admission."""
+        if self._refresh_required:
+            self.refresh()
+        self._refresh_provider_generation()
+        return self._runtime
+
+    def invalidate(self) -> None:
+        """Refresh configured runtime state on the next admission."""
+        self._refresh_required = True
+        self._preset_catalog_refresh_required = True
+        self._resolved_presets.clear()
+
+    def _refresh_preset_catalog(self) -> None:
+        if not self._preset_catalog_refresh_required:
+            return
+        if self._preset_catalog_loader is not None:
+            self._model_presets = dict(self._preset_catalog_loader())
+        self._preset_catalog_refresh_required = False
+
     def resolve_snapshot(
         self,
         snapshot: ProviderSnapshot,
-        *,
-        model_preset: str | None = None,
     ) -> LLMRuntime:
         """Resolve a factory snapshot without changing the selected default."""
-        return runtime_from_provider_snapshot(snapshot, model_preset=model_preset)
+        return runtime_from_provider_snapshot(snapshot)
 
     def adopt_snapshot(
         self,
         snapshot: ProviderSnapshot,
-        *,
-        model_preset: str | None = None,
     ) -> LLMRuntime:
         """Select a snapshot as the default for future turns."""
-        runtime = self.resolve_snapshot(snapshot, model_preset=model_preset)
+        runtime = self.resolve_snapshot(snapshot)
         self._runtime = runtime
-        self._tracks_provider_generation = model_preset is None
+        self._tracks_provider_generation = runtime.model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
-            runtime.snapshot_signature
+            runtime.snapshot_signature,
+            runtime.model_preset,
         )
         return runtime
 
     def resolve_preset(self, name: str | None) -> LLMRuntime:
         """Resolve a named preset without changing the selected default."""
+        self._refresh_preset_catalog()
         normalized = preset_helpers.normalize_preset_name(name, self._model_presets)
+        cached = self._resolved_presets.get(normalized)
+        if cached is not None:
+            return cached
         snapshot = preset_helpers.build_runtime_preset_snapshot(
             name=normalized,
             presets=self._model_presets,
             provider=self._runtime.provider,
             loader=self._preset_snapshot_loader,
         )
-        return self.resolve_snapshot(snapshot, model_preset=normalized)
+        runtime = self.resolve_snapshot(snapshot)
+        self._resolved_presets[normalized] = runtime
+        return runtime
 
     def select_preset(self, name: str | None) -> LLMRuntime:
         """Select a named preset as the default for future turns."""
@@ -104,7 +140,7 @@ class ModelRuntimeResolver:
 
     def select_model(self, model: str) -> LLMRuntime:
         """Change the default model without reconstructing downstream consumers."""
-        if not isinstance(model, str) or not model.strip():
+        if not isinstance(cast(object, model), str) or not model.strip():
             raise ValueError("model must be a non-empty string")
         self._runtime = replace(
             self._runtime,
@@ -115,8 +151,9 @@ class ModelRuntimeResolver:
 
     def select_context_window(self, context_window_tokens: int) -> LLMRuntime:
         """Change the default context limit for future admissions."""
-        if not isinstance(context_window_tokens, int) or isinstance(
-            context_window_tokens,
+        raw_context_window = cast(object, context_window_tokens)
+        if not isinstance(raw_context_window, int) or isinstance(
+            raw_context_window,
             bool,
         ):
             raise TypeError("context_window_tokens must be an integer")
@@ -146,21 +183,26 @@ class ModelRuntimeResolver:
     def refresh(self) -> LLMRuntime | None:
         """Refresh configured defaults and return the replacement when changed."""
         if self._provider_snapshot_loader is None:
+            self._refresh_required = False
             return None
 
+        self._resolved_presets.clear()
         snapshot = self._provider_snapshot_loader()
-        default_selection = preset_helpers.default_selection_signature(snapshot.signature)
+        default_selection = preset_helpers.default_selection_signature(
+            snapshot.signature,
+            snapshot.model_preset,
+        )
         active_preset = self._runtime.model_preset
         if active_preset and self._default_selection_signature in (None, default_selection):
             runtime = self.resolve_preset(active_preset)
         else:
-            active_preset = None
             runtime = self.resolve_snapshot(snapshot)
 
         unchanged = (
             runtime.snapshot_signature == self._runtime.snapshot_signature
             and runtime.model_preset == self._runtime.model_preset
         )
+        self._refresh_required = False
         if unchanged:
             self._default_selection_signature = default_selection
             return None
@@ -170,7 +212,7 @@ class ModelRuntimeResolver:
             self._default_selection_signature,
         ) = (
             runtime,
-            active_preset is None,
+            runtime.model_preset is None,
             default_selection,
         )
         return runtime

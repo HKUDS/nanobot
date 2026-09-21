@@ -6,6 +6,7 @@ the WebUI-specific audio transcription action carried over that socket.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from nanobot.audio.transcription import (
@@ -18,7 +19,11 @@ from nanobot.config.loader import load_config
 _MAX_REQUEST_ID_LENGTH = 80
 
 
-async def webui_transcription_event(envelope: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+async def webui_transcription_event(
+    envelope: dict[str, Any],
+    *,
+    config_path: Path | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Return the WS event name and payload for one WebUI transcription request."""
     request_id = envelope.get("request_id")
     valid_request_id = (
@@ -38,7 +43,7 @@ async def webui_transcription_event(envelope: dict[str, Any]) -> tuple[str, dict
     try:
         text = await transcribe_audio_data_url(
             envelope.get("data_url"),
-            resolve_transcription_config(load_config()),
+            resolve_transcription_config(load_config(config_path)),
             duration_ms=envelope.get("duration_ms"),
         )
     except TranscriptionIngressError as exc:

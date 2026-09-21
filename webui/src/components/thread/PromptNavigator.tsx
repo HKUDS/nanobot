@@ -3,6 +3,7 @@ import { ListTree, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { formControlFocusClassName } from "@/components/ui/form-control";
 import {
   Sheet,
   SheetContent,
@@ -83,7 +84,8 @@ export function PromptNavigator({
                 placeholder={t("thread.promptNavigator.search")}
                 className={cn(
                   "h-10 w-full rounded-full border border-border bg-background pl-9 pr-3 text-sm",
-                  "outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20",
+                  "transition-colors",
+                  formControlFocusClassName,
                 )}
               />
             </div>

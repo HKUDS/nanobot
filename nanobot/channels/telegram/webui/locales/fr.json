@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide Telegram",
+    "officialLabel": "Ouvrir BotFather",
+    "fields": {
+      "token": {
+        "label": "Jeton du bot",
+        "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "Proxy réseau",
+        "placeholder": "http://127.0.0.1:7890"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "* ou ID utilisateur Telegram"
+      },
+      "groupPolicy": {
+        "label": "Comportement en groupe",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages",
+          "allowlist": "Liste d’autorisation"
+        }
+      },
+      "mode": {
+        "label": "Mode de connexion",
+        "choices": {
+          "polling": "Sondage long",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "Répondre au message",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "reactEmoji": {
+        "label": "Lire les emoji"
+      },
+      "connectionPoolSize": {
+        "label": "Taille du pool de connexions"
+      },
+      "poolTimeout": {
+        "label": "Expiration du délai du pool de connexions"
+      },
+      "streaming": {
+        "label": "Diffusion en continu",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "Claviers en ligne",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "richMessages": {
+        "label": "Messages riches",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "streamEditInterval": {
+        "label": "Intervalle de mise à jour du flux"
+      },
+      "webhookUrl": {
+        "label": "URL du webhook"
+      },
+      "webhookListenHost": {
+        "label": "Hôte d'écoute du webhook"
+      },
+      "webhookListenPort": {
+        "label": "Port d'écoute du webhook"
+      },
+      "webhookPath": {
+        "label": "Chemin du webhook"
+      },
+      "webhookSecretToken": {
+        "label": "Jeton secret Webhook"
+      },
+      "webhookMaxConnections": {
+        "label": "Nombre maximal de connexions webhook"
+      }
+    }
+  }
+}

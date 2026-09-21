@@ -135,7 +135,7 @@ async def test_tool_fails_after_retry_exhausted():
 
     assert "failed after retry" in output
     assert "ClosedResourceError" in output
-    assert is_tool_error_result(wrapper.name, output)
+    assert is_tool_error_result(output)
     assert session.call_tool.call_count == 2
 
 

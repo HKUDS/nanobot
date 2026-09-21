@@ -2,7 +2,8 @@ import ReactDOM from "react-dom/client";
 
 import App from "./App";
 import "./globals.css";
-import "./i18n";
+import { initializeI18n } from "./i18n";
+import { initializeLoopbackRuntimeHost } from "./lib/runtime";
 
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
 // LAN access over plain HTTP leaves it undefined, which crashes components that
@@ -23,5 +24,25 @@ if (typeof globalThis.crypto !== "undefined" && !("randomUUID" in globalThis.cry
 const root = document.getElementById("root");
 if (!root) throw new Error("root element missing");
 
-/* StrictMode disabled: dev double-invokes state updaters; delta accumulation must stay pure — see useNanobotStream. */
-ReactDOM.createRoot(root).render(<App />);
+initializeLoopbackRuntimeHost();
+
+async function renderWebui(container: HTMLElement) {
+  await initializeI18n();
+  /* StrictMode disabled: dev double-invokes state updaters; delta accumulation must stay pure — see useNanobotStream. */
+  ReactDOM.createRoot(container).render(<App />);
+}
+
+void renderWebui(root);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js", {
+        updateViaCache: "none",
+      })
+      .catch(() => {
+        // Service workers are progressive enhancement; registration failures
+        // (unsupported proxies, blocked storage) must not break the app.
+      });
+  });
+}

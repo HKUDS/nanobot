@@ -2,7 +2,15 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
-import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+import { setAppLanguage } from "@/i18n";
+import * as clipboard from "@/lib/clipboard";
+import { fmtDateTime, formatMessageEndTime } from "@/lib/format";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  SlashCommand,
+  UIMessage,
+} from "@/lib/types";
 
 const CLI_APPS: CliAppInfo[] = [
   {
@@ -61,7 +69,126 @@ const MCP_PRESETS: McpPresetInfo[] = [
   },
 ];
 
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    command: "/model",
+    title: "Show or switch model",
+    description: "Show the active model or switch to another configuration.",
+    icon: "brain",
+    lifecycle: "agent_turn_with_args",
+    acceptsArgs: true,
+  },
+  {
+    command: "/goal",
+    title: "Start a goal",
+    description: "Start a sustained goal.",
+    icon: "activity",
+    lifecycle: "agent_turn_with_args",
+    acceptsArgs: true,
+  },
+  {
+    command: "/new",
+    title: "New chat",
+    description: "Start a new chat.",
+    icon: "square-pen",
+    lifecycle: "finalize_active_turn",
+    acceptsArgs: false,
+  },
+];
+
 describe("MessageBubble", () => {
+  it.each([false, undefined])("hides normal and legacy source badges (fallback: %s)", (fallback) => {
+    const message: UIMessage = { id: "primary", role: "assistant", content: "Hello", createdAt: 0,
+      isStreaming: true, responseSources: [{ provider: "openai_codex", model: "gpt", preset: "codex", fallback }] };
+    const { container, rerender } = render(<MessageBubble message={message} />);
+    expect(screen.queryByText("codex")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-assistant-footer]")).toHaveAttribute("data-state", "reserved");
+    rerender(<MessageBubble message={{ ...message, isStreaming: false }} />);
+    expect(screen.queryByText("codex")).not.toBeInTheDocument();
+  });
+
+  it("shows only fallback provider logos and preset names while streaming and after completion", () => {
+    const message: UIMessage = { id: "actual", role: "assistant", content: "Hello", createdAt: 0,
+      isStreaming: true, responseSources: [
+        { provider: "openai_codex", model: "gpt", preset: "codex", fallback: false },
+        { provider: "xai", model: "grok-4.5", preset: "grok", fallback: true },
+      ] };
+    const { container, rerender } = render(<MessageBubble message={message} />);
+    expect(screen.getByText("grok")).toBeVisible();
+    expect(screen.queryByText("codex")).not.toBeInTheDocument();
+    expect(screen.queryByText("grok-4.5")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-assistant-footer]")).toHaveAttribute("data-state", "visible");
+    expect(container.querySelector("img")).toHaveAttribute("alt", "");
+    fireEvent.error(container.querySelector("img")!);
+    expect(screen.getByText("grok")).toBeVisible();
+    rerender(<MessageBubble message={{ ...message, isStreaming: false }} />);
+    expect(screen.getByText("grok")).toBeVisible();
+    rerender(<MessageBubble message={{ ...message, responseSources: undefined }} />);
+    expect(screen.queryByText("grok")).not.toBeInTheDocument();
+  });
+
+  it("explains fallback on focus and click, with the source directly after the timestamp", async () => {
+    await setAppLanguage("zh-CN");
+    const description = "本条回复已切换至备用模型，由 grok 回答。";
+    const { container } = render(<MessageBubble message={{
+      id: "fallback-info", role: "assistant", content: "你好", createdAt: 1,
+      responseSources: [{ provider: "xai", model: "grok", preset: "grok", fallback: true }],
+    }} />);
+    const trigger = screen.getByRole("button", { name: description });
+    const footer = container.querySelector("[data-assistant-footer]")!;
+    const sourceGroup = footer.querySelector("[data-message-timestamp]")!.nextElementSibling;
+    expect(sourceGroup).toContainElement(trigger);
+    expect(sourceGroup).not.toHaveClass("ml-auto");
+    fireEvent.focus(trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(description);
+    fireEvent.blur(trigger);
+    fireEvent.click(trigger);
+    const popover = await screen.findByRole("dialog", { name: description });
+    expect(popover).toHaveTextContent(description);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.keyDown(popover, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("copies the localized compact reply instead of the stored English text", async () => {
+    await setAppLanguage("zh-CN");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<MessageBubble message={{
+      id: "compact-empty", role: "assistant", content: "Nothing to compact.",
+      compactReply: "empty", createdAt: 1,
+    }} />);
+    expect(screen.getByText("无需压缩上下文")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("无需压缩上下文"));
+  });
+
+  it("renders a compacted context notice", () => {
+    const message: UIMessage = {
+      id: "compaction-1",
+      role: "assistant",
+      content: "",
+      kind: "compaction",
+      createdAt: Date.now(),
+      compaction: {
+        id: "compact-1",
+        phase: "succeeded",
+        announce: true,
+      },
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    const notice = container.querySelector("[data-context-compaction='succeeded']");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(notice).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByText("Context compacted")).toBeInTheDocument();
+    expect(notice).toHaveTextContent(/^Context compacted$/);
+  });
+
   it("renders user messages as right-aligned pills", () => {
     const message: UIMessage = {
       id: "u1",
@@ -75,8 +202,301 @@ describe("MessageBubble", () => {
     const pill = screen.getByText("hello");
 
     expect(row).toHaveClass("ml-auto", "flex");
-    expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
+    expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-floating");
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
+  });
+
+  it("renders cross-session input with its public handle", () => {
+    const message: UIMessage = {
+      id: "session-message:message-1",
+      role: "user",
+      content: "Please review this.",
+      createdAt: 1_700_000_000_123,
+      sessionMessage: {
+        message_id: "message-1",
+        session: {
+          id: "handle_0123456789abcdef0123456789abcdef",
+          name: "mira-0123456789",
+        },
+      },
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    expect(container.querySelector("[data-session-message]")).toBeInTheDocument();
+    expect(screen.getByText("@mira-0123456789")).toBeInTheDocument();
+    expect(screen.getByText("Please review this.")).toBeInTheDocument();
+  });
+
+  it("outlines temporary-chat user messages with a short dashed border", () => {
+    const message: UIMessage = {
+      id: "u-temporary",
+      role: "user",
+      content: "private question",
+      createdAt: Date.now(),
+    };
+
+    const { rerender } = render(<MessageBubble message={message} temporary />);
+    const bubble = screen.getByText("private question");
+
+    expect(bubble).toHaveAttribute("data-temporary-message", "true");
+    expect(bubble).toHaveClass("border-dashed", "border-muted-foreground/40", "bg-transparent");
+
+    rerender(<MessageBubble message={message} />);
+    expect(bubble).not.toHaveClass("border-dashed");
+    expect(bubble).toHaveClass("bg-secondary/70");
+  });
+
+  it("does not replay an entrance animation when persisted messages mount", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "u-persisted",
+        role: "user",
+        content: "Earlier question",
+        createdAt: Date.now(),
+      },
+      {
+        id: "a-persisted",
+        role: "assistant",
+        content: "Earlier answer",
+        createdAt: Date.now(),
+      },
+      {
+        id: "t-persisted",
+        role: "tool",
+        kind: "trace",
+        content: "Earlier tool call",
+        createdAt: Date.now(),
+      },
+    ];
+
+    for (const message of messages) {
+      const { container, unmount } = render(<MessageBubble message={message} />);
+      for (const className of ["animate-in", "fade-in-0", "slide-in-from-bottom-1"]) {
+        expect(container.firstElementChild).not.toHaveClass(className);
+      }
+      unmount();
+    }
+  });
+
+  it("renders failed delivery details on focus without persistent accepted chrome", async () => {
+    const message: UIMessage = {
+      id: "u-delivery",
+      role: "user",
+      content: "hello",
+      createdAt: Date.now(),
+      deliveryStatus: "sending",
+    };
+
+    const { rerender } = render(<MessageBubble message={message} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+
+    rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    rerender(
+      <MessageBubble
+        message={{
+          ...message,
+          deliveryStatus: "failed",
+          deliveryErrorKind: "message_too_big",
+        }}
+      />,
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    const failedStatus = screen.getByRole("button", {
+      name: "Not sent: Message too large",
+    });
+    expect(failedStatus).toHaveClass(
+      "text-destructive/80",
+      "dark:text-red-400/80",
+    );
+    expect(screen.getByText("hello")).not.toHaveClass("ring-1");
+    expect(screen.getByText("hello")).not.toHaveClass("ring-destructive/30");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.focus(failedStatus);
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Message too large");
+    expect(tooltip).toHaveTextContent(
+      "The server rejected your last message because it exceeded the size limit.",
+    );
+    expect(screen.getByRole("alert")).toHaveClass("sr-only");
+  });
+
+  it("styles only generated quoted context in user messages", () => {
+    const message: UIMessage = {
+      id: "u-quote",
+      role: "user",
+      content: "> [!QUOTE]\n> selected assistant excerpt\n\nWhat about this?",
+      createdAt: Date.now(),
+    };
+
+    const { rerender } = render(<MessageBubble message={message} />);
+
+    const quote = screen.getByLabelText("Quoted context");
+    expect(quote).toHaveTextContent("selected assistant excerpt");
+    expect(quote).not.toHaveAttribute("title");
+    expect(screen.queryByText("Quoted context")).not.toBeInTheDocument();
+    expect(screen.getByText("What about this?")).toBeInTheDocument();
+
+    rerender(
+      <MessageBubble
+        message={{
+          ...message,
+          content: "> manually typed quote\n\nWhat about this?",
+        }}
+      />,
+    );
+    expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+  });
+
+  it("copies user messages from the shared message action", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const message: UIMessage = {
+      id: "u-copy",
+      role: "user",
+      content: "Copy this user prompt.",
+      createdAt: Date.now(),
+    };
+
+    try {
+      render(<MessageBubble message={message} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+
+      expect(writeText).toHaveBeenCalledWith("Copy this user prompt.");
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument(),
+      );
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("highlights recognized slash command names without adding container chrome", () => {
+    const message: UIMessage = {
+      id: "u-command",
+      role: "user",
+      content: "/model gpt-5",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} slashCommands={SLASH_COMMANDS} />);
+
+    const command = screen.getByTestId("message-slash-command");
+    expect(command).toHaveTextContent("/model");
+    expect(command).toHaveClass(
+      "font-[550]",
+      "transition-colors",
+      "duration-150",
+    );
+    expect(command).not.toHaveClass("font-mono");
+    expect(command.getAttribute("style")).not.toContain("text-shadow");
+    expect(command.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(command.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
+    expect(command.parentElement).toHaveTextContent("/model gpt-5");
+    expect(command.parentElement).toHaveClass("rounded-floating", "bg-secondary/70");
+  });
+
+  it("keeps unknown and invalid slash commands as plain message text", () => {
+    const unknown: UIMessage = {
+      id: "u-unknown-command",
+      role: "user",
+      content: "/unknown value",
+      createdAt: Date.now(),
+    };
+    const invalidExactCommand: UIMessage = {
+      id: "u-invalid-command",
+      role: "user",
+      content: "/new with-arguments",
+      createdAt: Date.now(),
+    };
+
+    const { rerender } = render(
+      <MessageBubble message={unknown} slashCommands={SLASH_COMMANDS} />,
+    );
+    expect(screen.queryByTestId("message-slash-command")).not.toBeInTheDocument();
+    expect(screen.getByText("/unknown value")).toBeInTheDocument();
+
+    rerender(<MessageBubble message={invalidExactCommand} slashCommands={SLASH_COMMANDS} />);
+    expect(screen.queryByTestId("message-slash-command")).not.toBeInTheDocument();
+    expect(screen.getByText("/new with-arguments")).toBeInTheDocument();
+  });
+
+  it("preserves installed capability mentions in slash command arguments", () => {
+    const message: UIMessage = {
+      id: "u-command-mention",
+      role: "user",
+      content: "/goal ask @zoom to schedule the review",
+      createdAt: Date.now(),
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        slashCommands={SLASH_COMMANDS}
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
+  });
+
+  it("highlights skill references without a live skill catalog", () => {
+    const message: UIMessage = {
+      id: "u-skill-reference",
+      role: "user",
+      content: "Ask $github to review this with @zoom",
+      createdAt: Date.now(),
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        cliApps={CLI_APPS}
+      />,
+    );
+
+    const skill = screen.getByTestId("message-skill-reference-github");
+    expect(skill).toHaveTextContent(/^github$/);
+    expect(skill).toHaveClass(
+      "font-[550]",
+      "transition-colors",
+      "duration-150",
+    );
+    expect(skill.getAttribute("style")).not.toContain("text-shadow");
+    expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
+    expect(skill.parentElement).toHaveTextContent("Ask github to review this with @Zoom");
+  });
+
+  it("highlights well-formed skill references and leaves a bare marker plain", () => {
+    const message: UIMessage = {
+      id: "u-plain-skill-reference",
+      role: "user",
+      content: "Try $unknown or $blocked-skill and $",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.getByTestId("message-skill-reference-unknown")).toHaveTextContent(/^unknown$/);
+    expect(screen.getByTestId("message-skill-reference-blocked-skill"))
+      .toHaveTextContent(/^blocked-skill$/);
+    const references = screen.getAllByTestId(/^message-skill-reference-/);
+    expect(references).toHaveLength(2);
+    expect(references[0].parentElement)
+      .toHaveTextContent("Try unknown or blocked-skill and $");
   });
 
   it("renders fork control in completed assistant action rows", () => {
@@ -95,6 +515,100 @@ describe("MessageBubble", () => {
     expect(onForkFromHere).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the assistant completion time in the former latency slot", async () => {
+    const completedAt = Date.UTC(2026, 6, 25, 12, 34, 56);
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "a-completed-at",
+          role: "assistant",
+          content: "Finished answer",
+          latencyMs: 13_000,
+          completedAt,
+          createdAt: Date.now(),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    const time = container.querySelector("[data-assistant-completed-at]");
+    expect(time).toHaveTextContent(formatMessageEndTime(completedAt));
+    expect(time).toHaveAttribute("dateTime", new Date(completedAt).toISOString());
+    expect(time).not.toHaveAttribute("title");
+    expect(time).toHaveAttribute("tabIndex", "0");
+    expect(time).toHaveClass(
+      "cursor-help",
+      "text-[11px]",
+      "leading-none",
+      "text-muted-foreground/70",
+      "tabular-nums",
+    );
+
+    fireEvent.pointerMove(time!);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(fmtDateTime(completedAt));
+  });
+
+  it("falls back to the assistant creation time when replay has no completion time", () => {
+    const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "a-created-at",
+          role: "assistant",
+          content: "Proactive answer",
+          createdAt,
+        }}
+      />,
+    );
+
+    const time = container.querySelector("[data-message-timestamp]");
+    expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
+    expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
+    expect(time).not.toHaveAttribute("title");
+    expect(time).not.toHaveAttribute("data-assistant-completed-at");
+  });
+
+  it("renders the creation time for user messages", async () => {
+    const createdAt = Date.UTC(2026, 6, 25, 12, 34, 56);
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "u-created-at",
+          role: "user",
+          content: "A user message",
+          createdAt,
+        }}
+      />,
+    );
+
+    const time = container.querySelector("[data-message-created-at]");
+    expect(time).toHaveTextContent(formatMessageEndTime(createdAt));
+    expect(time).toHaveAttribute("dateTime", new Date(createdAt).toISOString());
+    expect(time).not.toHaveAttribute("title");
+    expect(time).toHaveAttribute("tabIndex", "0");
+
+    fireEvent.pointerMove(time!);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(fmtDateTime(createdAt));
+  });
+
+  it("does not infer completion time from the assistant creation timestamp", () => {
+    const createdAt = Date.UTC(2026, 6, 25, 12, 34, 0);
+    const latencyMs = 13_000;
+    const { container } = render(
+      <MessageBubble
+        message={{
+          id: "a-replayed-completion",
+          role: "assistant",
+          content: "Replayed answer",
+          latencyMs,
+          createdAt,
+        }}
+      />,
+    );
+
+    expect(container.querySelector("[data-assistant-completed-at]")).not.toBeInTheDocument();
+  });
+
   it("renders installed CLI app mentions inside sent user messages", () => {
     const message: UIMessage = {
       id: "u-cli",
@@ -106,31 +620,53 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} cliApps={CLI_APPS} />);
 
     const token = screen.getByTestId("message-cli-mention-zoom");
-    expect(token).toHaveTextContent("@zoom");
-    expect(token).toHaveAttribute("title", "CLI app: Zoom");
+    expect(token).toHaveTextContent("@Zoom");
+    expect(token).toHaveAttribute("title", "CLI app: Zoom (@zoom)");
+    expect(token).toHaveClass("font-[550]");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #0B5CFF");
-    expect(token.getAttribute("style")).toContain("text-shadow");
-    expect(screen.getByTestId("message-cli-mention-logo-zoom")).toBeInTheDocument();
+    expect(token.getAttribute("style")).not.toContain("text-shadow");
+    const logo = screen.getByTestId("message-cli-mention-logo-zoom");
+    expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
+    expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
     expect(screen.queryByTestId("message-cli-mention-krita")).not.toBeInTheDocument();
     expect(screen.getByText(/not @krita/)).toBeInTheDocument();
   });
 
-  it("renders a lightweight automation source label for cron replies", () => {
+  it("places automation metadata after the timestamp and reveals its source on hover", async () => {
+    const completedAt = Date.UTC(2026, 6, 25, 12, 34, 56);
     const message: UIMessage = {
       id: "a-cron",
       role: "assistant",
       content: "Time to drink water.",
       source: { kind: "cron", label: "drink water" },
-      createdAt: Date.now(),
+      completedAt,
+      createdAt: completedAt - 1_000,
     };
 
-    render(<MessageBubble message={message} />);
+    const { container } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByText("drink water")).toBeInTheDocument();
-    expect(screen.getByText("Triggered automatically")).toBeInTheDocument();
+    const footer = container.querySelector("[data-assistant-footer]")!;
+    const timestamp = footer.querySelector("[data-message-timestamp]")!;
+    const trigger = footer.querySelector("[data-automation-trigger]")!;
+
+    expect(timestamp).toHaveTextContent(formatMessageEndTime(completedAt));
+    expect(trigger).toHaveTextContent("Triggered automatically");
+    expect(trigger.previousElementSibling).toBe(timestamp);
+    expect(trigger).toHaveClass(
+      "text-[11px]",
+      "leading-none",
+      "text-muted-foreground/70",
+      "tabular-nums",
+    );
+    expect(trigger.className).not.toMatch(/(?:^|\s)(?:border|bg-)/);
+    expect(trigger.querySelector("svg")).not.toBeInTheDocument();
+    expect(screen.queryByText("drink water")).not.toBeInTheDocument();
     expect(screen.getByText("Time to drink water.")).toBeInTheDocument();
+
+    fireEvent.pointerMove(trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("drink water");
   });
 
   it("renders structured CLI app attachments even without the installed catalog", () => {
@@ -152,7 +688,7 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} cliApps={[]} />);
 
     const token = screen.getByTestId("message-cli-mention-drawio");
-    expect(token).toHaveTextContent("@drawio");
+    expect(token).toHaveTextContent("@Draw.io");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
     expect(token.getAttribute("style")).toContain("color: #F08705");
@@ -170,10 +706,85 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} mcpPresets={MCP_PRESETS} />);
 
     const token = screen.getByTestId("message-mcp-mention-browserbase");
-    expect(token).toHaveTextContent("@browserbase");
-    expect(token).toHaveAttribute("title", "MCP server: Browserbase");
+    expect(token).toHaveTextContent("@Browserbase");
+    expect(token).toHaveAttribute("title", "MCP server: Browserbase (@browserbase)");
     expect(token.getAttribute("style")).toContain("color: #111827");
-    expect(screen.getByTestId("message-mcp-mention-logo-browserbase")).toBeInTheDocument();
+    const logo = screen.getByTestId("message-mcp-mention-logo-browserbase");
+    expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
+    expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
+  });
+
+  it.each((["cli", "mcp"] as const).flatMap((kind) => [
+    ["linear", "Linear", "Linear"],
+    ["iterm2", "iTerm2", "iTerm2"],
+    ["drawio", "Draw.io", "Draw.io"],
+    ["gimp", "GIMP", "GIMP"],
+    ["google-drive", "Google Drive", "Google Drive"],
+    ["1password-cli", "1Password CLI", "1Password CLI"],
+    ["feishu-cli", "Feishu/Lark CLI", "Feishu/Lark CLI"],
+    ["local-app", "  本地应用  ", "本地应用"],
+    ["fallback-app", "   ", "fallback-app"],
+  ].map(([name, displayName, expected]) => ({ kind, name, displayName, expected }))))(
+    "uses the saved display name for $kind $name without rewriting its identifier",
+    ({ kind, name, displayName, expected }) => {
+      const message: UIMessage = {
+        id: "saved-app-name",
+        role: "user",
+        content: `Use @${name} please`,
+        ...(kind === "cli" ? {
+          cliApps: [{ name, display_name: displayName, category: "test", entry_point: name }],
+        } : {
+          mcpPresets: [{ name, display_name: displayName, category: "test", transport: "stdio" }],
+        }),
+      };
+      render(<MessageBubble message={message} />);
+      const token = screen.getByTestId(`message-${kind}-mention-${name}`);
+      expect(token.textContent).toBe(`@${expected}`);
+      expect(token).toHaveAttribute("title", `${kind === "cli" ? "CLI app" : "MCP server"}: ${expected} (@${name})`);
+      expect(token).toHaveClass("inline-flex", "items-baseline", "max-w-full", "[overflow-wrap:anywhere]");
+      expect(token.firstElementChild).toHaveClass("shrink-0");
+      expect(token.lastElementChild).toHaveClass("min-w-0", "font-semibold");
+      expect(message.content).toBe(`Use @${name} please`);
+    },
+  );
+
+  it("copies the original mention identifiers rather than display names", async () => {
+    const copy = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(true);
+    try {
+      render(<MessageBubble message={{
+        id: "copy-display-name", role: "user", content: "Please use @drawio",
+        cliApps: [{ name: "drawio", display_name: "Draw.io", category: "diagram", entry_point: "drawio" }],
+      }} />);
+      expect(screen.getByTestId("message-cli-mention-drawio")).toHaveTextContent("@Draw.io");
+      fireEvent.click(screen.getByRole("button", { name: "Copy", exact: true }));
+      await waitFor(() => expect(copy).toHaveBeenCalledWith("Please use @drawio"));
+    } finally {
+      copy.mockRestore();
+    }
+  });
+
+  it("renders persisted session mentions inside sent user messages", () => {
+    const message: UIMessage = {
+      id: "u-session",
+      role: "user",
+      content: "Use @收费设计 as context",
+      createdAt: Date.now(),
+      sessionMentions: [{
+        name: "收费设计",
+        session_key: "websocket:pricing",
+        title: "收费设计",
+      }],
+    };
+
+    render(<MessageBubble message={message} />);
+
+    const token = screen.getByTestId("message-session-mention-收费设计");
+    expect(token).toHaveTextContent("@收费设计");
+    expect(token).toHaveAttribute("title", "Session: 收费设计");
+    expect(token.closest("a")).toHaveAttribute("href", "#/chat/websocket%3Apricing");
+    expect(token.closest("a")?.getAttribute("style")).toContain(
+      "text-decoration-color: var(--inline-token-highlight)",
+    );
   });
 
   it("copies completed assistant replies from the action row", async () => {
@@ -279,7 +890,57 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
   });
 
-  it("does not show copy when showAssistantCopyAction is false", () => {
+  it("keeps assistant footer geometry mounted across stream completion", () => {
+    const streaming: UIMessage = {
+      id: "a-footer-stable",
+      role: "assistant",
+      content: "Stable answer",
+      isStreaming: true,
+      createdAt: Date.now(),
+    };
+    const { container, rerender } = render(<MessageBubble message={streaming} />);
+
+    const reservedFooter = container.querySelector("[data-assistant-footer]");
+    expect(reservedFooter).not.toBeNull();
+    expect(reservedFooter).toHaveAttribute("data-state", "reserved");
+    expect(reservedFooter).toHaveClass("mt-2", "min-h-8", "opacity-0");
+
+    rerender(
+      <MessageBubble
+        message={{
+          ...streaming,
+          isStreaming: false,
+          completedAt: Date.now(),
+        }}
+      />,
+    );
+
+    const visibleFooter = container.querySelector("[data-assistant-footer]");
+    expect(visibleFooter).toBe(reservedFooter);
+    expect(visibleFooter).toHaveAttribute("data-state", "visible");
+    expect(visibleFooter).toHaveClass("mt-2", "min-h-8", "opacity-100");
+  });
+
+  it("omits footer space when an active answer is no longer the tail", () => {
+    const message: UIMessage = {
+      id: "a-intermediate",
+      role: "assistant",
+      content: "I will keep working.",
+      createdAt: Date.now(),
+    };
+
+    const { container } = render(
+      <MessageBubble
+        message={message}
+        isTurnStreaming
+        isThreadTail={false}
+      />,
+    );
+
+    expect(container.querySelector("[data-assistant-footer]")).not.toBeInTheDocument();
+  });
+
+  it("does not show copy when showCopyAction is false", () => {
     const message: UIMessage = {
       id: "a-mid",
       role: "assistant",
@@ -287,7 +948,7 @@ describe("MessageBubble", () => {
       createdAt: Date.now(),
     };
 
-    render(<MessageBubble message={message} showAssistantCopyAction={false} />);
+    render(<MessageBubble message={message} showCopyAction={false} />);
 
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
   });
@@ -305,12 +966,55 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} />);
     const toggle = screen.getByRole("button", { name: /used 2 tools/i });
 
-    expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
-    expect(screen.queryByText('search "hk weather"')).not.toBeInTheDocument();
+    const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(content).toHaveAttribute("data-state", "closed");
+    expect(content).toHaveAttribute("inert");
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
 
     fireEvent.click(toggle);
     expect(screen.getByText('weather("get")')).toBeInTheDocument();
     expect(screen.getByText('search "hk weather"')).toBeInTheDocument();
+    expect(content).toHaveAttribute("data-state", "open");
+    fireEvent.click(toggle);
+    expect(content).toHaveAttribute("data-state", "closed");
+    expect(content).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
+  });
+
+  it("lazily mounts large trace groups and releases them only after an uninterrupted exit", async () => {
+    const traces = Array.from({ length: 1000 }, (_, index) => `tool call ${index}`);
+    render(<MessageBubble message={{
+      id: "large-trace", role: "tool", kind: "trace",
+      content: traces[0], traces, createdAt: Date.now(),
+    }} />);
+    const toggle = screen.getByRole("button", { name: /used 1000 tools/i });
+    const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    // Hidden content must not allocate a DOM node for every historical trace.
+    expect(content.querySelectorAll("li")).toHaveLength(0);
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+
+    let finishExit!: () => void;
+    const getAnimations = vi.fn(() => [{
+      finished: new Promise<void>((resolve) => { finishExit = resolve; }),
+    }]);
+    Object.defineProperty(content, "getAnimations", { value: getAnimations });
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+    expect(content).toHaveAttribute("inert");
+
+    // Reopening cancels cleanup of the previous exit, even if it finishes later.
+    fireEvent.click(toggle);
+    await act(async () => { finishExit(); });
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
+    expect(content).not.toHaveAttribute("inert");
+
+    fireEvent.click(toggle);
+    expect(getAnimations).toHaveBeenCalledTimes(2);
+    await act(async () => { finishExit(); });
+    expect(content.querySelectorAll("li")).toHaveLength(0);
+    fireEvent.click(toggle);
+    expect(content.querySelectorAll("li")).toHaveLength(1000);
   });
 
   it("renders video media as an inline player", () => {
@@ -334,13 +1038,13 @@ describe("MessageBubble", () => {
     const video = screen.getByLabelText(/video attachment/i);
     expect(video.tagName).toBe("VIDEO");
     expect(video).toHaveAttribute("src", "/api/media/sig/payload");
-    expect(video).toHaveAttribute("preload", "auto");
+    expect(video).toHaveAttribute("preload", "metadata");
     expect(container.querySelector("video[controls]")).toBeInTheDocument();
     expect(screen.queryByText("Preview")).not.toBeInTheDocument();
     expect(screen.queryByText("Code")).not.toBeInTheDocument();
   });
 
-  it("auto-expands the reasoning trace while streaming with a shimmer header", () => {
+  it("renders streaming reasoning as one compact activity line", () => {
     const message: UIMessage = {
       id: "a-reasoning-streaming",
       role: "assistant",
@@ -352,15 +1056,19 @@ describe("MessageBubble", () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByText("Thinking…")).toBeInTheDocument();
-    expect(screen.getByText(/Step 1: parse intent\./)).toBeInTheDocument();
+    const preview = screen.getByText("Step 1: parse intent. Step 2: compute.");
+    expect(preview).toBeInTheDocument();
     expect(container.querySelector(".reasoning-sheen-stripe")).not.toBeInTheDocument();
-    expect(screen.getByText("Thinking…")).toHaveClass("streaming-text-sheen");
-    expect(screen.getByText("Thinking…")).toHaveAttribute("data-sheen-text", "Thinking…");
-    expect(screen.getByRole("button", { name: /thinking/i }).parentElement).not.toHaveClass("mb-2");
+    expect(preview).toHaveClass("streaming-text-sheen");
+    expect(preview).toHaveAttribute(
+      "data-sheen-text",
+      "Step 1: parse intent. Step 2: compute.",
+    );
+    expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /thinking/i })).not.toBeInTheDocument();
   });
 
-  it("collapses the reasoning section by default once streaming ends", () => {
+  it("keeps completed reasoning on one line above the answer", () => {
     const message: UIMessage = {
       id: "a-reasoning-done",
       role: "assistant",
@@ -372,17 +1080,15 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    const preview = screen.getByText("hidden until expanded");
+    expect(preview).toBeInTheDocument();
     expect(screen.getByText("The answer is 42.")).toBeInTheDocument();
-    expect(screen.queryByText("hidden until expanded")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /thinking/i }).parentElement).toHaveClass("mb-2");
-
-    fireEvent.click(screen.getByRole("button", { name: /thinking/i }));
-    expect(screen.getByText("hidden until expanded")).toBeInTheDocument();
+    expect(preview.closest('[data-testid="activity-step"]')).toHaveClass("mb-2");
+    expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /thinking/i })).not.toBeInTheDocument();
   });
 
-  it("renders reasoning body as markdown so headings are not left as raw ###", async () => {
-    await import("@/components/MarkdownTextRenderer");
+  it("compacts reasoning markdown into plain single-line text", () => {
     const message: UIMessage = {
       id: "a-reasoning-md",
       role: "assistant",
@@ -393,13 +1099,10 @@ describe("MessageBubble", () => {
     };
 
     const { container } = render(<MessageBubble message={message} />);
-    fireEvent.click(screen.getByRole("button", { name: /thinking/i }));
 
-    await waitFor(() => {
-      expect(container.querySelector("h3")?.textContent).toBe("Section title");
-    });
+    expect(screen.getByText("Section title Body line.")).toBeInTheDocument();
     expect(container.textContent).not.toContain("###");
-    expect(screen.getByText("Body line.")).toBeInTheDocument();
+    expect(container.querySelector("h3")).not.toBeInTheDocument();
   });
 
   it("renders inline file paths as compact file references", async () => {
@@ -463,7 +1166,15 @@ describe("MessageBubble", () => {
     const { container } = render(<MessageBubble message={message} />);
 
     const imageButton = screen.getByRole("button", { name: /view image/i });
-    expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-[20px]");
+    expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-panel");
+    expect(imageButton).toHaveClass(
+      "border",
+      "border-border/60",
+      "focus-visible:ring-2",
+    );
+    expect(imageButton).not.toHaveClass("hover:scale-[1.01]");
+    expect(imageButton).not.toHaveClass("hover:ring-2");
+    expect(imageButton).not.toHaveClass("hover:ring-primary/25");
     expect(imageButton).not.toHaveAttribute("title");
     expect(container.querySelector("img")).toHaveClass("h-auto", "w-full", "object-contain");
   });
@@ -510,4 +1221,5 @@ describe("MessageBubble", () => {
     expect(container.querySelector('img[src="/api/media/sig/svg"]')).toBeInTheDocument();
     expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
   });
+
 });

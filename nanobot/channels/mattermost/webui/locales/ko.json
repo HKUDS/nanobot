@@ -1,0 +1,112 @@
+{
+  "setup": {
+    "docsLabel": "Mattermost 설정 가이드 열기",
+    "officialLabel": "Mattermost 봇 가이드 열기",
+    "fields": {
+      "serverUrl": {
+        "label": "서버 URL",
+        "placeholder": "https://mattermost.example.com"
+      },
+      "token": {
+        "label": "봇 토큰",
+        "placeholder": "Mattermost 봇 토큰"
+      },
+      "teamId": {
+        "label": "팀 ID",
+        "placeholder": "팀 ID(선택 사항)"
+      },
+      "groupPolicy": {
+        "label": "채널 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "스레드 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지(멘션 불필요)",
+          "allowlist": "허용 목록"
+        }
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "allowFromMatchMode": {
+        "label": "사용자 매칭",
+        "choices": {
+          "email": "이메일",
+          "id": "사용자 ID",
+          "username": "사용자 이름"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "허용된 채널"
+      },
+      "replyInThread": {
+        "label": "스레드로 답장하기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "includeThreadContext": {
+        "label": "스레드 컨텍스트 포함",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "threadContextLimit": {
+        "label": "스레드 컨텍스트 제한"
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "reactEmoji": {
+        "label": "이모티콘 읽기"
+      },
+      "doneEmoji": {
+        "label": "이모티콘 완료"
+      },
+      "sendProgress": {
+        "label": "진행 상황 보내기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "sendToolHints": {
+        "label": "도구 힌트 보내기",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "dm_enabled": {
+        "label": "다이렉트 메시지 활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "dm_policy": {
+        "label": "다이렉트 메시지 액세스",
+        "choices": {
+          "allowlist": "허용 목록",
+          "open": "열기"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "허용된 직접 메시지 사용자"
+      }
+    }
+  }
+}

@@ -6,7 +6,6 @@ from typing import Any, Mapping
 
 from nanobot.session.automation_turns import (
     AutomationTurnSpec,
-    automation_history_overrides_for_spec,
     automation_trigger,
 )
 
@@ -50,13 +49,3 @@ def local_trigger_delivery_id(metadata: Mapping[str, Any] | None) -> str | None:
         return None
     value = trigger.get("delivery_id")
     return value if isinstance(value, str) and value else None
-
-
-def local_trigger_history_overrides(
-    metadata: Mapping[str, Any] | None,
-) -> tuple[str | None, dict[str, Any]]:
-    """Return session-history text/metadata overrides for a local trigger turn."""
-    return automation_history_overrides_for_spec(
-        metadata,
-        LOCAL_TRIGGER_AUTOMATION_SPEC,
-    )

@@ -56,6 +56,23 @@ def test_restart_notice_preserves_metadata_across_env(monkeypatch):
     assert "NANOBOT_RESTART_NOTIFY_METADATA" not in os.environ
 
 
+def test_restart_notice_drops_process_local_webui_turn_metadata(monkeypatch):
+    monkeypatch.delenv("NANOBOT_RESTART_NOTIFY_METADATA", raising=False)
+
+    set_restart_notice_to_env(
+        channel="websocket",
+        chat_id="chat-1",
+        metadata={
+            "webui_turn_id": "turn-from-old-process",
+            "slack": {"thread_ts": "1700.42"},
+        },
+    )
+
+    notice = consume_restart_notice_from_env()
+    assert notice is not None
+    assert notice.metadata == {"slack": {"thread_ts": "1700.42"}}
+
+
 def test_restart_notice_clears_stale_metadata(monkeypatch):
     monkeypatch.setenv("NANOBOT_RESTART_NOTIFY_METADATA", '{"stale": true}')
     set_restart_notice_to_env(channel="cli", chat_id="direct")

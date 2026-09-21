@@ -1,0 +1,36 @@
+{
+  "setup": {
+    "primaryAction": "連接 WhatsApp",
+    "docsLabel": "開啟 WhatsApp 設定指南",
+    "officialLabel": "開啟 WhatsApp 說明",
+    "fields": {
+      "allowFrom": {
+        "label": "允許的聯絡人",
+        "placeholder": "電話號碼或 WhatsApp ID"
+      },
+      "groupPolicy": {
+        "label": "群組行為",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息",
+          "allowlist": "允許清單"
+        }
+      },
+      "proxy": {
+        "label": "網路代理",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp 連結QR Code",
+    "scanTitle": "連結 WhatsApp",
+    "scanDescription": "在 WhatsApp 中開啟「已連結裝置」，選擇「連結裝置」，然後掃描此QR Code。",
+    "waiting": "正在等待 WhatsApp 掃描…",
+    "connected": "WhatsApp 已連接。",
+    "stopped": "WhatsApp 連接已停止。請重新開始以取得新的QR Code。",
+    "connecting": "正在連接…",
+    "scanAgain": "連結其他帳戶",
+    "connect": "連結 WhatsApp"
+  }
+}

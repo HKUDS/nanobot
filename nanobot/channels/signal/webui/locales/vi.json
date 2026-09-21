@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "Mở hướng dẫn Signal",
+    "officialLabel": "Mở hướng dẫn signal-cli",
+    "fields": {
+      "phoneNumber": {
+        "label": "Số điện thoại",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "Máy chủ dịch vụ",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "Cổng dịch vụ",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "Người được phép gửi tin nhắn riêng",
+        "placeholder": "Số điện thoại hoặc UUID"
+      },
+      "group_allowFrom": {
+        "label": "Nhóm được phép",
+        "placeholder": "ID nhóm"
+      },
+      "groupMessageBufferSize": {
+        "label": "Nhóm tin nhắn ngữ cảnh"
+      },
+      "attachmentsDir": {
+        "label": "Thư mục đính kèm"
+      },
+      "dm_enabled": {
+        "label": "Bật tin nhắn trực tiếp",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "dm_policy": {
+        "label": "Truy cập tin nhắn trực tiếp",
+        "choices": {
+          "allowlist": "Danh sách cho phép",
+          "open": "Mở"
+        }
+      },
+      "group_enabled": {
+        "label": "Bật nhóm",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "group_policy": {
+        "label": "Truy cập nhóm",
+        "choices": {
+          "allowlist": "Danh sách cho phép",
+          "open": "Mở"
+        }
+      },
+      "group_requireMention": {
+        "label": "Yêu cầu đề cập trong nhóm",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      }
+    }
+  }
+}

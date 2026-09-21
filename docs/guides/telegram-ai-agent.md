@@ -1,8 +1,7 @@
-# Build a Telegram AI Agent with nanobot
+# Connect Telegram to nanobot
 
-This guide connects nanobot to Telegram so a paired Telegram user can message a
-self-hosted AI agent backed by your normal nanobot config, tools, memory, and
-workspace.
+This guide connects one Telegram bot to nanobot. Messages sent to that bot use
+your normal nanobot model, tools, memory, and workspace.
 
 ## What this guide builds
 
@@ -29,26 +28,54 @@ python -m pip install nanobot-ai
 nanobot onboard --wizard
 ```
 
-## Enable the Telegram channel
+## Connect Telegram in the WebUI
 
-Install the optional channel dependency:
+Start the WebUI:
+
+```bash
+nanobot webui
+```
+
+Open **Settings → Channels → Telegram**:
+
+1. If Telegram support is not installed, turn on its switch and confirm the
+   installation.
+2. Paste the token from BotFather.
+3. If the gateway cannot reach Telegram directly, expand **Advanced** and enter
+   an HTTP or SOCKS proxy such as `http://127.0.0.1:7890`.
+4. Save and enable Telegram.
+
+The configuration badge appears as soon as a bot token is saved. A connection
+check is separate: if Telegram is temporarily unreachable, the saved
+configuration remains valid and the bot can continue working in environments
+where the gateway has network access.
+
+Saved tokens and proxy URLs are masked. A proxy entered here is used both for
+the connection check and for normal Telegram traffic.
+
+## Manual setup
+
+For a headless installation, install Telegram support:
 
 ```bash
 nanobot plugins enable telegram
 ```
 
-Merge this snippet into `~/.nanobot/config.json`:
+Then merge this snippet into `~/.nanobot/config.json`:
 
 ```json
 {
   "channels": {
     "telegram": {
       "enabled": true,
-      "token": "YOUR_BOT_TOKEN"
+      "token": "YOUR_BOT_TOKEN",
+      "proxy": "http://127.0.0.1:7890"
     }
   }
 }
 ```
+
+Omit `proxy` when the gateway can reach Telegram directly.
 
 Omitting `allowFrom` enables pairing-only mode. The first DM from a new user
 gets a pairing code instead of agent access.
@@ -95,8 +122,13 @@ workspace as your local CLI check.
 
 - If the channel is not listed, run `nanobot plugins enable telegram` again in
   the same Python environment.
-- If messages do not arrive, run `nanobot gateway --verbose` and check the bot
-  token.
+- If the WebUI shows a saved configuration but the live check cannot reach Telegram,
+  the token is still saved. Confirm the gateway can reach `api.telegram.org`,
+  or open **Advanced → Network proxy** and enter a proxy.
+- If Telegram rejects the token, copy the current token from BotFather or
+  regenerate it.
+- If messages do not arrive, run `nanobot gateway --verbose` and confirm the
+  Telegram channel is enabled.
 - If a first DM returns a pairing code, that is expected. Approve the code before
   testing normal agent replies.
 - If Telegram Web shows unsupported rich messages, keep `richMessages` disabled.

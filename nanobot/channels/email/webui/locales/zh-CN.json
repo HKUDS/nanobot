@@ -1,0 +1,166 @@
+{
+  "setup": {
+    "docsLabel": "打开邮件配置指南",
+    "officialLabel": "打开应用专用密码指南",
+    "presetLabel": "快速填充",
+    "sections": {
+      "receiving": "接收邮件",
+      "sending": "发送邮件"
+    },
+    "presets": {
+      "gmail": "Gmail",
+      "outlook": "Outlook",
+      "icloud": "iCloud"
+    },
+    "fields": {
+      "consentGranted": {
+        "label": "允许 nanobot 读取和发送邮件",
+        "choices": {
+          "true": "已授权",
+          "false": "未授权"
+        }
+      },
+      "imapHost": {
+        "label": "IMAP 主机",
+        "placeholder": "imap.gmail.com"
+      },
+      "imapUsername": {
+        "label": "IMAP 用户名",
+        "placeholder": "bot@example.com"
+      },
+      "imapPassword": {
+        "label": "IMAP 密码",
+        "placeholder": "应用专用密码"
+      },
+      "smtpHost": {
+        "label": "SMTP 主机",
+        "placeholder": "smtp.gmail.com"
+      },
+      "smtpUsername": {
+        "label": "SMTP 用户名",
+        "placeholder": "bot@example.com"
+      },
+      "smtpPassword": {
+        "label": "SMTP 密码",
+        "placeholder": "应用专用密码"
+      },
+      "imapPort": {
+        "label": "IMAP 端口",
+        "placeholder": "993"
+      },
+      "smtpPort": {
+        "label": "SMTP 端口",
+        "placeholder": "587"
+      },
+      "fromAddress": {
+        "label": "发件地址",
+        "placeholder": "bot@example.com"
+      },
+      "pollIntervalSeconds": {
+        "label": "收件检查间隔（秒）",
+        "placeholder": "30"
+      },
+      "allowFrom": {
+        "label": "允许的发件人",
+        "placeholder": "邮箱地址，用逗号分隔"
+      },
+      "verifyDkim": {
+        "label": "验证 DKIM",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "verifySpf": {
+        "label": "验证 SPF",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "imapMailbox": {
+        "label": "IMAP 邮箱"
+      },
+      "imapUseSsl": {
+        "label": "IMAP SSL",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "smtpUseTls": {
+        "label": "SMTP TLS",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "smtpUseSsl": {
+        "label": "SMTP SSL",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "autoReplyEnabled": {
+        "label": "自动回复",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "markSeen": {
+        "label": "标为已读",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "postAction": {
+        "label": "处理后",
+        "choices": {
+          "delete": "删除",
+          "move": "移动"
+        }
+      },
+      "postActionMoveMailbox": {
+        "label": "移至邮箱"
+      },
+      "postActionExpunge": {
+        "label": "永久执行操作",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "postActionIgnoreSkipped": {
+        "label": "忽略未处理邮件",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "maxBodyChars": {
+        "label": "正文长度上限"
+      },
+      "subjectPrefix": {
+        "label": "回复主题前缀"
+      },
+      "allowedAttachmentTypes": {
+        "label": "允许的附件类型"
+      },
+      "maxAttachmentSize": {
+        "label": "附件大小上限"
+      },
+      "maxAttachmentsPerEmail": {
+        "label": "附件数量上限"
+      },
+      "trustedAuthservIds": {
+        "label": "可信邮件认证服务",
+        "placeholder": "mx.google.com，用逗号分隔",
+        "help": "接收邮件服务添加的准确 authserv-id。启用 SPF 或 DKIM 验证时必填。"
+      }
+    }
+  },
+  "displayName": "电子邮件"
+}
