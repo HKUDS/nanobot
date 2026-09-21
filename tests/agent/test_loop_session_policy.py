@@ -170,6 +170,41 @@ async def test_direct_transient_run_never_spills_before_cancellation(tmp_path) -
     assert current_request_context() is None
 
 
+@pytest.mark.parametrize("private", [True, False])
+@pytest.mark.parametrize("failure", ["runner", "discard", "queue"])
+async def test_session_worker_errors_keep_private_content_out_of_logs(
+    tmp_path, private, failure, monkeypatch,
+) -> None:
+    loop = _loop(tmp_path, [])
+    key = "websocket:synthetic-worker-error"
+    if private:
+        loop.sessions.get_or_create_transient(key)
+    else:
+        loop.sessions.get_or_create(key)
+    secret = "synthetic-private-worker-content"
+    if failure == "runner":
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=ValueError(secret))
+    else:
+        async def fail_after_discard(*args, **kwargs):
+            # The privacy snapshot must survive cache eviction during failure.
+            loop.sessions.invalidate(key)
+            raise ValueError(secret)
+
+        target = "_process_message" if failure == "discard" else "_dispatch_one"
+        monkeypatch.setattr(loop, target, fail_after_discard)
+    records = []
+    sink = logger.add(lambda message: records.append(message.record), format="{message}")
+    try:
+        await run_session(loop, _message(key, secret))
+    finally:
+        logger.remove(sink)
+    errors = [r for r in records if r["level"].name == "ERROR"]
+    assert errors
+    assert all(r["exception"] is None for r in errors) is private
+    if private:
+        assert secret not in str([r["message"] for r in records])
+
+
 @pytest.mark.asyncio
 async def test_transient_session_stays_outside_unified_session(tmp_path) -> None:
     loop = _loop(tmp_path, ["private answer"], unified_session=True)

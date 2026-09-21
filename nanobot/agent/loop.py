@@ -1458,6 +1458,10 @@ class AgentLoop:
                     msg = deferred.pop(0)
                     if not deferred:
                         self._deferred_automation_turns.pop(session_key)
+                session = self.sessions.get_cached(session_key)
+                log_content = session is None or (
+                    session.policy.persist and session.policy.log_content
+                )
                 try:
                     await self._dispatch_one(msg, pending)
                 except asyncio.CancelledError as exc:
@@ -1465,7 +1469,7 @@ class AgentLoop:
                         coordinator.complete(msg, error=exc)
                     raise
                 except Exception:
-                    logger.exception(
+                    logger.opt(exception=log_content).error(
                         "Session worker failed one message for {}; continuing FIFO",
                         session_key,
                     )
@@ -1504,6 +1508,12 @@ class AgentLoop:
     ) -> None:
         """Process one root message while later inputs remain in its session inbox."""
         session_key = self._effective_session_key(msg)
+        # The request context is reset before errors reach this boundary, and
+        # discard may evict the session while a turn is still unwinding.
+        session = self.sessions.get_cached(session_key)
+        log_content = session is None or (
+            session.policy.persist and session.policy.log_content
+        )
         recovery_task_registered = False
         recovery_admission = self._recovery_admission
         current_task: asyncio.Task[Any] | None = None
@@ -1588,7 +1598,9 @@ class AgentLoop:
                         )
                     raise
                 except Exception as exc:
-                    logger.exception("Error processing message for session {}", session_key)
+                    logger.opt(exception=log_content).error(
+                        "Error processing message for session {}", session_key,
+                    )
                     await delivery.fail(
                         publish_completion=not turn_continuation.internal_continuation_pending(
                             msg.metadata

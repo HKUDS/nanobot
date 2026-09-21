@@ -2,29 +2,110 @@
 
 import asyncio
 import sys
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.runner_helpers import make_run_spec
 from loguru import logger
 from mcp import types
 from mcp.shared.exceptions import McpError
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.context import (
     RequestContext,
     request_context,
     tool_log_content_allowed,
 )
 from nanobot.agent.tools.execution import _classify_violation, execute_tool_calls
-from nanobot.agent.tools.mcp import MCPPromptWrapper, MCPResourceWrapper, MCPToolWrapper
+from nanobot.agent.tools.mcp import (
+    MCPPromptWrapper,
+    MCPProvider,
+    MCPResourceWrapper,
+    MCPToolWrapper,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool, _redact_url_for_log
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.config.schema import WebSearchConfig
-from nanobot.providers.base import ToolCallRequest
+from nanobot.config.schema import MCPServerConfig, WebSearchConfig
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 _SECRET = "synthetic-private-detail"
+
+
+@pytest.mark.parametrize("log_content", [True, False])
+@pytest.mark.parametrize("transient", [True, False])
+async def test_mcp_reconnect_failure_obeys_private_log_policy(
+    log_content, transient, monkeypatch, diagnostic_records,
+):
+    @asynccontextmanager
+    async def broken_stdio(_params):
+        if transient:
+            raise ConnectionResetError(_SECRET)
+        raise RuntimeError(_SECRET)
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("mcp.client.stdio.stdio_client", broken_stdio)
+    session = SimpleNamespace(call_tool=AsyncMock(side_effect=RuntimeError("session terminated")))
+    wrapper = MCPToolWrapper(session, "sample", SimpleNamespace(
+        name="search", description="synthetic", inputSchema={},
+    ))
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    provider = MCPProvider({"sample": MCPServerConfig(command="synthetic-mcp")}, registry)
+    provider._attach_reconnect_handlers({"sample"})
+    try:
+        with request_context(RequestContext(channel="websocket", chat_id="test", log_content=log_content)):
+            result = await wrapper.execute(query=_SECRET)
+    finally:
+        await provider.aclose()
+
+    assert "failed" in result
+    failures = [
+        r for r in diagnostic_records
+        if "connection failure" in r["message"] or "failed to connect" in r["message"]
+    ]
+    assert failures
+    assert any(r["exception"] is not None for r in failures) is log_content
+
+
+@pytest.mark.parametrize("log_content", [True, False])
+@pytest.mark.parametrize("kind", ["injection", "continuation", "finalization", "finally"])
+async def test_runner_recovery_diagnostics_obey_private_policy(log_content, kind, diagnostic_records):
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    spec = make_run_spec(
+        provider, model="test-model", initial_messages=[{"role": "user", "content": _SECRET}],
+        tools=ToolRegistry(), max_iterations=1, max_tool_result_chars=100,
+    )
+    if kind == "injection":
+        spec.injection_callback = AsyncMock(side_effect=ValueError(_SECRET))
+    elif kind == "continuation":
+        spec.continuation_callback = MagicMock(side_effect=ValueError(_SECRET))
+    elif kind == "finalization":
+        spec.max_iterations = 0
+        provider.chat_stream_with_retry = AsyncMock(side_effect=ValueError(_SECRET))
+    else:
+        class BrokenFinallyHook(AgentHook):
+            async def before_run(self, context):
+                raise ValueError(_SECRET)
+
+            async def on_finally(self, context):
+                raise RuntimeError("synthetic cleanup failure")
+
+        spec.hook = BrokenFinallyHook()
+
+    with request_context(RequestContext(channel="websocket", chat_id="test", log_content=log_content)):
+        if kind == "finally":
+            with pytest.raises(ValueError, match=_SECRET):
+                await AgentRunner().run(spec)
+        else:
+            await AgentRunner().run(spec)
+    errors = [r for r in diagnostic_records if r["level"].name == "ERROR"]
+    assert errors
+    assert all((r["exception"] is not None) is log_content for r in errors)
 
 
 @pytest.fixture

@@ -213,13 +213,14 @@ def _is_transient_connection_failure(exc: BaseException) -> bool:
 
 
 def _log_mcp_connection_failure(name: str, exc: BaseException, hint: str = "") -> None:
+    exception = exc if tool_log_content_allowed() else False
     if _is_transient_connection_failure(exc):
         logger.warning("MCP server '{}': transient connection failure", name)
-        logger.opt(exception=exc).debug(
+        logger.opt(exception=exception).debug(
             "MCP server '{}' transient connection failure details", name
         )
         return
-    logger.opt(exception=exc).error("MCP server '{}': failed to connect: {}", name, hint)
+    logger.opt(exception=exception).error("MCP server '{}': failed to connect: {}", name, hint)
 
 
 def _is_session_terminated(exc: BaseException) -> bool:

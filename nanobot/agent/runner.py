@@ -23,6 +23,7 @@ from nanobot.agent.context_governance import (
     TranscriptBuilder,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.events import NO_EVENTS, EventSink
@@ -219,7 +220,7 @@ class AgentRunner:
         try:
             content = callback()
         except Exception:
-            logger.exception("continuation_callback failed")
+            logger.opt(exception=tool_log_content_allowed()).error("continuation_callback failed")
             return None
         if content is None or not content.strip():
             return None
@@ -242,7 +243,7 @@ class AgentRunner:
         try:
             items = await callback()
         except Exception:
-            logger.exception("injection_callback failed")
+            logger.opt(exception=tool_log_content_allowed()).error("injection_callback failed")
             return []
         if not items:
             return []
@@ -318,7 +319,7 @@ class AgentRunner:
                     try:
                         await hook.on_finally(context)
                     except Exception:
-                        logger.exception(
+                        logger.opt(exception=tool_log_content_allowed()).error(
                             "AgentHook.on_finally error after {}",
                             context.stop_reason or "run exception",
                         )
@@ -1181,7 +1182,7 @@ class AgentRunner:
                 transcript=messages,
             )
         except Exception:
-            logger.exception(
+            logger.opt(exception=tool_log_content_allowed()).error(
                 "Budget-exhausted finalization failed for {}; using fallback",
                 spec.session_key or "default",
             )
