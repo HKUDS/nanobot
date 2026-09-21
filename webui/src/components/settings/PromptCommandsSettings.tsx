@@ -73,8 +73,8 @@ export function PromptCommandsSettings() {
           </button>)}
     </section>
     <Sheet open={draft !== null} onOpenChange={(open) => { if (!open) close(); }}>
-      <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-xl">
-        <SheetTitle>{label(draft?.revision ? "edit" : "add")}</SheetTitle>
+      <SheetContent className="flex w-full flex-col gap-4 overflow-y-auto p-5 sm:max-w-xl sm:p-6">
+        <SheetTitle className="pr-6">{label(draft?.revision ? "edit" : "add")}</SheetTitle>
         <SheetDescription>{label("hint")}</SheetDescription>
         {draft ? <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
           <label className="grid gap-2 text-sm">{label("name")}<Input required pattern="[a-z][a-z0-9-]{0,47}" maxLength={48} disabled={busy || !!draft.revision} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
