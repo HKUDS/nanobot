@@ -61,23 +61,30 @@ class RotatingTextOutput(io.TextIOBase):
                 if self._size and self._size + len(data) > self._max_bytes:
                     self._rotate()
                     self._ensure_open()
-                assert self._handle is not None
-                self._handle.write(data)
-                self._handle.flush()
-                self._size += len(data)
+                self._append(data)
                 return len(text)
 
             if self._size:
+                size_before = self._size
                 self._rotate()
+                if self._size >= size_before:
+                    self._ensure_open()
+                    self._append(data)
+                    return len(text)
             offset = 0
             while offset < len(data):
                 self._ensure_open()
                 capacity = self._max_bytes - self._size
                 if capacity <= 0:
+                    size_before = self._size
                     self._rotate()
+                    if self._size >= size_before:
+                        self._ensure_open()
+                        self._append(data[offset:])
+                        break
                     continue
 
-                chunk_size = self._utf8_chunk_size(data[offset:], capacity)
+                chunk_size = self._utf8_chunk_size(data, offset, capacity)
                 if chunk_size == 0 and self._size:
                     self._rotate()
                     continue
@@ -86,24 +93,32 @@ class RotatingTextOutput(io.TextIOBase):
                 # case; normal caps split only at code-point boundaries.
                 chunk_size = chunk_size or min(capacity, len(data) - offset)
                 chunk = data[offset : offset + chunk_size]
-                assert self._handle is not None
-                self._handle.write(chunk)
-                self._handle.flush()
-                self._size += chunk_size
+                self._append(chunk)
                 offset += chunk_size
                 if offset < len(data):
+                    size_before = self._size
                     self._rotate()
+                    if self._size >= size_before:
+                        self._ensure_open()
+                        self._append(data[offset:])
+                        break
         return len(text)
 
     @staticmethod
-    def _utf8_chunk_size(data: bytes, capacity: int) -> int:
+    def _utf8_chunk_size(data: bytes, offset: int, capacity: int) -> int:
         """Return the largest prefix within capacity that ends on a UTF-8 boundary."""
-        end = min(len(data), capacity)
+        end = min(len(data), offset + capacity)
         if end == len(data):
-            return end
-        while end > 0 and data[end] & 0xC0 == 0x80:
+            return end - offset
+        while end > offset and data[end] & 0xC0 == 0x80:
             end -= 1
-        return end
+        return end - offset
+
+    def _append(self, data: bytes) -> None:
+        assert self._handle is not None
+        self._handle.write(data)
+        self._handle.flush()
+        self._size += len(data)
 
     def flush(self) -> None:
         with self._lock:

@@ -53,6 +53,28 @@ def test_rotating_output_splits_one_oversized_write_at_utf8_boundaries(
     assert "".join(path.read_text(encoding="utf-8") for path in paths) == text
 
 
+def test_rotating_output_keeps_writing_when_rotation_is_blocked(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    log_path = tmp_path / "gateway.log"
+    output = RotatingTextOutput(log_path, max_bytes=8, backup_count=1)
+    output.write("12345678")
+    original_replace = Path.replace
+
+    def block_active_log_rotation(path: Path, target: Path) -> Path:
+        if path == log_path:
+            raise OSError("rotation blocked")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", block_active_log_rotation)
+
+    assert output.write("oversized output") == len("oversized output")
+    output.close()
+
+    assert log_path.read_text(encoding="utf-8") == "12345678oversized output"
+
+
 def test_rotating_output_falls_back_when_active_log_cannot_be_renamed(
     tmp_path: Path,
     monkeypatch,
