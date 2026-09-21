@@ -97,6 +97,59 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 describe("MessageBubble", () => {
+  it.each([false, undefined])("hides normal and legacy source badges (fallback: %s)", (fallback) => {
+    const message: UIMessage = { id: "primary", role: "assistant", content: "Hello", createdAt: 0,
+      isStreaming: true, responseSources: [{ provider: "openai_codex", model: "gpt", preset: "codex", fallback }] };
+    const { container, rerender } = render(<MessageBubble message={message} />);
+    expect(screen.queryByText("codex")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-assistant-footer]")).toHaveAttribute("data-state", "reserved");
+    rerender(<MessageBubble message={{ ...message, isStreaming: false }} />);
+    expect(screen.queryByText("codex")).not.toBeInTheDocument();
+  });
+
+  it("shows only fallback provider logos and preset names while streaming and after completion", () => {
+    const message: UIMessage = { id: "actual", role: "assistant", content: "Hello", createdAt: 0,
+      isStreaming: true, responseSources: [
+        { provider: "openai_codex", model: "gpt", preset: "codex", fallback: false },
+        { provider: "xai", model: "grok-4.5", preset: "grok", fallback: true },
+      ] };
+    const { container, rerender } = render(<MessageBubble message={message} />);
+    expect(screen.getByText("grok")).toBeVisible();
+    expect(screen.queryByText("codex")).not.toBeInTheDocument();
+    expect(screen.queryByText("grok-4.5")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-assistant-footer]")).toHaveAttribute("data-state", "visible");
+    expect(container.querySelector("img")).toHaveAttribute("alt", "");
+    fireEvent.error(container.querySelector("img")!);
+    expect(screen.getByText("grok")).toBeVisible();
+    rerender(<MessageBubble message={{ ...message, isStreaming: false }} />);
+    expect(screen.getByText("grok")).toBeVisible();
+    rerender(<MessageBubble message={{ ...message, responseSources: undefined }} />);
+    expect(screen.queryByText("grok")).not.toBeInTheDocument();
+  });
+
+  it("explains fallback on focus and click, with the source directly after the timestamp", async () => {
+    await setAppLanguage("zh-CN");
+    const description = "本条回复已切换至备用模型，由 grok 回答。";
+    const { container } = render(<MessageBubble message={{
+      id: "fallback-info", role: "assistant", content: "你好", createdAt: 1,
+      responseSources: [{ provider: "xai", model: "grok", preset: "grok", fallback: true }],
+    }} />);
+    const trigger = screen.getByRole("button", { name: description });
+    const footer = container.querySelector("[data-assistant-footer]")!;
+    const sourceGroup = footer.querySelector("[data-message-timestamp]")!.nextElementSibling;
+    expect(sourceGroup).toContainElement(trigger);
+    expect(sourceGroup).not.toHaveClass("ml-auto");
+    fireEvent.focus(trigger);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(description);
+    fireEvent.blur(trigger);
+    fireEvent.click(trigger);
+    const popover = await screen.findByRole("dialog", { name: description });
+    expect(popover).toHaveTextContent(description);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.keyDown(popover, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("copies the localized compact reply instead of the stored English text", async () => {
     await setAppLanguage("zh-CN");
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -866,6 +919,25 @@ describe("MessageBubble", () => {
     expect(visibleFooter).toBe(reservedFooter);
     expect(visibleFooter).toHaveAttribute("data-state", "visible");
     expect(visibleFooter).toHaveClass("mt-2", "min-h-8", "opacity-100");
+  });
+
+  it("omits footer space when an active answer is no longer the tail", () => {
+    const message: UIMessage = {
+      id: "a-intermediate",
+      role: "assistant",
+      content: "I will keep working.",
+      createdAt: Date.now(),
+    };
+
+    const { container } = render(
+      <MessageBubble
+        message={message}
+        isTurnStreaming
+        isThreadTail={false}
+      />,
+    );
+
+    expect(container.querySelector("[data-assistant-footer]")).not.toBeInTheDocument();
   });
 
   it("does not show copy when showCopyAction is false", () => {

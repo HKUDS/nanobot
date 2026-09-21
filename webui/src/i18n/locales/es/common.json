@@ -515,6 +515,10 @@
       "installing": "Instalando dependencias…"
     },
     "models": {
+      "catalogAuthRequired": "La autorización ha caducado. Inicia sesión de nuevo.",
+      "catalogUnavailable": "No se pudieron actualizar los modelos. Inténtalo más tarde.",
+      "catalogStale": "Se muestran modelos en caché; la lista puede estar desactualizada.",
+      "catalogFallback": "Se muestran modelos integrados; la lista puede estar desactualizada.",
       "selectModel": "Seleccionar modelo",
       "addConfiguration": "Agregar configuración",
       "newConfiguration": "Nueva configuración de modelo",
@@ -1057,6 +1061,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Código de dispositivo",
+      "deviceCodeHelp": "Copia este código e introdúcelo en GitHub. Esta ventana se actualizará automáticamente tras la autorización.",
+      "waitingForDeviceApproval": "Esperando la autorización de GitHub…",
+      "openGitHub": "Abrir GitHub",
       "authentication": "Autenticación OAuth",
       "signIn": "Iniciar sesión",
       "signingIn": "Iniciando sesión...",
@@ -1380,6 +1388,11 @@
       "chooseAI": "Elige tu IA",
       "switchModel": "Cambiar el modelo de este chat",
       "manageModels": "Gestionar modelos",
+      "fallbackNotice": "Esta respuesta usó un modelo alternativo: {{model}}.",
+      "checkModelSettings": "Revisar ajustes del modelo",
+      "reauthNotice": "La autorización de {{provider}} caducó. Vuelve a iniciar sesión.",
+      "reauthFallback": "Un modelo alternativo respondió esta vez.",
+      "reauthSettings": "Abrir ajustes del modelo",
       "context": {
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso del contexto",
@@ -1601,6 +1614,7 @@
     "skill": "Habilidad: {{name}}",
     "askAboutSelection": "Preguntar sobre esto",
     "forkFromHere": "Bifurcar",
+    "fallbackResponse": "Esta respuesta usa un modelo de respaldo: {{preset}}.",
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",

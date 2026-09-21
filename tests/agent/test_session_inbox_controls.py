@@ -18,7 +18,13 @@ from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequ
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
-from nanobot.session.recovery import PENDING_FOLLOWUPS_KEY
+from nanobot.session.manager import SessionManager
+from nanobot.session.recovery import (
+    PENDING_FOLLOWUPS_KEY,
+    RecoveryCoordinator,
+    pending_followups,
+    record_pending_followup,
+)
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
 
@@ -231,6 +237,105 @@ async def test_cancelled_session_completes_queued_automation_waiters(loop):
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize("followup_still_queued", [True, False])
+@pytest.mark.parametrize("shutdown", [True, False])
+async def test_stopped_followups_are_not_recovered_but_shutdown_preserves_them(
+    loop,
+    tmp_path,
+    followup_still_queued,
+    shutdown,
+):
+    started = asyncio.Event()
+
+    async def chat(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    loop.provider.chat_stream_with_retry = chat
+    key = "websocket:test"
+    loop._enqueue_session_message(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="first",
+        metadata={"webui": True},
+    ))
+    await asyncio.wait_for(started.wait(), timeout=3)
+    loop._enqueue_session_message(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="cancel me",
+        metadata={"webui": True},
+    ))
+
+    if not followup_still_queued:
+        consumed = loop._pending_queues[key].get_nowait()
+        assert consumed.content == "cancel me"
+    session = loop.sessions.get_or_create(key)
+    assert [message.content for message in pending_followups(session)] == ["cancel me"]
+
+    if shutdown:
+        loop.preserve_inflight_turns_on_shutdown()
+        await loop.aclose()
+    else:
+        stop = InboundMessage(
+            channel="websocket", sender_id="u", chat_id="test", content="/stop",
+        )
+        await loop._dispatch_command_inline(stop, key, "/stop", loop.commands.dispatch_priority)
+
+    # Use fresh managers and the real startup scan: a cache-only assertion can
+    # miss the canceled journal being replayed from disk on the next restart.
+    expected = ["cancel me"] if shutdown else []
+    for _ in range(2):
+        restarted = SessionManager(tmp_path)
+        bus = MessageBus()
+        assert key in {item["key"] for item in restarted.list_sessions()}
+        assert [message.content for message in pending_followups(
+            restarted.get_or_create(key)
+        )] == expected
+        await RecoveryCoordinator(restarted, bus).scan()
+        recovered = []
+        while not bus.inbound.empty():
+            recovered.append((await bus.consume_inbound()).content)
+        assert recovered == expected
+
+
+async def test_cancel_preserves_followups_accepted_after_cancellation_started(loop):
+    key = "websocket:test"
+    session = loop.sessions.get_or_create(key)
+
+    def journal(content):
+        record_pending_followup(session, InboundMessage(
+            channel="websocket", sender_id="u", chat_id="test", content=content,
+            metadata={"webui": True},
+        ))
+        loop.sessions.save(session)
+
+    journal("old followup")
+    started = asyncio.Event()
+    cancelling = asyncio.Event()
+    release = asyncio.Event()
+
+    async def worker():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelling.set()
+            await release.wait()
+
+    task = asyncio.create_task(worker())
+    loop._track_active_task(key, task)
+    await started.wait()
+    stop = asyncio.create_task(loop._cancel_active_tasks(key))
+    try:
+        await asyncio.wait_for(cancelling.wait(), timeout=3)
+        journal("new followup")
+    finally:
+        release.set()
+        await stop
+
+    loop.sessions.invalidate(key)
+    assert [message.content for message in pending_followups(
+        loop.sessions.get_or_create(key)
+    )] == ["new followup"]
 
 
 @pytest.mark.parametrize("action", ["stop", "close"])

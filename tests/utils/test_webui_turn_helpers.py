@@ -21,6 +21,7 @@ from nanobot.bus.runtime_events import (
     UserInputAccepted,
 )
 from nanobot.providers.base import GenerationSettings
+from nanobot.providers.fallback_provider import FallbackModelSelection
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import session_handle_for_name
@@ -177,7 +178,7 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
             metadata={"webui": True},
         )
     ):
-        await observer("deepseek/deepseek-chat")
+        await observer(FallbackModelSelection("deepseek/deepseek-chat", "openai_codex"))
 
     outbound = bus.publish_outbound.await_args.args[0]
     assert outbound.channel == "websocket"
@@ -186,6 +187,7 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
     assert outbound.event.model_preset == "Deep Research"
+    assert outbound.event.reauth_provider == "openai_codex"
 
 
 @pytest.mark.asyncio
@@ -343,6 +345,6 @@ async def test_fallback_model_ignores_non_websocket_requests() -> None:
     observer = wth.build_webui_fallback_model_observer(bus)
 
     with request_context(RequestContext(channel="telegram", chat_id="chat-model")):
-        await observer("fallback")
+        await observer(FallbackModelSelection("fallback", "openai_codex"))
 
     bus.publish_outbound.assert_not_awaited()

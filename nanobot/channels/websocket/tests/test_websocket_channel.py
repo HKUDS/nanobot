@@ -93,6 +93,30 @@ from .ws_test_client import http_get as _http_get
 _PORT = 29876
 
 
+def _thread_conversation_events(body: dict[str, Any]) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for event in body["events"]:
+        name = event.get("event")
+        if name == "turn_end":
+            if messages and messages[-1]["role"] == "assistant":
+                messages[-1]["latencyMs"] = event.get("latency_ms")
+            continue
+        if name == "user_message":
+            role = "user"
+        elif name == "message" and event.get("kind") is None:
+            role = "assistant"
+        elif name == "stream_end" and isinstance(event.get("text"), str):
+            role = "assistant"
+        else:
+            continue
+        messages.append({
+            "role": role,
+            "content": event.get("text", ""),
+            "latencyMs": event.get("latency_ms"),
+        })
+    return messages
+
+
 def _ch(bus: Any, **kw: Any) -> WebSocketChannel:
     cfg: dict[str, Any] = {
         "enabled": True,
@@ -915,8 +939,12 @@ async def test_webui_message_envelope_persists_user_transcript_for_refresh(
 
     body = build_webui_thread_response("websocket:chat-1")
     assert body is not None
-    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
-    assert [message["content"] for message in body["messages"]] == ["hello", "hi back"]
+    assert [message["role"] for message in _thread_conversation_events(body)] == [
+        "user", "assistant",
+    ]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "hello", "hi back",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1532,7 +1560,7 @@ async def test_webui_automation_intent_is_hidden_and_not_inherited_by_cron(
     }) == {"role": "user", "content": original}
     body = build_webui_thread_response("websocket:chat-automation")
     assert body is not None
-    assert [message["content"] for message in body["messages"]] == [original]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [original]
 
     store_path = tmp_path / "cron" / "jobs.json"
     cron = CronService(store_path)
@@ -2281,11 +2309,13 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
                 model="deepseek/deepseek-chat",
                 model_preset="Deep Research",
                 fallback=True,
+                reauth_provider="openai_codex",
             ),
         )
     )
     fallback_payload = json.loads(chat_one.send.call_args.args[0])
     assert fallback_payload["fallback"] is True
+    assert fallback_payload["reauth_provider"] == "openai_codex"
     chat_two.send.assert_not_awaited()
 
 
@@ -2650,7 +2680,7 @@ async def test_send_delta_keeps_buffer_across_merged_stream_boundary() -> None:
     assert [line["text"] for line in lines] == ["first ", "first second"]
     body = build_webui_thread_response("websocket:chat-1")
     assert body is not None
-    assert body["messages"][-1]["content"] == "first second"
+    assert _thread_conversation_events(body)[-1]["content"] == "first second"
 
 
 @pytest.mark.asyncio
@@ -2848,9 +2878,9 @@ async def test_stream_transcript_persists_without_subscribers() -> None:
     assert lines[0]["text"] == "hello world"
     body = build_webui_thread_response("websocket:chat-1")
     assert body is not None
-    assert body["messages"][-1]["role"] == "assistant"
-    assert body["messages"][-1]["content"] == "hello world"
-    assert body["messages"][-1]["latencyMs"] == 42
+    assert _thread_conversation_events(body)[-1]["role"] == "assistant"
+    assert _thread_conversation_events(body)[-1]["content"] == "hello world"
+    assert _thread_conversation_events(body)[-1]["latencyMs"] == 42
 
 
 @pytest.mark.asyncio
@@ -3370,7 +3400,10 @@ async def test_durable_incomplete_marker_stays_pending_without_safe_session_reco
     assert body is not None
     assert read_transcript_lines(key)[-1]["transcript_incomplete"] is True
     assert body["completed_turn_ids"] == []
-    assert [(message["role"], message["content"]) for message in body["messages"]] == [
+    assert [
+        (message["role"], message["content"])
+        for message in _thread_conversation_events(body)
+    ] == [
         ("user", "question"),
     ]
     assert body["has_pending_tool_calls"] is True
@@ -3482,7 +3515,10 @@ async def test_http_replay_recovers_marked_answer_from_session_after_gateway_res
 
     assert response.status_code == 200
     body = json.loads(response.body.decode())
-    assert [(message["role"], message["content"]) for message in body["messages"]] == [
+    assert [
+        (message["role"], message["content"])
+        for message in _thread_conversation_events(body)
+    ] == [
         ("user", "question"),
         ("assistant", "durable answer"),
     ]
@@ -5617,9 +5653,9 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
     assert body["sessionKey"] == key
-    assert len(body["messages"]) == 1
-    assert body["messages"][0]["role"] == "user"
-    assert body["messages"][0]["content"] == "hi"
+    assert len(_thread_conversation_events(body)) == 1
+    assert _thread_conversation_events(body)[0]["role"] == "user"
+    assert _thread_conversation_events(body)[0]["content"] == "hi"
     assert body["has_pending_tool_calls"] is False
 
 
@@ -5785,7 +5821,7 @@ def test_handle_webui_thread_get_reports_registered_turn_as_pending(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert body["messages"][0]["content"] == "hi"
+    assert _thread_conversation_events(body)[0]["content"] == "hi"
     assert body["has_pending_tool_calls"] is True
 
 
@@ -5988,7 +6024,7 @@ def test_handle_webui_thread_get_reconciles_registered_turn_with_turn_end(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert body["messages"][-1]["content"] == "done"
+    assert _thread_conversation_events(body)[-1]["content"] == "done"
     assert body["has_pending_tool_calls"] is expected_pending
     assert body["active_turn_id"] == active_turn_id
 
@@ -6027,9 +6063,69 @@ def test_handle_webui_thread_get_accepts_pagination_query(tmp_path, monkeypatch)
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["content"] for message in body["messages"]] == ["q3", "a3"]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "q3", "a3",
+    ]
     assert body["page"]["has_more_before"] is True
     assert body["page"]["before_cursor"]
+
+
+@pytest.mark.parametrize("sources", [
+    None,
+    [],
+    [{"provider": "xai", "model": "grok", "preset": "saved backup", "fallback": True}],
+])
+def test_handle_webui_thread_get_returns_canonical_events_by_default(
+    tmp_path,
+    monkeypatch,
+    sources,
+) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:event-route"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "event-route", "text": "question"},
+    )
+    append_transcript_object(
+        key,
+        {
+            "event": "message", "chat_id": "event-route", "text": "answer",
+            **({"response_sources": sources} if sources is not None else {}),
+        },
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "event-route"})
+
+    channel = _ch(MagicMock())
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    response = channel.gateway.http._handle_webui_thread_get(request, encoded)
+
+    assert response.status_code == 200
+    body = json.loads(response.body.decode())
+    assert "messages" not in body
+    assert body["projection"] == "events"
+    assert [event["event"] for event in body["events"]] == [
+        "user_message",
+        "message",
+        "turn_end",
+    ]
+    answer = body["events"][1]
+    if sources is None:
+        assert "response_sources" not in answer
+    else:
+        assert answer["response_sources"] == sources
 
 
 def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
@@ -6246,8 +6342,10 @@ def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
-    assert [message["content"] for message in body["messages"]] == [
+    assert [message["role"] for message in _thread_conversation_events(body)] == [
+        "user", "assistant",
+    ]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
         "legacy question",
         "legacy answer",
     ]
@@ -6295,8 +6393,10 @@ def test_handle_webui_thread_get_does_not_backfill_cron_internal_prompt(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["assistant"]
-    assert [message["content"] for message in body["messages"]] == ["提醒已经到期。"]
+    assert [message["role"] for message in _thread_conversation_events(body)] == ["assistant"]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "提醒已经到期。",
+    ]
 
 
 def test_handle_webui_thread_get_does_not_backfill_trigger_internal_prompt(
@@ -6341,8 +6441,10 @@ def test_handle_webui_thread_get_does_not_backfill_trigger_internal_prompt(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["assistant"]
-    assert [message["content"] for message in body["messages"]] == ["PR #4502 已经开始 review。"]
+    assert [message["role"] for message in _thread_conversation_events(body)] == ["assistant"]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "PR #4502 已经开始 review。",
+    ]
 
 
 def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
@@ -6387,5 +6489,7 @@ def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["assistant"]
-    assert [message["content"] for message in body["messages"]] == ["subagent summary"]
+    assert [message["role"] for message in _thread_conversation_events(body)] == ["assistant"]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "subagent summary",
+    ]

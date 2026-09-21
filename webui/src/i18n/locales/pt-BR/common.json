@@ -215,6 +215,10 @@
       "voiceInput": "Entrada de voz"
     },
     "models": {
+      "catalogAuthRequired": "A autorização expirou. Entre novamente.",
+      "catalogUnavailable": "Não foi possível atualizar os modelos. Tente mais tarde.",
+      "catalogStale": "Exibindo modelos em cache; a lista pode estar desatualizada.",
+      "catalogFallback": "Exibindo modelos integrados; a lista pode estar desatualizada.",
       "selectModel": "Selecionar modelo",
       "addConfiguration": "Adicionar configuração",
       "newConfiguration": "Nova configuração de modelo",
@@ -1070,6 +1074,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Código do dispositivo",
+      "deviceCodeHelp": "Copie este código e insira-o no GitHub. Esta janela será atualizada automaticamente após a autorização.",
+      "waitingForDeviceApproval": "Aguardando autorização do GitHub…",
+      "openGitHub": "Abrir GitHub",
       "authentication": "Autenticação OAuth",
       "signIn": "Entrar",
       "signingIn": "Entrando...",
@@ -1393,6 +1401,11 @@
       "chooseAI": "Escolha sua IA",
       "switchModel": "Alternar o modelo desta conversa",
       "manageModels": "Gerenciar modelos",
+      "fallbackNotice": "Esta resposta usou um modelo alternativo: {{model}}.",
+      "checkModelSettings": "Verificar configurações do modelo",
+      "reauthNotice": "A autorização de {{provider}} expirou. Entre novamente.",
+      "reauthFallback": "Um modelo alternativo respondeu desta vez.",
+      "reauthSettings": "Abrir configurações do modelo",
       "context": {
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso do contexto",
@@ -1640,6 +1653,7 @@
     "automationTriggered": "Acionada automaticamente",
     "askAboutSelection": "Perguntar sobre isto",
     "forkFromHere": "Fazer fork",
+    "fallbackResponse": "Esta resposta usa um modelo alternativo: {{preset}}.",
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tempo de resposta (ponta a ponta)",

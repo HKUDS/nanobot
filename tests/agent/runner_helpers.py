@@ -10,6 +10,13 @@ from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
+async def failed_test_consolidator(
+    _messages: list[dict[str, Any]],
+    _previous_summary: str | None,
+) -> None:
+    """Model a failed summary and raw fallback in tests not exercising compaction."""
+
+
 def make_run_spec(provider: LLMProvider, **kwargs: Any) -> AgentRunSpec:
     """Build a run spec from the pre-runtime test arguments.
 
@@ -51,4 +58,5 @@ def make_run_spec(provider: LLMProvider, **kwargs: Any) -> AgentRunSpec:
         ),
         context_window_tokens=context_window_tokens,
     )
+    kwargs.setdefault("consolidate_history", failed_test_consolidator)
     return AgentRunSpec(runtime=runtime, **kwargs)

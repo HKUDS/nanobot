@@ -19,7 +19,14 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import json_repair
 from loguru import logger
 
-from nanobot.events import NO_EVENTS, EventSink, RetryStatusEvent, RetryWaitEvent
+from nanobot.events import (
+    NO_EVENTS,
+    EventSink,
+    ResponseSource,
+    ResponseSourceEvent,
+    RetryStatusEvent,
+    RetryWaitEvent,
+)
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
 if TYPE_CHECKING:
@@ -263,6 +270,9 @@ class ProviderCallContext:
     context_window_tokens: int | None = None
     session_id: str | None = field(default=None, repr=False)
     events: EventSink = field(default=NO_EVENTS, repr=False, compare=False)
+    # None opts out (auxiliary calls); an empty name denotes an unnamed preset.
+    response_preset: str | None = None
+    response_is_fallback: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1185,9 +1195,8 @@ class LLMProvider(ABC):
 
         # Safety net: ensure the first non-system message is not a bare
         # ``assistant`` message.  Providers like GLM reject system→assistant
-        # with error 1214.  This can happen when upstream truncation (e.g.
-        # _snip_history) drops the only user message.  Insert a synthetic
-        # user message to keep the sequence valid.
+        # with error 1214.  Insert a synthetic user message to keep the
+        # sequence valid when replayed history starts at an assistant turn.
         for i, msg in enumerate(merged):
             if msg.get("role") != "system":
                 if msg.get("role") == "assistant" and not msg.get("tool_calls"):
@@ -1599,8 +1608,47 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """Run one chat entry point through this provider's retry policy."""
         call = self._safe_chat_stream if stream else self._safe_chat
+
+        async def attributed_call(**kwargs: Any) -> LLMResponse:
+            context = kwargs.get("provider_context")
+            if (
+                not isinstance(context, ProviderCallContext)
+                or context.response_preset is None
+                or not context.events.accepts(ResponseSourceEvent)
+            ):
+                return await call(**kwargs)
+            source = (
+                ResponseSource(
+                    provider=self.provider_name,
+                    model=kwargs.get("model") or self.get_default_model(),
+                    preset=context.response_preset,
+                    fallback=context.response_is_fallback,
+                )
+                if context.response_preset else None
+            )
+            await context.events.emit(ResponseSourceEvent(None))
+            delta_callback = kwargs.get("on_content_delta")
+            source_sent = False
+
+            async def attributed_delta(text: str) -> None:
+                nonlocal source_sent
+                if text and not source_sent:
+                    await context.events.emit(ResponseSourceEvent(source))
+                    source_sent = True
+                if delta_callback is not None:
+                    await delta_callback(text)
+
+            if delta_callback is not None:
+                kwargs["on_content_delta"] = attributed_delta
+            response = await call(**kwargs)
+            await context.events.emit(ResponseSourceEvent(
+                source if response.finish_reason != "error" and response.content else None,
+                content=response.content if response.finish_reason != "error" else None,
+            ))
+            return response
+
         return await self._run_with_retry(
-            call,
+            attributed_call,
             kw,
             original_messages,
             retry_mode=retry_mode,
@@ -1826,6 +1874,8 @@ class LLMProvider(ABC):
                             ),
                             session_id=provider_context.session_id,
                             events=provider_context.events,
+                            response_preset=provider_context.response_preset,
+                            response_is_fallback=provider_context.response_is_fallback,
                         )
                 if stripped is not None or stripped_context is not None:
                     logger.warning(

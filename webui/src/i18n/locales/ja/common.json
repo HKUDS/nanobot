@@ -515,6 +515,10 @@
       "installing": "必要なパッケージをインストール中…"
     },
     "models": {
+      "catalogAuthRequired": "認証が失効しました。再度ログインしてください。",
+      "catalogUnavailable": "モデルを更新できません。しばらくしてから再試行してください。",
+      "catalogStale": "キャッシュ済みのモデルを表示しています。最新ではない可能性があります。",
+      "catalogFallback": "組み込みのモデルを表示しています。最新ではない可能性があります。",
       "selectModel": "モデルを選択",
       "addConfiguration": "設定を追加",
       "newConfiguration": "新しいモデル設定",
@@ -1056,6 +1060,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "デバイスコード",
+      "deviceCodeHelp": "このコードをコピーして GitHub で入力し、認証してください。完了すると、この画面は自動的に更新されます。",
+      "waitingForDeviceApproval": "GitHub の認証を待っています…",
+      "openGitHub": "GitHub を開く",
       "authentication": "OAuth 認証",
       "signIn": "サインイン",
       "signingIn": "サインイン中...",
@@ -1379,6 +1387,11 @@
       "chooseAI": "AI を選択",
       "switchModel": "この会話で使うモデルを切り替える",
       "manageModels": "モデルを管理",
+      "fallbackNotice": "この応答では代替モデルを使用しました：{{model}}。",
+      "checkModelSettings": "モデル設定を確認",
+      "reauthNotice": "{{provider}} の認証が失効しました。再ログインしてください。",
+      "reauthFallback": "今回の応答には代替モデルを使用しました。",
+      "reauthSettings": "モデル設定を開く",
       "context": {
         "tooltip": "コンテキスト {{percent}}%",
         "detailsLabel": "コンテキスト使用量を開く",
@@ -1600,6 +1613,7 @@
     "skill": "スキル: {{name}}",
     "askAboutSelection": "この内容について質問",
     "forkFromHere": "分岐",
+    "fallbackResponse": "この返信では代替モデルに切り替わり、{{preset}} が回答しています。",
     "copyReply": "コピー",
     "copiedReply": "コピー済み",
     "turnLatencyTitle": "応答時間（全行程）",

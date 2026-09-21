@@ -401,6 +401,10 @@
       "voiceInput": "语音识别"
     },
     "models": {
+      "catalogAuthRequired": "授权已失效，请重新登录。",
+      "catalogUnavailable": "暂时无法刷新模型，请稍后重试。",
+      "catalogStale": "当前显示缓存的模型列表，可能不是最新。",
+      "catalogFallback": "当前显示内置模型列表，可能不是最新。",
       "selectModel": "选择模型",
       "addConfiguration": "添加配置",
       "newConfiguration": "新建模型配置",
@@ -1256,6 +1260,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "设备码",
+      "deviceCodeHelp": "复制此设备码，前往 GitHub 输入并授权。完成后此窗口会自动更新。",
+      "waitingForDeviceApproval": "等待 GitHub 授权…",
+      "openGitHub": "前往 GitHub",
       "authentication": "OAuth 认证",
       "signIn": "登录",
       "signingIn": "登录中...",
@@ -1578,6 +1586,11 @@
       "chooseAI": "选择你的 AI",
       "switchModel": "切换本次对话所用模型",
       "manageModels": "管理模型预设",
+      "fallbackNotice": "本次已使用备用模型：{{model}}。",
+      "checkModelSettings": "检查模型设置",
+      "reauthNotice": "{{provider}} 授权已失效，请重新登录。",
+      "reauthFallback": "本次已由备用模型继续回复。",
+      "reauthSettings": "打开模型设置",
       "context": {
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "打开上下文用量",
@@ -1826,6 +1839,7 @@
     "automationTriggered": "自动触发",
     "askAboutSelection": "询问此内容",
     "forkFromHere": "从此处分叉",
+    "fallbackResponse": "本条回复已切换至备用模型，由 {{preset}} 回答。",
     "copyReply": "复制",
     "copiedReply": "已复制",
     "turnLatencyTitle": "本轮耗时（端到端）",

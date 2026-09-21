@@ -23,6 +23,7 @@ import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
+import { ResponseSourceBadge } from "@/components/ResponseSourceBadge";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
@@ -66,6 +67,8 @@ interface MessageBubbleProps {
   temporary?: boolean;
   /** When false, hide this message's copy button. Default true. */
   showCopyAction?: boolean;
+  /** Whether this message is the final display unit in the thread. */
+  isThreadTail?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
@@ -330,6 +333,7 @@ export function MessageBubble({
   isTurnStreaming = false,
   temporary = false,
   showCopyAction = true,
+  isThreadTail = true,
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
@@ -483,7 +487,7 @@ export function MessageBubble({
       ? completedAt
       : message.createdAt;
   const assistantTimestampLabel =
-    message.role === "assistant" && !message.isStreaming
+    message.role === "assistant" && !message.isStreaming && !isTurnStreaming
       ? formatMessageEndTime(assistantTimestamp)
       : "";
   const showCompletedAt =
@@ -494,11 +498,15 @@ export function MessageBubble({
     && (!empty || hasReasoning || media.length > 0);
   const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
   const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
+  const fallbackSources = message.responseSources?.filter((source) => source.fallback === true) ?? [];
   const showAssistantFooterRow =
-    showCopyButton || showForkButton || showAssistantTimestamp;
-  const showAssistantFooterSlot =
+    showCopyButton || showForkButton || showAssistantTimestamp || fallbackSources.length > 0;
+  const hasAssistantFooterContent =
     message.role === "assistant"
     && (!empty || hasReasoning || media.length > 0);
+  const showAssistantFooterSlot =
+    hasAssistantFooterContent
+    && (showAssistantFooterRow || ((message.isStreaming || isTurnStreaming) && isThreadTail));
   return (
     <div className="w-full text-[15px]" style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
@@ -570,6 +578,13 @@ export function MessageBubble({
               >
                 {assistantTimestampLabel}
               </MessageTimestamp>
+            ) : null}
+            {fallbackSources.length > 0 ? (
+              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1">
+                {fallbackSources.map((source) => (
+                  <ResponseSourceBadge key={JSON.stringify(source)} source={source} />
+                ))}
+              </div>
             ) : null}
             {showAutomationTrigger ? (
               <AutomationTriggerMeta

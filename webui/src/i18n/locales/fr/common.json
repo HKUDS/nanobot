@@ -515,6 +515,10 @@
       "installing": "Installation des dépendances…"
     },
     "models": {
+      "catalogAuthRequired": "L’autorisation a expiré. Veuillez vous reconnecter.",
+      "catalogUnavailable": "Impossible d’actualiser les modèles. Réessayez plus tard.",
+      "catalogStale": "Modèles en cache affichés ; la liste peut ne pas être à jour.",
+      "catalogFallback": "Modèles intégrés affichés ; la liste peut ne pas être à jour.",
       "selectModel": "Choisir un modèle",
       "addConfiguration": "Ajouter une configuration",
       "newConfiguration": "Nouvelle configuration de modèle",
@@ -1056,6 +1060,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Code de l’appareil",
+      "deviceCodeHelp": "Copiez ce code et saisissez-le sur GitHub. Cette fenêtre se mettra à jour automatiquement après l’autorisation.",
+      "waitingForDeviceApproval": "En attente de l’autorisation GitHub…",
+      "openGitHub": "Ouvrir GitHub",
       "authentication": "Authentification OAuth",
       "signIn": "Se connecter",
       "signingIn": "Connexion...",
@@ -1379,6 +1387,11 @@
       "chooseAI": "Choisissez votre IA",
       "switchModel": "Changer le modèle de cette conversation",
       "manageModels": "Gérer les modèles",
+      "fallbackNotice": "Cette réponse a utilisé un modèle de secours : {{model}}.",
+      "checkModelSettings": "Vérifier les paramètres du modèle",
+      "reauthNotice": "L’autorisation de {{provider}} a expiré. Veuillez vous reconnecter.",
+      "reauthFallback": "Un modèle de secours a traité cette réponse.",
+      "reauthSettings": "Ouvrir les paramètres du modèle",
       "context": {
         "tooltip": "Contexte {{percent}} %",
         "detailsLabel": "Ouvrir l’utilisation du contexte",
@@ -1600,6 +1613,7 @@
     "skill": "Compétence : {{name}}",
     "askAboutSelection": "Poser une question à ce sujet",
     "forkFromHere": "Bifurquer",
+    "fallbackResponse": "Cette réponse utilise un modèle de secours : {{preset}}.",
     "copyReply": "Copier",
     "copiedReply": "Copié",
     "turnLatencyTitle": "Temps de réponse (de bout en bout)",

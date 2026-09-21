@@ -401,6 +401,10 @@
       "voiceInput": "Voice input"
     },
     "models": {
+      "catalogAuthRequired": "Authorization expired. Please sign in again.",
+      "catalogUnavailable": "Could not refresh models. Try again later.",
+      "catalogStale": "Showing cached models; the list may be out of date.",
+      "catalogFallback": "Showing built-in models; the list may be out of date.",
       "selectModel": "Select model",
       "addConfiguration": "Add configuration",
       "newConfiguration": "New model configuration",
@@ -1256,6 +1260,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Device code",
+      "deviceCodeHelp": "Copy this code and enter it on GitHub. This window will update automatically after authorization.",
+      "waitingForDeviceApproval": "Waiting for GitHub authorization…",
+      "openGitHub": "Open GitHub",
       "authentication": "OAuth authentication",
       "signIn": "Sign in",
       "signingIn": "Signing in...",
@@ -1579,6 +1587,11 @@
       "chooseAI": "Choose your AI",
       "switchModel": "Switch model for this chat",
       "manageModels": "Manage models",
+      "fallbackNotice": "This response used a fallback model: {{model}}.",
+      "checkModelSettings": "Check model settings",
+      "reauthNotice": "{{provider}} authorization expired. Please sign in again.",
+      "reauthFallback": "A fallback model handled this response.",
+      "reauthSettings": "Open model settings",
       "context": {
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",
@@ -1826,6 +1839,7 @@
     "automationTriggered": "Triggered automatically",
     "askAboutSelection": "Ask about this",
     "forkFromHere": "Fork",
+    "fallbackResponse": "This reply switched to a fallback model, answered by {{preset}}.",
     "copyReply": "Copy",
     "copiedReply": "Copied",
     "turnLatencyTitle": "Response time (end-to-end)",

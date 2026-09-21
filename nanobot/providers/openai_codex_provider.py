@@ -26,8 +26,10 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
 )
 from nanobot.providers.oauth_model_catalog import (
+    OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
+    oauth_catalog_auth_rejected,
 )
 from nanobot.providers.openai_responses import (
     ResponsesStreamCapture,
@@ -552,6 +554,13 @@ def _friendly_error(status_code: int, raw: str) -> str:
 
 def _codex_error_response(exc: Exception) -> LLMResponse:
     """Convert Codex transport/API failures into actionable, retryable metadata."""
+    if isinstance(exc, RuntimeError) and _codex_login_required(exc):
+        return LLMResponse(
+            content="OpenAI Codex authorization expired. Please sign in again.",
+            finish_reason="error",
+            error_kind="oauth_auth_required",
+            error_should_retry=False,
+        )
     exc_type = "CodexHTTPError" if isinstance(exc, _CodexHTTPError) else type(exc).__name__
     detail = str(exc).strip()
 
@@ -654,8 +663,32 @@ def invalidate_openai_codex_model_catalog() -> None:
     _OPENAI_CODEX_MODEL_CATALOG.invalidate()
 
 
+def _codex_login_required(exc: RuntimeError) -> bool:
+    # oauth-cli-kit exposes refresh failures as strings, not typed HTTP errors.
+    # Interpret only its exact envelope; never propagate the raw token response.
+    detail = str(exc)
+    if detail == "OAuth credentials not found. Please run the login command.":
+        return True
+    prefix = "Token refresh failed: "
+    if detail.startswith(prefix):
+        status, _, body = detail[len(prefix):].partition(" ")
+        payload: object = None
+        if len(body) <= 16_384:
+            try:
+                payload = json.loads(body)
+            except ValueError:
+                pass
+        return status.isdecimal() and oauth_catalog_auth_rejected(int(status), payload)
+    return False
+
+
 def _fetch_openai_codex_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
-    token = get_codex_token(proxy=proxy)
+    try:
+        token = get_codex_token(proxy=proxy)
+    except RuntimeError as exc:
+        if _codex_login_required(exc):
+            raise OAuthCatalogAuthRequiredError() from None
+        raise
     account_id = getattr(token, "account_id", None)
     if not isinstance(account_id, str) or not account_id:
         raise RuntimeError("OpenAI Codex OAuth token has no account ID")

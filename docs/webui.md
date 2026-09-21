@@ -165,9 +165,16 @@ You can keep more than one temporary chat open and switch between them under
 open. Reloading or closing the page, restarting the gateway, or losing the
 WebSocket connection ends all of them. They cannot be recovered afterward.
 
+Temporary chats do not create saved files for oversized text tool results; these
+stay in memory and are truncated to the configured tool-result limit. Tool-call
+arguments and execution-error details are hidden from the built-in tool logs,
+while tool activity remains visible in the current chat.
+
 Temporary does not mean consequence-free. Requests still go to the configured
 model provider, and tools can still change files, run commands, or affect
-external services. Temporary chats always use the default workspace in
+external services. Files and image artifacts created or exported by tools
+(including images returned by MCP tools) are not erased when the chat closes.
+Temporary chats always use the default workspace in
 Restricted mode; the project picker and Full Access are unavailable. Commands
 and tools that create durable goals, automations, or subagent work are also
 unavailable. Use a regular topic when you need reusable context, scheduled work,

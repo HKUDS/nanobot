@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { deriveTitle, isModelCommandText, visibleSessionPreview } from "@/lib/format";
-import {
-  normalizeLegacyLongTaskMessages,
-  projectWebuiThreadMessages,
-} from "@/lib/thread-display-compat";
+import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import type { UIMessage } from "@/lib/types";
 
 const STARTED_AT = Date.UTC(2026, 6, 25, 12, 34, 0);
@@ -31,21 +28,7 @@ function message(
   };
 }
 
-describe("normalizeLegacyLongTaskMessages", () => {
-  it("maps legacy long_task rows to trace lines", () => {
-    const legacy = {
-      id: "x",
-      role: "assistant",
-      kind: "long_task",
-      content: "long_task · done",
-      createdAt: 1,
-    } as unknown as UIMessage;
-    const out = normalizeLegacyLongTaskMessages([legacy]);
-    expect(out[0]!.kind).toBe("trace");
-    expect(out[0]!.role).toBe("tool");
-    expect(out[0]!.traces).toEqual(["long_task · done"]);
-  });
-
+describe("command display projection", () => {
   it("removes model and silent-command turns without hiding concurrent replies", () => {
     const visible = projectWebuiThreadMessages([
       message("user", { id: "model", content: "/model fast", turnId: "model-turn" }),
@@ -139,7 +122,7 @@ describe("projectWebuiThreadMessages", () => {
     expect(visible[1]?.completedAt).toBeUndefined();
   });
 
-  it("uses the nearest user start for legacy rows without turn metadata", () => {
+  it("uses the nearest user start for rows without turn metadata", () => {
     const visible = projectWebuiThreadMessages([
       message("user"),
       message("assistant", {

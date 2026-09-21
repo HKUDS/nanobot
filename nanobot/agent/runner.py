@@ -6,7 +6,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,6 +23,7 @@ from nanobot.agent.context_governance import (
     TranscriptBuilder,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.events import NO_EVENTS, EventSink
@@ -36,6 +37,7 @@ from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     LLMUsage,
+    ProviderCallContext,
     ProviderConversationState,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
@@ -218,7 +220,7 @@ class AgentRunner:
         try:
             content = callback()
         except Exception:
-            logger.exception("continuation_callback failed")
+            logger.opt(exception=tool_log_content_allowed()).error("continuation_callback failed")
             return None
         if content is None or not content.strip():
             return None
@@ -241,7 +243,7 @@ class AgentRunner:
         try:
             items = await callback()
         except Exception:
-            logger.exception("injection_callback failed")
+            logger.opt(exception=tool_log_content_allowed()).error("injection_callback failed")
             return []
         if not items:
             return []
@@ -317,7 +319,7 @@ class AgentRunner:
                     try:
                         await hook.on_finally(context)
                     except Exception:
-                        logger.exception(
+                        logger.opt(exception=tool_log_content_allowed()).error(
                             "AgentHook.on_finally error after {}",
                             context.stop_reason or "run exception",
                         )
@@ -327,8 +329,11 @@ class AgentRunner:
     @staticmethod
     def _initial_transcript_and_compaction(
         spec: AgentRunSpec,
-    ) -> tuple[list[dict[str, Any]], ContextCompactionState | None]:
-        """Build the initial transcript and its optional compaction state."""
+    ) -> tuple[list[dict[str, Any]], ContextCompactionState]:
+        """Build the initial transcript and its compaction state."""
+        consolidate_history = spec.consolidate_history
+        if consolidate_history is None:
+            raise ValueError("consolidate_history is required")
         transcript_input = spec.transcript_input
         if transcript_input is not None:
             if spec.initial_messages is not None:
@@ -339,21 +344,24 @@ class AgentRunner:
             return ContextCompactionState.from_transcript(
                 transcript_input,
                 transcript_builder,
-                spec.consolidate_history,
+                consolidate_history,
                 spec.consolidate_provider_compaction,
             )
         if spec.initial_messages is None:
             raise ValueError("initial_messages is required without transcript_input")
-        if spec.consolidate_history is not None:
-            raise ValueError("consolidate_history requires transcript_input")
-        return list(spec.initial_messages), None
+        messages = list(spec.initial_messages)
+        return messages, ContextCompactionState.from_messages(
+            messages,
+            consolidate_history,
+            spec.consolidate_provider_compaction,
+        )
 
     async def _run_core(
         self,
         spec: AgentRunSpec,
         hook: AgentHook,
         messages: list[dict[str, Any]],
-        compaction: ContextCompactionState | None,
+        compaction: ContextCompactionState,
     ) -> AgentRunResult:
         final_content: str | None = None
         tools_used: list[str] = []
@@ -433,11 +441,7 @@ class AgentRunner:
             )
             await hook.before_iteration(context)
             request_message_count = len(messages)
-            request_messages = (
-                request_state.compaction.request_messages(messages)
-                if request_state.compaction is not None
-                else messages
-            )
+            request_messages = request_state.compaction.request_messages(messages)
             response, raw_usage = await self._request_model(
                 spec,
                 request_messages,
@@ -449,11 +453,10 @@ class AgentRunner:
             assert request_state.messages is not None
             messages_for_model = request_state.messages
             conversation_state.observe_response(response, messages)
-            if request_state.compaction is not None:
-                request_state.compaction.accept_request(
-                    messages_for_model,
-                    raw_boundary=request_message_count,
-                )
+            request_state.compaction.accept_request(
+                messages_for_model,
+                raw_boundary=request_message_count,
+            )
             context.response = response
             context.tool_calls = list(response.tool_calls)
 
@@ -833,11 +836,7 @@ class AgentRunner:
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,
             provider_state=conversation_state.finish(messages),
-            summary_checkpoint=(
-                request_state.compaction.summary_checkpoint
-                if request_state.compaction is not None
-                else None
-            ),
+            summary_checkpoint=request_state.compaction.summary_checkpoint,
             provider_compaction_applied=request_state.provider_compaction_applied,
         )
 
@@ -885,6 +884,10 @@ class AgentRunner:
             tools=tool_definitions,
         )
         wants_streaming = hook.wants_streaming()
+        provider_context = replace(
+            provider_context or ProviderCallContext(),
+            response_preset=spec.runtime.model_preset or "",
+        )
 
         active_hosted_tools: dict[str, dict[str, Any]] = {}
         native_reasoning_open = False
@@ -1169,21 +1172,17 @@ class AgentRunner:
         round_usages: list[LLMUsage],
     ) -> tuple[str | None, LLMUsage | None]:
         compaction = request_state.compaction
-        request_messages = (
-            compaction.request_messages(messages)
-            if compaction is not None
-            else messages
-        )
+        request_messages = compaction.request_messages(messages)
         retry_messages = self._budget_exhausted_finalization_messages(request_messages)
         try:
             response = await self._request_no_tools(
                 spec,
                 retry_messages,
                 request_state=request_state,
-                transcript=messages if compaction is not None else None,
+                transcript=messages,
             )
         except Exception:
-            logger.exception(
+            logger.opt(exception=tool_log_content_allowed()).error(
                 "Budget-exhausted finalization failed for {}; using fallback",
                 spec.session_key or "default",
             )
@@ -1235,7 +1234,10 @@ class AgentRunner:
         )
         response = await spec.runtime.provider.chat_stream_with_retry(
             **kwargs,
-            provider_context=provider_context,
+            provider_context=replace(
+                provider_context or ProviderCallContext(),
+                response_preset=spec.runtime.model_preset or "",
+            ),
         )
         await self.context_governor.summarize_provider_compaction(
             request_state,

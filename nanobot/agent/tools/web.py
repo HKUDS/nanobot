@@ -18,7 +18,7 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.context import ToolContext, tool_log_content_allowed
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -186,6 +186,8 @@ def _url_carries_credentials(url: str) -> bool:
 
 def _redact_url_for_log(url: str) -> str:
     """Return only a URL's origin, excluding userinfo, path, query, and fragment."""
+    if not tool_log_content_allowed():
+        return "[content hidden]"
     try:
         parsed = urlparse(url)
         hostname = parsed.hostname
@@ -415,7 +417,7 @@ class WebSearchTool(Tool):
         try:
             self.config = self._config_loader()
         except Exception:
-            logger.exception("Failed to refresh web search config")
+            logger.opt(exception=tool_log_content_allowed()).error("Failed to refresh web search config")
 
     def _effective_provider(self) -> str:
         """Resolve the backend that execute() will actually use."""
@@ -732,7 +734,10 @@ class WebSearchTool(Tool):
             ]
             return _format_results(query, items, n)
         except Exception as e:
-            logger.warning("Jina search failed ({}), falling back to DuckDuckGo", e)
+            logger.warning(
+                "Jina search failed ({}), falling back to DuckDuckGo",
+                e if tool_log_content_allowed() else type(e).__name__,
+            )
             return await self._search_duckduckgo(query, n)
 
     async def _search_kagi(self, query: str, n: int) -> str:
@@ -1037,7 +1042,10 @@ class WebSearchTool(Tool):
             ]
             return _format_results(query, items, n)
         except Exception as e:
-            logger.warning("DuckDuckGo search failed: {}", e)
+            logger.warning(
+                "DuckDuckGo search failed: {}",
+                e if tool_log_content_allowed() else type(e).__name__,
+            )
             return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
 
     async def _search_bocha(self, query: str, n: int, freshness: str = "noLimit") -> str:
