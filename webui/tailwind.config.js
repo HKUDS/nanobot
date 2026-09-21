@@ -1,5 +1,6 @@
 import animate from "tailwindcss-animate";
 import typography from "@tailwindcss/typography";
+import plugin from "tailwindcss/plugin";
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -124,5 +125,13 @@ export default {
       },
     },
   },
-  plugins: [animate, typography],
+  plugins: [
+    animate,
+    typography,
+    plugin(({ addVariant }) => {
+      // Revealing controls on emulated hover can consume the first Safari
+      // tap. Keep these sidebar hover effects on hover-capable pointers.
+      addVariant("media-hover", "@media (hover: hover)");
+    }),
+  ],
 };

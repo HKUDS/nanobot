@@ -2199,6 +2199,42 @@ describe("App layout", () => {
     expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument();
   }, 15_000);
 
+  it("opens a mobile topic with one click and closes the drawer without a search tooltip", async () => {
+    const user = userEvent.setup();
+    mockSessions = ["First", "Second"].map((title, index) => ({
+      key: `websocket:mobile-${index}`,
+      channel: "websocket",
+      chatId: `mobile-${index}`,
+      createdAt: "2026-04-16T10:00:00Z",
+      updatedAt: "2026-04-16T10:00:00Z",
+      preview: `${title} mobile chat`,
+    }));
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: !query.includes("1024px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    for (const title of ["First", "Second"]) {
+      await user.click(await screen.findByRole("button", { name: "Toggle sidebar" }));
+      const sheet = await screen.findByRole("dialog");
+      await waitFor(() => expect(sheet).toHaveFocus());
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      await user.click(await within(sheet).findByRole("button", { name: `${title} mobile chat` }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(document.title).toBe(`${title} mobile chat · nanobot`));
+      expect(screen.getByRole("button", { name: `${title} mobile chat` }))
+        .toHaveAttribute("aria-current", "page");
+    }
+  });
+
   it("keeps the mobile session action menu inside the sidebar sheet", async () => {
     mockSessions = [
       {
