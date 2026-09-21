@@ -521,6 +521,7 @@ function IncomingSessionMessage({
       {createdAtLabel || showCopyAction ? (
         <TooltipProvider>
           <div
+            data-user-context-actions
             className="message-actions mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
           >
             {showCopyAction ? <MessageCopyButton content={message.content} /> : null}
@@ -641,7 +642,11 @@ export function MessageBubble({
         ) : null}
         {showDeliveryStatus || showCreatedAt || (hasText && showCopyAction) ? (
           <TooltipProvider>
-            <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
+            <div
+              data-user-context-actions
+              data-context-actions-pinned={showDeliveryStatus || undefined}
+              className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground"
+            >
               {showCreatedAt ? (
                 <MessageTimestamp
                   data-message-created-at

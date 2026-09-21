@@ -741,6 +741,45 @@ describe("ThreadMessages", () => {
     expect(answerB).toHaveAttribute("data-context-block-active", "true");
   });
 
+  it("uses one active visual block across user and assistant messages", () => {
+    const messages: UIMessage[] = [
+      { id: "user-a", role: "user", content: "first prompt", createdAt: 500 },
+      { id: "answer-a", role: "assistant", content: "first answer", createdAt: 1_000 },
+      { id: "user-b", role: "user", content: "second prompt", createdAt: 1_500 },
+    ];
+
+    render(<ThreadMessages messages={messages} isStreaming={false} />);
+    const userA = screen.getByText("first prompt")
+      .closest<HTMLElement>("[data-thread-display-unit]")!;
+    const answerA = screen.getByText("first answer")
+      .closest<HTMLElement>("[data-thread-display-unit]")!;
+    const userB = screen.getByText("second prompt")
+      .closest<HTMLElement>("[data-thread-display-unit]")!;
+
+    expect(userA.dataset.messageContextBlock).toBeTruthy();
+    expect(userB.dataset.messageContextBlock).toBeTruthy();
+    expect(userA.dataset.messageContextBlock).not.toBe(answerA.dataset.messageContextBlock);
+    expect(userB.dataset.messageContextBlock).not.toBe(answerA.dataset.messageContextBlock);
+    expect(userA.querySelector("[data-user-context-actions]")).toBeInTheDocument();
+    expect(userB.querySelector("[data-user-context-actions]")).toBeInTheDocument();
+
+    fireEvent.pointerEnter(userA, { pointerType: "mouse" });
+    expect(userA).toHaveAttribute("data-context-block-active", "true");
+    expect(answerA).not.toHaveAttribute("data-context-block-active");
+
+    fireEvent.pointerEnter(answerA, { pointerType: "mouse" });
+    expect(userA).not.toHaveAttribute("data-context-block-active");
+    expect(answerA).toHaveAttribute("data-context-block-active", "true");
+
+    fireEvent.pointerEnter(userB, { pointerType: "mouse" });
+    expect(answerA).not.toHaveAttribute("data-context-block-active");
+    expect(userB).toHaveAttribute("data-context-block-active", "true");
+
+    fireEvent.focus(userA.querySelector<HTMLElement>("[data-user-context-actions] button")!);
+    expect(userA).toHaveAttribute("data-context-block-active", "true");
+    expect(userB).not.toHaveAttribute("data-context-block-active");
+  });
+
   it("clears completed block controls when the pointer enters an ungrouped message", () => {
     const messages: UIMessage[] = [
       { id: "user-a", role: "user", content: "first prompt", createdAt: 500 },

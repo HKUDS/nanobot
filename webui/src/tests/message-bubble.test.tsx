@@ -211,6 +211,8 @@ describe("MessageBubble", () => {
 
     expect(row).toHaveClass("ml-auto", "flex");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-floating");
+    expect(container.querySelector("[data-user-context-actions]"))
+      .not.toHaveAttribute("data-context-actions-pinned");
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
@@ -233,6 +235,7 @@ describe("MessageBubble", () => {
     const { container } = render(<MessageBubble message={message} />);
 
     expect(container.querySelector("[data-session-message]")).toBeInTheDocument();
+    expect(container.querySelector("[data-user-context-actions]")).toBeInTheDocument();
     expect(screen.getByText("@mira-0123456789")).toBeInTheDocument();
     expect(screen.getByText("Please review this.")).toBeInTheDocument();
   });
@@ -300,9 +303,13 @@ describe("MessageBubble", () => {
     const { rerender } = render(<MessageBubble message={message} />);
 
     expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+    expect(document.querySelector("[data-user-context-actions]"))
+      .toHaveAttribute("data-context-actions-pinned", "true");
 
     rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-user-context-actions]"))
+      .not.toHaveAttribute("data-context-actions-pinned");
 
     rerender(
       <MessageBubble
@@ -317,6 +324,8 @@ describe("MessageBubble", () => {
     const failedStatus = screen.getByRole("button", {
       name: "Not sent: Message too large",
     });
+    expect(document.querySelector("[data-user-context-actions]"))
+      .toHaveAttribute("data-context-actions-pinned", "true");
     expect(failedStatus).toHaveClass(
       "text-destructive/80",
       "dark:text-red-400/80",

@@ -148,7 +148,10 @@ export function ThreadMessages({
           unit.type === "activity"
           && next?.type === "message"
           && next.message.role === "assistant";
-        const contextBlockKey = messageBlocks.blockKeys[index];
+        const contextBlockKey = messageBlocks.blockKeys[index]
+          ?? (unit.type === "message" && unit.message.role === "user"
+            ? `message-block-${unitKeys[index]}`
+            : undefined);
         const showBlockContext = messageBlocks.blockIndices.has(index);
         const blockActivity = messageBlocks.activityByBlock.get(index);
         const suppressActivity = messageBlocks.suppressedActivityIndices.has(index);

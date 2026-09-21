@@ -770,6 +770,18 @@
   transition: opacity 120ms ease-out;
 }
 
+[data-message-context-block] [data-user-context-actions] {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+[data-context-block-active] [data-user-context-actions],
+[data-user-context-actions][data-context-actions-pinned] {
+  pointer-events: auto;
+  opacity: 1;
+}
+
 [data-block-context-rail] {
   pointer-events: none;
   opacity: 0;
@@ -804,7 +816,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .assistant-context-actions {
+  .assistant-context-actions,
+  [data-user-context-actions] {
     transition: none;
   }
 
