@@ -38,6 +38,16 @@ class WebUIFilePreviewError(ValueError):
         self.message = message
 
 
+def file_reference_payload(raw_path: str | None, *, scope: WorkspaceScope) -> dict[str, str | None]:
+    """Resolve copyable paths through the preview policy without reading file contents."""
+    resolved = _resolve_preview_path(raw_path, scope=scope)
+    try:
+        relative = resolved.relative_to(scope.project_path).as_posix()
+    except ValueError:
+        relative = None
+    return {"path": str(resolved), "relative_path": relative}
+
+
 def file_preview_payload(
     raw_path: str | None,
     *,

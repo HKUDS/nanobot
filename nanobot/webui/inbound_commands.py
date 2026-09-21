@@ -41,6 +41,7 @@ from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
     file_preview_payload,
+    file_reference_payload,
 )
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -793,6 +794,7 @@ class WebUICommandRouter:
             chat_id = preview_payload.get("chat_id")
             path = preview_payload.get("path")
             probe = preview_payload.get("probe") is True
+            metadata_only = preview_payload.get("metadata") is True
             if not isinstance(chat_id, str) or not isinstance(path, str):
                 await self.send_webui_response(
                     connection, request_id, status=400, message="invalid preview request",
@@ -802,14 +804,18 @@ class WebUICommandRouter:
                 policy = self._temporary_chats.message_policy(connection, chat_id, "")
                 if policy is None:
                     raise TemporaryChatError("temporary_chat_unavailable")
-                preview = file_preview_availability_payload if probe else file_preview_payload
-                result = preview(path, scope=policy.workspace_scope)
+                if metadata_only:
+                    result = file_reference_payload(path, scope=policy.workspace_scope)
+                elif probe:
+                    result = file_preview_availability_payload(path, scope=policy.workspace_scope)
+                else:
+                    result = file_preview_payload(path, scope=policy.workspace_scope)
             except TemporaryChatError as exc:
                 await self.send_webui_response(
                     connection, request_id, status=404, message=exc.detail,
                 )
             except WebUIFilePreviewError as exc:
-                if probe and exc.status in {400, 403, 404, 413, 415}:
+                if probe and not metadata_only and exc.status in {400, 403, 404, 413, 415}:
                     await self.send_webui_response(
                         connection, request_id, result={"available": False},
                     )

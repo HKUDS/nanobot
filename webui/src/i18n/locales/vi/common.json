@@ -1676,6 +1676,19 @@
     "next": "Ảnh tiếp theo",
     "close": "Đóng xem trước"
   },
+  "fileActions": {
+    "menu": "Thao tác tệp {{name}}",
+    "title": "Thao tác tệp",
+    "preview": "Xem trước",
+    "copyAbsolute": "Sao chép đường dẫn tuyệt đối",
+    "copyRelative": "Sao chép đường dẫn tương đối",
+    "copyReference": "Sao chép tham chiếu",
+    "copied": "Đã sao chép",
+    "failed": "Không thể sao chép. Vui lòng thử lại.",
+    "unavailable": "Không thể xác định tệp. Bạn có thể sao chép tham chiếu gốc.",
+    "loading": "Đang xác định tệp…",
+    "gatewayPath": "Đường dẫn thuộc máy chạy gateway."
+  },
   "filePreview": {
     "aria": "Xem trước tệp",
     "breadcrumb": "Đường dẫn tệp",

@@ -8,11 +8,53 @@ from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
     file_preview_payload,
+    file_reference_payload,
 )
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII="
 )
+
+
+def test_file_reference_metadata_does_not_read_contents(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "notes with space.bin"
+    source.write_bytes(b"\0binary")
+    scope = default_workspace_scope(tmp_path, restrict_to_workspace=True)
+    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: pytest.fail("read contents"))
+    assert file_reference_payload("notes%20with%20space.bin:12", scope=scope) == {
+        "path": str(source.resolve()), "relative_path": "notes with space.bin",
+    }
+
+
+def test_file_reference_outside_project_has_no_relative_path(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "elsewhere.txt"
+    outside.write_text("example")
+    scope = default_workspace_scope(workspace, restrict_to_workspace=False)
+    assert file_reference_payload(str(outside), scope=scope) == {
+        "path": str(outside.resolve()), "relative_path": None,
+    }
+
+
+@pytest.mark.parametrize("target", ["../elsewhere.txt", "linked.txt"])
+def test_file_reference_rejects_traversal_and_symlink_escape(tmp_path, target) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "elsewhere.txt"
+    outside.write_text("example")
+    (workspace / "linked.txt").symlink_to(outside)
+    scope = default_workspace_scope(workspace, restrict_to_workspace=True)
+    with pytest.raises(WebUIFilePreviewError) as error:
+        file_reference_payload(target, scope=scope)
+    assert error.value.status == 403
+
+
+@pytest.mark.parametrize("target", ["missing.txt", "."])
+def test_file_reference_rejects_missing_files_and_directories(tmp_path, target) -> None:
+    with pytest.raises(WebUIFilePreviewError) as error:
+        file_reference_payload(target, scope=default_workspace_scope(tmp_path, True))
+    assert error.value.status == 404
 
 
 @pytest.mark.parametrize(("data", "mime"), [

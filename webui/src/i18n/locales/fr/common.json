@@ -1676,6 +1676,19 @@
     "next": "Image suivante",
     "close": "Fermer l’aperçu"
   },
+  "fileActions": {
+    "menu": "Actions du fichier {{name}}",
+    "title": "Actions du fichier",
+    "preview": "Aperçu",
+    "copyAbsolute": "Copier le chemin absolu",
+    "copyRelative": "Copier le chemin relatif",
+    "copyReference": "Copier la référence",
+    "copied": "Copié",
+    "failed": "Impossible de copier. Réessayez.",
+    "unavailable": "Impossible de résoudre ce fichier. Vous pouvez copier la référence d’origine.",
+    "loading": "Résolution du fichier…",
+    "gatewayPath": "Les chemins désignent la machine de la passerelle."
+  },
   "filePreview": {
     "aria": "Aperçu du fichier",
     "breadcrumb": "Chemin du fichier",

@@ -1876,6 +1876,19 @@
     "next": "Next image",
     "close": "Close image preview"
   },
+  "fileActions": {
+    "menu": "File actions for {{name}}",
+    "title": "File actions",
+    "preview": "Preview",
+    "copyAbsolute": "Copy absolute path",
+    "copyRelative": "Copy relative path",
+    "copyReference": "Copy reference",
+    "copied": "Copied",
+    "failed": "Could not copy. Please try again.",
+    "unavailable": "Could not resolve this file. You can copy the original reference.",
+    "loading": "Resolving file…",
+    "gatewayPath": "Paths refer to the gateway machine."
+  },
   "filePreview": {
     "aria": "File preview",
     "breadcrumb": "File path",

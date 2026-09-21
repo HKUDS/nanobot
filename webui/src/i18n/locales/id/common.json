@@ -1676,6 +1676,19 @@
     "next": "Gambar berikutnya",
     "close": "Tutup pratinjau"
   },
+  "fileActions": {
+    "menu": "Tindakan file untuk {{name}}",
+    "title": "Tindakan file",
+    "preview": "Pratinjau",
+    "copyAbsolute": "Salin jalur absolut",
+    "copyRelative": "Salin jalur relatif",
+    "copyReference": "Salin referensi",
+    "copied": "Disalin",
+    "failed": "Tidak dapat menyalin. Coba lagi.",
+    "unavailable": "File tidak dapat ditemukan. Anda dapat menyalin referensi aslinya.",
+    "loading": "Memeriksa file…",
+    "gatewayPath": "Jalur merujuk ke komputer gateway."
+  },
   "filePreview": {
     "aria": "Pratinjau file",
     "breadcrumb": "Jalur file",

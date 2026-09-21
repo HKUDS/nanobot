@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { FileActionsProvider } from "@/components/FileActions";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
@@ -28,6 +29,7 @@ import { useFilePreviewState, type FilePreviewStore } from "@/hooks/useFilePrevi
 import {
   ApiError,
   fetchFilePreviewAvailability,
+  fetchFileReferenceMetadata,
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
@@ -48,6 +50,7 @@ import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import type {
   ChatSummary,
   FilePreviewPayload,
+  FileReferenceMetadata,
   RoundUsage,
   SettingsPayload,
   SlashCommand,
@@ -1525,6 +1528,21 @@ export function ThreadShell({
   const openFilePreviewRef = useRef(handleOpenFilePreview);
   openFilePreviewRef.current = handleOpenFilePreview;
   const openFilePreview = useCallback((path: string) => openFilePreviewRef.current(path), []);
+  const resolveFileMetadata = useCallback((path: string) => {
+    if (!previewSessionKey) return Promise.reject(new Error("No active session"));
+    return temporary
+      ? client.requestMutation<FileReferenceMetadata>("temporary_chat.file_preview", {
+        chat_id: chatId, path, metadata: true,
+      })
+      : fetchFileReferenceMetadata(getToken(), previewSessionKey, path);
+  }, [chatId, client, getToken, previewSessionKey, temporary]);
+  const fileActions = useMemo(() => ({
+    resolveMetadata: resolveFileMetadata,
+    // A menu's explicit Preview action should not toggle an already-open file closed.
+    openPreview: (path: string) => {
+      if (path !== filePreviewPath || filePreviewClosing) openFilePreview(path);
+    },
+  }), [filePreviewClosing, filePreviewPath, openFilePreview, resolveFileMetadata]);
 
   useEffect(() => {
     if (!filePreviewPath || !headerActive) return;
@@ -1814,6 +1832,7 @@ export function ThreadShell({
         <FilePreviewAvailabilityProvider
           resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
+          <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
@@ -1842,6 +1861,7 @@ export function ThreadShell({
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
+          </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>
       {headerPortalTarget && headerActive

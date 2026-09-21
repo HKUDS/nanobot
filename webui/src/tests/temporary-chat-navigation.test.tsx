@@ -59,7 +59,9 @@ class TestSocket {
     } else if (frame.type === "webui_request" && frame.action === "temporary_chat.file_preview") {
       queueMicrotask(() => this.receive({
         event: "webui_response", request_id: frame.request_id, ok: true,
-        result: frame.payload.probe ? { available: true } : previewFile(String(frame.payload.path)),
+        result: frame.payload.metadata
+          ? { path: `/workspace/${String(frame.payload.path)}`, relative_path: frame.payload.path }
+          : frame.payload.probe ? { available: true } : previewFile(String(frame.payload.path)),
       }));
     }
   }
@@ -119,6 +121,7 @@ describe("temporary chat navigation", () => {
       }
       if (path.includes("/file-preview?")) {
         const query = new URL(path, "http://test").searchParams;
+        if (query.has("metadata")) return Response.json({ path: `/workspace/${query.get("path")}`, relative_path: query.get("path") });
         return Response.json(query.has("probe") ? { available: true } : previewFile(query.get("path")!));
       }
       if (withFiles && path.includes("/webui-thread")) {
@@ -161,7 +164,17 @@ describe("temporary chat navigation", () => {
     } else {
       await selectTopic("Regular topic");
     }
-    fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
+    fireEvent.contextMenu(await screen.findByRole("button", { name: "notes.txt" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Copy absolute path" })).not.toHaveAttribute("data-disabled"));
+    if (temporary) {
+      expect(TestSocket.current.sent).toContainEqual(expect.objectContaining({
+        type: "webui_request", action: "temporary_chat.file_preview",
+        payload: expect.objectContaining({ path: "notes.txt", metadata: true }),
+      }));
+    } else {
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("path=notes.txt&metadata=1"))).toBe(true);
+    }
+    fireEvent.click(screen.getByRole("menuitem", { name: "Preview" }));
     await screen.findByText("Preview of notes.txt");
     await selectTopic("Second pane");
     expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
