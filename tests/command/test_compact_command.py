@@ -363,6 +363,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
 
 @pytest.mark.asyncio
 async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
+    loop.provider.estimate_prompt_tokens.return_value = (100, "test")
     key = "cli:test"
     session = loop.sessions.get_or_create(key)
     session.add_message("user", "large tool turn")

@@ -31,6 +31,9 @@ class RecordingProvider(LLMProvider):
     def get_default_model(self) -> str:
         return self.name
 
+    def estimate_prompt_tokens(self, messages, tools=None, model=None) -> tuple[int, str]:
+        return 100, "test"
+
 
 @pytest.mark.asyncio
 async def test_sessions_run_concurrently_with_isolated_model_presets(tmp_path) -> None:
