@@ -541,14 +541,15 @@ def channels_status(
             enabled = cast(dict[str, Any], section).get("enabled", False)
         else:
             enabled = getattr(section, "enabled", False)
-        try:
-            plugin.load_channel_class()
-        except ModuleNotFoundError:
+        if not feature_support.extra_installed(name, list(plugin.dependencies)):
             available = "[yellow]Missing dependency[/yellow]"
-        except Exception:
-            available = "[yellow]Unavailable[/yellow]"
         else:
-            available = "[green]✓[/green]"
+            try:
+                plugin.load_channel_class()
+            except Exception:
+                available = "[yellow]Unavailable[/yellow]"
+            else:
+                available = "[green]✓[/green]"
         table.add_row(
             plugin.display_name,
             "[green]\u2713[/green]" if enabled else "[dim]\u2717[/dim]",

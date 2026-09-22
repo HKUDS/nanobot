@@ -1301,7 +1301,7 @@ def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
     assert seen["config_path"] == config_path.resolve()
 
 
-def test_channels_status_lists_plugins_with_unavailable_runtimes(monkeypatch):
+def test_channels_status_reports_plugin_availability(monkeypatch):
     from typer.testing import CliRunner
 
     from nanobot.channels.plugin import ChannelPlugin
@@ -1309,11 +1309,14 @@ def test_channels_status_lists_plugins_with_unavailable_runtimes(monkeypatch):
     from nanobot.cli.commands import app
     from nanobot.config.schema import Config
 
+    class _MissingDependencyPlugin(_FakePlugin):
+        name = "missing_dependency"
+        display_name = "Missing Dependency Channel"
+
     available = _channel_plugin(_FakePlugin)
-    unavailable = ChannelPlugin(
-        name="unavailable",
-        display_name="Unavailable Channel",
-        runtime="missing_channel_runtime:Channel",
+    missing_dependency = _channel_plugin(
+        _MissingDependencyPlugin,
+        dependencies=("missing-sdk>=1",),
     )
     invalid = ChannelPlugin(
         name="invalid",
@@ -1324,21 +1327,30 @@ def test_channels_status_lists_plugins_with_unavailable_runtimes(monkeypatch):
         "nanobot.channels.registry.discover_plugins",
         lambda: {
             "fakeplugin": available,
-            "unavailable": unavailable,
+            "missing_dependency": missing_dependency,
             "invalid": invalid,
         },
     )
     monkeypatch.setattr(commands, "_load_inspection_config", lambda **_kwargs: (None, Config()))
+    monkeypatch.setattr(
+        commands.feature_support,
+        "extra_installed",
+        lambda name, _dependencies: name != "missing_dependency",
+    )
 
     result = CliRunner().invoke(app, ["channels", "status"])
 
     assert result.exit_code == 0
-    assert "Fake Plugin" in result.stdout
-    assert "Unavailable Channel" in result.stdout
-    assert "Invalid Channel" in result.stdout
-    assert "Available" in result.stdout
-    assert "Missing dependency" in result.stdout
-    assert "Unavailable" in result.stdout
+    status_by_channel = {}
+    for line in result.stdout.splitlines():
+        columns = line.split("│")
+        if len(columns) == 5 and columns[1].strip() != "Channel":
+            status_by_channel[columns[1].strip()] = columns[3].strip()
+    assert status_by_channel == {
+        "Fake Plugin": "✓",
+        "Invalid Channel": "Unavailable",
+        "Missing Dependency Channel": "Missing dependency",
+    }
 
 
 def test_plugins_list_shows_available_features(monkeypatch):
