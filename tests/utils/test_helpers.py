@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import tiktoken
-
 from nanobot.utils import helpers
 from nanobot.utils.helpers import (
     _write_text_atomic,
@@ -104,7 +102,8 @@ def test_truncate_text_to_tokens_keeps_text_within_budget():
 
 
 def test_truncate_text_to_tokens_truncates_over_budget():
-    enc = tiktoken.get_encoding("cl100k_base")
+    enc = helpers._get_token_encoding()
+    assert enc is not None
     text = "word " * 1_000
 
     result = truncate_text_to_tokens(text, 50)

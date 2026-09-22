@@ -160,6 +160,19 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | xAI returns 400 `invalid-argument` | Read the bounded `Response body` appended to the provider error. Hosted `x_search` is sent only when xAI's model catalog advertises `supportsBackendSearch`; the model ID `grok-4.5` itself is valid. |
 | xAI model or X Search stops working after an upstream release | The integration follows Grok Build's public OAuth/proxy client contract. Update nanobot if xAI changes that contract. |
 
+### Local Token Estimation
+
+The fallback token counter uses a bundled cl100k_base vocabulary. Counting and
+truncating text do not download tokenizer data or require a writable tiktoken cache.
+If that bundled resource cannot be loaded, nanobot logs one warning and uses UTF-8
+byte estimates until the process restarts. Repair the nanobot installation and
+restart to restore the bundled counter.
+
+These counts are estimates: other models may use different tokenizers, message
+framing, or media accounting. A provider-supplied counter takes precedence over
+the bundled fallback. Context checks use matching provider usage or resumable
+provider-state counts when available; otherwise they use local estimates.
+
 ## Langfuse Problems
 
 Langfuse tracing is optional and controlled by environment variables.

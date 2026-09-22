@@ -12,14 +12,16 @@ import time
 import uuid
 from contextlib import suppress
 from datetime import datetime
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
-import tiktoken
 from loguru import logger
 
+from nanobot.utils.token_encoding import get_token_encoding as _get_token_encoding
+
 if TYPE_CHECKING:
+    from tiktoken import Encoding
+
     from nanobot.providers.base import LLMUsage
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
@@ -102,11 +104,6 @@ def sanitize_surrogates_deep(value: Any) -> Any:
     return value
 
 
-@lru_cache(maxsize=1)
-def _get_token_encoding() -> Any:
-    return tiktoken.get_encoding("cl100k_base")
-
-
 def _cache_tools_token_count(
     tools_id: int,
     fingerprint: tuple[int, ...],
@@ -121,7 +118,7 @@ def _cache_tools_token_count(
 
 
 def _estimate_tools_tokens(
-    enc: Any,
+    enc: Encoding,
     tools: list[dict[str, Any]],
     *,
     leading_separator: bool,
@@ -409,34 +406,35 @@ def truncate_text(text: str, max_chars: int) -> str:
 def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
     """Truncate text to a token budget with a stable suffix.
 
-    Unlike :func:`truncate_text`, this measures actual tokens, so the cap holds
-    regardless of language or content (CJK and code cost more tokens per char).
-    Falls back to a conservative UTF-8 byte budget if tiktoken is unavailable.
+    Uses the bundled cl100k_base encoding, which may differ from the model's
+    tokenizer. Falls back to a UTF-8 byte budget if that encoding is unavailable.
     """
     if max_tokens <= 0:
         return text
     try:
         enc = _get_token_encoding()
-        tokens = enc.encode(text)
-        if len(tokens) <= max_tokens:
-            return text
-        suffix_tokens = enc.encode(_TRUNCATED_SUFFIX)
-        body_budget = max_tokens - len(suffix_tokens)
-        if body_budget <= 0:
+        if enc is not None:
+            tokens = enc.encode(text)
+            if len(tokens) <= max_tokens:
+                return text
+            suffix_tokens = enc.encode(_TRUNCATED_SUFFIX)
+            body_budget = max_tokens - len(suffix_tokens)
+            if body_budget <= 0:
+                return enc.decode(tokens[:max_tokens])
+            for candidate_budget in range(body_budget, -1, -1):
+                result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
+                if len(enc.encode(result)) <= max_tokens:
+                    return result
             return enc.decode(tokens[:max_tokens])
-        for candidate_budget in range(body_budget, -1, -1):
-            result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
-            if len(enc.encode(result)) <= max_tokens:
-                return result
-        return enc.decode(tokens[:max_tokens])
     except Exception:
-        if len(text.encode("utf-8")) <= max_tokens:
-            return text
-        suffix_bytes = len(_TRUNCATED_SUFFIX.encode("utf-8"))
-        if max_tokens <= suffix_bytes:
-            return _truncate_text_to_utf8_bytes(text, max_tokens)
-        body = _truncate_text_to_utf8_bytes(text, max_tokens - suffix_bytes)
-        return body + _TRUNCATED_SUFFIX
+        pass
+    if len(text.encode("utf-8")) <= max_tokens:
+        return text
+    suffix_bytes = len(_TRUNCATED_SUFFIX.encode("utf-8"))
+    if max_tokens <= suffix_bytes:
+        return _truncate_text_to_utf8_bytes(text, max_tokens)
+    body = _truncate_text_to_utf8_bytes(text, max_tokens - suffix_bytes)
+    return body + _TRUNCATED_SUFFIX
 
 
 def _truncate_text_to_utf8_bytes(text: str, max_bytes: int) -> str:
@@ -755,20 +753,22 @@ def _estimate_prompt_tokens_with_source(
     per_message_overhead = len(messages) * 4
     try:
         enc = _get_token_encoding()
-        tool_tokens = (
-            _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
-        )
-        message_tokens = len(enc.encode(message_payload)) if message_payload else 0
-        return message_tokens + tool_tokens + per_message_overhead, "tiktoken"
+        if enc is not None:
+            tool_tokens = (
+                _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
+            )
+            message_tokens = len(enc.encode(message_payload)) if message_payload else 0
+            return message_tokens + tool_tokens + per_message_overhead, "tiktoken"
     except Exception:
-        tool_payload = (
-            ("\n" if message_payload else "") + json.dumps(tools, ensure_ascii=False)
-            if tools
-            else ""
-        )
-        payload = message_payload + tool_payload
-        estimated = len(payload.encode("utf-8"))
-        return estimated + per_message_overhead, "heuristic"
+        pass
+    tool_payload = (
+        ("\n" if message_payload else "") + json.dumps(tools, ensure_ascii=False)
+        if tools
+        else ""
+    )
+    payload = message_payload + tool_payload
+    estimated = len(payload.encode("utf-8"))
+    return estimated + per_message_overhead, "heuristic"
 
 
 def estimate_prompt_tokens(
@@ -814,9 +814,11 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
         return 4
     try:
         enc = _get_token_encoding()
-        return max(4, len(enc.encode(payload)) + 4)
+        if enc is not None:
+            return max(4, len(enc.encode(payload)) + 4)
     except Exception:
-        return max(4, len(payload.encode("utf-8")) + 4)
+        pass
+    return max(4, len(payload.encode("utf-8")) + 4)
 
 
 def estimate_prompt_tokens_chain(
