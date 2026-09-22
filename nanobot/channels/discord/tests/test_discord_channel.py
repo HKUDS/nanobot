@@ -1638,3 +1638,31 @@ async def test_reset_discards_in_flight_compaction_notices() -> None:
     await owner._reset_runtime_state(close_client=False)
 
     assert owner._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_reset_cancels_delayed_reactions_and_clears_registries() -> None:
+    """Runtime reset must not leave delayed working-emoji tasks alive.
+
+    The delayed task closes over the inbound Discord message; if reset only
+    cancelled typing tasks, a stopped or hot-restarted channel could still
+    fire late add_reaction calls from the old runtime.
+    """
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    release = asyncio.Event()
+    fired: list[str] = []
+
+    async def _delayed_working_emoji() -> None:
+        await release.wait()
+        fired.append("reaction")
+
+    task = asyncio.create_task(_delayed_working_emoji())
+    owner._working_emoji_tasks["123"] = task
+    owner._pending_reactions["123"] = object()
+
+    await owner._reset_runtime_state(close_client=False)
+
+    assert owner._working_emoji_tasks == {}
+    assert owner._pending_reactions == {}
+    assert task.cancelled()
+    assert fired == []
