@@ -201,7 +201,7 @@ async def test_default_allow_set_and_public_parameter_schema_are_unchanged(
                 "type": "string",
                 "description": (
                     "Dot-path for check; top-level runtime or scratchpad key for set. "
-                    "Read-only routing metadata: request.channel, request.chat_id, request.sender_id."
+                    "Read-only routing metadata: request.channel, request.chat_id, request.sender_id, request.topic_id."
                 ),
             },
             "value": {
