@@ -39,6 +39,7 @@ from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.token_encoding import warmup_token_encoding
 from nanobot.webui.build import BuildMode
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
@@ -402,6 +403,7 @@ def _run_gateway(
         raise typer.Exit(1)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+    warmup_token_encoding()
     _prepare_webui_bundle_for_gateway(
         config,
         mode=webui_bundle_mode,

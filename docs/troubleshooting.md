@@ -162,16 +162,10 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 
 ### Local Token Estimation
 
-The fallback token counter uses a bundled cl100k_base vocabulary. Counting and
-truncating text do not download tokenizer data or require a writable tiktoken cache.
-If that bundled resource cannot be loaded, nanobot logs one warning and uses UTF-8
-byte estimates until the process restarts. Repair the nanobot installation and
-restart to restore the bundled counter.
-
-These counts are estimates: other models may use different tokenizers, message
-framing, or media accounting. A provider-supplied counter takes precedence over
-the bundled fallback. Context checks use matching provider usage or resumable
-provider-state counts when available; otherwise they use local estimates.
+Gateway loads the fallback tokenizer in the background, caching it beside the active config
+under `cache/tiktoken` unless `TIKTOKEN_CACHE_DIR` or `DATA_GYM_CACHE_DIR` is set;
+chats use UTF-8 byte estimates while loading or after failure (restart to retry),
+and token estimates may differ from model usage.
 
 ## Langfuse Problems
 

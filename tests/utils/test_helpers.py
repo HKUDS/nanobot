@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from nanobot.utils import helpers
+from nanobot.utils import helpers, token_encoding
 from nanobot.utils.helpers import (
     _write_text_atomic,
     content_with_media_breadcrumbs,
@@ -101,15 +101,14 @@ def test_truncate_text_to_tokens_keeps_text_within_budget():
     assert result == text
 
 
-def test_truncate_text_to_tokens_truncates_over_budget():
-    enc = helpers._get_token_encoding()
-    assert enc is not None
+def test_truncate_text_to_tokens_truncates_over_budget(monkeypatch, byte_encoding):
+    monkeypatch.setattr(token_encoding, "_encoding", byte_encoding)
     text = "word " * 1_000
 
     result = truncate_text_to_tokens(text, 50)
 
     assert result.endswith("\n... (truncated)")
-    assert len(enc.encode(result)) <= 50
+    assert len(byte_encoding.encode_ordinary(result)) <= 50
 
 
 def test_truncate_text_to_tokens_non_positive_budget_returns_text():

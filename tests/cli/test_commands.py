@@ -2995,6 +2995,24 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
     assert seen["workspace"] == Path(config.agents.defaults.workspace)
 
 
+def test_gateway_starts_tokenizer_warmup_before_provider_setup(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    events = []
+
+    def stop_provider(_config):
+        events.append("provider")
+        raise _StopGatewayError("stop")
+
+    _patch_cli_command_runtime(monkeypatch, config, make_provider=stop_provider)
+    monkeypatch.setattr(cli_gateway_runtime, "warmup_token_encoding", lambda: events.append("warmup"))
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    assert events == ["warmup", "provider"]
+
+
 def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
