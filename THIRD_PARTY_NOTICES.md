@@ -9,45 +9,6 @@ written source offer, and relinking instructions; those target-specific notices 
 
 ---
 
-## tiktoken — offline token estimation (MIT)
-
-- **Source**: https://github.com/openai/tiktoken/tree/0.12.0
-- **Bundled**: `nanobot/utils/cl100k_base.tiktoken.gz` and the cl100k_base pattern in
-  `nanobot/utils/token_encoding.py`
-- **Vocabulary**: https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken
-- **SHA-256 of the uncompressed vocabulary**:
-  `223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7`
-
-The vocabulary is redistributed without content changes, compressed with gzip.
-Run `python scripts/vendor_token_encoding.py` from a source checkout to reproduce it.
-This download is a maintainer operation; runtime token estimation uses only the bundled file.
-
-```
-MIT License
-
-Copyright (c) 2022 OpenAI, Shantanu Jain
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
 ## Tabler Icons — interface icons (MIT)
 
 - **Source**: https://github.com/tabler/tabler-icons

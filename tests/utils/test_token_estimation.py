@@ -1,9 +1,6 @@
 import json
-import socket
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from loguru import logger
 
 from nanobot.utils import helpers, token_encoding
 from nanobot.utils.helpers import (
@@ -24,76 +21,21 @@ class _BrokenCounterProvider:
 
 
 @pytest.fixture(autouse=True)
-def isolate_token_caches():
-    token_encoding._load_encoding.cache_clear()
+def isolate_token_caches(monkeypatch, byte_encoding):
+    monkeypatch.setattr(token_encoding, "_encoding", byte_encoding)
     helpers._TOOLS_TOKEN_CACHE.clear()
     yield
-    token_encoding._load_encoding.cache_clear()
     helpers._TOOLS_TOKEN_CACHE.clear()
 
 
-def test_token_estimation_is_offline_with_empty_external_cache(tmp_path, monkeypatch):
-    monkeypatch.setenv("TIKTOKEN_CACHE_DIR", str(tmp_path / "empty"))
-    attempted = []
-
-    def forbidden(*args, **kwargs):
-        attempted.append(args)
-        raise AssertionError("token estimation must not use the network or tokenizer registry")
-
-    monkeypatch.setattr(socket.socket, "connect", forbidden)
-    monkeypatch.setattr(token_encoding.tiktoken, "get_encoding", forbidden)
-    samples = [
-        ("hello world", [15339, 1917]),
-        ("你好，世界🙂", [57668, 53901, 3922, 3574, 244, 98220, 9468, 19044]),
-        ("print(123)\n", [1374, 7, 4513, 340]),
-        ("<|endoftext|>", [27, 91, 8862, 728, 428, 91, 29]),
-    ]
-    for text, expected in samples:
-        encoding = helpers._get_token_encoding()
-        assert encoding is not None
-        assert encoding.encode(text) == expected
-        tokens, source = estimate_prompt_tokens_chain(
-            _NoCounterProvider(), "custom-model", [{"role": "user", "content": text}],
-        )
-        assert (tokens, source) == (len(expected) + 4, "tiktoken")
-        assert estimate_message_tokens({"role": "user", "content": text}) == tokens
-        assert len(encoding.encode(truncate_text_to_tokens(text * 100, 40))) <= 40
-    assert attempted == []
-    assert list(tmp_path.iterdir()) == []
-
-
-@pytest.mark.parametrize("corrupt", [False, True], ids=["missing", "corrupt"])
-def test_unavailable_vocabulary_falls_back_once_across_threads(tmp_path, monkeypatch, corrupt):
-    if corrupt:
-        (tmp_path / "cl100k_base.tiktoken.gz").write_bytes(b"broken gzip")
-    loads = []
-
-    def resources(package):
-        loads.append(package)
-        return tmp_path
-
-    monkeypatch.setattr(token_encoding, "files", resources)
-    warnings = []
-    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    content = "🙂你" * 100
-    try:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            results = list(pool.map(
-                lambda _: estimate_message_tokens({"role": "user", "content": content}),
-                range(37),
-            ))
-        tokens, source = estimate_prompt_tokens_chain(
-            _NoCounterProvider(), "test-model", [{"role": "user", "content": content}],
-        )
-        truncated = truncate_text_to_tokens(content, 40)
-    finally:
-        logger.remove(sink)
-    assert results == [len(content.encode("utf-8")) + 4] * 37
-    assert (tokens, source) == (results[0], "heuristic")
-    assert len(truncated.encode("utf-8")) <= 40
-    assert loads == ["nanobot.utils"]
-    assert len(warnings) == 1
-    assert "until restart" in warnings[0]
+@pytest.mark.parametrize("text", ["hello world", "你好，世界🙂", "print(123)\n", "<|endoftext|>"])
+def test_token_estimation_treats_prompt_text_as_ordinary(text, byte_encoding):
+    expected = len(byte_encoding.encode_ordinary(text)) + 4
+    assert estimate_prompt_tokens_chain(
+        _NoCounterProvider(), "custom-model", [{"role": "user", "content": text}],
+    ) == (expected, "tiktoken")
+    assert estimate_message_tokens({"role": "user", "content": text}) == expected
+    assert len(byte_encoding.encode_ordinary(truncate_text_to_tokens(text * 100, 40))) <= 40
 
 
 def test_provider_counter_does_not_initialize_fallback(monkeypatch):
@@ -191,20 +133,12 @@ def test_estimate_prompt_tokens_caches_tools_encoding(monkeypatch) -> None:
         def __init__(self) -> None:
             self.encoded: list[str] = []
 
-        def encode(self, text: str) -> list[int]:
+        def encode_ordinary(self, text: str) -> list[int]:
             self.encoded.append(text)
             return list(range(max(1, len(text) // 4)))
 
     fake_encoding = FakeEncoding()
-    get_encoding_calls = 0
-
-    def fake_get_encoding(name: str, **kwargs) -> FakeEncoding:
-        nonlocal get_encoding_calls
-        assert name == "nanobot_cl100k_base"
-        get_encoding_calls += 1
-        return fake_encoding
-
-    monkeypatch.setattr(token_encoding.tiktoken, "Encoding", fake_get_encoding)
+    monkeypatch.setattr(token_encoding, "_encoding", fake_encoding)
     tools = [{"type": "function", "function": {"name": "demo", "description": "cached"}}]
     messages = [{"role": "user", "content": "hello"}]
 
@@ -212,7 +146,6 @@ def test_estimate_prompt_tokens_caches_tools_encoding(monkeypatch) -> None:
     second = estimate_prompt_tokens(messages, tools)
 
     assert first == second
-    assert get_encoding_calls == 1
     rendered_tools = "\n" + json.dumps(tools, ensure_ascii=False)
     assert fake_encoding.encoded.count(rendered_tools) == 1
 
@@ -222,12 +155,12 @@ def test_estimate_prompt_tokens_recomputes_when_tool_items_change(monkeypatch) -
         def __init__(self) -> None:
             self.encoded: list[str] = []
 
-        def encode(self, text: str) -> list[int]:
+        def encode_ordinary(self, text: str) -> list[int]:
             self.encoded.append(text)
             return list(range(max(1, len(text) // 4)))
 
     fake_encoding = FakeEncoding()
-    monkeypatch.setattr(token_encoding.tiktoken, "Encoding", lambda **kwargs: fake_encoding)
+    monkeypatch.setattr(token_encoding, "_encoding", fake_encoding)
 
     tools = [{"type": "function", "function": {"name": "before"}}]
     messages = [{"role": "user", "content": "hello"}]
