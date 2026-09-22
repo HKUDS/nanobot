@@ -138,6 +138,16 @@ class TestReadDedup:
         assert "2| Second line" in result
         assert "\x00" not in result
 
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    @pytest.mark.asyncio
+    async def test_bom_only_unicode_text_is_empty_file(self, tool, tmp_path, encoding):
+        f = tmp_path / "empty.txt"
+        f.write_bytes("".encode(encoding))
+
+        result = await tool.execute(path=str(f))
+
+        assert result == f"(Empty file: {f})"
+
 
 # ---------------------------------------------------------------------------
 # Cross-session isolation (issue #3571)

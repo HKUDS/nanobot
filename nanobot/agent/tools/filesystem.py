@@ -375,6 +375,9 @@ class ReadFileTool(_FsTool):
                             "Only supported text files and images can be read."
                         )
 
+            if not text_content:
+                return f"(Empty file: {path})"
+
             # Normalize CRLF -> LF before line-splitting. Primarily a Windows
             # concern (git checkouts with autocrlf, editors saving CRLF) but
             # applied on all platforms so downstream StrReplace/Grep behavior
