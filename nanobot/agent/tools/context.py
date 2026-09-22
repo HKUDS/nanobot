@@ -33,7 +33,6 @@ class RequestContext:
     """Per-request context injected into tools at message-processing time."""
     channel: str
     chat_id: str
-    topic_id: str | int | None = None
     message_id: str | None = None
     session_key: str | None = None
     session_generation: str | None = field(default=None, kw_only=True)
@@ -50,6 +49,7 @@ class RequestContext:
     persist_session: bool = True
     # Effective tool scope; injected inputs retain the active run's scope.
     workspace_scope: WorkspaceScope | None = None
+    topic_id: str | int | None = None
 
 
 @runtime_checkable
