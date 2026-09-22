@@ -25,7 +25,9 @@ from nanobot.bus.outbound_events import (
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.linear import client as linear_client
 from nanobot.channels.linear import connect as linear_connect
+from nanobot.channels.linear import runtime as linear_runtime
 from nanobot.channels.linear.client import LinearApiError, LinearClient
 from nanobot.channels.linear.config import LinearConfig, validate_public_base_url
 from nanobot.channels.linear.oauth import OAUTH_FLOWS, authorization_url
@@ -55,7 +57,7 @@ def _installation() -> LinearInstallation:
         access_token="access",
         refresh_token="refresh",
         expires_at=time.time() + 3600,
-        scope=("read", "write", "app:mentionable"),
+        scope=("read", "write", "app:mentionable", "app:assignable"),
     )
 
 
@@ -144,7 +146,7 @@ def test_linear_config_rejects_overlapping_callback_paths() -> None:
         )
 
 
-def test_oauth_authorization_uses_app_actor_pkce_and_mention_scope() -> None:
+def test_oauth_authorization_uses_app_actor_pkce_and_agent_scopes() -> None:
     flow = OAUTH_FLOWS.create()
     try:
         parsed = urlparse(authorization_url(_config(), flow))
@@ -153,7 +155,7 @@ def test_oauth_authorization_uses_app_actor_pkce_and_mention_scope() -> None:
         assert "actor=app" in query
         assert "code_challenge_method=S256" in query
         assert "app%3Amentionable" in query
-        assert "app%3Aassignable" not in query
+        assert "app%3Aassignable" in query
         assert f"state={flow.state}" in query
     finally:
         OAUTH_FLOWS.remove(flow)
@@ -175,6 +177,7 @@ def test_state_store_persists_installations_and_deduplicates_webhooks(tmp_path: 
 
     assert store.installation("org-1") == installation
     assert store.installation("org-2") == second_installation
+    assert store.list_installations("client-id") == [installation, second_installation]
     assert store.enqueue_webhook("delivery-1", _agent_webhook()) is True
     assert store.enqueue_webhook("delivery-1", _agent_webhook()) is False
 
@@ -243,10 +246,39 @@ def test_oauth_callback_completes_only_registered_state(tmp_path: Path) -> None:
             f"/linear/oauth/callback?state={flow.state}&code=authorization-code",
         )
         response = connection.getresponse()
-        response.read()
+        body = response.read()
         connection.close()
         assert response.status == 200
+        assert b"Authorization received" in body
+        assert b"Linear connected" not in body
         assert flow.code == "authorization-code"
+    finally:
+        OAUTH_FLOWS.remove(flow)
+        lease.close()
+
+
+def test_oauth_callback_does_not_report_cancelled_authorization_as_connected(
+    tmp_path: Path,
+) -> None:
+    port = _free_port()
+    lease = acquire_http_server(
+        _config(port),
+        LinearStateStore(tmp_path / "linear.sqlite3"),
+    )
+    flow = OAUTH_FLOWS.create()
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+        connection.request(
+            "GET",
+            f"/linear/oauth/callback?state={flow.state}&error=access_denied",
+        )
+        response = connection.getresponse()
+        body = response.read()
+        connection.close()
+        assert response.status == 200
+        assert b"Authorization not completed" in body
+        assert b"Linear connected" not in body
+        assert flow.error == "access_denied"
     finally:
         OAUTH_FLOWS.remove(flow)
         lease.close()
@@ -306,6 +338,71 @@ async def test_successful_authorization_survives_repeated_polls(
 
 
 @pytest.mark.asyncio
+async def test_connect_store_lists_and_disconnects_workspaces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = LinearStateStore(tmp_path / "linear.sqlite3")
+    installation = _installation()
+    state.save_installation(installation)
+    monkeypatch.setattr(linear_connect, "_load_linear_config", _config)
+    monkeypatch.setattr(linear_connect, "LinearStateStore", lambda: state)
+    client = SimpleNamespace(revoke_installation=AsyncMock(), close=AsyncMock())
+    monkeypatch.setattr(linear_connect, "LinearClient", lambda *_args: client)
+    store = linear_connect.LinearConnectStore()
+
+    inspected = await store.handle("start", {"operation": ["inspect"]})
+    assert inspected["status"] == "inspected"
+    assert inspected["installations"] == [{
+        "organization_id": "org-1",
+        "organization_name": "Example",
+        "scopes": ["read", "write", "app:mentionable", "app:assignable"],
+        "authorization_status": "authorized",
+        "missing_scopes": [],
+    }]
+
+    disconnected = await store.handle(
+        "start",
+        {"operation": ["disconnect"], "organization_id": ["org-1"]},
+    )
+    assert disconnected["status"] == "disconnected"
+    assert disconnected["installations"] == []
+    assert state.installation("org-1") is None
+    client.revoke_installation.assert_awaited_once_with(installation)
+
+    state.save_installation(replace(_installation(), scope=("read", "write", "app:mentionable")))
+    outdated = await store.handle("start", {"operation": ["inspect"]})
+    assert outdated["installations"][0]["authorization_status"] == "missing_scopes"
+    assert outdated["installations"][0]["missing_scopes"] == ["app:assignable"]
+
+
+@pytest.mark.asyncio
+async def test_disconnect_keeps_local_installation_when_revocation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = LinearStateStore(tmp_path / "linear.sqlite3")
+    installation = _installation()
+    state.save_installation(installation)
+    monkeypatch.setattr(linear_connect, "_load_linear_config", _config)
+    monkeypatch.setattr(linear_connect, "LinearStateStore", lambda: state)
+    client = SimpleNamespace(
+        revoke_installation=AsyncMock(side_effect=LinearApiError("network unavailable")),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr(linear_connect, "LinearClient", lambda *_args: client)
+
+    with pytest.raises(linear_connect.ChannelConnectError, match="Unable to revoke"):
+        await linear_connect.LinearConnectStore().handle(
+            "start",
+            {"operation": ["disconnect"], "organization_id": ["org-1"]},
+        )
+
+    assert state.installation("org-1") == installation
+    client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_oauth_exchange_saves_workspace_app_identity_and_required_scopes(
     tmp_path: Path,
 ) -> None:
@@ -317,7 +414,7 @@ async def test_oauth_exchange_saves_workspace_app_identity_and_required_scopes(
                     "access_token": "access",
                     "refresh_token": "refresh",
                     "expires_in": 86400,
-                    "scope": "read write app:mentionable",
+                    "scope": "read write app:mentionable app:assignable",
                 },
             )
         return httpx.Response(
@@ -444,7 +541,7 @@ async def test_expired_workspace_token_is_refreshed_and_rotated(tmp_path: Path) 
                     "access_token": "rotated-access",
                     "refresh_token": "rotated-refresh",
                     "expires_in": 86400,
-                    "scope": "read write app:mentionable",
+                    "scope": "read write app:mentionable app:assignable",
                 },
             )
         assert request.headers["Authorization"] == "Bearer rotated-access"
@@ -468,9 +565,100 @@ async def test_expired_workspace_token_is_refreshed_and_rotated(tmp_path: Path) 
     assert refreshed.refresh_token == "rotated-refresh"
 
 
+@pytest.mark.asyncio
+async def test_client_uploads_attachment_with_linear_presigned_headers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attachment = tmp_path / "report.txt"
+    attachment.write_text("report body", encoding="utf-8")
+    seen_put = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal seen_put
+        if request.url.host == "api.linear.app":
+            return httpx.Response(200, json={"data": {"fileUpload": {
+                "success": True,
+                "uploadFile": {
+                    "uploadUrl": "https://uploads.linear.app/signed/report.txt",
+                    "assetUrl": "https://uploads.linear.app/assets/report.txt",
+                    "headers": [{"key": "x-upload-token", "value": "signed"}],
+                },
+            }}})
+        seen_put = True
+        assert request.content == b"report body"
+        assert request.headers["x-upload-token"] == "signed"
+        assert request.headers["content-type"].startswith("text/plain")
+        assert request.headers["cache-control"] == "public, max-age=31536000"
+        return httpx.Response(200)
+
+    monkeypatch.setattr(linear_client, "validate_url_target", lambda _url: (True, ""))
+    state = LinearStateStore(tmp_path / "linear.sqlite3")
+    state.save_installation(_installation())
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LinearClient(_config(), state, http)
+    try:
+        asset_url = await client.upload_file("org-1", attachment)
+    finally:
+        await http.aclose()
+
+    assert seen_put is True
+    assert asset_url == "https://uploads.linear.app/assets/report.txt"
+
+
+@pytest.mark.asyncio
+async def test_client_downloads_private_linear_attachment_with_workspace_token(
+    tmp_path: Path,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "uploads.linear.app"
+        assert request.headers["Authorization"] == "Bearer access"
+        return httpx.Response(200, headers={"Content-Type": "image/png"}, content=b"png")
+
+    state = LinearStateStore(tmp_path / "linear.sqlite3")
+    state.save_installation(_installation())
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LinearClient(_config(), state, http)
+    try:
+        body, content_type = await client.download_file(
+            "org-1", "https://uploads.linear.app/private/image"
+        )
+    finally:
+        await http.aclose()
+
+    assert body == b"png"
+    assert content_type == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_client_revokes_access_and_refresh_tokens_before_disconnect(
+    tmp_path: Path,
+) -> None:
+    requests: list[dict[str, list[str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://api.linear.app/oauth/revoke"
+        requests.append(parse_qs(request.content.decode()))
+        return httpx.Response(200 if len(requests) == 1 else 400)
+
+    state = LinearStateStore(tmp_path / "linear.sqlite3")
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LinearClient(_config(), state, http)
+    try:
+        await client.revoke_installation(_installation())
+    finally:
+        await http.aclose()
+
+    assert requests == [
+        {"token": ["access"], "token_type_hint": ["access_token"]},
+        {"token": ["refresh"], "token_type_hint": ["refresh_token"]},
+    ]
+
+
 class _FakeLinearClient:
     def __init__(self) -> None:
         self.activities: list[dict[str, Any]] = []
+        self.downloads: list[str] = []
 
     async def create_activity(
         self,
@@ -480,6 +668,8 @@ class _FakeLinearClient:
         *,
         activity_id: str,
         ephemeral: bool = False,
+        signal: str | None = None,
+        signal_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.activities.append(
             {
@@ -488,8 +678,25 @@ class _FakeLinearClient:
                 "content": content,
                 "activity_id": activity_id,
                 "ephemeral": ephemeral,
+                "signal": signal,
+                "signal_metadata": signal_metadata,
             }
         )
+
+    async def upload_file(self, _organization_id: str, file_path: Path) -> str:
+        return f"https://uploads.linear.app/{file_path.name}"
+
+    async def download_file(
+        self,
+        _organization_id: str,
+        url: str,
+        *,
+        max_bytes: int = linear_client.MAX_DOWNLOAD_BYTES,
+    ) -> tuple[bytes, str]:
+        self.downloads.append(url)
+        if len(b"image") > max_bytes:
+            raise LinearApiError("Linear attachment exceeds the download budget")
+        return b"image", "image/png"
 
 
 def _runtime(tmp_path: Path) -> tuple[LinearChannel, _FakeLinearClient]:
@@ -517,8 +724,104 @@ async def test_created_agent_session_publishes_only_the_mention_prompt(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_created_session_downloads_private_linear_attachments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel, client = _runtime(tmp_path)
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr(linear_runtime, "get_media_dir", lambda _channel: media_dir)
+    payload = _agent_webhook()
+    payload["promptContext"] = (
+        "Review ![checkout.png](https://uploads.linear.app/private/image-1)"
+    )
+
+    await channel._process_webhook("delivery-media", payload)  # pyright: ignore[reportPrivateUsage]
+
+    inbound = await channel.bus.consume_inbound()
+    assert client.downloads == ["https://uploads.linear.app/private/image-1"]
+    assert len(inbound.media) == 1
+    assert Path(inbound.media[0]).name == "delivery-media_checkout.png"
+    assert Path(inbound.media[0]).read_bytes() == b"image"
+
+
+@pytest.mark.asyncio
+async def test_unpaired_session_does_not_download_private_attachments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel, client = _runtime(tmp_path)
+    channel.config.allow_from = []
+    monkeypatch.setattr(channel, "is_allowed", lambda _sender_id: False)
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr(linear_runtime, "get_media_dir", lambda _channel: media_dir)
+    payload = _agent_webhook()
+    payload["promptContext"] = "Review https://uploads.linear.app/private/image-1"
+
+    await channel._process_webhook("delivery-unpaired", payload)  # pyright: ignore[reportPrivateUsage]
+
+    assert client.downloads == []
+    assert list(media_dir.iterdir()) == []
+    assert client.activities[0]["content"]["type"] == "response"
+    assert "pairing" in client.activities[0]["content"]["body"].lower()
+
+
+@pytest.mark.asyncio
+async def test_inbound_attachments_share_one_total_download_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel, client = _runtime(tmp_path)
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr(linear_runtime, "get_media_dir", lambda _channel: media_dir)
+    monkeypatch.setattr(linear_runtime, "MAX_DOWNLOAD_BYTES", 7)
+    payload = _agent_webhook()
+    payload["promptContext"] = (
+        "Review https://uploads.linear.app/private/one "
+        "and https://uploads.linear.app/private/two"
+    )
+
+    await channel._process_webhook("delivery-budget", payload)  # pyright: ignore[reportPrivateUsage]
+
+    inbound = await channel.bus.consume_inbound()
+    assert len(inbound.media) == 1
+    assert client.downloads == [
+        "https://uploads.linear.app/private/one",
+        "https://uploads.linear.app/private/two",
+    ]
+    assert "[Attachment unavailable: two]" in inbound.content
+
+
+@pytest.mark.asyncio
+async def test_inbound_attachments_enforce_the_count_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel, client = _runtime(tmp_path)
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr(linear_runtime, "get_media_dir", lambda _channel: media_dir)
+    monkeypatch.setattr(linear_runtime, "MAX_PROMPT_ATTACHMENTS", 1)
+    payload = _agent_webhook()
+    payload["promptContext"] = (
+        "Review https://uploads.linear.app/private/one "
+        "and https://uploads.linear.app/private/two"
+    )
+
+    await channel._process_webhook("delivery-count", payload)  # pyright: ignore[reportPrivateUsage]
+
+    inbound = await channel.bus.consume_inbound()
+    assert client.downloads == ["https://uploads.linear.app/private/one"]
+    assert "[Only the first 1 attachments were accepted.]" in inbound.content
+
+
+@pytest.mark.asyncio
 async def test_prompted_stop_signal_becomes_priority_stop_command(tmp_path: Path) -> None:
-    channel, _ = _runtime(tmp_path)
+    channel, client = _runtime(tmp_path)
+    channel.config.allow_from = []
     await channel._process_webhook(  # pyright: ignore[reportPrivateUsage]
         "delivery-2",
         _agent_webhook(action="prompted", signal="stop"),
@@ -527,6 +830,7 @@ async def test_prompted_stop_signal_becomes_priority_stop_command(tmp_path: Path
     inbound = await channel.bus.consume_inbound()
     assert inbound.content == "/stop"
     assert inbound.metadata["linear"]["signal"] == "stop"
+    assert client.activities == []
 
 
 @pytest.mark.asyncio
@@ -581,7 +885,149 @@ async def test_outbound_response_and_tool_progress_use_native_activity_shapes(
     assert client.activities[0]["content"] == {"type": "response", "body": "Done"}
     assert client.activities[1]["activity_id"] == activity_id
     assert client.activities[2]["content"]["type"] == "action"
-    assert client.activities[2]["content"]["action"] == "linear_get_issue"
+    assert client.activities[2]["content"]["action"] == "Linear Get Issue"
+
+
+@pytest.mark.asyncio
+async def test_outbound_buttons_keep_media_in_linear_select_elicitation(tmp_path: Path) -> None:
+    channel, client = _runtime(tmp_path)
+    attachment = tmp_path / "choice.png"
+    attachment.write_bytes(b"png")
+    await channel.send(OutboundMessage(
+        channel="linear",
+        chat_id="session-1",
+        content="Choose a priority",
+        media=[str(attachment)],
+        buttons=[["High", "Low"]],
+        metadata={
+            "linear": {"organization_id": "org-1", "agent_session_id": "session-1"}
+        },
+    ))
+
+    assert client.activities[0]["content"] == {
+        "type": "elicitation",
+        "body": (
+            "Choose a priority\n\n"
+            "![choice.png](https://uploads.linear.app/choice.png)"
+        ),
+    }
+    assert client.activities[0]["signal"] == "select"
+    assert client.activities[0]["signal_metadata"] == {
+        "options": [
+            {"label": "High", "value": "High"},
+            {"label": "Low", "value": "Low"},
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_outbound_local_media_is_uploaded_and_linked(tmp_path: Path) -> None:
+    channel, client = _runtime(tmp_path)
+    attachment = tmp_path / "diagram.png"
+    attachment.write_bytes(b"png")
+    await channel.send(OutboundMessage(
+        channel="linear",
+        chat_id="session-1",
+        content="Here is the diagram.",
+        media=[str(attachment)],
+        metadata={
+            "linear": {"organization_id": "org-1", "agent_session_id": "session-1"}
+        },
+    ))
+
+    assert client.activities[0]["content"] == {
+        "type": "response",
+        "body": (
+            "Here is the diagram.\n\n"
+            "![diagram.png](https://uploads.linear.app/diagram.png)"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_tool_activities_redact_credentials_and_make_start_ephemeral(
+    tmp_path: Path,
+) -> None:
+    channel, client = _runtime(tmp_path)
+    metadata = {
+        "linear": {"organization_id": "org-1", "agent_session_id": "session-1"}
+    }
+    await channel.send(OutboundMessage(
+        channel="linear",
+        chat_id="session-1",
+        content="",
+        metadata=metadata,
+        event=ProgressEvent(tool_events=[{
+            "phase": "start",
+            "call_id": "call-secret",
+            "name": "call_api",
+            "arguments": {"api_key": "secret-value", "query": "safe"},
+        }]),
+    ))
+    await channel.send(OutboundMessage(
+        channel="linear",
+        chat_id="session-1",
+        content="",
+        metadata=metadata,
+        event=ProgressEvent(tool_events=[{
+            "phase": "error",
+            "call_id": "call-secret",
+            "name": "call_api",
+            "error": "Authorization: Bearer plaintext-secret",
+        }]),
+    ))
+    await channel.send(OutboundMessage(
+        channel="linear",
+        chat_id="session-1",
+        content="",
+        metadata=metadata,
+        event=ProgressEvent(tool_events=[{
+            "phase": "end",
+            "call_id": "call-secret",
+            "name": "call_api",
+            "arguments": {"api_key": "secret-value"},
+            "result": {"token": "result-secret", "status": "ok"},
+        }]),
+    ))
+
+    assert client.activities[0]["ephemeral"] is True
+    assert client.activities[0]["content"]["action"] == "Call API"
+    assert "secret-value" not in client.activities[0]["content"]["parameter"]
+    assert client.activities[1]["ephemeral"] is False
+    assert "plaintext-secret" not in client.activities[1]["content"]["result"]
+    assert "result-secret" not in client.activities[2]["content"]["result"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "token=plain-secret",
+        "client_secret=plain-secret",
+        "cookie=session-secret",
+        "credential: plain-secret",
+        "OPENAI_API_KEY=plain-secret",
+    ],
+)
+def test_tool_result_text_redacts_common_credential_assignments(value: str) -> None:
+    result = linear_runtime._compact_result(value)  # pyright: ignore[reportPrivateUsage]
+
+    assert "plain-secret" not in result
+    assert "session-secret" not in result
+    assert "[redacted]" in result
+
+
+@pytest.mark.asyncio
+async def test_reasoning_can_be_hidden_for_linear(tmp_path: Path) -> None:
+    channel, client = _runtime(tmp_path)
+    channel.config.show_reasoning = False
+    metadata = {
+        "linear": {"organization_id": "org-1", "agent_session_id": "session-1"}
+    }
+
+    await channel.send_reasoning_delta("session-1", "private thought", metadata)
+    await channel.send_reasoning_end("session-1", metadata)
+
+    assert client.activities == []
 
 
 @pytest.mark.parametrize("include_start", [True, False])

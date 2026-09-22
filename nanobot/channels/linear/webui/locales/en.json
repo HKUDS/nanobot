@@ -4,11 +4,11 @@
   "setup": {
     "docsLabel": "Open Linear setup guide",
     "officialLabel": "Create Linear OAuth app",
-    "tryIt": "Mention the app in an issue comment. Follow-ups inside its Agent Session do not need another mention.",
-    "summary": "Create a private Linear OAuth app, save its credentials and public URL, then authorize each workspace. New sessions require an explicit @mention; ordinary comments are ignored.",
+    "tryIt": "Mention the app in an issue comment or delegate an issue to it. Follow-ups inside its Agent Session do not need another mention.",
+    "summary": "Create a private Linear OAuth app, save its credentials and public URL, then authorize each workspace. Start a session by mentioning the app or delegating an issue to it; ordinary comments are ignored.",
     "steps": [
       "Expose this nanobot instance through a stable HTTPS URL (a tunnel is fine).",
-      "Create a private OAuth app in Linear with read, write, and app:mentionable scopes. Do not add app:assignable.",
+      "Create a private OAuth app in Linear with read, write, app:mentionable, and app:assignable scopes.",
       "Subscribe the app webhook to AgentSessionEvent, PermissionChange, and OAuthAuthorization using the generated webhook URL.",
       "Enter the app credentials, wait for them to save automatically, connect the workspace with OAuth, then @mention the app on an issue."
     ],
@@ -53,6 +53,10 @@
         "label": "Allowed Linear users",
         "placeholder": "Linear user IDs, comma separated",
         "help": "Leave empty to use nanobot pairing, or use * to allow every user in connected workspaces."
+      },
+      "showReasoning": {
+        "label": "Show reasoning",
+        "help": "Post model reasoning as thought activities in Linear. Turn this off for a quieter session."
       }
     }
   },
@@ -71,6 +75,22 @@
     "savePublicUrl": "Enter a public HTTPS URL to create a prefilled Linear app.",
     "saveBeforeConnect": "Enter the app credentials and wait for them to save before connecting.",
     "removeCredentials": "Remove saved credentials",
-    "retrySave": "Retry"
+    "retrySave": "Retry",
+    "channelRunning": "Channel running",
+    "accessTitle": "Access and issue tools",
+    "accessAll": "Every member of an authorized workspace can run this agent.",
+    "accessRestricted": "Only the Linear user IDs listed in Advanced can run this agent.",
+    "accessPairing": "On first use, mention nanobot in Linear, approve the pairing code in Settings → Pairing, then mention it again.",
+    "mcpDescription": "This channel handles agent conversations. Connect Linear tools to let the agent search or change issues.",
+    "configureTools": "Configure Linear tools",
+    "workspacesTitle": "Authorized workspaces",
+    "refreshWorkspaces": "Refresh workspaces",
+    "loadingWorkspaces": "Loading workspaces",
+    "noWorkspaces": "No workspaces are authorized. Connect a workspace to receive Linear agent requests.",
+    "refreshRequired": "Authorization refresh required",
+    "missingScopes": "Reconnect to grant: {{scopes}}",
+    "authorized": "Authorized",
+    "confirmDisconnect": "Disconnect workspace",
+    "disconnect": "Disconnect"
   }
 }

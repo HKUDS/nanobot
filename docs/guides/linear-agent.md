@@ -1,7 +1,7 @@
 # Connect nanobot as a Native Linear Agent
 
 This guide takes you from an empty Linear channel configuration to a working
-@mention in an issue. The recommended path uses the nanobot WebUI and a
+@mention or delegated issue. The recommended path uses the nanobot WebUI and a
 pre-filled Linear app manifest, so you do not need to enter callback URLs or
 webhook subscriptions by hand.
 
@@ -11,21 +11,31 @@ webhook subscriptions by hand.
 
 ## What this channel does
 
-- A new task starts only when someone explicitly @mentions the installed app.
+- A new task starts when someone explicitly @mentions the installed app or
+  delegates an issue to it.
 - An ordinary issue comment does not invoke nanobot.
 - A follow-up inside the existing Agent Session continues the same nanobot
   session without another @mention.
-- Linear's stop control cancels the active nanobot turn.
+- Linear's stop control asks nanobot to cancel the active turn without requiring
+  the sender to complete pairing first. An activity already delivered to Linear
+  cannot be recalled.
 - nanobot reports its acknowledgement, tool activity, reasoning, and final
   answer as native Linear Agent Activities.
+- Button choices are sent as Linear selection activities, and local outbound
+  files are uploaded to Linear before they are linked in the response.
+- Private `uploads.linear.app` links in the session prompt are downloaded with
+  the workspace OAuth token and passed to nanobot as inbound media after access
+  checks. A prompt can import up to 10 attachments and 40 MB in total; skipped
+  or unavailable files are called out in the prompt instead of failing silently.
 
-The OAuth request includes `app:mentionable` and deliberately excludes
-`app:assignable`. Do not add `app:assignable` if every new task must start with
-an @mention.
+The OAuth request includes `app:mentionable` and `app:assignable`, in addition
+to `read` and `write`. Existing workspace installations must be reconnected to
+grant `app:assignable`.
 
-Linear MCP is optional. Add it when the agent also needs tools for searching or
-changing Linear issues. MCP does not replace this channel's OAuth installation,
-webhook, or Agent Session transport.
+The native channel owns Agent Session transport. Connect the Linear MCP app when
+the agent also needs tools for searching or changing Linear issues; OAuth scopes
+on the channel do not expose those actions as nanobot tools. MCP does not replace
+the channel's OAuth installation, webhook, or Agent Session transport.
 
 ## Before you start
 
@@ -169,11 +179,14 @@ only in the nanobot configuration and the Linear application settings.
 1. Select **Connect Linear**.
 2. Open the displayed authorization link, or scan the QR code.
 3. Choose the workspace and approve the installation as a workspace admin.
-4. Return to nanobot and wait for the **Connected** badge.
+4. Return to nanobot and wait for the **Channel running** badge. The
+   **Authorized workspaces** section lists the workspace separately.
 
 nanobot enables the channel automatically after authorization. The gateway must
 remain running so Linear can deliver webhooks. Reopening the panel shows the
-running connection immediately, without another authorization attempt.
+running channel and its authorized workspaces without another authorization
+attempt. Use **Disconnect** on a workspace to revoke its Linear OAuth tokens and
+remove the local installation; removing the last workspace also disables the channel.
 To replace an authorization, select
 **Connect another workspace** and authorize the same workspace again.
 
@@ -190,6 +203,7 @@ refreshes each workspace installation separately.
    @nanobot summarize the likely cause and suggest the next diagnostic step
    ```
 
+   You can instead delegate the issue to the app to start the Agent Session.
 3. Open the Agent Session. You should first see a starting acknowledgement,
    followed by agent activity and a final response.
 4. Send a follow-up inside that Agent Session. You do not need to @mention the
@@ -200,6 +214,11 @@ code. Approve the pending request in the WebUI pairing dialog, then repeat the
 prompt in the same Agent Session. For a static allowlist, enter Linear user IDs
 in **Allowed Linear users**. Enter `*` only if every member of every connected
 workspace should be able to invoke the agent.
+
+By default, reasoning is posted as Linear thought activities. Turn off **Show
+reasoning** under **Advanced** for a quieter session. Use **Configure Linear
+tools** to open the Apps page and connect Linear MCP when prompts need to search,
+edit, or transition issues.
 
 ## Verify the setup
 
@@ -214,6 +233,7 @@ The setup is complete when all of these checks pass:
   tunnel or proxy reachability; the task checks below verify the Linear connection.
 - A new comment with an explicit @mention creates an Agent Session and receives
   a response.
+- Delegating an issue to the app creates an Agent Session and receives a response.
 - A normal issue comment without an @mention does nothing.
 - A follow-up inside the Agent Session receives a response without another
   @mention.
@@ -239,7 +259,8 @@ Merge this section into `~/.nanobot/config.json`:
       "port": 3979,
       "webhookPath": "/linear/webhook",
       "oauthCallbackPath": "/linear/oauth/callback",
-      "allowFrom": ["YOUR_LINEAR_USER_ID"]
+      "allowFrom": ["YOUR_LINEAR_USER_ID"],
+      "showReasoning": true
     }
   }
 }
@@ -291,8 +312,9 @@ secret.
 | An @mention gets no response | Confirm `AgentSessionEvent` is subscribed, the Client ID and signing secret match the same app, and the workspace authorization has not been revoked. Run `nanobot gateway logs` for the exact error. |
 | The first @mention returns a pairing code | Approve it in the WebUI pairing dialog, then repeat the prompt in the same Agent Session. Alternatively, configure a narrow **Allowed Linear users** list. |
 | Normal comments do nothing | This is intentional. Start a task by @mentioning the app, or continue inside an existing Agent Session. |
-| Issues can be delegated to the app without an @mention | Remove `app:assignable`, reconnect the workspace, and use nanobot's built-in OAuth flow, which requests only `read`, `write`, and `app:mentionable`. |
-| Authorization reports missing scopes | Reconnect from nanobot. Do not reuse an authorization URL that omits `read`, `write`, or `app:mentionable`. |
+| Delegating an issue does not start a session | Reconnect the workspace so the installation grants `app:assignable`, then confirm the app can be selected as the issue delegate. |
+| The agent can discuss an issue but cannot search or change it | Connect the Linear MCP app from **Configure Linear tools**. The native channel transports the conversation but does not add issue-management tools. |
+| Authorization reports missing scopes | Reconnect from nanobot. Do not reuse an authorization URL that omits `read`, `write`, `app:mentionable`, or `app:assignable`. |
 
 For Linear's platform-side behavior, see the official
 [Agents guide](https://linear.app/developers/agents),

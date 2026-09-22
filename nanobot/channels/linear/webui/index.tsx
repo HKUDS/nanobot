@@ -32,6 +32,7 @@ export default {
         { key: "channels.linear.webhookPath" },
         { key: "channels.linear.oauthCallbackPath" },
         { key: "channels.linear.allowFrom" },
+        { key: "channels.linear.showReasoning" },
       ],
     },
   },

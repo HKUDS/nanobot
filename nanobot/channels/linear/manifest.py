@@ -18,6 +18,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "webhookPath": field(default="/linear/webhook"),
         "oauthCallbackPath": field(default="/linear/oauth/callback"),
         "allowFrom": field("list"),
+        "showReasoning": field("bool", default=True),
     },
     required=required_fields(
         "clientId",

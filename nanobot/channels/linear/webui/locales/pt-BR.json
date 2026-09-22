@@ -8,7 +8,7 @@
     "summary": "Crie um aplicativo OAuth privado do Linear, salve as credenciais e a URL pública e autorize o workspace. Cada nova sessão exige uma @menção explícita; comentários comuns são ignorados.",
     "steps": [
       "Exponha esta instância do nanobot por uma URL HTTPS estável (um túnel pode ser usado).",
-      "Crie um aplicativo OAuth privado no Linear com os escopos read, write e app:mentionable. Não adicione app:assignable.",
+      "Crie um aplicativo OAuth privado no Linear com os escopos read, write, app:mentionable e app:assignable.",
       "Inscreva o webhook do aplicativo em AgentSessionEvent, PermissionChange e OAuthAuthorization usando a URL gerada.",
       "Insira as credenciais do aplicativo, aguarde o salvamento automático, conecte o espaço de trabalho com OAuth e mencione o aplicativo com @ em uma issue."
     ],
@@ -53,6 +53,10 @@
         "label": "Usuários do Linear permitidos",
         "placeholder": "IDs de usuário do Linear separados por vírgulas",
         "help": "Deixe vazio para usar o pareamento do nanobot ou use * para permitir todos os usuários dos workspaces conectados."
+      },
+      "showReasoning": {
+        "label": "Mostrar raciocínio",
+        "help": "Publica o raciocínio do modelo como atividades de pensamento no Linear. Desative para uma sessão mais limpa."
       }
     }
   },
@@ -71,6 +75,22 @@
     "savePublicUrl": "Insira uma URL HTTPS pública para criar um aplicativo Linear pré-preenchido.",
     "saveBeforeConnect": "Insira as credenciais do aplicativo e aguarde o salvamento antes de conectar.",
     "removeCredentials": "Remover credenciais salvas",
-    "retrySave": "Tentar novamente"
+    "retrySave": "Tentar novamente",
+    "channelRunning": "Canal em execução",
+    "accessTitle": "Acesso e ferramentas de issues",
+    "accessAll": "Todos os membros de um workspace autorizado podem executar este agente.",
+    "accessRestricted": "Somente os IDs de usuário do Linear listados em Avançado podem executar este agente.",
+    "accessPairing": "No primeiro uso, mencione o nanobot no Linear, aprove o código em Configurações → Pareamento e mencione-o novamente.",
+    "mcpDescription": "Este canal gerencia conversas do agente. Conecte as ferramentas do Linear para pesquisar ou alterar issues.",
+    "configureTools": "Configurar ferramentas do Linear",
+    "workspacesTitle": "Workspaces autorizados",
+    "refreshWorkspaces": "Atualizar workspaces",
+    "loadingWorkspaces": "Carregando workspaces",
+    "noWorkspaces": "Nenhum workspace está autorizado. Conecte um para receber solicitações do agente Linear.",
+    "refreshRequired": "Atualização da autorização necessária",
+    "missingScopes": "Reconecte para conceder: {{scopes}}",
+    "authorized": "Autorizado",
+    "confirmDisconnect": "Desconectar workspace",
+    "disconnect": "Desconectar"
   }
 }

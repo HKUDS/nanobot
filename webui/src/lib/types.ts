@@ -1212,7 +1212,22 @@ export interface McpPresetsPayload {
   };
 }
 
-type ChannelConnectStatus = "pending" | "succeeded" | "expired" | "cancelled" | "failed";
+type ChannelConnectStatus =
+  | "pending"
+  | "succeeded"
+  | "expired"
+  | "cancelled"
+  | "failed"
+  | "inspected"
+  | "disconnected";
+
+export interface ChannelInstallationSummary {
+  organization_id: string;
+  organization_name?: string;
+  scopes?: string[];
+  authorization_status?: "authorized" | "refresh_required" | "missing_scopes";
+  missing_scopes?: string[];
+}
 
 export interface ChannelConnectPayload {
   session_id: string;
@@ -1222,6 +1237,11 @@ export interface ChannelConnectPayload {
   qr_url?: string;
   interval_ms?: number;
   expires_at_ms?: number;
+  organization_id?: string;
+  organization_name?: string;
+  installations?: ChannelInstallationSummary[];
+  webhook_url?: string;
+  redirect_uri?: string;
   nanobot_features?: NanobotFeaturesPayload;
 }
 

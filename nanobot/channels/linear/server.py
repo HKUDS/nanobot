@@ -136,13 +136,13 @@ class SharedLinearHttpServer:
         code = _query_first(query, "code")
         error = _query_first(query, "error")
         if not state or (not code and not error):
-            _handler_response(handler, HTTPStatus.BAD_REQUEST, _oauth_html(False))
+            _handler_response(handler, HTTPStatus.BAD_REQUEST, _oauth_html("invalid"))
             return
         completed = OAUTH_FLOWS.complete(state, code=code, error=error)
         _handler_response(
             handler,
             HTTPStatus.OK if completed else HTTPStatus.BAD_REQUEST,
-            _oauth_html(completed),
+            _oauth_html("cancelled" if error and completed else "received" if completed else "invalid"),
         )
 
     def _handle_webhook(self, handler: BaseHTTPRequestHandler) -> None:
@@ -243,13 +243,22 @@ def _handler_response(
     handler.wfile.write(body)
 
 
-def _oauth_html(success: bool) -> bytes:
-    title = "Linear connected" if success else "Linear connection failed"
-    detail = (
-        "Authorization received. You can close this window and return to nanobot."
-        if success
-        else "The authorization request is invalid or expired. Return to nanobot and try again."
-    )
+def _oauth_html(status: str) -> bytes:
+    messages = {
+        "received": (
+            "Authorization received",
+            "Return to nanobot while it verifies the Linear workspace. You can close this window.",
+        ),
+        "cancelled": (
+            "Authorization not completed",
+            "Return to nanobot to try again or leave Linear disconnected.",
+        ),
+        "invalid": (
+            "Linear connection failed",
+            "This authorization request is invalid or expired. Return to nanobot and try again.",
+        ),
+    }
+    title, detail = messages.get(status, messages["invalid"])
     return (
         "<!doctype html><html><head><meta charset=utf-8><title>"
         + title

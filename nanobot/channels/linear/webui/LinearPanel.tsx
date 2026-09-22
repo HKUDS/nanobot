@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Loader2 } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, Loader2, RefreshCw, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
@@ -19,7 +19,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { channelValidationStatusClass } from "@/components/settings/channels/ChannelValidationProgress";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { configureChannel } from "@/lib/api";
+import { configureChannel, disableNanobotFeature, startChannelConnect } from "@/lib/api";
+import type { ChannelInstallationSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -29,6 +30,7 @@ import { linearManifestUrl } from "./manifest";
 const PUBLIC_BASE_URL_KEY = "channels.linear.publicBaseUrl";
 const WEBHOOK_PATH_KEY = "channels.linear.webhookPath";
 const CALLBACK_PATH_KEY = "channels.linear.oauthCallbackPath";
+const ALLOW_FROM_KEY = "channels.linear.allowFrom";
 
 export function LinearPanel({
   token,
@@ -62,6 +64,12 @@ export function LinearPanel({
   const [connecting, setConnecting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [installations, setInstallations] = useState<ChannelInstallationSummary[]>([]);
+  const [loadingInstallations, setLoadingInstallations] = useState(false);
+  const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
+  const [disconnectConfirmId, setDisconnectConfirmId] = useState<string | null>(null);
+  const [workspaceNotice, setWorkspaceNotice] = useState<string | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const advancedPanelId = useId();
 
@@ -96,6 +104,49 @@ export function LinearPanel({
       feature.config_values?.[CALLBACK_PATH_KEY] || "/linear/oauth/callback",
     )
     : null;
+  const allowFrom = feature.config_values?.[ALLOW_FROM_KEY]?.trim() ?? "";
+
+  const loadInstallations = useCallback(async () => {
+    if (!credentialsSaved || dirty) return;
+    setLoadingInstallations(true);
+    setWorkspaceNotice(null);
+    setWorkspaceError(null);
+    try {
+      const payload = await startChannelConnect(client, "linear", { operation: "inspect" });
+      setInstallations(payload.installations ?? []);
+    } catch (err) {
+      setWorkspaceError((err as Error).message);
+    } finally {
+      setLoadingInstallations(false);
+    }
+  }, [client, credentialsSaved, dirty]);
+
+  useEffect(() => {
+    if (feature.runtime_status === "running") void loadInstallations();
+  }, [feature.runtime_status, loadInstallations]);
+
+  const disconnectWorkspace = async (installation: ChannelInstallationSummary) => {
+    setDisconnectingId(installation.organization_id);
+    setWorkspaceNotice(null);
+    setWorkspaceError(null);
+    try {
+      const payload = await startChannelConnect(client, "linear", {
+        operation: "disconnect",
+        organization_id: installation.organization_id,
+      });
+      const remaining = payload.installations ?? [];
+      setInstallations(remaining);
+      setWorkspaceNotice(payload.message ?? null);
+      setDisconnectConfirmId(null);
+      if (remaining.length === 0) {
+        onFeaturesUpdate(await disableNanobotFeature(client, "linear"));
+      }
+    } catch (err) {
+      setWorkspaceError((err as Error).message);
+    } finally {
+      setDisconnectingId(null);
+    }
+  };
 
   const setFieldValue = (key: string, value: string) => {
     setFieldValues((current) => ({ ...current, [key]: value }));
@@ -199,7 +250,7 @@ export function LinearPanel({
               channelValidationStatusClass("connected"),
             )}>
               <Check className="h-3.5 w-3.5" aria-hidden />
-              {t("settings.channels.validation.connected", { defaultValue: "Connected" })}
+              {tx("custom.channelRunning", "Channel running")}
             </span>
           ) : null}
           <span role="status" aria-live="polite" aria-atomic="true" className={cn(
@@ -243,6 +294,107 @@ export function LinearPanel({
           </div>
         ) : null}
       </form>
+      <section className="mt-5 space-y-3" aria-labelledby="linear-access-heading">
+        <div>
+          <h4 id="linear-access-heading" className="text-[13px] font-semibold text-foreground">
+            {tx("custom.accessTitle", "Access and issue tools")}
+          </h4>
+          <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+            {allowFrom === "*"
+              ? tx("custom.accessAll", "Every member of an authorized workspace can run this agent.")
+              : allowFrom
+                ? tx("custom.accessRestricted", "Only the Linear user IDs listed in Advanced can run this agent.")
+                : tx("custom.accessPairing", "On first use, mention nanobot in Linear, approve the pairing code in Settings → Pairing, then mention it again.")}
+          </p>
+          <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+            {tx("custom.mcpDescription", "This channel handles agent conversations. Connect Linear tools to let the agent search or change issues.")}{" "}
+            <a href="#/apps" className="font-medium text-foreground underline underline-offset-4">
+              {tx("custom.configureTools", "Configure Linear tools")}
+            </a>
+          </p>
+        </div>
+      </section>
+      {feature.runtime_status === "running" ? (
+        <section className="mt-5 space-y-3" aria-labelledby="linear-workspaces-heading">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 id="linear-workspaces-heading" className="text-[13px] font-semibold text-foreground">
+              {tx("custom.workspacesTitle", "Authorized workspaces")}
+            </h4>
+            <Button type="button" variant="ghost" size="sm"
+              disabled={loadingInstallations || disconnectingId !== null}
+              className="min-h-10 gap-2 rounded-full text-[12px]"
+              onClick={() => void loadInstallations()}>
+              <RefreshCw className={cn("h-3.5 w-3.5", loadingInstallations && "animate-spin motion-reduce:animate-none")} aria-hidden />
+              {tx("custom.refreshWorkspaces", "Refresh workspaces")}
+            </Button>
+          </div>
+          <div role="status" aria-live="polite" className="sr-only">
+            {loadingInstallations ? tx("custom.loadingWorkspaces", "Loading workspaces") : ""}
+          </div>
+          {!loadingInstallations && !workspaceError && installations.length === 0 ? (
+            <p className="rounded-control bg-muted/45 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground">
+              {tx("custom.noWorkspaces", "No workspaces are authorized. Connect a workspace to receive Linear agent requests.")}
+            </p>
+          ) : null}
+          <div className="space-y-2">
+            {installations.map((installation) => {
+              const confirming = disconnectConfirmId === installation.organization_id;
+              const disconnecting = disconnectingId === installation.organization_id;
+              const name = installation.organization_name || installation.organization_id;
+              return (
+                <article key={installation.organization_id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-muted/45 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-[12.5px] font-medium text-foreground">{name}</p>
+                    <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                      {installation.authorization_status === "missing_scopes"
+                        ? tx(
+                          "custom.missingScopes",
+                          "Reconnect to grant: {{scopes}}",
+                          { scopes: installation.missing_scopes?.join(", ") || "required scopes" },
+                        )
+                        : installation.authorization_status === "refresh_required"
+                          ? tx("custom.refreshRequired", "Authorization refresh required")
+                          : tx("custom.authorized", "Authorized")}
+                      {installation.scopes?.length ? ` · ${installation.scopes.join(", ")}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {confirming ? (
+                      <Button type="button" variant="ghost" size="sm"
+                        disabled={loadingInstallations || disconnecting}
+                        className="min-h-10 rounded-full text-[12px]"
+                        onClick={() => setDisconnectConfirmId(null)}>
+                        {t("settings.actions.cancel", { defaultValue: "Cancel" })}
+                      </Button>
+                    ) : null}
+                    <Button type="button" variant={confirming ? "destructive" : "outline"} size="sm"
+                      disabled={loadingInstallations || disconnectingId !== null}
+                      className="min-h-10 gap-2 rounded-full text-[12px]"
+                      onClick={() => confirming
+                        ? void disconnectWorkspace(installation)
+                        : setDisconnectConfirmId(installation.organization_id)}>
+                      {disconnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+                        : <Unplug className="h-3.5 w-3.5" aria-hidden />}
+                      {confirming
+                        ? tx("custom.confirmDisconnect", "Disconnect workspace")
+                        : tx("custom.disconnect", "Disconnect")}
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          {workspaceError ? (
+            <p role="alert" className="text-[12px] leading-5 text-destructive">{workspaceError}</p>
+          ) : null}
+          {workspaceNotice ? (
+            <p role="status" className="text-[12px] leading-5 text-muted-foreground">
+              {workspaceNotice}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
       <LinearConnectFlow token={token} feature={feature}
         idleLabel={tx("custom.connect", "Connect Linear")} onFeaturesUpdate={onFeaturesUpdate}
         onActiveChange={setConnecting}
