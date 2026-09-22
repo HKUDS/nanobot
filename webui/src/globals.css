@@ -717,10 +717,9 @@
     display: inline;
   }
 
-  /* Wide markdown tables scroll horizontally within the conversation column.
-     Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
-     custom `table` component (see MarkdownTextRenderer); min-w-max on the
-     <table> keeps natural column widths so it scrolls instead of shrinking. */
+  /* Markdown tables wrap cell text to fit the conversation column. The
+     renderer's overflow-x:auto wrapper remains a fallback for content that
+     cannot shrink. */
 
   /* Clip any residual horizontal bleed at the thread column edge. Vertical
      scrolling and internal code-block scroll are unaffected. */
