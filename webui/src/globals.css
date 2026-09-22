@@ -762,6 +762,7 @@
 .message-block-menu-trigger,
 [data-message-block-menu] {
   --message-block-control-size: 1.75rem;
+  --message-block-action-width: 1.75rem;
   --message-block-trigger-offset: 2rem;
 }
 
@@ -817,6 +818,7 @@
   .message-block-menu-trigger,
   [data-message-block-menu] {
     --message-block-control-size: 2.75rem;
+    --message-block-action-width: 2rem;
     --message-block-trigger-offset: 3rem;
   }
 

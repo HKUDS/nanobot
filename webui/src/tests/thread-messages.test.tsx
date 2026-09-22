@@ -682,10 +682,13 @@ describe("ThreadMessages", () => {
     expect(disclosure).not.toHaveClass("hover:bg-muted/60");
     expect(menu.querySelector("[data-message-block-copy-action]")).toHaveClass(
       "rounded-control",
+      "h-[var(--message-block-control-size)]",
+      "w-[var(--message-block-action-width)]",
     );
+    expect(menu.querySelector("[data-message-block-copy-action]")).not.toHaveClass("touch-target");
     expect(disclosure.querySelector("[data-message-block-activity-icon]")).toHaveClass(
       "h-[var(--message-block-control-size)]",
-      "w-[var(--message-block-control-size)]",
+      "w-[var(--message-block-action-width)]",
       "rounded-control",
       "group-hover:bg-muted/70",
     );

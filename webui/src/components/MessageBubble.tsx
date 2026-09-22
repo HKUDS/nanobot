@@ -191,7 +191,7 @@ export function MessageBlockMenuActions({
                         onClick={onCopy}
                         aria-label={copyLabel}
                         className={cn(
-                          "touch-target inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] items-center justify-center rounded-control",
+                          "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
                           "text-muted-foreground transition-[color,background-color,scale]",
                           "hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -226,7 +226,7 @@ export function MessageBlockMenuActions({
                         onClick={onForkFromHere}
                         aria-label={t("message.forkFromHere")}
                         className={cn(
-                          "touch-target inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] items-center justify-center rounded-control",
+                          "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
                           "text-muted-foreground transition-[color,background-color,scale]",
                           "hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -260,7 +260,7 @@ export function MessageBlockMenuActions({
                 <span
                   data-message-block-activity-icon
                   className={cn(
-                    "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] shrink-0 items-center justify-center rounded-control",
+                    "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] shrink-0 items-center justify-center rounded-control",
                     "transition-[background-color,box-shadow,scale]",
                     "group-hover:bg-muted/70 group-active:scale-[0.96]",
                     "group-focus-visible:ring-2 group-focus-visible:ring-ring",
