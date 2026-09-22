@@ -32,6 +32,7 @@ interface ThreadMessagesProps {
   onOpenFilePreview?: (path: string) => void;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onQuoteSelection?: (text: string) => void;
+  onActivityToggle?: () => void;
 }
 
 export type DisplayUnit = TurnUnit;
@@ -84,6 +85,7 @@ export function ThreadMessages({
   onOpenFilePreview,
   onForkFromMessage,
   onQuoteSelection,
+  onActivityToggle,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const messageListRef = useRef<HTMLDivElement>(null);
@@ -131,6 +133,7 @@ export function ThreadMessages({
   const [openContextBlockKey, setOpenContextBlockKey] = useState<string | null>(null);
   const pointedContextBlockRef = useRef<string | null>(null);
   const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
+    onActivityToggle?.();
     setExpandedActivityKeys((current) => {
       if (current.has(key) === expanded) return current;
       const next = new Set(current);
@@ -138,7 +141,7 @@ export function ThreadMessages({
       else next.delete(key);
       return next;
     });
-  }, []);
+  }, [onActivityToggle]);
   const setContextBlockActive = useCallback((key: string | null) => {
     setActiveContextBlockKey((current) => current === key ? current : key);
     setOpenContextBlockKey((current) => current !== null && current !== key ? null : current);

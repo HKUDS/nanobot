@@ -901,6 +901,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   onOpenFilePreview={onOpenFilePreview}
                   onForkFromMessage={onForkFromMessage}
                   onQuoteSelection={onQuoteSelection}
+                  onActivityToggle={yieldCameraToUser}
                 />
               </div>
               <div aria-hidden className="thread-message-end-gap shrink-0" />

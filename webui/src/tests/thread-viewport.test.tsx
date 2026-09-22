@@ -266,6 +266,27 @@ describe("ThreadViewport", () => {
     expect(takeUserControl).toHaveBeenCalledTimes(1);
   });
 
+  it("yields scroll control before expanding activity from a portaled message menu", () => {
+    const takeUserControl = vi.spyOn(ThreadMotionCoordinator.prototype, "takeUserControl");
+    render(
+      <ThreadViewport
+        messages={[
+          { id: "reasoning", role: "assistant", content: "", reasoning: "A completed thought", createdAt: 1 },
+          { id: "answer", role: "assistant", content: "Finished answer", createdAt: 2 },
+        ]}
+        isStreaming={false}
+        composer={<div>composer</div>}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    const disclosure = screen.getByRole("button", { name: "Worked" });
+    expect(screen.getByTestId("thread-message-region")).not.toContainElement(disclosure);
+    takeUserControl.mockClear();
+    fireEvent.click(disclosure);
+    expect(takeUserControl).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Collapse activity details" })).toBeInTheDocument();
+  });
+
   it("top-aligns short threads in the message rendering area", () => {
     render(
       <ThreadViewport
