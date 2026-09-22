@@ -552,7 +552,7 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     await waitFor(() => expect(document.body).toHaveTextContent("echo full"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse activity details" }));
+    fireEvent.click(screen.getByRole("button", { name: /Collapse activity details/ }));
     const reopenedMenu = await openMessageActions("done");
     fireEvent.click(within(reopenedMenu).getByRole("button", { name: /Worked/ }));
     await act(async () => Promise.resolve());

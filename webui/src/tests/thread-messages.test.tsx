@@ -99,7 +99,7 @@ describe("ThreadMessages", () => {
         />,
       );
 
-      expect(screen.getByRole("button", { name: "Working for 1s" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Working for 1s/ })).toBeInTheDocument();
     },
   );
 
@@ -520,8 +520,8 @@ describe("ThreadMessages", () => {
     const finalActivity = menu.querySelector<HTMLElement>("[data-message-block-activity-action]")!;
     expect(finalActivity).toBeInTheDocument();
     fireEvent.click(finalActivity);
-    expect(screen.getByTestId("agent-activity-scroll")).toHaveTextContent("Completed First");
-    expect(screen.getByTestId("agent-activity-scroll")).toHaveTextContent("Completed Second");
+    expect(screen.getByTestId("agent-activity-content")).toHaveTextContent("Completed First");
+    expect(screen.getByTestId("agent-activity-content")).toHaveTextContent("Completed Second");
   });
 
   it("keeps empty frame source counts on the nearest visible unit", () => {
@@ -709,20 +709,20 @@ describe("ThreadMessages", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(answerRow.querySelector("[data-contextual-activity]")?.parentElement?.parentElement)
       .toHaveClass("mb-2");
-    expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
-    const collapse = screen.getByRole("button", { name: "Collapse activity details" });
+    expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
+    const collapse = screen.getByRole("button", { name: /Collapse activity details/ });
     expect(collapse).toHaveAttribute("data-contextual-activity-collapse", "true");
     expect(collapse.querySelectorAll("svg")).toHaveLength(1);
     const guide = answerRow.querySelector("[data-contextual-activity-guide]");
     expect(guide).toBeInTheDocument();
     expect(guide).toHaveClass("start-[13px]");
-    expect(screen.getByTestId("agent-activity-scroll")).toHaveClass("ps-6");
+    expect(screen.getByTestId("agent-activity-content")).toHaveClass("ps-6");
     await waitFor(() => expect(collapse).toHaveFocus());
     fireEvent.click(collapse);
 
     expect(answerRow.querySelector("[data-contextual-activity]")?.parentElement?.parentElement)
       .not.toHaveClass("mb-2");
-    expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
     expect(answerRow.querySelector("[data-contextual-activity-guide]"))
       .not.toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
@@ -1445,7 +1445,7 @@ describe("ThreadMessages", () => {
     const disclosure = screen.getByRole("button", { name: "Worked for 9s" });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(disclosure);
-    expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
     expect(screen.getByText("final answer")).toBeInTheDocument();
   });
 

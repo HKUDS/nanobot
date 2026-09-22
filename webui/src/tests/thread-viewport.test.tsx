@@ -284,7 +284,7 @@ describe("ThreadViewport", () => {
     takeUserControl.mockClear();
     fireEvent.click(disclosure);
     expect(takeUserControl).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Collapse activity details" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Collapse activity details/ })).toBeInTheDocument();
   });
 
   it("top-aligns short threads in the message rendering area", () => {

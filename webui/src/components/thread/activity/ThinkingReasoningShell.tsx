@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode, type Ref } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Activity } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -8,18 +8,12 @@ interface ThinkingReasoningShellProps {
   expanded: boolean;
   contextual?: boolean;
   showHeader?: boolean;
-  inlineCollapse?: boolean;
   collapseLabel?: string;
   contentId?: string;
   label: string;
   children: ReactNode;
-  viewportRef: Ref<HTMLDivElement>;
-  contentRef: Ref<HTMLDivElement>;
-  fadeTop: boolean;
-  fadeBottom: boolean;
   hasDetails?: boolean;
   onToggle: () => void;
-  onScroll: () => void;
 }
 
 export function ThinkingReasoningShell({
@@ -27,23 +21,31 @@ export function ThinkingReasoningShell({
   expanded,
   contextual = false,
   showHeader = true,
-  inlineCollapse = false,
   collapseLabel,
   contentId: providedContentId,
   label,
   children,
-  viewportRef,
-  contentRef,
-  fadeTop,
-  fadeBottom,
   hasDetails = true,
   onToggle,
-  onScroll,
 }: ThinkingReasoningShellProps) {
   const generatedContentId = useId();
   const contentId = providedContentId ?? generatedContentId;
   const [hasExpanded, setHasExpanded] = useState(expanded);
   if (expanded && !hasExpanded) setHasExpanded(true);
+  const headerClassName = "touch-target inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md px-1.5";
+  const headerContent = (
+    <>
+      <Activity className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
+      <span
+        className={cn(
+          "min-w-0 truncate text-[12px] font-normal leading-4 text-muted-foreground/65",
+          active && "animate-pulse motion-reduce:animate-none",
+        )}
+      >
+        {label}
+      </span>
+    </>
+  );
   return (
     <div
       className="flex w-full max-w-[45rem] animate-in flex-col fade-in duration-300 motion-reduce:animate-none"
@@ -52,56 +54,34 @@ export function ThinkingReasoningShell({
       data-block-context-rail={contextual && showHeader || undefined}
       data-block-context-expanded={contextual && expanded ? true : undefined}
     >
-      {showHeader ? <div className={cn(
-        "flex items-center gap-1.5",
-        inlineCollapse ? "min-h-7" : "min-h-5",
-      )}>
+      {showHeader ? <div className="flex min-h-7 items-center gap-1.5">
         {hasDetails ? (
           <button
             type="button"
             data-thread-disclosure=""
-            data-contextual-activity-disclosure={contextual || undefined}
-            data-contextual-activity-collapse={inlineCollapse || undefined}
+            data-contextual-activity-disclosure
+            data-contextual-activity-collapse={expanded || undefined}
             className={cn(
-              "touch-target inline-flex min-w-0 items-center bg-transparent",
-              inlineCollapse
-                ? "h-7 gap-1.5 rounded-md px-1.5 transition-colors hover:bg-muted/60 hover:text-foreground"
-                : "h-5 rounded-sm p-0",
+              headerClassName,
+              "bg-transparent transition-colors hover:bg-muted/60 hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
             onClick={onToggle}
             aria-expanded={expanded}
             aria-controls={contentId}
-            aria-label={inlineCollapse ? collapseLabel ?? label : label}
+            aria-label={expanded && collapseLabel ? `${label} · ${collapseLabel}` : label}
             aria-live={active ? "polite" : undefined}
           >
-            {inlineCollapse ? (
-              <Activity className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
-            ) : null}
-            <span
-              className={cn(
-                "min-w-0 truncate text-[12px] font-normal leading-4 text-muted-foreground/65",
-                active && "animate-pulse motion-reduce:animate-none",
-              )}
-            >
-              {label}
-            </span>
+            {headerContent}
           </button>
         ) : (
           <div
-            className="inline-flex h-5 min-w-0 items-center"
+            className={headerClassName}
             role="status"
             aria-label={label}
             aria-live={active ? "polite" : undefined}
           >
-            <span
-              className={cn(
-                "min-w-0 truncate text-[12px] font-normal leading-4 text-muted-foreground/65",
-                active && "animate-pulse motion-reduce:animate-none",
-              )}
-            >
-              {label}
-            </span>
+            {headerContent}
           </div>
         )}
       </div> : null}
@@ -119,7 +99,7 @@ export function ThinkingReasoningShell({
           )}
         >
           <div className="relative min-h-0 overflow-hidden">
-            {inlineCollapse ? (
+            {expanded ? (
               <span
                 data-contextual-activity-guide
                 aria-hidden
@@ -127,35 +107,11 @@ export function ThinkingReasoningShell({
               />
             ) : null}
             <div
-              ref={viewportRef}
-              data-testid={expanded ? "agent-activity-scroll" : undefined}
-              data-fade-top={fadeTop}
-              data-fade-bottom={fadeBottom}
-              onScroll={onScroll}
-              className={cn(
-                "mt-1 max-h-[180px] overflow-y-auto pe-1",
-                "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-                inlineCollapse ? "ps-6" : "ps-4",
-              )}
+              data-testid={expanded ? "agent-activity-content" : undefined}
+              className="mt-1 flex flex-col gap-0.5 pe-1 ps-6"
             >
-              <div ref={contentRef} className="flex flex-col gap-0.5">
-                {hasExpanded ? children : null}
-              </div>
+              {hasExpanded ? children : null}
             </div>
-            {fadeTop ? (
-              <span
-                data-testid="activity-scroll-fade-top"
-                className="pointer-events-none absolute inset-x-0 top-1 z-10 h-3.5 bg-gradient-to-b from-background to-transparent"
-                aria-hidden
-              />
-            ) : null}
-            {fadeBottom ? (
-              <span
-                data-testid="activity-scroll-fade-bottom"
-                className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3.5 bg-gradient-to-t from-background to-transparent"
-                aria-hidden
-              />
-            ) : null}
           </div>
         </div>
       ) : null}

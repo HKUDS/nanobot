@@ -3,7 +3,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -68,7 +67,6 @@ import type {
   UIMessage,
 } from "@/lib/types";
 
-const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
 const EMPTY_CLI_APPS: CliAppInfo[] = [];
 const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
 
@@ -286,12 +284,6 @@ function FoldedAgentActivity({
   const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
   const [failedTraceDetailKey, setFailedTraceDetailKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [activityScrollFade, setActivityScrollFade] = useState({ top: false, bottom: false });
-  const activityScrollRef = useRef<HTMLDivElement>(null);
-  const activityContentRef = useRef<HTMLDivElement>(null);
-  const autoFollowActivityRef = useRef(true);
-  const scrollFrameRef = useRef<number | null>(null);
-  const wasOuterExpandedRef = useRef(false);
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
   /** Live work stays open; completed work briefly shows the done state, then tucks away. */
@@ -373,97 +365,15 @@ function FoldedAgentActivity({
           defaultValue: "Worked for {{duration}}",
         });
 
-  const cancelActivityScrollFrame = useCallback(() => {
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-  }, []);
-
-  const syncActivityScrollFade = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    const scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop));
-    const next = {
-      top: scrollTop > 1,
-      bottom: maxScrollTop - scrollTop > 1,
-    };
-    setActivityScrollFade((current) =>
-      current.top === next.top && current.bottom === next.bottom ? current : next,
-    );
-  }, []);
-
-  const scrollActivityToBottom = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    syncActivityScrollFade();
-  }, [syncActivityScrollFade]);
-
-  const scheduleActivityScrollToBottom = useCallback(() => {
-    cancelActivityScrollFrame();
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      scrollActivityToBottom();
-    });
-  }, [cancelActivityScrollFrame, scrollActivityToBottom]);
-
   const toggleOuter = () => {
     if (expanded !== undefined) {
       onExpandedChange?.(!expanded);
       return;
     }
     const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
-    if (nextOpen) {
-      autoFollowActivityRef.current = true;
-    }
     setUserToggledOuter(true);
     setOuterOpenLocal(nextOpen);
   };
-
-  useLayoutEffect(() => {
-    const justOpened = outerExpanded && !wasOuterExpandedRef.current;
-    wasOuterExpandedRef.current = outerExpanded;
-    if (!outerExpanded) return;
-    if (justOpened && !isTurnStreaming) {
-      cancelActivityScrollFrame();
-      autoFollowActivityRef.current = false;
-      const el = activityScrollRef.current;
-      if (el) el.scrollTop = 0;
-      syncActivityScrollFade();
-      return;
-    }
-    if (!autoFollowActivityRef.current) return;
-    scheduleActivityScrollToBottom();
-  }, [
-    outerExpanded,
-    activityMessages,
-    isTurnStreaming,
-    cancelActivityScrollFrame,
-    scheduleActivityScrollToBottom,
-    syncActivityScrollFade,
-  ]);
-
-  useEffect(() => {
-    if (!outerExpanded) {
-      autoFollowActivityRef.current = true;
-      return;
-    }
-    const target = activityContentRef.current;
-    if (!target || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (autoFollowActivityRef.current) {
-        scheduleActivityScrollToBottom();
-      } else {
-        syncActivityScrollFade();
-      }
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [outerExpanded, scheduleActivityScrollToBottom, syncActivityScrollFade]);
-
-  useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
 
   useEffect(() => {
     if (outerExpanded && deferredTraceRefs.length > 0) {
@@ -491,14 +401,6 @@ function FoldedAgentActivity({
     return () => window.clearTimeout(timeout);
   }, [isTurnStreaming, userToggledOuter]);
 
-  const onActivityScroll = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    autoFollowActivityRef.current = distance < ACTIVITY_SCROLL_NEAR_BOTTOM_PX;
-    syncActivityScrollFade();
-  }, [syncActivityScrollFade]);
-
   if (!hasVisibleActivity && !isTurnStreaming) return null;
 
   if (hasOnlyFileActivity && expanded === undefined) {
@@ -520,17 +422,11 @@ function FoldedAgentActivity({
         expanded={outerExpanded}
         contextual={isCompletedDisclosure}
         showHeader={!hideHeader || outerExpanded}
-        inlineCollapse={hideHeader && outerExpanded}
         collapseLabel={t("message.collapseActivity")}
         contentId={detailsId}
         label={activityLabel}
-        viewportRef={activityScrollRef}
-        contentRef={activityContentRef}
-        fadeTop={activityScrollFade.top}
-        fadeBottom={activityScrollFade.bottom}
         hasDetails={hasVisibleActivity}
         onToggle={toggleOuter}
-        onScroll={onActivityScroll}
       >
         {traceDetailLoadFailed ? (
           <div role="alert" className="flex items-center gap-2 py-1 text-[12px] text-destructive">
