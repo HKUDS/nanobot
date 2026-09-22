@@ -185,6 +185,72 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
     return chunks
 
 
+def _ends_with_hard_break_backslash(line: str) -> bool:
+    """True when the line ends with an odd run of backslashes.
+
+    A single trailing backslash is already a CommonMark hard break; appending
+    spaces after it would turn the break into a literal backslash instead.
+    An even run is escaped literal backslashes, so spaces still end the break.
+    """
+    bare = line.rstrip("\\")
+    return (len(line) - len(bare)) % 2 == 1
+
+
+def _rich_message_markdown(content: str) -> str:
+    """Turn single newlines into hard breaks for Telegram rich messages.
+
+    Single newlines outside fenced code blocks get two trailing spaces so
+    Telegram renders them as line breaks; paragraph breaks are left alone.
+    Backtick- and tilde-fenced code blocks are left untouched. The result is
+    at least as long as the input and the transformation is idempotent, so
+    callers can measure and split the transformed payload safely.
+    """
+    if not content:
+        return content
+
+    lines = content.split("\n")
+    out: list[str] = []
+    fence: tuple[str, int] | None = None
+
+    for index, line in enumerate(lines):
+        if fence:
+            out.append(line)
+            bare = line.strip()
+            if bare and set(bare) <= {fence[0]} and len(bare) >= fence[1]:
+                fence = None
+            continue
+
+        bare = line.lstrip()
+        backticks = len(bare) - len(bare.lstrip("`"))
+        tildes = len(bare) - len(bare.lstrip("~"))
+        if backticks >= 3:
+            fence = ("`", backticks)
+            out.append(line)
+            continue
+        if tildes >= 3:
+            fence = ("~", tildes)
+            out.append(line)
+            continue
+
+        if (
+            index + 1 < len(lines)
+            and lines[index + 1]
+            and line
+            and not line.endswith("  ")
+            and not _ends_with_hard_break_backslash(line)
+        ):
+            out.append(line + "  ")
+        else:
+            out.append(line)
+
+    return "\n".join(out)
+
+
+def _rich_message_payload(content: str) -> dict[str, str]:
+    """Build the rich_message payload, turning soft breaks into hard breaks."""
+    return {"markdown": _rich_message_markdown(content)}
+
+
 def _escape_telegram_html(text: str) -> str:
     """Escape text for Telegram HTML parse mode."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -352,6 +418,33 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = text.replace('⟪B⟫', '<b>').replace('⟪/B⟫', '</b>')
 
     return text
+
+
+def _split_telegram_rich_chunks(content: str, max_len: int) -> list[str]:
+    """Split raw Markdown so each transformed rich payload fits ``max_len``.
+
+    Hard-break spaces inserted by :func:`_rich_message_markdown` count toward
+    Telegram's rich-message limit, so raw chunks are re-split with a smaller
+    budget whenever their transformed payload would not fit.
+    """
+    chunks: list[str] = []
+    pending = _split_telegram_markdown(content, max_len)
+    while pending:
+        chunk = pending.pop(0)
+        markdown = _rich_message_markdown(chunk)
+        if len(markdown) <= max_len:
+            chunks.append(chunk)
+            continue
+
+        next_limit = max(1, int(len(chunk) * max_len / len(markdown)) - 8)
+        next_limit = min(next_limit, len(chunk) - 1)
+        if next_limit <= 0:
+            raise ValueError("A transformed Telegram rich token exceeds the message limit")
+        parts = _split_telegram_markdown(chunk, next_limit)
+        if len(parts) == 1 and parts[0] == chunk:
+            raise ValueError("Unable to split Telegram Markdown within the rich limit")
+        pending = parts + pending
+    return chunks
 
 
 def _split_telegram_markdown_html_chunks(
@@ -551,7 +644,9 @@ class TelegramChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self._app: TelegramApplication | None = None
-        self._typing_tasks: dict[str, asyncio.Task[None]] = {}  # chat_id -> typing loop task
+        # (chat_id, message_thread_id) -> typing loop task; topics of one
+        # supergroup stream typing independently.
+        self._typing_tasks: dict[tuple[str, int | None], asyncio.Task[None]] = {}
         self._media_group_buffers: dict[str, dict[str, Any]] = {}
         self._media_group_tasks: dict[str, asyncio.Task[None]] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
@@ -838,8 +933,8 @@ class TelegramChannel(BaseChannel):
         self._running = False
 
         # Cancel all typing indicators
-        for chat_id in list(self._typing_tasks):
-            self._stop_typing(chat_id)
+        for key in list(self._typing_tasks):
+            self._stop_typing(*key)
 
         for task in self._media_group_tasks.values():
             task.cancel()
@@ -891,10 +986,6 @@ class TelegramChannel(BaseChannel):
     def _rich_streaming_enabled(self) -> bool:
         return self.config.rich_messages and not self._rich_send_disabled
 
-    @staticmethod
-    def _rich_message_payload(content: str) -> dict[str, str]:
-        return {"markdown": content}
-
     def _mark_rich_unavailable(self, exc: Exception, operation: str) -> bool:
         if not self._is_rich_capability_error(exc):
             return False
@@ -916,7 +1007,7 @@ class TelegramChannel(BaseChannel):
 
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
         }
         if reply_params is not None:
             # sendRichMessage uses reply_parameters (object), not reply_to_message_id.
@@ -975,7 +1066,7 @@ class TelegramChannel(BaseChannel):
         payload: dict[str, Any] = {
             "chat_id": chat_id,
             "draft_id": draft_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
             **thread_kwargs,
         }
         try:
@@ -1010,7 +1101,7 @@ class TelegramChannel(BaseChannel):
         app = self._require_app()
         payload: dict[str, Any] = {
             "chat_id": chat_id,
-            "rich_message": self._rich_message_payload(content),
+            "rich_message": _rich_message_payload(content),
             **thread_kwargs,
         }
         try:
@@ -1065,13 +1156,6 @@ class TelegramChannel(BaseChannel):
 
         progress_event = msg.event if isinstance(msg.event, ProgressEvent) else None
 
-        # Only stop typing indicator and remove reaction for final responses
-        if progress_event is None:
-            self._stop_typing(msg.chat_id)
-            if reply_to_message_id := msg.metadata.get("message_id"):
-                with suppress(ValueError):
-                    await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
-
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
@@ -1081,6 +1165,14 @@ class TelegramChannel(BaseChannel):
         message_thread_id = msg.metadata.get("message_thread_id")
         if message_thread_id is None and reply_to_message_id is not None:
             message_thread_id = self._message_threads.get((msg.chat_id, reply_to_message_id))
+
+        # Only stop typing indicator and remove reaction for final responses
+        if progress_event is None:
+            self._stop_typing(msg.chat_id, message_thread_id)
+            if reply_to_message_id:
+                with suppress(ValueError):
+                    await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
+
         thread_kwargs: dict[str, int] = {}
         if message_thread_id is not None:
             thread_kwargs["message_thread_id"] = message_thread_id
@@ -1171,17 +1263,41 @@ class TelegramChannel(BaseChannel):
 
             # Bot API 10.1 rich fast-path: send raw markdown via sendRichMessage.
             # All non-blockquote content tries rich first; _rich_send_disabled
-            # latches off permanently if the server doesn't support it.
+            # latches off permanently if the server doesn't support it. Sizing
+            # operates on the transformed payload because hard-break spaces
+            # can push it past the rich limit.
             if (
                 not render_as_blockquote
                 and self.config.rich_messages
                 and not getattr(self, "_rich_send_disabled", False)
             ):
-                rich_ok = await self._try_send_rich(
-                    chat_id, text, reply_params, thread_kwargs, reply_markup,
+                rich_chunks = _split_telegram_rich_chunks(
+                    text, TELEGRAM_RICH_MAX_LEN,
                 )
-                if rich_ok:
+                for index, rich_chunk in enumerate(rich_chunks):
+                    is_last = index == len(rich_chunks) - 1
+                    if await self._try_send_rich(
+                        chat_id, rich_chunk, reply_params, thread_kwargs,
+                        reply_markup if is_last else None,
+                    ):
+                        continue
+                    # Rich rejected mid-way: deliver the rest via the legacy path.
+                    legacy_chunks = [
+                        chunk
+                        for leftover in rich_chunks[index:]
+                        for chunk in _split_telegram_markdown(
+                            leftover, TELEGRAM_MAX_MESSAGE_LEN,
+                        )
+                    ]
+                    for legacy_index, legacy_chunk in enumerate(legacy_chunks):
+                        is_last_legacy = legacy_index == len(legacy_chunks) - 1
+                        await self._send_text(
+                            chat_id, legacy_chunk, reply_params, thread_kwargs,
+                            render_as_blockquote=render_as_blockquote,
+                            reply_markup=reply_markup if is_last_legacy else None,
+                        )
                     return
+                return
 
             chunks = _split_telegram_markdown(text, TELEGRAM_MAX_MESSAGE_LEN)
             for i, chunk in enumerate(chunks):
@@ -1341,17 +1457,19 @@ class TelegramChannel(BaseChannel):
                 return
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
-            self._stop_typing(chat_id)
-            if reply_to_message_id := meta.get("message_id"):
-                with suppress(ValueError):
-                    await self._remove_reaction(chat_id, int(reply_to_message_id))
             thread_kwargs: dict[str, int] = {}
             if message_thread_id := meta.get("message_thread_id"):
                 thread_kwargs["message_thread_id"] = message_thread_id
+            self._stop_typing(chat_id, message_thread_id)
+            if reply_to_message_id := meta.get("message_id"):
+                with suppress(ValueError):
+                    await self._remove_reaction(chat_id, int(reply_to_message_id))
             raw_text = buf.text
 
             if buf.draft_id is not None:
-                rich_chunks = _split_telegram_markdown(raw_text, TELEGRAM_RICH_MAX_LEN)
+                rich_chunks = _split_telegram_rich_chunks(
+                    raw_text, TELEGRAM_RICH_MAX_LEN,
+                )
                 for index, rich_chunk in enumerate(rich_chunks):
                     if self._rich_streaming_enabled() and await self._try_send_stream_rich(
                         int_chat_id, rich_chunk, thread_kwargs,
@@ -1447,7 +1565,10 @@ class TelegramChannel(BaseChannel):
         )
         if buf.message_id is None and buf.draft_id is None:
             try:
-                if rich_draft_allowed and len(buf.text) <= TELEGRAM_RICH_MAX_LEN:
+                if (
+                    rich_draft_allowed
+                    and len(_rich_message_markdown(buf.text)) <= TELEGRAM_RICH_MAX_LEN
+                ):
                     buf.draft_id = self._new_rich_draft_id()
                     if not await self._try_send_rich_draft(
                         int_chat_id,
@@ -1472,8 +1593,17 @@ class TelegramChannel(BaseChannel):
             )
             if (now - buf.last_edit) < edit_interval:
                 return
-            overflow_limit = TELEGRAM_RICH_MAX_LEN if buf.draft_id is not None else TELEGRAM_MAX_MESSAGE_LEN
-            if len(buf.text) > overflow_limit:
+            # Rich drafts must overflow on the transformed payload; hard-break
+            # spaces count toward Telegram's 32,768-character limit.
+            overflow_limit = (
+                TELEGRAM_RICH_MAX_LEN if buf.draft_id is not None else TELEGRAM_MAX_MESSAGE_LEN
+            )
+            stream_len = (
+                len(_rich_message_markdown(buf.text))
+                if buf.draft_id is not None
+                else len(buf.text)
+            )
+            if stream_len > overflow_limit:
                 try:
                     await self._flush_stream_overflow(
                         int_chat_id, buf, stream_thread_kwargs,
@@ -1533,7 +1663,7 @@ class TelegramChannel(BaseChannel):
             if not self._rich_streaming_enabled():
                 await self._start_legacy_stream(chat_id, buf, thread_kwargs)
                 return
-            chunks = _split_telegram_markdown(buf.text, TELEGRAM_RICH_MAX_LEN)
+            chunks = _split_telegram_rich_chunks(buf.text, TELEGRAM_RICH_MAX_LEN)
             if len(chunks) <= 1:
                 return
 
@@ -2066,15 +2196,15 @@ class TelegramChannel(BaseChannel):
 
     def _start_typing(self, chat_id: str, message_thread_id: int | None = None) -> None:
         """Start sending 'typing...' indicator for a chat, scoped to a topic when set."""
-        # Cancel any existing typing task for this chat
-        self._stop_typing(chat_id)
-        self._typing_tasks[chat_id] = asyncio.create_task(
+        # Cancel any existing typing task for this chat/topic
+        self._stop_typing(chat_id, message_thread_id)
+        self._typing_tasks[(chat_id, message_thread_id)] = asyncio.create_task(
             self._typing_loop(chat_id, message_thread_id),
         )
 
-    def _stop_typing(self, chat_id: str) -> None:
-        """Stop the typing indicator for a chat."""
-        task = self._typing_tasks.pop(chat_id, None)
+    def _stop_typing(self, chat_id: str, message_thread_id: int | None = None) -> None:
+        """Stop the typing indicator for one chat/topic."""
+        task = self._typing_tasks.pop((chat_id, message_thread_id), None)
         if task and not task.done():
             task.cancel()
 
@@ -2238,5 +2368,6 @@ class TelegramChannel(BaseChannel):
                 "username": user.username,
                 "first_name": user.first_name,
                 "is_callback": True,
+                "message_thread_id": getattr(query_message, "message_thread_id", None),
             },
         )
