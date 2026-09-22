@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Activity,
   Check,
   ChevronRight,
   CircleAlert,
@@ -75,6 +76,10 @@ interface MessageBubbleProps {
   onForkFromHere?: () => void;
   /** Render the assistant message's own footer controls. */
   showAssistantContextActions?: boolean;
+  /** Render routine timestamp and copy controls below a user message. */
+  showUserContextActions?: boolean;
+  /** Context-menu trigger positioned against this message's visual block. */
+  contextMenu?: ReactNode;
 }
 
 function ForkArrowIcon({ className }: { className?: string }) {
@@ -397,6 +402,208 @@ export function AssistantMessageActions({
   ) : null;
 }
 
+interface MessageBlockMenuActivity {
+  label: string;
+  expanded: boolean;
+  controls: string;
+  onToggle: () => void;
+}
+
+interface MessageBlockMenuActionsProps {
+  message: UIMessage;
+  isTurnStreaming?: boolean;
+  onForkFromHere?: () => void;
+  activity?: MessageBlockMenuActivity;
+}
+
+/** Actions and metadata shown after opening a visual message block's context panel. */
+export function MessageBlockMenuActions({
+  message,
+  isTurnStreaming = false,
+  onForkFromHere,
+  activity,
+}: MessageBlockMenuActionsProps) {
+  const { t } = useTranslation();
+  const content = message.role === "assistant"
+    ? message.compactReply === "empty"
+      ? t("thread.compaction.empty")
+      : message.compactReply === "failed"
+        ? t("thread.compaction.failed")
+        : message.content
+    : message.content;
+  const hasText = content.trim().length > 0;
+  const { copied, label: copyLabel, onCopy } = useMessageCopy(content);
+  const showFork = message.role === "assistant"
+    && !message.isStreaming
+    && !isTurnStreaming
+    && hasText
+    && onForkFromHere !== undefined;
+  const timestamp = message.role === "assistant"
+    && typeof message.completedAt === "number"
+    && Number.isFinite(message.completedAt)
+    ? message.completedAt
+    : message.createdAt;
+  const timestampLabel = typeof timestamp === "number" && Number.isFinite(timestamp)
+    ? formatMessageEndTime(timestamp)
+    : "";
+  const fallbackSources = message.role === "assistant"
+    ? message.responseSources?.filter((source) => source.fallback === true) ?? []
+    : [];
+  const automationSourceLabel = message.role === "assistant"
+    && ["cron", "local_trigger", "trigger"].includes(message.source?.kind ?? "")
+    ? message.source?.label?.trim() || t("message.automationSourceFallback")
+    : "";
+
+  return (
+    <TooltipProvider>
+      <div
+        data-message-block-menu-actions
+        className="flex w-max max-w-full flex-col items-start gap-1"
+      >
+        {hasText || showFork || activity ? (
+          <div
+            data-message-block-toolbar
+            className="flex w-full flex-wrap items-center gap-x-1 gap-y-1"
+          >
+            {hasText || showFork ? (
+              <div className="flex min-h-[var(--message-block-control-size)] items-center gap-0.5">
+                {hasText ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        data-message-block-copy-action
+                        data-assistant-copy-action={message.role === "assistant" || undefined}
+                        onClick={onCopy}
+                        aria-label={copyLabel}
+                        className={cn(
+                          "touch-target inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] items-center justify-center rounded-control",
+                          "text-muted-foreground transition-[color,background-color,scale]",
+                          "hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          "motion-reduce:transform-none",
+                        )}
+                      >
+                        {copied ? (
+                          <Check
+                            className="h-3.5 w-3.5 -translate-x-px"
+                            strokeWidth={1.75}
+                            aria-hidden
+                          />
+                        ) : (
+                          <Copy
+                            className="h-3.5 w-3.5 -translate-x-px"
+                            strokeWidth={1.75}
+                            aria-hidden
+                          />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">{copyLabel}</TooltipContent>
+                  </Tooltip>
+                ) : null}
+                {showFork ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        data-message-block-fork-action
+                        data-assistant-fork-action
+                        onClick={onForkFromHere}
+                        aria-label={t("message.forkFromHere")}
+                        className={cn(
+                          "touch-target inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] items-center justify-center rounded-control",
+                          "text-muted-foreground transition-[color,background-color,scale]",
+                          "hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          "motion-reduce:transform-none",
+                        )}
+                      >
+                        <ForkArrowIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="center">
+                      {t("message.forkFromHere")}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </div>
+            ) : null}
+            {activity ? (
+              <button
+                type="button"
+                data-message-block-activity-action
+                onClick={activity.onToggle}
+                aria-expanded={activity.expanded}
+                aria-controls={activity.controls}
+                className={cn(
+                  "group inline-flex min-h-[var(--message-block-control-size)] self-start items-center gap-1.5 whitespace-nowrap",
+                  "text-start text-[11px] leading-4",
+                  "text-muted-foreground transition-colors hover:text-foreground",
+                  "focus-visible:outline-none",
+                )}
+              >
+                <span
+                  data-message-block-activity-icon
+                  className={cn(
+                    "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-control-size)] shrink-0 items-center justify-center rounded-control",
+                    "transition-[background-color,box-shadow,scale]",
+                    "group-hover:bg-muted/70 group-active:scale-[0.96]",
+                    "group-focus-visible:ring-2 group-focus-visible:ring-ring",
+                    "motion-reduce:transform-none",
+                  )}
+                >
+                  <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
+                </span>
+                <span>{activity.label}</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {fallbackSources.length > 0 ? (
+          <div className="flex min-h-[var(--message-block-control-size)] max-w-full flex-wrap items-center gap-1">
+            {fallbackSources.map((source) => (
+              <ResponseSourceBadge
+                key={JSON.stringify(source)}
+                source={source}
+                className="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
+              />
+            ))}
+          </div>
+        ) : null}
+        {timestampLabel || automationSourceLabel ? (
+          <div
+            data-message-block-metadata
+            className="mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 text-[10px] leading-4 text-muted-foreground/45"
+          >
+            {timestampLabel ? (
+              <time
+                data-message-timestamp
+                data-message-created-at={message.role === "user" || undefined}
+                data-assistant-completed-at={
+                  message.role === "assistant" && timestamp === message.completedAt || undefined
+                }
+                dateTime={new Date(timestamp).toISOString()}
+                className="flex min-h-[var(--message-block-control-size)] items-center tabular-nums"
+              >
+                {timestampLabel}
+              </time>
+            ) : null}
+            {automationSourceLabel ? (
+              <span
+                data-automation-trigger
+                className="flex min-h-[var(--message-block-control-size)] items-center break-words"
+              >
+                {t("message.automationTriggered")} · {automationSourceLabel}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </TooltipProvider>
+  );
+}
+
 function deliveryErrorCopy(
   kind: MessageDeliveryErrorKind | undefined,
   t: (key: string) => string,
@@ -485,10 +692,14 @@ function UserDeliveryStatus({
 function IncomingSessionMessage({
   message,
   showCopyAction,
+  showContextActions,
+  contextMenu,
   onOpenFilePreview,
 }: {
   message: UIMessage;
   showCopyAction: boolean;
+  showContextActions: boolean;
+  contextMenu?: ReactNode;
   onOpenFilePreview?: (path: string) => void;
 }) {
   const handle = message.sessionMessage!.session;
@@ -499,9 +710,10 @@ function IncomingSessionMessage({
   return (
     <div
       data-session-message
-      className="group w-full text-[15px]"
+      className="group relative w-full text-[15px]"
       style={{ lineHeight: "var(--cjk-line-height)" }}
     >
+      {contextMenu}
       <div
         className="min-w-0 rounded-es-[16px] border-s-2 bg-background pb-1 ps-2.5"
         style={{ borderInlineStartColor: color }}
@@ -518,7 +730,7 @@ function IncomingSessionMessage({
           </MarkdownText>
         </div>
       </div>
-      {createdAtLabel || showCopyAction ? (
+      {showContextActions && (createdAtLabel || showCopyAction) ? (
         <TooltipProvider>
           <div
             data-user-context-actions
@@ -552,6 +764,8 @@ export function MessageBubble({
   onOpenFilePreview,
   onForkFromHere,
   showAssistantContextActions = true,
+  showUserContextActions = true,
+  contextMenu,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mentionCliApps = useMemo(
@@ -576,6 +790,8 @@ export function MessageBubble({
       <IncomingSessionMessage
         message={message}
         showCopyAction={showCopyAction}
+        showContextActions={showUserContextActions}
+        contextMenu={contextMenu}
         onOpenFilePreview={onOpenFilePreview}
       />
     );
@@ -615,7 +831,11 @@ export function MessageBubble({
       />
     );
     return (
-      <div className="group ml-auto flex max-w-[min(85%,36rem)] flex-col items-end gap-1.5">
+      <div
+        data-user-text-bubble={hasText && !hasImages && !hasMedia && !quotedContext || undefined}
+        className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
+      >
+        {contextMenu}
         {hasImages ? <UserImages images={images} align="right" /> : null}
         {!hasImages && hasMedia ? (
           <MessageMedia media={media} align="right" />
@@ -640,14 +860,15 @@ export function MessageBubble({
             {messageText}
           </p>
         ) : null}
-        {showDeliveryStatus || showCreatedAt || (hasText && showCopyAction) ? (
+        {showDeliveryStatus
+        || (showUserContextActions && (showCreatedAt || (hasText && showCopyAction))) ? (
           <TooltipProvider>
             <div
-              data-user-context-actions
+              data-user-context-actions={showUserContextActions || undefined}
               data-context-actions-pinned={showDeliveryStatus || undefined}
               className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground"
             >
-              {showCreatedAt ? (
+              {showUserContextActions && showCreatedAt ? (
                 <MessageTimestamp
                   data-message-created-at
                   timestamp={message.createdAt}
@@ -660,7 +881,9 @@ export function MessageBubble({
                 status={message.deliveryStatus}
                 errorKind={message.deliveryErrorKind}
               />
-              {hasText && showCopyAction ? <MessageCopyButton content={message.content} /> : null}
+              {showUserContextActions && hasText && showCopyAction
+                ? <MessageCopyButton content={message.content} />
+                : null}
             </div>
           </TooltipProvider>
         ) : null}
@@ -684,6 +907,7 @@ export function MessageBubble({
       className="group/assistant relative w-full text-[15px]"
       style={{ lineHeight: "var(--cjk-line-height)" }}
     >
+      {contextMenu}
       {hasReasoning ? (
         <ReasoningBubble
           text={reasoning}

@@ -1584,6 +1584,7 @@
     }
   },
   "message": {
+    "actions": "메시지 작업",
     "streaming": "생성 중",
     "delivery": {
       "sending": "전송 중…",
@@ -1637,6 +1638,7 @@
     "activityWorkingFor": "{{duration}} 동안 작업 중",
     "activityWorked": "작업함",
     "activityWorkedFor": "{{duration}} 동안 작업함",
+    "collapseActivity": "활동 세부 정보 접기",
     "activityShow": "작업 과정 보기",
     "activityShowFor": "작업 과정 보기 {{duration}}",
     "activityHide": "작업 과정 숨기기",

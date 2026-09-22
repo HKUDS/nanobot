@@ -770,6 +770,38 @@
   transition: opacity 120ms ease-out;
 }
 
+.thread-message-row,
+.message-block-menu-trigger,
+[data-message-block-menu] {
+  --message-block-control-size: 1.75rem;
+  --message-block-trigger-offset: 2rem;
+}
+
+.thread-message-row {
+  padding-inline-start: max(
+    calc(var(--message-block-trigger-offset) + 0.75rem),
+    calc((100% - var(--content-column-width)) / 2)
+  );
+  padding-inline-end: max(0.75rem, calc((100% - var(--content-column-width)) / 2));
+}
+
+.message-block-menu-trigger {
+  pointer-events: none;
+  opacity: 0;
+}
+
+[data-user-text-bubble] > .message-block-menu-trigger {
+  /* The first text line is 28px tall, with py-2 around the bubble. */
+  top: calc((1rem + 28px - var(--message-block-control-size)) / 2);
+}
+
+[data-context-block-active] .message-block-menu-trigger,
+[data-message-context-menu-open] .message-block-menu-trigger,
+.message-block-menu-trigger:focus-visible {
+  pointer-events: auto;
+  opacity: 1;
+}
+
 [data-message-context-block] [data-user-context-actions] {
   pointer-events: none;
   opacity: 0;
@@ -817,6 +849,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .assistant-context-actions,
+  .message-block-menu-trigger,
   [data-user-context-actions] {
     transition: none;
   }
@@ -827,6 +860,13 @@
 }
 
 @media (pointer: coarse) {
+  .thread-message-row,
+  .message-block-menu-trigger,
+  [data-message-block-menu] {
+    --message-block-control-size: 2.75rem;
+    --message-block-trigger-offset: 3rem;
+  }
+
   .assistant-context-actions {
     width: fit-content;
     background: transparent;

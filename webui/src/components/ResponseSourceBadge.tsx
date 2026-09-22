@@ -9,7 +9,13 @@ import type { ResponseSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** A persisted invocation identity; deliberately independent of live settings. */
-export function ResponseSourceBadge({ source }: { source: ResponseSource }) {
+export function ResponseSourceBadge({
+  source,
+  className,
+}: {
+  source: ResponseSource;
+  className?: string;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const description = t("message.fallbackResponse", { preset: source.preset });
@@ -25,6 +31,7 @@ export function ResponseSourceBadge({ source }: { source: ResponseSource }) {
               "touch-target inline-flex min-h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-1.5 text-xs",
               "transition-colors hover:bg-muted/55 hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              className,
             )}>
               <ArrowRightLeft aria-hidden className="size-3 shrink-0 opacity-70" />
               <span aria-hidden className={cn(

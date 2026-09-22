@@ -1784,6 +1784,7 @@
     }
   },
   "message": {
+    "actions": "消息操作",
     "streaming": "流式输出中",
     "delivery": {
       "sending": "发送中…",
@@ -1809,6 +1810,7 @@
     "activityWorkingFor": "处理中 {{duration}}",
     "activityWorked": "已处理",
     "activityWorkedFor": "已处理 {{duration}}",
+    "collapseActivity": "收起处理过程",
     "activityShow": "查看过程",
     "activityShowFor": "查看过程 {{duration}}",
     "activityHide": "收起过程",

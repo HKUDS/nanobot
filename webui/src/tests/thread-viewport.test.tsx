@@ -305,12 +305,16 @@ describe("ThreadViewport", () => {
     expect(screen.getByTestId("thread-message-region")).toHaveClass("min-w-0");
   });
 
-  it("uses the shared content-column width for conversation messages", () => {
+  it("keeps message hit rows full width and constrains content inside each row", () => {
     render(<ThreadViewport messages={messages} isStreaming={false} composer={<div>composer</div>} />);
 
-    expect(screen.getByTestId("thread-message-region").firstElementChild).toHaveClass(
-      "mx-auto", "w-full", "max-w-[var(--content-column-width)]",
-    );
+    const region = screen.getByTestId("thread-message-region");
+    expect(region.firstElementChild).toHaveClass("w-full");
+    expect(region.firstElementChild).not.toHaveClass("max-w-[var(--content-column-width)]");
+    expect(region.parentElement).not.toHaveClass("max-w-[64rem]");
+    const rows = region.querySelectorAll("[data-thread-display-unit]");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row).toHaveClass("thread-message-row");
   });
 
   it("top-aligns a short active turn while the agent is responding", () => {

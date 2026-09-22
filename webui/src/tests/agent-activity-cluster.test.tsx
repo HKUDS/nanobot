@@ -247,6 +247,37 @@ describe("AgentActivityCluster", () => {
     }
   });
 
+  it("starts completed activity at the beginning when opened", () => {
+    const raf = installAnimationFrameQueue();
+    try {
+      render(
+        <AgentActivityCluster
+          messages={activityMessages()}
+          isTurnStreaming={false}
+          hasBodyBelow={false}
+          expanded
+          hideHeader
+        />,
+      );
+
+      const scrollport = screen.getByTestId("agent-activity-scroll");
+      setScrollGeometry(scrollport, {
+        scrollHeight: 1000,
+        clientHeight: 120,
+        scrollTop: 0,
+      });
+
+      act(() => {
+        raf.flush();
+      });
+
+      expect(scrollport.scrollTop).toBe(0);
+      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+    } finally {
+      raf.restore();
+    }
+  });
+
   it("follows new reasoning and tool activity while the user is at the bottom", () => {
     const raf = installAnimationFrameQueue();
     try {
@@ -371,6 +402,13 @@ describe("AgentActivityCluster", () => {
       const topFade = screen.getByTestId("activity-scroll-fade-top");
       expect(scrollport).not.toContainElement(topFade);
       expect(scrollport).not.toHaveClass("activity-scroll-fade");
+      expect(topFade).toHaveClass(
+        "top-1",
+        "h-3.5",
+        "bg-gradient-to-b",
+        "from-background",
+        "to-transparent",
+      );
       expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
 
       scrollport.scrollTop = 440;

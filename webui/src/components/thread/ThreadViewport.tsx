@@ -867,7 +867,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           className={cn(
             "thread-layout mx-auto grid min-h-full w-full",
             hasMessages
-              ? "h-full max-w-[64rem]"
+              ? "h-full"
               : "max-w-[72rem] px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-6 sm:px-4 sm:py-12",
           )}
         >
@@ -877,13 +877,13 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-message-region"
               className={cn(
                 "thread-message-viewport thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
-                "scroll-auto justify-start overflow-x-hidden px-3 pb-0 pt-[var(--thread-prompt-inset,3rem)] sm:px-4",
+                "scroll-auto justify-start overflow-x-hidden pb-0 pt-[var(--thread-prompt-inset,3rem)]",
                 "[overflow-anchor:none] [scrollbar-width:none]",
                 "[&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               )}
             >
-              <div ref={messageContentRef} className="mx-auto w-full max-w-[var(--content-column-width)]">
+              <div ref={messageContentRef} className="w-full">
                 <ThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}

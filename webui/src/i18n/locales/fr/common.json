@@ -1584,6 +1584,7 @@
     }
   },
   "message": {
+    "actions": "Actions du message",
     "streaming": "en cours de génération",
     "delivery": {
       "sending": "Envoi…",
@@ -1637,6 +1638,7 @@
     "activityWorkingFor": "Travail en cours depuis {{duration}}",
     "activityWorked": "Travail terminé",
     "activityWorkedFor": "Travail terminé en {{duration}}",
+    "collapseActivity": "Réduire les détails de l’activité",
     "activityShow": "Voir l’activité",
     "activityShowFor": "Voir l’activité {{duration}}",
     "activityHide": "Masquer l’activité",

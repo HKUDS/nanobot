@@ -167,6 +167,10 @@ interface AgentActivityClusterProps {
   /** Optional controlled expansion state for a completed inline activity block. */
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  /** Render only the controlled details; another control owns the disclosure label. */
+  hideHeader?: boolean;
+  /** Stable id used by an external disclosure control. */
+  detailsId?: string;
 }
 
 export function AgentActivityCluster(props: AgentActivityClusterProps) {
@@ -242,6 +246,8 @@ function FoldedAgentActivity({
   onOpenFilePreview,
   expanded,
   onExpandedChange,
+  hideHeader = false,
+  detailsId,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEditDisplayMode = useFileEditDisplayMode();
@@ -285,6 +291,7 @@ function FoldedAgentActivity({
   const activityContentRef = useRef<HTMLDivElement>(null);
   const autoFollowActivityRef = useRef(true);
   const scrollFrameRef = useRef<number | null>(null);
+  const wasOuterExpandedRef = useRef(false);
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
   /** Live work stays open; completed work briefly shows the done state, then tucks away. */
@@ -416,9 +423,27 @@ function FoldedAgentActivity({
   };
 
   useLayoutEffect(() => {
-    if (!outerExpanded || !autoFollowActivityRef.current) return;
+    const justOpened = outerExpanded && !wasOuterExpandedRef.current;
+    wasOuterExpandedRef.current = outerExpanded;
+    if (!outerExpanded) return;
+    if (justOpened && !isTurnStreaming) {
+      cancelActivityScrollFrame();
+      autoFollowActivityRef.current = false;
+      const el = activityScrollRef.current;
+      if (el) el.scrollTop = 0;
+      syncActivityScrollFade();
+      return;
+    }
+    if (!autoFollowActivityRef.current) return;
     scheduleActivityScrollToBottom();
-  }, [outerExpanded, activityMessages, isTurnStreaming, scheduleActivityScrollToBottom]);
+  }, [
+    outerExpanded,
+    activityMessages,
+    isTurnStreaming,
+    cancelActivityScrollFrame,
+    scheduleActivityScrollToBottom,
+    syncActivityScrollFade,
+  ]);
 
   useEffect(() => {
     if (!outerExpanded) {
@@ -494,6 +519,10 @@ function FoldedAgentActivity({
         active={isTurnStreaming}
         expanded={outerExpanded}
         contextual={isCompletedDisclosure}
+        showHeader={!hideHeader || outerExpanded}
+        inlineCollapse={hideHeader && outerExpanded}
+        collapseLabel={t("message.collapseActivity")}
+        contentId={detailsId}
         label={activityLabel}
         viewportRef={activityScrollRef}
         contentRef={activityContentRef}
@@ -563,7 +592,14 @@ function activityDurationMs(
   return Math.max(0, last - first);
 }
 
-function formatActivityDuration(ms: number): string {
+export function completedActivityDurationMs(
+  messages: UIMessage[],
+  completedLatencyMs?: number,
+): number {
+  return activityDurationMs(messages, false, 0, completedLatencyMs);
+}
+
+export function formatActivityDuration(ms: number): string {
   const seconds = ms > 0 && ms < 1000 ? 1 : Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);

@@ -1585,6 +1585,7 @@
     }
   },
   "message": {
+    "actions": "Acciones del mensaje",
     "streaming": "transmitiendo",
     "delivery": {
       "sending": "Enviando…",
@@ -1638,6 +1639,7 @@
     "activityWorkingFor": "Trabajando durante {{duration}}",
     "activityWorked": "Trabajo completado",
     "activityWorkedFor": "Trabajó durante {{duration}}",
+    "collapseActivity": "Contraer detalles de actividad",
     "activityShow": "Ver actividad",
     "activityShowFor": "Ver actividad {{duration}}",
     "activityHide": "Ocultar actividad",

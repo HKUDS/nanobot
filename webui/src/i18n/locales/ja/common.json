@@ -1584,6 +1584,7 @@
     }
   },
   "message": {
+    "actions": "メッセージ操作",
     "streaming": "生成中",
     "delivery": {
       "sending": "送信中…",
@@ -1637,6 +1638,7 @@
     "activityWorkingFor": "{{duration}}作業中",
     "activityWorked": "作業しました",
     "activityWorkedFor": "{{duration}}作業しました",
+    "collapseActivity": "アクティビティの詳細を折りたたむ",
     "activityShow": "処理過程を表示",
     "activityShowFor": "処理過程を表示 {{duration}}",
     "activityHide": "処理過程を非表示",

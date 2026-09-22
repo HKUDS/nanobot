@@ -1584,6 +1584,7 @@
     }
   },
   "message": {
+    "actions": "Thao tác tin nhắn",
     "streaming": "đang truyền",
     "delivery": {
       "sending": "Đang gửi…",
@@ -1637,6 +1638,7 @@
     "activityWorkingFor": "Đang xử lý trong {{duration}}",
     "activityWorked": "Đã xử lý",
     "activityWorkedFor": "Đã xử lý trong {{duration}}",
+    "collapseActivity": "Thu gọn chi tiết hoạt động",
     "activityShow": "Xem quá trình",
     "activityShowFor": "Xem quá trình {{duration}}",
     "activityHide": "Ẩn quá trình",

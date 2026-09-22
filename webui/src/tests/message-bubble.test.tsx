@@ -210,11 +210,31 @@ describe("MessageBubble", () => {
     const pill = screen.getByText("hello");
 
     expect(row).toHaveClass("ml-auto", "flex");
+    expect(row).toHaveAttribute("data-user-text-bubble", "true");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-floating");
     expect(container.querySelector("[data-user-context-actions]"))
       .not.toHaveAttribute("data-context-actions-pinned");
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
+  });
+
+  it("aligns the context trigger to the first text line only when text leads the user block", () => {
+    const message: UIMessage = {
+      id: "u-alignment", role: "user", content: "first line\nsecond line", createdAt: 0,
+    };
+    const contextMenu = <button data-message-block-menu-trigger>Message actions</button>;
+    const { container, rerender } = render(
+      <MessageBubble message={message} contextMenu={contextMenu} />,
+    );
+    const row = container.firstElementChild!;
+    expect(row).toHaveAttribute("data-user-text-bubble", "true");
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement).toBe(row);
+
+    rerender(<MessageBubble message={{ ...message, images: [{ name: "image.png" }] }} contextMenu={contextMenu} />);
+    expect(row).not.toHaveAttribute("data-user-text-bubble");
+
+    rerender(<MessageBubble message={{ ...message, content: "> [!QUOTE]\n> excerpt\n\nreply" }} contextMenu={contextMenu} />);
+    expect(row).not.toHaveAttribute("data-user-text-bubble");
   });
 
   it("renders cross-session input with its public handle", () => {

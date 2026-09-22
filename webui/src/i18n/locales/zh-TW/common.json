@@ -1584,6 +1584,7 @@
     }
   },
   "message": {
+    "actions": "訊息操作",
     "streaming": "串流輸出中",
     "delivery": {
       "sending": "傳送中…",
@@ -1636,6 +1637,7 @@
     "activityWorkingFor": "處理中，已 {{duration}}",
     "activityWorked": "已處理",
     "activityWorkedFor": "已處理 {{duration}}",
+    "collapseActivity": "收合處理過程",
     "activityShow": "查看過程",
     "activityShowFor": "查看過程 {{duration}}",
     "activityHide": "收合過程",

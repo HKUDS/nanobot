@@ -22,6 +22,13 @@ import { canonicalThreadPayload } from "./thread-test-payload";
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
+async function openMessageActions(text: string): Promise<HTMLElement> {
+  const message = await screen.findByText(text);
+  const block = message.closest<HTMLElement>("[data-thread-display-unit]")!;
+  fireEvent.click(within(block).getByRole("button", { name: "Message actions" }));
+  return screen.findByRole("dialog", { name: "Message actions" });
+}
+
 function makeClient() {
   const errorHandlers = new Set<(err: StreamError) => void>();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
@@ -532,7 +539,8 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    const activity = await screen.findByRole("button", { name: /Worked/ });
+    const menu = await openMessageActions("done");
+    const activity = within(menu).getByRole("button", { name: /Worked/ });
     fireEvent.click(activity);
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Full activity details could not be loaded.",
@@ -544,9 +552,9 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     await waitFor(() => expect(document.body).toHaveTextContent("echo full"));
 
-    const resolvedActivity = screen.getByRole("button", { name: /Worked/ });
-    fireEvent.click(resolvedActivity);
-    fireEvent.click(resolvedActivity);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse activity details" }));
+    const reopenedMenu = await openMessageActions("done");
+    fireEvent.click(within(reopenedMenu).getByRole("button", { name: /Worked/ }));
     await act(async () => Promise.resolve());
     expect(detailCalls).toBe(2);
   });
@@ -584,7 +592,7 @@ describe("ThreadShell", () => {
       />,
     );
     const { rerender } = render(view("trace-failure-a"));
-    fireEvent.click(await screen.findByRole("button", { name: /Worked/ }));
+    fireEvent.click(within(await openMessageActions("done-a")).getByRole("button", { name: /Worked/ }));
 
     rerender(view("trace-failure-b"));
     await screen.findByText("done-b");
@@ -624,7 +632,7 @@ describe("ThreadShell", () => {
       />,
     );
     const { rerender } = render(view("visible-failure-a"));
-    fireEvent.click(await screen.findByRole("button", { name: /Worked/ }));
+    fireEvent.click(within(await openMessageActions("failed-a")).getByRole("button", { name: /Worked/ }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
 
     rerender(view("visible-failure-b"));
@@ -873,7 +881,8 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1));
+    const oldMenu = await openMessageActions("old automation");
+    expect(within(oldMenu).getByRole("button", { name: "Copy" })).toBeInTheDocument();
     const turnId = "turn-automation";
     const startedAt = Date.now() / 1000;
     act(() => client._emitChat("assistant-only-actions", {
@@ -883,7 +892,7 @@ describe("ThreadShell", () => {
       started_at: startedAt,
       turn_id: turnId,
     }));
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
 
     act(() => client._emitChat("assistant-only-actions", {
       event: "message",
@@ -892,14 +901,18 @@ describe("ThreadShell", () => {
       turn_id: turnId,
     }));
     await waitFor(() => expect(screen.getByText("new automation")).toBeInTheDocument());
-    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
+    expect(screen.getByText("new automation").closest("[data-thread-display-unit]"))
+      .not.toHaveAttribute("data-message-context-block");
 
     act(() => client._emitChat("assistant-only-actions", {
       event: "turn_end",
       chat_id: "assistant-only-actions",
       turn_id: turnId,
     }));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(2));
+    const newMenu = await openMessageActions("new automation");
+    expect(within(newMenu).getByRole("button", { name: "Copy" })).toBeInTheDocument();
   });
 
   it("does not navigate away when clicking the chat title", async () => {
@@ -1177,6 +1190,7 @@ describe("ThreadShell", () => {
       ).not.toHaveAttribute("data-fallback");
     });
     expect(screen.getByText("Default")).toBeInTheDocument();
+    await openMessageActions("Reply from the actual provider");
     expect(await screen.findByText("backup")).toBeInTheDocument();
   });
 
@@ -2060,12 +2074,8 @@ describe("ThreadShell", () => {
       ),
     );
 
-    const targetText = await screen.findByText("answer 100");
-    fireEvent.click(within(
-      targetText.closest("[data-thread-display-unit]") as HTMLElement,
-    ).getByRole("button", {
-      name: "Fork",
-    }));
+    const menu = await openMessageActions("answer 100");
+    fireEvent.click(within(menu).getByRole("button", { name: "Fork" }));
 
     await waitFor(() =>
       expect(onForkChat).toHaveBeenCalledWith("long-chat", 101),

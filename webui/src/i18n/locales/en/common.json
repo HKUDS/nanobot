@@ -1784,6 +1784,7 @@
     }
   },
   "message": {
+    "actions": "Message actions",
     "streaming": "streaming",
     "delivery": {
       "sending": "Sending…",
@@ -1809,6 +1810,7 @@
     "activityWorkingFor": "Working for {{duration}}",
     "activityWorked": "Worked",
     "activityWorkedFor": "Worked for {{duration}}",
+    "collapseActivity": "Collapse activity details",
     "activityShow": "View activity",
     "activityShowFor": "View activity {{duration}}",
     "activityHide": "Hide activity",
