@@ -66,6 +66,7 @@ class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
         self.sent_media: list[dict] = []
+        self.chat_actions: list[dict] = []
         self.get_me_calls = 0
         self.shutdown_calls = 0
 
@@ -99,7 +100,7 @@ class _FakeBot:
         self.sent_media.append({"kind": "document", **kwargs})
 
     async def send_chat_action(self, **kwargs) -> None:
-        pass
+        self.chat_actions.append(kwargs)
 
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
@@ -2037,7 +2038,7 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     await channel._on_message(_make_telegram_update(text="hello everyone"), None)
 
@@ -2059,7 +2060,7 @@ async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(_make_telegram_update(text="@nanobot_test hi", entities=[mention]), None)
@@ -2083,7 +2084,7 @@ async def test_group_policy_mention_accepts_caption_mention() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(
@@ -2109,7 +2110,7 @@ async def test_group_policy_mention_accepts_reply_to_bot() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply = SimpleNamespace(from_user=SimpleNamespace(id=999))
     await channel._on_message(_make_telegram_update(text="reply", reply_to_message=reply), None)
@@ -2131,7 +2132,7 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     await channel._on_message(_make_telegram_update(text="hello group"), None)
 
@@ -2203,7 +2204,7 @@ async def test_on_message_includes_reply_context() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply = SimpleNamespace(text="Hello", message_id=2, from_user=SimpleNamespace(id=1))
     update = _make_telegram_update(text="translate this", reply_to_message=reply)
@@ -2324,7 +2325,7 @@ async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tm
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply_with_photo = SimpleNamespace(
         text=None,
@@ -2363,7 +2364,7 @@ async def test_on_message_reply_to_media_fallback_when_download_fails() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply_with_photo = SimpleNamespace(
         text=None,
@@ -2407,7 +2408,7 @@ async def test_on_message_reply_to_caption_and_media(monkeypatch, tmp_path) -> N
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply_with_caption_and_photo = SimpleNamespace(
         text=None,
@@ -2729,7 +2730,7 @@ async def test_on_message_pairs_unauthorized_private_user_before_side_effects(
     )
     _install_ready_app(channel)
     started_typing: list[str] = []
-    channel._start_typing = lambda chat_id: started_typing.append(chat_id)
+    channel._start_typing = lambda chat_id, *_args: started_typing.append(chat_id)
     channel._add_reaction = AsyncMock(return_value=None)
     channel._download_message_media = AsyncMock(return_value=([], []))
     monkeypatch.setattr(
@@ -2757,7 +2758,7 @@ async def test_on_message_location_content() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     location = SimpleNamespace(latitude=48.8566, longitude=2.3522)
     update = _make_telegram_update(location=location)
@@ -2779,7 +2780,7 @@ async def test_on_message_location_with_text() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     location = SimpleNamespace(latitude=51.5074, longitude=-0.1278)
     update = _make_telegram_update(text="meet me here", location=location)
@@ -3342,7 +3343,7 @@ async def test_callback_query_handles_inaccessible_message() -> None:
         MessageBus(),
     )
     channel._handle_message = AsyncMock()
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     query = SimpleNamespace(
         id="cb_inaccessible",
@@ -3534,3 +3535,28 @@ async def test_compaction_notices_are_tracked_per_compaction_id() -> None:
         chat_id=999, message_id=101, text="Context compacted.",
     )
     assert channel._compaction_notices == {("999", "c2"): 202}
+
+
+@pytest.mark.asyncio
+async def test_typing_action_scopes_to_topic_when_thread_id_available() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+
+    channel._start_typing("123", 42)
+    await asyncio.sleep(0.01)
+    channel._stop_typing("123")
+
+    actions = list(channel._app.bot.chat_actions)
+    assert actions
+    assert all(a.get("message_thread_id") == 42 for a in actions)
+
+    channel._start_typing("123")
+    await asyncio.sleep(0.01)
+    channel._stop_typing("123")
+
+    more_actions = channel._app.bot.chat_actions[len(actions):]
+    assert more_actions
+    assert all("message_thread_id" not in a for a in more_actions)
