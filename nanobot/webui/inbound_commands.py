@@ -8,6 +8,7 @@ import json
 import re
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -27,6 +28,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -53,6 +55,8 @@ from nanobot.webui.transcription_ws import webui_transcription_event
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
+_WEBUI_DRAFT_MODEL_PRESET_MAX = 256
+_WEBUI_MODEL_PRESET_NAME_MAX_CHARS = 256
 
 
 @dataclass(frozen=True)
@@ -150,6 +154,7 @@ class WebUICommandRouter:
         ] = {}
         self.request_operations: dict[str, WebUIRequestOperation] = {}
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
+        self._draft_model_presets: OrderedDict[str, str] = OrderedDict()
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
         return self._http_router.workspace_project_selection_available(connection)
@@ -282,6 +287,22 @@ class WebUICommandRouter:
             )
             return None
 
+    def _stage_model_preset(self, chat_id: str, model_preset: str) -> None:
+        self._draft_model_presets[chat_id] = model_preset
+        self._draft_model_presets.move_to_end(chat_id)
+        while len(self._draft_model_presets) > _WEBUI_DRAFT_MODEL_PRESET_MAX:
+            self._draft_model_presets.popitem(last=False)
+
+    def _draft_model_preset(self, chat_id: str) -> str | None:
+        model_preset = self._draft_model_presets.get(chat_id)
+        if model_preset is not None:
+            self._draft_model_presets.move_to_end(chat_id)
+        return model_preset
+
+    def _consume_model_preset(self, chat_id: str, model_preset: str) -> None:
+        if self._draft_model_presets.get(chat_id) == model_preset:
+            self._draft_model_presets.pop(chat_id, None)
+
     async def dispatch(
         self,
         connection: ServerConnection,
@@ -294,6 +315,19 @@ class WebUICommandRouter:
             await self.start_webui_request(connection, envelope)
             return
         if command_type == "new_chat":
+            raw_model_preset = envelope.get("model_preset")
+            model_preset: str | None = None
+            if raw_model_preset is not None:
+                if not isinstance(raw_model_preset, str):
+                    await self.send_webui_protocol_error(connection, "invalid model_preset")
+                    return
+                model_preset = raw_model_preset.strip()
+                if (
+                    not model_preset
+                    or len(model_preset) > _WEBUI_MODEL_PRESET_NAME_MAX_CHARS
+                ):
+                    await self.send_webui_protocol_error(connection, "invalid model_preset")
+                    return
             new_id = str(uuid.uuid4())
             scope = await self.workspace_scope_or_error(
                 connection,
@@ -306,12 +340,17 @@ class WebUICommandRouter:
             if scope is None:
                 return
             self._workspaces.stage_scope(new_id, scope)
+            if model_preset is not None:
+                self._stage_model_preset(new_id, model_preset)
             self._transport.webui_attach(connection, new_id)
+            attach_fields = self._session_projection.attach_fields(webui_session_key(new_id))
+            if model_preset is not None:
+                attach_fields["model_preset"] = model_preset
             await self._transport.webui_send_event(
                 connection,
                 "attached",
                 chat_id=new_id,
-                **self._session_projection.attach_fields(webui_session_key(new_id)),
+                **attach_fields,
             )
             await self._transport.webui_send_event(
                 connection,
@@ -607,6 +646,9 @@ class WebUICommandRouter:
         metadata: dict[str, Any] = {
             "remote": getattr(connection, "remote_address", None)
         }
+        draft_model_preset = self._draft_model_preset(chat_id)
+        if draft_model_preset is not None:
+            metadata[SESSION_MODEL_PRESET_METADATA_KEY] = draft_model_preset
         if envelope.get("webui") is True:
             metadata["webui"] = True
             metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
@@ -695,6 +737,8 @@ class WebUICommandRouter:
                 ),
             )
             self._workspaces.persist_scope(chat_id, scope)
+            if draft_model_preset is not None:
+                self._consume_model_preset(chat_id, draft_model_preset)
             accepted = True
         finally:
             if not accepted and queued_owner is not None:

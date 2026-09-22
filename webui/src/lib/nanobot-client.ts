@@ -819,7 +819,11 @@ export class NanobotClient {
   }
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
-  newChat(timeoutMs: number = 5_000, workspaceScope?: WorkspaceScopePayload | null): Promise<string> {
+  newChat(
+    timeoutMs: number = 5_000,
+    workspaceScope?: WorkspaceScopePayload | null,
+    modelPreset?: string | null,
+  ): Promise<string> {
     if (this.pendingNewChat) {
       return Promise.reject(new Error("newChat already in flight"));
     }
@@ -832,6 +836,7 @@ export class NanobotClient {
       this.queueSend({
         type: "new_chat",
         ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
+        ...(modelPreset ? { model_preset: modelPreset } : {}),
       });
     });
   }

@@ -1944,6 +1944,10 @@ class AgentLoop:
         await ctx.delivery.started()
         if ctx.kind is TurnKind.USER:
             self.workspace_scopes.persist_message_scope(session, msg)
+            if msg.channel == "websocket":
+                inbound_model_preset = model_preset_from_metadata(msg.metadata)
+                if inbound_model_preset is not None:
+                    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = inbound_model_preset
 
         if restore_runtime_checkpoint(session):
             self.sessions.save(session)

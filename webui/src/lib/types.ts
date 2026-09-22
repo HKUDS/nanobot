@@ -1618,7 +1618,11 @@ export interface FilePreviewPayload {
 }
 
 export type Outbound =
-  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
+  | {
+      type: "new_chat";
+      workspace_scope?: WorkspaceScopePayload;
+      model_preset?: string;
+    }
   | { type: "new_temporary_chat" }
   | {
       type: "webui_request";

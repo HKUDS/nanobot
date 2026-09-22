@@ -1817,7 +1817,7 @@ describe("NanobotClient", () => {
     await expect(promise).resolves.toBe("fresh-id");
   });
 
-  it("serializes workspace scope for new chats and messages", async () => {
+  it("serializes workspace scope and model preset for new chats", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -1832,9 +1832,13 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
 
-    const promise = client.newChat(1_000, workspaceScope);
+    const promise = client.newChat(1_000, workspaceScope, "Codex");
     expect(lastSocket().sent).toContain(
-      JSON.stringify({ type: "new_chat", workspace_scope: workspaceScope }),
+      JSON.stringify({
+        type: "new_chat",
+        workspace_scope: workspaceScope,
+        model_preset: "Codex",
+      }),
     );
     lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
     await expect(promise).resolves.toBe("fresh-id");

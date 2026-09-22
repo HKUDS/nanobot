@@ -1689,6 +1689,51 @@ async def test_new_chat_without_message_does_not_create_session(
 
 
 @pytest.mark.asyncio
+async def test_new_chat_model_preset_is_forwarded_only_to_first_message(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "new_chat", "model_preset": "  Codex  "},
+    )
+
+    attached = json.loads(conn.send.await_args_list[0].args[0])
+    chat_id = attached["chat_id"]
+    assert attached["model_preset"] == "Codex"
+    assert sessions.list_sessions() == []
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": chat_id, "content": "hello", "webui": True},
+    )
+
+    first = bus.publish_inbound.await_args.args[0]
+    assert first.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+
+    bus.publish_inbound.reset_mock()
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": chat_id, "content": "again", "webui": True},
+    )
+
+    second = bus.publish_inbound.await_args.args[0]
+    assert SESSION_MODEL_PRESET_METADATA_KEY not in second.metadata
+
+
+@pytest.mark.asyncio
 async def test_failed_first_message_does_not_persist_draft_session(
     bus: MagicMock,
     tmp_path,

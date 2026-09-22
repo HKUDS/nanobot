@@ -3,6 +3,8 @@ import asyncio
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import TurnEndEvent, TurnModelUpdatedEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.nanobot import Nanobot
@@ -13,6 +15,7 @@ from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
 )
+from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -104,6 +107,88 @@ async def test_sessions_run_concurrently_with_isolated_model_presets(tmp_path) -
     assert override.calls == ["override-model"]
     assert fast.calls == ["fast-model"]
     assert load_counts == {"fast": 1, "deep": 1}
+
+
+@pytest.mark.asyncio
+async def test_first_webui_turn_uses_inbound_model_preset_context_window(tmp_path) -> None:
+    bus = MessageBus()
+    default = RecordingProvider("default-model")
+    codex = RecordingProvider("openai-codex/gpt-5.6")
+    presets = {
+        "Codex": ModelPresetConfig(
+            model="openai-codex/gpt-5.6",
+            context_window_tokens=262_144,
+        ),
+    }
+
+    def load_preset(name: str) -> ProviderSnapshot:
+        preset = presets[name]
+        return ProviderSnapshot(
+            provider=codex,
+            model=preset.model,
+            context_window_tokens=preset.context_window_tokens,
+            signature=(name, preset.model),
+        )
+
+    loop = AgentLoop(
+        bus=bus,
+        provider=default,
+        workspace=tmp_path,
+        model="default-model",
+        context_window_tokens=200_000,
+        model_presets=presets,
+        preset_snapshot_loader=load_preset,
+    )
+    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+    coordinator = WebuiTurnCoordinator(
+        bus=bus,
+        sessions=loop.sessions,
+        schedule_background=lambda coro: coro.close(),
+    )
+    unsubscribe = coordinator.subscribe()
+    loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(loop.sessions)
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="webui-client",
+        chat_id="new-chat",
+        content="hello",
+        metadata={
+            "webui": True,
+            SESSION_MODEL_PRESET_METADATA_KEY: "Codex",
+        },
+    )
+    delivery = loop.turn_delivery_factory.create(msg, msg.session_key)
+
+    try:
+        response = await loop._process_message(msg, delivery=delivery)
+        await delivery.complete(response, publish_completion=True)
+
+        outbounds = [
+            await bus.consume_outbound()
+            for _ in range(bus.outbound_size)
+        ]
+        model_event = next(
+            outbound.event
+            for outbound in outbounds
+            if isinstance(outbound.event, TurnModelUpdatedEvent)
+        )
+        turn_end = next(
+            outbound.event
+            for outbound in outbounds
+            if isinstance(outbound.event, TurnEndEvent)
+        )
+
+        assert model_event.model_preset == "Codex"
+        assert model_event.context_window_tokens == 262_144
+        assert turn_end.context_window_tokens == 262_144
+        assert codex.calls == ["openai-codex/gpt-5.6"]
+        assert default.calls == []
+        assert model_preset_from_metadata(
+            loop.sessions.get_or_create(msg.session_key).metadata
+        ) == "Codex"
+    finally:
+        unsubscribe()
+        await loop.aclose()
 
 
 @pytest.mark.asyncio
