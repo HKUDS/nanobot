@@ -626,6 +626,7 @@ def _extract_text_file(path: Path) -> str:
                 content = raw.decode("utf-8")
             except UnicodeDecodeError:
                 content = raw.decode("latin-1")
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
         return _truncate(content, _MAX_TEXT_LENGTH)
     except Exception as e:
         logger.exception("Failed to read text file {}", path)
