@@ -1420,7 +1420,6 @@
       },
       "queued": {
         "label": "Aguardando envio",
-        "hint": "Envie agora ou aguarde a resposta atual terminar.",
         "guide": "Enviar agora",
         "delete": "Excluir guia",
         "edit": "Editar guia",

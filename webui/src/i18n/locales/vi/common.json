@@ -1406,7 +1406,6 @@
       },
       "queued": {
         "label": "Đang chờ gửi",
-        "hint": "Gửi ngay hoặc chờ phản hồi hiện tại hoàn tất.",
         "guide": "Gửi ngay",
         "delete": "Xóa hướng dẫn",
         "edit": "Sửa hướng dẫn",

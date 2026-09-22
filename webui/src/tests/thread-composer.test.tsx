@@ -2892,9 +2892,9 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("");
     expect(screen.getByText("keep the UI minimal")).toBeInTheDocument();
     expect(screen.getByText("Waiting to send")).toBeInTheDocument();
-    expect(screen.getByText(
+    expect(screen.queryByText(
       "Send now, or wait for the current response to finish.",
-    )).toBeInTheDocument();
+    )).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
 

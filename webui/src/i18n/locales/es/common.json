@@ -1407,7 +1407,6 @@
       },
       "queued": {
         "label": "Pendiente de envío",
-        "hint": "Envía ahora o espera a que termine la respuesta actual.",
         "guide": "Enviar ahora",
         "delete": "Eliminar guía",
         "edit": "Editar guía",
