@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Collection
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
@@ -25,6 +26,7 @@ SessionEventFactory = Callable[[str], EventSink]
 
 class AutoCompact:
     _INTERNAL_SESSION_PREFIXES = ("dream:",)
+    _SUMMARY_CACHE_MAX_SIZE = 128
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0,
@@ -33,7 +35,7 @@ class AutoCompact:
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
-        self._summaries: dict[str, SessionSummary] = {}
+        self._summaries: OrderedDict[str, SessionSummary] = OrderedDict()
         self._bind_events = bind_events
 
     def _is_expired(self, ts: datetime | str | None,
@@ -108,6 +110,9 @@ class AutoCompact:
                 )
                 if stored is not None:
                     self._summaries[key] = stored
+                    self._summaries.move_to_end(key)
+                    if len(self._summaries) > self._SUMMARY_CACHE_MAX_SIZE:
+                        self._summaries.popitem(last=False)
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
         finally:
