@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import { MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
+import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import {
   AgentActivityCluster,
   completedActivityDurationMs,
@@ -398,17 +399,6 @@ function MessageBlockMenu({
   const contextActiveRef = useRef(contextActive);
   contextActiveRef.current = contextActive;
   const label = t("message.actions");
-  const assistantContent = message.role === "assistant"
-    ? message.compactReply === "empty"
-      ? t("thread.compaction.empty")
-      : message.compactReply === "failed"
-        ? t("thread.compaction.failed")
-        : message.content
-    : "";
-  const hasAssistantCopy = message.role === "assistant"
-    && !message.isStreaming
-    && !isTurnStreaming
-    && assistantContent.trim().length > 0;
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
@@ -416,9 +406,6 @@ function MessageBlockMenu({
           ref={triggerRef}
           type="button"
           data-message-block-menu-trigger
-          data-assistant-context-actions={message.role === "assistant" || undefined}
-          data-copy-action={hasAssistantCopy || undefined}
-          data-fork-action={hasAssistantCopy && onForkFromHere !== undefined || undefined}
           aria-label={label}
           className={cn(
             "message-block-menu-trigger group touch-target absolute -start-[var(--message-block-trigger-offset)] top-0 z-20",
@@ -676,17 +663,21 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
             ) : null}
             <MessageBubble
               message={unit.message}
-              isTurnStreaming={isTurnStreaming}
               temporary={temporary}
               cliApps={cliApps}
               mcpPresets={mcpPresets}
               slashCommands={slashCommands}
               onOpenFilePreview={onOpenFilePreview}
-              onForkFromHere={forkIndex !== undefined ? onForkFromHere : undefined}
-              showAssistantContextActions={contextBlockKey === undefined}
-              showUserContextActions={contextBlockKey === undefined}
               contextMenu={unit.message.role === "user" ? blockMenu : undefined}
             />
+            {unit.message.role === "assistant"
+            && unit.message.kind !== "compaction"
+            && contextBlockKey === undefined ? (
+              <FallbackResponseSources
+                sources={unit.message.responseSources}
+                className="relative mt-0.5 text-muted-foreground"
+              />
+            ) : null}
           </div>
         ) : null}
       </div>

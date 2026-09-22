@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
 import {
@@ -24,7 +23,7 @@ import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
-import { ResponseSourceBadge } from "@/components/ResponseSourceBadge";
+import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
@@ -39,11 +38,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import {
-  fmtDateTime,
-  formatClockTime,
-  formatMessageEndTime,
-} from "@/lib/format";
+import { formatMessageEndTime } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
 import { sessionHandleColor } from "@/lib/session-handle";
@@ -63,21 +58,12 @@ import type {
 
 interface MessageBubbleProps {
   message: UIMessage;
-  /** The containing agent turn has not received turn_end yet. */
-  isTurnStreaming?: boolean;
   /** Give temporary-chat user turns the dashed private-mode treatment. */
   temporary?: boolean;
-  /** When false, hide this message's copy button. Default true. */
-  showCopyAction?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
   onOpenFilePreview?: (path: string) => void;
-  onForkFromHere?: () => void;
-  /** Render the assistant message's own footer controls. */
-  showAssistantContextActions?: boolean;
-  /** Render routine timestamp and copy controls below a user message. */
-  showUserContextActions?: boolean;
   /** Context-menu trigger positioned against this message's visual block. */
   contextMenu?: ReactNode;
 }
@@ -99,42 +85,6 @@ function ForkArrowIcon({ className }: { className?: string }) {
       <path d="m21 3-7.536 7.536A5 5 0 0 0 12 14.07V21" />
       <path d="m3 3 7.536 7.536A5 5 0 0 1 12 14.07V15" />
     </svg>
-  );
-}
-
-type MessageTimestampProps = Omit<
-  ComponentPropsWithoutRef<"time">,
-  "dateTime" | "title"
-> & {
-  timestamp: number;
-  tooltipLabel: string;
-};
-
-function MessageTimestamp({
-  timestamp,
-  tooltipLabel,
-  className,
-  children,
-  ...props
-}: MessageTimestampProps) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <time
-          {...props}
-          dateTime={new Date(timestamp).toISOString()}
-          tabIndex={0}
-          className={cn(
-            "inline-flex h-8 items-end pb-2 cursor-help text-[11px] leading-none text-muted-foreground/70 tabular-nums",
-            "focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            className,
-          )}
-        >
-          {children}
-        </time>
-      </TooltipTrigger>
-      <TooltipContent side="top" align="center">{tooltipLabel}</TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -167,239 +117,6 @@ function useMessageCopy(content: string) {
 
   const label = copied ? t("message.copiedReply") : t("message.copyReply");
   return { copied, label, onCopy };
-}
-
-function MessageCopyButton({ content }: { content: string }) {
-  const { copied, label, onCopy } = useMessageCopy(content);
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onCopy}
-          aria-label={label}
-          className={cn(
-            "touch-target inline-flex h-8 w-8 shrink-0 items-end justify-center rounded-full pb-2",
-            "transition-colors hover:bg-muted/55 hover:text-foreground",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          )}
-        >
-          {copied ? (
-            <Check className="h-4 w-4" aria-hidden />
-          ) : (
-            <Copy className="h-4 w-4" aria-hidden />
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top" align="center">{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-interface AssistantContextActionsProps {
-  content: string;
-  showCopy: boolean;
-  forkLabel: string;
-  fallbackSources?: NonNullable<UIMessage["responseSources"]>;
-  onForkFromHere?: () => void;
-  inline?: boolean;
-  timestamp?: {
-    value: number;
-    label: string;
-    completed: boolean;
-  };
-  automation?: {
-    label: string;
-    sourceLabel: string;
-  };
-}
-
-function AssistantContextActions({
-  content,
-  showCopy,
-  forkLabel,
-  fallbackSources = [],
-  onForkFromHere,
-  inline = false,
-  timestamp,
-  automation,
-}: AssistantContextActionsProps) {
-  const { copied, label: copyLabel, onCopy } = useMessageCopy(content);
-  return (
-    <TooltipProvider>
-      <div
-        data-assistant-context-actions
-        data-context-actions-pinned={fallbackSources.length > 0 || undefined}
-        data-copy-action={showCopy || undefined}
-        data-fork-action={onForkFromHere ? true : undefined}
-        className={cn(
-          "assistant-context-actions z-10 flex min-h-5 items-center gap-0.5 whitespace-nowrap",
-          "rounded-md bg-background/90 text-muted-foreground backdrop-blur-sm",
-          inline
-            ? "relative bg-transparent backdrop-blur-none"
-            : "relative mt-0.5",
-        )}
-      >
-        <div className="flex min-w-0 max-w-full items-center gap-0.5">
-          <div className="message-actions assistant-context-controls flex items-center gap-0.5">
-            {showCopy ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    data-assistant-copy-action
-                    onClick={onCopy}
-                    aria-label={copyLabel}
-                    className={cn(
-                      "touch-target inline-flex h-5 w-5 items-center justify-center rounded-sm",
-                      "transition-colors hover:bg-muted/70 hover:text-foreground",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    )}
-                  >
-                    {copied ? (
-                      <Check className="h-3 w-3" strokeWidth={1.75} aria-hidden />
-                    ) : (
-                      <Copy className="h-3 w-3" strokeWidth={1.75} aria-hidden />
-                    )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" align="center">{copyLabel}</TooltipContent>
-              </Tooltip>
-            ) : null}
-            {onForkFromHere ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    data-assistant-fork-action
-                    onClick={onForkFromHere}
-                    aria-label={forkLabel}
-                    className={cn(
-                      "touch-target inline-flex h-5 w-5 items-center justify-center rounded-sm",
-                      "transition-colors hover:bg-muted/70 hover:text-foreground",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    )}
-                  >
-                    <ForkArrowIcon className="h-3 w-3" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" align="center">{forkLabel}</TooltipContent>
-              </Tooltip>
-            ) : null}
-          </div>
-          {timestamp ? (
-            <MessageTimestamp
-              data-message-timestamp
-              {...(timestamp.completed ? { "data-assistant-completed-at": true } : {})}
-              {...(automation ? { "data-automation-trigger": true } : {})}
-              timestamp={timestamp.value}
-              tooltipLabel={automation
-                ? `${timestamp.label} — ${automation.label} — ${automation.sourceLabel}`
-                : timestamp.label}
-              className={cn(
-                "h-5 items-center rounded-sm px-1 pb-0 text-[11px]",
-                "transition-colors hover:bg-muted/70 hover:text-foreground",
-              )}
-            >
-              {formatClockTime(timestamp.value)}
-            </MessageTimestamp>
-          ) : null}
-          {fallbackSources.length > 0 ? (
-            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1">
-              {fallbackSources.map((source) => (
-                <ResponseSourceBadge key={JSON.stringify(source)} source={source} />
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </TooltipProvider>
-  );
-}
-
-interface AssistantMessageActionsProps {
-  message: UIMessage;
-  isTurnStreaming?: boolean;
-  showCopyAction?: boolean;
-  onForkFromHere?: () => void;
-  inline?: boolean;
-}
-
-/** The compact controls associated with one completed assistant message block. */
-export function AssistantMessageActions({
-  message,
-  isTurnStreaming = false,
-  showCopyAction = true,
-  onForkFromHere,
-  inline = false,
-}: AssistantMessageActionsProps) {
-  const { t } = useTranslation();
-  const assistantContent = message.compactReply === "empty"
-    ? t("thread.compaction.empty")
-    : message.compactReply === "failed"
-      ? t("thread.compaction.failed")
-      : message.content;
-  const empty = assistantContent.trim().length === 0;
-  const media = message.media ?? [];
-  const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
-  const hasReasoning = reasoning.length > 0 || !!message.reasoningStreaming;
-  const showAssistantActions =
-    message.role === "assistant" && !message.isStreaming && !isTurnStreaming && !empty;
-  const showCopyButton = showCopyAction && showAssistantActions;
-  const showForkButton = showAssistantActions && !!onForkFromHere;
-  const completedAt = message.completedAt;
-  const completedAtLabel =
-    message.role === "assistant" && !message.isStreaming
-      ? formatMessageEndTime(completedAt)
-      : "";
-  const assistantTimestamp =
-    typeof completedAt === "number" && Number.isFinite(completedAt)
-      ? completedAt
-      : message.createdAt;
-  const assistantTimestampLabel =
-    message.role === "assistant" && !message.isStreaming && !isTurnStreaming
-      ? formatMessageEndTime(assistantTimestamp)
-      : "";
-  const showCompletedAt =
-    completedAtLabel.length > 0
-    && (!empty || hasReasoning || media.length > 0);
-  const showAssistantTimestamp =
-    assistantTimestampLabel.length > 0
-    && (!empty || hasReasoning || media.length > 0);
-  const assistantTimestampTitle = showAssistantTimestamp ? fmtDateTime(assistantTimestamp) : "";
-  const automationSourceKind = message.source?.kind;
-  const automationSourceName = message.source?.label?.trim();
-  const automationSourceLabel = (
-    automationSourceKind === "cron"
-    || automationSourceKind === "local_trigger"
-    || automationSourceKind === "trigger"
-  )
-    ? (automationSourceName || t("message.automationSourceFallback"))
-    : "";
-  const showAutomationTrigger = showAssistantTimestamp && automationSourceLabel.length > 0;
-  const fallbackSources = message.responseSources?.filter((source) => source.fallback === true) ?? [];
-  const showAssistantContextActions =
-    showCopyButton || showForkButton || showAssistantTimestamp || fallbackSources.length > 0;
-
-  return showAssistantContextActions ? (
-    <AssistantContextActions
-      content={assistantContent}
-      showCopy={showCopyButton}
-      forkLabel={t("message.forkFromHere")}
-      fallbackSources={fallbackSources}
-      onForkFromHere={showForkButton ? onForkFromHere : undefined}
-      inline={inline}
-      timestamp={showAssistantTimestamp ? {
-        value: assistantTimestamp,
-        label: assistantTimestampTitle,
-        completed: showCompletedAt,
-      } : undefined}
-      automation={showAutomationTrigger ? {
-        label: t("message.automationTriggered"),
-        sourceLabel: automationSourceLabel,
-      } : undefined}
-    />
-  ) : null;
 }
 
 interface MessageBlockMenuActivity {
@@ -446,9 +163,6 @@ export function MessageBlockMenuActions({
   const timestampLabel = typeof timestamp === "number" && Number.isFinite(timestamp)
     ? formatMessageEndTime(timestamp)
     : "";
-  const fallbackSources = message.role === "assistant"
-    ? message.responseSources?.filter((source) => source.fallback === true) ?? []
-    : [];
   const automationSourceLabel = message.role === "assistant"
     && ["cron", "local_trigger", "trigger"].includes(message.source?.kind ?? "")
     ? message.source?.label?.trim() || t("message.automationSourceFallback")
@@ -560,17 +274,11 @@ export function MessageBlockMenuActions({
             ) : null}
           </div>
         ) : null}
-        {fallbackSources.length > 0 ? (
-          <div className="flex min-h-[var(--message-block-control-size)] max-w-full flex-wrap items-center gap-1">
-            {fallbackSources.map((source) => (
-              <ResponseSourceBadge
-                key={JSON.stringify(source)}
-                source={source}
-                className="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
-              />
-            ))}
-          </div>
-        ) : null}
+        <FallbackResponseSources
+          sources={message.role === "assistant" ? message.responseSources : undefined}
+          className="min-h-[var(--message-block-control-size)] gap-1"
+          badgeClassName="h-[var(--message-block-control-size)] min-h-[var(--message-block-control-size)]"
+        />
         {timestampLabel || automationSourceLabel ? (
           <div
             data-message-block-metadata
@@ -691,20 +399,15 @@ function UserDeliveryStatus({
 
 function IncomingSessionMessage({
   message,
-  showCopyAction,
-  showContextActions,
   contextMenu,
   onOpenFilePreview,
 }: {
   message: UIMessage;
-  showCopyAction: boolean;
-  showContextActions: boolean;
   contextMenu?: ReactNode;
   onOpenFilePreview?: (path: string) => void;
 }) {
   const handle = message.sessionMessage!.session;
   const color = sessionHandleColor(handle.id);
-  const createdAtLabel = formatMessageEndTime(message.createdAt);
   const handleName = `@${handle.name}`;
 
   return (
@@ -730,24 +433,6 @@ function IncomingSessionMessage({
           </MarkdownText>
         </div>
       </div>
-      {showContextActions && (createdAtLabel || showCopyAction) ? (
-        <TooltipProvider>
-          <div
-            data-user-context-actions
-            className="message-actions mt-1 flex min-h-8 items-center gap-1.5 text-muted-foreground"
-          >
-            {showCopyAction ? <MessageCopyButton content={message.content} /> : null}
-            {createdAtLabel ? (
-              <MessageTimestamp
-                timestamp={message.createdAt}
-                tooltipLabel={fmtDateTime(message.createdAt)}
-              >
-                {createdAtLabel}
-              </MessageTimestamp>
-            ) : null}
-          </div>
-        </TooltipProvider>
-      ) : null}
     </div>
   );
 }
@@ -755,16 +440,11 @@ function IncomingSessionMessage({
 /** Render user turns as compact bubbles and assistant turns as document-like prose. */
 export function MessageBubble({
   message,
-  isTurnStreaming = false,
   temporary = false,
-  showCopyAction = true,
   cliApps = [],
   mcpPresets = [],
   slashCommands = [],
   onOpenFilePreview,
-  onForkFromHere,
-  showAssistantContextActions = true,
-  showUserContextActions = true,
   contextMenu,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
@@ -789,8 +469,6 @@ export function MessageBubble({
     return (
       <IncomingSessionMessage
         message={message}
-        showCopyAction={showCopyAction}
-        showContextActions={showUserContextActions}
         contextMenu={contextMenu}
         onOpenFilePreview={onOpenFilePreview}
       />
@@ -807,9 +485,6 @@ export function MessageBubble({
     const hasText = userContent.trim().length > 0;
     const showDeliveryStatus =
       message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
-    const createdAtLabel = formatMessageEndTime(message.createdAt);
-    const showCreatedAt = createdAtLabel.length > 0;
-    const createdAtTitle = showCreatedAt ? fmtDateTime(message.createdAt) : "";
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
     const messageText = slashCommand ? (
@@ -860,30 +535,13 @@ export function MessageBubble({
             {messageText}
           </p>
         ) : null}
-        {showDeliveryStatus
-        || (showUserContextActions && (showCreatedAt || (hasText && showCopyAction))) ? (
+        {showDeliveryStatus ? (
           <TooltipProvider>
-            <div
-              data-user-context-actions={showUserContextActions || undefined}
-              data-context-actions-pinned={showDeliveryStatus || undefined}
-              className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground"
-            >
-              {showUserContextActions && showCreatedAt ? (
-                <MessageTimestamp
-                  data-message-created-at
-                  timestamp={message.createdAt}
-                  tooltipLabel={createdAtTitle}
-                >
-                  {createdAtLabel}
-                </MessageTimestamp>
-              ) : null}
+            <div className="flex min-h-8 items-center justify-end gap-1.5 text-muted-foreground">
               <UserDeliveryStatus
                 status={message.deliveryStatus}
                 errorKind={message.deliveryErrorKind}
               />
-              {showUserContextActions && hasText && showCopyAction
-                ? <MessageCopyButton content={message.content} />
-                : null}
             </div>
           </TooltipProvider>
         ) : null}
@@ -932,14 +590,6 @@ export function MessageBubble({
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
         </>
       )}
-      {showAssistantContextActions ? (
-        <AssistantMessageActions
-          message={message}
-          isTurnStreaming={isTurnStreaming}
-          showCopyAction={showCopyAction}
-          onForkFromHere={onForkFromHere}
-        />
-      ) : null}
     </div>
   );
 }

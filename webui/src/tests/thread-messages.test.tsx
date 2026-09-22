@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -16,13 +16,23 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function assistantContextActions(root: ParentNode = document): HTMLElement {
-  const actions = root.querySelector<HTMLElement>("[data-assistant-context-actions]");
-  expect(actions).not.toBeNull();
-  if (actions?.getAttribute("aria-expanded") === "false") {
-    fireEvent.click(actions);
+function openAssistantBlockMenu(root: ParentNode = document): HTMLElement {
+  const row = root.querySelector("[data-assistant-message]")?.closest<HTMLElement>("[data-thread-display-unit]");
+  expect(row).toBeTruthy();
+  return openMessageBlockMenu(row!).trigger;
+}
+
+function assistantActionCounts(root: ParentNode = document) {
+  const counts = { copy: 0, fork: 0 };
+  for (const body of root.querySelectorAll("[data-assistant-message]")) {
+    const row = body.closest<HTMLElement>("[data-thread-display-unit]")!;
+    if (!row.querySelector("[data-message-block-menu-trigger]")) continue;
+    const { menu } = openMessageBlockMenu(row);
+    counts.copy += within(menu).queryAllByRole("button", { name: "Copy", exact: true }).length;
+    counts.fork += within(menu).queryAllByRole("button", { name: "Fork", exact: true }).length;
+    fireEvent.keyDown(menu, { key: "Escape" });
   }
-  return actions!;
+  return counts;
 }
 
 function openMessageBlockMenu(root: ParentNode): {
@@ -389,8 +399,8 @@ describe("ThreadMessages", () => {
     rerender(<ThreadMessages messages={messages} isStreaming={false} activeTurnId={null} />);
     const firstRow = firstAnswer.closest<HTMLElement>("[data-thread-display-unit]")!;
     const finalRow = finalAnswer.closest<HTMLElement>("[data-thread-display-unit]")!;
-    const firstActions = firstRow.querySelector<HTMLElement>("[data-assistant-context-actions]")!;
-    const finalActions = finalRow.querySelector<HTMLElement>("[data-assistant-context-actions]")!;
+    const firstActions = firstRow.querySelector<HTMLElement>("[data-message-block-menu-trigger]")!;
+    const finalActions = finalRow.querySelector<HTMLElement>("[data-message-block-menu-trigger]")!;
     expect(firstRow).toContainElement(firstActions);
     expect(finalRow).toContainElement(finalActions);
     expect(firstActions).not.toBe(finalActions);
@@ -839,8 +849,6 @@ describe("ThreadMessages", () => {
     expect(userB.dataset.messageContextBlock).toBeTruthy();
     expect(userA.dataset.messageContextBlock).not.toBe(answerA.dataset.messageContextBlock);
     expect(userB.dataset.messageContextBlock).not.toBe(answerA.dataset.messageContextBlock);
-    expect(userA.querySelector("[data-user-context-actions]")).not.toBeInTheDocument();
-    expect(userB.querySelector("[data-user-context-actions]")).not.toBeInTheDocument();
     expect(userA.querySelector("[data-message-block-menu-trigger]")).toBeInTheDocument();
     expect(userB.querySelector("[data-message-block-menu-trigger]")).toBeInTheDocument();
 
@@ -1441,7 +1449,7 @@ describe("ThreadMessages", () => {
       <ThreadMessages messages={messages} isStreaming={false} />,
     );
     expect(screen.queryByRole("button", { name: /^thinking$/i })).not.toBeInTheDocument();
-    assistantContextActions(container);
+    openAssistantBlockMenu(container);
     const disclosure = screen.getByRole("button", { name: "Worked for 9s" });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(disclosure);
@@ -1484,7 +1492,7 @@ describe("ThreadMessages", () => {
     const { container } = render(
       <ThreadMessages messages={messages} isStreaming={false} />,
     );
-    assistantContextActions(container);
+    openAssistantBlockMenu(container);
     expect(screen.getByRole("button", { name: "Worked for 20s" }))
       .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Worked for 3s" }))
@@ -1811,7 +1819,7 @@ describe("ThreadMessages", () => {
       <ThreadMessages messages={messages} isStreaming={false} />,
     );
 
-    assistantContextActions(container);
+    openAssistantBlockMenu(container);
     expect(screen.getByRole("button", { name: "Worked for 15s" }))
       .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Worked for 0s" }))
@@ -1867,10 +1875,7 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(document.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(2);
-    expect(document.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
-      .toHaveLength(1);
+    expect(assistantActionCounts(document)).toEqual({ copy: 2, fork: 1 });
     expect(screen.getByText("starting…").closest("[data-testid='activity-model-message']")).toBeNull();
     expect(screen.getByText("final reply").closest("[data-testid='activity-model-message']")).toBeNull();
   });
@@ -1929,7 +1934,7 @@ describe("ThreadMessages", () => {
     expect(screen.getByText("result.csv")).toBeInTheDocument();
     const ownerRow = screen.getByText("result.csv")
       .closest<HTMLElement>("[data-thread-display-unit]")!;
-    assistantContextActions(ownerRow);
+    openAssistantBlockMenu(ownerRow);
     expect(screen.getByRole("button", { name: "Worked" })).toBeInTheDocument();
   });
 
@@ -1972,23 +1977,17 @@ describe("ThreadMessages", () => {
       .closest<HTMLElement>("[data-thread-display-unit]")!;
     const finalAnswer = screen.getByText("second answer slice")
       .closest<HTMLElement>("[data-thread-display-unit]")!;
-    expect(firstAnswer.querySelector("[data-assistant-context-actions]"))
+    expect(firstAnswer.querySelector("[data-message-block-menu-trigger]"))
       .not.toBeInTheDocument();
-    expect(finalAnswer.querySelector("[data-assistant-context-actions]"))
+    expect(finalAnswer.querySelector("[data-message-block-menu-trigger]"))
       .not.toBeInTheDocument();
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(1);
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
-      .toHaveLength(1);
+    expect(assistantActionCounts(container)).toEqual({ copy: 1, fork: 1 });
 
     rerender(<ThreadMessages {...props} isStreaming={false} activeTurnId={null} />);
 
-    expect(firstAnswer.querySelector("[data-assistant-context-actions]"))
+    expect(firstAnswer.querySelector("[data-message-block-menu-trigger]"))
       .toBeInTheDocument();
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(3);
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
-      .toHaveLength(2);
+    expect(assistantActionCounts(container)).toEqual({ copy: 3, fork: 2 });
   });
 
   it("keeps active turn actions hidden across guidance and failed user rows", () => {
@@ -2017,10 +2016,7 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(1);
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
-      .toHaveLength(1);
+    expect(assistantActionCounts(container)).toEqual({ copy: 1, fork: 1 });
   });
 
   it("only hides the active assistant-only automation turn", () => {
@@ -2042,10 +2038,7 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(1);
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
-      .toHaveLength(0);
+    expect(assistantActionCounts(container)).toEqual({ copy: 1, fork: 0 });
   });
 
   it("falls back to the latest user boundary for untagged active slices", () => {
@@ -2061,10 +2054,7 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(container.querySelector('[data-assistant-context-actions][data-copy-action="true"]'))
-      .not.toBeInTheDocument();
-    expect(container.querySelector('[data-assistant-context-actions][data-fork-action="true"]'))
-      .not.toBeInTheDocument();
+    expect(assistantActionCounts(container)).toEqual({ copy: 0, fork: 0 });
   });
 
   it("falls back to the latest user boundary while the active turn id is pending", () => {
@@ -2082,10 +2072,7 @@ describe("ThreadMessages", () => {
       />,
     );
 
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(1);
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-fork-action="true"]'))
-      .toHaveLength(1);
+    expect(assistantActionCounts(container)).toEqual({ copy: 1, fork: 1 });
   });
 
   it("projects adjacent assistant text slices into one answer", () => {
@@ -2096,8 +2083,7 @@ describe("ThreadMessages", () => {
     const { container } = render(
       <ThreadMessages messages={messages} isStreaming={false} />,
     );
-    expect(container.querySelectorAll('[data-assistant-context-actions][data-copy-action="true"]'))
-      .toHaveLength(1);
+    expect(assistantActionCounts(container).copy).toBe(1);
     expect(screen.getByText("part one")).toBeInTheDocument();
     expect(screen.getByText("part two")).toBeInTheDocument();
   });
