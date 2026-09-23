@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 import math
 import os
 import secrets
@@ -69,24 +68,6 @@ class _CredentialStore(TypedDict):
 
 class MCPAuthorizationRequiredError(RuntimeError):
     """Raised when a background MCP connection needs interactive authorization."""
-
-
-class _OAuthAuthorizationLogFilter(logging.Filter):
-    """Keep the SDK's expected authorization interruption out of error tracebacks."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if (
-            record.getMessage() == "OAuth flow error"
-            and record.exc_info
-            and isinstance(record.exc_info[1], MCPAuthorizationRequiredError)
-        ):
-            record.levelno = logging.INFO
-            record.levelname = "INFO"
-            record.msg = "MCP OAuth request paused at browser authorization"
-            record.args = ()
-            record.exc_info = None
-            record.exc_text = None
-        return True
 
 
 @dataclass(frozen=True)
@@ -571,6 +552,14 @@ class _RetryOAuthWithDiscoveredMetadata(BaseException):
     """Restart the SDK flow after discovery without logging a false OAuth failure."""
 
 
+class _OAuthAuthorizationInterrupted(BaseException):
+    """Carry expected authorization state past the SDK's generic error logger."""
+
+    def __init__(self, error: MCPAuthorizationRequiredError) -> None:
+        self.error = error
+        super().__init__(str(error))
+
+
 class _RetryOAuthWithStoredCredentials(BaseException):
     """Restart the SDK flow with credentials refreshed by another provider."""
 
@@ -778,7 +767,10 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
             self.context.client_info = None
             self._token_issuer = None
             raise _RetryOAuthWithStoredCredentials
-        return await super()._perform_authorization()
+        try:
+            return await super()._perform_authorization()
+        except MCPAuthorizationRequiredError as exc:
+            raise _OAuthAuthorizationInterrupted(exc) from exc
 
     async def async_auth_flow(
         self,
@@ -809,6 +801,12 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
                                 outgoing = await flow.asend(response)
                             except StopAsyncIteration:
                                 return
+                except _OAuthAuthorizationInterrupted as exc:
+                    logger.info(
+                        "MCP server '{}': OAuth request stopped at browser authorization",
+                        self._nanobot_storage.server_name,
+                    )
+                    raise exc.error from None
                 except _RetryOAuthWithDiscoveredMetadata:
                     # The SDK has now validated discovery metadata. Mark the token
                     # expired so its normal pre-request branch refreshes against the
@@ -834,9 +832,6 @@ async def create_mcp_oauth_auth(
     handlers: MCPOAuthHandlers | None = None,
 ) -> OAuthClientProvider:
     """Build the official MCP SDK OAuth provider for one configured server."""
-    sdk_logger = logging.getLogger("mcp.client.auth.oauth2")
-    if not any(isinstance(f, _OAuthAuthorizationLogFilter) for f in sdk_logger.filters):
-        sdk_logger.addFilter(_OAuthAuthorizationLogFilter())
     storage = MCPOAuthStorage(server_name, server_url)
     if handlers is not None:
         await storage.prepare_redirect_uri(
