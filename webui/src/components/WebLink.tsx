@@ -5,10 +5,11 @@ import { useTranslation } from "react-i18next";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { parseWebLink } from "@/lib/web-preview";
+import { cn } from "@/lib/utils";
 
 export const WebPreviewContext = createContext<((url: string) => void) | undefined>(undefined);
 
-export function WebLink({ href = "", children, ...props }: ComponentPropsWithoutRef<"a">) {
+export function WebLink({ href = "", children, layout = "inline", className, ...props }: ComponentPropsWithoutRef<"a"> & { layout?: "inline" | "row" }) {
   const { t } = useTranslation();
   const openPreview = useContext(WebPreviewContext);
   const [open, setOpen] = useState(false);
@@ -19,7 +20,7 @@ export function WebLink({ href = "", children, ...props }: ComponentPropsWithout
     return () => window.clearTimeout(timer);
   }, [feedback]);
   const url = parseWebLink(href);
-  const anchor = <a {...props} href={href} target="_blank" rel="noreferrer noopener">{children}</a>;
+  const anchor = <a {...props} className={cn(className, layout === "row" && "min-w-0 flex-1")} href={href} target="_blank" rel="noreferrer noopener">{children}</a>;
   if (!url) {
     // Keep the renderer's relative media/document and mail links unchanged.
     const relative = !/^[a-z][a-z\d+.-]*:/i.test(href)
@@ -28,7 +29,7 @@ export function WebLink({ href = "", children, ...props }: ComponentPropsWithout
   }
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <span className="inline max-w-full" onContextMenu={(event) => {
+      <span className={cn("max-w-full", layout === "row" ? "inline-flex w-full min-w-0 items-center" : "inline")} onContextMenu={(event) => {
         event.preventDefault(); event.stopPropagation(); setOpen(true);
       }} onKeyDown={(event) => {
         if ((event.shiftKey && event.key === "F10") || event.key === "ContextMenu") {
@@ -38,7 +39,7 @@ export function WebLink({ href = "", children, ...props }: ComponentPropsWithout
         {anchor}
         <DropdownMenuTrigger asChild>
           <button type="button" aria-label={t("webPreview.actions")} title={t("webPreview.actions")}
-            className="ml-0.5 inline-flex h-6 w-6 items-center justify-center rounded-md align-middle text-muted-foreground/70 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            className="ml-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md align-middle text-muted-foreground/70 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
           </button>
         </DropdownMenuTrigger>

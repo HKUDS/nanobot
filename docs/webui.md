@@ -136,9 +136,26 @@ them with **View diff**. Large diffs may hide unchanged lines or truncate the
 inline preview. Select the filename in the activity row to open the read-only
 file preview panel.
 
-Use the **…** menu beside a file reference (or right-click it) to preview the file
-and copy its absolute or project-relative path. The same menu is available in
-the preview header. Keyboard users can focus a reference and press **Shift+F10**.
+Files open as tabs in one preview pane. Select another file to add or switch a
+tab without reopening the pane; close a tab with its **×**, or close the pane
+with **Escape**. Tabs and width follow each session while the WebUI remains open.
+They are kept only in memory and cleared when that session is deleted or the
+connection ends. The pane overlays the conversation on narrow screens.
+
+PNG, JPEG, GIF and WebP files can be previewed as images within the size limit.
+Hover or focus an image file reference for a compact quick look, or select it
+to open the pane. Select the preview image for the full-size viewer, which
+supports zoom controls, pinch-to-zoom and panning. HTML and SVG files remain
+read-only source previews rather than executable pages.
+
+A plain image file link does not automatically insert a large image into the
+reply. Explicit Markdown images appear inline; image attachments use a compact
+gallery, showing at most four thumbnails before a count of the remaining images.
+An image already displayed inline is not duplicated in the attachment gallery.
+
+Select a file reference to preview it. Right-click the reference or its preview
+tab to copy its absolute or project-relative path. Keyboard users can focus a
+reference and press **Shift+F10**.
 Paths are resolved on the gateway machine, which may not be the computer running
 your browser. Files outside the project do not have a project-relative path.
 If a reference cannot be resolved, you can still copy the original reference;

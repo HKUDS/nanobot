@@ -35,13 +35,17 @@ export function FilePreviewPanel({
   // Cache aging must not restart an already open preview on unrelated rerenders.
   const initialPreviewRef = useRef(initialPreview);
   initialPreviewRef.current = initialPreview;
+  // Credential renewal is not a new file selection. Read the current token only
+  // when a session/path/loader change actually starts another request.
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   useEffect(() => {
     let cancelled = false;
     setImageOpen(false);
     const cached = initialPreviewRef.current;
     setState(cached ? { status: "ready", payload: cached } : { status: "loading" });
-    (loadPreview?.(path) ?? fetchFilePreview(token, sessionKey, path))
+    (loadPreview?.(path) ?? fetchFilePreview(tokenRef.current, sessionKey, path))
       .then((payload) => {
         if (!cancelled) setState({ status: "ready", payload });
       })
@@ -51,7 +55,7 @@ export function FilePreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [path, sessionKey, token, loadPreview]);
+  }, [path, sessionKey, loadPreview]);
 
   const displayPath = state.status === "ready" ? state.payload.display_path : path;
   const { name } = splitFilePath(displayPath);

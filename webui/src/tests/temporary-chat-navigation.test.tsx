@@ -5,6 +5,7 @@ import App from "@/App";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import type { InboundEvent, Outbound } from "@/lib/types";
+import { fetchBootstrap } from "@/lib/bootstrap";
 import { canonicalThreadPayload } from "./thread-test-payload";
 
 let groupedTopics = false;
@@ -16,7 +17,7 @@ const previewFile = (path: string) => ({
 
 vi.mock("@/lib/bootstrap", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/bootstrap")>(),
-  fetchBootstrap: async () => ({ token: "test", api_token: "test", ws_path: "/" }),
+  fetchBootstrap: vi.fn(async () => ({ token: "test", api_token: "test", ws_path: "/" })),
   deriveWsUrl: () => "ws://test",
 }));
 
@@ -95,6 +96,7 @@ async function selectTopic(name: string) {
 
 describe("temporary chat navigation", () => {
   beforeEach(() => {
+    vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({ token: "test", api_token: "test", ws_path: "/" });
     groupedTopics = false;
     withFiles = false;
     localStorage.clear();
@@ -143,6 +145,30 @@ describe("temporary chat navigation", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("keeps the preview resource stable across bootstrap token refresh", async () => {
+    withFiles = true;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.mocked(fetchBootstrap)
+      .mockResolvedValueOnce({ token: "old", api_token: "old", ws_path: "/", expires_in: 30 })
+      .mockResolvedValue({ token: "renewed", api_token: "renewed", ws_path: "/", expires_in: 300 });
+    render(<App />);
+    await screen.findByRole("button", { name: "Temporary chat" });
+    act(() => TestSocket.current.open());
+    await selectTopic("Regular topic");
+    fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
+    const content = await screen.findByText("Preview of notes.txt");
+    const fullPreviewRequests = () => vi.mocked(fetch).mock.calls.filter(([url]) =>
+      String(url).includes("/file-preview?path=") && !String(url).includes("probe=") && !String(url).includes("metadata="));
+    expect(fullPreviewRequests()).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(fetchBootstrap).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Preview of notes.txt")).toBe(content);
+    expect(fullPreviewRequests()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "second.txt" }));
+    await screen.findByText("Preview of second.txt");
+    expect(new Headers(fullPreviewRequests().at(-1)?.[1]?.headers).get("Authorization")).toBe("Bearer renewed");
   });
 
   it.each([false, true])("restores file previews after pane navigation (temporary=%s)", async (temporary) => {

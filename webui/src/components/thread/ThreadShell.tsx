@@ -1556,7 +1556,7 @@ export function ThreadShell({
     if (!previewSessionKey) return Promise.reject(new Error("No active session"));
     return temporary ? loadTemporaryFilePreview(path) : fetchFilePreview(getToken(), previewSessionKey, path);
   }, [previewSessionKey, temporary, loadTemporaryFilePreview, getToken]);
-  const filePreviews = useMemo(() => createFilePreviewResource(loadFilePreview), [loadFilePreview, token]);
+  const filePreviews = useMemo(() => createFilePreviewResource(loadFilePreview), [loadFilePreview]);
   const fileActions = useMemo(() => ({
     resolveMetadata: resolveFileMetadata,
     loadPreview: filePreviews.load,

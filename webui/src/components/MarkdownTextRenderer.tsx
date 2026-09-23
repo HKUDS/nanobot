@@ -453,6 +453,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
 
   return (
     <WebLink
+      layout="row"
       href={link.href}
       target="_blank"
       rel="noreferrer noopener"

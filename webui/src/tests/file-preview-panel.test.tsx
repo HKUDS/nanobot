@@ -165,4 +165,23 @@ describe("FilePreviewPanel", () => {
 
     expect(fetchFilePreview).toHaveBeenCalledTimes(1);
   });
+
+  it("preserves the open image and zoom on token renewal, using the current token for the next file", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      kind: "image", path: "/workspace/chart.png", display_path: "chart.png",
+      size: 42, mime_type: "image/png", data_url: "data:image/png;base64,example",
+    });
+    const view = (token: string, path = "chart.png") =>
+      <FilePreviewPanel sessionKey="websocket:a" path={path} token={token} />;
+    const { rerender } = render(view("old"));
+    fireEvent.click(await screen.findByRole("button", { name: "View image: chart.png" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Zoom in" }));
+    rerender(view("renewed"));
+    expect(fetchFilePreview).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("button", { name: "Fit image" })).toHaveTextContent("150%");
+    rerender(view("renewed", "second.png"));
+    await waitFor(() => expect(fetchFilePreview).toHaveBeenLastCalledWith("renewed", "websocket:a", "second.png"));
+  });
 });

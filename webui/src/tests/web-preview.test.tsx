@@ -76,6 +76,16 @@ describe("web preview boundaries", () => {
 });
 
 describe("web link actions", () => {
+  it("reserves room for actions beside a full-width link row without changing inline links", () => {
+    const { rerender } = render(<WebLink layout="row" href="https://example.com/">Long website title</WebLink>);
+    const link = screen.getByRole("link", { name: "Long website title" });
+    expect(link.parentElement).toHaveClass("inline-flex", "w-full");
+    expect(link).toHaveClass("min-w-0", "flex-1");
+    expect(screen.getByRole("button", { name: "Link actions" })).toHaveClass("shrink-0");
+    rerender(<WebLink href="https://example.com/">Long website title</WebLink>);
+    expect(link.parentElement).toHaveClass("inline");
+    expect(link).not.toHaveClass("flex-1");
+  });
   it("opens a shared right-click menu without loading any website beforehand", async () => {
     const open = vi.fn();
     const { container } = render(<WebPreviewContext.Provider value={open}><WebLink href="https://example.com/?a=b#c">Example</WebLink></WebPreviewContext.Provider>);
