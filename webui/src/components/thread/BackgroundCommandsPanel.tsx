@@ -127,7 +127,7 @@ function BackgroundCommandsBody({ client, chatId }: Props) {
       <span className="flex-1">{label("title")} <span className="text-muted-foreground">({commands.length})</span></span>
       <ChevronDown className="size-4 text-muted-foreground" aria-hidden />
     </button>
-    <div hidden={!expanded} className="max-h-[min(60vh,32rem)] space-y-2 overflow-y-auto px-3 pb-3">
+    <div hidden={!expanded} className="max-h-[min(25dvh,16rem)] space-y-2 overflow-y-auto px-3 pb-3">
       <p className="text-xs text-muted-foreground">{label("retention")}</p>
       {error ? <div role="status" className="flex flex-wrap items-center gap-2 text-xs">{label("stale")}
         <Button variant="ghost" size="sm" onClick={() => setRefresh((n) => n + 1)}>{label("retry")}</Button></div> : null}
