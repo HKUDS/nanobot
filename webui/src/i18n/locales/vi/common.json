@@ -1293,6 +1293,22 @@
     "error": "Lỗi kết nối"
   },
   "thread": {
+    "subtasks": {
+      "retry": "Thử lại",
+      "title": "Tác vụ con",
+      "retention": "32 tác vụ gần nhất; tối đa 12.000 ký tự cuối mỗi đầu ra.",
+      "stale": "Không có kết nối. Đang hiển thị bản chụp gần nhất.",
+      "queued": "Đang chờ",
+      "running": "Đang chạy",
+      "completed": "Hoàn tất",
+      "failed": "Thất bại",
+      "cancelled": "Đã hủy",
+      "interrupted": "Gián đoạn",
+      "unknown": "Chưa rõ trạng thái",
+      "round": "Vòng {{count}}",
+      "noOutput": "Chưa có đầu ra hiển thị.",
+      "truncated": "Đầu ra trước đó đã được lược bỏ."
+    },
     "compaction": {
       "cancelled": "Đã hủy nén ngữ cảnh",
       "empty": "Không có ngữ cảnh cần nén.",

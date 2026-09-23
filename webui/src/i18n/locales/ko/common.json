@@ -1293,6 +1293,22 @@
     "error": "연결 오류"
   },
   "thread": {
+    "subtasks": {
+      "retry": "다시 시도",
+      "title": "하위 작업",
+      "retention": "최근 작업 32개와 출력의 마지막 12,000자를 표시합니다.",
+      "stale": "연결할 수 없습니다. 마지막 스냅샷을 표시합니다.",
+      "queued": "대기 중",
+      "running": "실행 중",
+      "completed": "완료",
+      "failed": "실패",
+      "cancelled": "취소됨",
+      "interrupted": "중단됨",
+      "unknown": "상태 알 수 없음",
+      "round": "{{count}} 라운드",
+      "noOutput": "아직 표시할 출력이 없습니다.",
+      "truncated": "이전 출력이 생략되었습니다."
+    },
     "compaction": {
       "cancelled": "컨텍스트 압축이 취소되었습니다",
       "empty": "압축할 컨텍스트가 없습니다.",

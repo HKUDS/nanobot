@@ -1293,6 +1293,22 @@
     "error": "Erreur de connexion"
   },
   "thread": {
+    "subtasks": {
+      "retry": "Réessayer",
+      "title": "Sous-tâches",
+      "retention": "32 dernières tâches ; 12 000 derniers caractères par sortie.",
+      "stale": "Connexion indisponible. Dernier instantané affiché.",
+      "queued": "En attente",
+      "running": "En cours",
+      "completed": "Terminée",
+      "failed": "Échec",
+      "cancelled": "Annulée",
+      "interrupted": "Interrompue",
+      "unknown": "État inconnu",
+      "round": "Tour {{count}}",
+      "noOutput": "Aucune sortie visible pour le moment.",
+      "truncated": "La sortie précédente a été omise."
+    },
     "compaction": {
       "cancelled": "Compression du contexte annulée",
       "empty": "Aucun contexte à compresser.",

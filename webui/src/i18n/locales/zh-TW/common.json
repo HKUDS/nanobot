@@ -1293,6 +1293,22 @@
     "error": "連線錯誤"
   },
   "thread": {
+    "subtasks": {
+      "retry": "重試",
+      "title": "子任務",
+      "retention": "保留最近 32 個任務，每個任務顯示最後 12,000 個字元。",
+      "stale": "連線不可用，目前顯示上次快照。",
+      "queued": "排隊中",
+      "running": "執行中",
+      "completed": "已完成",
+      "failed": "失敗",
+      "cancelled": "已取消",
+      "interrupted": "已中斷",
+      "unknown": "狀態未知",
+      "round": "第 {{count}} 輪",
+      "noOutput": "尚無可見輸出。",
+      "truncated": "較早的輸出已省略。"
+    },
     "compaction": {
       "cancelled": "上下文壓縮已取消",
       "empty": "無需壓縮上下文",

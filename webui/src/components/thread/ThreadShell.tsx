@@ -11,6 +11,7 @@ import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { SubtasksPanel } from "@/components/thread/SubtasksPanel";
 import type {
   ComposerContextUsage,
   ComposerRoundUsage,
@@ -1571,6 +1572,7 @@ export function ThreadShell({
 
   const composer = (
     <>
+      {chatId && !temporary ? <SubtasksPanel key={chatId} client={client} chatId={chatId} /> : null}
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
           model={modelFallback.model}

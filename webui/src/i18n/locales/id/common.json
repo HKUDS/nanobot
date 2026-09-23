@@ -1293,6 +1293,22 @@
     "error": "Kesalahan koneksi"
   },
   "thread": {
+    "subtasks": {
+      "retry": "Coba lagi",
+      "title": "Subtugas",
+      "retention": "32 tugas terbaru; 12.000 karakter terakhir setiap keluaran.",
+      "stale": "Koneksi tidak tersedia. Menampilkan cuplikan terakhir.",
+      "queued": "Antrean",
+      "running": "Berjalan",
+      "completed": "Selesai",
+      "failed": "Gagal",
+      "cancelled": "Dibatalkan",
+      "interrupted": "Terputus",
+      "unknown": "Status tidak diketahui",
+      "round": "Putaran {{count}}",
+      "noOutput": "Belum ada keluaran yang terlihat.",
+      "truncated": "Keluaran sebelumnya dihilangkan."
+    },
     "compaction": {
       "cancelled": "Pemadatan konteks dibatalkan",
       "empty": "Tidak ada konteks yang perlu dipadatkan.",

@@ -14,6 +14,32 @@ published release.
 The published `nanobot-ai` wheel already includes the WebUI bundle. You only need
 the `webui/` source directory when you are changing the frontend itself.
 
+## Subtask outputs
+
+When a WebUI conversation delegates work, **Subtasks** above the composer shows
+the latest 32 child tasks. Expand a task for its status, iteration, elapsed time,
+recent tool names and visible answer text. Both inline consultations and background
+tasks use the existing subagent lifecycle. Output refreshes about every three seconds
+while the conversation is mounted and the browser visible; each task retains the
+latest 12,000 characters of its current answer and 20 tool names. This is not a raw
+trace viewer: reasoning, system prompts, tool arguments/results and provider error
+strings are not included. Model-produced answer text is rendered as plain text.
+
+Switching conversations or reconnecting reloads the parent-scoped snapshot. A failed
+read keeps the last result with an explicit stale-state notice; it does not claim
+that a disconnected task is still running. Ordinary records travel in the parent's
+existing session metadata and its normal save/follow-up lifecycle, not a separate
+journal. An abrupt shutdown can lose progress since the last parent save. A saved
+active task without a live execution is shown as interrupted after restart. Forks
+do not inherit child-task records. Deleting the parent revokes late updates.
+
+Temporary Chat still disables spawning subagents; this feature does not relax that
+policy. Transient sessions never save observer records, and read access to them is
+restricted to their owning connection. Output is not stored in browser storage.
+Older gateways without the snapshot action simply do not show this panel. The panel
+does not expose a global task list or introduce a second scheduler or cancellation
+mechanism; normal session stop controls retain their existing behavior.
+
 ## Open the WebUI
 
 Use the launcher:
