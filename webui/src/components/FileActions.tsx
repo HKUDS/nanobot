@@ -44,6 +44,12 @@ export function FileActions({
   const anchor = useRef({ getBoundingClientRect: () => new DOMRect(point.current.x, point.current.y, 0, 0) });
   const opener = useRef<HTMLElement | null>(null);
   const interactedOutside = useRef(false);
+  const copyGeneration = useRef(0);
+
+  const changeOpen = (next: boolean) => {
+    copyGeneration.current += 1;
+    setOpen(next);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -58,24 +64,27 @@ export function FileActions({
         if (!cancelled) setResolved(value);
       }).catch(() => { if (!cancelled) setLoadFailed(true); });
     }
-    return () => { cancelled = true; };
+    return () => { cancelled = true; copyGeneration.current += 1; };
   }, [open, path, metadata, resolveMetadata]);
 
   const copy = async (value: string) => {
+    const generation = ++copyGeneration.current;
     const success = await copyTextToClipboard(value);
+    // A dismissed/reopened menu or another reference owns its own feedback.
+    if (generation !== copyGeneration.current) return;
     setCopyStatus(success ? "copied" : "failed");
-    if (success) setOpen(false);
+    if (success) changeOpen(false);
   };
   const openMenu = (target: EventTarget, x: number, y: number) => {
     point.current = { x, y };
     opener.current = target instanceof Element ? target.closest<HTMLElement>("button, a, [tabindex]") : null;
     interactedOutside.current = false;
-    setOpen(true);
+    changeOpen(true);
   };
   const status = copyStatus ?? (loadFailed ? "unavailable" : !resolved && resolveMetadata ? "loading" : null);
 
   return (
-    <Menu.Root open={open} onOpenChange={setOpen}>
+    <Menu.Root open={open} onOpenChange={changeOpen}>
       <Menu.Anchor virtualRef={anchor} />
       <span
         className={cn("not-prose inline-flex max-w-full items-baseline align-baseline", className)}

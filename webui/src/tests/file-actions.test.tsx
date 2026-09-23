@@ -99,6 +99,39 @@ describe("File actions", () => {
     expect(copyTextToClipboard).toHaveBeenCalledWith("/new/notes.md");
   });
 
+  it.each([true, false])("ignores a late clipboard result (%s) after reopening the menu", async (result) => {
+    const user = userEvent.setup();
+    let finish!: (value: boolean) => void;
+    vi.mocked(copyTextToClipboard).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    render(<FileActions path="notes.md" metadata={details}><button>notes.md</button></FileActions>);
+    const reference = screen.getByRole("button", { name: "notes.md" });
+    fireEvent.contextMenu(reference);
+    await user.click(screen.getByRole("menuitem", { name: "Copy absolute path" }));
+    await user.keyboard("{Escape}");
+    fireEvent.contextMenu(reference);
+    await act(async () => finish(result));
+    expect(screen.getByRole("menu")).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Copy relative path" }));
+    expect(copyTextToClipboard).toHaveBeenLastCalledWith("notes.md");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("ignores a late clipboard result when the reference changes", async () => {
+    const user = userEvent.setup();
+    let finish!: (value: boolean) => void;
+    vi.mocked(copyTextToClipboard).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const view = (path: string, metadata: FileReferenceMetadata) => <FileActions path={path} metadata={metadata}><button>{path}</button></FileActions>;
+    const { rerender } = render(view("notes.md", details));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "notes.md" }));
+    await user.click(screen.getByRole("menuitem", { name: "Copy absolute path" }));
+    rerender(view("other.md", { path: "/workspace/other.md", relative_path: "other.md" }));
+    await act(async () => finish(true));
+    expect(screen.getByRole("menu")).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Copy absolute path" }));
+    expect(copyTextToClipboard).toHaveBeenLastCalledWith("/workspace/other.md");
+  });
+
   it("degrades to the original reference on an older gateway response", async () => {
     const user = userEvent.setup();
     render(<FileActionsProvider value={{ resolveMetadata: vi.fn().mockResolvedValue({ path: "/workspace/notes.md", content: "old preview response" }) }}>
