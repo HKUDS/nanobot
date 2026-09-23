@@ -1405,8 +1405,8 @@
         "duration": "Waktu pembuatan"
       },
       "queued": {
-        "label": "Panduan antrean",
-        "guide": "Pandu",
+        "label": "Menunggu dikirim",
+        "guide": "Kirim sekarang",
         "delete": "Hapus panduan",
         "edit": "Ubah panduan",
         "drag": "Seret untuk mengurutkan"
@@ -1583,6 +1583,7 @@
     }
   },
   "message": {
+    "actions": "Tindakan pesan",
     "streaming": "sedang mengalir",
     "delivery": {
       "sending": "Mengirim…",
@@ -1636,6 +1637,10 @@
     "activityWorkingFor": "Memproses selama {{duration}}",
     "activityWorked": "Selesai memproses",
     "activityWorkedFor": "Diproses selama {{duration}}",
+    "collapseActivity": "Ciutkan detail aktivitas",
+    "activityShow": "Lihat aktivitas",
+    "activityShowFor": "Lihat aktivitas {{duration}}",
+    "activityHide": "Sembunyikan aktivitas",
     "traceDetailsLoadFailed": "Detail aktivitas lengkap tidak dapat dimuat.",
     "retryTraceDetails": "Coba lagi",
     "retryConnection": "Koneksi gagal",
