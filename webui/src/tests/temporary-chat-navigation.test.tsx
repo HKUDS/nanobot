@@ -283,8 +283,13 @@ describe("temporary chat navigation", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
-    fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
+    // The same pane is reachable with taps only, without intercepting a native
+    // touch context menu or adding a button next to every rendered link.
+    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View links" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Preview website" }));
+    await screen.findByTestId("web-preview-panel");
+    expect(screen.queryByRole("dialog", { name: "Message actions" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
     await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
     await screen.findByText("Preview of notes.txt");

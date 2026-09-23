@@ -6,6 +6,8 @@
     "websiteInfo": "À propos des aperçus web"
   },
   "webPreview": {
+    "viewLinks": "Voir les liens",
+    "back": "Retour",
     "original": "Lien d’origine",
     "actions": "Actions du lien",
     "open": "Aperçu du site",

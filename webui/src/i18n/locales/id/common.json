@@ -6,6 +6,8 @@
     "websiteInfo": "Tentang pratinjau situs"
   },
   "webPreview": {
+    "viewLinks": "Lihat tautan",
+    "back": "Kembali",
     "original": "Tautan asli",
     "actions": "Tindakan tautan",
     "open": "Pratinjau situs",

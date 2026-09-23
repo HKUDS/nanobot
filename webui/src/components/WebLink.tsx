@@ -34,20 +34,13 @@ function WebsiteLink({ href, children, className, ...props }: ComponentPropsWith
   const anchor = useRef({ getBoundingClientRect: () => new DOMRect(point.current.x, point.current.y, 0, 0) });
   const interactedOutside = useRef(false);
   const generation = useRef(0);
-  const press = useRef<{ id: number; x: number; y: number; timer: number } | null>(null);
-  const suppressClick = useRef(false);
+  const pointerType = useRef("");
 
-  const cancelPress = () => {
-    if (press.current) window.clearTimeout(press.current.timer);
-    press.current = null;
-  };
   useEffect(() => () => {
-    cancelPress();
     generation.current += 1;
   }, []);
 
   const changeOpen = (next: boolean) => {
-    cancelPress();
     generation.current += 1;
     setOpen(next);
   };
@@ -70,38 +63,25 @@ function WebsiteLink({ href, children, className, ...props }: ComponentPropsWith
     <Menu.Anchor virtualRef={anchor} />
     <span className="inline max-w-full"
       onContextMenu={(event) => {
-        event.preventDefault(); event.stopPropagation();
+        event.stopPropagation();
+        // Touch keeps the browser's native link preview/copy/share menu. Older
+        // WebKit exposes contextmenu as a MouseEvent, so remember the last pointer.
+        const type = (event.nativeEvent as PointerEvent).pointerType || pointerType.current;
+        if (type === "touch" || (!type && window.matchMedia("(pointer: coarse)").matches)) return;
+        event.preventDefault();
         openAt(event.clientX, event.clientY);
       }}
       onKeyDown={(event) => {
-        suppressClick.current = false;
         if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
         event.preventDefault(); event.stopPropagation();
         const bounds = link.current!.getBoundingClientRect();
         openAt(bounds.left, bounds.bottom);
       }}
       onPointerDown={(event) => {
-        suppressClick.current = false;
-        cancelPress();
-        if (event.pointerType !== "touch" || !event.isPrimary || event.button !== 0) return;
-        const { pointerId: id, clientX: x, clientY: y } = event;
-        press.current = { id, x, y, timer: window.setTimeout(() => {
-          suppressClick.current = true;
-          openAt(x, y);
-        }, 600) };
-      }}
-      onPointerMove={(event) => {
-        const current = press.current;
-        if (current && (event.pointerId !== current.id || Math.hypot(event.clientX - current.x, event.clientY - current.y) > 10)) cancelPress();
-      }}
-      onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress}
-      onClickCapture={(event) => {
-        if (!suppressClick.current) return;
-        suppressClick.current = false;
-        event.preventDefault(); event.stopPropagation();
+        pointerType.current = event.pointerType;
       }}>
-      <a {...props} ref={link} href={href} target="_blank" rel="noreferrer noopener"
-        className={cn(className, "[-webkit-touch-callout:none]")}>{children}</a>
+      <a {...props} ref={link} data-web-link href={href} target="_blank" rel="noreferrer noopener"
+        className={className}>{children}</a>
     </span>
     {feedback === "copied" ? <span role="status" className="sr-only">{t("webPreview.copied")}</span> : null}
     <Menu.Portal container={portal ?? undefined}>

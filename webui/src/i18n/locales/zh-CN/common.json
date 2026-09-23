@@ -6,6 +6,8 @@
     "websiteInfo": "关于网页预览"
   },
   "webPreview": {
+    "viewLinks": "查看链接",
+    "back": "返回",
     "original": "原始链接",
     "actions": "链接操作",
     "open": "预览网页",

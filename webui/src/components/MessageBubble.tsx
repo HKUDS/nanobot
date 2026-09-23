@@ -14,6 +14,7 @@ import {
   CircleAlert,
   Clock3,
   Copy,
+  Link2,
   Quote,
   Wrench,
 } from "lucide-react";
@@ -131,6 +132,7 @@ interface MessageBlockMenuActionsProps {
   isTurnStreaming?: boolean;
   onForkFromHere?: () => void;
   activity?: MessageBlockMenuActivity;
+  onViewLinks?: () => void;
 }
 
 /** Actions and metadata shown after opening a visual message block's context panel. */
@@ -139,6 +141,7 @@ export function MessageBlockMenuActions({
   isTurnStreaming = false,
   onForkFromHere,
   activity,
+  onViewLinks,
 }: MessageBlockMenuActionsProps) {
   const { t } = useTranslation();
   const content = message.role === "assistant"
@@ -274,6 +277,10 @@ export function MessageBlockMenuActions({
             ) : null}
           </div>
         ) : null}
+        {onViewLinks ? <button type="button" data-message-links-trigger onClick={onViewLinks}
+          className="flex min-h-[var(--message-block-control-size)] w-full items-center gap-2 rounded-control px-2 py-1.5 text-[13px] text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <Link2 className="h-3.5 w-3.5" aria-hidden />{t("webPreview.viewLinks")}
+        </button> : null}
         <FallbackResponseSources
           sources={message.role === "assistant" ? message.responseSources : undefined}
           className="min-h-[var(--message-block-control-size)] gap-1"

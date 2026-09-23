@@ -145,45 +145,44 @@ describe("web link actions", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(link).not.toHaveFocus();
   });
-  it("opens on a touch hold and suppresses the following ghost click, but keeps the next tap usable", async () => {
+  it("leaves touch holds, native context menus and subsequent taps to the browser", async () => {
     vi.useFakeTimers();
     const onClick = vi.fn();
     render(<WebLink href="https://example.com/" onClick={onClick}>Example</WebLink>);
     const link = screen.getByRole("link", { name: "Example" });
     fireEvent.pointerDown(link, { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, clientX: 100, clientY: 150 });
-    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(fireEvent.contextMenu(link)).toBe(true);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(link.className).not.toContain("touch-callout");
     fireEvent.pointerUp(link, { pointerId: 1, pointerType: "touch" });
-    expect(fireEvent.click(link)).toBe(false);
-    expect(onClick).not.toHaveBeenCalled();
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
-    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
-    fireEvent.pointerDown(link, { pointerId: 2, pointerType: "touch", isPrimary: true, button: 0 });
-    fireEvent.pointerUp(link, { pointerId: 2, pointerType: "touch" });
     expect(fireEvent.click(link)).toBe(true);
     expect(onClick).toHaveBeenCalledTimes(1);
   });
-  it.each(["move", "cancel", "leave", "short tap", "second finger"])("cancels touch hold on %s", async (reason) => {
-    vi.useFakeTimers();
+  it("still supports a mouse and keyboard after touch on a hybrid device", () => {
     render(<WebLink href="https://example.com/">Example</WebLink>);
     const link = screen.getByRole("link", { name: "Example" });
-    fireEvent.pointerDown(link, { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, clientX: 100, clientY: 100 });
-    if (reason === "move") fireEvent.pointerMove(link, { pointerId: 1, clientX: 100, clientY: 125 });
-    else if (reason === "cancel") fireEvent.pointerCancel(link);
-    else if (reason === "leave") fireEvent.pointerLeave(link);
-    else if (reason === "short tap") fireEvent.pointerUp(link);
-    else fireEvent.pointerDown(link, { pointerId: 2, pointerType: "touch", isPrimary: false, button: 0 });
-    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    fireEvent.pointerDown(link, { pointerType: "touch" });
+    fireEvent.pointerDown(link, { pointerType: "mouse", button: 2 });
+    expect(fireEvent.contextMenu(link)).toBe(false);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.pointerDown(link, { pointerType: "touch" });
+    fireEvent.keyDown(link, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
-  it("cancels pending holds and discards an open menu when its URL changes", async () => {
-    vi.useFakeTimers();
+  it("leaves a coarse-pointer context menu native even without a preceding pointer event", () => {
+    const original = window.matchMedia;
+    const media = vi.spyOn(window, "matchMedia").mockImplementation(query => ({ ...original(query), matches: query === "(pointer: coarse)" }));
+    render(<WebLink href="https://example.com/">Example</WebLink>);
+    expect(fireEvent.contextMenu(screen.getByRole("link", { name: "Example" }))).toBe(true);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    media.mockRestore();
+  });
+  it("discards an open menu when its URL changes", () => {
     const view = (href: string) => <WebLink href={href}>Example</WebLink>;
     const { rerender } = render(view("https://example.com/old"));
-    fireEvent.pointerDown(screen.getByRole("link", { name: "Example" }), { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0 });
-    rerender(view("https://example.com/new"));
-    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     fireEvent.contextMenu(screen.getByRole("link", { name: "Example" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
     rerender(view("https://example.com/third"));

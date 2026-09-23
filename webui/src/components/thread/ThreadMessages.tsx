@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
+import { MessageLinksMenu, useMessageWebLinks } from "@/components/MessageLinksMenu";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import {
   AgentActivityCluster,
@@ -355,6 +356,7 @@ interface ThreadDisplayUnitProps {
 }
 
 interface MessageBlockMenuProps {
+  messageRoot: RefObject<HTMLElement>;
   message: UIMessage;
   isTurnStreaming: boolean;
   contextBlockKey: string;
@@ -372,6 +374,7 @@ interface MessageBlockMenuProps {
 }
 
 function MessageBlockMenu({
+  messageRoot,
   message,
   isTurnStreaming,
   contextBlockKey,
@@ -385,6 +388,9 @@ function MessageBlockMenu({
   const { t } = useTranslation();
   const contentRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const links = useMessageWebLinks(messageRoot, open);
+  const [linksShown, setLinksShown] = useState(false);
+  useEffect(() => { if (!open) setLinksShown(false); }, [open]);
   const [triggerHeight, setTriggerHeight] = useState(28);
   useLayoutEffect(() => {
     const trigger = triggerRef.current;
@@ -466,12 +472,15 @@ function MessageBlockMenu({
           "shadow-[0_2px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.24)]",
         )}
       >
-        <MessageBlockMenuActions
+        {linksShown && links.length > 0 ? <MessageLinksMenu links={links}
+          onBack={() => { setLinksShown(false); contentRef.current?.focus({ preventScroll: true }); }}
+          onClose={() => onOpenChange(false)} /> : <MessageBlockMenuActions
           message={message}
           isTurnStreaming={isTurnStreaming}
           onForkFromHere={onForkFromHere}
           activity={activity}
-        />
+          onViewLinks={links.length > 0 ? () => setLinksShown(true) : undefined}
+        />}
       </PopoverContent>
     </Popover>
   );
@@ -570,6 +579,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   ]);
   const blockMenu = unit.type === "message" && contextBlockKey !== undefined ? (
     <MessageBlockMenu
+      messageRoot={elementRef}
       message={unit.message}
       isTurnStreaming={isTurnStreaming}
       contextBlockKey={contextBlockKey}

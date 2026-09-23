@@ -6,6 +6,8 @@
     "websiteInfo": "Sobre as prévias de sites"
   },
   "webPreview": {
+    "viewLinks": "Ver links",
+    "back": "Voltar",
     "original": "Link original",
     "actions": "Ações do link",
     "open": "Pré-visualizar site",

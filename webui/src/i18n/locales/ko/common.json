@@ -6,6 +6,8 @@
     "websiteInfo": "웹 미리보기 정보"
   },
   "webPreview": {
+    "viewLinks": "링크 보기",
+    "back": "뒤로",
     "original": "원래 링크",
     "actions": "링크 작업",
     "open": "웹사이트 미리보기",

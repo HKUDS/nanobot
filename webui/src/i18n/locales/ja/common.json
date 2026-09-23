@@ -6,6 +6,8 @@
     "websiteInfo": "ウェブプレビューについて"
   },
   "webPreview": {
+    "viewLinks": "リンクを表示",
+    "back": "戻る",
     "original": "元のリンク",
     "actions": "リンク操作",
     "open": "ウェブサイトをプレビュー",

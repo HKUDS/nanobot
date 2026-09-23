@@ -6,6 +6,8 @@
     "websiteInfo": "Giới thiệu về xem trước trang web"
   },
   "webPreview": {
+    "viewLinks": "Xem liên kết",
+    "back": "Quay lại",
     "original": "Liên kết gốc",
     "actions": "Thao tác liên kết",
     "open": "Xem trước trang web",
