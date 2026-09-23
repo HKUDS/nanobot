@@ -1,4 +1,26 @@
 {
+  "webPreview": {
+    "original": "Liên kết gốc",
+    "actions": "Thao tác liên kết",
+    "open": "Xem trước trang web",
+    "external": "Mở trong trình duyệt",
+    "copy": "Sao chép liên kết",
+    "copied": "Đã sao chép liên kết",
+    "copyFailed": "Không thể sao chép liên kết",
+    "title": "Xem trước trang web",
+    "resize": "Đổi chiều rộng bản xem trước",
+    "refresh": "Tải lại trang web",
+    "close": "Đóng bản xem trước",
+    "isolated": "Bản xem trước cách ly và hạn chế. Đăng nhập và một số tương tác có thể không hoạt động.",
+    "blockedHint": "Một số trang chặn nhúng. Nếu nội dung trống hoặc bị lỗi, hãy mở trong trình duyệt.",
+    "loopback": "Localhost trỏ đến thiết bị của trình duyệt này, không phải gateway từ xa. Không có chuyển tiếp cổng.",
+    "native": "Ứng dụng gốc không hỗ trợ xem trước nhúng. Hãy mở liên kết trong trình duyệt.",
+    "unsupported": "Trình duyệt này không hỗ trợ xem trước cách ly thông tin xác thực. Hãy mở trong tab mới.",
+    "sameOrigin": "Không thể nhúng chính ứng dụng nanobot tại đây. Hãy mở trong tab mới.",
+    "mixedContent": "Trang HTTPS không thể xem trước trang HTTP tại đây. Hãy mở trong tab mới.",
+    "invalid": "Không thể xem trước địa chỉ này.",
+    "frame": "Xem trước trang web: {{host}}"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

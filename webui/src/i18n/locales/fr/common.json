@@ -1,4 +1,26 @@
 {
+  "webPreview": {
+    "original": "Lien d’origine",
+    "actions": "Actions du lien",
+    "open": "Aperçu du site",
+    "external": "Ouvrir dans le navigateur",
+    "copy": "Copier le lien",
+    "copied": "Lien copié",
+    "copyFailed": "Impossible de copier le lien",
+    "title": "Aperçu web",
+    "resize": "Redimensionner l’aperçu web",
+    "refresh": "Actualiser le site",
+    "close": "Fermer l’aperçu web",
+    "isolated": "Aperçu isolé et limité. La connexion et certaines interactions peuvent ne pas fonctionner.",
+    "blockedHint": "Certains sites bloquent l’intégration. Si la vue reste vide ou échoue, ouvrez-la dans le navigateur.",
+    "loopback": "Localhost désigne l’appareil de ce navigateur, pas une passerelle distante. Aucun port n’est redirigé.",
+    "native": "L’application native ne prend pas en charge les aperçus intégrés. Ouvrez ce lien dans le navigateur.",
+    "unsupported": "Ce navigateur ne prend pas en charge les aperçus aux identifiants isolés. Ouvrez un nouvel onglet.",
+    "sameOrigin": "L’application nanobot elle-même ne peut pas être intégrée ici. Ouvrez un nouvel onglet.",
+    "mixedContent": "Une page HTTPS ne peut pas afficher un site HTTP ici. Ouvrez un nouvel onglet.",
+    "invalid": "Cette adresse ne peut pas être prévisualisée.",
+    "frame": "Aperçu web : {{host}}"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

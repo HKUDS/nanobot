@@ -1,4 +1,26 @@
 {
+  "webPreview": {
+    "original": "原始連結",
+    "actions": "連結操作",
+    "open": "預覽網頁",
+    "external": "在瀏覽器中開啟",
+    "copy": "複製連結",
+    "copied": "已複製連結",
+    "copyFailed": "無法複製連結",
+    "title": "網頁預覽",
+    "resize": "調整網頁預覽寬度",
+    "refresh": "重新整理網頁",
+    "close": "關閉網頁預覽",
+    "isolated": "受限的隔離預覽，登入及部分互動功能可能無法使用。",
+    "blockedHint": "部分網站禁止嵌入。若頁面空白或載入失敗，請在瀏覽器中開啟。",
+    "loopback": "localhost 指向目前瀏覽器所在裝置，而非遠端閘道。不會自動轉送連接埠。",
+    "native": "原生用戶端暫不支援嵌入預覽，請在瀏覽器中開啟此連結。",
+    "unsupported": "此瀏覽器不支援憑證隔離預覽，請在新分頁中開啟。",
+    "sameOrigin": "無法在此嵌入 nanobot 應用程式本身，請在新分頁中開啟。",
+    "mixedContent": "HTTPS 頁面無法在此預覽 HTTP 網站，請在新分頁中開啟。",
+    "invalid": "無法預覽此位址。",
+    "frame": "網頁預覽：{{host}}"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

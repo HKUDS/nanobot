@@ -1,4 +1,26 @@
 {
+  "webPreview": {
+    "original": "Link original",
+    "actions": "Ações do link",
+    "open": "Pré-visualizar site",
+    "external": "Abrir no navegador",
+    "copy": "Copiar link",
+    "copied": "Link copiado",
+    "copyFailed": "Não foi possível copiar o link",
+    "title": "Prévia do site",
+    "resize": "Redimensionar prévia",
+    "refresh": "Atualizar site",
+    "close": "Fechar prévia do site",
+    "isolated": "Prévia isolada e limitada. O login e algumas interações podem não funcionar.",
+    "blockedHint": "Alguns sites bloqueiam a incorporação. Se a prévia ficar vazia ou falhar, abra no navegador.",
+    "loopback": "Localhost aponta para o dispositivo deste navegador, não para um gateway remoto. Nenhuma porta é encaminhada.",
+    "native": "O aplicativo nativo não permite prévias incorporadas. Abra o link no navegador.",
+    "unsupported": "Este navegador não permite prévias com credenciais isoladas. Abra em uma nova aba.",
+    "sameOrigin": "O próprio aplicativo nanobot não pode ser incorporado aqui. Abra em uma nova aba.",
+    "mixedContent": "Uma página HTTPS não pode exibir um site HTTP aqui. Abra em uma nova aba.",
+    "invalid": "Não é possível pré-visualizar este endereço.",
+    "frame": "Prévia do site: {{host}}"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
