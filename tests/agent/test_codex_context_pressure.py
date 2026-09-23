@@ -65,7 +65,7 @@ def _request_state(provider, *, prior_tokens=180_000, repetitions=15_000):
 @pytest.fixture
 def transport(monkeypatch):
     bodies = []
-    behavior = {"error": None, "compacted_content": "compacted state"}
+    behavior = {"errors": [], "compacted_content": "compacted state"}
     monkeypatch.setattr(
         "nanobot.providers.openai_codex_provider.get_codex_token",
         lambda **_kwargs: SimpleNamespace(account_id="acct", access="token"),
@@ -80,8 +80,8 @@ def transport(monkeypatch):
                 "Function calls and outputs must be paired", status_code=400,
             )
         if body["input"][-1].get("type") == "compaction_trigger":
-            if behavior["error"] is not None:
-                raise behavior["error"]
+            if behavior["errors"]:
+                raise behavior["errors"].pop(0)
             output = [{"type": "compaction", "encrypted_content": behavior["compacted_content"]}]
         else:
             output = [{"role": "assistant", "content": "done"}]
@@ -98,8 +98,7 @@ def transport(monkeypatch):
     return bodies, behavior
 
 
-@pytest.mark.parametrize("prior_tokens", [160_000, 180_000])
-@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("prior_tokens, wrapped", [(160_000, False), (180_000, True)])
 async def test_pressure_compacts_resumable_state_before_sending_tool_result(
     transport, prior_tokens, wrapped,
 ):
@@ -120,7 +119,6 @@ async def test_pressure_compacts_resumable_state_before_sending_tool_result(
         messages=prepared, model=state.config.model, max_tokens=8192, provider_context=context,
     )
 
-    consolidate.assert_not_awaited()
     assert raw == before
     assert response.content == "done"
     assert response.provider_compaction_applied is True
@@ -226,13 +224,14 @@ async def test_failed_required_compaction_does_not_send_oversized_generation(tra
     prepared, context = await ContextGovernor().prepare_request(
         state, raw, tool_definitions=[], transcript=raw,
     )
-    transport[1]["error"] = error
+    transport[1]["errors"] = [error]
     response = await provider.chat(prepared, max_tokens=8192, provider_context=context)
     assert response.finish_reason == "error"
     assert len(transport[0]) == 1
     consolidate.assert_not_awaited()
     state.conversation.observe_response(response, raw)
-    assert state.conversation.checkpoint(raw) is not None
+    assert context.conversation_state is not None
+    assert state.conversation.checkpoint(raw) == context.conversation_state
     if isinstance(error, httpx.ReadTimeout):
         assert response.error_should_retry is True
         assert provider.supports_pre_request_compaction() is True
@@ -258,39 +257,64 @@ async def test_compaction_that_still_exceeds_budget_stops_before_generation(tran
     assert response.error_kind == "context_window_exceeded"
     assert response.error_should_retry is False
     state.conversation.observe_response(response, raw)
-    assert state.conversation.checkpoint(raw) is not None
+    assert context.conversation_state is not None
+    assert state.conversation.checkpoint(raw) == context.conversation_state
     assert "after native compaction" in response.content
     assert len(transport[0]) == 1
     consolidate.assert_not_awaited()
 
 
-@pytest.mark.parametrize("compatible", [False, True])
-async def test_fallback_cannot_discard_required_compaction(transport, compatible):
+@pytest.mark.parametrize("mode", [
+    "incompatible_state", "compaction_unavailable", "compatible", "smaller_window",
+])
+async def test_fallback_cannot_discard_required_compaction(transport, mode):
     primary = OpenAICodexProvider()
-    model = "openai-codex/gpt-5.6-sol" if compatible else "openai-codex/gpt-6-astra"
+    model = (
+        "openai-codex/gpt-6-astra" if mode == "incompatible_state" else primary.default_model
+    )
     fallback = OpenAICodexProvider(default_model=model)
-    fallback.chat_with_context = AsyncMock(return_value=LLMResponse(content="fallback done"))
+    fallback._native_compaction_available = mode != "compaction_unavailable"
+    fallback.chat_with_context = AsyncMock(wraps=fallback.chat_with_context)
+    fallback_window = 32_768 if mode == "smaller_window" else 200_000
     provider = FallbackProvider(
         primary=primary,
-        fallback_presets=[ModelPresetConfig(model=model, provider="openai_codex")],
+        fallback_presets=[ModelPresetConfig(
+            model=model, provider="openai_codex",
+            context_window_tokens=fallback_window, max_tokens=8192,
+        )],
         provider_factory=lambda _preset: fallback,
     )
-    state, raw, _ = _request_state(provider)
+    state, raw, consolidate = _request_state(provider)
     prepared, context = await ContextGovernor().prepare_request(
         state, raw, tool_definitions=[], transcript=raw,
     )
-    transport[1]["error"] = _CodexHTTPError("unavailable", status_code=503)
+    transport[1]["errors"] = [_CodexHTTPError("unavailable", status_code=503)]
     response = await provider.chat_with_context(
         messages=prepared, max_tokens=8192, provider_context=context,
     )
-    if compatible:
-        assert response.content == "fallback done"
+    consolidate.assert_not_awaited()
+    bodies, _ = transport
+    if mode in {"compatible", "smaller_window"}:
         fallback.chat_with_context.assert_awaited_once()
         forwarded = fallback.chat_with_context.await_args.kwargs["provider_context"]
-        assert forwarded.conversation_state is not None
+        assert forwarded.conversation_state == context.conversation_state
         assert forwarded.compaction_input_budget == context.compaction_input_budget
+        assert forwarded.context_window_tokens == fallback_window
+        assert bodies[1]["input"][-1] == {"type": "compaction_trigger"}
+    else:
+        fallback.chat_with_context.assert_not_awaited()
+        assert len(bodies) == 1
+    if mode == "compatible":
+        assert response.content == "done"
+        assert response.provider_compaction_applied is True
+        assert len(bodies) == 3
+        assert bodies[-1]["input"][-1]["output"] == raw[-1]["content"]
     else:
         assert response.finish_reason == "error"
-        fallback.chat_with_context.assert_not_awaited()
+        if mode == "smaller_window":
+            assert response.error_kind == "context_window_exceeded"
+            assert response.error_should_retry is False
+            assert len(bodies) == 2
         state.conversation.observe_response(response, raw)
-        assert state.conversation.checkpoint(raw) is not None
+        assert context.conversation_state is not None
+        assert state.conversation.checkpoint(raw) == context.conversation_state

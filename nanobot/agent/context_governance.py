@@ -662,34 +662,32 @@ class ContextGovernor:
                 context_window_tokens=state.config.context_window_tokens,
             )
         )
-        if (
-            pressure is not None
-            and self.input_budget(state.config) > 0
-            and provider_context is not None
-            and provider_context.conversation_state is not None
-            and state.config.provider.supports_pre_request_compaction(state.config.model) is True
-        ):
-            # Keep the resumable state until its owner has compacted it. Inline
-            # server compaction alone cannot make an oversized request safe.
-            provider_context = replace(
-                provider_context, compaction_input_budget=self.input_budget(state.config),
-            )
-            logger.info(
-                "Request requires provider pre-request compaction for {}: tokens={} budget={} via {}",
-                state.config.session_key or "default", pressure[0],
-                provider_context.compaction_input_budget, pressure[1],
-            )
-        elif pressure is not None:
-            prepared = await self._compact_request_history(
-                state,
-                state.compaction,
-                messages,
-                pressure,
-                tool_definitions=tool_definitions,
-            )
-            provider_context = state.conversation.independent_request_context(
-                context_window_tokens=state.config.context_window_tokens,
-            )
+        if pressure is not None:
+            input_budget = self.input_budget(state.config)
+            if (
+                input_budget > 0
+                and provider_context is not None
+                and provider_context.conversation_state is not None
+                and state.config.provider.supports_pre_request_compaction(state.config.model) is True
+            ):
+                # Keep the resumable state until its owner has compacted it. Inline
+                # server compaction alone cannot make an oversized request safe.
+                provider_context = replace(provider_context, compaction_input_budget=input_budget)
+                logger.info(
+                    "Request requires provider pre-request compaction for {}: tokens={} budget={} via {}",
+                    state.config.session_key or "default", pressure[0], input_budget, pressure[1],
+                )
+            else:
+                prepared = await self._compact_request_history(
+                    state,
+                    state.compaction,
+                    messages,
+                    pressure,
+                    tool_definitions=tool_definitions,
+                )
+                provider_context = state.conversation.independent_request_context(
+                    context_window_tokens=state.config.context_window_tokens,
+                )
         if state.events.publish is not None:
             provider_context = replace(
                 provider_context or ProviderCallContext(), events=state.events,
