@@ -85,7 +85,8 @@ class MemoryStore:
         self._malformed_entry_logged = False  # rate-limit bad history shape warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._dream_prompt_oversize_logged = False
-        self._append_lock = threading.Lock()  # serialize cursor allocation + append
+        # Serialize cursor allocation, append, and history compaction.
+        self._append_lock = threading.Lock()
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
         ])
@@ -407,31 +408,32 @@ class MemoryStore:
         """Drop oldest processed entries without discarding pending Dream input."""
         if self.max_history_entries <= 0:
             return
-        entries = self._read_entries()
-        if len(entries) <= self.max_history_entries:
-            return
-        last_dream_cursor = self.get_last_dream_cursor()
-        first_unprocessed = next(
-            (
-                index
-                for index, entry in enumerate(entries)
-                if (
-                    (cursor := self._valid_cursor(entry.get("cursor"))) is not None
-                    and cursor > last_dream_cursor
-                )
-            ),
-            len(entries),
-        )
-        keep_from = min(len(entries) - self.max_history_entries, first_unprocessed)
-        kept = entries[keep_from:]
-        if len(kept) > self.max_history_entries:
-            logger.warning(
-                "History compaction retained {} unprocessed entries beyond the configured "
-                "limit of {}",
-                len(kept),
-                self.max_history_entries,
+        with self._append_lock:
+            entries = self._read_entries()
+            if len(entries) <= self.max_history_entries:
+                return
+            last_dream_cursor = self.get_last_dream_cursor()
+            first_unprocessed = next(
+                (
+                    index
+                    for index, entry in enumerate(entries)
+                    if (
+                        (cursor := self._valid_cursor(entry.get("cursor"))) is not None
+                        and cursor > last_dream_cursor
+                    )
+                ),
+                len(entries),
             )
-        self._write_entries(kept)
+            keep_from = min(len(entries) - self.max_history_entries, first_unprocessed)
+            kept = entries[keep_from:]
+            if len(kept) > self.max_history_entries:
+                logger.warning(
+                    "History compaction retained {} unprocessed entries beyond the configured "
+                    "limit of {}",
+                    len(kept),
+                    self.max_history_entries,
+                )
+            self._write_entries(kept)
 
     # -- JSONL helpers -------------------------------------------------------
 

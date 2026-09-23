@@ -193,6 +193,78 @@ class TestHistoryWithCursor:
         assert len(entries) == 2
         assert entries[0]["cursor"] in {4, 5}
 
+    def test_compact_history_serializes_with_append(self, tmp_path):
+        """Appending after a compaction snapshot must not be overwritten."""
+        import threading
+
+        store = MemoryStore(tmp_path, max_history_entries=2)
+        for index in range(1, 4):
+            store.append_history(f"event {index}")
+        store.set_last_dream_cursor(3)
+
+        snapshot_ready = threading.Event()
+        append_started = threading.Event()
+        resume = threading.Event()
+        original_read_entries = store._read_entries
+        original_write_entries = store._write_entries
+        compaction_errors: list[BaseException] = []
+        append_results: list[int] = []
+        append_errors: list[BaseException] = []
+
+        def paused_read_entries():
+            entries = original_read_entries()
+            snapshot_ready.set()
+            if not resume.wait(timeout=5):
+                raise TimeoutError("Timed out waiting to resume history compaction")
+            return entries
+
+        def checked_write_entries(entries):
+            assert store._append_lock.locked(), "Compaction released the lock before writing"
+            original_write_entries(entries)
+
+        def compact():
+            try:
+                store.compact_history()
+            except BaseException as exc:
+                compaction_errors.append(exc)
+
+        def append():
+            try:
+                append_started.set()
+                append_results.append(store.append_history("new event"))
+            except BaseException as exc:
+                append_errors.append(exc)
+
+        store._read_entries = paused_read_entries
+        store._write_entries = checked_write_entries
+        compact_thread = threading.Thread(target=compact, daemon=True)
+        append_thread = threading.Thread(target=append, daemon=True)
+        try:
+            compact_thread.start()
+            assert snapshot_ready.wait(timeout=5), "Compaction did not read its snapshot"
+
+            append_thread.start()
+            assert append_started.wait(timeout=5), "Append thread did not start"
+            if not store._append_lock.locked():
+                append_thread.join(timeout=5)
+                assert not append_thread.is_alive(), "Append did not finish before compaction resumed"
+            resume.set()
+        finally:
+            resume.set()
+            if compact_thread.ident is not None:
+                compact_thread.join(timeout=5)
+            if append_thread.ident is not None:
+                append_thread.join(timeout=5)
+
+        assert not compact_thread.is_alive(), "Compaction thread did not finish"
+        assert not append_thread.is_alive(), "Append thread did not finish"
+        assert not compaction_errors
+        assert not append_errors
+        assert append_results == [4]
+        entries = store._read_entries()
+        assert [entry["cursor"] for entry in entries] == [2, 3, 4]
+        assert entries[-1]["content"] == "new event"
+
     def test_compact_history_preserves_entries_after_dream_cursor(self, tmp_path):
         store = MemoryStore(tmp_path, max_history_entries=50)
         for index in range(1, 101):
@@ -229,6 +301,7 @@ class TestHistoryWithCursor:
         store = MemoryStore(tmp_path)
         store.append_history("event 1")
         entries = store.read_unprocessed_history(since_cursor=0)
+        original_content = store.history_file.read_bytes()
 
         # Mock os.replace to raise an exception
         def failing_replace(*args, **kwargs):
@@ -244,6 +317,7 @@ class TestHistoryWithCursor:
 
         # Original file should still exist (because replace failed)
         assert store.history_file.exists()
+        assert store.history_file.read_bytes() == original_content
 
 
 class TestAppendHistoryHardCap:
