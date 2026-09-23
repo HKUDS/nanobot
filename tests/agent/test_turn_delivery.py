@@ -9,12 +9,40 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.events import RetryStatusEvent
 from nanobot.providers.base import LLMProvider, ProviderCallContext
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
+
+
+@pytest.mark.parametrize("channel", ["telegram", "discord", "websocket", "cli", "custom"])
+@pytest.mark.parametrize("legacy_route", [False, True])
+async def test_heartbeat_compaction_never_reaches_its_result_destination(channel, legacy_route):
+    factory = TurnDeliveryFactory(MessageBus())
+    msg = InboundMessage(channel=channel, sender_id="user", chat_id="chat", content="check")
+    delivery = factory.create(msg, HEARTBEAT_SESSION_KEY)
+    metadata = {"_compaction_route": {"channel": channel, "chat_id": "chat"}} if legacy_route else {}
+    idle_events = factory.session_events(HEARTBEAT_SESSION_KEY, metadata)
+    for sink in (delivery.events, idle_events):
+        assert not sink.accepts(ContextCompactionEvent)
+        for phase in ("started", "succeeded", "failed", "cancelled"):
+            await sink.emit(ContextCompactionEvent("heartbeat-compact", phase))
+    assert factory.bus.outbound.empty()
+
+    delivery.remember_session_route(metadata)
+    assert "_compaction_route" not in metadata
+
+    # The same destination still receives the user's own compaction lifecycle.
+    user_delivery = factory.create(msg, f"{channel}:chat")
+    user_delivery.remember_session_route(metadata)
+    for sink in (user_delivery.events, factory.session_events(f"{channel}:chat", metadata)):
+        await sink.emit(ContextCompactionEvent("user-compact", "succeeded"))
+        assert factory.bus.outbound.get_nowait().event == ContextCompactionEvent(
+            "user-compact", "succeeded",
+        )
 
 
 @pytest.mark.parametrize("unified", [False, True])
