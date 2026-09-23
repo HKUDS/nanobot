@@ -483,7 +483,16 @@ describe("MarkdownTextRenderer", () => {
     expect(surface).toHaveAttribute("role", "region");
     expect(surface).toHaveAttribute("tabindex", "0");
     expect(surface).toHaveAccessibleName("Data table");
-    expect(screen.getByRole("table")).toHaveTextContent("nanobot");
+    const table = screen.getByRole("table");
+    expect(table).toHaveTextContent("nanobot");
+    expect(table).not.toHaveClass("min-w-max");
+    expect(table).toHaveClass(
+      "table-fixed",
+      "[&_th]:whitespace-normal",
+      "[&_th]:[overflow-wrap:anywhere]",
+      "[&_td]:whitespace-normal",
+      "[&_td]:[overflow-wrap:anywhere]",
+    );
     expect(container.firstElementChild).toHaveClass("space-y-4");
     expect(container.firstElementChild).not.toHaveClass("space-y-0");
   });
