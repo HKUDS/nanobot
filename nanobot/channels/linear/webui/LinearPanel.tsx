@@ -29,11 +29,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { channelValidationStatusClass } from "@/components/settings/channels/ChannelValidationProgress";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { configureChannel, disableNanobotFeature, startChannelConnect } from "@/lib/api";
-import type { ChannelInstallationSummary } from "@/lib/types";
+import { configureChannel, disableNanobotFeature } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
+import { manageLinearWorkspace } from "./api";
+import type { LinearInstallationSummary } from "./types";
 import { LinearConnectFlow } from "./LinearConnectFlow";
 import { linearManifestUrl } from "./manifest";
 
@@ -75,7 +76,7 @@ export function LinearPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [publicUrlPromptOpen, setPublicUrlPromptOpen] = useState(false);
-  const [installations, setInstallations] = useState<ChannelInstallationSummary[]>([]);
+  const [installations, setInstallations] = useState<LinearInstallationSummary[]>([]);
   const [loadingInstallations, setLoadingInstallations] = useState(false);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [disconnectConfirmId, setDisconnectConfirmId] = useState<string | null>(null);
@@ -122,7 +123,7 @@ export function LinearPanel({
     setWorkspaceNotice(null);
     setWorkspaceError(null);
     try {
-      const payload = await startChannelConnect(client, "linear", { operation: "inspect" });
+      const payload = await manageLinearWorkspace(client, { operation: "inspect" });
       setInstallations(payload.installations ?? []);
     } catch (err) {
       setWorkspaceError((err as Error).message);
@@ -135,12 +136,12 @@ export function LinearPanel({
     if (feature.runtime_status === "running") void loadInstallations();
   }, [feature.runtime_status, loadInstallations]);
 
-  const disconnectWorkspace = async (installation: ChannelInstallationSummary) => {
+  const disconnectWorkspace = async (installation: LinearInstallationSummary) => {
     setDisconnectingId(installation.organization_id);
     setWorkspaceNotice(null);
     setWorkspaceError(null);
     try {
-      const payload = await startChannelConnect(client, "linear", {
+      const payload = await manageLinearWorkspace(client, {
         operation: "disconnect",
         organization_id: installation.organization_id,
       });

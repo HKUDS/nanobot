@@ -815,12 +815,12 @@ export async function runPairingAction(
   return mutation<PairingPayload>(transport, `settings.pairing.${action}`, { code });
 }
 
-export async function startChannelConnect(
+export async function startChannelConnect<T = ChannelConnectPayload>(
   transport: WebUIMutationTransport,
   channel: string,
   params: Readonly<Record<string, string | boolean>> = {},
-): Promise<ChannelConnectPayload> {
-  return mutation<ChannelConnectPayload>(
+): Promise<T> {
+  return mutation<T>(
     transport,
     "settings.channel.connect.start",
     {
