@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from "react";
-import { FileIcon, ImageIcon, PlaySquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
@@ -7,6 +6,7 @@ import type { UIMediaAttachment } from "@/lib/types";
 import { ImageThumbnail } from "@/components/ImageGallery";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { useRegisterInlineImage } from "@/components/InlineImageContext";
+import { FileReferenceIcon, fileKindForPath } from "@/components/FileReferenceChip";
 
 interface AttachmentTileProps {
   attachment: UIMediaAttachment;
@@ -58,14 +58,12 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     );
   }
 
-  const Icon = attachment.kind === "video"
-    ? PlaySquare
-    : attachment.kind === "image"
-      ? ImageIcon
-      : FileIcon;
+  const fileKind = attachment.kind === "file"
+    ? fileKindForPath(attachment.name || attachment.url || "")
+    : attachment.kind;
   const body = (
     <>
-      <Icon className="h-4 w-4 flex-none" aria-hidden />
+      <FileReferenceIcon kind={fileKind} className="size-4" />
       <span className="min-w-0 truncate">{attachment.name ?? label}</span>
     </>
   );

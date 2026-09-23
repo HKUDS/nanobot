@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import { Globe2, Image, PanelRightClose, X } from "lucide-react";
+import { Globe2, PanelRightClose, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FileReferenceIcon, fileKindForPath, splitFilePath } from "@/components/FileReferenceChip";
 import { FileActions } from "@/components/FileActions";
@@ -93,8 +93,8 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
                 }}
                 className="flex h-8 min-w-0 items-center gap-1.5 rounded-compact pl-2.5 pr-1.5 text-[12.5px] font-medium leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
                 <span aria-hidden className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">
-                  {tab.kind === "web" ? <Globe2 className="size-3.5" /> : /\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(tab.value)
-                    ? <Image className="size-3.5" /> : <FileReferenceIcon kind={fileKindForPath(tab.value)} interactive={false} />}
+                  {tab.kind === "web" ? <Globe2 className="size-3.5" />
+                    : <FileReferenceIcon kind={fileKindForPath(tab.value)} className="size-3.5" />}
                 </span>
                 <span className="truncate">{name}</span>
               </button>

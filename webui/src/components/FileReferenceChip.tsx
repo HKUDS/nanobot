@@ -1,5 +1,5 @@
 import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { ImageIcon } from "lucide-react";
+import { File, FileCode2, FileImage, FileJson2, FileText, FileVideo2, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FileActions, useFilePreviewLoader } from "@/components/FileActions";
 import { inferMediaKind } from "@/lib/media";
@@ -23,7 +23,9 @@ export type FileReferenceKind =
   | "notebook"
   | "python"
   | "react"
-  | "typescript";
+  | "text"
+  | "typescript"
+  | "video";
 
 interface FileReferenceChipProps {
   path: string;
@@ -95,7 +97,7 @@ export function FileReferenceChip({
                 ],
               )}
             >
-              <FileReferenceIcon kind={kind} interactive={interactive} />
+              <FileReferenceIcon kind={kind} className="translate-y-[0.12em]" />
               <span
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
@@ -192,7 +194,8 @@ export function splitFilePath(path: string): { directory: string; name: string }
 }
 
 export function fileKindForPath(path: string): FileReferenceKind {
-  if (inferMediaKind({ url: path }) === "image") return "image";
+  const mediaKind = inferMediaKind({ url: path });
+  if (mediaKind === "image" || mediaKind === "video") return mediaKind;
   const normalized = path.toLowerCase();
   const name = normalized.split(/[\\/]/).pop() ?? normalized;
   const ext = name.includes(".") ? name.split(".").pop() ?? "" : "";
@@ -200,6 +203,8 @@ export function fileKindForPath(path: string): FileReferenceKind {
     return "default";
   }
   switch (ext) {
+    case "avif":
+      return "image";
     case "py":
     case "pyi":
       return "python";
@@ -229,123 +234,32 @@ export function fileKindForPath(path: string): FileReferenceKind {
       return "markdown";
     case "ipynb":
       return "notebook";
+    case "txt":
+    case "log":
+      return "text";
     default:
       return "default";
   }
 }
 
-export function FileReferenceIcon({ kind, interactive }: { kind: FileReferenceKind; interactive: boolean }) {
-  if (kind === "image") return <ImageIcon aria-hidden className="h-[1em] w-[1em] shrink-0 translate-y-[0.12em]" />;
-  if (kind === "python") {
-    return (
-      <svg
-        aria-hidden
-        className="h-[1em] w-[1em] shrink-0 translate-y-[0.12em]"
-        viewBox="0 0 24 24"
-      >
-        <path
-          d="M11.9 2.3c-3 0-4.5.8-4.5 2.3v2.1h4.8v.8H5.5C4 7.5 3 8.8 3 10.8v2.1c0 1.8 1.1 3 2.7 3h1.6v-2.3c0-1.7 1.4-3.1 3.1-3.1h4.2c1.3 0 2.3-1 2.3-2.3V4.6c0-1.4-1.5-2.3-4.6-2.3h-.4Z"
-          fill="#3776AB"
-        />
-        <path
-          d="M12.1 21.7c3 0 4.5-.8 4.5-2.3v-2.1h-4.8v-.8h6.7c1.5 0 2.5-1.3 2.5-3.3v-2.1c0-1.8-1.1-3-2.7-3h-1.6v2.3c0 1.7-1.4 3.1-3.1 3.1H9.4c-1.3 0-2.3 1-2.3 2.3v3.6c0 1.4 1.5 2.3 4.6 2.3h.4Z"
-          fill="#FFD43B"
-        />
-        <circle cx="9" cy="5.1" r="0.8" fill="#fff" />
-        <circle cx="15" cy="18.9" r="0.8" fill="#5C3B00" opacity="0.85" />
-      </svg>
-    );
-  }
-  if (kind === "react") {
-    return (
-      <svg
-        aria-hidden
-        className={cn("h-[0.92em] w-[0.92em] shrink-0 translate-y-[0.11em]", interactive && "text-sky-500 dark:text-sky-300")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="1.9" fill="currentColor" stroke="none" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" transform="rotate(60 12 12)" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" transform="rotate(120 12 12)" />
-      </svg>
-    );
-  }
-  if (kind === "default") {
-    return (
-      <svg
-        aria-hidden
-        className={cn("h-[0.92em] w-[0.92em] shrink-0 translate-y-[0.11em]", interactive && "text-sky-500 dark:text-sky-300")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
-        <path d="M14 2v5h5" />
-      </svg>
-    );
-  }
-  const label = fileKindLabel(kind);
-  return (
-    <svg
-      aria-hidden
-      className={cn("h-[0.96em] w-[0.96em] shrink-0 translate-y-[0.12em]", interactive && "text-sky-500 dark:text-sky-300")}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
-      <path
-        d="M7 3.5h6.6L18 7.9V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"
-        fill="currentColor"
-        opacity="0.12"
-      />
-      <path
-        d="M13.5 3.75V8h4.25M7 3.5h6.6L18 7.9V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <text
-        x="12"
-        y="15.7"
-        textAnchor="middle"
-        fill="currentColor"
-        fontSize={label.length > 1 ? "5.8" : "7.2"}
-        fontWeight="800"
-        letterSpacing="-0.2"
-      >
-        {label}
-      </text>
-    </svg>
-  );
-}
+const FILE_ICONS = {
+  default: File,
+  css: FileCode2,
+  html: FileCode2,
+  image: FileImage,
+  javascript: FileCode2,
+  json: FileJson2,
+  markdown: FileText,
+  notebook: FileCode2,
+  python: FileCode2,
+  react: FileCode2,
+  text: FileText,
+  typescript: FileCode2,
+  video: FileVideo2,
+} satisfies Record<FileReferenceKind, LucideIcon>;
 
-function fileKindLabel(kind: FileReferenceKind): string {
-  switch (kind) {
-    case "css":
-      return "#";
-    case "html":
-      return "H";
-    case "javascript":
-      return "JS";
-    case "json":
-      return "{}";
-    case "markdown":
-      return "M";
-    case "notebook":
-      return "N";
-    case "python":
-      return "PY";
-    case "typescript":
-      return "TS";
-    default:
-      return "";
-  }
+/** The same file silhouette and stroke in replies, tabs, and attachment tiles. */
+export function FileReferenceIcon({ kind, className }: { kind: FileReferenceKind; className?: string }) {
+  const Icon = FILE_ICONS[kind];
+  return <Icon aria-hidden strokeWidth={1.75} className={cn("h-[1em] w-[1em] shrink-0", className)} />;
 }
