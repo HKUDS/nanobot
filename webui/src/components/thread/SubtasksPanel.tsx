@@ -63,7 +63,7 @@ export function SubtasksPanel({ client, chatId }: {
       <span className="flex-1">{t("thread.subtasks.title")} <span className="text-muted-foreground">({tasks.length})</span></span>
       <ChevronDown className="size-4 text-muted-foreground" aria-hidden />
     </button>
-    <div hidden={!expanded} className="max-h-[min(50vh,26rem)] space-y-2 overflow-y-auto px-3 pb-3">
+    <div hidden={!expanded} className="max-h-[min(25dvh,16rem)] space-y-2 overflow-y-auto px-3 pb-3">
       <p className="text-xs text-muted-foreground">{t("thread.subtasks.retention")}</p>
       {error ? <div role="status" className="flex flex-wrap items-center gap-2 text-xs">
         {t("thread.subtasks.stale")}<Button variant="ghost" size="sm" onClick={() => setRefresh((n) => n + 1)}>{t("thread.subtasks.retry")}</Button>
