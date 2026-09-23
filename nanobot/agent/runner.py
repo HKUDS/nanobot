@@ -41,11 +41,6 @@ from nanobot.providers.base import (
     ProviderConversationState,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
-from nanobot.runtime_context import (
-    RUNTIME_CONTEXT_HISTORY_META,
-    RUNTIME_CONTEXT_MESSAGE_META,
-    public_history_message,
-)
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.summary import SessionSummaryCheckpoint
 from nanobot.utils.helpers import (
@@ -150,28 +145,6 @@ class AgentRunner:
         self.context_governor = ContextGovernor()
 
     @staticmethod
-    def _injection_preview(injections: list[dict[str, Any]]) -> str:
-        if not tool_log_content_allowed():
-            return "[content hidden]"
-        parts: list[str] = []
-        for message in injections:
-            if is_hidden_history_message(message):
-                parts.append("[content hidden]")
-                continue
-            metadata = message.get("_meta")
-            marker = (
-                cast(dict[object, object], metadata).get(RUNTIME_CONTEXT_MESSAGE_META)
-                if isinstance(metadata, dict) else None
-            )
-            content = public_history_message({
-                "content": message.get("content"),
-                RUNTIME_CONTEXT_HISTORY_META: marker,
-            }).get("content")
-            parts.append(content if isinstance(content, str) else "[non-text content]")
-        text = "\n\n".join(parts)
-        return text[:80] + "..." if len(text) > 80 else text
-
-    @staticmethod
     def _append_injected_messages(
         messages: list[dict[str, Any]],
         injections: list[dict[str, Any]],
@@ -232,9 +205,17 @@ class AgentRunner:
                 )
         self._append_injected_messages(messages, injections)
         if real_injection:
+            preview = "[content hidden]"
+            if tool_log_content_allowed():
+                preview = "\n\n".join(
+                    message["content"] for message in injections
+                    if isinstance(message.get("content"), str)
+                    and not is_hidden_history_message(message)
+                )
+                preview = preview[:80] + "..." if len(preview) > 80 else preview
             logger.info(
                 "Injected {} follow-up message(s) {} (snapshot {}): {}",
-                len(injections), phase, injection_cycles, self._injection_preview(injections),
+                len(injections), phase, injection_cycles, preview,
             )
         else:
             logger.info("Injected caller-requested continuation {}", phase)

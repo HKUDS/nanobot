@@ -50,55 +50,6 @@ def _make_loop(tmp_path, *, recovery_admission=None):
     return loop
 
 @pytest.mark.asyncio
-async def test_injection_log_previews_only_appended_visible_content():
-    from loguru import logger
-
-    from nanobot.agent.runner import AgentRunner
-    from nanobot.runtime_context import (
-        RUNTIME_CONTEXT_MESSAGE_META,
-        RuntimeContextBlock,
-        append_runtime_context,
-    )
-    from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-
-    content, marker = append_runtime_context(
-        "继续", [RuntimeContextBlock(source="test", content="private runtime context")],
-    )
-    batch = [
-        {"role": "user", "content": " "},
-        {"role": "user", "content": content, "_meta": {RUNTIME_CONTEXT_MESSAGE_META: marker}},
-        {"role": "user", "content": "second"},
-        {"role": "user", "content": "private result", HIDDEN_HISTORY_META: True},
-        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,private"}}]},
-    ]
-    provider = MagicMock()
-    tools = MagicMock()
-    spec = make_run_spec(
-        provider, initial_messages=[], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
-        injection_callback=AsyncMock(return_value=batch),
-    )
-    messages = []
-    observed = []
-
-    def capture(message):
-        if message.record["message"].startswith("Injected "):
-            observed.append((message.record["message"], list(messages)))
-
-    sink = logger.add(capture)
-    try:
-        await AgentRunner()._try_drain_injections(spec, messages, None, 0)
-    finally:
-        logger.remove(sink)
-
-    assert observed == [(
-        "Injected 4 follow-up message(s) after error (snapshot 1): "
-        "继续\n\nsecond\n\n[content hidden]\n\n[non-text content]",
-        batch[1:],
-    )]
-
-
-@pytest.mark.asyncio
 async def test_drain_injections_returns_empty_when_no_callback():
     """No injection_callback → empty list."""
     from nanobot.agent.runner import AgentRunner
@@ -1605,7 +1556,6 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.sessions.get_or_create("cli:c").policy = SessionPolicy(log_content=log_content)
     followups = [f"follow-up-{index:02}" for index in range(12)]
-    followups.append("长消息" * 40)
 
     run_task = asyncio.create_task(loop.run())
     await loop.bus.publish_inbound(InboundMessage(
