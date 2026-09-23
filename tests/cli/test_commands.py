@@ -84,6 +84,7 @@ class _GatewayAgentContractStub:
     """Minimal stable AgentLoop surface required by gateway assembly tests."""
 
     tools = ToolRegistry()
+    exec_sessions = None
 
     @staticmethod
     def mcp_runtime_status() -> dict[str, str]:
