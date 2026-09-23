@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "Xem trước",
+    "closeTab": "Đóng {{name}}",
+    "closeAll": "Đóng khung xem trước",
+    "websiteInfo": "Giới thiệu về xem trước trang web"
+  },
   "webPreview": {
     "original": "Liên kết gốc",
     "actions": "Thao tác liên kết",
@@ -1697,6 +1703,11 @@
     "continue": "Tiếp tục"
   },
   "lightbox": {
+    "viewAll": "Xem tất cả {{count}} ảnh",
+    "zoomIn": "Phóng to",
+    "zoomOut": "Thu nhỏ",
+    "resetZoom": "Vừa khung hình",
+    "gestures": "Chụm ngón tay hoặc nhấp đúp để thu phóng. Kéo để di chuyển. Dùng +, − hoặc 0 để thu phóng hoặc đặt lại.",
     "title": "Xem trước ảnh",
     "open": "Xem ảnh",
     "prev": "Ảnh trước",

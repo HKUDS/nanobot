@@ -1158,7 +1158,7 @@ describe("MessageBubble", () => {
     const { container } = render(<MessageBubble message={message} />);
 
     const imageButton = screen.getByRole("button", { name: /view image/i });
-    expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-panel");
+    expect(imageButton).toHaveClass("w-[min(100%,28rem)]", "rounded-control");
     expect(imageButton).toHaveClass(
       "border",
       "border-border/60",

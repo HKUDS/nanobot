@@ -732,7 +732,9 @@ export function PaneWorkbench({
                 >
                   {renderPane(pane, {
                     active,
-                    headerPortalTarget: chrome ? headerPortalTarget : undefined,
+                    // A single conversation owns its header, alongside its preview tabs.
+                    // Multiple conversation panes still share the workbench toolbar.
+                    headerPortalTarget: chrome && displayedPanes.length > 1 ? headerPortalTarget : undefined,
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
                     headerActions,
                   })}

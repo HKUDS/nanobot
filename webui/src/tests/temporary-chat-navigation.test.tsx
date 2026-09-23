@@ -174,18 +174,50 @@ describe("temporary chat navigation", () => {
     } else {
       expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("path=notes.txt&metadata=1"))).toBe(true);
     }
-    fireEvent.click(screen.getByRole("menuitem", { name: "Preview" }));
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
     await screen.findByText("Preview of notes.txt");
+    fireEvent.click(screen.getByRole("button", { name: "second.txt" }));
+    await screen.findByText("Preview of second.txt");
+    const pane = screen.getByTestId("preview-pane");
+    expect(within(pane).getAllByText("second.txt")).toHaveLength(1);
+    expect(within(pane).queryByRole("navigation", { name: "File path" })).not.toBeInTheDocument();
+    expect(within(pane).queryByRole("button", { name: /File actions/ })).not.toBeInTheDocument();
+    fireEvent.contextMenu(within(pane).getByRole("tab", { name: "second.txt" }));
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Copy absolute path" })).not.toHaveAttribute("data-disabled"));
+    if (temporary) {
+      expect(TestSocket.current.sent).toContainEqual(expect.objectContaining({
+        type: "webui_request", action: "temporary_chat.file_preview",
+        payload: expect.objectContaining({ path: "second.txt", metadata: true }),
+      }));
+    } else {
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("path=second.txt&metadata=1"))).toBe(true);
+    }
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(screen.getByTestId("preview-pane")).toBe(pane);
+    const previewRequestCount = () => temporary
+      ? TestSocket.current.sent.filter((frame) => frame.type === "webui_request" && frame.action === "temporary_chat.file_preview"
+        && frame.payload?.path === "notes.txt" && !frame.payload?.metadata && !frame.payload?.probe).length
+      : vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/file-preview?path=notes.txt")
+        && !String(url).includes("metadata=") && !String(url).includes("probe=")).length;
+    const beforeReturn = previewRequestCount();
+    fireEvent.click(screen.getByRole("tab", { name: "notes.txt" }));
+    expect(screen.getByText("Preview of notes.txt")).toBeInTheDocument();
+    expect(previewRequestCount()).toBe(beforeReturn);
     await selectTopic("Second pane");
     expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "second.txt" }));
     await screen.findByText("Preview of second.txt");
     await selectTopic(temporary ? "Show example files" : "Regular topic");
     await screen.findByText("Preview of notes.txt");
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "notes.txt" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByText("Preview of second.txt")).not.toBeInTheDocument();
 
     // Explicit close must stick even if switching interrupts the close animation.
-    fireEvent.click(screen.getByRole("button", { name: "Close file preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close preview pane" }));
     await selectTopic("Second pane");
     await selectTopic(temporary ? "Show example files" : "Regular topic");
     expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
@@ -212,7 +244,7 @@ describe("temporary chat navigation", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
     await screen.findByTestId("web-preview-panel");
     await selectTopic("Synthetic separate session");
-    expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
     await selectTopic("Regular topic");
     await screen.findByTestId("web-preview-panel");
     fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
@@ -221,24 +253,24 @@ describe("temporary chat navigation", () => {
     expect(screen.getByTestId("web-preview-panel")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
     fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
     fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
-    expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
     await screen.findByText("Preview of notes.txt");
     fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
     expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close website preview" }));
-    expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close preview pane" }));
+    await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
     for (const storage of [localStorage, sessionStorage]) {
       const values = Array.from({ length: storage.length }, (_, i) => storage.getItem(storage.key(i)!));
       expect(JSON.stringify(values)).not.toContain("https://example.com/demo");
     }
   });
 
-  it("toggles the current file, switches files, and only handles Escape below dialogs", async () => {
+  it("keeps the sidebar mounted across tabs, deduplicates repeated opens, and handles Escape below dialogs", async () => {
     withFiles = true;
     render(<App />);
     await screen.findByRole("button", { name: "Temporary chat" });
@@ -248,8 +280,15 @@ describe("temporary chat navigation", () => {
     await screen.findByText("Preview of notes.txt");
     fireEvent.click(screen.getByRole("button", { name: "second.txt" }));
     await screen.findByText("Preview of second.txt");
+    const pane = screen.getByTestId("preview-pane");
     fireEvent.click(screen.getByRole("button", { name: "second.txt" }));
-    await waitFor(() => expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument());
+    expect(screen.getByTestId("preview-pane")).toBe(pane);
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "second.txt" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Close second.txt" }));
+    await screen.findByText("Preview of notes.txt");
+    expect(screen.getByTestId("preview-pane")).toBe(pane);
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
     await screen.findByText("Preview of notes.txt");
     const dialog = document.createElement("div");
@@ -263,7 +302,7 @@ describe("temporary chat navigation", () => {
   });
 
   it("forgets preview paths on temporary close and disconnect", async () => {
-    const update = vi.spyOn(FilePreviewStore.prototype, "update");
+    const update = vi.spyOn(FilePreviewStore.prototype, "open");
     render(<App />);
     await screen.findByRole("button", { name: "Temporary chat" });
     act(() => TestSocket.current.open());
@@ -273,14 +312,14 @@ describe("temporary chat navigation", () => {
     }));
     fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
     await screen.findByText("Preview of notes.txt");
-    const store = update.mock.contexts.find((value) => value.get(`websocket:${chatId}`).path)!;
-    expect(store.get(`websocket:${chatId}`).path).toBe("notes.txt");
+    const store = update.mock.contexts.find((value) => value.get(`websocket:${chatId}`).tabs.length)!;
+    expect(store.get(`websocket:${chatId}`).activeId).toBe("file:notes.txt");
     await selectTopic("Close temporary chat: Show example files");
-    expect(store.get(`websocket:${chatId}`).path).toBeNull();
-    act(() => store.update("websocket:regular", { path: "notes.txt" }));
+    expect(store.get(`websocket:${chatId}`).tabs).toEqual([]);
+    act(() => store.open("websocket:regular", "file", "notes.txt"));
     vi.useFakeTimers();
     act(() => TestSocket.current.close());
-    expect(store.get("websocket:regular").path).toBeNull();
+    expect(store.get("websocket:regular").tabs).toEqual([]);
   });
 
   it("keeps messages when navigating to a regular workbench and back", async () => {

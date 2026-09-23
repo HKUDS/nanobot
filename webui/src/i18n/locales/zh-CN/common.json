@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "预览",
+    "closeTab": "关闭 {{name}}",
+    "closeAll": "关闭预览栏",
+    "websiteInfo": "关于网页预览"
+  },
   "webPreview": {
     "original": "原始链接",
     "actions": "链接操作",
@@ -1897,6 +1903,11 @@
     "continue": "继续"
   },
   "lightbox": {
+    "viewAll": "查看全部 {{count}} 张图片",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "适应窗口",
+    "gestures": "双指捏合或双击缩放，放大后拖动查看。也可按 +、− 或 0 缩放或复位。",
     "title": "图片预览",
     "open": "查看图片",
     "prev": "上一张",

@@ -1,31 +1,36 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { Copy, Ellipsis, PanelRight } from "lucide-react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import * as Menu from "@radix-ui/react-menu";
 import { useTranslation } from "react-i18next";
 
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { floatingItemClassName, floatingItemFocusClassName, floatingSurfaceClassName, floatingSurfaceMotionClassName } from "@/components/ui/floating-surface";
+import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import type { FileReferenceMetadata } from "@/lib/types";
+import type { FileReferenceMetadata, FilePreviewPayload } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface FileActionsContextValue {
   resolveMetadata: (path: string) => Promise<FileReferenceMetadata>;
-  openPreview: (path: string) => void;
+  loadPreview?: (path: string) => Promise<FilePreviewPayload>;
 }
 
 const FileActionsContext = createContext<FileActionsContextValue | undefined>(undefined);
 
 export const FileActionsProvider = FileActionsContext.Provider;
 
-/** Shared by reply references, activity rows, and the preview header. */
+export function useFilePreviewLoader() {
+  return useContext(FileActionsContext)?.loadPreview;
+}
+
+const itemClassName = `${floatingItemClassName} ${floatingItemFocusClassName} cursor-default data-[disabled]:pointer-events-none data-[disabled]:opacity-50`;
+
+/** Copy-only context menu, shared by file references and preview tabs. */
 export function FileActions({
-  path, children, onPreview, metadata,
+  path, children, metadata, className,
 }: {
   path: string;
-  children?: ReactNode;
-  onPreview?: (path: string) => void;
+  children: ReactNode;
   metadata?: FileReferenceMetadata;
+  className?: string;
 }) {
   const context = useContext(FileActionsContext);
   const { t } = useTranslation();
@@ -34,6 +39,11 @@ export function FileActions({
   const [loadFailed, setLoadFailed] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
   const resolveMetadata = context?.resolveMetadata;
+  const portal = useFloatingPortal();
+  const point = useRef({ x: 0, y: 0 });
+  const anchor = useRef({ getBoundingClientRect: () => new DOMRect(point.current.x, point.current.y, 0, 0) });
+  const opener = useRef<HTMLElement | null>(null);
+  const interactedOutside = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,79 +61,72 @@ export function FileActions({
     return () => { cancelled = true; };
   }, [open, path, metadata, resolveMetadata]);
 
-  const enabled = Boolean(context || onPreview || metadata);
-
   const copy = async (value: string) => {
     const success = await copyTextToClipboard(value);
     setCopyStatus(success ? "copied" : "failed");
+    if (success) setOpen(false);
   };
-  const preview = onPreview ? context?.openPreview ?? onPreview : undefined;
+  const openMenu = (target: EventTarget, x: number, y: number) => {
+    point.current = { x, y };
+    opener.current = target instanceof Element ? target.closest<HTMLElement>("button, a, [tabindex]") : null;
+    interactedOutside.current = false;
+    setOpen(true);
+  };
+  const status = copyStatus ?? (loadFailed ? "unavailable" : !resolved && resolveMetadata ? "loading" : null);
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <Menu.Root open={open} onOpenChange={setOpen}>
+      <Menu.Anchor virtualRef={anchor} />
       <span
-        className="not-prose inline-flex max-w-full items-baseline gap-0.5 align-baseline"
+        className={cn("not-prose inline-flex max-w-full items-baseline align-baseline", className)}
         onContextMenu={(event) => {
-          if (!enabled) return;
           event.preventDefault();
           event.stopPropagation();
-          setOpen(true);
+          openMenu(event.target, event.clientX, event.clientY);
         }}
         onKeyDown={(event) => {
-          if (!enabled) return;
           if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
             event.preventDefault();
             event.stopPropagation();
-            setOpen(true);
+            const bounds = event.currentTarget.getBoundingClientRect();
+            openMenu(event.target, bounds.left, bounds.bottom);
           }
         }}
       >
         {children}
-        {enabled ? <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={t("fileActions.menu", { name: path.split(/[\\/]/).pop() || path })}
-            title={t("fileActions.title")}
-            onClick={(event) => event.stopPropagation()}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground/65 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Ellipsis className="h-3.5 w-3.5" aria-hidden />
-          </button>
-        </DropdownMenuTrigger> : null}
-        {enabled ? <DropdownMenuContent align="end" collisionPadding={12} onClick={(event) => event.stopPropagation()}>
-          {preview ? <>
-            <DropdownMenuItem onSelect={() => preview(path)}>
-              <PanelRight className="mr-2 h-4 w-4" aria-hidden />
-              {t("fileActions.preview")}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </> : null}
-          <DropdownMenuItem disabled={!resolved} onSelect={(event) => {
+      </span>
+      <Menu.Portal container={portal ?? undefined}>
+        <Menu.Content aria-label={t("fileActions.menu", { name: path.split(/[\\/]/).pop() || path })}
+          align="start" sideOffset={4} collisionPadding={12}
+          className={cn(floatingSurfaceClassName, floatingSurfaceMotionClassName, "min-w-40 rounded-control p-1 [&_[role=menuitem]]:py-1.5")}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+          onInteractOutside={() => { interactedOutside.current = true; }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (!interactedOutside.current) opener.current?.focus();
+          }}>
+          <Menu.Item className={itemClassName} disabled={!resolved} onSelect={(event) => {
             event.preventDefault();
             if (resolved) void copy(resolved.path);
           }}>
-            <Copy className="mr-2 h-4 w-4" aria-hidden />
             {t("fileActions.copyAbsolute")}
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={!resolved?.relative_path} onSelect={(event) => {
+          </Menu.Item>
+          <Menu.Item className={itemClassName} disabled={!resolved?.relative_path} onSelect={(event) => {
             event.preventDefault();
             if (resolved?.relative_path) void copy(resolved.relative_path);
           }}>
-            <Copy className="mr-2 h-4 w-4" aria-hidden />
             {t("fileActions.copyRelative")}
-          </DropdownMenuItem>
-          {!resolved ? <DropdownMenuItem onSelect={(event) => {
+          </Menu.Item>
+          {!resolved ? <Menu.Item className={itemClassName} onSelect={(event) => {
             event.preventDefault();
             void copy(path);
-          }}>{t("fileActions.copyReference")}</DropdownMenuItem> : null}
-          <div role="status" className="max-w-64 px-2.5 py-1.5 text-xs text-muted-foreground">
-            {copyStatus ? t(`fileActions.${copyStatus}`)
-              : loadFailed ? t("fileActions.unavailable")
-                : !resolved && resolveMetadata ? t("fileActions.loading")
-                  : t("fileActions.gatewayPath")}
-          </div>
-        </DropdownMenuContent> : null}
-      </span>
-    </DropdownMenu>
+          }}>{t("fileActions.copyReference")}</Menu.Item> : null}
+          {status ? <div role="status" className="max-w-64 px-2.5 py-1.5 text-xs text-muted-foreground">
+            {t(`fileActions.${status}`)}
+          </div> : null}
+        </Menu.Content>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }

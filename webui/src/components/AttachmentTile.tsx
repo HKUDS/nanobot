@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import type { UIMediaAttachment } from "@/lib/types";
+import { ImageThumbnail } from "@/components/ImageGallery";
+import { ImageLightbox } from "@/components/ImageLightbox";
+import { useRegisterInlineImage } from "@/components/InlineImageContext";
 
 interface AttachmentTileProps {
   attachment: UIMediaAttachment;
@@ -14,41 +17,22 @@ interface AttachmentTileProps {
 
 export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
   const { t } = useTranslation();
-  const [failed, setFailed] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
+  const failed = !!attachment.url && failedUrl === attachment.url;
+  const [imageOpen, setImageOpen] = useState(false);
   const hasUrl = typeof attachment.url === "string" && attachment.url.length > 0;
   const label = attachmentLabel(attachment, t);
+  useRegisterInlineImage(inline && attachment.kind === "image" && hasUrl && !failed ? attachment.url : undefined);
 
   if (attachment.kind === "image" && hasUrl && !failed) {
     return (
-      <AttachmentFrame
-        attachment={attachment}
-        className={className}
-        inline={inline}
-        variant={variant}
-      >
-        <a
-          href={attachment.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="block bg-muted/20"
-          aria-label={attachment.name
-            ? t("message.openAttachment", { name: attachment.name })
-            : t("lightbox.open", { defaultValue: "Open image" })}
-        >
-          <img
-            src={attachment.url}
-            alt={attachment.name ?? ""}
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            onError={() => setFailed(true)}
-            className={cn(
-              "block h-auto max-w-full bg-background object-contain",
-              variant === "compact" ? "max-h-40" : "max-h-[34rem]",
-            )}
-          />
-        </a>
-      </AttachmentFrame>
+      <span className={cn("not-prose my-3 block max-w-full", className)}>
+        <ImageThumbnail key={attachment.url} image={attachment}
+          size={variant === "compact" ? "compact" : "large"}
+          onOpen={() => setImageOpen(true)} onError={() => setFailedUrl(attachment.url)} />
+        <ImageLightbox images={[attachment]} index={imageOpen ? 0 : null}
+          onIndexChange={() => {}} onOpenChange={setImageOpen} />
+      </span>
     );
   }
 

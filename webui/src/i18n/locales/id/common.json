@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "Pratinjau",
+    "closeTab": "Tutup {{name}}",
+    "closeAll": "Tutup panel pratinjau",
+    "websiteInfo": "Tentang pratinjau situs"
+  },
   "webPreview": {
     "original": "Tautan asli",
     "actions": "Tindakan tautan",
@@ -1697,6 +1703,11 @@
     "continue": "Lanjutkan"
   },
   "lightbox": {
+    "viewAll": "Lihat semua {{count}} gambar",
+    "zoomIn": "Perbesar",
+    "zoomOut": "Perkecil",
+    "resetZoom": "Sesuaikan gambar",
+    "gestures": "Cubit atau klik dua kali untuk memperbesar. Seret untuk menggeser. Gunakan +, − atau 0 untuk memperbesar atau mereset.",
     "title": "Pratinjau gambar",
     "open": "Lihat gambar",
     "prev": "Gambar sebelumnya",

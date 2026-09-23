@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "プレビュー",
+    "closeTab": "{{name}} を閉じる",
+    "closeAll": "プレビューパネルを閉じる",
+    "websiteInfo": "ウェブプレビューについて"
+  },
   "webPreview": {
     "original": "元のリンク",
     "actions": "リンク操作",
@@ -1697,6 +1703,11 @@
     "continue": "続行"
   },
   "lightbox": {
+    "viewAll": "すべての画像（{{count}} 枚）を表示",
+    "zoomIn": "拡大",
+    "zoomOut": "縮小",
+    "resetZoom": "画面に合わせる",
+    "gestures": "ピンチまたはダブルクリックで拡大し、ドラッグで移動できます。+、−、0 キーで拡大・縮小・リセットできます。",
     "title": "画像プレビュー",
     "open": "画像を表示",
     "prev": "前の画像",

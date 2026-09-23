@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "미리보기",
+    "closeTab": "{{name}} 닫기",
+    "closeAll": "미리보기 패널 닫기",
+    "websiteInfo": "웹 미리보기 정보"
+  },
   "webPreview": {
     "original": "원래 링크",
     "actions": "링크 작업",
@@ -1697,6 +1703,11 @@
     "continue": "계속"
   },
   "lightbox": {
+    "viewAll": "이미지 {{count}}개 모두 보기",
+    "zoomIn": "확대",
+    "zoomOut": "축소",
+    "resetZoom": "화면에 맞추기",
+    "gestures": "두 손가락이나 두 번 클릭으로 확대하고 드래그로 이동하세요. +, −, 0 키로 확대, 축소 또는 초기화할 수 있습니다.",
     "title": "이미지 미리보기",
     "open": "이미지 보기",
     "prev": "이전 이미지",

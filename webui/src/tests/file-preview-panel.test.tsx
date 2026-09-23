@@ -1,5 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
@@ -46,7 +45,7 @@ describe("FilePreviewPanel", () => {
       kind: "image", path: "/workspace/chart.png", display_path: "chart.png",
       project_path: "/workspace", size: 42, mime_type: "image/png", data_url: dataUrl,
     });
-    render(<FilePreviewPanel sessionKey="websocket:a" path="chart.png" token="test" onClose={() => {}} />);
+    render(<FilePreviewPanel sessionKey="websocket:a" path="chart.png" token="test" />);
     const img = await screen.findByRole("img", { name: "chart.png" });
     expect(img).toHaveAttribute("src", dataUrl);
     expect(screen.queryByTestId("mock-code-block")).not.toBeInTheDocument();
@@ -62,7 +61,7 @@ describe("FilePreviewPanel", () => {
       language: "text", content: "session B", truncated: false, size: 9,
     };
     vi.mocked(fetchFilePreview).mockResolvedValueOnce(payload);
-    const view = (key: string) => <FilePreviewPanel key={key} sessionKey={key} path="notes.txt" token="test" onClose={() => {}} />;
+    const view = (key: string) => <FilePreviewPanel key={key} sessionKey={key} path="notes.txt" token="test" />;
     const { rerender } = render(view("a"));
     rerender(view("b"));
     await screen.findByText("session B");
@@ -70,9 +69,27 @@ describe("FilePreviewPanel", () => {
     expect(screen.queryByText("session A")).not.toBeInTheDocument();
   });
 
-  it("shows a compact breadcrumb with one file name and a visible close action", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
+  it("opens the sidebar image in the shared zoomable viewer and returns to the preview", async () => {
+    vi.mocked(fetchFilePreview).mockResolvedValue({
+      kind: "image", path: "/workspace/chart.png", display_path: "chart.png",
+      size: 42, mime_type: "image/png", data_url: "data:image/png;base64,example",
+    });
+    render(<FilePreviewPanel sessionKey="websocket:a" path="chart.png" token="test" />);
+    const trigger = await screen.findByRole("button", { name: "View image: chart.png" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("img", { name: "chart.png" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Zoom in" }));
+    expect(within(dialog).getByRole("button", { name: "Fit image" })).toHaveTextContent("150%");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.getByTestId("file-preview-panel")).toBeInTheDocument();
+    expect(fetchFilePreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders file content without a second filename or breadcrumb below the tabs", async () => {
     vi.mocked(fetchFilePreview).mockResolvedValue({
       path: "/Users/hr/workspace/quicksort.py",
       display_path: "quicksort.py",
@@ -86,7 +103,6 @@ describe("FilePreviewPanel", () => {
         sessionKey="websocket:chat-1"
         path="quicksort.py"
         token="tok"
-        onClose={onClose}
       />,
     );
 
@@ -94,16 +110,33 @@ describe("FilePreviewPanel", () => {
     expect(codeBlock).toHaveTextContent("print('ok')");
     expect(codeBlock).toHaveAttribute("data-language", "python");
     expect(codeBlock).toHaveAttribute("data-highlight", "true");
-    expect(screen.getByTestId("file-preview-breadcrumb")).toHaveTextContent("...");
-    expect(screen.getByTestId("file-preview-breadcrumb")).toHaveTextContent("workspace");
-    expect(screen.getByTestId("file-preview-title")).toHaveTextContent("quicksort.py");
-    expect(screen.getAllByText("quicksort.py")).toHaveLength(1);
+    expect(screen.queryByTestId("file-preview-breadcrumb")).not.toBeInTheDocument();
+    expect(screen.queryByText("quicksort.py")).not.toBeInTheDocument();
 
-    const closeButton = screen.getByRole("button", { name: "Close file preview" });
-    expect(closeButton).toBeVisible();
+  });
 
-    await user.click(closeButton);
-    expect(onClose).toHaveBeenCalledTimes(1);
+  it("paints cached content immediately, revalidates it, and does not restart when the cache ages", async () => {
+    const cached = { path: "notes.txt", display_path: "notes.txt", language: "text", content: "Cached", truncated: false };
+    let resolve!: (payload: typeof cached) => void;
+    const loadPreview = vi.fn(() => new Promise<typeof cached>(r => { resolve = r; }));
+    const view = (initialPreview?: typeof cached) => <FilePreviewPanel sessionKey="a" path="notes.txt"
+      token="test" loadPreview={loadPreview} initialPreview={initialPreview} />;
+    const { rerender } = render(view(cached));
+    expect(screen.getByTestId("mock-code-block")).toHaveTextContent("Cached");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await act(async () => resolve({ ...cached, content: "Updated" }));
+    expect(screen.getByTestId("mock-code-block")).toHaveTextContent("Updated");
+    rerender(view());
+    expect(screen.getByTestId("mock-code-block")).toHaveTextContent("Updated");
+    expect(loadPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed revalidation rather than leaving stale cached content looking current", async () => {
+    const cached = { path: "notes.txt", display_path: "notes.txt", language: "text", content: "Cached", truncated: false };
+    render(<FilePreviewPanel sessionKey="a" path="notes.txt" token="test" initialPreview={cached}
+      loadPreview={vi.fn().mockRejectedValue(new Error("Forbidden"))} />);
+    await screen.findByText("Could not preview this file.");
+    expect(screen.queryByText("Cached")).not.toBeInTheDocument();
   });
 
   it("updates translated chrome without refetching the open file", async () => {
@@ -120,7 +153,6 @@ describe("FilePreviewPanel", () => {
         sessionKey="websocket:chat-1"
         path="notes.md"
         token="tok"
-        onClose={() => {}}
       />,
     );
 

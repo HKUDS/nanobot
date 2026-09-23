@@ -14,7 +14,6 @@ import {
   CircleAlert,
   Clock3,
   Copy,
-  ImageIcon,
   Quote,
   Wrench,
 } from "lucide-react";
@@ -24,7 +23,8 @@ import { DisclosureContent } from "@/components/ui/disclosure";
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
-import { ImageLightbox } from "@/components/ImageLightbox";
+import { ImageGallery } from "@/components/ImageGallery";
+import { InlineImageProvider, useInlineImages } from "@/components/InlineImageContext";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
@@ -511,7 +511,7 @@ export function MessageBubble({
         className="group relative ml-auto flex w-fit max-w-[min(85%,36rem)] flex-col items-end gap-1.5"
       >
         {contextMenu}
-        {hasImages ? <UserImages images={images} align="right" /> : null}
+        {hasImages ? <ImageGallery images={images} align="right" size="compact" /> : null}
         {!hasImages && hasMedia ? (
           <MessageMedia media={media} align="right" />
         ) : null}
@@ -576,7 +576,7 @@ export function MessageBubble({
       {empty && message.isStreaming && !hasReasoning ? (
         <ThinkingState />
       ) : empty && message.isStreaming ? null : (
-        <>
+        <InlineImageProvider>
           <div data-assistant-selectable={message.isStreaming ? undefined : "true"}>
             {/* A mode switch rebuilds Streamdown's subtree and moves the scroll anchor. */}
             <MarkdownText
@@ -588,7 +588,7 @@ export function MessageBubble({
             </MarkdownText>
           </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
-        </>
+        </InlineImageProvider>
       )}
     </div>
   );
@@ -681,17 +681,22 @@ function MessageMedia({
   media: UIMediaAttachment[];
   align: "left" | "right";
 }) {
+  const inlineImages = useInlineImages();
   if (media.length === 0) return null;
   const images: UIImage[] = [];
+  const seen = new Set<string>();
   const nonImages: UIMediaAttachment[] = [];
   for (const item of media) {
     const normalized = toMediaAttachment(item);
     if (normalized.kind === "image") {
+      if (normalized.url && (inlineImages.has(normalized.url) || seen.has(normalized.url))) continue;
+      if (normalized.url) seen.add(normalized.url);
       images.push({ url: normalized.url, name: normalized.name });
     } else {
       nonImages.push(normalized);
     }
   }
+  if (images.length === 0 && nonImages.length === 0) return null;
 
   return (
     <div
@@ -701,146 +706,11 @@ function MessageMedia({
       )}
     >
       {images.length > 0 ? (
-        <UserImages images={images} align={align} size={align === "left" ? "large" : "compact"} />
+        <ImageGallery images={images} align={align} size={align === "left" ? "large" : "compact"} />
       ) : null}
       {nonImages.map((item, i) => (
         <AttachmentTile key={`${item.url ?? item.name ?? item.kind}-${i}`} attachment={item} />
       ))}
-    </div>
-  );
-}
-
-/**
- * Right-aligned preview row for images attached to a user turn.
- *
- * The URL is expected to be a self-contained ``data:`` URL (the Composer
- * hands the normalized base64 payload to the optimistic bubble so that the
- * preview survives React StrictMode double-mount — blob URLs would be
- * revoked by the Composer's cleanup before remount). Historical replays
- * have no URL (the backend strips data URLs before persisting), so we
- * render a labelled placeholder tile instead of a broken ``<img>``.
- */
-function UserImages({
-  images,
-  align = "right",
-  size = "compact",
-}: {
-  images: UIImage[];
-  align?: "left" | "right";
-  size?: "compact" | "large";
-}) {
-  const { t } = useTranslation();
-  // Only real-URL images can open in the lightbox; historical-replay
-  // placeholders (no URL) have nothing to zoom into.
-  const viewableImages: UIImage[] = [];
-  const originalToViewable = new Map<number, number>();
-  for (let i = 0; i < images.length; i += 1) {
-    const img = images[i];
-    if (typeof img.url !== "string" || img.url.length === 0) continue;
-    originalToViewable.set(i, viewableImages.length);
-    viewableImages.push(img);
-  }
-
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-
-  return (
-    <>
-      <div
-        className={cn(
-          "flex flex-wrap items-end gap-2",
-          size === "large" && "gap-3",
-          align === "right" ? "ml-auto justify-end" : "mr-auto justify-start",
-        )}
-      >
-        {images.map((img, i) => (
-          <UserImageCell
-            key={`${img.url ?? "placeholder"}-${i}`}
-            image={img}
-            size={size}
-            placeholderLabel={t("message.imageAttachment")}
-            openLabel={t("lightbox.open")}
-            onOpen={
-              originalToViewable.has(i)
-                ? () => setLightboxIndex(originalToViewable.get(i)!)
-                : undefined
-            }
-          />
-        ))}
-      </div>
-      <ImageLightbox
-        images={viewableImages}
-        index={lightboxIndex}
-        onIndexChange={setLightboxIndex}
-        onOpenChange={(open) => {
-          if (!open) setLightboxIndex(null);
-        }}
-      />
-    </>
-  );
-}
-
-function UserImageCell({
-  image,
-  size,
-  placeholderLabel,
-  openLabel,
-  onOpen,
-}: {
-  image: UIImage;
-  size: "compact" | "large";
-  placeholderLabel: string;
-  openLabel: string;
-  onOpen?: () => void;
-}) {
-  const hasUrl = typeof image.url === "string" && image.url.length > 0;
-  const tileClasses = cn(
-    "relative overflow-hidden border border-border/60 bg-muted/40",
-    size === "large"
-      ? "w-[min(100%,34rem)] rounded-panel bg-transparent"
-      : "h-24 w-24 rounded-control",
-    "shadow-[0_6px_18px_-14px_rgba(0,0,0,0.45)]",
-  );
-
-  if (hasUrl && onOpen) {
-    return (
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={image.name ? `${openLabel}: ${image.name}` : openLabel}
-        className={cn(
-          tileClasses,
-          "block cursor-zoom-in p-0",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-        )}
-      >
-        <img
-          src={image.url}
-          alt={image.name ?? ""}
-          loading="lazy"
-          decoding="async"
-          draggable={false}
-          className={cn(
-            "block",
-            size === "large"
-              ? "h-auto max-h-[36rem] w-full rounded-[inherit] object-contain"
-              : "h-full w-full object-cover",
-          )}
-        />
-      </button>
-    );
-  }
-
-  return (
-    <div className={tileClasses} title={image.name ?? undefined}>
-      <div
-        className="flex h-full w-full flex-col items-center justify-center gap-1 px-2 text-[11px] text-muted-foreground"
-        aria-label={placeholderLabel}
-      >
-        <ImageIcon className="h-4 w-4 flex-none" aria-hidden />
-        <span className="line-clamp-2 text-center leading-tight">
-          {image.name ?? placeholderLabel}
-        </span>
-      </div>
     </div>
   );
 }

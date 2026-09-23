@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "Aperçu",
+    "closeTab": "Fermer {{name}}",
+    "closeAll": "Fermer le panneau d’aperçu",
+    "websiteInfo": "À propos des aperçus web"
+  },
   "webPreview": {
     "original": "Lien d’origine",
     "actions": "Actions du lien",
@@ -1697,6 +1703,11 @@
     "continue": "Continuer"
   },
   "lightbox": {
+    "viewAll": "Voir les {{count}} images",
+    "zoomIn": "Agrandir",
+    "zoomOut": "Réduire",
+    "resetZoom": "Ajuster l’image",
+    "gestures": "Pincez ou double-cliquez pour zoomer. Faites glisser pour déplacer. Utilisez +, − ou 0 pour zoomer ou réinitialiser.",
     "title": "Aperçu de l’image",
     "open": "Voir l’image",
     "prev": "Image précédente",

@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "Vista previa",
+    "closeTab": "Cerrar {{name}}",
+    "closeAll": "Cerrar panel de vista previa",
+    "websiteInfo": "Acerca de las vistas previas web"
+  },
   "webPreview": {
     "original": "Enlace original",
     "actions": "Acciones del enlace",
@@ -1698,6 +1704,11 @@
     "continue": "Continuar"
   },
   "lightbox": {
+    "viewAll": "Ver las {{count}} imágenes",
+    "zoomIn": "Acercar",
+    "zoomOut": "Alejar",
+    "resetZoom": "Ajustar imagen",
+    "gestures": "Pellizca o haz doble clic para ampliar. Arrastra para mover. Usa +, − o 0 para ampliar o restablecer.",
     "title": "Vista previa de imagen",
     "open": "Ver imagen",
     "prev": "Imagen anterior",

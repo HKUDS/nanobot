@@ -607,7 +607,34 @@
   .thread-workspace {
     container: thread-workspace / inline-size;
   }
-  /* The full-width toolbar must not cover the preview breadcrumb or close button. */
+  .thread-preview-layout {
+    container: thread-preview-layout / inline-size;
+  }
+  /* A split needs 420px for the conversation plus 360px for the preview.
+     Narrow workbench panes use the same contained overlay as a phone. */
+  @container thread-preview-layout (min-width: 780px) {
+    .file-preview-pane {
+      position: relative;
+      z-index: auto;
+      width: var(--file-preview-slot-width);
+      min-width: 0;
+      flex-shrink: 0;
+    }
+    .file-preview-content {
+      width: var(--file-preview-width);
+      padding-bottom: 0;
+    }
+    .file-preview-resize {
+      display: flex;
+    }
+  }
+  @container thread-preview-layout (width < 780px) {
+    /* Covered conversation controls must not remain in the keyboard/AT order. */
+    .thread-preview-layout[data-preview-open] > .thread-conversation {
+      visibility: hidden;
+    }
+  }
+  /* Split content leaves no margin for floating conversation controls. */
   .thread-workspace:has([data-file-preview-panel]) > * {
     --thread-header-position: relative;
     --thread-prompt-inset: 1rem;

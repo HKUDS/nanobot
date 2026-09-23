@@ -108,6 +108,18 @@ function BspWorkbenchHarness() {
 }
 
 describe("PaneWorkbench", () => {
+  it("keeps a single conversation's header inside that pane instead of above its previews", () => {
+    render(<PaneWorkbench panes={[{ key: "alpha", title: "Alpha" }]} activePaneKey="alpha"
+      layout="columns" chrome showLayoutControl={false} onActivatePane={vi.fn()} onAddPane={vi.fn()}
+      onLayoutChange={vi.fn()} onPaneOrderChange={vi.fn()}
+      renderPane={(_pane, context) => {
+        expect(context.headerPortalTarget).toBeUndefined();
+        return <div data-testid="local-toolbar">{context.headerActions}</div>;
+      }} />);
+    expect(screen.getByTestId("workbench-header-host")).toBeEmptyDOMElement();
+    expect(within(screen.getByTestId("local-toolbar")).getByRole("button", { name: "Add pane" })).toBeVisible();
+  });
+
   const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
   const originalAnimate = HTMLElement.prototype.animate;
   const animate = vi.fn(() => ({

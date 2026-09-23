@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "Prévia",
+    "closeTab": "Fechar {{name}}",
+    "closeAll": "Fechar painel de prévia",
+    "websiteInfo": "Sobre as prévias de sites"
+  },
   "webPreview": {
     "original": "Link original",
     "actions": "Ações do link",
@@ -1711,6 +1717,11 @@
     "continue": "Continuar"
   },
   "lightbox": {
+    "viewAll": "Ver todas as {{count}} imagens",
+    "zoomIn": "Ampliar",
+    "zoomOut": "Reduzir",
+    "resetZoom": "Ajustar imagem",
+    "gestures": "Faça o gesto de pinça ou clique duas vezes para ampliar. Arraste para mover. Use +, − ou 0 para ampliar ou redefinir.",
     "title": "Pré-visualização de imagem",
     "open": "Ver imagem",
     "prev": "Imagem anterior",

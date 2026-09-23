@@ -40,8 +40,7 @@ describe("web preview boundaries", () => {
     expect(webPreviewRestriction(external, page, false, true)).toBeNull();
   });
   it("embeds only on mount, without credentials/referrer/host permissions, and refreshes with a new frame", async () => {
-    const close = vi.fn();
-    const { container } = render(<WebPreviewPanel url="https://example.com/demo" onClose={close} />);
+    const { container } = render(<WebPreviewPanel url="https://example.com/demo" />);
     const frame = container.querySelector("iframe")!;
     expect(frame).toHaveAttribute("src", "https://example.com/demo");
     expect(frame).toHaveAttribute("sandbox", "allow-scripts");
@@ -50,27 +49,29 @@ describe("web preview boundaries", () => {
     expect(frame.getAttribute("allow")).toContain("clipboard-read 'none'");
     // A frame load event is not evidence that CSP/X-Frame-Options allowed embedding.
     fireEvent.load(frame);
-    expect(screen.getByText(/Some sites block embedding/)).toBeInTheDocument();
+    expect(screen.queryByText(/Some sites block embedding/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "About website previews" }));
+    expect(await screen.findByText(/Some sites block embedding/)).toBeInTheDocument();
+    await userEvent.setup().keyboard("{Escape}");
     fireEvent.click(screen.getByRole("button", { name: "Refresh website" }));
     expect(container.querySelector("iframe")).not.toBe(frame);
     expect(screen.getByRole("link", { name: "Open in browser" })).toHaveAttribute("rel", "noreferrer noopener");
-    fireEvent.click(screen.getByRole("button", { name: "Close website preview" }));
-    expect(close).toHaveBeenCalledOnce();
   });
   it("does not load an iframe in native or unsupported browsers", () => {
     vi.mocked(isNativeRuntime).mockReturnValue(true);
-    const { container, rerender } = render(<WebPreviewPanel url="https://example.com" onClose={() => {}} />);
+    const { container, rerender } = render(<WebPreviewPanel url="https://example.com" />);
     expect(container.querySelector("iframe")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent(/native host/);
     vi.mocked(isNativeRuntime).mockReturnValue(false);
     Reflect.deleteProperty(HTMLIFrameElement.prototype, "credentialless");
-    rerender(<WebPreviewPanel url="https://example.com" onClose={() => {}} />);
+    rerender(<WebPreviewPanel url="https://example.com" />);
     expect(container.querySelector("iframe")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent(/does not support/);
   });
-  it("explains that loopback belongs to the browsing device", () => {
-    render(<WebPreviewPanel url="http://127.0.0.1:4173" onClose={() => {}} />);
-    expect(screen.getByText(/not a remote gateway/)).toBeInTheDocument();
+  it("explains that loopback belongs to the browsing device on request", async () => {
+    render(<WebPreviewPanel url="http://127.0.0.1:4173" />);
+    fireEvent.click(screen.getByRole("button", { name: "About website previews" }));
+    expect(await screen.findByText(/not a remote gateway/)).toBeInTheDocument();
   });
 });
 
@@ -105,12 +106,12 @@ describe("web link actions", () => {
   });
 });
 
-it("keeps mutually exclusive preview targets per session, clears them on deletion, and never persists URLs", () => {
+it("keeps file and website tabs per session, clears them on deletion, and never persists URLs", () => {
   const store = new FilePreviewStore();
   const local = vi.spyOn(Storage.prototype, "setItem");
   function View({ session }: { session: string }) {
-    const { state, setWebUrl, setPath } = useFilePreviewState(session, store);
-    return <><output>{state.webUrl ?? state.path ?? "closed"}</output><button onClick={() => setWebUrl("https://example.com/preview")}>Web</button><button onClick={() => setPath("notes.txt")}>File</button></>;
+    const { state, openWeb, openFile } = useFilePreviewState(session, store);
+    return <><output>{state.tabs.find((tab) => tab.id === state.activeId)?.value ?? "closed"}</output><button onClick={() => openWeb("https://example.com/preview")}>Web</button><button onClick={() => openFile("notes.txt")}>File</button></>;
   }
   const { rerender } = render(<View session="a" />);
   fireEvent.click(screen.getByText("Web"));
@@ -120,12 +121,14 @@ it("keeps mutually exclusive preview targets per session, clears them on deletio
   rerender(<View session="a" />);
   expect(screen.getByRole("status")).toHaveTextContent("https://example.com/preview");
   fireEvent.click(screen.getByText("File"));
-  expect(store.get("a")).toMatchObject({ path: "notes.txt", webUrl: null });
+  expect(store.get("a").activeId).toBe("file:notes.txt");
+  expect(store.get("a").tabs).toHaveLength(2);
   fireEvent.click(screen.getByText("Web"));
-  expect(store.get("a").path).toBeNull();
+  expect(store.get("a").activeId).toBe("web:https://example.com/preview");
+  expect(store.get("a").tabs).toHaveLength(2);
   act(() => store.delete("a"));
   expect(screen.getByRole("status")).toHaveTextContent("closed");
   act(() => store.clear());
-  expect(store.get("b").path).toBeNull();
+  expect(store.get("b").tabs).toEqual([]);
   expect(local).not.toHaveBeenCalled();
 });

@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "預覽",
+    "closeTab": "關閉 {{name}}",
+    "closeAll": "關閉預覽欄",
+    "websiteInfo": "關於網頁預覽"
+  },
   "webPreview": {
     "original": "原始連結",
     "actions": "連結操作",
@@ -1697,6 +1703,11 @@
     "continue": "繼續"
   },
   "lightbox": {
+    "viewAll": "查看全部 {{count}} 張圖片",
+    "zoomIn": "放大",
+    "zoomOut": "縮小",
+    "resetZoom": "符合視窗",
+    "gestures": "雙指捏合或按兩下縮放，放大後拖曳查看。也可按 +、− 或 0 縮放或重設。",
     "title": "圖片預覽",
     "open": "檢視圖片",
     "prev": "上一張",

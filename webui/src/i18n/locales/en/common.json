@@ -1,4 +1,10 @@
 {
+  "previewTabs": {
+    "title": "Preview",
+    "closeTab": "Close {{name}}",
+    "closeAll": "Close preview pane",
+    "websiteInfo": "About website previews"
+  },
   "webPreview": {
     "original": "Original link",
     "actions": "Link actions",
@@ -1897,6 +1903,11 @@
     "continue": "Continue"
   },
   "lightbox": {
+    "viewAll": "View all {{count}} images",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetZoom": "Fit image",
+    "gestures": "Pinch or double-click to zoom. Drag to move when zoomed. Use +, − or 0 to zoom or reset.",
     "title": "Image preview",
     "open": "View image",
     "prev": "Previous image",
