@@ -403,11 +403,6 @@ class LinearChannel(BaseChannel):
             return
         media: list[str] = []
         if self.is_allowed(sender_id):
-            media, attachment_warnings = await self._download_prompt_media(
-                organization_id, content, delivery_id
-            )
-            if attachment_warnings:
-                content = "\n\n".join((content, *attachment_warnings))
             await self._create_activity(
                 agent_session_id,
                 metadata,
@@ -415,6 +410,11 @@ class LinearChannel(BaseChannel):
                 key="accepted",
                 ephemeral=True,
             )
+            media, attachment_warnings = await self._download_prompt_media(
+                organization_id, content, delivery_id
+            )
+            if attachment_warnings:
+                content = "\n\n".join((content, *attachment_warnings))
         await self._handle_message(
             sender_id=sender_id,
             chat_id=agent_session_id,
@@ -467,7 +467,7 @@ class LinearChannel(BaseChannel):
                 remaining_bytes -= len(body)
                 name = _download_filename(url, labeled.get(url, ""), content_type, index)
                 destination = get_media_dir("linear") / safe_filename(
-                    f"{delivery_id}_{name}"
+                    f"{delivery_id}_{index + 1}_{name}"
                 )
                 await asyncio.to_thread(destination.write_bytes, body)
                 media.append(str(destination))

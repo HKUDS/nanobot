@@ -793,8 +793,61 @@ async def test_created_session_downloads_private_linear_attachments(
     inbound = await channel.bus.consume_inbound()
     assert client.downloads == ["https://uploads.linear.app/private/image-1"]
     assert len(inbound.media) == 1
-    assert Path(inbound.media[0]).name == "delivery-media_checkout.png"
+    assert Path(inbound.media[0]).name == "delivery-media_1_checkout.png"
     assert Path(inbound.media[0]).read_bytes() == b"image"
+
+
+@pytest.mark.asyncio
+async def test_same_named_attachments_keep_distinct_contents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel, client = _runtime(tmp_path)
+    monkeypatch.setattr(linear_runtime, "get_media_dir", lambda _channel: tmp_path)
+    monkeypatch.setattr(client, "download_file", AsyncMock(side_effect=[
+        (b"first image", "image/png"), (b"second image", "image/png"),
+    ]))
+    payload = _agent_webhook()
+    payload["promptContext"] = (
+        "Compare ![image.png](https://uploads.linear.app/private/one) "
+        "with ![image.png](https://uploads.linear.app/private/two)"
+    )
+
+    await channel._process_webhook("same-names", payload)  # pyright: ignore[reportPrivateUsage]
+
+    inbound = await channel.bus.consume_inbound()
+    assert len(set(inbound.media)) == 2
+    assert [Path(path).read_bytes() for path in inbound.media] == [b"first image", b"second image"]
+
+
+@pytest.mark.asyncio
+async def test_start_activity_precedes_blocked_attachment_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel, client = _runtime(tmp_path)
+    monkeypatch.setattr(linear_runtime, "get_media_dir", lambda _channel: tmp_path)
+    download_started = asyncio.Event()
+    release_download = asyncio.Event()
+
+    async def download(*_args: object, **_kwargs: object) -> tuple[bytes, str]:
+        download_started.set()
+        await release_download.wait()
+        return b"image", "image/png"
+
+    monkeypatch.setattr(client, "download_file", download)
+    payload = _agent_webhook()
+    payload["promptContext"] = "Review https://uploads.linear.app/private/image"
+    task = asyncio.create_task(
+        channel._process_webhook("slow-download", payload)  # pyright: ignore[reportPrivateUsage]
+    )
+    try:
+        await asyncio.wait_for(download_started.wait(), timeout=5)
+        assert client.activities[0]["content"] == {"type": "thought", "body": "Starting…"}
+        assert channel.bus.inbound.empty()
+    finally:
+        release_download.set()
+        await asyncio.wait_for(task, timeout=5)
+
+    assert len((await channel.bus.consume_inbound()).media) == 1
 
 
 @pytest.mark.asyncio
