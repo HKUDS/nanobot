@@ -212,38 +212,20 @@ def test_atomic_write_lines_empty_input_replaces_file_with_empty(tmp_path: Path)
     assert list(tmp_path.glob("*.tmp")) == []
 
 
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
 def test_atomic_write_lines_cleans_temp_when_replace_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[BaseException]
 ) -> None:
     """A failed replace must not leave a temp file or change the target."""
     target = tmp_path / "history.jsonl"
     target.write_text("kept\n", encoding="utf-8")
 
     def fail_replace(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("replace failed")
+        raise error_type("replace failed")
 
     monkeypatch.setattr(helpers.os, "replace", fail_replace)
 
-    with pytest.raises(RuntimeError, match="replace failed"):
-        atomic_write_lines(target, ["new"])
-
-    assert target.read_text(encoding="utf-8") == "kept\n"
-    assert list(tmp_path.glob("*.tmp")) == []
-
-
-def test_atomic_write_lines_cleans_temp_on_base_exception(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """KeyboardInterrupt during replace still removes the temp file."""
-    target = tmp_path / "history.jsonl"
-    target.write_text("kept\n", encoding="utf-8")
-
-    def interrupt(*_args: object, **_kwargs: object) -> None:
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(helpers.os, "replace", interrupt)
-
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(error_type, match="replace failed"):
         atomic_write_lines(target, ["new"])
 
     assert target.read_text(encoding="utf-8") == "kept\n"
@@ -297,10 +279,11 @@ def test_atomic_write_lines_suppresses_directory_permission_error(
     assert opened == [(str(tmp_path), os.O_RDONLY)]
 
 
-def test_atomic_write_lines_suppresses_einval_directory_fsync(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("error_number", [errno.EINVAL, errno.EIO], ids=["unsupported", "io-error"])
+def test_atomic_write_lines_directory_fsync_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_number: int
 ) -> None:
-    """EINVAL from the directory fsync is ignored.
+    """Only unsupported directory fsync errors are ignored; descriptors always close.
 
     The directory fd is faked so this path runs where ``os.open`` of a directory
     raises ``PermissionError`` (Windows). That suppress path has its own test.
@@ -325,70 +308,26 @@ def test_atomic_write_lines_suppresses_einval_directory_fsync(
         if fd != directory_fd:
             real_close(fd)
 
-    def fsync_then_einval(fd: int) -> None:
+    def fsync_then_error(fd: int) -> None:
         nonlocal fsync_calls
         fsync_calls += 1
         if fsync_calls == 1:
             real_fsync(fd)
             return
-        raise OSError(errno.EINVAL, "Invalid argument")
+        raise OSError(error_number, "directory fsync failed")
 
     monkeypatch.setattr(helpers.os, "open", tracking_open)
     monkeypatch.setattr(helpers.os, "close", tracking_close)
-    monkeypatch.setattr(helpers.os, "fsync", fsync_then_einval)
+    monkeypatch.setattr(helpers.os, "fsync", fsync_then_error)
 
-    atomic_write_lines(target, ["ok"])
+    if error_number == errno.EINVAL:
+        atomic_write_lines(target, ["ok"])
+    else:
+        with pytest.raises(OSError) as exc_info:
+            atomic_write_lines(target, ["ok"])
+        assert exc_info.value.errno == error_number
 
     assert target.read_text(encoding="utf-8") == "ok\n"
-    assert fsync_calls == 2
-    assert opened == [(str(tmp_path), directory_fd)]
-    assert closed == [directory_fd]
-
-
-def test_atomic_write_lines_propagates_other_directory_fsync_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Directory fsync errors other than EINVAL propagate.
-
-    The directory fd is faked so this path runs where ``os.open`` of a directory
-    raises ``PermissionError`` (Windows). That suppress path has its own test.
-    """
-    target = tmp_path / "session.jsonl"
-    directory_fd = 12345
-    fsync_calls = 0
-    real_fsync = helpers.os.fsync
-    real_open = helpers.os.open
-    real_close = helpers.os.close
-    opened: list[tuple[object, int]] = []
-    closed: list[int] = []
-
-    def tracking_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
-        if flags == os.O_RDONLY:
-            opened.append((path, directory_fd))
-            return directory_fd
-        return real_open(path, flags, *args, **kwargs)
-
-    def tracking_close(fd: int) -> None:
-        closed.append(fd)
-        if fd != directory_fd:
-            real_close(fd)
-
-    def fsync_then_eio(fd: int) -> None:
-        nonlocal fsync_calls
-        fsync_calls += 1
-        if fsync_calls == 1:
-            real_fsync(fd)
-            return
-        raise OSError(errno.EIO, "I/O error")
-
-    monkeypatch.setattr(helpers.os, "open", tracking_open)
-    monkeypatch.setattr(helpers.os, "close", tracking_close)
-    monkeypatch.setattr(helpers.os, "fsync", fsync_then_eio)
-
-    with pytest.raises(OSError, match="I/O error"):
-        atomic_write_lines(target, ["new"])
-
-    assert target.read_text(encoding="utf-8") == "new\n"
     assert fsync_calls == 2
     assert opened == [(str(tmp_path), directory_fd)]
     assert closed == [directory_fd]

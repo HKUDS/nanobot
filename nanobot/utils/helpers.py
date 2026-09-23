@@ -569,9 +569,6 @@ def atomic_write_lines(path: Path, lines: Iterable[str], *, fsync: bool = True) 
     directory this way) and ``EINVAL`` (filesystems that reject directory
     fsync). Any other directory fsync error propagates. The temp file is
     removed on every ``BaseException``.
-
-    #5291's subagent transcript store should call this helper when it merges
-    instead of copying the temp/fsync/replace sequence.
     """
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
