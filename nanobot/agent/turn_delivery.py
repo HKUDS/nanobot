@@ -20,9 +20,19 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventPublisher
 from nanobot.channels.notification_routes import notification_metadata
-from nanobot.events import AgentEvent, EventSink, ResponseSource, ResponseSourceEvent
+from nanobot.events import (
+    AgentEvent,
+    ContextCompactionEvent,
+    EventSink,
+    ResponseSource,
+    ResponseSourceEvent,
+)
 from nanobot.providers.base import LLMUsage
-from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
+from nanobot.session.keys import (
+    UNIFIED_SESSION_KEY,
+    is_internal_session,
+    last_channel_from_metadata,
+)
 from nanobot.utils.helpers import strip_think
 
 if TYPE_CHECKING:
@@ -43,12 +53,15 @@ TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
 
 
 def _bind_events(
-    bus: MessageBus, route: TurnRoute,
+    bus: MessageBus, route: TurnRoute, session_key: str,
 ) -> EventSink:
     channel, chat_id = route.channel, route.chat_id
     metadata = deepcopy(route.metadata)
 
     def accepts(event_type: type[AgentEvent]) -> bool:
+        # A maintenance result destination does not own the internal context.
+        if is_internal_session(session_key) and issubclass(event_type, ContextCompactionEvent):
+            return False
         return notification_is_deliverable(
             event_type, channel=channel, publish_lifecycle=route.publish_lifecycle,
         )
@@ -124,6 +137,8 @@ class TurnDeliveryFactory:
         session_metadata: dict[str, Any],
     ) -> EventSink:
         """Bind idle notifications to one route without acquiring a turn owner."""
+        if is_internal_session(session_key):
+            return EventSink()
         saved_route = session_metadata.get("_compaction_route")
         if isinstance(saved_route, dict):
             saved_route = cast(dict[str, Any], saved_route)
@@ -148,7 +163,7 @@ class TurnDeliveryFactory:
             metadata = {}
         metadata = deepcopy(metadata)
 
-        return _bind_events(self.bus, TurnRoute(channel, chat_id, metadata))
+        return _bind_events(self.bus, TurnRoute(channel, chat_id, metadata), session_key)
 
     @staticmethod
     def _default_route(msg: InboundMessage, session_key: str) -> TurnRoute:
@@ -202,7 +217,7 @@ class TurnDelivery:
     _stream_source_unknown: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
-        self._routed_events = _bind_events(self.bus, self.route)
+        self._routed_events = _bind_events(self.bus, self.route, self.session_key)
         self.events = EventSink(self._publish_event, self._routed_events.accepts)
         self.delivery_message = dataclasses.replace(
             self.input_message,
@@ -222,6 +237,9 @@ class TurnDelivery:
 
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
+        if is_internal_session(self.session_key):
+            session_metadata.pop("_compaction_route", None)
+            return
         # Keep the storage key readable by older gateways.
         session_metadata["_compaction_route"] = {
             "channel": self.route.channel,
