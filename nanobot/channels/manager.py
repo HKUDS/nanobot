@@ -41,6 +41,7 @@ from nanobot.utils.restart import (
 )
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.exec_session import ExecSessionManager
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
     from nanobot.triggers.local_store import LocalTriggerStore
@@ -111,6 +112,7 @@ class ChannelManager:
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None,
         config_path: Path | None = None,
+        exec_sessions: ExecSessionManager | None = None,
     ):
         if config_path is None:
             from nanobot.config.loader import get_config_path
@@ -120,6 +122,7 @@ class ChannelManager:
         self._config_path = config_path.expanduser().resolve(strict=False)
         self.bus = bus
         self._session_manager = session_manager
+        self._exec_sessions = exec_sessions
         self._cron_service = cron_service
         self._local_trigger_store = local_trigger_store
         self._webui_runtime_model_name = webui_runtime_model_name
@@ -210,6 +213,7 @@ class ChannelManager:
                 mcp_reload=self._webui_mcp_reload,
                 skill_state_action=self._webui_skill_state_action,
                 recovery_action=self._webui_recovery_action,
+                exec_sessions=self._exec_sessions,
                 logger=logger,
             )
             kwargs["gateway"] = gateway

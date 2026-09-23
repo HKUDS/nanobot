@@ -205,6 +205,11 @@ class AgentLoop:
         return self.tools.tool_names
 
     @property
+    def exec_sessions(self) -> ExecSessionManager:
+        """Session-scoped command observation and lifecycle control."""
+        return self._exec_session_manager
+
+    @property
     def provider(self) -> LLMProvider:
         """Provider selected for future turn admissions."""
         return self.runtime_resolver.runtime.provider

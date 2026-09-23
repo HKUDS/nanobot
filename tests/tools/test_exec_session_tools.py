@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -818,10 +818,12 @@ def test_exec_session_manager_retains_and_aggregates_failed_cleanup():
         manager = ExecSessionManager()
         first = SimpleNamespace(
             session_id="first",
+            forget_output=Mock(),
             kill=AsyncMock(side_effect=OSError("first failed")),
         )
         second = SimpleNamespace(
             session_id="second",
+            forget_output=Mock(),
             kill=AsyncMock(side_effect=RuntimeError("second failed")),
         )
         manager._sessions = {first.session_id: first, second.session_id: second}
@@ -848,6 +850,7 @@ def test_exec_session_manager_preserves_single_cleanup_error():
         session = SimpleNamespace(
             session_id="failed",
             kill=AsyncMock(side_effect=OSError("cleanup failed")),
+            forget_output=Mock(),
         )
         manager._sessions = {session.session_id: session}
 
@@ -968,6 +971,7 @@ def test_terminate_by_owner_retains_failed_sessions():
         session = SimpleNamespace(
             session_id="failed",
             owner_session_key="cli:a",
+            forget_output=Mock(),
             kill=AsyncMock(side_effect=OSError("termination failed")),
         )
         manager._sessions[session.session_id] = session
@@ -991,9 +995,11 @@ def test_stale_cleanup_retains_session_when_kill_fails():
         session = SimpleNamespace(
             session_id="stale-failed",
             owner_session_key="cli:a",
+            retains_output=False,
             last_access=time.monotonic() - 10,
             kill=AsyncMock(side_effect=OSError("termination failed")),
         )
+        session.stop = session.kill
         manager._sessions[session.session_id] = session
 
         with pytest.raises(OSError, match="termination failed"):

@@ -12,6 +12,7 @@ import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { SubtasksPanel } from "@/components/thread/SubtasksPanel";
+import { BackgroundCommandsPanel } from "@/components/thread/BackgroundCommandsPanel";
 import type {
   ComposerContextUsage,
   ComposerRoundUsage,
@@ -1597,6 +1598,7 @@ export function ThreadShell({
           onDismiss={dismissStreamError}
         />
       ) : null}
+      {chatId ? <BackgroundCommandsPanel client={client} chatId={chatId} /> : null}
       {session ? (
         <ThreadComposer
           onSend={handleThreadSend}

@@ -22,6 +22,7 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
 
 if TYPE_CHECKING:
+    from nanobot.agent.tools.exec_session import ExecSessionManager
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
@@ -48,6 +49,7 @@ class GatewayServices:
     local_trigger_store: LocalTriggerStore | None
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
+    exec_sessions: ExecSessionManager | None = None
 
 
 def build_gateway_services(
@@ -74,6 +76,7 @@ def build_gateway_services(
     mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     skill_state_action: Callable[[set[str]], None] | None = None,
     recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
+    exec_sessions: ExecSessionManager | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     settings = WebUISettingsServices.create(
@@ -152,6 +155,7 @@ def build_gateway_services(
         workspaces=workspaces,
         temporary_chats=temporary_chats,
         session_projection=session_projection,
+        exec_sessions=exec_sessions,
         session_manager=session_manager,
         cron_service=cron_service,
         local_trigger_store=local_trigger_store,
