@@ -1,5 +1,6 @@
 """Document text extraction utilities for nanobot."""
 
+import codecs
 import mimetypes
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -603,14 +604,29 @@ def _office_archive_error(path: Path) -> str | None:
     return None
 
 
+def _decode_bom_text(raw: bytes) -> str | None:
+    """Decode text whose byte-order mark declares a Unicode encoding."""
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig")
+    # UTF-32 LE starts with the UTF-16 LE BOM, so check UTF-32 first.
+    if raw.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        return raw.decode("utf-32")
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return raw.decode("utf-16")
+    return None
+
+
 def _extract_text_file(path: Path) -> str:
     """Extract text from a plain text file."""
     try:
-        # Try UTF-8 first, then latin-1 fallback
-        try:
-            content = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            content = path.read_text(encoding="latin-1")
+        raw = path.read_bytes()
+        content = _decode_bom_text(raw)
+        if content is None:
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                content = raw.decode("latin-1")
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
         return _truncate(content, _MAX_TEXT_LENGTH)
     except Exception as e:
         logger.exception("Failed to read text file {}", path)

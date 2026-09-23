@@ -2,14 +2,42 @@ import { useState } from "react";
 import { ArrowRightLeft, Hexagon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { providerBrand } from "@/lib/provider-brand";
 import type { ResponseSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+export function FallbackResponseSources({
+  sources,
+  className,
+  badgeClassName,
+}: {
+  sources?: ResponseSource[];
+  className?: string;
+  badgeClassName?: string;
+}) {
+  const fallbacks = sources?.filter((source) => source.fallback === true) ?? [];
+  if (fallbacks.length === 0) return null;
+  return (
+    <TooltipProvider>
+      <div className={cn("flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1", className)}>
+        {fallbacks.map((source) => (
+          <ResponseSourceBadge key={JSON.stringify(source)} source={source} className={badgeClassName} />
+        ))}
+      </div>
+    </TooltipProvider>
+  );
+}
+
 /** A persisted invocation identity; deliberately independent of live settings. */
-export function ResponseSourceBadge({ source }: { source: ResponseSource }) {
+export function ResponseSourceBadge({
+  source,
+  className,
+}: {
+  source: ResponseSource;
+  className?: string;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const description = t("message.fallbackResponse", { preset: source.preset });
@@ -25,6 +53,7 @@ export function ResponseSourceBadge({ source }: { source: ResponseSource }) {
               "touch-target inline-flex min-h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-1.5 text-xs",
               "transition-colors hover:bg-muted/55 hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              className,
             )}>
               <ArrowRightLeft aria-hidden className="size-3 shrink-0 opacity-70" />
               <span aria-hidden className={cn(
