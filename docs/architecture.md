@@ -57,6 +57,10 @@ Keep this split in mind when debugging. If a problem is about channel routing, s
 
 After a terminal tool-iteration limit, the next ordinary turn receives a short runtime-context note to follow the current request and resume unfinished work only when asked. `session/turn_continuation.py` owns this budget-stop context; a queued Goal continuation is not a terminal stop. The note is stored with that input for stable model-history replay but is hidden from display history. Tool calls and results remain intact. New or forked histories do not inherit the pending note. This is model guidance, not a tool-execution ban or a fix for sudo authentication.
 
+## Context Budgets
+
+When file reads make a request exceed the context budget, the runner first summarizes history that the model has already received. If the new file results still do not fit, it replaces only the necessary unread text results with a budget error that asks the model to read a smaller range. It saves that same error for replay; it does not restore the oversized result on the next turn. Source files, accepted history, tool call IDs, and tool schemas stay unchanged. This recovery does not bypass the budget limit or offload `read_file` results to more files.
+
 ## Providers
 
 Provider metadata is centralized in `nanobot/providers/registry.py`. Configuration fields live in `nanobot/config/schema.py`.
