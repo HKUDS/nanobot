@@ -39,6 +39,7 @@ from nanobot.utils.helpers import (
     safe_filename,
     strip_think,
 )
+from nanobot.utils.image_artifacts import EphemeralImageStore
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 SESSION_CACHE_MAX_SIZE = 128
@@ -180,6 +181,8 @@ class Session:
     last_consolidated: int = 0
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
+    # Process-local resource, excluded from the explicit durable session schema.
+    ephemeral_images: EphemeralImageStore | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.metadata), dict):

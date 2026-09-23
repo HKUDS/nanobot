@@ -16,10 +16,12 @@ from nanobot.events import (
     ResponseSourceEvent,
     RetryWaitEvent,
 )
+from nanobot.utils.image_artifacts import ImageArtifactsEvent
 
 NotificationAudience = Literal["channel", "lifecycle", "interactive"]
 
 NOTIFICATION_AUDIENCES: dict[type[AgentEvent], NotificationAudience] = {
+    ImageArtifactsEvent: "interactive",
     ProgressEvent: "lifecycle",
     FileEditEvent: "lifecycle",
     StreamDeltaEvent: "channel",

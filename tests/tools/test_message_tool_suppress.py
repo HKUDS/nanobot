@@ -205,7 +205,7 @@ class TestMessageToolSchema:
         tool = MessageTool()
 
         assert "Do not use this for the normal reply in the current chat" in tool.description
-        assert "generate_image creates images in the current chat" in tool.description
+        assert "WebUI displays generated images automatically; do not resend them" in tool.description
         assert (
             "Do not use this for a normal reply in the current chat"
             in tool.parameters["properties"]["content"]["description"]

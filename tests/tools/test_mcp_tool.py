@@ -666,6 +666,27 @@ async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
     # The base64 payload must NOT leak into the model-facing result.
     assert _PNG_B64 not in result
     assert "message tool" in payload["next_step"]
+    assert result.artifacts == ()  # Unannotated images are observations, not automatic deliveries.
+
+
+@pytest.mark.parametrize("audience,deliveries", [(None, 0), (["assistant"], 0), (["user"], 1)])
+@pytest.mark.parametrize("is_error", [False, True])
+async def test_mcp_image_audience_is_explicit(tmp_path, audience, deliveries, is_error):
+    from nanobot.config.loader import set_config_path
+    from nanobot.utils.image_artifacts import ImageArtifactResult
+
+    set_config_path(tmp_path / "config.json")
+    block = _FakeImageContent(_PNG_B64)
+    block.annotations = SimpleNamespace(audience=audience)
+
+    async def call_tool(_name, arguments):
+        return SimpleNamespace(content=[block], isError=is_error)
+
+    result = await _make_wrapper(SimpleNamespace(call_tool=call_tool)).execute()
+    if is_error:
+        assert not isinstance(result, ImageArtifactResult)
+    else:
+        assert len(result.artifacts) == deliveries
 
 
 @pytest.mark.asyncio

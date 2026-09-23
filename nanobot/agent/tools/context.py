@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from nanobot.providers.factory import ProviderSnapshot
     from nanobot.security.workspace_access import WorkspaceSandboxStatus
     from nanobot.session.manager import SessionManager
+    from nanobot.utils.image_artifacts import EphemeralImageStore
     from nanobot.utils.llm_runtime import LLMRuntime
 
 _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
@@ -41,6 +42,7 @@ class RequestContext:
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
     log_content: bool = True
+    ephemeral_images: EphemeralImageStore | None = None
 
 
 @runtime_checkable

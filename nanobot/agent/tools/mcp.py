@@ -583,8 +583,9 @@ def _mcp_image_tool_result(text_parts: list[str], artifacts: list[dict[str, Any]
         "artifacts": artifacts,
         "next_step": (
             "These images were returned by an MCP tool and saved as local artifacts. "
-            "Call the message tool with the artifact 'path' values in the media "
-            "parameter to deliver the images to the user. Do not paste base64 or raw "
+            "Images explicitly annotated for the user are displayed automatically in WebUI. "
+            "Other images are observations: only send them with the message tool media when the user "
+            "requested delivery. Do not paste base64 or raw "
             "paths into your reply unless the user asks for debug details."
         ),
     }
@@ -713,39 +714,55 @@ class MCPToolWrapper(_MCPWrapperBase):
         """
         from mcp import types
 
+        from nanobot.utils.image_artifacts import ImageArtifact, ImageArtifactResult
+
         text_parts: list[str] = []
         artifacts: list[dict[str, Any]] = []
+        deliverables: list[ImageArtifact] = []
         for block in content:
             if isinstance(block, types.TextContent):
                 text_parts.append(block.text)
                 continue
             data_url = _image_block_data_url(block, types)
             if data_url is not None:
+                if len(artifacts) >= 8:
+                    text_parts.append("(image result limit reached: at most 8 images per tool call)")
+                    continue
                 stored = self._store_image_block(data_url, arguments)
                 if stored is not None:
                     artifacts.append(stored)
+                    annotations = getattr(block, "annotations", None)
+                    audience = getattr(annotations, "audience", None)
+                    if audience and "user" in audience:
+                        deliverables.append(ImageArtifact(
+                            str(stored["id"]), str(stored["path"]), str(stored["mime"]),
+                            str(stored["provider"]),
+                        ))
                 else:
                     text_parts.append("(MCP tool returned an image that could not be stored)")
                 continue
             text_parts.append(str(block))
 
         if artifacts:
-            return _mcp_image_tool_result(text_parts, artifacts)
+            return ImageArtifactResult(_mcp_image_tool_result(text_parts, artifacts), tuple(deliverables))
         return "\n".join(text_parts) or "(no output)"
 
     def _store_image_block(
         self, data_url: str, arguments: Mapping[str, Any]
     ) -> dict[str, Any] | None:
         """Persist one image data URL as an artifact; return its metadata or None."""
+        from nanobot.agent.tools.context import current_request_context
         from nanobot.utils.artifacts import ArtifactError, store_generated_image_artifact
 
         try:
+            request = current_request_context()
             return store_generated_image_artifact(
                 data_url,
                 prompt=str(arguments.get("prompt") or ""),
                 model=str(arguments.get("model") or ""),
                 save_dir="generated",
                 provider=f"mcp:{self._server_name}",
+                ephemeral_store=request.ephemeral_images if request else None,
             )
         except (ArtifactError, OSError) as exc:
             logger.warning(

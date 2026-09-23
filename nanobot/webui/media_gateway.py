@@ -18,6 +18,7 @@ from nanobot.webui.attachment_ingress import (
 from nanobot.webui.ingress_policy import AttachmentIngressLimits
 from nanobot.webui.media_api import (
     serve_signed_media,
+    sign_media_path,
     sign_or_stage_media_path,
     signed_media_attachments,
 )
@@ -78,6 +79,25 @@ class WebUIMediaGateway:
             logger=self.logger,
         )
 
+    def sign_media_path(self, path: Path) -> dict[str, str] | None:
+        """Sign an existing managed image without copying files into the media root."""
+        from nanobot.utils.helpers import detect_image_mime
+        from nanobot.utils.image_artifacts import MAX_IMAGE_BYTES
+
+        url = sign_media_path(path, secret=self.secret, media_dir=self._media_dir)
+        if url is None:
+            return None
+        try:
+            if path.stat().st_size > MAX_IMAGE_BYTES:
+                return None
+            with path.open("rb") as image:
+                mime = detect_image_mime(image.read(32))
+        except OSError:
+            return None
+        if mime not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:
+            return None
+        return {"url": url, "name": path.name, "kind": "image", "mime": mime}
+
     def rewrite_local_markdown_images(
         self,
         text: str,
@@ -88,6 +108,7 @@ class WebUIMediaGateway:
             text,
             workspace_path=workspace_path or self.workspace_path,
             sign_path=self.sign_or_stage_media_path,
+            sign_extra_path=self.sign_media_path,
         )
 
     def augment_transcript_media(self, paths: list[str]) -> list[dict[str, Any]]:

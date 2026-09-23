@@ -305,6 +305,99 @@ async def _new_temporary_chat(
 
 
 @pytest.mark.asyncio
+async def test_temporary_generated_images_are_owner_only_and_removed_on_discard(bus, tmp_path):
+    from nanobot.utils.artifacts import ArtifactError, store_generated_image_artifact
+    from nanobot.utils.image_artifacts import ImageArtifact, ImageArtifactsEvent
+
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    sessions = SessionManager(tmp_path)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    owner, stranger = AsyncMock(), AsyncMock()
+    chat = await _new_temporary_chat(channel, owner)
+    session = sessions.get_cached(f"websocket:{chat}")
+    scope = session.ephemeral_images
+    image = store_generated_image_artifact(png, prompt="fixture", model="fixture", ephemeral_store=scope)
+    artifact = ImageArtifact(image["id"], image["path"], image["mime"], "fixture")
+    # Even an erroneous internal subscription must not reveal a temporary artifact.
+    channel._attach(stranger, chat)
+    channel._media.sign_or_stage_media_path = MagicMock(side_effect=AssertionError("must not stage"))
+    msg = OutboundMessage(channel="websocket", chat_id=chat, content="",
+                          metadata={"webui": True, WEBUI_TURN_METADATA_KEY: "image-turn"},
+                          event=ImageArtifactsEvent((artifact,), "call-1"))
+    await channel.send(msg)
+    await asyncio.sleep(0)
+    payload = _sent_ws_payloads(owner)[-1]
+    assert payload["kind"] == "artifacts"
+    assert payload["media_urls"][0]["url"] == png
+    assert "media" not in payload
+    assert not stranger.send.await_count
+    assert read_transcript_lines(f"websocket:{chat}") == []
+    # Explicit message/Markdown delivery must use the same private payload, not copy into media/.
+    owner.send.reset_mock()
+    await channel.send(OutboundMessage(channel="websocket", chat_id=chat,
+                                      content=f'![fixture]({image["path"]})', media=[image["path"]]))
+    await asyncio.sleep(0)
+    assert png in _sent_ws_payloads(owner)[-1]["text"]
+    await channel._temporary_chats.discard(owner, chat)
+    assert not Path(image["path"]).exists()
+    owner.send.reset_mock()
+    await channel.send(msg)
+    assert not owner.send.await_count
+    assert not stranger.send.await_count
+    assert read_transcript_lines(f"websocket:{chat}") == []
+    with pytest.raises(ArtifactError, match="closed"):
+        store_generated_image_artifact(png, prompt="late", model="fixture", ephemeral_store=scope)
+    await channel._cleanup_connection(owner)
+    await channel._cleanup_connection(stranger)
+
+
+@pytest.mark.asyncio
+async def test_image_artifacts_replay_with_kind_and_no_raw_binary(bus, tmp_path, monkeypatch):
+    from nanobot.utils.artifacts import store_generated_image_artifact
+    from nanobot.utils.image_artifacts import ImageArtifact, ImageArtifactsEvent
+
+    monkeypatch.setattr("nanobot.utils.artifacts.get_media_dir", lambda: tmp_path / "media")
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=SessionManager(tmp_path), workspace_path=tmp_path))
+    image = store_generated_image_artifact(png, prompt="fixture", model="fixture")
+    artifact = ImageArtifact(image["id"], image["path"], image["mime"], "fixture")
+    connection = AsyncMock()
+    channel._attach(connection, "artifact-test")
+    await channel.send(OutboundMessage(channel="websocket", chat_id="artifact-test", content="",
+        event=ImageArtifactsEvent((artifact,), "call-1"), metadata={WEBUI_TURN_METADATA_KEY: "turn-1"}))
+    await asyncio.sleep(0)
+    payload = _sent_ws_payloads(connection)[-1]
+    assert payload["media_urls"][0]["url"].startswith("/api/media/")
+    records = read_transcript_lines("websocket:artifact-test")
+    assert records and png not in json.dumps(records)
+    assert records[-1]["kind"] == "artifacts"
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    channel.gateway.tokens.api_tokens["fixture-token"] = time.monotonic() + 300
+    key = quote("websocket:artifact-test", safe="")
+    req = Request(f"/api/sessions/{key}/webui-thread", Headers([("Authorization", "Bearer fixture-token")]))
+    response = await channel.gateway.http._dispatch_session_routes(req, req.path)
+    assert response.status_code == 200
+    replay = json.loads(response.body)["events"]
+    image_event = next(event for event in replay if event.get("kind") == "artifacts")
+    assert image_event["turn_id"] == "turn-1"
+    assert image_event["media_urls"][0]["url"].startswith("/api/media/")
+    Path(image["path"]).unlink()
+    response = await channel.gateway.http._dispatch_session_routes(req, req.path)
+    replay = json.loads(response.body)["events"]
+    image_event = next(event for event in replay if event.get("kind") == "artifacts")
+    assert image_event["media_urls"][0]["url"] == ""
+    assert image_event["media_urls"][0]["kind"] == "image"
+    await channel._cleanup_connection(connection)
+
+
+@pytest.mark.asyncio
 async def test_attach_exposes_the_session_canonical_model_preset(bus, tmp_path) -> None:
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:pinned-model")

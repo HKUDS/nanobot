@@ -912,6 +912,25 @@ export function projectThreadEvent(
   }
 
   if (event.event === "message") {
+    if (event.kind === "artifacts") {
+      const turn = turnFieldsForProjection(state, event, "activity");
+      let start = 0;
+      if (!turn.turnId) {
+        for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+          if (state.messages[i].role === "user") { start = i; break; }
+        }
+      }
+      const currentMessages = state.messages.slice(start);
+      const seen = new Set(currentMessages.filter((message) => message.kind === "artifacts"
+        && message.turnId === turn.turnId).flatMap((message) => message.media?.map((m) => m.url) ?? []));
+      const media = (event.media_urls ?? []).map(toMediaAttachment).filter((item) => !item.url || !seen.has(item.url));
+      if (media.length) state.messages = [...state.messages, {
+        id: projectionMessageId(event, options), role: "assistant", kind: "artifacts", content: "",
+        media, ...turn, createdAt: projectionCreatedAt(event, options),
+      }];
+      // Do not close an answer stream or suppress subsequent activity/narration.
+      return state;
+    }
     if (
       state.suppressUntilTurnEnd
       && (event.kind === "tool_hint" || event.kind === "progress" || event.kind === "reasoning")

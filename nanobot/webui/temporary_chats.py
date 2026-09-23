@@ -15,6 +15,7 @@ from nanobot.bus.events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.image_artifacts import EphemeralImageStore
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _TEMPORARY_CHAT_DISABLED_TOOLS = frozenset({
@@ -96,6 +97,7 @@ class WebUITemporaryChats:
         if session.policy.persist:
             raise RuntimeError("Temporary Chat must use a non-persistent session policy")
         self._owners[chat_id] = owner
+        session.ephemeral_images = EphemeralImageStore()
         self._owner_chat_ids.setdefault(owner, set()).add(chat_id)
         self._active_sessions[chat_id] = session
         self._known_transient_chat_ids.add(chat_id)
@@ -156,6 +158,13 @@ class WebUITemporaryChats:
     def owns(self, owner: object, chat_id: str) -> bool:
         return self._owners.get(chat_id) is owner
 
+    def image_attachment(self, chat_id: str, path: str) -> dict[str, str] | None:
+        """Return only images owned by this still-active temporary chat."""
+        session = self._active_sessions.get(chat_id)
+        if chat_id not in self._owners or session is None or session.ephemeral_images is None:
+            return None
+        return session.ephemeral_images.attachment(path)
+
     def should_persist_transcript(self, chat_id: str) -> bool:
         """Apply the session policy and retain it for late events after disposal."""
         return (
@@ -164,6 +173,12 @@ class WebUITemporaryChats:
         )
 
     def _discard_media(self, chat_id: str) -> None:
+        session = self._active_sessions.get(chat_id)
+        if session is not None and session.ephemeral_images is not None:
+            try:
+                session.ephemeral_images.close()
+            except OSError:
+                self._logger.warning("failed to remove temporary generated images")
         for raw_path in self._media_paths.pop(chat_id, set()):
             try:
                 Path(raw_path).unlink(missing_ok=True)
@@ -189,8 +204,8 @@ class WebUITemporaryChats:
 
         session_key = self._session_key(chat_id)
         self._forget_owner(owner, chat_id)
-        self._active_sessions.pop(chat_id, None)
         self._discard_media(chat_id)
+        self._active_sessions.pop(chat_id, None)
         if self._sessions is not None:
             self._sessions.invalidate(session_key)
         await self._bus.publish_inbound(

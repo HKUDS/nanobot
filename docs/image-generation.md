@@ -46,7 +46,12 @@ See [Provider Notes](#provider-notes) for Custom, AIHubMix, MiniMax, Gemini, Oll
 3. Include an aspect ratio or size in the request when the configured defaults are not suitable.
 4. Attach reference images when editing an existing image.
 
-Generated images are rendered as assistant media in the chat. Follow-up prompts such as "make it warmer", "change the background", or "try a 16:9 version" can reuse the most recent generated artifact.
+Completed generated images are automatically rendered below the turn's reply in
+WebUI; the model does not need to call `message` to deliver them. Other channels
+continue to use explicit message attachments. Follow-up prompts such as "make it
+warmer", "change the background", or "try a 16:9 version" can reuse the most recent
+generated artifact. See [WebUI image delivery](./webui.md#composer)
+for temporary-chat lifetime, MCP audience rules, and size limits.
 
 The WebUI hides provider storage details from the user. The agent sees the saved artifact path internally and can pass it back to `generate_image` as `reference_images` for iterative edits.
 

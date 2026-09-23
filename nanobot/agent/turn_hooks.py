@@ -14,8 +14,10 @@ from nanobot.agent.hook import (
     AgentTurnHookFactory,
     CompositeHook,
 )
+from nanobot.agent.hooks.image_artifacts import ImageArtifactsHook
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.events import NO_EVENTS, EventSink
+from nanobot.utils.image_artifacts import ImageArtifactsEvent
 
 
 @dataclass(slots=True)
@@ -51,8 +53,11 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         tool_hint_max_length=spec.tool_hint_max_length,
         log_content=log_content,
     )
+    hook_chain: list[AgentHook] = [progress_hook]
+    if spec.events.accepts(ImageArtifactsEvent):
+        hook_chain.append(ImageArtifactsHook(spec.events))
     if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:
-        return progress_hook
+        return CompositeHook(hook_chain) if len(hook_chain) > 1 else progress_hook
 
     turn_context = AgentTurnHookContext(
         events=spec.events,
@@ -65,7 +70,6 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         attributes=dict(spec.attributes or {}),
         ephemeral=spec.ephemeral,
     )
-    hook_chain: list[AgentHook] = [progress_hook]
 
     for factory in spec.registered_hook_factories:
         try:
