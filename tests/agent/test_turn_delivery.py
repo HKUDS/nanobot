@@ -20,16 +20,17 @@ from nanobot.webui.metadata import (
 
 @pytest.mark.parametrize("channel", ["telegram", "discord", "websocket", "cli", "custom"])
 @pytest.mark.parametrize("legacy_route", [False, True])
-async def test_heartbeat_compaction_never_reaches_its_result_destination(channel, legacy_route):
+@pytest.mark.parametrize("key", [HEARTBEAT_SESSION_KEY, "dream:20260602-155256"])
+async def test_internal_compaction_never_reaches_its_result_destination(channel, legacy_route, key):
     factory = TurnDeliveryFactory(MessageBus())
     msg = InboundMessage(channel=channel, sender_id="user", chat_id="chat", content="check")
-    delivery = factory.create(msg, HEARTBEAT_SESSION_KEY)
+    delivery = factory.create(msg, key)
     metadata = {"_compaction_route": {"channel": channel, "chat_id": "chat"}} if legacy_route else {}
-    idle_events = factory.session_events(HEARTBEAT_SESSION_KEY, metadata)
+    idle_events = factory.session_events(key, metadata)
     for sink in (delivery.events, idle_events):
         assert not sink.accepts(ContextCompactionEvent)
         for phase in ("started", "succeeded", "failed", "cancelled"):
-            await sink.emit(ContextCompactionEvent("heartbeat-compact", phase))
+            await sink.emit(ContextCompactionEvent("internal-compact", phase))
     assert factory.bus.outbound.empty()
 
     delivery.remember_session_route(metadata)

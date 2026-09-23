@@ -29,8 +29,8 @@ from nanobot.events import (
 )
 from nanobot.providers.base import LLMUsage
 from nanobot.session.keys import (
-    HEARTBEAT_SESSION_KEY,
     UNIFIED_SESSION_KEY,
+    is_internal_session,
     last_channel_from_metadata,
 )
 from nanobot.utils.helpers import strip_think
@@ -59,9 +59,8 @@ def _bind_events(
     metadata = deepcopy(route.metadata)
 
     def accepts(event_type: type[AgentEvent]) -> bool:
-        # Heartbeat results have a separate post-run notification gate. Its
-        # internal context maintenance must never use that result destination.
-        if session_key == HEARTBEAT_SESSION_KEY and issubclass(event_type, ContextCompactionEvent):
+        # A maintenance result destination does not own the internal context.
+        if is_internal_session(session_key) and issubclass(event_type, ContextCompactionEvent):
             return False
         return notification_is_deliverable(
             event_type, channel=channel, publish_lifecycle=route.publish_lifecycle,
@@ -138,7 +137,7 @@ class TurnDeliveryFactory:
         session_metadata: dict[str, Any],
     ) -> EventSink:
         """Bind idle notifications to one route without acquiring a turn owner."""
-        if session_key == HEARTBEAT_SESSION_KEY:
+        if is_internal_session(session_key):
             return EventSink()
         saved_route = session_metadata.get("_compaction_route")
         if isinstance(saved_route, dict):
@@ -238,7 +237,7 @@ class TurnDelivery:
 
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
-        if self.session_key == HEARTBEAT_SESSION_KEY:
+        if is_internal_session(self.session_key):
             session_metadata.pop("_compaction_route", None)
             return
         # Keep the storage key readable by older gateways.
