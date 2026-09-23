@@ -1,67 +1,126 @@
-import { createContext, useContext, useEffect, useState, type ComponentPropsWithoutRef } from "react";
-import { Copy, ExternalLink, MoreHorizontal, PanelRight } from "lucide-react";
+import { createContext, useContext, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
+import * as Menu from "@radix-ui/react-menu";
 import { useTranslation } from "react-i18next";
 
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { floatingItemClassName, floatingItemFocusClassName, floatingSurfaceClassName, floatingSurfaceMotionClassName } from "@/components/ui/floating-surface";
+import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { parseWebLink } from "@/lib/web-preview";
 import { cn } from "@/lib/utils";
 
 export const WebPreviewContext = createContext<((url: string) => void) | undefined>(undefined);
 
-export function WebLink({ href = "", children, layout = "inline", className, ...props }: ComponentPropsWithoutRef<"a"> & { layout?: "inline" | "row" }) {
+const itemClassName = `${floatingItemClassName} ${floatingItemFocusClassName} cursor-default`;
+
+export function WebLink({ href = "", children, ...props }: ComponentPropsWithoutRef<"a">) {
+  const url = parseWebLink(href);
+  if (url) return <WebsiteLink key={href} {...props} href={href}>{children}</WebsiteLink>;
+  // Keep the renderer's relative media/document and mail links unchanged.
+  const relative = !/^[a-z][a-z\d+.-]*:/i.test(href)
+    && !href.includes("\\") && !Array.from(href).some((char) => char.charCodeAt(0) < 32);
+  return relative || /^(mailto:|tel:|#)/i.test(href)
+    ? <a {...props} href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <>{children}</>;
+}
+
+/** Keep links as links; secondary actions share the compact file-reference surface. */
+function WebsiteLink({ href, children, className, ...props }: ComponentPropsWithoutRef<"a"> & { href: string }) {
   const { t } = useTranslation();
   const openPreview = useContext(WebPreviewContext);
+  const portal = useFloatingPortal();
   const [open, setOpen] = useState(false);
-  const [feedback, setFeedback] = useState("");
-  useEffect(() => {
-    if (!feedback) return;
-    const timer = window.setTimeout(() => setFeedback(""), 4000);
-    return () => window.clearTimeout(timer);
-  }, [feedback]);
-  const url = parseWebLink(href);
-  const anchor = <a {...props} className={cn(className, layout === "row" && "min-w-0 flex-1")} href={href} target="_blank" rel="noreferrer noopener">{children}</a>;
-  if (!url) {
-    // Keep the renderer's relative media/document and mail links unchanged.
-    const relative = !/^[a-z][a-z\d+.-]*:/i.test(href)
-      && !href.includes("\\") && !Array.from(href).some((char) => char.charCodeAt(0) < 32);
-    return relative || /^(mailto:|tel:|#)/i.test(href) ? anchor : <>{children}</>;
-  }
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <span className={cn("max-w-full", layout === "row" ? "inline-flex w-full min-w-0 items-center" : "inline")} onContextMenu={(event) => {
-        event.preventDefault(); event.stopPropagation(); setOpen(true);
-      }} onKeyDown={(event) => {
-        if ((event.shiftKey && event.key === "F10") || event.key === "ContextMenu") {
-          event.preventDefault(); event.stopPropagation(); setOpen(true);
-        }
+  const [feedback, setFeedback] = useState<"copied" | "copyFailed" | null>(null);
+  const link = useRef<HTMLAnchorElement>(null);
+  const point = useRef({ x: 0, y: 0 });
+  const anchor = useRef({ getBoundingClientRect: () => new DOMRect(point.current.x, point.current.y, 0, 0) });
+  const interactedOutside = useRef(false);
+  const generation = useRef(0);
+  const press = useRef<{ id: number; x: number; y: number; timer: number } | null>(null);
+  const suppressClick = useRef(false);
+
+  const cancelPress = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  useEffect(() => () => {
+    cancelPress();
+    generation.current += 1;
+  }, []);
+
+  const changeOpen = (next: boolean) => {
+    cancelPress();
+    generation.current += 1;
+    setOpen(next);
+  };
+  const openAt = (x: number, y: number) => {
+    point.current = { x, y };
+    interactedOutside.current = false;
+    setFeedback(null);
+    changeOpen(true);
+  };
+  const copy = async () => {
+    const current = generation.current;
+    const copied = await copyTextToClipboard(href);
+    // Late clipboard results must not dismiss a new menu or report another URL.
+    if (current !== generation.current) return;
+    setFeedback(copied ? "copied" : "copyFailed");
+    if (copied) changeOpen(false);
+  };
+
+  return <Menu.Root open={open} onOpenChange={changeOpen}>
+    <Menu.Anchor virtualRef={anchor} />
+    <span className="inline max-w-full"
+      onContextMenu={(event) => {
+        event.preventDefault(); event.stopPropagation();
+        openAt(event.clientX, event.clientY);
+      }}
+      onKeyDown={(event) => {
+        suppressClick.current = false;
+        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        event.preventDefault(); event.stopPropagation();
+        const bounds = link.current!.getBoundingClientRect();
+        openAt(bounds.left, bounds.bottom);
+      }}
+      onPointerDown={(event) => {
+        suppressClick.current = false;
+        cancelPress();
+        if (event.pointerType !== "touch" || !event.isPrimary || event.button !== 0) return;
+        const { pointerId: id, clientX: x, clientY: y } = event;
+        press.current = { id, x, y, timer: window.setTimeout(() => {
+          suppressClick.current = true;
+          openAt(x, y);
+        }, 600) };
+      }}
+      onPointerMove={(event) => {
+        const current = press.current;
+        if (current && (event.pointerId !== current.id || Math.hypot(event.clientX - current.x, event.clientY - current.y) > 10)) cancelPress();
+      }}
+      onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress}
+      onClickCapture={(event) => {
+        if (!suppressClick.current) return;
+        suppressClick.current = false;
+        event.preventDefault(); event.stopPropagation();
       }}>
-        {anchor}
-        <DropdownMenuTrigger asChild>
-          <button type="button" aria-label={t("webPreview.actions")} title={t("webPreview.actions")}
-            className="ml-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md align-middle text-muted-foreground/70 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
-          </button>
-        </DropdownMenuTrigger>
-      </span>
-      <DropdownMenuContent align="start">
-        <DropdownMenuLabel className="max-w-64 truncate">{url.host}</DropdownMenuLabel>
-        {openPreview ? <DropdownMenuItem onSelect={() => openPreview(url.href)}>
-          <PanelRight className="h-4 w-4" aria-hidden />{t("webPreview.open")}
-        </DropdownMenuItem> : null}
-        <DropdownMenuItem asChild>
-          <a href={url.href} target="_blank" rel="noreferrer noopener">
-            <ExternalLink className="h-4 w-4" aria-hidden />{t("webPreview.external")}
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={(event) => {
-          // Keep the menu/focus alive until the clipboard fallback finishes.
+      <a {...props} ref={link} href={href} target="_blank" rel="noreferrer noopener"
+        className={cn(className, "[-webkit-touch-callout:none]")}>{children}</a>
+    </span>
+    {feedback === "copied" ? <span role="status" className="sr-only">{t("webPreview.copied")}</span> : null}
+    <Menu.Portal container={portal ?? undefined}>
+      <Menu.Content aria-label={t("webPreview.actions")} align="start" sideOffset={4} collisionPadding={12}
+        className={cn(floatingSurfaceClassName, floatingSurfaceMotionClassName, "min-w-40 rounded-control p-1 [&_[role=menuitem]]:py-1.5 [@media(pointer:coarse)]:[&_[role=menuitem]]:min-h-11")}
+        onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+        onClick={(event) => event.stopPropagation()}
+        onInteractOutside={() => { interactedOutside.current = true; }}
+        onCloseAutoFocus={(event) => {
           event.preventDefault();
-          setFeedback("");
-          void copyTextToClipboard(url.href).then((copied) => setFeedback(t(copied ? "webPreview.copied" : "webPreview.copyFailed")));
-        }}><Copy className="h-4 w-4" aria-hidden />{t("webPreview.copy")}</DropdownMenuItem>
-        {feedback ? <div role="status" className="px-2.5 py-1.5 text-xs text-muted-foreground">{feedback}</div> : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+          if (!interactedOutside.current) link.current?.focus();
+        }}>
+        {openPreview ? <Menu.Item className={itemClassName} onSelect={() => openPreview(href)}>{t("webPreview.open")}</Menu.Item> : null}
+        <Menu.Item asChild className={itemClassName}>
+          <a href={href} target="_blank" rel="noreferrer noopener">{t("webPreview.external")}</a>
+        </Menu.Item>
+        <Menu.Item className={itemClassName} onSelect={(event) => { event.preventDefault(); void copy(); }}>{t("webPreview.copy")}</Menu.Item>
+        {feedback === "copyFailed" ? <div role="status" className="max-w-64 px-2.5 py-1.5 text-xs text-muted-foreground">{t("webPreview.copyFailed")}</div> : null}
+      </Menu.Content>
+    </Menu.Portal>
+  </Menu.Root>;
 }

@@ -1,5 +1,5 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebLink, WebPreviewContext } from "@/components/WebLink";
@@ -19,6 +19,8 @@ beforeEach(() => {
   Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, value: false });
 });
 afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
   if (credentialless) Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", credentialless);
   else Reflect.deleteProperty(HTMLIFrameElement.prototype, "credentialless");
 });
@@ -76,21 +78,23 @@ describe("web preview boundaries", () => {
 });
 
 describe("web link actions", () => {
-  it("reserves room for actions beside a full-width link row without changing inline links", () => {
-    const { rerender } = render(<WebLink layout="row" href="https://example.com/">Long website title</WebLink>);
+  it("keeps the primary link without a persistent action button or extra tab stop", () => {
+    render(<WebLink href="https://example.com/">Long website title</WebLink>);
     const link = screen.getByRole("link", { name: "Long website title" });
-    expect(link.parentElement).toHaveClass("inline-flex", "w-full");
-    expect(link).toHaveClass("min-w-0", "flex-1");
-    expect(screen.getByRole("button", { name: "Link actions" })).toHaveClass("shrink-0");
-    rerender(<WebLink href="https://example.com/">Long website title</WebLink>);
-    expect(link.parentElement).toHaveClass("inline");
-    expect(link).not.toHaveClass("flex-1");
+    expect(link).toHaveAttribute("href", "https://example.com/");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noreferrer noopener");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(fireEvent.click(link)).toBe(true);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
   it("opens a shared right-click menu without loading any website beforehand", async () => {
     const open = vi.fn();
     const { container } = render(<WebPreviewContext.Provider value={open}><WebLink href="https://example.com/?a=b#c">Example</WebLink></WebPreviewContext.Provider>);
     expect(container.querySelector("iframe")).toBeNull();
     fireEvent.contextMenu(screen.getByRole("link", { name: "Example" }));
+    expect(screen.getAllByRole("menuitem")).toHaveLength(3);
+    expect(screen.queryByText("example.com")).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
     expect(open).toHaveBeenCalledWith("https://example.com/?a=b#c");
   });
@@ -99,14 +103,91 @@ describe("web link actions", () => {
     fireEvent.keyDown(screen.getByRole("link", { name: "Example" }), { key: "F10", shiftKey: true });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Copy link" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Link copied"));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Example" })).toHaveFocus();
     expect(copyTextToClipboard).toHaveBeenCalledWith("https://example.com/?q=one#two");
     expect(screen.queryByRole("menuitem", { name: "Preview website" })).not.toBeInTheDocument();
     vi.mocked(copyTextToClipboard).mockResolvedValue(false);
-    await userEvent.setup().keyboard("{Escape}");
-    await userEvent.setup().click(screen.getByRole("button", { name: "Link actions" }));
+    fireEvent.keyDown(screen.getByRole("link", { name: "Example" }), { key: "ContextMenu" });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Copy link" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Could not copy link"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    vi.mocked(copyTextToClipboard).mockResolvedValue(true);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+  it("ignores a late copy completion after the user reopens the menu", async () => {
+    let finish!: (result: boolean) => void;
+    vi.mocked(copyTextToClipboard).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    render(<WebLink href="https://example.com/">Example</WebLink>);
+    const link = screen.getByRole("link", { name: "Example" });
+    fireEvent.contextMenu(link);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
+    await userEvent.setup().keyboard("{Escape}");
+    fireEvent.contextMenu(link);
+    await act(async () => finish(true));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+  it("closes with Escape and restores focus, without stealing an outside click", async () => {
+    const user = userEvent.setup();
+    render(<><WebLink href="https://example.com/">Example</WebLink><button>Elsewhere</button></>);
+    const link = screen.getByRole("link", { name: "Example" });
+    fireEvent.keyDown(link, { key: "F10", shiftKey: true });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(link).toHaveFocus());
+    fireEvent.contextMenu(link);
+    // Radix's modal menu disables hit testing on underlying controls. A real
+    // outside pointer first dismisses the menu rather than activating that control.
+    // Its document listener is deferred until the opening pointer event finishes.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    fireEvent.pointerDown(document.body, { pointerType: "mouse", button: 0 });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(link).not.toHaveFocus();
+  });
+  it("opens on a touch hold and suppresses the following ghost click, but keeps the next tap usable", async () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    render(<WebLink href="https://example.com/" onClick={onClick}>Example</WebLink>);
+    const link = screen.getByRole("link", { name: "Example" });
+    fireEvent.pointerDown(link, { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, clientX: 100, clientY: 150 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.pointerUp(link, { pointerId: 1, pointerType: "touch" });
+    expect(fireEvent.click(link)).toBe(false);
+    expect(onClick).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    fireEvent.pointerDown(link, { pointerId: 2, pointerType: "touch", isPrimary: true, button: 0 });
+    fireEvent.pointerUp(link, { pointerId: 2, pointerType: "touch" });
+    expect(fireEvent.click(link)).toBe(true);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+  it.each(["move", "cancel", "leave", "short tap", "second finger"])("cancels touch hold on %s", async (reason) => {
+    vi.useFakeTimers();
+    render(<WebLink href="https://example.com/">Example</WebLink>);
+    const link = screen.getByRole("link", { name: "Example" });
+    fireEvent.pointerDown(link, { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, clientX: 100, clientY: 100 });
+    if (reason === "move") fireEvent.pointerMove(link, { pointerId: 1, clientX: 100, clientY: 125 });
+    else if (reason === "cancel") fireEvent.pointerCancel(link);
+    else if (reason === "leave") fireEvent.pointerLeave(link);
+    else if (reason === "short tap") fireEvent.pointerUp(link);
+    else fireEvent.pointerDown(link, { pointerId: 2, pointerType: "touch", isPrimary: false, button: 0 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+  it("cancels pending holds and discards an open menu when its URL changes", async () => {
+    vi.useFakeTimers();
+    const view = (href: string) => <WebLink href={href}>Example</WebLink>;
+    const { rerender } = render(view("https://example.com/old"));
+    fireEvent.pointerDown(screen.getByRole("link", { name: "Example" }), { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0 });
+    rerender(view("https://example.com/new"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Example" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    rerender(view("https://example.com/third"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
   it("does not add web actions for mail, files or executable addresses", () => {
     render(<><WebLink href="mailto:test@example.com">Mail</WebLink><WebLink href="javascript:alert(1)">Unsafe</WebLink><WebLink href="file:///notes">File</WebLink></>);

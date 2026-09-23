@@ -158,13 +158,16 @@ describe("temporary chat navigation", () => {
     act(() => TestSocket.current.open());
     await selectTopic("Regular topic");
     fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
-    const content = await screen.findByText("Preview of notes.txt");
+    await screen.findByText("Preview of notes.txt");
+    const panel = screen.getByTestId("file-preview-panel");
     const fullPreviewRequests = () => vi.mocked(fetch).mock.calls.filter(([url]) =>
       String(url).includes("/file-preview?path=") && !String(url).includes("probe=") && !String(url).includes("metadata="));
     expect(fullPreviewRequests()).toHaveLength(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(fetchBootstrap).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Preview of notes.txt")).toBe(content);
+    // Lazy syntax highlighting can replace text spans independently of token refresh.
+    expect(screen.getByTestId("file-preview-panel")).toBe(panel);
+    expect(screen.getByText("Preview of notes.txt")).toBeInTheDocument();
     expect(fullPreviewRequests()).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "second.txt" }));
     await screen.findByText("Preview of second.txt");

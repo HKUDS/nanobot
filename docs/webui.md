@@ -458,8 +458,10 @@ private, trusted network.
 ### Links and website previews
 
 HTTP(S) links in replies have a **Link actions** menu: right-click the link,
-press Shift+F10 while it is focused, or use its ellipsis button. You can copy the
-link, open it in a browser tab, or preview it beside the current conversation.
+press Shift+F10 while it is focused, or touch and hold it. There is no persistent
+action button beside the link. Scrolling or a short tap does not open the menu.
+You can copy the link, open it in a browser tab, or preview it beside the current
+conversation.
 Ordinary clicks still open links in a browser tab. File and session links keep
 their own behavior.
 
