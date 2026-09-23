@@ -136,6 +136,7 @@ class TestTurnTranscriptSummary:
         runtime,
         summary,
     ):
+        runtime = replace(runtime, context_window_tokens=4096)
         accepted = [
             {"role": "system", "content": "stable system"},
             {"role": "user", "content": "accepted history"},
@@ -401,7 +402,7 @@ class TestConsolidatorSummarize:
         mock_provider,
         runtime,
     ):
-        runtime = replace(runtime, generation=GenerationSettings(max_tokens=96))
+        runtime = replace(runtime, generation=GenerationSettings(max_tokens=256))
         mock_provider.chat_stream_with_retry.side_effect = RuntimeError("API error")
 
         result = await _archive(
@@ -910,6 +911,7 @@ class TestCompactIdleSession:
         store,
         runtime,
     ):
+        runtime = replace(runtime, generation=GenerationSettings(max_tokens=256))
         mock_provider.chat_stream_with_retry.side_effect = [
             LLMResponse(content="Earlier durable checkpoint.", finish_reason="stop"),
             RuntimeError("LLM unavailable"),
