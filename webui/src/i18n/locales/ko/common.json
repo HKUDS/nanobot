@@ -1427,8 +1427,8 @@
         "duration": "생성 시간"
       },
       "queued": {
-        "label": "대기 중인 안내",
-        "guide": "안내",
+        "label": "전송 대기 중",
+        "guide": "지금 보내기",
         "delete": "안내 삭제",
         "edit": "안내 수정",
         "drag": "드래그하여 순서 변경"
@@ -1605,6 +1605,7 @@
     }
   },
   "message": {
+    "actions": "메시지 작업",
     "streaming": "생성 중",
     "delivery": {
       "sending": "전송 중…",
@@ -1658,6 +1659,10 @@
     "activityWorkingFor": "{{duration}} 동안 작업 중",
     "activityWorked": "작업함",
     "activityWorkedFor": "{{duration}} 동안 작업함",
+    "collapseActivity": "활동 세부 정보 접기",
+    "activityShow": "작업 과정 보기",
+    "activityShowFor": "작업 과정 보기 {{duration}}",
+    "activityHide": "작업 과정 숨기기",
     "traceDetailsLoadFailed": "전체 활동 세부 정보를 불러올 수 없습니다.",
     "retryTraceDetails": "다시 시도",
     "retryConnection": "연결 실패",

@@ -722,10 +722,9 @@
     display: inline;
   }
 
-  /* Wide markdown tables scroll horizontally within the conversation column.
-     Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
-     custom `table` component (see MarkdownTextRenderer); min-w-max on the
-     <table> keeps natural column widths so it scrolls instead of shrinking. */
+  /* Markdown tables wrap cell text to fit the conversation column. The
+     renderer's overflow-x:auto wrapper remains a fallback for content that
+     cannot shrink. */
 
   /* Clip any residual horizontal bleed at the thread column edge. Vertical
      scrolling and internal code-block scroll are unaffected. */
@@ -763,13 +762,68 @@
   }
 }
 
-.message-actions > button:first-child {
-  margin-inline-start: -0.5rem;
+.thread-message-row,
+.message-block-menu-trigger,
+[data-message-block-menu] {
+  --message-block-control-size: 1.75rem;
+  --message-block-action-width: 1.75rem;
+  --message-block-trigger-offset: 2rem;
+}
+
+.thread-message-row {
+  padding-inline-start: max(
+    calc(var(--message-block-trigger-offset) + 0.75rem),
+    calc((100% - var(--content-column-width)) / 2)
+  );
+  padding-inline-end: max(0.75rem, calc((100% - var(--content-column-width)) / 2));
+}
+
+.message-block-menu-trigger {
+  pointer-events: none;
+  opacity: 0;
+}
+
+[data-user-text-bubble] > .message-block-menu-trigger {
+  /* The first text line is 28px tall, with py-2 around the bubble. */
+  top: calc((1rem + 28px - var(--message-block-control-size)) / 2);
+}
+
+[data-context-block-active] .message-block-menu-trigger,
+[data-message-context-menu-open] .message-block-menu-trigger,
+.message-block-menu-trigger:focus-visible {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+[data-block-context-rail] {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+[data-context-block-active] [data-block-context-rail],
+[data-block-context-rail][data-block-context-expanded] {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-block-menu-trigger {
+    transition: none;
+  }
+
+  [data-block-context-rail] {
+    transition: none;
+  }
 }
 
 @media (pointer: coarse) {
-  .message-actions > button:first-child {
-    margin-inline-start: -0.875rem;
+  .thread-message-row,
+  .message-block-menu-trigger,
+  [data-message-block-menu] {
+    --message-block-control-size: 2.75rem;
+    --message-block-action-width: 2rem;
+    --message-block-trigger-offset: 3rem;
   }
 
   .touch-target {

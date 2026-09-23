@@ -348,28 +348,35 @@ class ReadFileTool(_FsTool):
                 fp, offset=offset, limit=limit, content_hash=content_hash,
             ):
                 return f"[File unchanged since last read: {path}]"
-            try:
-                text_content = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                # Match the former eager extractor for known text formats while
-                # keeping arbitrary binary files on the guarded error path.
-                from nanobot.utils.document import _is_text_extension
+            from nanobot.utils.document import _decode_bom_text
 
-                if _is_text_extension(fp.suffix.lower()):
-                    text_content = raw.decode("latin-1")
-                else:
-                    mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-                    if mime and mime.startswith("image/"):
-                        return build_image_content_blocks(
-                            raw,
-                            mime,
-                            str(fp),
-                            f"(Image file: {path})",
+            text_content = _decode_bom_text(raw)
+            if text_content is None:
+                try:
+                    text_content = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    # Match the former eager extractor for known text formats while
+                    # keeping arbitrary binary files on the guarded error path.
+                    from nanobot.utils.document import _is_text_extension
+
+                    if _is_text_extension(fp.suffix.lower()):
+                        text_content = raw.decode("latin-1")
+                    else:
+                        mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+                        if mime and mime.startswith("image/"):
+                            return build_image_content_blocks(
+                                raw,
+                                mime,
+                                str(fp),
+                                f"(Image file: {path})",
+                            )
+                        return ToolResult.error(
+                            f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
+                            "Only supported text files and images can be read."
                         )
-                    return ToolResult.error(
-                        f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
-                        "Only supported text files and images can be read."
-                    )
+
+            if not text_content:
+                return f"(Empty file: {path})"
 
             # Normalize CRLF -> LF before line-splitting. Primarily a Windows
             # concern (git checkouts with autocrlf, editors saving CRLF) but

@@ -1441,8 +1441,8 @@
         "duration": "Tempo de geração"
       },
       "queued": {
-        "label": "Guia em fila",
-        "guide": "Guiar",
+        "label": "Aguardando envio",
+        "guide": "Enviar agora",
         "delete": "Excluir guia",
         "edit": "Editar guia",
         "drag": "Arraste para reordenar"
@@ -1619,6 +1619,7 @@
     }
   },
   "message": {
+    "actions": "Ações da mensagem",
     "streaming": "transmitindo",
     "delivery": {
       "sending": "Enviando…",
@@ -1644,6 +1645,10 @@
     "activityWorkingFor": "Trabalhando por {{duration}}",
     "activityWorked": "Trabalhou",
     "activityWorkedFor": "Trabalhou por {{duration}}",
+    "collapseActivity": "Recolher detalhes da atividade",
+    "activityShow": "Ver atividade",
+    "activityShowFor": "Ver atividade {{duration}}",
+    "activityHide": "Ocultar atividade",
     "traceDetailsLoadFailed": "Não foi possível carregar os detalhes completos da atividade.",
     "retryTraceDetails": "Tentar novamente",
     "retryConnection": "Falha na conexão",
