@@ -1,0 +1,93 @@
+{
+  "description": "Gunakan nanobot dari issue Linear melalui Agent Session native.",
+  "requirements": "Aplikasi OAuth Linear privat dan URL callback HTTPS publik yang stabil",
+  "setup": {
+    "docsLabel": "Buka panduan penyiapan Linear",
+    "officialLabel": "Buat aplikasi OAuth Linear",
+    "tryIt": "Mention aplikasi atau delegasikan issue kepadanya; percakapan lanjutan di Agent Session tidak memerlukan mention lagi.",
+    "summary": "Buat aplikasi OAuth Linear privat, simpan kredensial dan URL publiknya, lalu otorisasi workspace. Mulai sesi dengan mention aplikasi atau mendelegasikan issue; komentar biasa diabaikan.",
+    "steps": [
+      "Ekspos instans nanobot ini melalui URL HTTPS yang stabil (tunnel dapat digunakan).",
+      "Buat aplikasi OAuth privat di Linear dengan scope read, write, app:mentionable, dan app:assignable.",
+      "Daftarkan webhook aplikasi untuk AgentSessionEvent, PermissionChange, dan OAuthAuthorization menggunakan URL yang dibuat.",
+      "Hubungkan workspace melalui OAuth, lalu mention aplikasi atau delegasikan issue kepadanya."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "ID klien OAuth",
+        "placeholder": "ID klien OAuth Linear",
+        "help": "Salin dari aplikasi OAuth privat di Linear."
+      },
+      "clientSecret": {
+        "label": "Secret klien OAuth",
+        "placeholder": "••••••",
+        "help": "Hanya disimpan oleh instans nanobot ini."
+      },
+      "webhookSigningSecret": {
+        "label": "Secret penandatanganan webhook",
+        "placeholder": "••••••",
+        "help": "Digunakan untuk memverifikasi Linear-Signature sebelum isi webhook diurai."
+      },
+      "publicBaseUrl": {
+        "label": "URL HTTPS publik",
+        "placeholder": "https://nanobot.example.com",
+        "help": "Origin HTTPS stabil yang diarahkan ke listener di bawah; jangan sertakan path."
+      },
+      "host": {
+        "label": "Host listener",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "Port listener",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Path webhook",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "Path callback OAuth",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "Pengguna Linear yang diizinkan",
+        "placeholder": "ID pengguna Linear, dipisahkan koma",
+        "help": "Biarkan kosong untuk memakai pairing nanobot, atau gunakan * untuk mengizinkan semua pengguna di workspace yang terhubung."
+      },
+      "showReasoning": {
+        "label": "Tampilkan penalaran",
+        "help": "Kirim penalaran model sebagai aktivitas pemikiran di Linear. Nonaktifkan untuk sesi yang lebih ringkas."
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Kode QR otorisasi Linear",
+    "authorizeTitle": "Otorisasi di Linear",
+    "authorizeDescription": "Buka Linear di browser ini atau pindai kode QR. nanobot akan mengaktifkan channel setelah otorisasi.",
+    "waiting": "Menunggu otorisasi Linear...",
+    "connected": "Linear telah terhubung.",
+    "stopped": "Otorisasi dihentikan.",
+    "connecting": "Menghubungkan...",
+    "reconnect": "Hubungkan workspace lain",
+    "connect": "Hubungkan Linear",
+    "openLinear": "Lanjutkan di Linear",
+    "createApp": "Buat aplikasi Linear",
+    "savePublicUrl": "Masukkan URL HTTPS publik untuk membuat aplikasi Linear.",
+    "removeCredentials": "Hapus kredensial tersimpan",
+    "retrySave": "Coba lagi",
+    "channelRunning": "Channel berjalan",
+    "accessAll": "Semua anggota workspace yang diotorisasi dapat menjalankan agen ini.",
+    "accessRestricted": "Hanya ID pengguna Linear yang tercantum di Lanjutan yang dapat menjalankan agen ini.",
+    "accessPairing": "Lakukan pairing saat pertama digunakan dan hubungkan Linear MCP untuk mencari atau mengedit issue.",
+    "configureTools": "Konfigurasi Linear MCP",
+    "workspacesTitle": "Workspace yang diotorisasi",
+    "refreshWorkspaces": "Muat ulang workspace",
+    "loadingWorkspaces": "Memuat workspace",
+    "noWorkspaces": "Belum ada workspace yang diotorisasi. Hubungkan workspace untuk menerima permintaan agen Linear.",
+    "refreshRequired": "Penyegaran otorisasi diperlukan",
+    "missingScopes": "Hubungkan ulang untuk memberikan: {{scopes}}",
+    "authorized": "Diotorisasi",
+    "confirmDisconnect": "Putuskan workspace",
+    "disconnect": "Putuskan"
+  }
+}

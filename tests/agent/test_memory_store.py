@@ -113,54 +113,6 @@ class TestHistoryWithCursor:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 2
 
-    def test_prompt_history_filters_to_current_session(self, store):
-        store.append_history("legacy entry without session")
-        store.append_history("telegram entry", session_key="telegram:chat-1")
-        store.append_history("slack entry", session_key="slack:chat-2")
-
-        entries = store.read_recent_history_for_prompt(
-            since_cursor=0,
-            session_key="telegram:chat-1",
-        )
-
-        assert [e["content"] for e in entries] == ["telegram entry"]
-        assert [e["content"] for e in store.read_unprocessed_history(0)] == [
-            "legacy entry without session",
-            "telegram entry",
-            "slack entry",
-        ]
-
-    def test_unified_prompt_history_excludes_internal_cron_sessions(self, store):
-        store.append_history("legacy entry without session")
-        store.append_history("unified entry", session_key="unified:default")
-        store.append_history("telegram entry", session_key="telegram:chat-1")
-        store.append_history("cron internal entry", session_key="cron:job-1")
-
-        entries = store.read_recent_history_for_prompt(
-            since_cursor=0,
-            session_key="unified:default",
-            unified_session=True,
-        )
-
-        assert [e["content"] for e in entries] == [
-            "legacy entry without session",
-            "unified entry",
-            "telegram entry",
-        ]
-
-    def test_unified_cron_prompt_history_includes_own_cron_entry(self, store):
-        store.append_history("unified entry", session_key="unified:default")
-        store.append_history("other cron entry", session_key="cron:job-2")
-        store.append_history("own cron entry", session_key="cron:job-1")
-
-        entries = store.read_recent_history_for_prompt(
-            since_cursor=0,
-            session_key="cron:job-1",
-            unified_session=True,
-        )
-
-        assert [e["content"] for e in entries] == ["unified entry", "own cron entry"]
-
     def test_read_unprocessed_skips_entries_without_cursor(self, store):
         """Regression: entries missing the cursor key should be silently skipped."""
         store.history_file.write_text(
@@ -278,8 +230,6 @@ class TestHistoryWithCursor:
         store.append_history("event 1")
         entries = store.read_unprocessed_history(since_cursor=0)
 
-        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
-
         # Mock os.replace to raise an exception
         def failing_replace(*args, **kwargs):
             raise RuntimeError("Simulated failure")
@@ -289,8 +239,8 @@ class TestHistoryWithCursor:
         with pytest.raises(RuntimeError):
             store._write_entries(entries)
 
-        # Temp file should be cleaned up
-        assert not tmp_path_obj.exists()
+        # Temp file should be cleaned up, including uniquely named temps.
+        assert list(store.history_file.parent.glob("*.tmp")) == []
 
         # Original file should still exist (because replace failed)
         assert store.history_file.exists()

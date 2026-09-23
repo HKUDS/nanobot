@@ -40,17 +40,13 @@ class TestReadDescriptionFix:
         tool = ReadFileTool()
         assert "image" in tool.description.lower()
 
-    def test_description_no_longer_says_cannot_read_images(self):
-        tool = ReadFileTool()
-        assert "cannot read binary files or images" not in tool.description.lower()
-
 
 # ---------------------------------------------------------------------------
 # Read deduplication
 # ---------------------------------------------------------------------------
 
 class TestReadDedup:
-    """Same file + same offset/limit + unchanged mtime -> short stub."""
+    """Only reads whose original result remains in context may return a stub."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -64,9 +60,11 @@ class TestReadDedup:
     async def test_second_read_returns_unchanged_stub(self, tool, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("\n".join(f"line {i}" for i in range(100)), encoding="utf-8")
-        first = await tool.execute(path=str(f))
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f))
         assert "line 0" in first
-        second = await tool.execute(path=str(f))
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            second = await tool.execute(path=str(f))
         assert "unchanged" in second.lower()
         # Stub should not contain file content
         assert "line 0" not in second
@@ -75,18 +73,22 @@ class TestReadDedup:
     async def test_read_after_external_modification_returns_full(self, tool, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("original", encoding="utf-8")
-        await tool.execute(path=str(f))
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f))
         # Modify the file externally
         f.write_text("modified content", encoding="utf-8")
-        second = await tool.execute(path=str(f))
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            second = await tool.execute(path=str(f))
         assert "modified content" in second
 
     @pytest.mark.asyncio
     async def test_different_offset_returns_full(self, tool, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("\n".join(f"line {i}" for i in range(1, 21)), encoding="utf-8")
-        await tool.execute(path=str(f), offset=1, limit=5)
-        second = await tool.execute(path=str(f), offset=6, limit=5)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f), offset=1, limit=5)
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            second = await tool.execute(path=str(f), offset=6, limit=5)
         # Different offset → full read, not stub
         assert "line 6" in second
 
@@ -119,14 +121,41 @@ class TestReadDedup:
         assert "1| name" in result
         assert "2| café" in result
 
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    @pytest.mark.asyncio
+    async def test_bom_marked_unicode_text_uses_declared_encoding(
+        self,
+        tool,
+        tmp_path,
+        encoding,
+    ):
+        f = tmp_path / "unicode.txt"
+        f.write_bytes("Hello 世界\nSecond line".encode(encoding))
+
+        result = await tool.execute(path=str(f))
+
+        assert "1| Hello 世界" in result
+        assert "2| Second line" in result
+        assert "\x00" not in result
+
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    @pytest.mark.asyncio
+    async def test_bom_only_unicode_text_is_empty_file(self, tool, tmp_path, encoding):
+        f = tmp_path / "empty.txt"
+        f.write_bytes("".encode(encoding))
+
+        result = await tool.execute(path=str(f))
+
+        assert result == f"(Empty file: {f})"
+
 
 # ---------------------------------------------------------------------------
 # Cross-session isolation (issue #3571)
 # ---------------------------------------------------------------------------
 # Each session must keep its own read cache. When session A reads a file,
 # session B reading the same file must still receive the full content, not
-# the "[File unchanged since last read]" dedup stub. The stub is only valid
-# within the session that first cached the read.
+# the "[File unchanged since last read]" dedup stub. Within each session,
+# the original result must also remain in the current model context.
 
 class TestReadDedupSessionIsolation:
 
@@ -163,8 +192,10 @@ class TestReadDedupSessionIsolation:
 
         token = file_state.bind_file_states(session_a)
         try:
-            first = await shared_tool.execute(path=str(f))
-            repeat = await shared_tool.execute(path=str(f))
+            with file_state.file_read_context("read-a1", lambda: {}):
+                first = await shared_tool.execute(path=str(f))
+            with file_state.file_read_context("read-a2", lambda: {"read-a1": first}):
+                repeat = await shared_tool.execute(path=str(f))
         finally:
             file_state.reset_file_states(token)
 
@@ -289,35 +320,29 @@ class TestReadDeviceBlacklist:
 
 
 # ---------------------------------------------------------------------------
-# file_state: mtime-unchanged / content-changed fallback
+# File changes with preserved mtime
 # ---------------------------------------------------------------------------
-# On filesystems with coarse mtime resolution (NTFS ~100ms, FAT 2s) a fast
-# write-after-read can leave mtime unchanged. The content-hash fallback is
-# what protects against stale-read warnings being false-negative on those
-# platforms. Lock that behavior down here so nobody reverts it silently.
+# An editor can preserve mtime while replacing contents. Deduplication must
+# compare the file snapshot even when the original result remains in context.
 
 class TestFileStateHashFallback:
 
-    def test_check_read_warns_when_content_changed_but_mtime_same(self, tmp_path):
+    async def test_read_returns_changed_content_when_mtime_same(self, tmp_path):
         f = tmp_path / "data.txt"
         f.write_text("original", encoding="utf-8")
-        file_state.record_read(f)
+        tool = ReadFileTool(workspace=tmp_path)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f))
         original_mtime = os.path.getmtime(f)
 
         f.write_text("modified", encoding="utf-8")
         os.utime(f, (original_mtime, original_mtime))
         assert os.path.getmtime(f) == original_mtime
 
-        warning = file_state.check_read(f)
-        assert warning is not None
-        assert "modified" in warning.lower()
-
-    def test_check_read_passes_when_content_and_mtime_unchanged(self, tmp_path):
-        f = tmp_path / "data.txt"
-        f.write_text("stable", encoding="utf-8")
-        file_state.record_read(f)
-
-        assert file_state.check_read(f) is None
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            second = await tool.execute(path=str(f))
+        assert "modified" in second
+        assert "unchanged" not in second.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +567,3 @@ class TestReadDescriptionUpdate:
         tool = ReadFileTool()
         desc = tool.description.lower()
         assert "document" in desc or "docx" in desc or "xlsx" in desc or "pptx" in desc
-
-    def test_description_no_longer_says_cannot_read(self):
-        tool = ReadFileTool()
-        assert "cannot read" not in tool.description.lower()

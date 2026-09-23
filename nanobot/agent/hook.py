@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
 
@@ -51,7 +53,7 @@ class AgentRunHookContext:
 class AgentTurnHookContext:
     """Turn-local inputs available when constructing per-turn hooks."""
 
-    on_progress: Callable[..., Awaitable[None]] | None = None
+    events: EventSink = NO_EVENTS
     workspace: Path | None = None
     channel: str = "cli"
     chat_id: str = "direct"
@@ -179,7 +181,9 @@ class CompositeHook(AgentHook):
             try:
                 await getattr(h, method_name)(*args, **kwargs)
             except Exception:
-                logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+                logger.opt(exception=tool_log_content_allowed()).error(
+                    "AgentHook.{} error in {}", method_name, type(h).__name__,
+                )
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)

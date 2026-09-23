@@ -6,6 +6,8 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock
+from urllib.request import getproxies_environment
 
 import httpx
 import pytest
@@ -65,6 +67,9 @@ def fake_mcp_runtime() -> dict[str, object | None]:
 def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (*_PROXY_ENV_VARS, "NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
+    # getproxies() falls back to OS-level proxy settings (e.g. the Windows
+    # registry) when no environment variables are set; keep tests hermetic.
+    monkeypatch.setattr("nanobot.security.network.getproxies", getproxies_environment)
 
 
 @pytest.fixture(autouse=True)
@@ -238,6 +243,67 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
     assert snapshot == {"xmind": "failed"}
     assert "saved-oauth-secret" not in str(snapshot)
     assert "app.xmind.com" not in str(snapshot)
+
+
+@pytest.mark.parametrize( "value_schema, params, error",
+    [
+        pytest.param(
+            True, {"value": {"count": "42", "enabled": False}}, None,
+            id="true-property-preserves-value",
+        ),
+        pytest.param(
+            False, {"value": None}, "value is not allowed by schema",
+            id="false-property-rejects-null",
+        ),
+        pytest.param(False, {}, None, id="false-property-can-be-absent"),
+        pytest.param(
+            {"type": "array", "items": True},
+            {"value": ["42", False, None, {"nested": [1]}]},
+            None,
+            id="true-items-preserve-values",
+        ),
+        pytest.param(
+            {"type": "array", "items": False},
+            {"value": [1]},
+            "value[0] is not allowed by schema",
+            id="false-items-reject-element",
+        ),
+        pytest.param(
+            {"type": "array", "items": False}, {"value": []}, None,
+            id="false-items-allow-empty-array",
+        ),
+        pytest.param(
+            {"type": "object", "properties": {"blocked": False}},
+            {"value": {"blocked": "x"}},
+            "value.blocked is not allowed by schema",
+            id="nested-false-property-reports-path",
+        ),
+    ],
+)
+async def test_registry_executes_mcp_tools_with_boolean_subschemas(
+    value_schema, params, error,
+) -> None:
+    session = SimpleNamespace(
+        call_tool=AsyncMock(return_value=SimpleNamespace(content=[_FakeTextContent("ok")])),
+    )
+    tool_def = SimpleNamespace(
+        name="demo",
+        description="demo tool",
+        inputSchema={"type": "object", "properties": {"value": value_schema}},
+    )
+    wrapper = MCPToolWrapper(session, "test", tool_def)
+    registry = ToolRegistry()
+    registry.register(wrapper)
+
+    result = await registry.execute(wrapper.name, params)
+
+    if error is None:
+        assert result == "ok"
+        session.call_tool.assert_awaited_once_with("demo", arguments=params)
+    else:
+        assert is_tool_error_result(result)
+        assert f"Invalid parameters for tool '{wrapper.name}': {error}" in result
+        session.call_tool.assert_not_awaited()
 
 
 def test_wrapper_preserves_non_nullable_unions() -> None:

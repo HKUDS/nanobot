@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
+import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
@@ -42,6 +43,7 @@ const SEMANTIC_MESSAGE_FIELDS = [
   "reasoning",
   "latencyMs",
   "source",
+  "responseSources",
   "turnId",
   "turnPhase",
   "turnSeq",
@@ -70,6 +72,7 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
+  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const errorHandlers = new Set<(error: StreamError) => void>();
   const runStartedAtByChatId = new Map<string, number>();
   const unsettledRunByChatId = new Map<string, boolean>();
@@ -111,6 +114,11 @@ function fakeClient() {
         handler(status);
         return () => statusHandlers.delete(handler);
       },
+      onRunStatus(handler: (chatId: string, startedAt: number | null) => void) {
+        runStatusHandlers.add(handler);
+        for (const [chatId, startedAt] of runStartedAtByChatId) handler(chatId, startedAt);
+        return () => runStatusHandlers.delete(handler);
+      },
       onError(handler: (error: StreamError) => void) {
         errorHandlers.add(handler);
         return () => errorHandlers.delete(handler);
@@ -118,6 +126,9 @@ function fakeClient() {
       getRunStartedAt(chatId: string) {
         const v = runStartedAtByChatId.get(chatId);
         return v === undefined ? null : v;
+      },
+      getRunTurnId() {
+        return null;
       },
       getGoalState(chatId: string) {
         return goalStateByChatId.get(chatId);
@@ -154,6 +165,11 @@ function fakeClient() {
       status = nextStatus;
       statusHandlers.forEach((handler) => handler(status));
     },
+    emitRunStatus(chatId: string, startedAt: number | null) {
+      if (startedAt === null) runStartedAtByChatId.delete(chatId);
+      else runStartedAtByChatId.set(chatId, startedAt);
+      runStatusHandlers.forEach((handler) => handler(chatId, startedAt));
+    },
     emitError(error: StreamError) {
       errorHandlers.forEach((handler) => handler(error));
     },
@@ -186,6 +202,103 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("keeps invocation snapshots across streaming, recovery segments, completion and reload", async () => {
+    const fake = fakeClient();
+    const a = { provider: "openai_codex", model: "gpt", preset: "writer", fallback: false };
+    const b = { provider: "xai", model: "grok", preset: "reviewer", fallback: true };
+    const { result, unmount } = renderHook(() => useNanobotStream("sources", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => fake.emit("sources", { event: "delta", chat_id: "sources", text: "First", response_sources: [a] }));
+    await flushStreamFrame();
+    expect(result.current.messages[0].responseSources).toEqual([a]);
+    act(() => {
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", resuming: true, response_sources: [a] });
+      fake.emit("sources", { event: "delta", chat_id: "sources", text: "Recovered", response_sources: [b] });
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", response_sources: [b] });
+      fake.emit("sources", { event: "turn_end", chat_id: "sources" });
+    });
+    expect(result.current.messages.map(m => m.responseSources)).toEqual([[a], [b]]);
+    const history = result.current.messages;
+    unmount();
+    const reloaded = renderHook(() => useNanobotStream("sources", history), { wrapper: wrap(fake.client) });
+    expect(reloaded.result.current.messages.map(m => m.responseSources)).toEqual([[a], [b]]);
+  });
+
+  it("honors complete and end-only sources and clears an ambiguous merged attribution", () => {
+    const fake = fakeClient();
+    const a = { provider: "openai", model: "shared-model", preset: "primary", fallback: false };
+    const b = { provider: "openai", model: "shared-model", preset: "backup", fallback: true };
+    const { result } = renderHook(() => useNanobotStream("sources", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("sources", { event: "message", chat_id: "sources", text: "Complete", response_sources: [b] });
+      fake.emit("sources", { event: "stream_end", chat_id: "sources", text: "Mixed", response_sources: [a, b], resuming: true, merge_next: true });
+    });
+    expect(result.current.messages.map(m => m.responseSources)).toEqual([[b], [a, b]]);
+    act(() => fake.emit("sources", { event: "stream_end", chat_id: "sources", response_sources: [] }));
+    expect(result.current.messages[1].responseSources).toEqual([]);
+  });
+  it.each(["succeeded", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-compaction", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+
+    act(() => {
+      fake.emit("chat-compaction", {
+        event: "context_compaction",
+        chat_id: "chat-compaction",
+        compaction_id: "compact-1",
+        phase: "started",
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    const createdAt = result.current.messages[0].createdAt;
+    expect(result.current.messages[0]).toMatchObject({
+      id: "compaction-compact-1",
+      kind: "compaction",
+      compaction: {
+        id: "compact-1",
+        phase: "started",
+        announce: true,
+      },
+    });
+
+    act(() => {
+      fake.emit("chat-compaction", {
+        event: "context_compaction",
+        chat_id: "chat-compaction",
+        compaction_id: "compact-1",
+        phase,
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      id: "compaction-compact-1",
+      createdAt,
+      compaction: {
+        phase,
+        announce: true,
+      },
+    });
+  });
+
+  it("keeps a hydrated terminal compaction when a queued start arrives", () => {
+    const fake = fakeClient();
+    const initial = [{ id: "compaction-c1", role: "assistant" as const, content: "",
+      kind: "compaction" as const, createdAt: 123,
+      compaction: { id: "c1", phase: "succeeded" as const } }];
+    const { result } = renderHook(() => useNanobotStream("chat", initial), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => fake.emit("chat", { event: "context_compaction", chat_id: "chat",
+      compaction_id: "c1", phase: "started" }));
+    expect(result.current.messages).toEqual(initial);
+  });
+
   it("batches answer deltas into one animation-frame update", async () => {
     const fake = fakeClient();
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");
@@ -218,6 +331,95 @@ describe("useNanobotStream", () => {
       isStreaming: true,
     });
     requestFrame.mockRestore();
+  });
+
+  it("paces visible updates and immediately flushes the final ordered text", () => {
+    vi.useFakeTimers();
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const fake = fakeClient();
+    const { result, unmount } = renderHook(() => useNanobotStream("paced", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    try {
+      act(() => fake.emit("paced", { event: "delta", chat_id: "paced", text: "first" }));
+      expect(frames).toHaveLength(1);
+      act(() => frames.shift()!(1_000));
+      expect(result.current.messages[0].content).toBe("first");
+      act(() => {
+        fake.emit("paced", { event: "delta", chat_id: "paced", text: " 中文" });
+        fake.emit("paced", { event: "delta", chat_id: "paced", text: "🚀" });
+        vi.advanceTimersByTime(49);
+      });
+      expect(frames).toHaveLength(0);
+      expect(result.current.messages[0].content).toBe("first");
+      now.mockReturnValue(1_050);
+      act(() => vi.advanceTimersByTime(1));
+      expect(frames).toHaveLength(1);
+      act(() => frames.shift()!(1_050));
+      expect(result.current.messages[0].content).toBe("first 中文🚀");
+      act(() => {
+        fake.emit("paced", { event: "delta", chat_id: "paced", text: " tail" });
+        fake.emit("paced", { event: "stream_end", chat_id: "paced" });
+      });
+      expect(result.current.messages[0].content).toBe("first 中文🚀 tail");
+      act(() => fake.emit("paced", { event: "turn_end", chat_id: "paced" }));
+      expect(result.current.messages[0].isStreaming).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      unmount();
+      requestFrame.mockRestore();
+      now.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["frame", "timer"] as const)("moves a pending visible %s to background cadence and flushes on return", (pending) => {
+    vi.useFakeTimers();
+    const descriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const fake = fakeClient();
+    const { result, unmount } = renderHook(() => useNanobotStream("visibility", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const visibility = (value: string) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      act(() => fake.emit("visibility", { event: "delta", chat_id: "visibility", text: "first" }));
+      if (pending === "timer") act(() => frames.shift()!(1_000));
+      act(() => {
+        fake.emit("visibility", { event: "delta", chat_id: "visibility", text: " hidden" });
+        visibility("hidden");
+        vi.advanceTimersByTime(999);
+      });
+      expect(result.current.messages[0]?.content).toBe(pending === "timer" ? "first" : undefined);
+      act(() => vi.advanceTimersByTime(1));
+      expect(result.current.messages[0].content).toBe("first hidden");
+      act(() => {
+        fake.emit("visibility", { event: "delta", chat_id: "visibility", text: " returned" });
+        visibility("visible");
+      });
+      expect(result.current.messages[0].content).toBe("first hidden returned");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      unmount();
+      requestFrame.mockRestore();
+      now.mockRestore();
+      if (descriptor) Object.defineProperty(document, "visibilityState", descriptor);
+      else delete (document as Document & { visibilityState?: string }).visibilityState;
+      vi.useRealTimers();
+    }
   });
 
   it("coalesces hidden-tab deltas without scheduling paint frames", () => {
@@ -265,6 +467,30 @@ describe("useNanobotStream", () => {
       } else {
         delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
       }
+      vi.useRealTimers();
+    }
+  });
+
+  it("buffers a hidden chat view and flushes its ordered deltas on return", () => {
+    vi.useFakeTimers();
+    const fake = fakeClient();
+    const Client = wrap(fake.client);
+    let visible = false;
+    const { result, rerender, unmount } = renderHook(() => useNanobotStream("hidden-view", EMPTY_MESSAGES), {
+      wrapper: ({ children }) => <Client><ThreadVisibilityContext.Provider value={visible}>{children}</ThreadVisibilityContext.Provider></Client>,
+    });
+    try {
+      act(() => {
+        for (let seq = 1; seq <= 100; seq++) fake.emit("hidden-view", {
+          event: "delta", chat_id: "hidden-view", text: "x", turn_id: "turn", turn_seq: seq,
+        });
+      });
+      expect(result.current.messages).toHaveLength(0);
+      visible = true;
+      rerender();
+      expect(result.current.messages[0]).toMatchObject({ content: "x".repeat(100), turnSeq: 100 });
+    } finally {
+      unmount();
       vi.useRealTimers();
     }
   });
@@ -324,6 +550,39 @@ describe("useNanobotStream", () => {
       id: assistantId,
       content: "partial resumed",
       isStreaming: true,
+    });
+  });
+
+  it("clears stale stream state when the transport resets a run", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-reconnect-reset", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+
+    act(() => {
+      fake.emit("chat-reconnect-reset", {
+        event: "goal_status",
+        chat_id: "chat-reconnect-reset",
+        status: "running",
+        started_at: 1_700,
+      });
+      fake.emit("chat-reconnect-reset", {
+        event: "delta",
+        chat_id: "chat-reconnect-reset",
+        text: "partial",
+      });
+    });
+    await flushStreamFrame();
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => fake.emitRunStatus("chat-reconnect-reset", null));
+
+    expect(result.current.runStartedAt).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messages[0]).toMatchObject({
+      content: "partial",
+      isStreaming: false,
     });
   });
 
@@ -2489,6 +2748,24 @@ describe("useNanobotStream", () => {
     expect(outbound[3]).not.toHaveProperty("quotedContext");
   });
 
+  it("keeps automation intent out of the optimistic user message", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-automation", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => {
+      result.current.send("每天八点提醒我喝水", undefined, { intent: "create_automation" });
+    });
+    expect(result.current.messages[0].content).toBe("每天八点提醒我喝水");
+    expect(result.current.messages[0]).not.toHaveProperty("intent");
+    expect(fake.client.sendMessage).toHaveBeenCalledWith(
+      "chat-automation",
+      "每天八点提醒我喝水",
+      undefined,
+      expect.objectContaining({ intent: "create_automation", turnId: expect.any(String) }),
+    );
+  });
+
   it("attaches assistant media_urls to complete messages", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-m", EMPTY_MESSAGES), {
@@ -3122,6 +3399,72 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("clears retry status and exposes a terminal model failure at turn end", () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(120_000);
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-retry", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "retry_status",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        state: "waiting",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+        retry_after_s: 3.5,
+      });
+    });
+    expect(result.current.retryStatus).toEqual({
+      state: "waiting",
+      attempt: 2,
+      max_attempts: 4,
+      error_kind: "connection",
+      next_retry_at: 123.5,
+      turn_id: "turn-1",
+    });
+    expect(result.current.isStreaming).toBe(true);
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "retry_status",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        state: "cleared",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+      });
+    });
+    expect(result.current.retryStatus).toBeNull();
+
+    act(() => {
+      fake.emit("chat-retry", {
+        event: "turn_end",
+        chat_id: "chat-retry",
+        turn_id: "turn-1",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_error_kind: "connection",
+        failure_attempts: 4,
+        failure_message: "Unlocalized server failure",
+      });
+    });
+    expect(result.current.retryStatus).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamError).toEqual({
+      kind: "model_request_failed",
+      chatId: "chat-retry",
+      turnId: "turn-1",
+      errorKind: "connection",
+      attempts: 4,
+    });
+    dateNow.mockRestore();
+  });
+
   it("clears runStartedAt on turn_end even without idle", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-g", EMPTY_MESSAGES), {
@@ -3233,20 +3576,55 @@ describe("useNanobotStream", () => {
 
 });
 
-describe("live/replay projection before canonical-event revision migration", () => {
+describe("live canonical event projection", () => {
   it.each(PROJECTION_FIXTURE_CASES)("matches the shared $name fixture", (fixtureCase) => {
+    // Keep client-only elapsed-time estimates out of the transport contract.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+    try {
+      const fake = fakeClient();
+      const { result } = renderHook(
+        () => useNanobotStream(fixtureCase.chat_id, fixtureCase.initial_messages),
+        { wrapper: wrap(fake.client) },
+      );
+
+      for (const event of fixtureCase.live_events) {
+        act(() => {
+          fake.emit(fixtureCase.chat_id, event);
+        });
+      }
+
+      expect(normalizeProjection(result.current.messages)).toEqual(fixtureCase.expected);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each([true, false])("keeps continuation reasoning before its answer across frames (text snapshots: %s)", async (snapshots) => {
+    const fixture = PROJECTION_FIXTURE_CASES.find(
+      (candidate) => candidate.name === "length_continuation_reasoning_then_new_recovery_turn",
+    )!;
     const fake = fakeClient();
     const { result } = renderHook(
-      () => useNanobotStream(fixtureCase.chat_id, fixtureCase.initial_messages),
+      () => useNanobotStream(fixture.chat_id, fixture.initial_messages),
       { wrapper: wrap(fake.client) },
     );
-
-    for (const event of fixtureCase.live_events) {
+    for (const event of fixture.live_events) {
       act(() => {
-        fake.emit(fixtureCase.chat_id, event);
+        fake.emit(fixture.chat_id, event.event === "stream_end" && !snapshots
+          ? { ...event, text: undefined }
+          : event);
       });
+      await flushStreamFrame();
     }
-
-    expect(normalizeProjection(result.current.messages)).toEqual(fixtureCase.expected);
+    const units = normalizeActivityTimeline(result.current.messages);
+    expect(units.map((unit) => unit.type === "activity"
+      ? unit.messages.map((message) => message.reasoning).join("")
+      : unit.message.content)).toEqual([
+      "Write long code.",
+      "Plan.\n\nContinue code.\n\nFinish code.",
+      "```python\nfirst\nsecond",
+      "Recover.\n\nContinue recovery.",
+      "Recovered answer.",
+    ]);
   });
 });

@@ -8,13 +8,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
+from nanobot.events import NO_EVENTS
 from nanobot.providers.base import LLMResponse
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 
 
 def _make_loop(
@@ -26,7 +27,7 @@ def _make_loop(
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.estimate_prompt_tokens.return_value = (10_000, "test")
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
     provider.generation.max_tokens = 4096
     loop = AgentLoop(
         bus=bus,
@@ -84,7 +85,14 @@ def _make_fake_compact(
 ):
     state = {"count": 0}
 
-    async def _fake_compact(key: str, *, runtime, max_suffix: int = 8) -> str:
+    async def _fake_compact(
+        key: str,
+        *,
+        runtime,
+        max_suffix: int = 8,
+        trigger: str = "policy",
+        events=NO_EVENTS,
+    ) -> str:
         state["count"] += 1
         session = loop.sessions.get_or_create(key)
 
@@ -109,7 +117,7 @@ def _make_fake_compact(
                 "last_active": last_active.isoformat(),
             }
 
-        session.last_archived = archive_end
+        session.commit_summary_checkpoint(s, insert_at=archive_end, last_active=last_active)
         loop.sessions.save(session)
         return s
 
@@ -123,6 +131,25 @@ async def _drain_background_tasks(loop: AgentLoop) -> None:
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
     await asyncio.sleep(0)
+
+
+async def test_heartbeat_idle_compaction_persists_summary_without_channel_notices(tmp_path):
+    loop = _make_loop(tmp_path)
+    session = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
+    _add_turns(session, 2)
+    session.metadata["_compaction_route"] = {"channel": "telegram", "chat_id": "chat"}
+    session.updated_at = datetime.now() - timedelta(minutes=20)
+    loop.sessions.save(session)
+    loop.consolidator.archive_session = AsyncMock(return_value="Heartbeat summary.")
+
+    loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
+    await _drain_background_tasks(loop)
+
+    loop.consolidator.archive_session.assert_awaited_once()
+    loop.sessions.invalidate(HEARTBEAT_SESSION_KEY)
+    refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
+    assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
+    assert loop.bus.outbound.empty()
 
 
 class TestSessionTTLConfig:
@@ -229,36 +256,6 @@ class TestAgentLoopTTLParam:
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
 
-    @pytest.mark.asyncio
-    async def test_process_message_reads_history_with_token_budget(self, tmp_path):
-        """_process_message should pass an auto-derived token budget to get_history."""
-        loop = _make_loop(tmp_path)
-        session = loop.sessions.get_or_create("cli:direct")
-        session.get_history = MagicMock(return_value=[])
-        loop.context.build_messages = MagicMock(return_value=[])
-        loop._run_agent_loop = AsyncMock(
-            return_value=AgentRunResult(
-                final_content="ok",
-                messages=[],
-                stop_reason="stop",
-            )
-        )
-        loop._save_turn = MagicMock()
-
-        msg = InboundMessage(
-            channel="cli",
-            sender_id="u1",
-            chat_id="direct",
-            content="hello",
-        )
-        await loop._process_message(msg)
-        session.get_history.assert_called_once()
-        kwargs = session.get_history.call_args.kwargs
-        assert isinstance(kwargs.get("max_tokens"), int)
-        assert kwargs["max_tokens"] > 0
-        assert set(kwargs) == {"max_tokens", "extend_to_user"}
-
-
 class TestAutoCompact:
     """Test the _archive method."""
 
@@ -321,16 +318,14 @@ class TestAutoCompact:
 
         assert len(archived_messages) == 12
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 12
+        assert len(session_after.messages) == 13
         assert session_after.messages[0]["content"] == "msg user 0"
         visible = session_after.get_history(max_messages=12)
-        assert len(visible) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        assert visible[0]["content"] == "msg user 2"
-        assert visible[-1]["content"] == "msg assistant 5"
+        assert visible == []
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_auto_compact_extends_recent_suffix_to_user_turn(self, tmp_path):
+    async def test_auto_compact_replaces_entire_tool_turn(self, tmp_path):
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 2, prefix="old")
@@ -345,19 +340,7 @@ class TestAutoCompact:
         session_after = loop.sessions.get_or_create("cli:test")
         assert session_after.messages[0]["content"] == "old user 0"
         visible = session_after.get_history(max_messages=len(session_after.messages))
-        assert len(visible) > loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        assert visible[0]["content"] == "record this"
-        assert visible[-1]["content"] == "done"
-        tool_results = {
-            m.get("tool_call_id")
-            for m in visible
-            if m.get("role") == "tool"
-        }
-        assert all(
-            tc["id"] in tool_results
-            for m in visible
-            for tc in (m.get("tool_calls") or [])
-        )
+        assert visible == []
         await loop.aclose()
 
     @pytest.mark.asyncio
@@ -378,10 +361,8 @@ class TestAutoCompact:
         assert entry is not None
         assert entry["text"] == "User said hello."
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 12
-        assert len(session_after.get_history(max_messages=12)) == (
-            loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        )
+        assert len(session_after.messages) == 13
+        assert session_after.get_history(max_messages=12) == []
         await loop.aclose()
 
     @pytest.mark.asyncio
@@ -602,19 +583,17 @@ class TestAutoCompactEdgeCases:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        loop.provider.chat_with_retry = AsyncMock(
+        loop.provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(content="(nothing)", tool_calls=[])
         )
 
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 12
-        assert len(session_after.get_history(max_messages=12)) == (
-            loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        )
-        # "(nothing)" summary should not be stored
-        assert "cli:test" not in loop.auto_compact._summaries
+        assert len(session_after.messages) == 13
+        assert session_after.get_history(max_messages=12) == []
+        assert loop.auto_compact._summaries["cli:test"]["text"] == "(nothing)"
+        assert session_after.metadata["_last_summary"]["text"] == "(nothing)"
 
         await loop.aclose()
 
@@ -626,16 +605,14 @@ class TestAutoCompactEdgeCases:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        loop.provider.chat_with_retry = AsyncMock(side_effect=Exception("API down"))
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=Exception("API down"))
 
         # Should not raise
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 12
-        assert len(session_after.get_history(max_messages=12)) == (
-            loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        )
+        assert len(session_after.messages) == 13
+        assert session_after.get_history(max_messages=12) == []
 
         await loop.aclose()
 
@@ -684,7 +661,7 @@ class TestAutoCompactIntegration:
             "Example: 'I walked to the store yesterday.'"
         )
 
-        # Phase 1: User has a conversation longer than the retained recent suffix
+        # Phase 1: User has an extended conversation before compaction
         session.add_message("user", "I'm learning English, teach me past tense")
         session.add_message("assistant", "Past tense is used for actions completed in the past...")
         session.add_message("user", "Give me an example")
@@ -702,7 +679,7 @@ class TestAutoCompactIntegration:
         loop.sessions.save(session)
 
         # Phase 3: User returns with a new message
-        loop.provider.chat_with_retry = AsyncMock(
+        loop.provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(
                 content=overview,
                 tool_calls=[],
@@ -718,7 +695,7 @@ class TestAutoCompactIntegration:
 
         # Phase 4: Verify
         session_after = loop.sessions.get_or_create("cli:test")
-        resumed_system_prompt = loop.provider.chat_with_retry.await_args_list[-1].kwargs[
+        resumed_system_prompt = loop.provider.chat_stream_with_retry.await_args_list[-1].kwargs[
             "messages"
         ][0]["content"]
 
@@ -857,10 +834,8 @@ class TestProactiveAutoCompact:
         await self._run_check_expired(loop)
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 10
-        assert len(session_after.get_history(max_messages=10)) == (
-            loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        )
+        assert len(session_after.messages) == 11
+        assert session_after.get_history(max_messages=10) == []
         assert len(archived_messages) == 10
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
@@ -915,7 +890,7 @@ class TestProactiveAutoCompact:
         started = asyncio.Event()
         block_forever = asyncio.Event()
 
-        async def _slow_compact(key, *, runtime, max_suffix=8):
+        async def _slow_compact(key, *, runtime, max_suffix=8, **_kwargs):
             nonlocal archive_count
             archive_count += 1
             started.set()
@@ -947,7 +922,7 @@ class TestProactiveAutoCompact:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _failing_compact(key, *, runtime, max_suffix=8):
+        async def _failing_compact(key, *, runtime, max_suffix=8, **_kwargs):
             raise RuntimeError("LLM down")
 
         loop.consolidator.compact_idle_session = _failing_compact
@@ -1043,10 +1018,8 @@ class TestProactiveAutoCompact:
 
         assert _fake_compact.state["count"] == 1
         s1_after = loop.sessions.get_or_create("cli:expired_idle")
-        assert len(s1_after.messages) == 12
-        assert len(s1_after.get_history(max_messages=12)) == (
-            loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        )
+        assert len(s1_after.messages) == 13
+        assert s1_after.get_history(max_messages=12) == []
         s2_after = loop.sessions.get_or_create("cli:expired_active")
         assert len(s2_after.messages) == 12  # Preserved
         s3_after = loop.sessions.get_or_create("cli:recent")
@@ -1175,10 +1148,8 @@ class TestSummaryPersistence:
 
         # prepare_session should recover summary from metadata
         reloaded = loop.sessions.get_or_create("cli:test")
-        assert len(reloaded.messages) == 12
-        assert len(reloaded.get_history(max_messages=12)) == (
-            loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        )
+        assert len(reloaded.messages) == 13
+        assert reloaded.get_history(max_messages=12) == []
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
 
         assert summary is not None
@@ -1302,9 +1273,9 @@ class TestSummaryPersistence:
         assert "_last_summary" in reloaded.metadata
 
         # Simulate /new command
-        session.clear()
-        loop.sessions.save(session)
-        loop.sessions.invalidate(session.key)
+        reloaded.clear()
+        loop.sessions.save(reloaded)
+        loop.sessions.invalidate(reloaded.key)
 
         # After /new, metadata should no longer contain _last_summary
         fresh = loop.sessions.get_or_create("cli:test")

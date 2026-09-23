@@ -50,6 +50,86 @@ async function waitUntil(predicate: () => boolean, timeout = 1_000): Promise<voi
   if (!predicate()) throw new Error(`condition was not met within ${timeout}ms`)
 }
 
+describe("Desktop attach-only protocol", () => {
+  const gatewayId = "4d7d6bea-6d4b-4da1-975f-3d835c986c50"
+  async function fixture(run: (client: NanobotClient, socket: FakeSocket, statuses: ConnectionStatus[], attempts: () => number) => Promise<void>) {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    let attempts = 0
+    const statuses: ConnectionStatus[] = []
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket { constructor() { super(); socket = this } },
+    })
+    const client = new NanobotClient({
+      expectedGatewayId: gatewayId, reconnect: false, reconnectDelayMs: 1,
+      resolveConnection: async () => {
+        attempts++
+        return { wsUrl: "ws://127.0.0.1:8765/ws", apiUrl: "http://127.0.0.1:8765", apiToken: "fixture" }
+      },
+      onEvent: () => {}, onStatus: (status) => statuses.push(status),
+    })
+    try {
+      client.connect()
+      await waitUntil(() => !!socket)
+      socket!.emit("open")
+      await run(client, socket!, statuses, () => attempts)
+    } finally {
+      client.close()
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  }
+  for (const terminal of [undefined, { protocolVersion: 2, gatewayId }, { protocolVersion: 1, gatewayId: "other" }]) {
+    test(`rejects missing or changed handshake before any mutation: ${JSON.stringify(terminal)}`, async () => {
+      await fixture(async (client, socket, statuses, attempts) => {
+        expect(() => client.newChat()).toThrow("Desktop identity not verified")
+        await expect(client.updateRecovery("continue", "chat", "recovery")).rejects.toThrow("Desktop identity not verified")
+        socket.emit("message", { data: JSON.stringify({ event: "ready", chat_id: "", client_id: "test", terminal }) })
+        await Bun.sleep(20)
+        expect(socket.sent).toHaveLength(0)
+        expect(socket.readyState).toBe(3)
+        expect(statuses.at(-1)).toBe("error")
+        expect(attempts()).toBe(1)
+      })
+    })
+  }
+  test("connects once, never replays a task and never reconnects after a disconnect", async () => {
+    await fixture(async (client, socket, statuses, attempts) => {
+      socket.emit("message", { data: JSON.stringify({ event: "ready", chat_id: "", client_id: "test", terminal: { protocolVersion: 1, gatewayId } }) })
+      expect(socket.sent.map((frame) => JSON.parse(frame).type)).toEqual(["new_chat"])
+      socket.emit("message", { data: JSON.stringify({ event: "attached", chat_id: "desktop-chat" }) })
+      client.send("one task")
+      socket.emit("close")
+      await Bun.sleep(20)
+      expect(attempts()).toBe(1)
+      expect(socket.sent.map((frame) => JSON.parse(frame).type)).toEqual(["new_chat", "message"])
+      expect(() => client.send("another task")).toThrow()
+      expect(statuses.at(-1)).toBe("error")
+    })
+  })
+  for (const fields of [{}, { chat_id: "" }, { chat_id: 1, client_id: "test" }, { chat_id: "", client_id: null }]) {
+    test(`rejects an incomplete ready frame even with matching identity: ${JSON.stringify(fields)}`, async () => {
+      await fixture(async (client, socket, statuses, attempts) => {
+        socket.emit("message", { data: JSON.stringify({ event: "ready", terminal: { protocolVersion: 1, gatewayId }, ...fields }) })
+        expect(() => client.newChat()).toThrow("Desktop identity not verified")
+        await expect(client.updateRecovery("continue", "chat", "recovery")).rejects.toThrow("Desktop identity not verified")
+        await Bun.sleep(20)
+        expect(socket.sent).toHaveLength(0)
+        expect(socket.readyState).toBe(3)
+        expect(statuses.at(-1)).toBe("error")
+        expect(attempts()).toBe(1)
+      })
+    })
+  }
+  test("explicit client exit sends no lifecycle command", async () => {
+    await fixture(async (client, socket) => {
+      client.close()
+      expect(socket.sent).toHaveLength(0)
+      expect(socket.readyState).toBe(3)
+    })
+  })
+})
+
 describe("gateway protocol", () => {
   test("bootstraps fresh websocket and API credentials", async () => {
     const original = globalThis.fetch
@@ -706,6 +786,54 @@ describe("gateway protocol", () => {
     }
   })
 
+  test("receives compaction phases and rejects malformed compaction events", () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+    const events: InboundEvent[] = []
+    const statuses: string[] = []
+    const client = new NanobotClient({
+      url: "ws://nanobot.test/ws",
+      onEvent: (event) => events.push(event),
+      onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
+    })
+    try {
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+      const base = { event: "context_compaction", chat_id: "chat", compaction_id: "compact-1" }
+      for (const phase of ["started", "succeeded", "failed", "cancelled"]) {
+        socket.emit("message", { data: JSON.stringify({
+          ...base, phase,
+        }) })
+      }
+      for (const invalid of [
+        { phase: "unknown" },
+        { phase: "started", compaction_id: "" },
+        { phase: "started", compaction_id: 42 },
+        { phase: "started", compaction_id: undefined },
+        { phase: "started", chat_id: undefined },
+      ]) {
+        socket.emit("message", { data: JSON.stringify({ ...base, ...invalid }) })
+      }
+      expect(events.map((event) => event.event)).toEqual(Array(4).fill("context_compaction"))
+      expect(events.map((event) => "phase" in event ? event.phase : null)).toEqual([
+        "started", "succeeded", "failed", "cancelled",
+      ])
+      expect(statuses.filter((status) => status.includes("invalid event"))).toHaveLength(5)
+    } finally {
+      client.close()
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
   test("validates nested unified diff payloads at the websocket boundary", () => {
     const original = globalThis.WebSocket
     let socket: FakeSocket | undefined
@@ -750,6 +878,84 @@ describe("gateway protocol", () => {
 
       expect(events).toHaveLength(1)
       expect(events[0]?.event).toBe("file_edit")
+      expect(statuses).toContain("error:gateway sent an invalid event")
+      client.close()
+    } finally {
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
+  })
+
+  test("validates structured retry and failed turn events", () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+
+    try {
+      const events: InboundEvent[] = []
+      const statuses: string[] = []
+      const client = new NanobotClient({
+        url: "ws://nanobot.test/ws",
+        onEvent: (event) => events.push(event),
+        onStatus: (status, detail) => statuses.push(`${status}:${detail || ""}`),
+      })
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+      socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        state: "waiting",
+        attempt: 2,
+        max_attempts: 4,
+        error_kind: "connection",
+        retry_after_s: 3.5,
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        state: "cleared",
+        attempt: 4,
+        max_attempts: 4,
+        error_kind: "connection",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "turn_end",
+        chat_id: "chat",
+        turn_id: "turn-1",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_error_kind: "connection",
+        failure_attempts: 4,
+        failure_message: "Model provider request failed.",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "retry_status",
+        chat_id: "chat",
+        state: "waiting",
+        attempt: 0,
+        error_kind: "connection",
+      }) })
+      socket.emit("message", { data: JSON.stringify({
+        event: "turn_end",
+        chat_id: "chat",
+        outcome: "failed",
+        failure_kind: "model",
+        failure_attempts: 0,
+      }) })
+
+      expect(events).toHaveLength(3)
+      expect(events[0]?.event).toBe("retry_status")
+      expect(events[1]?.event).toBe("retry_status")
+      expect(events[2]?.event).toBe("turn_end")
       expect(statuses).toContain("error:gateway sent an invalid event")
       client.close()
     } finally {
@@ -922,6 +1128,43 @@ describe("gateway protocol", () => {
         userMessageOffset: 0,
       })
       expect(requested).toContain("before=newer-page")
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("loads compaction history as activity rows", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = Object.assign(async () => Response.json({
+      messages: [
+        { role: "assistant", content: "before" },
+        ...["started", "succeeded", "failed", "cancelled"].map((phase) => ({
+          role: "assistant",
+          kind: "compaction",
+          content: "",
+          compaction: { id: phase, phase },
+        })),
+        { role: "assistant", kind: "compaction", content: "invalid", compaction: null },
+        {
+          role: "assistant", kind: "compaction", content: "invalid",
+          compaction: { id: "", phase: "succeeded" },
+        },
+        {
+          role: "assistant", kind: "compaction", content: "invalid",
+          compaction: { id: "unknown", phase: "unknown" },
+        },
+        { role: "assistant", content: "after" },
+      ],
+    }), { preconnect: original.preconnect })
+    try {
+      const history = await fetchHistory("http://nanobot.test", "token", "chat")
+      expect(history.messages).toEqual([
+        { role: "assistant", content: "before", forkIndex: 0 },
+        ...(["started", "succeeded", "failed", "cancelled"] as const).map((phase) => ({
+          role: "activity" as const, content: "", compaction: { id: phase, phase },
+        })),
+        { role: "assistant", content: "after", forkIndex: 0 },
+      ])
     } finally {
       globalThis.fetch = original
     }

@@ -8,6 +8,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.utils.prompt_templates import render_template
+
+_ARCHIVE_PROMPT = render_template("agent/consolidator_archive.md", strip=True)
+
 
 class TestNewCommandArchival:
     """Test /new archival behavior with the structured archive flow."""
@@ -30,7 +34,7 @@ class TestNewCommandArchival:
             model="test-model",
             context_window_tokens=1,
         )
-        loop.provider.chat_with_retry = AsyncMock(
+        loop.provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(content="ok", tool_calls=[])
         )
         loop.tools.get_definitions = MagicMock(return_value=[])
@@ -91,12 +95,6 @@ class TestNewCommandArchival:
         session.last_archived = len(session.messages) - 2
         ordinary_history = session.get_history()
         assert [message["content"] for message in ordinary_history] == [
-            "msg1",
-            "resp1",
-            "msg2",
-            "resp2",
-            "msg3",
-            "resp3",
             "msg4",
             "resp4",
         ]
@@ -115,9 +113,9 @@ class TestNewCommandArchival:
         assert len(scheduled) == 1
         await scheduled[0]
         await loop.aclose()
-        sent = loop.provider.chat_with_retry.call_args.kwargs["messages"]
+        sent = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
         assert sent[1:-1] == ordinary_history
-        assert "final 2 conversation messages" in sent[-1]["content"]
+        assert sent[-1]["content"] == _ARCHIVE_PROMPT
 
     @pytest.mark.asyncio
     async def test_new_clears_session_and_responds(self, tmp_path: Path) -> None:

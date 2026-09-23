@@ -2,9 +2,14 @@
 
 <!-- Meta description: Run nanobot from a browser WebUI with persistent and temporary chats, visible tool activity, workspace controls, Apps, skill discovery, settings, and Automations. -->
 
-The WebUI is nanobot's browser workbench for persistent topics, temporary
-chats, visible agent activity, workspace controls, Apps, skill discovery,
-settings, and Automations in one place.
+The WebUI is nanobot's browser workbench for persistent topics, grouped
+conversation panes, temporary chats, visible agent activity, workspace controls,
+Apps, skill discovery, settings, and Automations in one place. It shares the
+gateway and saved sessions with the native terminal client.
+
+For a visual tour, see the [README feature gallery](../README.md#-webui).
+This guide follows the current source tree; some features are newer than the
+published release.
 
 The published `nanobot-ai` wheel already includes the WebUI bundle. You only need
 the `webui/` source directory when you are changing the frontend itself.
@@ -78,7 +83,9 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 | Area | Use it for |
 |---|---|
 | Topics | Start persistent topics or temporary chats; switch, search, reorder, fork, or delete persistent topics |
+| Conversation groups | Arrange up to four independent topics in one workbench with resizable panes |
 | Agent activity | See thinking, tool calls, file edits with diffs, command output, and generated artifacts in context |
+| Context usage | Inspect current context size, per-round token and cache usage, and compaction progress |
 | Workspace | Pick the project workspace before asking for file or shell work |
 | Access | Choose the access mode for local capabilities allowed by your gateway configuration |
 | Composer | Send text, images, voice input, slash commands, and `@` mentions for topics, Apps, or MCP presets |
@@ -99,18 +106,52 @@ Drag a topic within its current sidebar group to keep frequently used work in
 your preferred order. Drag a topic from the sidebar into the composer when you
 want to reference it in the next message instead of switching to it.
 
-The message timeline shows both user-visible replies and agent activity. Long
-tool or reasoning sections can be expanded when you need the details.
+### Conversation groups and panes
+
+Open a topic's sidebar action menu and choose **Create group** to turn it into
+a conversation group. Use **Add pane** in the workbench header to start another
+topic alongside it. A group holds up to four panes. To bring in an existing
+topic, drag it onto the group or use **Move to** in its action menu.
+
+Use **Pane layout** to choose columns, rows, a grid, BSP, or a main pane with a
+stack. Drag a divider to resize panes. Each pane has its own conversation;
+select one to direct the shared composer to that topic. Group membership and
+layout persist across refreshes. Grouping topics does not merge their histories.
+
+To bring another topic's work into a conversation, select it from the `@` menu
+or drag it from the sidebar into the composer. The agent can read the selected
+session and exchange messages with other saved sessions. See [Composer](#composer)
+for the distinction between an attached reference and plain text.
+
+### Activity and context usage
+
+The message timeline shows replies and agent activity. Expand the **Worked for**
+section to inspect the reasoning and tool activity for a completed turn.
 
 When the agent writes or edits files, the activity item shows the target path,
-status, changed line counts, and, when available, a unified diff. Use **View
-diff** to expand the change; large diffs may hide unchanged lines or truncate the
-inline preview. Use **Open file** from a file edit to open the read-only file
-preview panel.
+status, and changed line counts. Choose **Settings → Appearance → File edit
+display** to control the detail: **Summary** shows the change summary, **Diff**
+shows available unified patches inline, and **Collapsed diff** lets you expand
+them with **View diff**. Large diffs may hide unchanged lines or truncate the
+inline preview. Select the filename in the activity row to open the read-only
+file preview panel.
 
 File previews follow the active topic's access mode. Restricted workspace access
 previews only files under the selected workspace. Full Access can preview files
 outside the workspace when that access mode is allowed by the gateway.
+
+Open the context indicator beside the composer model badge to see how much of
+the model's context window is in use. The **Recent rounds** chart shows input
+tokens for each logical model round, including tool-call rounds. Hover or focus
+a bar for input tokens, output tokens, generation time, and the KV cache hit
+rate when reported. Provider usage may be estimated or unavailable; these
+figures are not a billing statement.
+
+When nanobot compacts context, the timeline shows its progress and outcome.
+The model continues with a summary and any messages after it; messages covered
+by the summary remain in your chat history but are no longer sent to the model
+verbatim. Use `/compact` to compact the current topic's context manually.
+See [Memory](./memory.md) for compaction and Dream consolidation.
 
 ## Temporary Chats
 
@@ -126,9 +167,16 @@ You can keep more than one temporary chat open and switch between them under
 open. Reloading or closing the page, restarting the gateway, or losing the
 WebSocket connection ends all of them. They cannot be recovered afterward.
 
+Temporary chats do not create saved files for oversized text tool results; these
+stay in memory and are truncated to the configured tool-result limit. Tool-call
+arguments and execution-error details are hidden from the built-in tool logs,
+while tool activity remains visible in the current chat.
+
 Temporary does not mean consequence-free. Requests still go to the configured
 model provider, and tools can still change files, run commands, or affect
-external services. Temporary chats always use the default workspace in
+external services. Files and image artifacts created or exported by tools
+(including images returned by MCP tools) are not erased when the chat closes.
+Temporary chats always use the default workspace in
 Restricted mode; the project picker and Full Access are unavailable. Commands
 and tools that create durable goals, automations, or subagent work are also
 unavailable. Use a regular topic when you need reusable context, scheduled work,
@@ -139,7 +187,8 @@ or a result you must retain.
 Use the workspace picker before starting project-specific work. This gives the
 agent the right project context for file paths, shell commands, and topic
 metadata. A locally hosted WebUI opens the operating system's folder chooser
-when one is available; remote deployments keep the manual absolute path entry.
+when one is available; remote deployments use a manual absolute path on the
+nanobot host. The browser's local filesystem is never used for project selection.
 
 Selecting a project does not replace the configured agent workspace. The two
 paths have different responsibilities:
@@ -168,9 +217,10 @@ neighboring memory or profile files, and it does not allow writes outside the
 selected project. These tool exceptions do not broaden the browser's file
 preview boundary.
 
-Remote WebUI connections may reduce access for the current workspace. Selecting a
-different workspace or enabling Full Access remains limited to local and native
-clients.
+Remote WebUI connections may reduce access for the current workspace and may
+select a different workspace by entering its server-side path. A remote project
+change must use Restricted mode; enabling Full Access remains limited to local
+and native clients.
 
 ## Composer
 

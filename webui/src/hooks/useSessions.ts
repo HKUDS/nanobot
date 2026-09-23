@@ -11,16 +11,19 @@ import {
 } from "@/lib/api";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { deriveTitle } from "@/lib/format";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import type {
   ChatSummary,
   SessionAutomationJob,
   SessionDeleteResult,
   UIMessage,
+  WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
 } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
-const INITIAL_HISTORY_PAGE_LIMIT = 80;
+const INITIAL_HISTORY_PAGE_LIMIT = 40;
 const OLDER_HISTORY_PAGE_LIMIT = 120;
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
@@ -35,12 +38,20 @@ function isAbortError(error: unknown): boolean {
 
 export type SessionHistoryContinuity = "initial" | "overlap" | "reset";
 
-function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
-  return messages.map((m, idx) => ({
-    ...m,
-    id: m.id ?? `hist-${idx}`,
-    createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
-  }));
+function projectPersistedThread(body: WebuiThreadPersistedPayload | null): {
+  messages: UIMessage[];
+  forkBoundaryMessageCount: number | null;
+} {
+  const events = body?.events ?? [];
+  const messages = projectThreadEvents(events);
+  const boundaryIndex = body?.fork_boundary_event_index;
+  const forkBoundaryMessageCount = typeof boundaryIndex === "number"
+    && Number.isInteger(boundaryIndex)
+    && boundaryIndex >= 0
+    && boundaryIndex <= events.length
+      ? projectThreadEvents(events.slice(0, boundaryIndex)).length
+      : null;
+  return { messages, forkBoundaryMessageCount };
 }
 
 function sameSemanticMessage(a: UIMessage, b: UIMessage): boolean {
@@ -121,13 +132,80 @@ function completedTurnIdsFromThread(
   ));
 }
 
+interface SessionHistoryState {
+  key: string | null;
+  messages: UIMessage[];
+  loading: boolean;
+  loadingOlder: boolean;
+  error: string | null;
+  hasPendingToolCalls: boolean;
+  completedTurnIds: string[];
+  forkBoundaryMessageCount: number | null;
+  beforeCursor: string | null;
+  hasMoreBefore: boolean;
+  userMessageOffset: number;
+  version: number;
+  continuity: SessionHistoryContinuity;
+  lineage: number;
+  activeTurnId: string | null;
+}
+
+function emptyHistoryState(key: string | null, loading = false): SessionHistoryState {
+  return {
+    key,
+    messages: [],
+    loading,
+    loadingOlder: false,
+    error: null,
+    hasPendingToolCalls: false,
+    completedTurnIds: [],
+    forkBoundaryMessageCount: null,
+    beforeCursor: null,
+    hasMoreBefore: false,
+    userMessageOffset: 0,
+    version: 0,
+    continuity: "initial",
+    lineage: 0,
+    activeTurnId: null,
+  };
+}
+
+function cachedHistoryState(
+  key: string,
+  body: WebuiThreadPersistedPayload,
+  version: number,
+): SessionHistoryState {
+  const projected = projectPersistedThread(body);
+  const messages = projected.messages;
+  return {
+    key,
+    messages,
+    loading: false,
+    loadingOlder: false,
+    error: null,
+    hasPendingToolCalls: hasPendingToolCallsFromThread(body, messages),
+    completedTurnIds: completedTurnIdsFromThread(body),
+    forkBoundaryMessageCount: projected.forkBoundaryMessageCount,
+    beforeCursor: body.page?.before_cursor ?? null,
+    hasMoreBefore: body.page?.has_more_before === true,
+    userMessageOffset: Math.max(0, body.page?.user_message_offset ?? 0),
+    version,
+    continuity: "initial",
+    lineage: version,
+    activeTurnId: typeof body.active_turn_id === "string" ? body.active_turn_id : null,
+  };
+}
+
 /** Sidebar state: fetches the full session list and exposes create / delete actions. */
 export function useSessions(): {
   sessions: ChatSummary[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  createChat: (workspaceScope?: WorkspaceScopePayload | null) => Promise<string>;
+  createChat: (
+    workspaceScope?: WorkspaceScopePayload | null,
+    modelPreset?: string | null,
+  ) => Promise<string>;
   forkChat: (sourceChatId: string, beforeUserIndex: number, title?: string) => Promise<string>;
   deleteChat: (
     key: string,
@@ -156,14 +234,21 @@ export function useSessions(): {
           try {
             const rows = await listSessions(tokenRef.current);
             const serverKeys = new Set(rows.map((row) => row.key));
-            setSessions((prev) => [
-              ...rows,
-              ...prev.filter(
-                (session) =>
-                  optimisticKeysRef.current.has(session.key)
-                  && !serverKeys.has(session.key),
-              ),
-            ]);
+            setSessions((prev) => {
+              const byKey = new Map(prev.map((row) => [row.key, row]));
+              const next = [
+                ...rows.map((row) => {
+                  const previous = byKey.get(row.key);
+                  return previous && JSON.stringify(previous) === JSON.stringify(row) ? previous : row;
+                }),
+                ...prev.filter(
+                  (session) =>
+                    optimisticKeysRef.current.has(session.key)
+                    && !serverKeys.has(session.key),
+                ),
+              ];
+              return next.length === prev.length && next.every((row, index) => row === prev[index]) ? prev : next;
+            });
             for (const key of Array.from(optimisticKeysRef.current)) {
               if (serverKeys.has(key)) optimisticKeysRef.current.delete(key);
             }
@@ -188,23 +273,24 @@ export function useSessions(): {
   }, [refresh]);
 
   useEffect(() => {
-    let disposed = false;
-    let refreshQueued = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribe = client.onSessionUpdate(() => {
-      if (refreshQueued) return;
-      refreshQueued = true;
-      queueMicrotask(() => {
-        refreshQueued = false;
-        if (!disposed) void refresh();
-      });
+      if (timer !== undefined) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        void refresh();
+      }, 250);
     });
     return () => {
-      disposed = true;
+      clearTimeout(timer);
       unsubscribe();
     };
   }, [client, refresh]);
 
-  const createChat = useCallback(async (workspaceScope?: WorkspaceScopePayload | null): Promise<string> => {
+  const createChat = useCallback(async (
+    workspaceScope?: WorkspaceScopePayload | null,
+    modelPreset?: string | null,
+  ): Promise<string> => {
     const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
@@ -219,6 +305,7 @@ export function useSessions(): {
         updatedAt: new Date().toISOString(),
         title: "",
         preview: "",
+        modelPreset: modelPreset ?? null,
         workspaceScope: workspaceScope ?? null,
       },
       ...prev.filter((s) => s.key !== key),
@@ -257,11 +344,15 @@ export function useSessions(): {
 
   const deleteChat = useCallback(
     async (key: string, options?: { deleteAutomations?: boolean }) => {
+      const optimistic = optimisticKeysRef.current.has(key);
       const result = await apiDeleteSession(client, key, options);
-      if (!result.deleted) return result;
+      if (result.blocked_by_automations || (!result.deleted && !optimistic)) return result;
       optimisticKeysRef.current.delete(key);
+      webuiThreadCache.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
-      return result;
+      // The gateway may have restarted and forgotten an unpersisted chat's
+      // draft scope, but removing that optimistic session is still a deletion.
+      return result.deleted ? result : { ...result, deleted: true };
     },
     [client],
   );
@@ -314,38 +405,12 @@ export function useSessionHistory(key: string | null): {
   const refresh = useCallback(() => {
     setRefreshSeq((value) => value + 1);
   }, []);
-  const [state, setState] = useState<{
-    key: string | null;
-    messages: UIMessage[];
-    loading: boolean;
-    loadingOlder: boolean;
-    error: string | null;
-    hasPendingToolCalls: boolean;
-    completedTurnIds: string[];
-    forkBoundaryMessageCount: number | null;
-    beforeCursor: string | null;
-    hasMoreBefore: boolean;
-    userMessageOffset: number;
-    version: number;
-    continuity: SessionHistoryContinuity;
-    lineage: number;
-    activeTurnId: string | null;
-  }>({
-    key: null,
-    messages: [],
-    loading: false,
-    loadingOlder: false,
-    error: null,
-    hasPendingToolCalls: false,
-    completedTurnIds: [],
-    forkBoundaryMessageCount: null,
-    beforeCursor: null,
-    hasMoreBefore: false,
-    userMessageOffset: 0,
-    version: 0,
-    continuity: "initial",
-    lineage: 0,
-    activeTurnId: null,
+  const [state, setState] = useState<SessionHistoryState>(() => {
+    if (!key) return emptyHistoryState(null);
+    const cached = webuiThreadCache.get(key);
+    if (!cached) return emptyHistoryState(key, true);
+    historyVersionRef.current = 1;
+    return cachedHistoryState(key, cached, historyVersionRef.current);
   });
 
   useEffect(() => () => {
@@ -359,23 +424,7 @@ export function useSessionHistory(key: string | null): {
       olderRequestAbortRef.current?.abort();
       olderRequestAbortRef.current = null;
       loadingOlderRef.current = false;
-      setState({
-        key: null,
-        messages: [],
-        loading: false,
-        loadingOlder: false,
-        error: null,
-        hasPendingToolCalls: false,
-        completedTurnIds: [],
-        forkBoundaryMessageCount: null,
-        beforeCursor: null,
-        hasMoreBefore: false,
-        userMessageOffset: 0,
-        version: 0,
-        continuity: "initial",
-        lineage: 0,
-        activeTurnId: null,
-      });
+      setState(emptyHistoryState(null));
       return;
     }
     let cancelled = false;
@@ -383,43 +432,44 @@ export function useSessionHistory(key: string | null): {
     olderRequestAbortRef.current?.abort();
     olderRequestAbortRef.current = null;
     loadingOlderRef.current = false;
-    // Mark the new key as loading immediately so callers never see stale
-    // messages from the previous session during the render right after a switch.
+    const cachedBody = webuiThreadCache.get(key);
+    const cachedVersion = cachedBody ? historyVersionRef.current + 1 : 0;
+    if (cachedBody) historyVersionRef.current = cachedVersion;
     setState((prev) => prev.key === key
-      ? { ...prev, loading: true, loadingOlder: false, error: null }
-      : {
-          key,
-          messages: [],
-          loading: true,
+      ? {
+          ...prev,
+          loading: cachedBody ? false : prev.messages.length === 0 && prev.lineage === 0,
           loadingOlder: false,
           error: null,
-          hasPendingToolCalls: false,
-          completedTurnIds: [],
-          forkBoundaryMessageCount: null,
-          beforeCursor: null,
-          hasMoreBefore: false,
-          userMessageOffset: 0,
-          version: 0,
-          continuity: "initial",
-          lineage: 0,
-          activeTurnId: null,
-        });
+        }
+      : cachedBody
+        ? cachedHistoryState(key, cachedBody, cachedVersion)
+        : emptyHistoryState(key, true));
     (async () => {
       try {
         const body = await fetchWebuiThread(getToken(), key, {
           limit: INITIAL_HISTORY_PAGE_LIMIT,
           direction: "latest",
           signal: controller.signal,
+          revision: cachedBody?.revision,
+          cached: cachedBody,
         });
         if (cancelled) return;
+        if (body === cachedBody && cachedBody !== undefined) {
+          setState((prev) => prev.key === key
+            ? { ...prev, loading: false, error: null }
+            : prev);
+          return;
+        }
+        if (body) webuiThreadCache.set(key, body);
+        else webuiThreadCache.delete(key);
         historyVersionRef.current += 1;
         const responseVersion = historyVersionRef.current;
         const completedTurnIds = completedTurnIdsFromThread(body);
-        const ui = persistedMessagesToUi(body?.messages ?? []);
+        const projected = projectPersistedThread(body);
+        const ui = projected.messages;
         const hasPending = hasPendingToolCallsFromThread(body, ui);
-        const forkBoundary = typeof body?.fork_boundary_message_count === "number"
-          ? Math.max(0, Math.min(body.fork_boundary_message_count, ui.length))
-          : null;
+        const forkBoundary = projected.forkBoundaryMessageCount;
         setState((prev) => {
           const merged = prev.key === key
             ? mergeLatestHistory(prev.messages, ui, prev.lineage === 0)
@@ -465,6 +515,7 @@ export function useSessionHistory(key: string | null): {
       } catch (e) {
         if (cancelled || isAbortError(e)) return;
         if (e instanceof ApiError && e.status === 404) {
+          webuiThreadCache.delete(key);
           historyVersionRef.current += 1;
           const responseVersion = historyVersionRef.current;
           setState((prev) => {
@@ -490,23 +541,9 @@ export function useSessionHistory(key: string | null): {
             };
           });
         } else {
-          setState((prev) => ({
-            key,
-            messages: [],
-            loading: false,
-            loadingOlder: false,
-            error: (e as Error).message,
-            hasPendingToolCalls: false,
-            completedTurnIds: [],
-            forkBoundaryMessageCount: null,
-            beforeCursor: null,
-            hasMoreBefore: false,
-            userMessageOffset: 0,
-            version: prev.key === key ? prev.version : 0,
-            continuity: prev.key === key ? prev.continuity : "initial",
-            lineage: prev.key === key ? prev.lineage : 0,
-            activeTurnId: prev.key === key ? prev.activeTurnId : null,
-          }));
+          setState((prev) => prev.key === key && prev.messages.length > 0
+            ? { ...prev, loading: false, error: (e as Error).message }
+            : { ...emptyHistoryState(key), error: (e as Error).message });
         }
       }
     })();
@@ -541,7 +578,8 @@ export function useSessionHistory(key: string | null): {
       });
       setState((prev) => {
         if (!matchesRequest(prev)) return prev;
-        if (!body?.messages?.length) {
+        const projected = projectPersistedThread(body);
+        if (!body || !projected.messages.length) {
           return {
             ...prev,
             loadingOlder: false,
@@ -549,10 +587,8 @@ export function useSessionHistory(key: string | null): {
             beforeCursor: null,
           };
         }
-        const older = persistedMessagesToUi(body.messages);
-        const olderBoundary = typeof body.fork_boundary_message_count === "number"
-          ? Math.max(0, Math.min(body.fork_boundary_message_count, older.length))
-          : null;
+        const older = projected.messages;
+        const olderBoundary = projected.forkBoundaryMessageCount;
         const shiftedBoundary = prev.forkBoundaryMessageCount === null
           ? null
           : prev.forkBoundaryMessageCount + older.length;

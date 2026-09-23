@@ -135,9 +135,9 @@ def _merge_form_values(
         if not raw_key:
             continue
         field = raw_key[len(prefix):] if raw_key.startswith(prefix) else raw_key
-        if field in secrets and not _str(raw_value):
+        if field in secrets and raw_value is not None and not _str(raw_value):
             continue
-        _assign(merged, field, raw_value)
+        _assign(merged, field, "" if field in secrets and raw_value is None else raw_value)
     return merged
 
 
@@ -341,16 +341,30 @@ def _message_from_response(data: dict[str, Any], fallback: str) -> str:
     return str(error) if error else fallback
 
 
-def _http_get(url: str, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
-    with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
+def _http_get(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    proxy: str | None = None,
+) -> dict[str, Any]:
+    if proxy and "://" not in proxy:
+        proxy = f"http://{proxy}"
+    with httpx.Client(timeout=_TIMEOUT_SECONDS, proxy=proxy) as client:
         response = client.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
     return cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
 
-def _http_post(url: str, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
-    with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
+def _http_post(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    proxy: str | None = None,
+) -> dict[str, Any]:
+    if proxy and "://" not in proxy:
+        proxy = f"http://{proxy}"
+    with httpx.Client(timeout=_TIMEOUT_SECONDS, proxy=proxy) as client:
         response = client.post(url, headers=headers)
         response.raise_for_status()
         data = response.json()

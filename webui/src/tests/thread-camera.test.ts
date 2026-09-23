@@ -39,6 +39,45 @@ function cameraHarness(prefersReducedMotion = false) {
 }
 
 describe("ThreadCameraController", () => {
+  it("uses the same duration for nearby and distant targets", () => {
+    const durations = [100, 100_000].map((target) => {
+      const { camera, viewport, advance } = cameraHarness();
+      camera.navigateTo(target);
+      let elapsed = 0;
+      while (camera.isFollowing() && elapsed < 1_000) {
+        advance(16);
+        elapsed += 16;
+      }
+      expect(viewport.scrollTop).toBe(target);
+      expect(elapsed).toBeLessThanOrEqual(250);
+      return elapsed;
+    });
+    expect(durations[0]).toBe(durations[1]);
+  });
+
+  it.each([1_000, 100_000, -100_000])("finishes a %i px navigation within 250ms", (distance) => {
+    const { camera, viewport, frames, advance } = cameraHarness();
+    viewport.scrollTop = distance < 0 ? -distance : 0;
+    const target = viewport.scrollTop + distance;
+    camera.navigateTo(target);
+    advance(16);
+    expect(viewport.scrollTop).not.toBe(target);
+    advance(234);
+    expect(viewport.scrollTop).toBe(target);
+    expect(camera.isFollowing()).toBe(false);
+    expect(frames).toHaveLength(0);
+  });
+
+  it("keeps the original deadline when layout retargets navigation", () => {
+    const { camera, viewport, advance } = cameraHarness();
+    camera.navigateTo(100_000);
+    advance(100);
+    expect(camera.navigateTo(120_000)).toBe("retargeted");
+    advance(150);
+    expect(viewport.scrollTop).toBe(120_000);
+    expect(camera.isFollowing()).toBe(false);
+  });
+
   it("pins automatic follow in the geometry frame without camera debt", () => {
     const { camera, viewport, frames } = cameraHarness();
 

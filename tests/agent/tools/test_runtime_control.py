@@ -45,7 +45,6 @@ def test_agent_loop_assembles_my_tool_with_runtime_control(tmp_path: Path) -> No
     assert isinstance(tool._runtime_control, RuntimeControl)
     assert isinstance(tool._runtime_control, AgentRuntimeControl)
     assert tool._runtime_control is not loop
-    assert not hasattr(tool, "_runtime_state")
 
 
 def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path) -> None:

@@ -76,49 +76,6 @@ function activityMessages(extraReasoning = "", extraTool?: UIMessage): UIMessage
   return rows;
 }
 
-function installAnimationFrameQueue() {
-  const originalRequest = window.requestAnimationFrame;
-  const originalCancel = window.cancelAnimationFrame;
-  const callbacks = new Map<number, FrameRequestCallback>();
-  let nextId = 1;
-
-  window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-    const id = nextId;
-    nextId += 1;
-    callbacks.set(id, callback);
-    return id;
-  }) as typeof window.requestAnimationFrame;
-  window.cancelAnimationFrame = ((id: number) => {
-    callbacks.delete(id);
-  }) as typeof window.cancelAnimationFrame;
-
-  return {
-    flush() {
-      const pending = Array.from(callbacks.entries());
-      callbacks.clear();
-      for (const [, callback] of pending) callback(0);
-    },
-    restore() {
-      window.requestAnimationFrame = originalRequest;
-      window.cancelAnimationFrame = originalCancel;
-    },
-  };
-}
-
-function setScrollGeometry(
-  element: HTMLElement,
-  geometry: { scrollHeight: number; clientHeight: number; scrollTop?: number },
-) {
-  Object.defineProperties(element, {
-    scrollHeight: { configurable: true, value: geometry.scrollHeight },
-    clientHeight: { configurable: true, value: geometry.clientHeight },
-    scrollTop: {
-      configurable: true,
-      value: geometry.scrollTop ?? element.scrollTop,
-      writable: true,
-    },
-  });
-}
 
 function installReducedMotion() {
   const original = window.matchMedia;
@@ -140,6 +97,57 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  it("loads deferred trace details only after completed activity is expanded", async () => {
+    const onLoadTraceDetails = vi.fn();
+    render(
+      <AgentActivityCluster
+        messages={[{
+          id: "t-deferred",
+          role: "tool",
+          kind: "trace",
+          content: "exec(…)",
+          traces: ["exec(…)"],
+          traceDetail: {
+            ref: "9.tr-deadbeefdeadbeef",
+            bytes: 40_000,
+            traceCount: 1,
+          },
+          createdAt: 1,
+        }]}
+        isTurnStreaming={false}
+        hasBodyBelow={false}
+        onLoadTraceDetails={onLoadTraceDetails}
+      />,
+    );
+
+    expect(onLoadTraceDetails).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Worked/ }));
+    await waitFor(() => {
+      expect(onLoadTraceDetails).toHaveBeenCalledWith(["9.tr-deadbeefdeadbeef"]);
+    });
+  });
+
+  it("shows model retries in the existing live activity header", () => {
+    render(
+      <AgentActivityCluster
+        messages={[]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        retryStatus={{
+          state: "waiting",
+          attempt: 1,
+          max_attempts: 4,
+          error_kind: "connection",
+          next_retry_at: Date.now() / 1000 + 5,
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText("Connection failed · retrying in 5s · attempt 1/4"),
+    ).toBeInTheDocument();
+  });
+
   it("keeps intermediate assistant output as normal Markdown inside live activity", async () => {
     await act(async () => {
       await preloadMarkdownText();
@@ -168,186 +176,39 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByTestId("activity-step")).not.toBeInTheDocument();
   });
 
-  it("jumps to the latest activity when opened", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
+  it.each([false, true])("uses one activity layout without nested scrolling (streaming: %s)", (isTurnStreaming) => {
+    const onExpandedChange = vi.fn();
+    const props = {
+      messages: activityMessages(),
+      isTurnStreaming,
+      hasBodyBelow: false,
+      ...(isTurnStreaming ? {} : { expanded: true, hideHeader: true }),
+      onExpandedChange,
+    };
+    const view = render(<AgentActivityCluster {...props} />);
+    const header = screen.getByRole("button", { name: /^(Working|Worked)/ });
+    const content = screen.getByTestId("agent-activity-content");
 
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
+    expect(header).toHaveClass("h-7", "gap-1.5", "px-1.5");
+    expect(header.querySelector("svg")).toHaveClass("lucide-activity");
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(view.container.querySelector("[data-contextual-activity-guide]")).toBeInTheDocument();
+    expect(content).toHaveClass("ps-6");
+    expect(content).not.toHaveClass("max-h-[180px]");
+    expect(content).not.toHaveClass("overflow-y-auto");
+    expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
 
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(880);
-    } finally {
-      raf.restore();
-    }
-  });
-
-  it("follows new reasoning and tool activity while the user is at the bottom", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      act(() => {
-        raf.flush();
-      });
-
-      rerender(
-        <AgentActivityCluster
-          messages={activityMessages(" with more detail", {
-            id: "t2",
-            role: "tool",
-            kind: "trace",
-            content: "open_browser()",
-            traces: ["open_browser()"],
-            createdAt: 3,
-          })}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1500,
-        clientHeight: 120,
-        scrollTop: scrollport.scrollTop,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(1380);
-    } finally {
-      raf.restore();
-    }
-  });
-
-  it("does not pull the user down after they scroll up inside the activity pane", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      act(() => {
-        raf.flush();
-      });
-
-      scrollport.scrollTop = 100;
-      fireEvent.scroll(scrollport);
-
-      rerender(
-        <AgentActivityCluster
-          messages={activityMessages(" still streaming")}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1500,
-        clientHeight: 120,
-        scrollTop: scrollport.scrollTop,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(100);
-    } finally {
-      raf.restore();
-    }
-  });
-
-  it("feathers only the activity edges with clipped content", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-      expect(scrollport).toHaveAttribute("data-fade-top", "true");
-      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
-      const topFade = screen.getByTestId("activity-scroll-fade-top");
-      expect(scrollport).not.toContainElement(topFade);
-      expect(scrollport).not.toHaveClass("activity-scroll-fade");
-      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
-
-      scrollport.scrollTop = 440;
-      fireEvent.scroll(scrollport);
-      expect(scrollport).toHaveAttribute("data-fade-top", "true");
-      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
-      expect(screen.getByTestId("activity-scroll-fade-top")).toBeInTheDocument();
-      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
-
-      scrollport.scrollTop = 0;
-      fireEvent.scroll(scrollport);
-      expect(scrollport).toHaveAttribute("data-fade-top", "false");
-      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
-      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
-      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
-
-      setScrollGeometry(scrollport, {
-        scrollHeight: 100,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      fireEvent.scroll(scrollport);
-      expect(scrollport).toHaveAttribute("data-fade-top", "false");
-      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
-      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
-    } finally {
-      raf.restore();
+    view.rerender(<AgentActivityCluster {...props} messages={activityMessages(" updated", {
+      id: "next-tool", role: "tool", kind: "trace", content: "open_browser()", createdAt: 3,
+    })} />);
+    expect(screen.getByTestId("agent-activity-content")).toBe(content);
+    expect(content).toHaveTextContent("thinking updated");
+    fireEvent.click(header);
+    if (isTurnStreaming) {
+      expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
+    } else {
+      expect(onExpandedChange).toHaveBeenCalledWith(false);
     }
   });
 
@@ -408,7 +269,7 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow
         />,
       );
-      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+      expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
 
       rerender(
         <AgentActivityCluster
@@ -422,11 +283,11 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+      expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
       act(() => {
         vi.advanceTimersByTime(301);
       });
-      expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Worked" })).toHaveAttribute(
         "aria-expanded",
         "false",
@@ -436,31 +297,6 @@ describe("AgentActivityCluster", () => {
     }
   });
 
-  it("keeps chevron color feedback faster than the drawer rotation", () => {
-    render(
-      <AgentActivityCluster
-        messages={[{
-          id: "r-motion",
-          role: "assistant",
-          content: "",
-          reasoning: "checking motion",
-          createdAt: 1,
-        }]}
-        isTurnStreaming={false}
-        hasBodyBelow
-      />,
-    );
-
-    const button = screen.getByRole("button", { name: "Worked" });
-    expect(button).toHaveAttribute("data-thread-disclosure");
-    const chevron = button.querySelector("svg");
-    expect(chevron).toBeInTheDocument();
-    expect(chevron).toHaveClass("transition-colors", "duration-200");
-    expect(chevron?.parentElement).toHaveClass(
-      "transition-transform",
-      "[transition-duration:220ms]",
-    );
-  });
 
   it("uses persisted turn latency for completed history instead of replay timestamps", () => {
     render(
@@ -542,6 +378,7 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
+      fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
       expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
       const fileRef = screen.getByTestId("activity-file-reference");
@@ -623,6 +460,91 @@ describe("AgentActivityCluster", () => {
 
     assertBetween(screen.getByText("Edited"));
   });
+
+  it.each(["diff", "collapsed_diff"] as const)(
+    "keeps %s edits outside reasoning folds in live and replayed activity",
+    (fileEditDisplayMode) => {
+      localStorage.setItem(
+        "nanobot-webui.settings-preferences",
+        JSON.stringify({ fileEditDisplayMode }),
+      );
+      const messages: UIMessage[] = [
+        { id: "before", role: "assistant", content: "", reasoning: "Before edit", createdAt: 1 },
+        {
+          id: "edit", role: "tool", kind: "trace", content: "edit_file()", createdAt: 2,
+          traces: ["edit_file()"],
+          fileEdits: [{
+            call_id: "edit-call", tool: "edit_file", path: "src/app.tsx", phase: "end",
+            added: 1, deleted: 1, approximate: false, status: "done",
+            diff: unifiedFileDiff([
+              "--- a/src/app.tsx", "+++ b/src/app.tsx", "@@ -1 +1 @@", "-old", "+new",
+            ]),
+          }],
+        },
+        {
+          id: "after", role: "assistant", content: "After edit",
+          activityKind: "model", createdAt: 3,
+        },
+      ];
+      const { rerender, unmount } = render(
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
+      );
+      try {
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        const assertIndependentDiff = () => {
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(diff).toBeVisible();
+          expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
+            .toBeNull();
+          expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(1);
+        };
+        const assertExpandedOrder = () => {
+          for (const toggle of document.querySelectorAll<HTMLButtonElement>(
+            '[data-thread-disclosure][aria-expanded="false"]',
+          )) {
+            fireEvent.click(toggle);
+          }
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(screen.getByText("Before edit")).toBeVisible();
+          expect(screen.getByText("After edit")).toBeVisible();
+          expect(screen.getByText("Before edit").compareDocumentPosition(diff)
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+          expect(diff.compareDocumentPosition(screen.getByText("After edit"))
+            & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+          assertIndependentDiff();
+        };
+        assertIndependentDiff();
+        assertExpandedOrder();
+        for (const toggle of document.querySelectorAll<HTMLButtonElement>("[data-thread-disclosure]")) {
+          fireEvent.click(toggle);
+          assertIndependentDiff();
+        }
+        rerender(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
+        assertIndependentDiff();
+        rerender(
+          <AgentActivityCluster
+            messages={messages.slice(0, 2)}
+            isTurnStreaming
+            hasBodyBelow={false}
+            retryStatus={{ state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection" }}
+          />,
+        );
+        expect(screen.getByRole("status", { name: "Connection failed · retrying in 0s · attempt 1/4" }))
+          .toBeVisible();
+        unmount();
+        render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        assertIndependentDiff();
+        assertExpandedOrder();
+      } finally {
+        localStorage.removeItem("nanobot-webui.settings-preferences");
+      }
+    },
+  );
 
   it("renders file edit diffs and responds to preference changes", () => {
     localStorage.setItem(
@@ -741,7 +663,7 @@ describe("AgentActivityCluster", () => {
     }
   });
 
-  it("keeps long file edit diffs collapsed until opened", () => {
+  it("keeps long file edit diffs lazy and releases them after closing", async () => {
     localStorage.setItem(
       "nanobot-webui.settings-preferences",
       JSON.stringify({ fileEditDisplayMode: "diff" }),
@@ -810,10 +732,20 @@ describe("AgentActivityCluster", () => {
         "Show 5 more lines",
       );
 
+      const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+      let finish!: () => void;
+      const finished = new Promise<void>((resolve) => { finish = resolve; });
+      Object.defineProperty(content, "getAnimations", { value: () => [{ finished }] });
       fireEvent.click(toggle);
-
       expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(content).toHaveAttribute("data-state", "closed");
+      expect(content).toHaveAttribute("inert");
+      expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
+      await act(async () => { finish(); });
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(screen.getByText("line-160")).toBeInTheDocument();
+      expect(screen.queryByText("line-161")).not.toBeInTheDocument();
     } finally {
       localStorage.removeItem("nanobot-webui.settings-preferences");
     }
@@ -959,6 +891,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Deleted")).toBeInTheDocument();
     expect(screen.queryByText("Edited")).not.toBeInTheDocument();
@@ -992,7 +925,7 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
@@ -1216,6 +1149,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Searched X · nanobot oauth")).toBeInTheDocument();
     expect(screen.queryByText(/Completed X search/i)).not.toBeInTheDocument();
@@ -1249,6 +1183,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.queryByText(/signed-secret|secret1234|url-secret/)).not.toBeInTheDocument();
     expect(screen.getByText("Searched release notes access_token=<redacted>")).toBeInTheDocument();
@@ -1465,6 +1400,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const title = screen.getByText("Example documentation");
     const url = screen.getByText("example.com/docs");
@@ -1546,6 +1482,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const run = screen.getByText(/Reviewed sources.*2 files/).closest('[data-testid="activity-step"]');
     expect(run).toBeInTheDocument();
@@ -1586,6 +1523,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not search files “needle”").closest(
       '[data-testid="activity-step"]',
@@ -1614,6 +1552,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.queryByText(/password|signed-secret/)).not.toBeInTheDocument();
     expect(screen.getByText("Completed Download asset")).toBeInTheDocument();
@@ -1700,6 +1639,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.queryByText("+0")).not.toBeInTheDocument();
@@ -1794,6 +1734,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not edit").closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
@@ -1827,6 +1768,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const row = screen.getByText("Could not edit").closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
@@ -1894,6 +1836,7 @@ describe("AgentActivityCluster", () => {
                   "-const fps = 30;",
                   "+const fps = 60;",
                   " start();",
+
                 ]),
               },
             ],
@@ -1903,6 +1846,7 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
+      fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
       const fileRefs = screen.getAllByTestId("activity-file-reference");
       expect(fileRefs).toHaveLength(3);
@@ -1963,6 +1907,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.getByText("Could not edit")).toBeInTheDocument();
@@ -2070,6 +2015,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     expect(screen.getByText("Could not generate image")).toBeInTheDocument();
     const row = screen.getByText("Could not generate image").closest(
@@ -2142,6 +2088,7 @@ describe("AgentActivityCluster", () => {
         hasBodyBelow={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
     const steps = screen.getAllByTestId("activity-step");
     expect(steps.length).toBeGreaterThanOrEqual(3);

@@ -18,6 +18,7 @@ from nanobot.providers.openai_responses.parsing import (
     parse_response_output,
 )
 from nanobot.providers.openai_responses.state import (
+    build_responses_compaction_state,
     build_responses_state,
     is_compaction_compatibility_error,
     prepare_responses_input,
@@ -40,6 +41,7 @@ __all__ = [
     "is_replayable_finish_reason",
     "map_finish_reason",
     "parse_response_output",
+    "build_responses_compaction_state",
     "build_responses_state",
     "is_compaction_compatibility_error",
     "prepare_responses_input",

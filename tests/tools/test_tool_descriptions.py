@@ -9,7 +9,9 @@ from nanobot.agent.tools.shell import ExecTool
 
 def test_coding_tool_descriptions_steer_editing_priority() -> None:
     apply_patch = ApplyPatchTool().description.lower()
-    edit_file = EditFileTool().description.lower()
+    edit_tool = EditFileTool()
+    edit_file = edit_tool.description.lower()
+    edit_parameters = edit_tool.parameters["properties"]
     write_file = WriteFileTool().description.lower()
 
     assert "default tool for code edits" in apply_patch
@@ -18,8 +20,10 @@ def test_coding_tool_descriptions_steer_editing_priority() -> None:
     assert "edit_file only for small exact replacements" in apply_patch
 
     assert "small, exact replacement" in edit_file
-    assert "copied from read_file" in edit_file
     assert "prefer apply_patch" in edit_file
+    assert "occurrence, line_hint, and replace_all=true are mutually exclusive" in edit_file
+    assert "copy it from read_file" in edit_parameters["old_text"]["description"].lower()
+    assert "must differ from old_text" in edit_parameters["new_text"]["description"].lower()
 
     assert "replace an entire file" in write_file
     assert "prefer apply_patch" in write_file

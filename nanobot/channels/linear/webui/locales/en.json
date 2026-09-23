@@ -1,0 +1,93 @@
+{
+  "description": "Work with nanobot from Linear issues through native Agent Sessions.",
+  "requirements": "A private Linear OAuth app and a stable public HTTPS callback URL",
+  "setup": {
+    "docsLabel": "Open Linear setup guide",
+    "officialLabel": "Create Linear OAuth app",
+    "tryIt": "Mention the app in an issue comment or delegate an issue to it. Follow-ups inside its Agent Session do not need another mention.",
+    "summary": "Create a private Linear OAuth app, save its credentials and public URL, then authorize each workspace. Start a session by mentioning the app or delegating an issue to it; ordinary comments are ignored.",
+    "steps": [
+      "Expose this nanobot instance through a stable HTTPS URL (a tunnel is fine).",
+      "Create a private OAuth app in Linear with read, write, app:mentionable, and app:assignable scopes.",
+      "Subscribe the app webhook to AgentSessionEvent, PermissionChange, and OAuthAuthorization using the generated webhook URL.",
+      "Connect the workspace with OAuth, then mention the app or delegate an issue to it."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "OAuth client ID",
+        "placeholder": "Linear OAuth client ID",
+        "help": "Copy it from the private OAuth app in Linear."
+      },
+      "clientSecret": {
+        "label": "OAuth client secret",
+        "placeholder": "••••••",
+        "help": "Stored only by this nanobot instance."
+      },
+      "webhookSigningSecret": {
+        "label": "Webhook signing secret",
+        "placeholder": "••••••",
+        "help": "Used to verify Linear-Signature before any webhook body is parsed."
+      },
+      "publicBaseUrl": {
+        "label": "Public HTTPS URL",
+        "placeholder": "https://nanobot.example.com",
+        "help": "A stable HTTPS origin routed to the listener below; do not include a path."
+      },
+      "host": {
+        "label": "Listen host",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "Listen port",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Webhook path",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "OAuth callback path",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "Allowed Linear users",
+        "placeholder": "Linear user IDs, comma separated",
+        "help": "Leave empty to use nanobot pairing, or use * to allow every user in connected workspaces."
+      },
+      "showReasoning": {
+        "label": "Show reasoning",
+        "help": "Post model reasoning as thought activities in Linear. Turn this off for a quieter session."
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Linear authorization QR code",
+    "authorizeTitle": "Authorize in Linear",
+    "authorizeDescription": "Open Linear in this browser or scan the QR code. nanobot enables the channel after authorization.",
+    "waiting": "Waiting for Linear authorization...",
+    "connected": "Linear is connected.",
+    "stopped": "Authorization stopped.",
+    "connecting": "Connecting...",
+    "reconnect": "Connect another workspace",
+    "connect": "Connect Linear",
+    "openLinear": "Continue in Linear",
+    "createApp": "Create Linear app",
+    "savePublicUrl": "Enter a public HTTPS URL to create a Linear app.",
+    "removeCredentials": "Remove saved credentials",
+    "retrySave": "Retry",
+    "channelRunning": "Channel running",
+    "accessAll": "Every member of an authorized workspace can run this agent.",
+    "accessRestricted": "Only the Linear user IDs listed in Advanced can run this agent.",
+    "accessPairing": "Pair on first use; connect Linear MCP to search or edit issues.",
+    "configureTools": "Configure Linear MCP",
+    "workspacesTitle": "Authorized workspaces",
+    "refreshWorkspaces": "Refresh workspaces",
+    "loadingWorkspaces": "Loading workspaces",
+    "noWorkspaces": "No workspaces are authorized. Connect a workspace to receive Linear agent requests.",
+    "refreshRequired": "Authorization refresh required",
+    "missingScopes": "Reconnect to grant: {{scopes}}",
+    "authorized": "Authorized",
+    "confirmDisconnect": "Disconnect workspace",
+    "disconnect": "Disconnect"
+  }
+}

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
@@ -568,7 +569,10 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
     loop.runner.run = AsyncMock(side_effect=fake_run)
     loop.max_iterations = 55
 
-    await loop._run_agent_loop([], runtime=loop.llm_runtime())
+    await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
+    )
 
     loop.runner.run.assert_awaited_once()
 
@@ -609,7 +613,7 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=runtime,
         session=None,
         request_context=RequestContext(channel="test", chat_id="c1", runtime=runtime),
@@ -668,7 +672,7 @@ async def test_terminal_drain_timeout(tmp_path):
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=runtime,
         session=session,
         request_context=RequestContext(
@@ -742,7 +746,7 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
     loop.subagents._running_tasks["sub-deadline-1"] = hang_task
 
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=loop.llm_runtime(),
         session=session,
         pending_queue=pending_queue,

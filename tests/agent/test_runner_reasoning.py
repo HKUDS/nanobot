@@ -9,6 +9,7 @@ channels, gated by ``context.streamed_reasoning`` rather than
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -19,6 +20,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
+from nanobot.utils.progress_events import output_events
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -82,6 +84,18 @@ class _LifecycleRecordingHook(AgentHook):
         self.events.append(f"hosted_tool:{event.get('phase')}")
 
 
+class _BlockingReasoningEndHook(_LifecycleRecordingHook):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reasoning_end_started = asyncio.Event()
+        self.release_reasoning_end = asyncio.Event()
+
+    async def emit_reasoning_end(self) -> None:
+        self.reasoning_end_started.set()
+        await self.release_reasoning_end.wait()
+        await super().emit_reasoning_end()
+
+
 @pytest.mark.asyncio
 async def test_runner_preserves_reasoning_fields_in_assistant_history():
     """Reasoning fields ride along on the persisted assistant message so
@@ -92,7 +106,7 @@ async def test_runner_preserves_reasoning_fields_in_assistant_history():
     captured_second_call: list[dict] = []
     call_count = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -105,7 +119,7 @@ async def test_runner_preserves_reasoning_fields_in_assistant_history():
         captured_second_call[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
@@ -138,7 +152,7 @@ async def test_runner_emits_anthropic_thinking_blocks():
 
     provider = MagicMock()
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(
             content="The answer is 42.",
             thinking_blocks=[
@@ -149,7 +163,7 @@ async def test_runner_emits_anthropic_thinking_blocks():
             usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -178,14 +192,14 @@ async def test_runner_emits_inline_think_content_as_reasoning():
 
     provider = MagicMock()
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(
             content="<think>Let me think about this...\nThe answer is 42.</think>The answer is 42.",
             tool_calls=[],
             usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -213,7 +227,7 @@ async def test_runner_prefers_reasoning_content_over_inline_think():
 
     provider = MagicMock()
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(
             content="<think>inline thinking</think>The answer.",
             reasoning_content="dedicated reasoning field",
@@ -221,7 +235,7 @@ async def test_runner_prefers_reasoning_content_over_inline_think():
             usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -311,7 +325,7 @@ async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
     async def _stream(_content: str) -> None:
         pass
 
-    hook = AgentProgressHook(on_progress=_progress, on_stream=_stream)
+    hook = AgentProgressHook(output_events(on_progress=_progress, on_stream=_stream), streaming=True)
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "question"}],
@@ -335,7 +349,7 @@ async def test_runner_closes_reasoning_stream_after_one_shot_response():
 
     provider = MagicMock()
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(
             content="answer",
             reasoning_content="hidden thought",
@@ -343,7 +357,7 @@ async def test_runner_closes_reasoning_stream_after_one_shot_response():
             usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -552,6 +566,86 @@ async def test_runner_closes_native_reasoning_before_hosted_tool_event():
         "content:done",
         "stream_end:False",
     ]
+
+
+@pytest.mark.asyncio
+async def test_runner_closes_native_reasoning_when_stream_is_cancelled():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+    reasoning_started = asyncio.Event()
+    release_provider = asyncio.Event()
+
+    async def chat_stream_with_retry(
+        *, on_thinking_delta=None, **kwargs
+    ):
+        if on_thinking_delta:
+            await on_thinking_delta("inspect")
+        reasoning_started.set()
+        await release_provider.wait()
+        raise AssertionError("the cancelled provider call should not complete")
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    hook = _LifecycleRecordingHook()
+
+    task = asyncio.create_task(AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "inspect"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    )))
+    await reasoning_started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert hook.events == ["reasoning:inspect", "reasoning_end"]
+
+
+@pytest.mark.asyncio
+async def test_runner_settles_native_reasoning_end_before_propagating_cancellation():
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock()
+
+    async def chat_stream_with_retry(
+        *, on_content_delta=None, on_thinking_delta=None, **kwargs
+    ):
+        if on_thinking_delta:
+            await on_thinking_delta("inspect")
+        if on_content_delta:
+            await on_content_delta("done")
+        raise AssertionError("the cancelled provider call should not complete")
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    hook = _BlockingReasoningEndHook()
+
+    task = asyncio.create_task(AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "inspect"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    )))
+    await hook.reasoning_end_started.wait()
+
+    task.cancel()
+    await asyncio.sleep(0)
+    hook.release_reasoning_end.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert hook.events == ["reasoning:inspect", "reasoning_end"]
 
 
 @pytest.mark.asyncio

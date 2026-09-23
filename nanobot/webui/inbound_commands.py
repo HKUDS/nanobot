@@ -35,6 +35,7 @@ from nanobot.session.webui_turns import (
     websocket_turn_wall_started_at,
 )
 from nanobot.utils.helpers import safe_filename
+from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
@@ -150,8 +151,11 @@ class WebUICommandRouter:
         self.request_operations: dict[str, WebUIRequestOperation] = {}
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
 
-    def workspace_controls_available(self, connection: ServerConnection) -> bool:
-        return self._http_router.workspace_controls_available(connection)
+    def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
+        return self._http_router.workspace_project_selection_available(connection)
+
+    def workspace_full_access_available(self, connection: ServerConnection) -> bool:
+        return self._http_router.workspace_full_access_available(connection)
 
     async def send_webui_protocol_error(
         self,
@@ -295,7 +299,8 @@ class WebUICommandRouter:
                 connection,
                 lambda: self._workspaces.scope_for_new_chat(
                     envelope,
-                    controls_available=self.workspace_controls_available(connection),
+                    can_change_project=self.workspace_project_selection_available(connection),
+                    can_use_full_access=self.workspace_full_access_available(connection),
                 ),
             )
             if scope is None:
@@ -435,7 +440,8 @@ class WebUICommandRouter:
                     envelope,
                     chat_id=chat_id,
                     chat_running=websocket_turn_wall_started_at(chat_id) is not None,
-                    controls_available=self.workspace_controls_available(connection),
+                    can_change_project=self.workspace_project_selection_available(connection),
+                    can_use_full_access=self.workspace_full_access_available(connection),
                 ),
                 chat_id=chat_id,
             )
@@ -579,7 +585,8 @@ class WebUICommandRouter:
                     envelope,
                     chat_id=chat_id,
                     chat_running=websocket_turn_wall_started_at(chat_id) is not None,
-                    controls_available=self.workspace_controls_available(connection),
+                    can_change_project=self.workspace_project_selection_available(connection),
+                    can_use_full_access=self.workspace_full_access_available(connection),
                 )
             ),
             chat_id=chat_id,
@@ -656,6 +663,11 @@ class WebUICommandRouter:
                 )
             if trusted_webui:
                 context_blocks: list[RuntimeContextBlock] = []
+                if not is_user_shell and envelope.get("intent") == "create_automation":
+                    context_blocks.append(RuntimeContextBlock(
+                        source="webui_automation_creation",
+                        content=render_template("agent/automation_creation.md", strip=True),
+                    ))
                 quote = webui_quote_runtime_context(
                     {WEBUI_QUOTE_METADATA: envelope.get("quoted_context")}
                 )
@@ -973,6 +985,7 @@ class WebUICommandRouter:
         self.request_tasks.clear()
         self.request_locks.clear()
         self.request_operations.clear()
+        await self._http_router.settings_routes.close()
         self.gateway.tokens.clear()
         self.gateway.endpoint.clear()
         self._temporary_chats.close()

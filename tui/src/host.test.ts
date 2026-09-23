@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-import { createTuiHost } from "./host"
+import {
+  configureOpenTuiEnvironment,
+  createTuiHost,
+} from "./host"
 
 async function settle(): Promise<void> {
   await Bun.sleep(0)
@@ -8,6 +11,27 @@ async function settle(): Promise<void> {
 }
 
 describe("TUI host integration", () => {
+  test("disables the explicit-width probe on Windows", () => {
+    const environment: Record<string, string | undefined> = {}
+
+    configureOpenTuiEnvironment(environment, "win32")
+
+    expect(environment.OPENTUI_FORCE_EXPLICIT_WIDTH).toBe("false")
+  })
+
+  test("preserves explicit probe choices and leaves other platforms unchanged", () => {
+    const overridden = {
+      OPENTUI_FORCE_EXPLICIT_WIDTH: "true",
+    }
+    const nonWindows: Record<string, string | undefined> = {}
+
+    configureOpenTuiEnvironment(overridden, "win32")
+    configureOpenTuiEnvironment(nonWindows, "linux")
+
+    expect(overridden.OPENTUI_FORCE_EXPLICIT_WIDTH).toBe("true")
+    expect(nonWindows.OPENTUI_FORCE_EXPLICIT_WIDTH).toBeUndefined()
+  })
+
   test("standalone terminals remain a no-op", async () => {
     const commands: string[][] = []
     const host = createTuiHost({}, async (command) => { commands.push([...command]) })

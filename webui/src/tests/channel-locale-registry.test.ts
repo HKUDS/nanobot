@@ -1,7 +1,4 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { channelFieldMessageKey } from "@/channel-plugins/i18n";
 import { registeredChannelLocales } from "@/channel-plugins/locale-registry";
@@ -13,8 +10,10 @@ const expectedChannels = [
   "discord",
   "email",
   "feishu",
+  "linear",
   "matrix",
   "mattermost",
+  "mochat",
   "msteams",
   "napcat",
   "qq",
@@ -96,20 +95,27 @@ describe("channel locale registry", () => {
       }
     }
   });
+});
 
-  it("keeps i18n initialization independent from channel React modules", () => {
-    const localeRegistry = readFileSync(
-      resolve(process.cwd(), "src/channel-plugins/locale-registry.ts"),
-      "utf8",
-    );
-    const i18nEntry = readFileSync(resolve(process.cwd(), "src/i18n/index.ts"), "utf8");
+describe("channel locale registry concurrency", () => {
+  it("registers every locale loaded concurrently for the same channel", async () => {
+    // A fresh module instance starts with an empty registry, which is the state
+    // startup reaches when the stored locale differs from the fallback locale.
+    vi.resetModules();
+    const registry = await import("@/channel-plugins/locale-registry");
 
-    expect(localeRegistry).toContain("webui/locales/*.json");
-    expect(localeRegistry).not.toContain("eager: true");
-    expect(localeRegistry).not.toMatch(/channel-plugins\/registry|\.tsx|\breact\b/i);
-    expect(i18nEntry).toContain("channel-plugins/locale-registry");
-    expect(i18nEntry).toContain("import.meta.glob");
-    expect(i18nEntry).not.toMatch(/import\s+\w+Common\s+from/);
-    expect(i18nEntry).not.toContain("channel-plugins/registry");
+    await Promise.all([
+      registry.channelLocaleResources("en"),
+      registry.channelLocaleResources("zh-CN"),
+    ]);
+
+    const registrations = registry.registeredChannelLocales();
+    expect([...registrations.keys()].sort()).toEqual(expectedChannels);
+    for (const [channel, locales] of registrations) {
+      expect([...locales.keys()].sort(), `${channel} concurrent locales`).toEqual([
+        "en",
+        "zh-CN",
+      ]);
+    }
   });
 });

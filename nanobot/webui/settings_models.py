@@ -81,6 +81,7 @@ class ModelSettingsPayload(TypedDict):
     model_presets: list[dict[str, Any]]
     model_call_order: list[str]
     model_call_order_editable: bool
+    model_configuration_migratable: bool
     providers: list[dict[str, Any]]
 
 
@@ -684,6 +685,7 @@ def provider_models_payload(
             **base_payload,
             "status": "available",
             "source": catalog.source,
+            "error_kind": catalog.error_kind,
             "models": rows,
             "model_count": len(rows),
             "message": catalog.message,
@@ -925,6 +927,48 @@ def _model_call_order_state(config: Config) -> tuple[list[str], bool]:
     return order, True
 
 
+def _legacy_model_configuration_migratable(
+    config: Config,
+    oauth_status: OAuthStatusReader,
+) -> bool:
+    """Return whether the implicit default represents usable legacy configuration.
+
+    A pristine config still carries schema defaults for backwards compatibility.
+    Those defaults are not user configuration and must not be materialized as a
+    preset. Inline fallbacks, or a default whose matching provider is configured,
+    are evidence that there is real legacy state to preserve.
+    """
+    _, editable = _model_call_order_state(config)
+    if editable:
+        return False
+
+    defaults = config.agents.defaults
+    if defaults.fallback_models:
+        return True
+
+    provider_name = defaults.provider
+    if provider_name == "auto":
+        model_prefix = defaults.model.split("/", 1)[0] if "/" in defaults.model else ""
+        if model_prefix and resolve_settings_provider(config, model_prefix) is not None:
+            provider_name = model_prefix
+        else:
+            provider_name = (
+                config.get_provider_name(
+                    defaults.model,
+                    preset=config.resolve_default_preset(),
+                )
+                or ""
+            )
+    if not provider_name or provider_name == "auto":
+        return False
+
+    resolved_provider = resolve_settings_provider(config, provider_name)
+    if resolved_provider is None:
+        return False
+    spec, _, provider_config = resolved_provider
+    return provider_configured_for_settings(spec, provider_config, oauth_status)
+
+
 def _validate_configured_provider(
     config: Config,
     provider: str,
@@ -1073,6 +1117,10 @@ def model_settings_payload(
         "model_presets": model_presets,
         "model_call_order": model_call_order,
         "model_call_order_editable": model_call_order_editable,
+        "model_configuration_migratable": _legacy_model_configuration_migratable(
+            config,
+            oauth_status,
+        ),
         "providers": providers,
     }
 
@@ -1153,6 +1201,10 @@ def create_model_configuration(
         raise WebUISettingsError("configuration already exists", status=409)
     _validate_configured_provider(config, provider, oauth_status)
 
+    activate_as_primary = not config.model_presets and not _legacy_model_configuration_migratable(
+        config, oauth_status
+    )
+
     base = config.resolve_preset()
     max_tokens = _parse_positive_int(
         query_first_alias(query, "max_tokens", "maxTokens"),
@@ -1180,6 +1232,9 @@ def create_model_configuration(
         temperature=temperature if temperature is not None else base.temperature,
         reasoning_effort=reasoning_effort,
     )
+    if activate_as_primary:
+        config.agents.defaults.model_preset = name
+        config.agents.defaults.fallback_models = []
     return name
 
 
@@ -1258,7 +1313,12 @@ def update_model_configuration(
     return changed
 
 
-def update_model_call_order(config: Config, query: QueryParams) -> bool:
+def update_model_call_order(
+    config: Config,
+    query: QueryParams,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> bool:
     raw_order = query_first_alias(query, "order", "presetNames")
     if raw_order is None:
         raise WebUISettingsError("model call order is required")
@@ -1277,15 +1337,16 @@ def update_model_call_order(config: Config, query: QueryParams) -> bool:
         raise WebUISettingsError("model call order must contain at least one preset")
 
     normalized_order = [cast(str, name).strip() for name in cast(list[object], order)]
+    unknown = [name for name in normalized_order if name not in config.model_presets]
+    if unknown:
+        raise WebUISettingsError(f"unknown model preset: {unknown[0]}")
+
     _, editable = _model_call_order_state(config)
-    if not editable:
+    if not editable and _legacy_model_configuration_migratable(config, oauth_status):
         raise WebUISettingsError(
             "convert the existing model configuration to presets first",
             status=409,
         )
-    unknown = [name for name in normalized_order if name not in config.model_presets]
-    if unknown:
-        raise WebUISettingsError(f"unknown model preset: {unknown[0]}")
 
     defaults = config.agents.defaults
     fallback_models: list[FallbackCandidate] = list(normalized_order[1:])
@@ -1299,8 +1360,18 @@ def update_model_call_order(config: Config, query: QueryParams) -> bool:
     return changed
 
 
-def migrate_model_configurations(config: Config) -> bool:
+def migrate_model_configurations(
+    config: Config,
+    *,
+    oauth_status: OAuthStatusReader,
+) -> bool:
     """Materialize legacy primary/inline model settings as named presets."""
+    _, editable = _model_call_order_state(config)
+    if editable:
+        return False
+    if not _legacy_model_configuration_migratable(config, oauth_status):
+        raise WebUISettingsError("there is no legacy model configuration to convert", status=409)
+
     defaults = config.agents.defaults
     primary = config.resolve_preset()
     created: list[str] = []
@@ -1359,14 +1430,12 @@ def delete_model_configuration(config: Config, query: QueryParams) -> None:
     if name not in config.model_presets:
         raise WebUISettingsError("unknown model configuration")
     defaults = config.agents.defaults
-    referenced = defaults.model_preset == name or any(
-        fallback == name for fallback in defaults.fallback_models
-    )
-    if referenced:
+    if defaults.model_preset == name:
         raise WebUISettingsError(
-            "remove the model preset from the call order first",
+            "the primary model preset cannot be deleted",
             status=409,
         )
+    defaults.fallback_models = [fallback for fallback in defaults.fallback_models if fallback != name]
     del config.model_presets[name]
 
 
@@ -1522,20 +1591,32 @@ def login_oauth_provider(
 
     if spec.name == "github_copilot":
         try:
-            from nanobot.providers.github_copilot_provider import (
-                get_github_copilot_login_status,
-                login_github_copilot,
-            )
+            from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
-        token = get_github_copilot_login_status()
-        if not token:
-            token = login_github_copilot(print_fn=lambda _message: None)
-        if not (token and token.access):
-            raise WebUISettingsError("OAuth login failed", status=401)
-        invalidate_oauth_model_catalog(spec.name)
-        return settings_payload(config_path=config_path)
+        # An existing token can be revoked. Expose the device prompt immediately
+        # instead of waiting for approval inside a blocking CLI login request.
+        oauth_flows.clear(spec.name)
+        copilot_flow = GitHubCopilotOAuthFlow()
+        flow_id = secrets.token_urlsafe(24)
+        # Own the flow before network I/O, so logout/replacement also cancels a
+        # login that is still waiting for GitHub to return its device prompt.
+        oauth_flows.register(spec.name, flow_id, copilot_flow)
+        try:
+            copilot_flow.start()
+        except Exception:
+            oauth_flows.remove(spec.name, flow_id, copilot_flow)
+            raise WebUISettingsError("GitHub sign-in failed. Start again.", status=502) from None
+        return {
+            "status": "authorization_required",
+            "provider": spec.name,
+            "flow_id": flow_id,
+            "authorization_url": copilot_flow.authorization_url,
+            "user_code": copilot_flow.user_code,
+            "expires_in": copilot_flow.remaining_seconds,
+            "completion_input": "device_code",
+        }
 
     if spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import start_xai_oauth_login
@@ -1579,7 +1660,7 @@ def complete_oauth_provider(
     provider_name = (query_first(query, "provider") or "").strip()
     flow_id = (query_first(query, "flow_id") or "").strip()
     spec = find_by_name(provider_name)
-    if spec is None or spec.name not in {"openai_codex", "xai_grok"}:
+    if spec is None or spec.name not in {"openai_codex", "xai_grok", "github_copilot"}:
         raise WebUISettingsError("OAuth completion is not supported for this provider")
     if not flow_id:
         raise WebUISettingsError("flow_id is required")
@@ -1587,6 +1668,11 @@ def complete_oauth_provider(
     flow = oauth_flows.get(spec.name, flow_id)
     if flow is None:
         raise WebUISettingsError(f"{spec.label} sign-in expired. Start again.", status=410)
+
+    cancel = query_first(query, "cancel")
+    if cancel is not None and parse_bool(cancel, "cancel"):
+        oauth_flows.remove(spec.name, flow_id, flow)
+        return {"status": "cancelled", "provider": spec.name, "flow_id": flow_id}
 
     try:
         if spec.name == "openai_codex":
@@ -1599,6 +1685,12 @@ def complete_oauth_provider(
                 token = complete_openai_codex_oauth_login(flow, authorization_response)
             except OpenAICodexOAuthInputError as exc:
                 raise WebUISettingsError(str(exc), status=400) from exc
+        elif spec.name == "github_copilot":
+            from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
+
+            if not isinstance(flow, GitHubCopilotOAuthFlow):
+                raise WebUISettingsError("Invalid GitHub sign-in session. Start again.")
+            token = flow.complete()
         else:
             from nanobot.providers.xai_oauth import complete_xai_oauth_login
 
@@ -1653,6 +1745,7 @@ def logout_oauth_provider(
             from nanobot.providers.github_copilot_provider import get_storage
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
+        oauth_flows.clear(spec.name)
         token_path = get_storage().get_token_path()
     elif spec.name == "xai_grok":
         from nanobot.providers.xai_oauth import logout_xai_oauth
@@ -1787,6 +1880,6 @@ class ModelSettingsHandler:
         except WebUISettingsError as exc:
             return SettingsRouteResult.failure(exc.status, exc.message)
 
-        if payload.get("status") in {"authorization_required", "pending"}:
+        if payload.get("status") in {"authorization_required", "pending", "cancelled"}:
             return SettingsRouteResult.success(payload)
         return SettingsRouteResult.success(payload, decorate_restart=True)

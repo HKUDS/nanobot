@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import shutil
 import stat
 import time
 import uuid
+from collections.abc import Iterable
 from contextlib import suppress
 from datetime import datetime
 from functools import lru_cache
@@ -191,6 +193,9 @@ def strip_think(text: str) -> str:
     tokens mid-text would silently rewrite any message where a user or the
     assistant discusses the tokens themselves.
     """
+    # Every supported control tag contains '<'; ordinary text only needs trimming.
+    if "<" not in text:
+        return text.strip()
     # Well-formed blocks first.
     text = re.sub(rf"<(?P<tag>{_THINKING_TAG})>[\s\S]*?</(?P=tag)>", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>[\s\S]*$", "", text)
@@ -224,6 +229,8 @@ def strip_reasoning_tags(text: object) -> str:
     """Remove wrapper tags from text that is already known to be reasoning."""
     if not isinstance(text, str):
         return ""
+    if "<" not in text:
+        return text.strip()
     text = re.sub(rf"^\s*<{_THINKING_TAG}/>\s*", "", text)
     text = re.sub(rf"\s*<{_THINKING_TAG}/>\s*$", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>\s*", "", text)
@@ -239,6 +246,8 @@ def extract_think(text: str) -> tuple[str | None, str]:
     extracted; unclosed streaming prefixes are stripped from the cleaned
     text but not surfaced — :func:`strip_think` handles that case.
     """
+    if "<" not in text:
+        return None, text.strip()
     parts: list[str] = []
     for m in re.finditer(rf"<(?P<tag>{_THINKING_TAG})>([\s\S]*?)</(?P=tag)>", text):
         parts.append(m.group(2).strip())
@@ -357,7 +366,6 @@ def timestamp() -> str:
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
-_TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
@@ -503,20 +511,24 @@ def stringify_text_blocks(content: list[object]) -> str | None:
 
 
 def _render_tool_result_reference(
-    filepath: Path,
+    reference_path: str,
     *,
     original_size: int,
     preview: str,
     truncated_preview: bool,
+    max_chars: int | None = None,
 ) -> str:
     result = (
         f"[tool output persisted]\n"
-        f"Full output saved to: {filepath}\n"
+        f"Full output saved to workspace path: {reference_path}\n"
         f"Original size: {original_size} chars\n"
         f"Preview:\n{preview}"
     )
     if truncated_preview:
-        result += "\n...\n(Read the saved file if you need the full output.)"
+        result += "\n...\nPreview is also truncated."
+    result += "\nResult truncated. Read the saved file if you need the complete output."
+    if max_chars and len(result) > max_chars:
+        result = f"[truncated: {reference_path}]"
     return result
 
 
@@ -540,6 +552,51 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
     siblings.sort(key=_bucket_mtime, reverse=True)
     for path in siblings[keep:]:
         shutil.rmtree(path, ignore_errors=True)
+
+
+def atomic_write_lines(path: Path, lines: Iterable[str], *, fsync: bool = True) -> None:
+    """Atomically replace *path* with already-serialized record lines.
+
+    Each item is one record. A trailing newline is added when the item does
+    not already end with one. The bytes are written to a uniquely named temp
+    file in the same directory, then published with ``os.replace``.
+
+    ``fsync=True`` (the default) flushes and fsyncs the file before the
+    replace, then fsyncs the parent directory. ``fsync=False`` skips both,
+    which session saves use when the caller does not ask for durability.
+    Directory fsync suppresses ``PermissionError`` (Windows cannot open a
+    directory this way) and ``EINVAL`` (filesystems that reject directory
+    fsync). Any other directory fsync error propagates. The temp file is
+    removed on every ``BaseException``.
+    """
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "x", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(line if line.endswith("\n") else f"{line}\n")
+            if fsync:
+                handle.flush()
+                os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        if fsync:
+            _fsync_directory_after_replace(path.parent)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def _fsync_directory_after_replace(directory: Path) -> None:
+    """Fsync *directory* after a replace, ignoring unsupported platforms."""
+    with suppress(PermissionError):
+        fd = os.open(str(directory), os.O_RDONLY)
+        try:
+            try:
+                os.fsync(fd)
+            except OSError as exc:
+                if exc.errno != errno.EINVAL:
+                    raise
+        finally:
+            os.close(fd)
 
 
 def _write_text_atomic(path: Path, content: str) -> None:
@@ -570,28 +627,16 @@ def maybe_persist_tool_result(
     workspace: Path | None,
     session_key: str | None,
     tool_call_id: str,
-    content: Any,
+    content: str,
     *,
     max_chars: int,
-) -> Any:
-    """Persist oversized tool output and replace it with a stable reference string."""
-    if workspace is None or max_chars <= 0:
-        return content
+) -> str:
+    """Offload oversized text.
 
-    text_payload: str | None = None
-    suffix = "txt"
-    if isinstance(content, str):
-        text_payload = content
-    elif isinstance(content, list):
-        text_payload = stringify_text_blocks(cast(list[object], content))
-        if text_payload is None:
-            return cast(Any, content)
-        suffix = "json"
-    else:
+    Complete references may exceed the per-block ``max_chars`` budget.
+    """
+    if workspace is None or max_chars <= 0 or len(content) <= max_chars:
         return content
-
-    if len(text_payload) <= max_chars:
-        return cast(Any, content)
 
     root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
     bucket = ensure_dir(root / safe_filename(session_key or "default"))
@@ -599,19 +644,28 @@ def maybe_persist_tool_result(
         _cleanup_tool_result_buckets(root, bucket)
     except Exception:
         logger.exception("Failed to clean stale tool result buckets in {}", root)
-    path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
+    path = bucket / f"{safe_filename(tool_call_id)}.txt"
     if not path.exists():
-        if suffix == "json" and isinstance(content, list):
-            _write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
-        else:
-            _write_text_atomic(path, text_payload)
+        _write_text_atomic(path, content)
 
-    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    reference_path = str(path.resolve())
+    overhead = len(_render_tool_result_reference(
+        reference_path, original_size=len(content), preview="", truncated_preview=True,
+    ))
+    available = max(0, max_chars - overhead)
+    separator = "\n...\n"
+    tail_chars = min(1200, max(0, (available - len(separator)) // 4))
+    if tail_chars:
+        head_chars = available - tail_chars - len(separator)
+        preview = content[:head_chars] + separator + content[-tail_chars:]
+    else:
+        preview = content[:available]
     return _render_tool_result_reference(
-        path,
-        original_size=len(text_payload),
+        reference_path,
+        original_size=len(content),
         preview=preview,
-        truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
+        truncated_preview=True,
+        max_chars=max_chars,
     )
 
 
@@ -633,21 +687,69 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
         return [content]
     if len(content) <= max_len:
         return [content]
+    original_content = content
     chunks: list[str] = []
     while content:
         if len(content) <= max_len:
-            chunks.append(content)
+            if content.strip():
+                chunks.append(content)
             break
         cut = content[:max_len]
-        # Try to break at newline first, then space, then hard break
-        pos = cut.rfind("\n")
-        if pos <= 0:
-            pos = cut.rfind(" ")
-        if pos <= 0:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
+        # Consume only the newline itself so indentation starts the next chunk.
+        newline_pos = cut.rfind("\n")
+        if newline_pos >= 0:
+            # Exclude both bytes of a CRLF boundary from the emitted chunk.
+            line_end = newline_pos
+            if line_end > 0 and content[line_end - 1] == "\r":
+                line_end -= 1
+            chunk = content[:line_end]
+            if chunk.strip():
+                chunks.append(chunk)
+            content = content[newline_pos + 1 :]
+            continue
+
+        # Keep the existing word-boundary behavior, but avoid emitting a
+        # whitespace-only chunk when an indented line exceeds max_len.
+        space_pos = cut.rfind(" ")
+        if space_pos > 0 and cut[:space_pos].strip():
+            chunks.append(content[:space_pos])
+            content = content[space_pos:].lstrip(" \t")
+            # A space boundary may sit immediately before a line break. Drop
+            # that delimiter too, without stripping the next line's indent.
+            if content.startswith("\r\n"):
+                content = content[2:]
+            elif content.startswith("\n"):
+                content = content[1:]
+            continue
+
+        # Do not split between the two code points of a CRLF delimiter.
+        if cut.endswith("\r") and content[max_len : max_len + 1] == "\n":
+            chunk = cut[:-1]
+            if chunk.strip():
+                chunks.append(chunk)
+            content = content[max_len + 1 :]
+            continue
+
+        chunk = content[:max_len]
+        if chunk.strip():
+            chunks.append(chunk)
+        content = content[max_len:]
+        if not chunk.strip():
+            # Keep any remaining indentation so the final non-blank chunk can
+            # retain as much of it as the channel limit permits.
+            continue
+        # A delimiter can sit immediately after the hard-break boundary. Keep
+        # ordinary space trimming, but consume only the newline so indentation
+        # on the following line is preserved.
+        content = content.lstrip(" \t")
+        if content.startswith("\r\n"):
+            content = content[2:]
+        elif content.startswith("\n"):
+            content = content[1:]
+    # Preserve the historical non-empty-input contract for callers that take
+    # the first chunk directly. This fallback is only reachable for content
+    # made entirely of whitespace.
+    return chunks or [original_content[:max_len]]
 
 
 def build_assistant_message(

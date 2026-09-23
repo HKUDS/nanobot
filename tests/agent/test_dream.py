@@ -62,28 +62,14 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert "skill-creator" in prompt
 
-    def test_prompt_embeds_current_memory_file_contents(self, store):
-        """Dream must see the real current file contents (Tier 4) so it edits the
-        files, not a stale mental model."""
+    def test_prompt_does_not_duplicate_current_memory_file_contents(self, store):
         store.append_history("hello")
         result = store.build_dream_prompt()
         assert result is not None
         prompt, _ = result
-        assert "## Current Memory Files" in prompt
-        assert "### SOUL.md" in prompt
-        assert "### USER.md" in prompt
-        assert "### memory/MEMORY.md" in prompt
-        # Real current contents are embedded verbatim.
-        assert "Project X active" in prompt
-        assert "Helpful" in prompt
-
-    def test_prompt_renders_missing_files_as_empty(self, tmp_path):
-        store = MemoryStore(tmp_path)  # no durable files written
-        store.append_history("hello")
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, _ = result
-        assert "(empty)" in prompt
+        assert "## Current Memory Files" not in prompt
+        assert "Project X active" not in prompt
+        assert "Helpful" not in prompt
 
     def test_workspace_dream_prompt_overrides_default(self, store):
         store.dream_prompt_file.parent.mkdir(parents=True)
@@ -98,7 +84,6 @@ class TestBuildDreamPrompt:
         assert result is not None
         prompt, _ = result
         assert prompt.startswith("Custom Dream prompt.")
-        assert "memory consolidation engine" not in prompt
         assert "## Conversation History" in prompt
         assert "keep this fact" in prompt
 
@@ -125,7 +110,7 @@ class TestBuildDreamPrompt:
 
         assert result is not None
         prompt, _ = result
-        assert "memory consolidation engine" in prompt
+        assert prompt.startswith(store.default_dream_prompt() + "\n\n## Conversation History\n")
 
     def test_truncates_long_entries_at_1000_chars(self, store):
         long_content = "x" * 2000
@@ -260,7 +245,7 @@ class TestDreamTools:
         )
 
         assert "Patch applied" in memory_result
-        assert "Successfully edited" in soul_result
+        assert "Patch applied" in soul_result
         assert "Successfully wrote" in user_result
         assert "Project Y active" in store.memory_file.read_text(encoding="utf-8")
         assert "Precise" in store.soul_file.read_text(encoding="utf-8")
@@ -411,22 +396,21 @@ class TestEphemeralDirect:
         provider.get_default_model.return_value = "test-model"
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
-        provider.chat_with_retry = AsyncMock(
+        provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop", usage=None)
         )
 
         with (
             patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
+            patch("nanobot.agent.loop.Consolidator"),
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
-                context_window_tokens=8000,
+                context_window_tokens=32_000,
             )
 
         return loop, store
@@ -465,7 +449,7 @@ class TestEphemeralDirect:
 
         assert response is not None
         assert response.content == "done"
-        loop.provider.chat_with_retry.assert_awaited()
+        loop.provider.chat_stream_with_retry.assert_awaited()
 
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
         """Verify that ephemeral=True is forwarded to TurnContext."""
@@ -507,23 +491,9 @@ class TestEphemeralDirect:
 
         assert captured.get("ephemeral") is False
 
-    async def test_ephemeral_skips_consolidator(self, tmp_path, _make_loop):
-        """When ephemeral=True, consolidator.maybe_consolidate_by_tokens is not called."""
-        from unittest.mock import patch
-
-        loop, store = _make_loop
-
-        with patch.object(
-            loop.consolidator, "maybe_consolidate_by_tokens",
-        ) as mock_consolidate:
-            await loop.process_direct(
-                "test", session_key="dream:consolidate-test", ephemeral=True,
-            )
-            mock_consolidate.assert_not_called()
-
     async def test_ephemeral_response_reports_stop_reason(self, tmp_path, _make_loop):
         loop, store = _make_loop
-        loop.provider.chat_with_retry.return_value = LLMResponse(
+        loop.provider.chat_stream_with_retry.return_value = LLMResponse(
             content="provider error",
             finish_reason="error",
         )
@@ -543,7 +513,7 @@ class TestEphemeralDirect:
         from nanobot.providers.base import ToolCallRequest
 
         loop, store = _make_loop
-        loop.provider.chat_with_retry = AsyncMock(side_effect=[
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
             LLMResponse(
                 content="trying an edit",
                 finish_reason="tool_calls",
@@ -571,7 +541,7 @@ class TestEphemeralDirect:
         assert resp is not None
         assert resp.metadata["_stop_reason"] == "completed"
         assert MemoryStore.dream_run_completed(resp) is True
-        second_request = loop.provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+        second_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
         tool_result = next(message for message in second_request if message["role"] == "tool")
         assert "Error" in tool_result["content"]
 
@@ -597,16 +567,16 @@ class TestEphemeralDirect:
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
 
-        async def chat_with_retry(**kwargs):
+        async def chat_stream_with_retry(**kwargs):
             captured["messages"] = kwargs["messages"]
             return LLMResponse(content="done", finish_reason="stop")
 
-        provider.chat_with_retry = chat_with_retry
+        provider.chat_stream_with_retry = chat_stream_with_retry
         loop = AgentLoop(
             bus=MessageBus(),
             provider=provider,
             workspace=tmp_path,
-            context_window_tokens=8000,
+            context_window_tokens=32_000,
         )
 
         await loop.process_direct(
@@ -624,6 +594,63 @@ class TestEphemeralDirect:
         assert "entry-20" in request_text
         assert "entry-21" not in request_text
         assert "entry-60" not in request_text
+
+    async def test_dream_turn_injects_memory_files_once_and_persists_session(self, tmp_path):
+        """Dream gets durable files from system context without losing its session record."""
+        from unittest.mock import MagicMock
+
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.queue import MessageBus
+
+        markers = {
+            "SOUL.md": "DREAM_SOUL_MARKER",
+            "USER.md": "DREAM_USER_MARKER",
+            "memory/MEMORY.md": "DREAM_MEMORY_MARKER",
+        }
+        store = MemoryStore(tmp_path)
+        store.write_soul(markers["SOUL.md"])
+        store.write_user(markers["USER.md"])
+        store.write_memory(markers["memory/MEMORY.md"])
+        store.append_history("history-marker")
+        (tmp_path / "AGENTS.md").write_text("DREAM_AGENTS_MARKER", encoding="utf-8")
+
+        result = store.build_dream_prompt()
+        assert result is not None
+        prompt, _ = result
+
+        captured: dict[str, list[dict]] = {}
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.supports_tools = True
+        provider.generation = MagicMock(max_tokens=4096)
+
+        async def chat_stream_with_retry(**kwargs):
+            captured["messages"] = kwargs["messages"]
+            return LLMResponse(content="done", finish_reason="stop")
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        loop = AgentLoop(
+            bus=MessageBus(),
+            provider=provider,
+            workspace=tmp_path,
+            context_window_tokens=32_000,
+        )
+        session_key = "dream:single-memory-copy"
+
+        await loop.process_direct(
+            prompt,
+            session_key=session_key,
+            ephemeral=True,
+            tools=store.build_dream_tools(),
+        )
+
+        messages = captured["messages"]
+        system_prompt = str(messages[0]["content"])
+        request_text = "\n".join(str(message.get("content", "")) for message in messages)
+        for marker in [*markers.values(), "DREAM_AGENTS_MARKER"]:
+            assert marker in system_prompt
+            assert request_text.count(marker) == 1
+        assert loop.sessions._get_session_path(session_key).exists()
 
 
 class TestEphemeralHooks:
@@ -644,7 +671,7 @@ class TestEphemeralHooks:
         provider.get_default_model.return_value = "test-model"
         provider.supports_tools = True
         provider.generation = MagicMock(max_tokens=4096)
-        provider.chat_with_retry = AsyncMock(
+        provider.chat_stream_with_retry = AsyncMock(
             return_value=LLMResponse(
                 content="done", finish_reason="stop", tool_calls=[], usage=None,
             )
@@ -658,15 +685,14 @@ class TestEphemeralHooks:
         with (
             patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator") as mock_consolidator_cls,
+            patch("nanobot.agent.loop.Consolidator"),
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
-            mock_consolidator_cls.return_value.maybe_consolidate_by_tokens = AsyncMock()
             loop = AgentLoop(
                 bus=bus,
                 provider=provider,
                 workspace=tmp_path,
-                context_window_tokens=8000,
+                context_window_tokens=32_000,
                 hooks=[spy],
             )
 

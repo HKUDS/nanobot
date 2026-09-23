@@ -49,7 +49,8 @@ Merge this snippet into `~/.nanobot/config.json`:
       "token": "YOUR_BOT_TOKEN",
       "allowChannels": [],
       "groupPolicy": "mention",
-      "streaming": true
+      "streaming": true,
+      "replyToMessage": false
     }
   }
 }
@@ -59,6 +60,9 @@ Omitting `allowFrom` enables pairing-only mode. A new user should DM the bot
 first, get a pairing code, and be approved before using the bot in servers.
 
 Invite the bot with permissions to read history and send messages.
+
+Set `replyToMessage` to `true` to make responses use Discord's native reply UI.
+It defaults to `false`, preserving the existing behavior.
 
 ## Run nanobot gateway
 

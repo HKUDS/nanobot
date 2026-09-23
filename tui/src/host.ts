@@ -8,6 +8,19 @@ type CommandRunner = (command: readonly string[]) => Promise<void>
 
 const METADATA_SOURCE = "nanobot:tui:metadata"
 
+export function configureOpenTuiEnvironment(
+  environment: Environment = process.env,
+  platform = process.platform,
+): void {
+  if (platform !== "win32") return
+
+  // OpenTUI probes OSC 66 support on the main screen before its renderer is
+  // active. Some Windows terminal hosts do not restore the cursor around that
+  // probe, so shutdown resumes in terminal history instead of below the TUI.
+  // Keep an explicit user choice, but use the safe default on Windows.
+  environment.OPENTUI_FORCE_EXPLICIT_WIDTH ??= "false"
+}
+
 class StandaloneHost implements TuiHost {
   reportTitle(): void {}
   release(): void {}
