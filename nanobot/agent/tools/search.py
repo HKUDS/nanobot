@@ -14,6 +14,7 @@ import time
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, TypeVar
 
@@ -70,16 +71,16 @@ class _FindFilesEntry:
     is_dir: bool
 
 
-class _FindFilesCancelledError(Exception):
+class _SearchCancelledError(Exception):
     """Stop a worker scan after its owning async task was cancelled."""
 
 
-class _FindFilesBudgetExceededError(Exception):
+class _SearchBudgetExceededError(Exception):
     """Stop an unbounded filesystem scan at its configured budget."""
 
 
 @dataclass(slots=True)
-class _FindFilesBudget:
+class _SearchBudget:
     cancelled: threading.Event
     deadline: float
     max_paths: int
@@ -87,43 +88,65 @@ class _FindFilesBudget:
 
     def checkpoint(self) -> None:
         if self.cancelled.is_set():
-            raise _FindFilesCancelledError
+            raise _SearchCancelledError
         if time.monotonic() >= self.deadline:
-            raise _FindFilesBudgetExceededError("time")
+            raise _SearchBudgetExceededError("time")
 
     def visit_path(self) -> None:
         self.checkpoint()
         self.scanned_paths += 1
         if self.scanned_paths > self.max_paths:
-            raise _FindFilesBudgetExceededError("paths")
+            raise _SearchBudgetExceededError("paths")
 
 
 def _normalize_pattern(pattern: str) -> str:
     return pattern.strip().replace("\\", "/")
 
 
+@lru_cache(maxsize=128)
+def _glob_patterns(pattern: str) -> tuple[str, ...]:
+    """Expand bounded brace alternatives before matching path segments."""
+    pending = [_normalize_pattern(pattern)]
+    expanded: list[str] = []
+    while pending:
+        current = pending.pop()
+        braces = re.search(r"\{([^{}]*)\}", current)
+        if braces is None:
+            if "{" in current or "}" in current:
+                raise ValueError("Invalid glob: unbalanced braces")
+            expanded.append(current)
+            continue
+        options = braces[1].split(",")
+        if len(options) < 2:
+            raise ValueError("Invalid glob: braces require comma-separated alternatives")
+        if len(expanded) + len(pending) + len(options) > 64:
+            raise ValueError("Invalid glob: at most 64 brace alternatives are supported")
+        pending.extend(current[:braces.start()] + part + current[braces.end():] for part in options)
+    return tuple(expanded)
+
+
 def _match_glob(rel_path: str, name: str, pattern: str) -> bool:
-    normalized = _normalize_pattern(pattern)
+    return any(_match_path_glob(rel_path, name, item) for item in _glob_patterns(pattern))
+
+
+def _match_path_glob(rel_path: str, name: str, normalized: str) -> bool:
     if not normalized:
         return False
-    if "/" in normalized or normalized.startswith("**"):
+    if "/" in normalized:
         pattern_parts = PurePosixPath(normalized).parts
-        if "**" in pattern_parts:
-            path_parts = PurePosixPath(rel_path).parts
-            # Keep relative patterns suffix-matched, as with PurePath.match.
-            matched = [True] * (len(path_parts) + 1)
-            for part in pattern_parts:
-                if part == "**":
-                    # A globstar consumes zero or more complete path segments.
-                    for index in range(1, len(matched)):
-                        matched[index] = matched[index] or matched[index - 1]
-                else:
-                    matched = [False] + [
-                        matched[index] and fnmatch.fnmatchcase(path_part, part)
-                        for index, path_part in enumerate(path_parts)
-                    ]
-            return matched[-1]
-        return PurePosixPath(rel_path).match(normalized)
+        path_parts = PurePosixPath(rel_path).parts
+        matched = [True] + [False] * len(path_parts)
+        for part in pattern_parts:
+            if part == "**":
+                # A globstar consumes zero or more complete path segments.
+                for index in range(1, len(matched)):
+                    matched[index] = matched[index] or matched[index - 1]
+            else:
+                matched = [False] + [
+                    matched[index] and fnmatch.fnmatchcase(path_part, part)
+                    for index, path_part in enumerate(path_parts)
+                ]
+        return matched[-1]
     return fnmatch.fnmatch(name, normalized)
 
 
@@ -152,6 +175,20 @@ def _paginate(items: list[T], limit: int | None, offset: int) -> tuple[list[T], 
     sliced = items[offset : offset + limit]
     truncated = len(items) > offset + limit
     return sliced, truncated
+
+
+def _text_page(
+    items: list[str], limit: int | None, offset: int, max_chars: int,
+) -> tuple[list[str], bool]:
+    page, truncated = _paginate(items, limit, offset)
+    size = 0
+    for index, item in enumerate(page):
+        size += len(item) + (1 if index else 0)
+        if size > max_chars:
+            if index == 0:
+                raise ValueError("Search entry exceeds output budget; narrow the search path")
+            return page[:index], True
+    return page, truncated
 
 
 def _pagination_note(limit: int | None, offset: int, truncated: bool) -> str | None:
@@ -183,7 +220,14 @@ def _matches_query(rel_path: str, query: str | None) -> bool:
 
 
 class _SearchTool(_FsTool):
-    _IGNORE_DIRS = set(ListDirTool._IGNORE_DIRS)
+    _IGNORE_DIRS = ListDirTool._IGNORE_DIRS | {".worktrees", ".worktree", ".nanobot"}
+    _MAX_SCAN_PATHS = 500_000
+    _MAX_SCAN_SECONDS = 30.0
+    _MAX_RESULT_CHARS = 12_000
+
+    @classmethod
+    def _ignore_directory(cls, name: str) -> bool:
+        return name in cls._IGNORE_DIRS or name.startswith(".verify-")
 
     def _display_path(self, target: Path, root: Path) -> str:
         workspace = self._display_workspace()
@@ -192,23 +236,26 @@ class _SearchTool(_FsTool):
                 return target.relative_to(workspace).as_posix()
         return target.relative_to(root).as_posix()
 
-    def _iter_files(self, root: Path) -> Iterable[Path]:
+    def _iter_files(self, root: Path, budget: _SearchBudget) -> Iterable[Path]:
         if root.is_file():
+            budget.visit_path()
             yield root
             return
 
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(d for d in dirnames if d not in self._IGNORE_DIRS)
+            budget.checkpoint()
+            for _ in dirnames:
+                budget.visit_path()
+            dirnames[:] = sorted(d for d in dirnames if not self._ignore_directory(d))
             current = Path(dirpath)
             for filename in sorted(filenames):
+                budget.visit_path()
                 yield current / filename
 
 
 class FindFilesTool(_SearchTool):
     """Find files by path fragment, glob, or type."""
     _scopes = {"core", "subagent"}
-    _MAX_SCAN_PATHS = 500_000
-    _MAX_SCAN_SECONDS = 30.0
 
     @property
     def name(self) -> str:
@@ -218,7 +265,7 @@ class FindFilesTool(_SearchTool):
     def description(self) -> str:
         return (
             "Find workspace paths by name, glob, or file type. "
-            "Returns relative paths and skips dependency/build directories."
+            "Returns relative paths; skips dependencies, builds, worktrees and tool artifacts."
         )
 
     @property
@@ -232,7 +279,7 @@ class FindFilesTool(_SearchTool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Search root (default '.')",
+                    "description": "Search root (default '.'); set path explicitly to search skipped worktrees, builds or tool artifacts",
                 },
                 "query": {
                     "type": "string",
@@ -240,7 +287,7 @@ class FindFilesTool(_SearchTool):
                 },
                 "glob": {
                     "type": "string",
-                    "description": "Path filter, e.g. '*.py' or 'tests/**/test_*.py'",
+                    "description": "Root-relative path glob, e.g. 'src/**/*.{ts,tsx}'; bare '*.py' matches any depth",
                 },
                 "type": {
                     "type": "string",
@@ -286,7 +333,7 @@ class FindFilesTool(_SearchTool):
         root: Path,
         frontier: list[tuple[str, int, _FindFilesEntry]],
         sequence: int,
-        budget: _FindFilesBudget,
+        budget: _SearchBudget,
     ) -> int:
         budget.checkpoint()
         try:
@@ -301,7 +348,7 @@ class FindFilesTool(_SearchTool):
                             continue
                     except OSError:
                         continue
-                    if is_dir and raw_entry.name in self._IGNORE_DIRS:
+                    if is_dir and self._ignore_directory(raw_entry.name):
                         continue
 
                     entry = self._entry(Path(raw_entry.path), root, is_dir=is_dir)
@@ -320,7 +367,7 @@ class FindFilesTool(_SearchTool):
         root: Path,
         *,
         include_dirs: bool,
-        budget: _FindFilesBudget,
+        budget: _SearchBudget,
     ) -> Iterable[_FindFilesEntry]:
         budget.checkpoint()
         if root.is_file():
@@ -415,12 +462,15 @@ class FindFilesTool(_SearchTool):
     ) -> str:
         started_at = time.monotonic()
         if cancelled.is_set():
-            raise _FindFilesCancelledError
+            raise _SearchCancelledError
         target = self._resolve(path or ".")
         if not target.exists():
             return ToolResult.error(f"Error: Path not found: {path}")
         if not (target.is_dir() or target.is_file()):
             return ToolResult.error(f"Error: Unsupported path: {path}")
+
+        if glob:
+            _glob_patterns(glob)
 
         if sort not in {"path", "modified"}:
             return ToolResult.error("Error: sort must be 'path' or 'modified'")
@@ -430,7 +480,7 @@ class FindFilesTool(_SearchTool):
             if head_limit is None
             else None if head_limit == 0 else head_limit
         )
-        budget = _FindFilesBudget(
+        budget = _SearchBudget(
             cancelled=cancelled,
             deadline=started_at + self._MAX_SCAN_SECONDS,
             max_paths=self._MAX_SCAN_PATHS,
@@ -478,7 +528,7 @@ class FindFilesTool(_SearchTool):
                     if selection_size is not None and len(matches) >= selection_size:
                         break
             budget.checkpoint()
-        except _FindFilesBudgetExceededError as exc:
+        except _SearchBudgetExceededError as exc:
             if str(exc) == "paths":
                 detail = f"{self._MAX_SCAN_PATHS} paths"
             else:
@@ -489,7 +539,7 @@ class FindFilesTool(_SearchTool):
             )
 
         paths = [item[0] for item in matches]
-        paged, truncated = _paginate(paths, limit, offset)
+        paged, truncated = _text_page(paths, limit, offset, self._MAX_RESULT_CHARS)
         if not paged:
             return "No files found"
 
@@ -497,6 +547,8 @@ class FindFilesTool(_SearchTool):
         note = _pagination_note(limit, offset, truncated)
         if note:
             result += "\n\n" + note
+        if truncated:
+            result += f"\n(use offset={offset + len(paged)} to continue)"
         return result
 
 
@@ -504,7 +556,6 @@ class GrepTool(_SearchTool):
     """Search text and document contents using a regex-like pattern."""
     _scopes = {"core", "subagent"}
 
-    _MAX_RESULT_CHARS = 128_000
     _MAX_RENDERED_LINE_CHARS = 2_000
     _MAX_FILE_BYTES = 2_000_000
     _MAX_EXPLICIT_FILE_BYTES = 100_000_000
@@ -536,11 +587,11 @@ class GrepTool(_SearchTool):
                 },
                 "path": {
                     "type": "string",
-                    "description": "Search root (default '.')",
+                    "description": "Search root (default '.'); set path explicitly to search skipped worktrees, builds or tool artifacts",
                 },
                 "glob": {
                     "type": "string",
-                    "description": "Path filter, e.g. '*.py' or 'tests/**/test_*.py'",
+                    "description": "Root-relative path glob, e.g. 'src/**/*.{ts,tsx}'; bare '*.py' matches any depth",
                 },
                 "type": {
                     "type": "string",
@@ -663,6 +714,7 @@ class GrepTool(_SearchTool):
         lines: list[LocatedDocumentLine],
         match_index: int,
         match_start: int = 0,
+        matches: dict[int, int] | None = None,
     ) -> str:
         match_line = lines[match_index]
         source_line = match_line.extracted_line
@@ -674,15 +726,16 @@ class GrepTool(_SearchTool):
                 match_locator += f",cell={column}{row_match.group(1)}"
         suffix = f" [{match_locator}]" if match_locator else ""
         block = [f"{display_path}:{source_line}{suffix}"]
-        for index, line in enumerate(lines):
-            is_match = index == match_index
+        matches = matches if matches is not None else {source_line: match_start}
+        for line in lines:
+            is_match = line.extracted_line in matches
             marker = ">" if is_match else " "
             coordinate = str(line.extracted_line)
             if line.locator:
                 coordinate += f" [{line.locator}]"
             rendered = GrepTool._clip_rendered_line(
                 line.text,
-                match_start if is_match else None,
+                matches.get(line.extracted_line),
             )
             block.append(f"{marker} {coordinate}| {rendered}")
         return "\n".join(block)
@@ -705,7 +758,54 @@ class GrepTool(_SearchTool):
         offset: int = 0,
         **kwargs: Any,
     ) -> str:
+        cancelled = threading.Event()
         try:
+            return await asyncio.to_thread(
+                self._execute_sync,
+                pattern=pattern, path=path, glob=glob, type=type, pages=pages,
+                case_insensitive=case_insensitive, fixed_strings=fixed_strings,
+                output_mode=output_mode, context_before=context_before, context_after=context_after,
+                max_matches=max_matches, max_results=max_results, head_limit=head_limit,
+                offset=offset, cancelled=cancelled,
+            )
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    def _execute_sync(
+        self,
+        *,
+        pattern: str,
+        path: str,
+        glob: str | None,
+        type: str | None,
+        pages: str | None,
+        case_insensitive: bool,
+        fixed_strings: bool,
+        output_mode: str,
+        context_before: int,
+        context_after: int,
+        max_matches: int | None,
+        max_results: int | None,
+        head_limit: int | None,
+        offset: int,
+        cancelled: threading.Event,
+    ) -> str:
+        budget = _SearchBudget(
+            cancelled=cancelled,
+            deadline=time.monotonic() + self._MAX_SCAN_SECONDS,
+            max_paths=self._MAX_SCAN_PATHS,
+        )
+
+        def checked_lines(lines: Iterable[LocatedDocumentLine]) -> Iterable[LocatedDocumentLine]:
+            for line in lines:
+                budget.checkpoint()
+                yield line
+
+        try:
+            budget.checkpoint()
+            if glob:
+                _glob_patterns(glob)
             target = self._resolve(path or ".")
             if not target.exists():
                 return ToolResult.error(f"Error: Path not found: {path}")
@@ -729,6 +829,7 @@ class GrepTool(_SearchTool):
                 limit = _DEFAULT_HEAD_LIMIT
             blocks: list[str] = []
             result_chars = 0
+            returned_matches = 0
             seen_content_matches = 0
             truncated = False
             size_truncated = False
@@ -737,6 +838,7 @@ class GrepTool(_SearchTool):
             document_errors: list[str] = []
             document_continuations: list[str] = []
             matching_files: list[str] = []
+            paged: list[str] = []
             counts: dict[str, int] = {}
             file_mtimes: dict[str, float] = {}
             root = target if target.is_dir() else target.parent
@@ -744,7 +846,7 @@ class GrepTool(_SearchTool):
                 self._MAX_EXPLICIT_FILE_BYTES if target.is_file() else self._MAX_FILE_BYTES
             )
 
-            for file_path in self._iter_files(target):
+            for file_path in self._iter_files(target, budget):
                 rel_path = file_path.relative_to(root).as_posix()
                 if glob and not _match_glob(rel_path, file_path.name, glob):
                     continue
@@ -798,33 +900,74 @@ class GrepTool(_SearchTool):
                     file_had_match = False
                     if output_mode == "content":
                         contexts = self._matching_contexts(
-                            source_lines,
+                            checked_lines(source_lines),
                             regex,
                             context_before,
                             context_after,
                         )
+                        last_lines: list[LocatedDocumentLine] = []
+                        last_matches: dict[int, int] = {}
                         for context_lines, match_index, match_start in contexts:
                             file_had_match = True
                             seen_content_matches += 1
                             if seen_content_matches <= offset:
                                 continue
-                            if limit is not None and len(blocks) >= limit:
+                            if limit is not None and returned_matches >= limit:
                                 truncated = True
                                 break
+                            match_line = context_lines[match_index]
+                            merge = bool(
+                                last_lines
+                                and context_lines[0].extracted_line <= last_lines[-1].extracted_line
+                            )
+                            if merge:
+                                context_lines = last_lines + [
+                                    line for line in context_lines
+                                    if line.extracted_line > last_lines[-1].extracted_line
+                                ]
+                            matches = {
+                                **(last_matches if merge else {}),
+                                match_line.extracted_line: match_start,
+                            }
+                            first_match = next(iter(matches))
+                            match_index = next(
+                                index for index, line in enumerate(context_lines)
+                                if line.extracted_line == first_match
+                            )
                             block = self._format_block(
                                 display_path,
                                 context_lines,
                                 match_index,
-                                match_start,
+                                matches[first_match],
+                                matches,
                             )
-                            extra_sep = 2 if blocks else 0
-                            if result_chars + extra_sep + len(block) > self._MAX_RESULT_CHARS:
+                            prior_chars = len(blocks[-1]) if merge else 0
+                            extra_sep = 2 if blocks and not merge else 0
+                            reduced_context = False
+                            if result_chars - prior_chars + extra_sep + len(block) > self._MAX_RESULT_CHARS:
+                                if not blocks:
+                                    # A large context must still yield a match and advance pagination.
+                                    context_lines = [match_line]
+                                    block = self._format_block(display_path, context_lines, 0, match_start)
+                                    reduced_context = True
+                                    if len(block) > self._MAX_RESULT_CHARS:
+                                        return ToolResult.error("Error: match exceeds output budget; narrow path or pattern")
+                                else:
+                                    size_truncated = True
+                                    break
+                            if merge:
+                                blocks[-1] = block
+                            else:
+                                blocks.append(block)
+                            result_chars += extra_sep + len(block) - prior_chars
+                            returned_matches += 1
+                            last_lines, last_matches = context_lines, matches
+                            if reduced_context:
+                                # Start a new page after falling back to a context-free match.
                                 size_truncated = True
                                 break
-                            blocks.append(block)
-                            result_chars += extra_sep + len(block)
                     else:
-                        for line in source_lines:
+                        for line in checked_lines(source_lines):
                             if not line.searchable or regex.search(line.text) is None:
                                 continue
                             file_had_match = True
@@ -835,6 +978,8 @@ class GrepTool(_SearchTool):
                                 matching_files.append(display_path)
                                 file_mtimes[display_path] = mtime
                             break
+                except (_SearchCancelledError, _SearchBudgetExceededError):
+                    raise
                 except Exception as e:
                     if not is_document:
                         raise
@@ -870,7 +1015,7 @@ class GrepTool(_SearchTool):
                         matching_files,
                         key=lambda name: (-file_mtimes.get(name, 0.0), name),
                     )
-                    paged, truncated = _paginate(ordered_files, limit, offset)
+                    paged, truncated = _text_page(ordered_files, limit, offset, self._MAX_RESULT_CHARS)
                     result = "\n".join(paged)
             elif output_mode == "count":
                 if not counts:
@@ -880,9 +1025,9 @@ class GrepTool(_SearchTool):
                         matching_files,
                         key=lambda name: (-file_mtimes.get(name, 0.0), name),
                     )
-                    ordered, truncated = _paginate(ordered_files, limit, offset)
-                    count_lines = [f"{name}: {counts[name]}" for name in ordered]
-                    result = "\n".join(count_lines)
+                    count_lines = [f"{name}: {counts[name]}" for name in ordered_files]
+                    paged, truncated = _text_page(count_lines, limit, offset, self._MAX_RESULT_CHARS)
+                    result = "\n".join(paged)
             else:
                 if not blocks:
                     result = f"No matches found for pattern '{pattern}' in {path}"
@@ -893,16 +1038,17 @@ class GrepTool(_SearchTool):
             if output_mode == "content" and truncated:
                 notes.append(
                     f"(pagination: limit={limit}, offset={offset}; "
-                    f"use offset={offset + len(blocks)} to continue)"
+                    f"use offset={offset + returned_matches} to continue)"
                 )
             elif output_mode == "content" and size_truncated:
                 notes.append(
                     "(output truncated due to size; "
-                    f"use offset={offset + len(blocks)} to continue)"
+                    f"use offset={offset + returned_matches} to continue)"
                 )
             elif truncated and output_mode in {"count", "files_with_matches"}:
                 notes.append(
-                    f"(pagination: limit={limit}, offset={offset})"
+                    f"(pagination: limit={limit}, offset={offset}; "
+                    f"use offset={offset + len(paged)} to continue)"
                 )
             elif output_mode in {"count", "files_with_matches"} and offset > 0:
                 notes.append(f"(pagination: offset={offset})")
@@ -922,6 +1068,9 @@ class GrepTool(_SearchTool):
             if notes:
                 result += "\n\n" + "\n".join(notes)
             return result
+        except _SearchBudgetExceededError as exc:
+            detail = f"{self._MAX_SCAN_PATHS} paths" if str(exc) == "paths" else f"{self._MAX_SCAN_SECONDS:g} seconds"
+            return ToolResult.error(f"Error: grep scan exceeded {detail}; narrow path, glob, or type and retry.")
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:

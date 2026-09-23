@@ -15,6 +15,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
+from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
@@ -66,6 +67,7 @@ async def test_find_files_filters_by_query_glob_and_type(tmp_path: Path) -> None
     ("glob", "expected"),
     [
         ("**/*.py", ["main.py", "src/api.py", "src/nested/deep/worker.py"]),
+        ("**.py", ["main.py", "src/api.py", "src/nested/deep/worker.py"]),
         ("src/**/*.py", ["src/api.py", "src/nested/deep/worker.py"]),
         ("src/**", ["src/api.py", "src/nested/deep/worker.py"]),
         ("src/*.py", ["src/api.py"]),
@@ -825,3 +827,165 @@ def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
 
     assert "alpha" not in prompt
     assert "beta" in prompt
+
+
+@pytest.mark.parametrize("tool_class", [FindFilesTool, GrepTool])
+@pytest.mark.parametrize("glob", ["webui/**/*.{ts,tsx}", "webui/*.{ts,tsx}", r"webui\*.{ts,tsx}"])
+async def test_search_braces_and_root_relative_paths(tmp_path, tool_class, glob):
+    for name in ["webui/App.tsx", "webui/client.ts", "webui/style.css", "backup/webui/Old.tsx"]:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("needle", encoding="utf-8")
+    tool = tool_class(workspace=tmp_path)
+    args = {"pattern": "needle", "output_mode": "files_with_matches"} if tool_class is GrepTool else {}
+
+    result = await tool.execute(path=".", glob=glob, **args)
+
+    assert sorted(result.splitlines()) == ["webui/App.tsx", "webui/client.ts"]
+    recursive = await tool.execute(path=".", glob="**/webui/*.{ts,tsx}", **args)
+    assert "backup/webui/Old.tsx" in recursive
+
+
+@pytest.mark.parametrize("tool_class", [FindFilesTool, GrepTool])
+@pytest.mark.parametrize("glob", ["*.{ts,tsx", "*.{ts}", "{a,b}" * 7])
+async def test_search_invalid_glob_is_an_error_even_in_empty_directory(tmp_path, tool_class, glob):
+    tool = tool_class(workspace=tmp_path)
+    args = {"pattern": "needle"} if tool_class is GrepTool else {}
+    result = await tool.execute(glob=glob, **args)
+    assert is_tool_error_result(result)
+    assert "glob" in result
+
+
+@pytest.mark.parametrize("tool_class", [FindFilesTool, GrepTool])
+async def test_search_skips_generated_directories_but_allows_explicit_roots(tmp_path, tool_class):
+    excluded = [".worktrees/other", ".worktree/other", ".nanobot/tool-results", "webui/.verify-run"]
+    for name in ["src", ".agent", *excluded]:
+        directory = tmp_path / name
+        directory.mkdir(parents=True)
+        (directory / "data.txt").write_text("needle", encoding="utf-8")
+    tool = tool_class(workspace=tmp_path)
+    args = {"pattern": "needle", "output_mode": "files_with_matches"} if tool_class is GrepTool else {}
+
+    result = await tool.execute(**args)
+    assert sorted(result.splitlines()) == [".agent/data.txt", "src/data.txt"]
+    for name in excluded:
+        assert await tool.execute(path=name, **args) == f"{name}/data.txt"
+        assert await tool.execute(path=f"{name}/data.txt", **args) == f"{name}/data.txt"
+
+
+async def test_grep_merges_context_and_pages_by_matches(tmp_path):
+    (tmp_path / "source.txt").write_text(
+        "before\nneedle one\nneedle two\nneedle three\nafter\n", encoding="utf-8",
+    )
+    tool = GrepTool(workspace=tmp_path)
+    result = await tool.execute(pattern="needle", head_limit=2)
+
+    assert result.count("source.txt:") == 1
+    assert result.count("| before") == 1
+    assert result.count("| needle one") == 1
+    assert result.count("| needle two") == 1
+    assert "> 2| needle one" in result and "> 3| needle two" in result
+    assert "use offset=2 to continue" in result
+    second = await tool.execute(pattern="needle", head_limit=2, offset=2)
+    assert re.findall(r"^> (\d+)\|", second, re.M) == ["4"]
+    assert "to continue" not in second
+
+
+async def test_grep_size_pages_do_not_lose_merged_matches(tmp_path, monkeypatch):
+    (tmp_path / "source.txt").write_text(
+        "\n".join(f"needle {n} " + "x" * 50 for n in range(30)), encoding="utf-8",
+    )
+    monkeypatch.setattr(GrepTool, "_MAX_RESULT_CHARS", 800)
+    tool = GrepTool(workspace=tmp_path)
+    seen = []
+    offset = 0
+    for _ in range(30):
+        result = await tool.execute(pattern="needle", offset=offset, head_limit=0)
+        seen.extend(re.findall(r"^> (\d+)\|", result, re.M))
+        continuation = re.search(r"use offset=(\d+) to continue", result)
+        if continuation is None:
+            break
+        next_offset = int(continuation[1])
+        assert next_offset > offset
+        offset = next_offset
+    assert seen == [str(n) for n in range(1, 31)]
+
+
+async def test_grep_large_first_context_still_advances(tmp_path, monkeypatch):
+    (tmp_path / "source.txt").write_text("x" * 1000 + "\nneedle\n" + "x" * 1000, encoding="utf-8")
+    monkeypatch.setattr(GrepTool, "_MAX_RESULT_CHARS", 350)
+    result = await GrepTool(workspace=tmp_path).execute(pattern="needle")
+    assert "> 2| needle" in result
+    assert "use offset=1 to continue" in result
+    assert "No matches" not in result
+
+
+@pytest.mark.parametrize("mode", ["find_files", "files_with_matches", "count"])
+async def test_search_path_pages_respect_size_and_continue(tmp_path, monkeypatch, mode):
+    for n in range(20):
+        target = tmp_path / (f"file-{n:02}-" + "x" * 50 + ".txt")
+        target.write_text("needle", encoding="utf-8")
+        os.utime(target, (1, 1))
+    tool_class = FindFilesTool if mode == "find_files" else GrepTool
+    monkeypatch.setattr(tool_class, "_MAX_RESULT_CHARS", 200)
+    tool = tool_class(workspace=tmp_path)
+    args = {} if mode == "find_files" else {"pattern": "needle", "output_mode": mode}
+    seen = []
+    offset = 0
+    for _ in range(20):
+        result = await tool.execute(offset=offset, head_limit=0, **args)
+        seen.extend(re.findall(r"^(file-.*?\.txt)", result, re.M))
+        continuation = re.search(r"use offset=(\d+) to continue", result)
+        if continuation is None:
+            break
+        assert int(continuation[1]) > offset
+        offset = int(continuation[1])
+    assert seen == sorted(path.name for path in tmp_path.iterdir())
+
+
+async def test_grep_worker_preserves_scope(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "inside.txt").write_text("needle", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("needle", encoding="utf-8")
+    tool = GrepTool(workspace=tmp_path, restrict_to_workspace=False)
+    token = bind_workspace_scope(default_workspace_scope(project, True))
+    try:
+        assert await tool.execute(pattern="needle", output_mode="files_with_matches") == "inside.txt"
+    finally:
+        reset_workspace_scope(token)
+
+
+async def test_grep_scan_yields_and_cancellation_stops_worker(tmp_path, monkeypatch):
+    tool = GrepTool(workspace=tmp_path)
+    started, stopped = threading.Event(), threading.Event()
+
+    def blocking_iter_files(root, budget):
+        started.set()
+        try:
+            if not budget.cancelled.wait(timeout=2):
+                raise TimeoutError("worker did not receive cancellation")
+            budget.checkpoint()
+            yield root / "unreachable.txt"
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(tool, "_iter_files", blocking_iter_files)
+    task = asyncio.create_task(tool.execute(pattern="needle"))
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=0.5)
+    assert await asyncio.to_thread(stopped.wait, 1)
+
+
+@pytest.mark.parametrize("budget,value", [("_MAX_SCAN_PATHS", 0), ("_MAX_SCAN_SECONDS", 0)])
+async def test_grep_bounds_scans(tmp_path, monkeypatch, budget, value):
+    (tmp_path / "source.txt").write_text("ordinary", encoding="utf-8")
+    monkeypatch.setattr(GrepTool, budget, value)
+    result = await GrepTool(workspace=tmp_path).execute(pattern="absent")
+    assert result.startswith("Error: grep scan exceeded 0")
