@@ -1691,17 +1691,6 @@
     "resize": "調整檔案預覽寬度",
     "truncated": "檔案較大，因此預覽內容已截斷。"
   },
-  "diagram": {
-    "title": "Mermaid 圖表",
-    "showDiagram": "圖形",
-    "showSource": "原始碼",
-    "expand": "放大圖表",
-    "unavailable": "無法安全繪製此圖表，已顯示原始碼。",
-    "zoomOut": "縮小",
-    "zoomIn": "放大",
-    "resetZoom": "重設縮放",
-    "pan": "圖表 — 捲動或拖曳查看"
-  },
   "code": {
     "fallbackLanguage": "程式碼",
     "copyAria": "複製程式碼",

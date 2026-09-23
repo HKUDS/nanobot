@@ -15,7 +15,6 @@ import { Streamdown, type Components, type StreamdownProps } from "streamdown";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
-import { MermaidBlock, MermaidStreamingContext } from "@/components/MermaidBlock";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
@@ -42,7 +41,6 @@ interface MarkdownTextRendererProps {
   className?: string;
   highlightCode?: boolean;
   streaming?: boolean;
-  preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
 }
 
@@ -531,7 +529,6 @@ export default function MarkdownTextRenderer({
   className,
   highlightCode = true,
   streaming = false,
-  preserveStreamingLayout = false,
   onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
@@ -556,9 +553,6 @@ export default function MarkdownTextRenderer({
         const match = /language-(\w+)/.exec(cls || "");
         if (match) {
           const code = String(kids).replace(/\n$/, "");
-          if (match[1].toLowerCase() === "mermaid") {
-            return <MermaidBlock code={code} />;
-          }
           return (
             <CodeBlock
               language={match[1]}
@@ -615,9 +609,6 @@ export default function MarkdownTextRenderer({
         }
         const fence = codeFenceFromPreChild(lone);
         if (fence) {
-          if (fence.language?.toLowerCase() === "mermaid") {
-            return <MermaidBlock code={fence.code} />;
-          }
           return (
             <CodeBlock
               language={fence.language || "text"}
@@ -832,10 +823,9 @@ export default function MarkdownTextRenderer({
   );
 
   return (
-    <MermaidStreamingContext.Provider value={streaming}>
     <Streamdown
       key={needsMath && mathPlugin ? "math" : "text"}
-      mode={streaming || preserveStreamingLayout ? "streaming" : "static"}
+      mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
       remend={REMEND_OPTIONS}
       isAnimating={false}
@@ -862,6 +852,5 @@ export default function MarkdownTextRenderer({
     >
       {children}
     </Streamdown>
-    </MermaidStreamingContext.Provider>
   );
 }
