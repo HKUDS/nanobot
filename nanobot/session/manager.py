@@ -31,6 +31,7 @@ from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_hi
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.utils.helpers import (
+    atomic_write_lines,
     content_with_media_breadcrumbs,
     ensure_dir,
     estimate_message_tokens,
@@ -1208,52 +1209,33 @@ class JsonlSessionStore:
 
     def _save_unlocked(self, session: Session, *, fsync: bool = False) -> None:
         path = self.get_session_path(session.key)
-        tmp_path = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        metadata_line = {
+            "_type": "metadata",
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "last_archived": session.last_archived,
+            # Keep old nanobot releases able to read sessions written
+            # during the field-name migration.
+            "last_consolidated": session.last_consolidated,
+        }
+        lines = [json.dumps(metadata_line, ensure_ascii=False)]
+        if session.provider_state is not None:
+            provider_state_line = {
+                "_type": _PROVIDER_STATE_RECORD_TYPE,
+                "state": session.provider_state.to_private_record(),
+            }
+            lines.append(json.dumps(provider_state_line, ensure_ascii=False))
+        for msg in session.messages:
+            lines.append(json.dumps(msg, ensure_ascii=False))
+        # fsync=False keeps the historical session-save default: publish the
+        # file without file or directory fsync unless the caller opts in.
+        atomic_write_lines(path, lines, fsync=fsync)
 
-        try:
-            with open(tmp_path, "x", encoding="utf-8") as f:
-                metadata_line = {
-                    "_type": "metadata",
-                    "key": session.key,
-                    "created_at": session.created_at.isoformat(),
-                    "updated_at": session.updated_at.isoformat(),
-                    "metadata": session.metadata,
-                    "last_archived": session.last_archived,
-                    # Keep old nanobot releases able to read sessions written
-                    # during the field-name migration.
-                    "last_consolidated": session.last_consolidated,
-                }
-                f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-                if session.provider_state is not None:
-                    provider_state_line = {
-                        "_type": _PROVIDER_STATE_RECORD_TYPE,
-                        "state": session.provider_state.to_private_record(),
-                    }
-                    f.write(json.dumps(provider_state_line, ensure_ascii=False) + "\n")
-                for msg in session.messages:
-                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-                if fsync:
-                    f.flush()
-                    os.fsync(f.fileno())
-
-            os.replace(tmp_path, path)
-
-            # The full record now contains the authoritative checkpoint state (or
-            # its removal), so an older volatile overlay is no longer needed.
-            self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
-
-            if fsync:
-                with suppress(PermissionError):
-                    fd = os.open(str(path.parent), os.O_RDONLY)
-                    try:
-                        os.fsync(fd)
-                    except OSError as exc:
-                        if exc.errno != errno.EINVAL:
-                            raise
-                    finally:
-                        os.close(fd)
-        finally:
-            tmp_path.unlink(missing_ok=True)
+        # The full record now contains the authoritative checkpoint state (or
+        # its removal), so an older volatile overlay is no longer needed.
+        self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
 
     def update_metadata(
         self,
