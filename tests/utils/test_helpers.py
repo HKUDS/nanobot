@@ -300,23 +300,30 @@ def test_atomic_write_lines_suppresses_directory_permission_error(
 def test_atomic_write_lines_suppresses_einval_directory_fsync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """EINVAL from the directory fsync is ignored.
+
+    The directory fd is faked so this path runs where ``os.open`` of a directory
+    raises ``PermissionError`` (Windows). That suppress path has its own test.
+    """
     target = tmp_path / "session.jsonl"
+    directory_fd = 12345
     fsync_calls = 0
     real_fsync = helpers.os.fsync
     real_open = helpers.os.open
     real_close = helpers.os.close
-    opened: list[int] = []
+    opened: list[tuple[object, int]] = []
     closed: list[int] = []
 
     def tracking_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
-        fd = real_open(path, flags, *args, **kwargs)
         if flags == os.O_RDONLY:
-            opened.append(fd)
-        return fd
+            opened.append((path, directory_fd))
+            return directory_fd
+        return real_open(path, flags, *args, **kwargs)
 
     def tracking_close(fd: int) -> None:
         closed.append(fd)
-        real_close(fd)
+        if fd != directory_fd:
+            real_close(fd)
 
     def fsync_then_einval(fd: int) -> None:
         nonlocal fsync_calls
@@ -334,29 +341,37 @@ def test_atomic_write_lines_suppresses_einval_directory_fsync(
 
     assert target.read_text(encoding="utf-8") == "ok\n"
     assert fsync_calls == 2
-    assert opened and opened[0] in closed
+    assert opened == [(str(tmp_path), directory_fd)]
+    assert closed == [directory_fd]
 
 
 def test_atomic_write_lines_propagates_other_directory_fsync_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Directory fsync errors other than EINVAL propagate.
+
+    The directory fd is faked so this path runs where ``os.open`` of a directory
+    raises ``PermissionError`` (Windows). That suppress path has its own test.
+    """
     target = tmp_path / "session.jsonl"
+    directory_fd = 12345
     fsync_calls = 0
     real_fsync = helpers.os.fsync
     real_open = helpers.os.open
     real_close = helpers.os.close
-    opened: list[int] = []
+    opened: list[tuple[object, int]] = []
     closed: list[int] = []
 
     def tracking_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
-        fd = real_open(path, flags, *args, **kwargs)
         if flags == os.O_RDONLY:
-            opened.append(fd)
-        return fd
+            opened.append((path, directory_fd))
+            return directory_fd
+        return real_open(path, flags, *args, **kwargs)
 
     def tracking_close(fd: int) -> None:
         closed.append(fd)
-        real_close(fd)
+        if fd != directory_fd:
+            real_close(fd)
 
     def fsync_then_eio(fd: int) -> None:
         nonlocal fsync_calls
@@ -373,4 +388,7 @@ def test_atomic_write_lines_propagates_other_directory_fsync_errors(
     with pytest.raises(OSError, match="I/O error"):
         atomic_write_lines(target, ["new"])
 
-    assert opened and opened[0] in closed
+    assert target.read_text(encoding="utf-8") == "new\n"
+    assert fsync_calls == 2
+    assert opened == [(str(tmp_path), directory_fd)]
+    assert closed == [directory_fd]
