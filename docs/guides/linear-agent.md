@@ -2,8 +2,8 @@
 
 This guide takes you from an empty Linear channel configuration to a working
 @mention or delegated issue. The recommended path uses the nanobot WebUI and a
-pre-filled Linear app manifest, so you do not need to enter callback URLs or
-webhook subscriptions by hand.
+pre-filled Linear app manifest. Review the generated URLs and subscriptions,
+and confirm that webhook delivery is enabled before testing a task.
 
 > [!NOTE]
 > Linear's Agent APIs are currently a Developer Preview. Their schema may
@@ -113,6 +113,18 @@ are intended for testing and generate a new hostname on restart. Update the
 nanobot public URL and the Linear app's Redirect URI and Webhook URL before
 continuing with a new hostname.
 
+These settings must be updated together:
+
+| Setting | Value with the new tunnel hostname |
+|---|---|
+| nanobot **Public HTTPS URL** | `https://<new-hostname>.trycloudflare.com` |
+| Linear **Redirect URIs** | `https://<new-hostname>.trycloudflare.com/linear/oauth/callback` |
+| Linear **Webhooks → URL** | `https://<new-hostname>.trycloudflare.com/linear/webhook` |
+
+Updating only the Redirect URI allows OAuth to succeed but leaves task events
+pointing at the old tunnel. After updating the Webhook URL, also check its
+**Delivery status**; a correct URL does not enable delivery by itself.
+
 ## Recommended setup in the WebUI
 
 Keep `nanobot webui` running throughout the setup.
@@ -123,15 +135,15 @@ Keep `nanobot webui` running throughout the setup.
 2. Enter your public origin in **Public HTTPS URL**, for example
    `https://nanobot.example.com`.
 3. Leave the three credential fields empty for now.
-4. Wait for **Settings saved.** The **Create prefilled Linear app** button
-   becomes available after the partial configuration is saved automatically.
+4. Wait for **Settings saved.**, then select **Create Linear app**. Selecting it
+   before entering an address shows a prompt and returns focus to the URL field.
 
 Saving a partial configuration at this point is expected. You will create the
 credentials in the next step.
 
 ### 2. Create the Linear app
 
-1. Select **Create prefilled Linear app**. Sign in to the Linear workspace in
+1. Select **Create Linear app**. Sign in to the Linear workspace in
    which you want to create the app.
 2. Review the pre-filled form. It should describe a **private** app and contain:
 
@@ -144,6 +156,16 @@ credentials in the next step.
 3. Choose a short, recognizable app name and icon if you want to customize how
    nanobot appears in Linear.
 4. Create the app.
+5. In the app's **Webhooks** section, check **Delivery status**. If it is
+   **Disabled**, use the adjacent **…** menu to enable delivery. Confirm the URL
+   points to the current public origin and that **Events** includes
+   **Agent session events** (`AgentSessionEvent`).
+
+> [!IMPORTANT]
+> OAuth authorization and webhook delivery are separate. Authorization can
+> succeed while webhook delivery is disabled. In that state, Linear can create
+> an Agent Session, but nanobot receives no task and Linear may report
+> **Agent didn't start** or **nanobot failed to start**.
 
 Do not add a `Comment` webhook subscription. Linear delivers new @mentions and
 Agent Session follow-ups through `AgentSessionEvent`; subscribing to comments
@@ -217,14 +239,17 @@ workspace should be able to invoke the agent.
 
 By default, reasoning is posted as Linear thought activities. Turn off **Show
 reasoning** under **Advanced** for a quieter session. Use **Configure Linear
-tools** to open the Apps page and connect Linear MCP when prompts need to search,
-edit, or transition issues.
+MCP**, to the left of **Create Linear app**, to open Linear MCP's connection
+settings when prompts need to search, edit, or transition issues. Pairing and
+access guidance is available in the dialog's **Help** menu.
 
 ## Verify the setup
 
 The setup is complete when all of these checks pass:
 
 - **Settings → Channels → Linear** shows the channel as on with no runtime error.
+- The Linear app's **Webhooks → Delivery status** is enabled, its URL uses the
+  current public origin, and **Events** includes **Agent session events**.
 - While the channel is running, opening
   `http://127.0.0.1:3979/linear/health` on the nanobot machine returns
   `{"ok":true}`. Use your configured host and port if you changed them.
@@ -274,7 +299,8 @@ Webhook:        https://nanobot.example.com/linear/webhook
 ```
 
 Subscribe the webhook to exactly `AgentSessionEvent`, `PermissionChange`, and
-`OAuthAuthorization`. Do not subscribe to `Comment`. The OAuth connection step
+`OAuthAuthorization` and enable webhook delivery in the Linear app's settings.
+Do not subscribe to `Comment`. The OAuth connection step
 in the WebUI is still required: it installs the app and stores the
 workspace-scoped access and refresh tokens.
 
@@ -302,18 +328,20 @@ secret.
 
 | Symptom | What to check |
 |---|---|
-| **Create prefilled Linear app** is disabled | Enter only the public HTTPS origin in **Public HTTPS URL** and wait for automatic saving to finish. If saving fails, correct the address or select **Retry**. |
+| **Create Linear app** asks for a public address or waits for saving | Enter only the public HTTPS origin in **Public HTTPS URL** and wait for automatic saving to finish. If saving fails, correct the address or select **Retry**. |
 | Linear rejects the callback or webhook URL | Use a public `https://` hostname. Do not use HTTP, localhost, a private IP, or a path in **Public HTTPS URL**. |
+| `Invalid redirect_uri parameter for the application` | In the Linear app matching nanobot's Client ID, set **Redirect URIs** to the current public origin plus `/linear/oauth/callback` (or your configured OAuth path). It must match the authorization request's `redirect_uri`. Save, cancel the pending authorization in nanobot, and start **Connect Linear** again. |
 | The tunnel URL changed | Update **Public HTTPS URL** in nanobot and the Redirect URI and Webhook URL in the Linear app, then start **Connect Linear** again. |
 | Public health returns 502 | Start **Connect Linear** or enable the connected channel. Check local health first, then confirm the tunnel or proxy targets the same listener port. |
 | OAuth opens but cannot finish | Keep `nanobot webui` running. Confirm the proxy forwards `/linear/oauth/callback` to the configured listen host and port. Then start **Connect Linear** again. |
 | OAuth finishes in Linear but nanobot keeps waiting | Keep the nanobot connection dialog open. Confirm the Redirect URI reaches the same nanobot process, and inspect gateway logs for callback or token exchange errors. |
 | The local health URL does not load | Start **Connect Linear** or enable the connected channel, then check the configured listen host and port. |
-| An @mention gets no response | Confirm `AgentSessionEvent` is subscribed, the Client ID and signing secret match the same app, and the workspace authorization has not been revoked. Run `nanobot gateway logs` for the exact error. |
+| **Agent didn't start**, **nanobot failed to start**, or a session stays on **Thinking…** without a response | First check **Webhooks → Delivery status** in the Linear app. If **Disabled**, enable it from **…**. Confirm the current Webhook URL and `AgentSessionEvent` subscription, then select **Retry** in the Linear session. OAuth success and a working `/linear/health` endpoint do not prove that Linear is sending events. |
+| An @mention still gets no response with delivery enabled | Inspect **Webhook delivery failures** in the Linear app and run `nanobot gateway logs`. A 404 points to the webhook path; a 502 points to the listener or tunnel; a 401 can indicate a signing-secret mismatch or stale event timestamp. Confirm the Client ID and signing secret belong to the same app and the workspace authorization has not been revoked. |
 | The first @mention returns a pairing code | Approve it in the WebUI pairing dialog, then repeat the prompt in the same Agent Session. Alternatively, configure a narrow **Allowed Linear users** list. |
 | Normal comments do nothing | This is intentional. Start a task by @mentioning the app, or continue inside an existing Agent Session. |
 | Delegating an issue does not start a session | Reconnect the workspace so the installation grants `app:assignable`, then confirm the app can be selected as the issue delegate. |
-| The agent can discuss an issue but cannot search or change it | Connect the Linear MCP app from **Configure Linear tools**. The native channel transports the conversation but does not add issue-management tools. |
+| The agent can discuss an issue but cannot search or change it | Connect the Linear MCP app from **Configure Linear MCP**. The native channel transports the conversation but does not add issue-management tools. |
 | Authorization reports missing scopes | Reconnect from nanobot. Do not reuse an authorization URL that omits `read`, `write`, `app:mentionable`, or `app:assignable`. |
 
 For Linear's platform-side behavior, see the official

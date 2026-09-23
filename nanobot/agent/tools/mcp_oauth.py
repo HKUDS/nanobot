@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import os
 import secrets
@@ -68,6 +69,24 @@ class _CredentialStore(TypedDict):
 
 class MCPAuthorizationRequiredError(RuntimeError):
     """Raised when a background MCP connection needs interactive authorization."""
+
+
+class _OAuthAuthorizationLogFilter(logging.Filter):
+    """Keep the SDK's expected authorization interruption out of error tracebacks."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if (
+            record.getMessage() == "OAuth flow error"
+            and record.exc_info
+            and isinstance(record.exc_info[1], MCPAuthorizationRequiredError)
+        ):
+            record.levelno = logging.INFO
+            record.levelname = "INFO"
+            record.msg = "MCP OAuth request paused at browser authorization"
+            record.args = ()
+            record.exc_info = None
+            record.exc_text = None
+        return True
 
 
 @dataclass(frozen=True)
@@ -815,6 +834,9 @@ async def create_mcp_oauth_auth(
     handlers: MCPOAuthHandlers | None = None,
 ) -> OAuthClientProvider:
     """Build the official MCP SDK OAuth provider for one configured server."""
+    sdk_logger = logging.getLogger("mcp.client.auth.oauth2")
+    if not any(isinstance(f, _OAuthAuthorizationLogFilter) for f in sdk_logger.filters):
+        sdk_logger.addFilter(_OAuthAuthorizationLogFilter())
     storage = MCPOAuthStorage(server_name, server_url)
     if handlers is not None:
         await storage.prepare_redirect_uri(

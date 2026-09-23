@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -260,6 +261,51 @@ async def test_background_authorization_request_clears_rejected_token(
 
     assert await storage.get_tokens() is None
     assert await storage.get_client_info() == client_info
+
+
+@pytest.mark.asyncio
+async def test_stale_authorization_preserves_new_credentials_without_error_log(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    await storage.set_tokens(OAuthToken(access_token="old-access"))
+    auth = await create_mcp_oauth_auth("linear", server_url)
+
+    replacement = MCPOAuthStorage("linear", server_url)
+    await replacement.prepare_redirect_uri("http://127.0.0.1/auth/mcp/callback")
+    await replacement.set_tokens(OAuthToken(access_token="new-access"))
+
+    sdk_logger = logging.getLogger("mcp.client.auth.oauth2")
+    with caplog.at_level(logging.INFO, logger=sdk_logger.name):
+        # The SDK logs and rethrows exceptions from the authorization callback.
+        with pytest.raises(MCPAuthorizationRequiredError):
+            try:
+                await auth.context.redirect_handler("https://auth.example.com/authorize")
+            except MCPAuthorizationRequiredError:
+                sdk_logger.exception("OAuth flow error")
+                raise
+
+    tokens = await MCPOAuthStorage("linear", server_url).get_tokens()
+    assert tokens is not None and tokens.access_token == "new-access"
+    records = [record for record in caplog.records if record.name == sdk_logger.name]
+    assert len(records) == 1
+    assert records[0].levelno == logging.INFO
+    assert records[0].exc_info is None
+    assert "OAuth flow error" not in caplog.text
+
+    caplog.clear()
+    with pytest.raises(ValueError):
+        try:
+            raise ValueError("invalid OAuth response")
+        except ValueError:
+            sdk_logger.exception("OAuth flow error")
+            raise
+    assert caplog.records[0].levelno == logging.ERROR
+    assert caplog.records[0].exc_info is not None
 
 
 @pytest.mark.asyncio
@@ -584,10 +630,12 @@ async def test_stale_token_endpoint_is_rediscovered_once(
 async def test_unrecoverable_refresh_error_requires_authorization(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     error: str,
     clears_client: bool,
 ) -> None:
     _use_data_dir(tmp_path, monkeypatch)
+    caplog.set_level(logging.INFO, logger="mcp.client.auth.oauth2")
     server_url = "https://mcp.example.com/mcp"
     storage = MCPOAuthStorage("linear", server_url)
     await storage.set_oauth_metadata(_oauth_metadata())
@@ -635,6 +683,14 @@ async def test_unrecoverable_refresh_error_requires_authorization(
             await client.get(server_url)
 
     reloaded = MCPOAuthStorage("linear", server_url)
+    interruptions = [
+        record for record in caplog.records
+        if record.getMessage() == "MCP OAuth request paused at browser authorization"
+    ]
+    assert interruptions
+    assert all(record.levelno == logging.INFO and record.exc_info is None
+               for record in interruptions)
+    assert "OAuth flow error" not in caplog.text
     assert await reloaded.get_tokens() is None
     client_info = await reloaded.get_client_info()
     assert client_info is not None

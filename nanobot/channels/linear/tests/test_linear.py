@@ -724,6 +724,57 @@ async def test_created_agent_session_publishes_only_the_mention_prompt(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_followup_after_pairing_includes_current_issue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel, _ = _runtime(tmp_path)
+    monkeypatch.setattr(channel, "is_allowed", lambda _sender: False)
+    await channel._process_webhook("unpaired", _agent_webhook())  # pyright: ignore[reportPrivateUsage]
+    assert channel.bus.inbound.empty()
+
+    monkeypatch.setattr(channel, "is_allowed", lambda _sender: True)
+    payload = _agent_webhook(action="prompted")
+    payload.pop("promptContext")
+    payload["agentSession"].pop("issueId")
+    payload["agentSession"]["issue"] = {
+        "id": "issue-1", "identifier": "CHE-6", "title": "Update documentation",
+        "description": "Document webhook delivery setup.",
+        "url": "https://linear.app/example/issue/CHE-6",
+    }
+    payload["agentActivity"]["body"] = "What is the current task?"
+    await channel._process_webhook("paired-followup", payload)  # pyright: ignore[reportPrivateUsage]
+
+    inbound = await channel.bus.consume_inbound()
+    assert "CHE-6" in inbound.content
+    assert "Update documentation" in inbound.content
+    assert "Document webhook delivery setup." in inbound.content
+    assert inbound.content.endswith("What is the current task?")
+    assert inbound.metadata["linear"]["issue_id"] == "issue-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["created", "prompted"])
+async def test_issue_id_remains_visible_without_structured_details(
+    tmp_path: Path, action: str,
+) -> None:
+    channel, _ = _runtime(tmp_path)
+    payload = _agent_webhook(action=action)
+    payload.pop("promptContext")
+    await channel._process_webhook("issue-id-only", payload)  # pyright: ignore[reportPrivateUsage]
+    inbound = await channel.bus.consume_inbound()
+    assert '"id": "issue-1"' in inbound.content
+
+
+@pytest.mark.asyncio
+async def test_followup_slash_command_is_not_wrapped_in_issue_context(tmp_path: Path) -> None:
+    channel, _ = _runtime(tmp_path)
+    payload = _agent_webhook(action="prompted")
+    payload["agentActivity"]["body"] = "/help"
+    await channel._process_webhook("command", payload)  # pyright: ignore[reportPrivateUsage]
+    assert (await channel.bus.consume_inbound()).content == "/help"
+
+
+@pytest.mark.asyncio
 async def test_created_session_downloads_private_linear_attachments(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -375,7 +375,9 @@ class LinearChannel(BaseChannel):
             "linear": {
                 "organization_id": organization_id,
                 "agent_session_id": agent_session_id,
-                "issue_id": str(session.get("issueId") or ""),
+                "issue_id": str(
+                    session.get("issueId") or _optional_object(session.get("issue")).get("id") or ""
+                ),
                 "comment_id": str(session.get("commentId") or ""),
                 "app_user_id": installation.app_user_id,
                 "oauth_client_id": str(payload.get("oauthClientId") or ""),
@@ -515,9 +517,30 @@ def _prompt_text(
     value: object
     if action == "created":
         value = payload.get("promptContext")
+        if context := _text_from_value(value):
+            return context
+        text = _text_from_value(session.get("comment"))
     else:
         value = activity.get("body") or activity.get("content")
-    return _text_from_value(value) or _text_from_value(session.get("comment"))
+        text = _text_from_value(value) or _text_from_value(session.get("comment"))
+        if not text or text.startswith("/"):
+            return text
+    context = _issue_context(session)
+    return "\n\n".join(part for part in (context, text) if part)
+
+
+def _issue_context(session: dict[str, Any]) -> str:
+    """Include issue identity even when pairing prevented the initial turn."""
+    issue = _optional_object(session.get("issue"))
+    fields: dict[str, str] = {}
+    for key, limit in (("id", 200), ("identifier", 200), ("title", 500),
+                       ("url", 2048), ("description", 12000)):
+        value = issue.get(key) or (session.get("issueId") if key == "id" else None)
+        if isinstance(value, str) and value.strip():
+            fields[key] = value.strip()[:limit]
+    if not fields:
+        return ""
+    return "Current Linear issue:\n" + json.dumps(fields, ensure_ascii=False)
 
 
 def _text_from_value(value: object) -> str:
