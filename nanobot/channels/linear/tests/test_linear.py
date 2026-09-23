@@ -766,12 +766,63 @@ async def test_issue_id_remains_visible_without_structured_details(
 
 
 @pytest.mark.asyncio
+async def test_followups_only_repeat_issue_context_when_it_changes(tmp_path: Path) -> None:
+    channel, _ = _runtime(tmp_path)
+    payload = _agent_webhook(action="prompted")
+    payload["agentSession"]["issue"] = {"id": "issue-1", "title": "Original title"}
+    payload["agentActivity"]["body"] = "Continue"
+    for delivery, expected_context in (("first", True), ("second", False)):
+        await channel._process_webhook(delivery, payload)  # pyright: ignore[reportPrivateUsage]
+        content = (await channel.bus.consume_inbound()).content
+        assert ("Current Linear issue:" in content) is expected_context
+        assert content.endswith("Continue")
+
+    payload["agentSession"]["issue"]["title"] = "Updated title"
+    await channel._process_webhook("changed", payload)  # pyright: ignore[reportPrivateUsage]
+    assert "Updated title" in (await channel.bus.consume_inbound()).content
+
+    payload["agentSession"]["id"] = "another-session"
+    await channel._process_webhook("another", payload)  # pyright: ignore[reportPrivateUsage]
+    assert "Updated title" in (await channel.bus.consume_inbound()).content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("idle", [True, False])
+@pytest.mark.parametrize("phase", ["succeeded", "failed", "cancelled"])
+async def test_compaction_restores_issue_context_on_next_message(
+    tmp_path: Path, idle: bool, phase: Literal["succeeded", "failed", "cancelled"],
+) -> None:
+    channel, _ = _runtime(tmp_path)
+    payload = _agent_webhook()
+    await channel._process_webhook("created", payload)  # pyright: ignore[reportPrivateUsage]
+    inbound = await channel.bus.consume_inbound()
+    followup = _agent_webhook(action="prompted")
+    followup["agentActivity"]["body"] = "Continue"
+    await channel._process_webhook("before", followup)  # pyright: ignore[reportPrivateUsage]
+    assert (await channel.bus.consume_inbound()).content == "Continue"
+
+    await channel.send(outbound_message_for_event(
+        channel="linear", chat_id=inbound.chat_id,
+        metadata={} if idle else inbound.metadata,
+        event=ContextCompactionEvent(compaction_id="compact", phase=phase),
+    ))
+    for delivery, include_context in (("after", phase == "succeeded"), ("again", False)):
+        await channel._process_webhook(delivery, followup)  # pyright: ignore[reportPrivateUsage]
+        content = (await channel.bus.consume_inbound()).content
+        assert ("Current Linear issue:" in content) is include_context
+        assert content.endswith("Continue")
+
+
+@pytest.mark.asyncio
 async def test_followup_slash_command_is_not_wrapped_in_issue_context(tmp_path: Path) -> None:
     channel, _ = _runtime(tmp_path)
     payload = _agent_webhook(action="prompted")
     payload["agentActivity"]["body"] = "/help"
     await channel._process_webhook("command", payload)  # pyright: ignore[reportPrivateUsage]
     assert (await channel.bus.consume_inbound()).content == "/help"
+    payload["agentActivity"]["body"] = "Continue"
+    await channel._process_webhook("after-command", payload)  # pyright: ignore[reportPrivateUsage]
+    assert "Current Linear issue:" in (await channel.bus.consume_inbound()).content
 
 
 @pytest.mark.asyncio

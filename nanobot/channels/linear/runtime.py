@@ -51,6 +51,7 @@ class LinearChannel(BaseChannel):
         self._server: LinearServerLease | None = None
         self._reasoning: dict[tuple[str, str], list[str]] = {}
         self._routes: dict[str, dict[str, Any]] = {}
+        self._issue_contexts: dict[str, str] = {}
 
     async def start(self) -> None:
         self.config.validate_runtime()
@@ -94,6 +95,7 @@ class LinearChannel(BaseChannel):
             self._client = None
         self._reasoning.clear()
         self._routes.clear()
+        self._issue_contexts.clear()
 
     def start_error_message(self, error: Exception) -> str | None:
         return f"Linear channel failed to start: {error}"
@@ -101,6 +103,8 @@ class LinearChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
         if isinstance(event, ContextCompactionEvent):
+            if event.phase == "succeeded":
+                self._issue_contexts.pop(msg.chat_id, None)
             # Idle notifications have no originating Linear turn. Sending a thought
             # through the cached route would reactivate an already completed session.
             if _linear_route(msg.metadata) is None:
@@ -364,7 +368,11 @@ class LinearChannel(BaseChannel):
         ).strip()
         if not sender_id:
             raise LinearPayloadError("missing sender identity")
-        content = "/stop" if signal == "stop" else _prompt_text(payload, session, activity, action)
+        issue_context = _issue_context(session)
+        prompt_content = _prompt_text(
+            payload, session, activity, action, issue_context=issue_context,
+        )
+        content = "/stop" if signal == "stop" else prompt_content
         if not content:
             if signal in {"auth", "continue", "select"}:
                 content = _signal_text(signal, activity)
@@ -402,6 +410,7 @@ class LinearChannel(BaseChannel):
             )
             return
         media: list[str] = []
+        context_delivered = False
         if self.is_allowed(sender_id):
             await self._create_activity(
                 agent_session_id,
@@ -413,6 +422,10 @@ class LinearChannel(BaseChannel):
             media, attachment_warnings = await self._download_prompt_media(
                 organization_id, content, delivery_id
             )
+            if issue_context and prompt_content and not content.startswith("/"):
+                if self._issue_contexts.get(agent_session_id) == issue_context:
+                    content = _prompt_text(payload, session, activity, action)
+                context_delivered = True
             if attachment_warnings:
                 content = "\n\n".join((content, *attachment_warnings))
         await self._handle_message(
@@ -424,6 +437,10 @@ class LinearChannel(BaseChannel):
             session_key=f"linear:{organization_id}:{agent_session_id}",
             is_dm=True,
         )
+        if context_delivered:
+            self._issue_contexts[agent_session_id] = issue_context
+            if len(self._issue_contexts) > 1000:
+                self._issue_contexts.pop(next(iter(self._issue_contexts)))
 
     async def _download_prompt_media(
         self,
@@ -513,6 +530,8 @@ def _prompt_text(
     session: dict[str, Any],
     activity: dict[str, Any],
     action: str,
+    *,
+    issue_context: str = "",
 ) -> str:
     value: object
     if action == "created":
@@ -525,8 +544,7 @@ def _prompt_text(
         text = _text_from_value(value) or _text_from_value(session.get("comment"))
         if not text or text.startswith("/"):
             return text
-    context = _issue_context(session)
-    return "\n\n".join(part for part in (context, text) if part)
+    return "\n\n".join(part for part in (issue_context, text) if part)
 
 
 def _issue_context(session: dict[str, Any]) -> str:
