@@ -241,8 +241,9 @@ class TestHistoryWithCursor:
         with pytest.raises(RuntimeError):
             store._write_entries(entries)
 
-        # Temp file should be cleaned up
+        # Temp file should be cleaned up, including uniquely named temps.
         assert not tmp_path_obj.exists()
+        assert list(store.history_file.parent.glob("*.tmp")) == []
 
         # Original file should still exist (because replace failed)
         assert store.history_file.exists()
