@@ -4,13 +4,13 @@
   "setup": {
     "docsLabel": "Mở hướng dẫn thiết lập Linear",
     "officialLabel": "Tạo ứng dụng OAuth Linear",
-    "tryIt": "Nhắc đến ứng dụng trong bình luận của issue. Tin nhắn tiếp theo trong Agent Session không cần nhắc lại.",
-    "summary": "Tạo ứng dụng OAuth Linear riêng tư, lưu thông tin xác thực và URL công khai, rồi cấp quyền cho workspace. Mỗi phiên mới cần @mention rõ ràng; bình luận thông thường sẽ bị bỏ qua.",
+    "tryIt": "Nhắc đến ứng dụng hoặc giao issue cho ứng dụng; không cần nhắc lại trong Agent Session.",
+    "summary": "Tạo ứng dụng OAuth Linear riêng tư, lưu thông tin xác thực và URL công khai, rồi cấp quyền cho workspace. Bắt đầu phiên bằng cách nhắc đến ứng dụng hoặc giao issue; bình luận thông thường sẽ bị bỏ qua.",
     "steps": [
       "Công khai phiên bản nanobot này qua URL HTTPS ổn định (có thể dùng tunnel).",
       "Tạo ứng dụng OAuth riêng tư trong Linear với các scope read, write, app:mentionable và app:assignable.",
       "Đăng ký webhook của ứng dụng cho AgentSessionEvent, PermissionChange và OAuthAuthorization bằng URL được tạo.",
-      "Nhập thông tin xác thực của ứng dụng, chờ lưu tự động, kết nối không gian làm việc bằng OAuth, rồi nhắc đến ứng dụng bằng @ trong issue."
+      "Kết nối workspace qua OAuth, rồi nhắc đến ứng dụng hoặc giao issue cho ứng dụng."
     ],
     "fields": {
       "clientId": {
@@ -71,18 +71,15 @@
     "reconnect": "Kết nối workspace khác",
     "connect": "Kết nối Linear",
     "openLinear": "Tiếp tục trong Linear",
-    "createApp": "Tạo ứng dụng Linear điền sẵn",
-    "savePublicUrl": "Nhập URL HTTPS công khai để tạo ứng dụng Linear được điền sẵn.",
-    "saveBeforeConnect": "Nhập thông tin xác thực của ứng dụng và chờ lưu xong trước khi kết nối.",
+    "createApp": "Tạo ứng dụng Linear",
+    "savePublicUrl": "Nhập URL HTTPS công khai để tạo ứng dụng Linear.",
     "removeCredentials": "Xóa thông tin xác thực đã lưu",
     "retrySave": "Thử lại",
     "channelRunning": "Channel đang chạy",
-    "accessTitle": "Quyền truy cập và công cụ issue",
     "accessAll": "Mọi thành viên trong workspace được cấp quyền đều có thể chạy agent này.",
     "accessRestricted": "Chỉ ID người dùng Linear được liệt kê trong Nâng cao mới có thể chạy agent này.",
-    "accessPairing": "Khi dùng lần đầu, hãy nhắc nanobot trong Linear, duyệt mã tại Cài đặt → Ghép đôi, rồi nhắc lại.",
-    "mcpDescription": "Channel này xử lý hội thoại với agent. Kết nối công cụ Linear để agent tìm kiếm hoặc thay đổi issue.",
-    "configureTools": "Cấu hình công cụ Linear",
+    "accessPairing": "Ghép đôi khi dùng lần đầu và kết nối Linear MCP để tìm kiếm hoặc chỉnh sửa issue.",
+    "configureTools": "Cấu hình Linear MCP",
     "workspacesTitle": "Workspace được cấp quyền",
     "refreshWorkspaces": "Làm mới workspace",
     "loadingWorkspaces": "Đang tải workspace",

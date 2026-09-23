@@ -10,7 +10,7 @@
       "Expose this nanobot instance through a stable HTTPS URL (a tunnel is fine).",
       "Create a private OAuth app in Linear with read, write, app:mentionable, and app:assignable scopes.",
       "Subscribe the app webhook to AgentSessionEvent, PermissionChange, and OAuthAuthorization using the generated webhook URL.",
-      "Enter the app credentials, wait for them to save automatically, connect the workspace with OAuth, then @mention the app on an issue."
+      "Connect the workspace with OAuth, then mention the app or delegate an issue to it."
     ],
     "fields": {
       "clientId": {
@@ -71,18 +71,15 @@
     "reconnect": "Connect another workspace",
     "connect": "Connect Linear",
     "openLinear": "Continue in Linear",
-    "createApp": "Create prefilled Linear app",
-    "savePublicUrl": "Enter a public HTTPS URL to create a prefilled Linear app.",
-    "saveBeforeConnect": "Enter the app credentials and wait for them to save before connecting.",
+    "createApp": "Create Linear app",
+    "savePublicUrl": "Enter a public HTTPS URL to create a Linear app.",
     "removeCredentials": "Remove saved credentials",
     "retrySave": "Retry",
     "channelRunning": "Channel running",
-    "accessTitle": "Access and issue tools",
     "accessAll": "Every member of an authorized workspace can run this agent.",
     "accessRestricted": "Only the Linear user IDs listed in Advanced can run this agent.",
-    "accessPairing": "On first use, mention nanobot in Linear, approve the pairing code in Settings → Pairing, then mention it again.",
-    "mcpDescription": "This channel handles agent conversations. Connect Linear tools to let the agent search or change issues.",
-    "configureTools": "Configure Linear tools",
+    "accessPairing": "Pair on first use; connect Linear MCP to search or edit issues.",
+    "configureTools": "Configure Linear MCP",
     "workspacesTitle": "Authorized workspaces",
     "refreshWorkspaces": "Refresh workspaces",
     "loadingWorkspaces": "Loading workspaces",

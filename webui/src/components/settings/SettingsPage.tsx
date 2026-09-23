@@ -81,6 +81,7 @@ export function SettingsPage({
   hostChromeInset,
 }: SettingsPageProps) {
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
+  const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
   const [pendingExit, setPendingExit] = useState<(() => void) | null>(null);
   const [automationDetailReturn, setAutomationDetailReturn] =
     useState<SessionAutomationJob | null>(null);
@@ -485,6 +486,12 @@ export function SettingsPage({
       case "channels":
         return (
           <ChannelsSettings
+            onConfigureMcp={(name) => {
+              setMcpSetupName(name);
+              setAppsKindFilter("mcp");
+              setAppsQuery(name);
+              selectSection("apps");
+            }}
             token={token}
             nanobotFeatures={nanobotFeatures}
             loading={nanobotFeaturesLoading}
@@ -506,6 +513,8 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <AppsCatalogSettings
+              setupName={mcpSetupName}
+              onSetupOpened={() => setMcpSetupName(null)}
               cliApps={cliApps}
               mcpPresets={mcpPresets}
               cliAppsLoading={cliAppsLoading}

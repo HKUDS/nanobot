@@ -6,6 +6,7 @@ import { channelTranslator } from "@/channel-plugins/i18n";
 import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
 import {
   CredentialForm,
+  channelFieldInputId,
   channelValuesForSubmit,
   defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
@@ -17,6 +18,15 @@ import {
   localizedChannelDisplayName,
 } from "@/components/settings/channels/ChannelIdentity";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { channelValidationStatusClass } from "@/components/settings/channels/ChannelValidationProgress";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import { configureChannel, disableNanobotFeature, startChannelConnect } from "@/lib/api";
@@ -30,7 +40,6 @@ import { linearManifestUrl } from "./manifest";
 const PUBLIC_BASE_URL_KEY = "channels.linear.publicBaseUrl";
 const WEBHOOK_PATH_KEY = "channels.linear.webhookPath";
 const CALLBACK_PATH_KEY = "channels.linear.oauthCallbackPath";
-const ALLOW_FROM_KEY = "channels.linear.allowFrom";
 
 export function LinearPanel({
   token,
@@ -39,6 +48,7 @@ export function LinearPanel({
   showBrandLogos,
   onFeaturesUpdate,
   onBeforeCloseChange,
+  onConfigureMcp,
 }: ChannelPluginPanelProps) {
   const { client } = useClient();
   const { t, i18n } = useTranslation();
@@ -64,6 +74,7 @@ export function LinearPanel({
   const [connecting, setConnecting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [publicUrlPromptOpen, setPublicUrlPromptOpen] = useState(false);
   const [installations, setInstallations] = useState<ChannelInstallationSummary[]>([]);
   const [loadingInstallations, setLoadingInstallations] = useState(false);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
@@ -104,7 +115,6 @@ export function LinearPanel({
       feature.config_values?.[CALLBACK_PATH_KEY] || "/linear/oauth/callback",
     )
     : null;
-  const allowFrom = feature.config_values?.[ALLOW_FROM_KEY]?.trim() ?? "";
 
   const loadInstallations = useCallback(async () => {
     if (!credentialsSaved || dirty) return;
@@ -275,11 +285,6 @@ export function LinearPanel({
         </div>
         <ChannelRuntimeError message={feature.runtime_error} />
         <CredentialForm {...formProps} fields={fields.filter((field) => field.key === PUBLIC_BASE_URL_KEY)} />
-        {!manifestUrl || manifestDirty ? (
-          <p className="text-[12px] leading-5 text-muted-foreground">
-            {tx("custom.savePublicUrl", "Enter a public HTTPS URL to create a prefilled Linear app.")}
-          </p>
-        ) : null}
         <CredentialForm {...formProps} fields={fields.filter((field) => field.key !== PUBLIC_BASE_URL_KEY)} />
         <div id={advancedPanelId} hidden={!advancedOpen}>
           <CredentialForm {...formProps} fields={advancedFields} />
@@ -294,26 +299,6 @@ export function LinearPanel({
           </div>
         ) : null}
       </form>
-      <section className="mt-5 space-y-3" aria-labelledby="linear-access-heading">
-        <div>
-          <h4 id="linear-access-heading" className="text-[13px] font-semibold text-foreground">
-            {tx("custom.accessTitle", "Access and issue tools")}
-          </h4>
-          <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-            {allowFrom === "*"
-              ? tx("custom.accessAll", "Every member of an authorized workspace can run this agent.")
-              : allowFrom
-                ? tx("custom.accessRestricted", "Only the Linear user IDs listed in Advanced can run this agent.")
-                : tx("custom.accessPairing", "On first use, mention nanobot in Linear, approve the pairing code in Settings → Pairing, then mention it again.")}
-          </p>
-          <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
-            {tx("custom.mcpDescription", "This channel handles agent conversations. Connect Linear tools to let the agent search or change issues.")}{" "}
-            <a href="#/apps" className="font-medium text-foreground underline underline-offset-4">
-              {tx("custom.configureTools", "Configure Linear tools")}
-            </a>
-          </p>
-        </div>
-      </section>
       {feature.runtime_status === "running" ? (
         <section className="mt-5 space-y-3" aria-labelledby="linear-workspaces-heading">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -400,19 +385,29 @@ export function LinearPanel({
         onActiveChange={setConnecting}
         renderActions={(connectButton) => (
           <div className="flex flex-wrap items-center justify-end gap-2 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <div className="me-auto min-w-0 max-w-full">
+            <div className="me-auto flex min-w-0 max-w-full flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm"
+                className="h-auto min-h-10 whitespace-normal rounded-full px-4 py-2 text-[12px]"
+                disabled={busy || connecting || !onConfigureMcp}
+                onClick={async () => {
+                  if (await saveSettings()) onConfigureMcp?.("linear");
+                }}>
+                {tx("custom.configureTools", "Configure Linear MCP")}
+              </Button>
               {manifestUrl && !manifestDirty ? (
-                <Button asChild variant="secondary" size="sm"
+                <Button asChild variant="outline" size="sm"
                   className="h-auto min-h-10 max-w-full gap-2 whitespace-normal rounded-full px-4 py-2 text-[12px]">
                   <a href={manifestUrl} target="_blank" rel="noreferrer">
-                    {tx("custom.createApp", "Create prefilled Linear app")}
+                    {tx("custom.createApp", "Create Linear app")}
                     <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   </a>
                 </Button>
               ) : (
-                <Button variant="secondary" size="sm" disabled
+                <Button type="button" variant="outline" size="sm"
+                  disabled={Boolean(fieldValues[PUBLIC_BASE_URL_KEY]?.trim())}
+                  onClick={() => setPublicUrlPromptOpen(true)}
                   className="h-auto min-h-10 max-w-full whitespace-normal rounded-full px-4 py-2 text-[12px]">
-                  {tx("custom.createApp", "Create prefilled Linear app")}
+                  {tx("custom.createApp", "Create Linear app")}
                 </Button>
               )}
             </div>
@@ -429,11 +424,26 @@ export function LinearPanel({
             </fieldset>
           </div>
         )} />
-      {dirty || !credentialsSaved ? (
-        <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
-          {tx("custom.saveBeforeConnect", "Enter the app credentials and wait for them to save before connecting.")}
-        </p>
-      ) : null}
+      <AlertDialog open={publicUrlPromptOpen} onOpenChange={setPublicUrlPromptOpen}>
+        <AlertDialogContent onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          document.getElementById(channelFieldInputId(PUBLIC_BASE_URL_KEY))?.focus();
+        }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {tx("setup.fields.publicBaseUrl.label", "Public HTTPS URL")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {tx("custom.savePublicUrl", "Enter a public HTTPS URL to create a Linear app.")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t("common.close", { defaultValue: "Close" })}
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   );
 }

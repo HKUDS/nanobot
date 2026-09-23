@@ -4,13 +4,13 @@
   "setup": {
     "docsLabel": "Linear 설정 가이드 열기",
     "officialLabel": "Linear OAuth 앱 만들기",
-    "tryIt": "이슈 댓글에서 앱을 멘션하세요. Agent Session 안의 후속 메시지에는 다시 멘션할 필요가 없습니다.",
-    "summary": "비공개 Linear OAuth 앱을 만들고 인증 정보와 공개 URL을 저장한 다음 워크스페이스를 승인하세요. 새 세션은 명시적인 @멘션으로만 시작되며 일반 댓글은 무시됩니다.",
+    "tryIt": "앱을 멘션하거나 이슈를 위임하세요. Agent Session 안에서는 다시 멘션할 필요가 없습니다.",
+    "summary": "비공개 Linear OAuth 앱을 만들고 인증 정보와 공개 URL을 저장한 다음 워크스페이스를 승인하세요. 앱 멘션이나 이슈 위임으로 세션을 시작할 수 있으며 일반 댓글은 무시됩니다.",
     "steps": [
       "이 nanobot 인스턴스를 안정적인 HTTPS URL로 공개하세요(터널을 사용할 수 있습니다).",
       "Linear에서 read, write, app:mentionable, app:assignable 범위가 있는 비공개 OAuth 앱을 만드세요.",
       "생성된 URL로 앱 webhook을 AgentSessionEvent, PermissionChange, OAuthAuthorization에 구독하세요.",
-      "앱 인증 정보를 입력하고 자동 저장이 완료되면 OAuth로 워크스페이스를 연결한 후 이슈에서 앱을 @멘션하세요."
+      "OAuth로 워크스페이스를 연결한 뒤 앱을 멘션하거나 이슈를 위임하세요."
     ],
     "fields": {
       "clientId": {
@@ -71,18 +71,15 @@
     "reconnect": "다른 워크스페이스 연결",
     "connect": "Linear 연결",
     "openLinear": "Linear에서 계속",
-    "createApp": "미리 입력된 Linear 앱 만들기",
-    "savePublicUrl": "공개 HTTPS URL을 입력하면 미리 채워진 Linear 앱을 만들 수 있습니다.",
-    "saveBeforeConnect": "앱 인증 정보를 입력하고 자동 저장이 완료된 후 연결하세요.",
+    "createApp": "Linear 앱 만들기",
+    "savePublicUrl": "공개 HTTPS URL을 입력한 후 Linear 앱을 만드세요.",
     "removeCredentials": "저장된 인증 정보 삭제",
     "retrySave": "다시 시도",
     "channelRunning": "채널 실행 중",
-    "accessTitle": "접근 및 이슈 도구",
     "accessAll": "승인된 워크스페이스의 모든 멤버가 이 에이전트를 실행할 수 있습니다.",
     "accessRestricted": "고급 설정에 나열된 Linear 사용자 ID만 이 에이전트를 실행할 수 있습니다.",
-    "accessPairing": "처음 사용할 때 Linear에서 nanobot을 멘션하고 설정 → 페어링에서 코드를 승인한 뒤 다시 멘션하세요.",
-    "mcpDescription": "이 채널은 에이전트 대화를 처리합니다. 이슈 검색이나 변경을 위해 Linear 도구를 연결하세요.",
-    "configureTools": "Linear 도구 구성",
+    "accessPairing": "처음 사용 시 페어링하고, Linear MCP를 연결해 이슈를 검색하거나 수정하세요.",
+    "configureTools": "Linear MCP 설정",
     "workspacesTitle": "승인된 워크스페이스",
     "refreshWorkspaces": "워크스페이스 새로 고침",
     "loadingWorkspaces": "워크스페이스 불러오는 중",

@@ -90,6 +90,52 @@ describe("Linear channel UI", () => {
     expect(manifest.webhook?.resourceTypes).not.toContain("Comment");
   });
 
+  it("prompts for the missing public URL and focuses its field after dismissal", async () => {
+    mockFeature(linearFeature);
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    const createApp = await screen.findByRole("button", { name: "Create Linear app" });
+    expect(createApp).toBeEnabled();
+    fireEvent.click(createApp);
+    const prompt = await screen.findByRole("alertdialog", { name: "Public HTTPS URL" });
+    expect(prompt).toHaveTextContent("Enter a public HTTPS URL to create a Linear app.");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(within(prompt).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Public HTTPS URL" })).toHaveFocus();
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
+
+  it("opens the Linear MCP connection settings without starting authorization", async () => {
+    mockFeature(savedFeature());
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    await screen.findByRole("textbox", { name: "OAuth client ID" });
+    expect(screen.queryByText("Pair on first use; connect Linear MCP to search or edit issues.")).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Help" }), { key: "ArrowDown" });
+    expect(await screen.findByText("Pair on first use; connect Linear MCP to search or edit issues.")).toBeVisible();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.click(await screen.findByRole("button", { name: "Configure Linear MCP" }));
+    const dialog = await screen.findByRole("dialog", { name: "Linear" });
+    expect(within(dialog).getByRole("button", { name: "Connect" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Configure Linear MCP" })).not.toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the channel draft open when saving before MCP setup fails", async () => {
+    mockFeature(savedFeature());
+    requestMutationMock.mockRejectedValueOnce(new Error("Unable to save settings"));
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "OAuth client ID" }), {
+      target: { value: "replacement-client" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Configure Linear MCP" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to save settings");
+    expect(screen.getByRole("textbox", { name: "OAuth client ID" })).toHaveValue("replacement-client");
+    expect(screen.queryByRole("dialog", { name: "Linear" })).not.toBeInTheDocument();
+  });
+
   it("automatically saves a public URL before OAuth credentials and reveals the app button", async () => {
     vi.stubGlobal(
       "fetch",
@@ -154,7 +200,7 @@ describe("Linear channel UI", () => {
       await screen.findByText("Settings saved."),
     ).toBeInTheDocument();
     expect(
-      await screen.findByRole("link", { name: "Create prefilled Linear app" }),
+      await screen.findByRole("link", { name: "Create Linear app" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
   });
@@ -496,7 +542,15 @@ function mockFeature(feature: NanobotFeatureInfo) {
     const url = String(input);
     if (url === "/api/settings") return jsonResponse(settingsPayload());
     if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
-    if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
+    if (url === "/api/settings/mcp-presets") return jsonResponse({
+      presets: [{
+        name: "linear", display_name: "Linear", category: "productivity",
+        description: "Search and update Linear issues.", transport: "streamableHttp",
+        auth: "oauth", install_supported: true, installed: false, configured: false,
+        available: false, status: "not_installed", required_fields: [],
+        enabled_tools: ["*"], source: "preset", connection_summary: "",
+      }], installed_count: 0,
+    });
     if (url === "/api/settings/nanobot-features") return jsonResponse({ features: [feature], enabled_count: 0 });
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   }));
