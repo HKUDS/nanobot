@@ -1405,8 +1405,8 @@
         "duration": "生成時間"
       },
       "queued": {
-        "label": "保留中のガイド",
-        "guide": "ガイド",
+        "label": "送信待ち",
+        "guide": "今すぐ送信",
         "delete": "ガイドを削除",
         "edit": "ガイドを編集",
         "drag": "ドラッグして並べ替え"
@@ -1583,6 +1583,7 @@
     }
   },
   "message": {
+    "actions": "メッセージ操作",
     "streaming": "生成中",
     "delivery": {
       "sending": "送信中…",
@@ -1636,6 +1637,10 @@
     "activityWorkingFor": "{{duration}}作業中",
     "activityWorked": "作業しました",
     "activityWorkedFor": "{{duration}}作業しました",
+    "collapseActivity": "アクティビティの詳細を折りたたむ",
+    "activityShow": "処理過程を表示",
+    "activityShowFor": "処理過程を表示 {{duration}}",
+    "activityHide": "処理過程を非表示",
     "traceDetailsLoadFailed": "アクティビティの詳細を読み込めませんでした。",
     "retryTraceDetails": "再試行",
     "retryConnection": "接続に失敗しました",
