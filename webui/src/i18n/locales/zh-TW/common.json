@@ -1431,8 +1431,8 @@
         "duration": "生成耗時"
       },
       "queued": {
-        "label": "佇列中的引導訊息",
-        "guide": "引導",
+        "label": "等待傳送",
+        "guide": "立即傳送",
         "delete": "刪除引導",
         "edit": "編輯引導",
         "drag": "拖曳排序"
@@ -1609,6 +1609,7 @@
     }
   },
   "message": {
+    "actions": "訊息操作",
     "streaming": "串流輸出中",
     "delivery": {
       "sending": "傳送中…",
@@ -1661,6 +1662,10 @@
     "activityWorkingFor": "處理中，已 {{duration}}",
     "activityWorked": "已處理",
     "activityWorkedFor": "已處理 {{duration}}",
+    "collapseActivity": "收合處理過程",
+    "activityShow": "查看過程",
+    "activityShowFor": "查看過程 {{duration}}",
+    "activityHide": "收合過程",
     "traceDetailsLoadFailed": "無法載入完整活動詳情。",
     "retryTraceDetails": "重試",
     "retryConnection": "連線失敗",

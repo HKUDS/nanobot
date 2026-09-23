@@ -714,11 +714,13 @@ export default function MarkdownTextRenderer({
           >
             <table
               className={cn(
-                "w-full min-w-max border-collapse text-[13px] leading-5",
+                "w-full table-fixed border-collapse text-[13px] leading-5",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
-                "[&_th]:text-left [&_th]:font-medium",
+                "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
+                "[&_th]:[overflow-wrap:anywhere]",
                 "[&_td]:border-b [&_td]:border-border/55 [&_td]:px-3 [&_td]:py-2",
+                "[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]",
                 "[&_th:not(:last-child)]:border-r [&_th:not(:last-child)]:border-border/45",
                 "[&_td:not(:last-child)]:border-r [&_td:not(:last-child)]:border-border/45",
                 "[&_tbody_tr:last-child_td]:border-b-0",
