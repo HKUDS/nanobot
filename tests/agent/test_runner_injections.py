@@ -1514,11 +1514,21 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(tmp_path):
+@pytest.mark.parametrize("log_content", [True, False])
+async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
+    tmp_path, request, log_content,
+):
     """Messages accumulated during a model call share its next request snapshot."""
+    from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
+    from nanobot.session.manager import SessionPolicy
+
+    records = []
+    sink = logger.add(lambda message: records.append(message.record))
+    request.addfinalizer(lambda: logger.remove(sink))
 
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -1544,7 +1554,9 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(t
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.sessions.get_or_create("cli:c").policy = SessionPolicy(log_content=log_content)
     followups = [f"follow-up-{index:02}" for index in range(12)]
+    followups.append("长消息" * 40)
 
     run_task = asyncio.create_task(loop.run())
     await loop.bus.publish_inbound(InboundMessage(
@@ -1584,6 +1596,17 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(t
     positions = [second_request.index(content) for content in followups]
     assert positions == sorted(positions)
     assert loop.bus.inbound_size == 0
+
+    injections = [r for r in records if "Processing mid-turn injection from" in r["message"]]
+    assert len(injections) == len(followups)
+    for record, content in zip(injections, followups):
+        preview = content[:80] + ("..." if len(content) > 80 else "")
+        if not log_content:
+            preview = "[content hidden]"
+        assert record["message"] == f"Processing mid-turn injection from cli:u: {preview}"
+        assert record["level"].name == "INFO"
+        assert record["extra"]["session_key"] == "cli:c"
+        assert record["extra"]["turn_id"]
 
 
 @pytest.mark.asyncio
