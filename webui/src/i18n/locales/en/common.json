@@ -1605,8 +1605,8 @@
         "duration": "Generation time"
       },
       "queued": {
-        "label": "Queued guidance",
-        "guide": "Guide",
+        "label": "Waiting to send",
+        "guide": "Send now",
         "delete": "Delete guidance",
         "edit": "Edit guidance",
         "drag": "Drag to reorder"
@@ -1783,6 +1783,7 @@
     }
   },
   "message": {
+    "actions": "Message actions",
     "streaming": "streaming",
     "delivery": {
       "sending": "Sending…",
@@ -1808,6 +1809,10 @@
     "activityWorkingFor": "Working for {{duration}}",
     "activityWorked": "Worked",
     "activityWorkedFor": "Worked for {{duration}}",
+    "collapseActivity": "Collapse activity details",
+    "activityShow": "View activity",
+    "activityShowFor": "View activity {{duration}}",
+    "activityHide": "Hide activity",
     "traceDetailsLoadFailed": "Full activity details could not be loaded.",
     "retryTraceDetails": "Retry",
     "retryConnection": "Connection failed",
