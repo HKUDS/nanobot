@@ -22,6 +22,7 @@ from nanobot.bus.events import (
     OUTBOUND_META_AGENT_UI,
     RUNTIME_CONTROL_SESSION_DISCARD,
     OutboundMessage,
+    SessionInitialization,
 )
 from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
@@ -1689,7 +1690,7 @@ async def test_new_chat_without_message_does_not_create_session(
 
 
 @pytest.mark.asyncio
-async def test_new_chat_model_preset_is_forwarded_only_to_first_message(
+async def test_typed_session_initialization_is_forwarded_without_message_metadata(
     bus: MagicMock,
     tmp_path,
 ) -> None:
@@ -1716,11 +1717,18 @@ async def test_new_chat_model_preset_is_forwarded_only_to_first_message(
     await channel._dispatch_envelope(
         conn,
         "webui-client",
-        {"type": "message", "chat_id": chat_id, "content": "hello", "webui": True},
+        {
+            "type": "message",
+            "chat_id": chat_id,
+            "content": "hello",
+            "webui": True,
+            "session_initialization": {"model_preset": "  Codex  "},
+        },
     )
 
     first = bus.publish_inbound.await_args.args[0]
-    assert first.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+    assert first.session_initialization == SessionInitialization(model_preset="Codex")
+    assert SESSION_MODEL_PRESET_METADATA_KEY not in first.metadata
 
     bus.publish_inbound.reset_mock()
     await channel._dispatch_envelope(
@@ -1730,7 +1738,37 @@ async def test_new_chat_model_preset_is_forwarded_only_to_first_message(
     )
 
     second = bus.publish_inbound.await_args.args[0]
+    assert second.session_initialization is None
     assert SESSION_MODEL_PRESET_METADATA_KEY not in second.metadata
+
+
+@pytest.mark.asyncio
+async def test_malformed_session_initialization_is_rejected_before_dispatch(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {
+            "type": "message",
+            "chat_id": "new-chat",
+            "content": "hello",
+            "turn_id": "turn-invalid-init",
+            "session_initialization": {"model_preset": "Codex", "unexpected": True},
+        },
+    )
+
+    assert json.loads(conn.send.await_args.args[0]) == {
+        "event": "error",
+        "detail": "invalid session_initialization",
+        "chat_id": "new-chat",
+        "turn_id": "turn-invalid-init",
+    }
+    bus.publish_inbound.assert_not_awaited()
 
 
 @pytest.mark.asyncio

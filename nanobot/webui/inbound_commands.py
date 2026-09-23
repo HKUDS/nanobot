@@ -8,7 +8,6 @@ import json
 import re
 import time
 import uuid
-from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -16,7 +15,7 @@ from typing import Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_USER_SHELL
+from nanobot.bus.events import INBOUND_META_USER_SHELL, SessionInitialization
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
@@ -28,7 +27,6 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
-from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -55,7 +53,6 @@ from nanobot.webui.transcription_ws import webui_transcription_event
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
-_WEBUI_DRAFT_MODEL_PRESET_MAX = 256
 _WEBUI_MODEL_PRESET_NAME_MAX_CHARS = 256
 
 
@@ -119,6 +116,7 @@ class WebUICommandTransport(Protocol):
         is_dm: bool,
         session_key: str | None,
         require_existing_session: bool,
+        session_initialization: SessionInitialization | None,
     ) -> None: ...
 
     async def send_session_updated(
@@ -154,7 +152,6 @@ class WebUICommandRouter:
         ] = {}
         self.request_operations: dict[str, WebUIRequestOperation] = {}
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
-        self._draft_model_presets: OrderedDict[str, str] = OrderedDict()
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
         return self._http_router.workspace_project_selection_available(connection)
@@ -287,22 +284,6 @@ class WebUICommandRouter:
             )
             return None
 
-    def _stage_model_preset(self, chat_id: str, model_preset: str) -> None:
-        self._draft_model_presets[chat_id] = model_preset
-        self._draft_model_presets.move_to_end(chat_id)
-        while len(self._draft_model_presets) > _WEBUI_DRAFT_MODEL_PRESET_MAX:
-            self._draft_model_presets.popitem(last=False)
-
-    def _draft_model_preset(self, chat_id: str) -> str | None:
-        model_preset = self._draft_model_presets.get(chat_id)
-        if model_preset is not None:
-            self._draft_model_presets.move_to_end(chat_id)
-        return model_preset
-
-    def _consume_model_preset(self, chat_id: str, model_preset: str) -> None:
-        if self._draft_model_presets.get(chat_id) == model_preset:
-            self._draft_model_presets.pop(chat_id, None)
-
     async def dispatch(
         self,
         connection: ServerConnection,
@@ -340,8 +321,6 @@ class WebUICommandRouter:
             if scope is None:
                 return
             self._workspaces.stage_scope(new_id, scope)
-            if model_preset is not None:
-                self._stage_model_preset(new_id, model_preset)
             self._transport.webui_attach(connection, new_id)
             attach_fields = self._session_projection.attach_fields(webui_session_key(new_id))
             if model_preset is not None:
@@ -556,6 +535,46 @@ class WebUICommandRouter:
             )
             return
 
+        session_initialization: SessionInitialization | None = None
+        raw_initialization = envelope.get("session_initialization")
+        if raw_initialization is not None:
+            if not isinstance(raw_initialization, dict):
+                await self._transport.webui_send_event(
+                    connection,
+                    "error",
+                    detail="invalid session_initialization",
+                    **rejection_fields,
+                )
+                return
+            initialization = cast(dict[str, Any], raw_initialization)
+            if set(initialization) != {"model_preset"}:
+                await self._transport.webui_send_event(
+                    connection,
+                    "error",
+                    detail="invalid session_initialization",
+                    **rejection_fields,
+                )
+                return
+            raw_model_preset = initialization.get("model_preset")
+            if not isinstance(raw_model_preset, str):
+                await self._transport.webui_send_event(
+                    connection,
+                    "error",
+                    detail="invalid session_initialization",
+                    **rejection_fields,
+                )
+                return
+            model_preset = raw_model_preset.strip()
+            if not model_preset or len(model_preset) > _WEBUI_MODEL_PRESET_NAME_MAX_CHARS:
+                await self._transport.webui_send_event(
+                    connection,
+                    "error",
+                    detail="invalid session_initialization",
+                    **rejection_fields,
+                )
+                return
+            session_initialization = SessionInitialization(model_preset=model_preset)
+
         try:
             temporary_policy = self._temporary_chats.message_policy(
                 connection,
@@ -646,9 +665,6 @@ class WebUICommandRouter:
         metadata: dict[str, Any] = {
             "remote": getattr(connection, "remote_address", None)
         }
-        draft_model_preset = self._draft_model_preset(chat_id)
-        if draft_model_preset is not None:
-            metadata[SESSION_MODEL_PRESET_METADATA_KEY] = draft_model_preset
         if envelope.get("webui") is True:
             metadata["webui"] = True
             metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
@@ -735,10 +751,9 @@ class WebUICommandRouter:
                     if temporary_policy is not None
                     else False
                 ),
+                session_initialization=session_initialization,
             )
             self._workspaces.persist_scope(chat_id, scope)
-            if draft_model_preset is not None:
-                self._consume_model_preset(chat_id, draft_model_preset)
             accepted = True
         finally:
             if not accepted and queued_owner is not None:

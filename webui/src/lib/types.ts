@@ -1648,6 +1648,7 @@ export type Outbound =
       intent?: "create_automation";
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
+      session_initialization?: { model_preset: string };
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;

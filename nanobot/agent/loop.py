@@ -78,6 +78,7 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
+    SessionInitializationConflictError,
     model_preset_from_metadata,
 )
 from nanobot.session.recovery import (
@@ -777,7 +778,28 @@ class AgentLoop:
             return
 
         async def dispatch_and_publish() -> None:
-            ctx = CommandContext(msg=msg, session=None, key=key, raw=raw, loop=self)
+            session = None
+            runtime = None
+            if msg.session_initialization is not None:
+                delivery = self.turn_delivery_factory.unrouted(msg, key)
+                try:
+                    async with self._get_session_lock(key):
+                        session = self._admit_message_session(msg, key)
+                        self.sessions.save(session)
+                        runtime = self.runtime_for_session(session)
+                except Exception:
+                    logger.exception("Failed to initialize session {} for command", key)
+                    await delivery.fail(publish_completion=True)
+                    await delivery.idle()
+                    return
+            ctx = CommandContext(
+                msg=msg,
+                session=session,
+                key=key,
+                raw=raw,
+                loop=self,
+                runtime=runtime,
+            )
             result = await dispatch_fn(ctx)
             if result:
                 await self.bus.publish_outbound(result)
@@ -916,6 +938,10 @@ class AgentLoop:
 
     def _can_inject_message(self, msg: InboundMessage) -> bool:
         """Keep independent turns and controls out of user-input batches."""
+        if msg.session_initialization is not None:
+            # Initialization must cross the per-session admission boundary. Treat
+            # retries as FIFO barriers rather than merging them into an active turn.
+            return False
         if turn_continuation.internal_continuation_inbound(msg.metadata) or any(
             coordinator.owns_turn(msg) for coordinator in self._automation_turn_coordinators
         ):
@@ -1896,8 +1922,38 @@ class AgentLoop:
             metadata=meta,
         )
 
+    def _admit_message_session(self, msg: InboundMessage, session_key: str) -> Session:
+        """Create or reuse a session while enforcing one-shot initialization."""
+        requested_preset: str | None = None
+        if msg.session_initialization is not None:
+            requested_runtime = self.runtime_resolver.resolve_preset(
+                msg.session_initialization.model_preset
+            )
+            requested_preset = requested_runtime.model_preset
+            if requested_preset is None:  # pragma: no cover - resolver invariant
+                raise RuntimeError("resolved session preset has no canonical name")
+
+        if msg.require_existing_session:
+            session = self.sessions.get_cached(session_key)
+            if session is None:
+                raise RuntimeError("required session is not active")
+            created = False
+        elif requested_preset is None:
+            return self.sessions.get_or_create(session_key)
+        else:
+            session, created = self.sessions.get_or_create_with_status(session_key)
+
+        if requested_preset is None:
+            return session
+        if created:
+            session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = requested_preset
+            return session
+        if model_preset_from_metadata(session.metadata) == requested_preset:
+            return session
+        raise SessionInitializationConflictError(session_key, requested_preset)
+
     async def _restore_turn(self, ctx: TurnContext) -> None:
-        """Restore checkpoint / pending user turn; reference non-image attachments."""
+        """Admit the session, restore checkpoints, and reference attachments."""
         msg = ctx.msg
 
         if ctx.kind is TurnKind.USER and msg.media:
@@ -1909,12 +1965,7 @@ class AgentLoop:
             msg = ctx.msg
 
         if ctx.session is None:
-            if msg.require_existing_session:
-                ctx.session = self.sessions.get_cached(ctx.session_key)
-                if ctx.session is None:
-                    raise RuntimeError("required session is not active")
-            else:
-                ctx.session = self.sessions.get_or_create(ctx.session_key)
+            ctx.session = self._admit_message_session(msg, ctx.session_key)
         session = ctx.session
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools or self.tools
@@ -1944,10 +1995,6 @@ class AgentLoop:
         await ctx.delivery.started()
         if ctx.kind is TurnKind.USER:
             self.workspace_scopes.persist_message_scope(session, msg)
-            if msg.channel == "websocket":
-                inbound_model_preset = model_preset_from_metadata(msg.metadata)
-                if inbound_model_preset is not None:
-                    session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = inbound_model_preset
 
         if restore_runtime_checkpoint(session):
             self.sessions.save(session)

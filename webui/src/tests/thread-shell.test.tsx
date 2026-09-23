@@ -1641,16 +1641,10 @@ describe("ThreadShell", () => {
     expect(onNewChat).not.toHaveBeenCalled();
   });
 
-  it("applies the selected landing preset before sending the first prompt", async () => {
+  it("passes the selected landing preset into first-message session creation", async () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
     settings.model_call_order = ["fast"];
-    let resolveModelCommand!: () => void;
-    client.sendSystemCommand.mockImplementation(
-      () => new Promise<void>((resolve) => {
-        resolveModelCommand = resolve;
-      }),
-    );
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");
 
     const view = (currentSession: ReturnType<typeof session> | null) => wrap(client, (
@@ -1674,11 +1668,12 @@ describe("ThreadShell", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(client.sendSystemCommand).toHaveBeenCalledWith(
-      "chat-new",
-      "/model fast",
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledWith(
+      null,
+      "use the selected model",
+      "fast",
     ));
-    expect(onCreateChat).toHaveBeenCalledWith(null, "use the selected model", "fast");
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
 
     await act(async () => {
       rerender(view(session("chat-new", "fast")));
@@ -1687,11 +1682,7 @@ describe("ThreadShell", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("fast · gpt-5.5 · OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
-    expect(client.sendMessage).not.toHaveBeenCalled();
 
-    await act(async () => {
-      resolveModelCommand();
-    });
     await waitFor(() => {
       expectSendMessageWithTurn(client, "chat-new", "use the selected model");
     });
