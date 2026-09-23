@@ -188,6 +188,9 @@ class FallbackProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         return self._primary.supports_native_compaction(model)
 
+    def supports_pre_request_compaction(self, model: str | None = None) -> bool:
+        return self._primary.supports_pre_request_compaction(model)
+
     def _primary_call_context(
         self,
         provider_context: ProviderCallContext,
@@ -207,6 +210,7 @@ class FallbackProvider(LLMProvider):
             events=provider_context.events,
             response_preset=provider_context.response_preset,
             response_is_fallback=provider_context.response_is_fallback,
+            compaction_input_budget=provider_context.compaction_input_budget,
         )
 
     def _primary_available(self) -> bool:
@@ -588,6 +592,15 @@ class FallbackProvider(LLMProvider):
                     fallback_model,
                 ):
                     state = None
+                if provider_context.compaction_input_budget is not None and (
+                    state is None
+                    or not fallback_provider.supports_pre_request_compaction(fallback_model)
+                ):
+                    logger.warning(
+                        "Skipping fallback '{}': required pre-request compaction cannot resume",
+                        fallback_model,
+                    )
+                    continue
                 context_window_tokens = (
                     fallback.context_window_tokens
                     if fallback_provider.supports_native_compaction(fallback_model)
@@ -603,6 +616,7 @@ class FallbackProvider(LLMProvider):
                         if provider_context.response_preset is not None else None
                     ),
                     response_is_fallback=provider_context.response_preset is not None,
+                    compaction_input_budget=provider_context.compaction_input_budget,
                 )
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)

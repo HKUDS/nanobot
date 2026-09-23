@@ -22,6 +22,7 @@ from loguru import logger
 from nanobot.agent.context import TranscriptInput
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
+    CONTEXT_SAFETY_BUFFER,
     LLMResponse,
     LLMUsage,
     ProviderCallContext,
@@ -63,7 +64,6 @@ ProviderCompactionConsolidator = Callable[
     Awaitable[str | None],
 ]
 
-CONTEXT_SAFETY_BUFFER = 1024
 # read_file has its own bound; exempt it to avoid persist->read->persist loops.
 TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
@@ -650,16 +650,6 @@ class ContextGovernor:
             tool_definitions=tool_definitions,
             request_context_tokens=request_context_tokens,
         )
-        if pressure is not None:
-            prepared = await self._compact_request_history(
-                state,
-                state.compaction,
-                messages,
-                pressure,
-                tool_definitions=tool_definitions,
-            )
-            model_messages = prepared
-            supplemental_messages = None
         provider_context = (
             state.conversation.prepare_request(
                 transcript,
@@ -672,6 +662,34 @@ class ContextGovernor:
                 context_window_tokens=state.config.context_window_tokens,
             )
         )
+        if (
+            pressure is not None
+            and self.input_budget(state.config) > 0
+            and provider_context is not None
+            and provider_context.conversation_state is not None
+            and state.config.provider.supports_pre_request_compaction(state.config.model) is True
+        ):
+            # Keep the resumable state until its owner has compacted it. Inline
+            # server compaction alone cannot make an oversized request safe.
+            provider_context = replace(
+                provider_context, compaction_input_budget=self.input_budget(state.config),
+            )
+            logger.info(
+                "Request requires provider pre-request compaction for {}: tokens={} budget={} via {}",
+                state.config.session_key or "default", pressure[0],
+                provider_context.compaction_input_budget, pressure[1],
+            )
+        elif pressure is not None:
+            prepared = await self._compact_request_history(
+                state,
+                state.compaction,
+                messages,
+                pressure,
+                tool_definitions=tool_definitions,
+            )
+            provider_context = state.conversation.independent_request_context(
+                context_window_tokens=state.config.context_window_tokens,
+            )
         if state.events.publish is not None:
             provider_context = replace(
                 provider_context or ProviderCallContext(), events=state.events,
