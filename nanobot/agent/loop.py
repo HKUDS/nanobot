@@ -1102,16 +1102,6 @@ class AgentLoop:
                         break
                     converted.append(await _to_user_message(pending_msg))
                 consumed = len(converted)
-                for pending_msg in pending_messages[:consumed]:
-                    preview = "[content hidden]"
-                    if request_ctx.log_content and pending_msg.is_user_input:
-                        preview = pending_msg.content[:80]
-                        if len(pending_msg.content) > 80:
-                            preview += "..."
-                    logger.info(
-                        "Processing mid-turn injection from {}:{}: {}",
-                        pending_msg.channel, pending_msg.sender_id, preview,
-                    )
                 return converted
             finally:
                 # Commit only a successfully converted prefix. On failure or
