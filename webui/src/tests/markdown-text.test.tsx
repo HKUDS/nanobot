@@ -13,10 +13,12 @@ vi.mock("@/components/MarkdownTextRenderer", () => ({
     children,
     highlightCode,
     streaming,
+    preserveStreamingLayout,
   }: {
     children: string;
     highlightCode?: boolean;
     streaming?: boolean;
+    preserveStreamingLayout?: boolean;
   }) {
     useEffect(() => {
       rendererMountSpy();
@@ -29,7 +31,8 @@ vi.mock("@/components/MarkdownTextRenderer", () => ({
       <div
         data-testid="markdown-renderer"
         data-highlight-code={String(highlightCode)}
-        data-streaming-layout={String(streaming)}
+        data-streaming-layout={String(streaming || preserveStreamingLayout)}
+        data-generating={String(streaming)}
       >
         {children}
       </div>
@@ -124,6 +127,7 @@ describe("MarkdownText", () => {
 
     rerender(<MarkdownText preserveStreamingLayout>{source}</MarkdownText>);
 
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute("data-generating", "false");
     expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
       "data-streaming-layout",
       "true",

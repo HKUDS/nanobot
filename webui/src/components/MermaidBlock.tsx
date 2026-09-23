@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type PointerEvent } from "react";
 import { Expand, Minus, Plus, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -9,7 +9,11 @@ import { useThemeValue } from "@/hooks/useTheme";
 
 type Diagram = { source: string; dark: boolean; url: string | null };
 
-export function MermaidBlock({ code, streaming = false }: { code: string; streaming?: boolean }) {
+// Streamdown memoizes unchanged blocks. Context carries completion to a retained fence.
+export const MermaidStreamingContext = createContext(false);
+
+export function MermaidBlock({ code }: { code: string }) {
+  const streaming = useContext(MermaidStreamingContext);
   const { t } = useTranslation();
   const dark = useThemeValue() === "dark";
   const [diagram, setDiagram] = useState<Diagram | null>(null);

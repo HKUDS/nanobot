@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
+import { MessageBubble } from "@/components/MessageBubble";
 import { MermaidBlock } from "@/components/MermaidBlock";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { renderMermaid } from "@/lib/mermaid-renderer";
@@ -14,6 +15,15 @@ describe("Mermaid blocks", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
   });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+  it("renders a completed assistant diagram while preserving the chat's streaming layout", async () => {
+    const message = { id: "diagram-reply", role: "assistant" as const, createdAt: 1,
+      content: "Before\n\n```mermaid\nflowchart LR\n A-->B\n```" };
+    const view = render(<MessageBubble message={{ ...message, isStreaming: true }} />);
+    await screen.findByTestId("plain-code-fallback");
+    expect(renderMermaid).not.toHaveBeenCalled();
+    view.rerender(<MessageBubble message={{ ...message, isStreaming: false }} />);
+    expect(await screen.findByRole("img", { name: "Mermaid diagram" })).toBeInTheDocument();
+  });
   it("renders through the actual Markdown fence route, with source and expand controls", async () => {
     render(<MarkdownTextRenderer>{"```mermaid\nflowchart LR\n A-->B\n```"}</MarkdownTextRenderer>);
     expect(await screen.findByRole("img", { name: "Mermaid diagram" })).toHaveAttribute("src", "blob:diagram");

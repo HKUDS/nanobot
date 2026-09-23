@@ -15,7 +15,7 @@ import { Streamdown, type Components, type StreamdownProps } from "streamdown";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
-import { MermaidBlock } from "@/components/MermaidBlock";
+import { MermaidBlock, MermaidStreamingContext } from "@/components/MermaidBlock";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
@@ -42,6 +42,7 @@ interface MarkdownTextRendererProps {
   className?: string;
   highlightCode?: boolean;
   streaming?: boolean;
+  preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
 }
 
@@ -530,6 +531,7 @@ export default function MarkdownTextRenderer({
   className,
   highlightCode = true,
   streaming = false,
+  preserveStreamingLayout = false,
   onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
@@ -555,7 +557,7 @@ export default function MarkdownTextRenderer({
         if (match) {
           const code = String(kids).replace(/\n$/, "");
           if (match[1].toLowerCase() === "mermaid") {
-            return <MermaidBlock code={code} streaming={streaming} />;
+            return <MermaidBlock code={code} />;
           }
           return (
             <CodeBlock
@@ -614,7 +616,7 @@ export default function MarkdownTextRenderer({
         const fence = codeFenceFromPreChild(lone);
         if (fence) {
           if (fence.language?.toLowerCase() === "mermaid") {
-            return <MermaidBlock code={fence.code} streaming={streaming} />;
+            return <MermaidBlock code={fence.code} />;
           }
           return (
             <CodeBlock
@@ -826,13 +828,14 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode, onOpenFilePreview, streaming, t],
+    [highlightCode, onOpenFilePreview, t],
   );
 
   return (
+    <MermaidStreamingContext.Provider value={streaming}>
     <Streamdown
       key={needsMath && mathPlugin ? "math" : "text"}
-      mode={streaming ? "streaming" : "static"}
+      mode={streaming || preserveStreamingLayout ? "streaming" : "static"}
       parseIncompleteMarkdown
       remend={REMEND_OPTIONS}
       isAnimating={false}
@@ -859,5 +862,6 @@ export default function MarkdownTextRenderer({
     >
       {children}
     </Streamdown>
+    </MermaidStreamingContext.Provider>
   );
 }
