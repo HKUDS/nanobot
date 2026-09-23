@@ -584,6 +584,77 @@ async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch)
     provider.chat_stream_with_retry.assert_not_awaited()
 
 
+@pytest.mark.parametrize("context_window, omitted_count", [(200_000, 1), (100_000, 2)])
+async def test_runner_recovers_oversized_file_read_delta(
+    tmp_path, monkeypatch, context_window, omitted_count,
+):
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    # A cold/offline tokenizer must exercise the same conservative count as #5879.
+    monkeypatch.setattr(
+        "nanobot.utils.helpers._get_token_encoding",
+        MagicMock(side_effect=RuntimeError("tokenizer unavailable")),
+    )
+    paths = [tmp_path / f"result-{index}.json" for index in range(3)]
+    for path in paths:
+        path.write_text("record, " * 10_000, encoding="utf-8")
+    tools = ToolRegistry()
+    tools.register(ReadFileTool(workspace=tmp_path, allowed_dir=tmp_path))
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = True
+    provider_state = ProviderConversationState(
+        kind="openai_responses", provider="openai:test", model="test-model",
+        version=1, payload={"items": []},
+    )
+    calls = [
+        ToolCallRequest(id=f"read-{index}", name="read_file", arguments={
+            "path": str(path), "limit": 20,
+        })
+        for index, path in enumerate(paths)
+    ]
+    # Retrying the omitted file alone must return its content, not "unchanged".
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=calls, provider_state=provider_state),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="reread", name="read_file", arguments=calls[0].arguments,
+        )], provider_state=provider_state),
+        LLMResponse(content="done"),
+    ])
+    consolidate = AsyncMock(return_value="small checkpoint")
+    phases = []
+
+    async def observe(event):
+        if isinstance(event, ContextCompactionEvent):
+            phases.append(event.phase)
+
+    result = await AgentRunner().run(make_run_spec(
+        provider, tools=tools, model="test-model", workspace=tmp_path,
+        initial_messages=None,
+        transcript_input=TranscriptInput(history=[], current_message="inspect the files"),
+        transcript_builder=_build_transcript,
+        consolidate_history=consolidate,
+        context_window_tokens=context_window, max_tokens=8192, max_iterations=3,
+        max_tool_result_chars=16_000, concurrent_tools=True,
+        events=EventSink(observe),
+    ))
+
+    assert result.final_content == "done"
+    requests = provider.chat_stream_with_retry.await_args_list
+    delivered = [m for m in requests[1].kwargs["messages"] if m["role"] == "tool"]
+    assert all("read_file result was not sent" in m["content"] for m in delivered[:omitted_count])
+    assert "offset" in delivered[0]["content"] and "JSON" in delivered[0]["content"]
+    assert all("record, " * 10_000 in m["content"] for m in delivered[omitted_count:])
+    assert all(r.kwargs["provider_context"].conversation_state is None for r in requests[1:])
+    assert "record, " * 10_000 in requests[2].kwargs["messages"][-1]["content"]
+    assert all("record, " * 10_000 in m["content"] for m in result.messages if m["role"] == "tool")
+    assert phases == ["started", "succeeded", "started", "succeeded"]
+    assert consolidate.await_count == 2
+    assert not any(m["role"] == "tool" for m in consolidate.await_args_list[0].args[0])
+    assert all(path.read_text(encoding="utf-8") == "record, " * 10_000 for path in paths)
+    assert not (tmp_path / ".nanobot" / "tool-results").exists()
+
+
 @pytest.mark.asyncio
 async def test_runner_governs_messages_added_by_before_iteration_hook(monkeypatch):
     from nanobot.agent.hook import AgentHook, AgentHookContext
