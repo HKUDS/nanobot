@@ -4,13 +4,13 @@
   "setup": {
     "docsLabel": "Ouvrir le guide de configuration Linear",
     "officialLabel": "Créer une application OAuth Linear",
-    "tryIt": "Mentionnez l’application dans un commentaire de ticket. Les messages suivants dans sa session d’agent ne nécessitent pas de nouvelle mention.",
-    "summary": "Créez une application OAuth Linear privée, enregistrez ses identifiants et son URL publique, puis autorisez l’espace de travail. Chaque nouvelle session exige une @mention explicite ; les commentaires ordinaires sont ignorés.",
+    "tryIt": "Mentionnez l’application ou déléguez-lui un ticket ; aucune nouvelle mention n’est nécessaire dans la session d’agent.",
+    "summary": "Créez une application OAuth Linear privée, enregistrez ses identifiants et son URL publique, puis autorisez l’espace de travail. Lancez une session en mentionnant l’application ou en lui déléguant un ticket ; les commentaires ordinaires sont ignorés.",
     "steps": [
       "Exposez cette instance nanobot avec une URL HTTPS stable (un tunnel convient).",
-      "Créez une application OAuth privée dans Linear avec les autorisations read, write et app:mentionable. N’ajoutez pas app:assignable.",
+      "Créez une application OAuth privée dans Linear avec les autorisations read, write, app:mentionable et app:assignable.",
       "Abonnez le webhook de l’application à AgentSessionEvent, PermissionChange et OAuthAuthorization avec l’URL générée.",
-      "Saisissez les identifiants de l’application, attendez leur enregistrement automatique, connectez l’espace de travail avec OAuth, puis mentionnez l’application avec @ dans une issue."
+      "Connectez l’espace de travail avec OAuth, puis mentionnez l’application ou déléguez-lui un ticket."
     ],
     "fields": {
       "clientId": {
@@ -53,6 +53,10 @@
         "label": "Utilisateurs Linear autorisés",
         "placeholder": "ID utilisateur Linear séparés par des virgules",
         "help": "Laissez vide pour utiliser l’association nanobot, ou saisissez * pour autoriser tous les utilisateurs des espaces connectés."
+      },
+      "showReasoning": {
+        "label": "Afficher le raisonnement",
+        "help": "Publie le raisonnement du modèle comme activités de réflexion dans Linear. Désactivez cette option pour une session plus sobre."
       }
     }
   },
@@ -67,10 +71,23 @@
     "reconnect": "Connecter un autre espace de travail",
     "connect": "Connecter Linear",
     "openLinear": "Continuer dans Linear",
-    "createApp": "Créer une application Linear préremplie",
-    "savePublicUrl": "Saisissez une URL HTTPS publique pour créer une application Linear préremplie.",
-    "saveBeforeConnect": "Saisissez les identifiants de l’application et attendez leur enregistrement avant de vous connecter.",
+    "createApp": "Créer une application Linear",
+    "savePublicUrl": "Saisissez une URL HTTPS publique pour créer une application Linear.",
     "removeCredentials": "Supprimer les identifiants enregistrés",
-    "retrySave": "Réessayer"
+    "retrySave": "Réessayer",
+    "channelRunning": "Canal en cours d’exécution",
+    "accessAll": "Tous les membres d’un espace autorisé peuvent exécuter cet agent.",
+    "accessRestricted": "Seuls les ID utilisateur Linear répertoriés dans Avancé peuvent exécuter cet agent.",
+    "accessPairing": "Associez au premier usage et connectez Linear MCP pour rechercher ou modifier des issues.",
+    "configureTools": "Configurer Linear MCP",
+    "workspacesTitle": "Espaces autorisés",
+    "refreshWorkspaces": "Actualiser les espaces",
+    "loadingWorkspaces": "Chargement des espaces",
+    "noWorkspaces": "Aucun espace n’est autorisé. Connectez-en un pour recevoir les demandes de l’agent Linear.",
+    "refreshRequired": "Actualisation de l’autorisation requise",
+    "missingScopes": "Reconnectez-vous pour accorder : {{scopes}}",
+    "authorized": "Autorisé",
+    "confirmDisconnect": "Déconnecter l’espace",
+    "disconnect": "Déconnecter"
   }
 }

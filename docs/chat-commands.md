@@ -5,6 +5,7 @@ These commands work inside chat channels and interactive agent sessions:
 | Command | Description |
 |---------|-------------|
 | `/new` | Stop current task and start a new conversation |
+| `/compact` | Summarize the current conversation context while keeping saved chat history |
 | `/stop` | Stop the current task |
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |

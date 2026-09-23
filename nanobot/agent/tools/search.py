@@ -11,16 +11,17 @@ import os
 import re
 import threading
 import time
-from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, TypeVar
 
+from nanobot.agent.tools._search_content import ContentPage, MatchTooLargeError
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
 from nanobot.utils.document import (
+    DocumentLineSource,
     LocatedDocumentLine,
     PdfPageRangeError,
     open_document_line_source,
@@ -52,14 +53,6 @@ _TYPE_GLOB_MAP = {
     "html": ("*.html", "*.htm"),
     "css": ("*.css", "*.scss", "*.sass"),
 }
-
-
-@dataclass(slots=True)
-class _PendingContextMatch:
-    lines: list[LocatedDocumentLine]
-    match_index: int
-    match_start: int
-    remaining_after: int
 
 
 @dataclass(slots=True)
@@ -158,15 +151,6 @@ def _is_binary(raw: bytes) -> bool:
         return False
     non_text = sum(byte < 9 or 13 < byte < 32 for byte in sample)
     return (non_text / len(sample)) > 0.2
-
-
-def _excel_column(index: int) -> str:
-    """Return a 1-indexed spreadsheet column label without importing openpyxl."""
-    label = ""
-    while index > 0:
-        index, remainder = divmod(index - 1, 26)
-        label = chr(ord("A") + remainder) + label
-    return label
 
 
 def _paginate(items: list[T], limit: int | None, offset: int) -> tuple[list[T], bool]:
@@ -646,99 +630,21 @@ class GrepTool(_SearchTool):
         }
 
     @staticmethod
-    def _clip_rendered_line(text: str, match_start: int | None = None) -> str:
-        limit = GrepTool._MAX_RENDERED_LINE_CHARS
-        if len(text) <= limit:
-            return text
-
-        marker = "..."
-        available = limit - len(marker)
-        if match_start is None:
-            return text[:available] + marker
-
-        start = max(0, match_start - available // 3)
-        start = min(start, len(text) - available)
-        end = start + available
-        prefix = marker if start else ""
-        suffix = marker if end < len(text) else ""
-        visible = text[start:end]
-        if prefix and suffix:
-            visible = visible[: available - len(marker)]
-        return prefix + visible + suffix
-
-    @staticmethod
-    def _matching_contexts(
-        lines: Iterable[LocatedDocumentLine],
-        regex: re.Pattern[str],
-        before: int,
-        after: int,
-    ) -> Iterable[tuple[list[LocatedDocumentLine], int, int]]:
-        history: deque[LocatedDocumentLine] = deque(maxlen=before)
-        pending: list[_PendingContextMatch] = []
-
-        for line in lines:
-            if not line.searchable:
-                continue
-
-            still_pending: list[_PendingContextMatch] = []
-            for item in pending:
-                item.lines.append(line)
-                item.remaining_after -= 1
-                if item.remaining_after == 0:
-                    yield item.lines, item.match_index, item.match_start
-                else:
-                    still_pending.append(item)
-            pending = still_pending
-
-            match = regex.search(line.text)
-            if match is not None:
-                context_lines = [*history, line]
-                item = _PendingContextMatch(
-                    lines=context_lines,
-                    match_index=len(context_lines) - 1,
-                    match_start=match.start(),
-                    remaining_after=after,
-                )
-                if after == 0:
-                    yield item.lines, item.match_index, item.match_start
-                else:
-                    pending.append(item)
-            history.append(line)
-
-        for item in pending:
-            yield item.lines, item.match_index, item.match_start
-
-    @staticmethod
-    def _format_block(
-        display_path: str,
-        lines: list[LocatedDocumentLine],
-        match_index: int,
-        match_start: int = 0,
-        matches: dict[int, int] | None = None,
-    ) -> str:
-        match_line = lines[match_index]
-        source_line = match_line.extracted_line
-        match_locator = match_line.locator
-        if match_locator.startswith("sheet="):
-            column = _excel_column(match_line.text[:match_start].count("\t") + 1)
-            row_match = re.search(r",row=(\d+)$", match_locator)
-            if row_match:
-                match_locator += f",cell={column}{row_match.group(1)}"
-        suffix = f" [{match_locator}]" if match_locator else ""
-        block = [f"{display_path}:{source_line}{suffix}"]
-        matches = matches if matches is not None else {source_line: match_start}
-        for line in lines:
-            is_match = line.extracted_line in matches
-            marker = ">" if is_match else " "
-            coordinate = str(line.extracted_line)
-            if line.locator:
-                coordinate += f" [{line.locator}]"
-            rendered = GrepTool._clip_rendered_line(
-                line.text,
-                matches.get(line.extracted_line),
-            )
-            block.append(f"{marker} {coordinate}| {rendered}")
-        return "\n".join(block)
+    def _open_source(path: Path, pages: str | None, max_bytes: int) -> DocumentLineSource | None:
+        if path.suffix.lower() in _DOCUMENT_EXTENSIONS:
+            return open_document_line_source(path, pages=pages)
+        with path.open("rb") as file:
+            raw = file.read(max_bytes + 1)
+        if _is_binary(raw):
+            return None
+        try:
+            content = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        return DocumentLineSource(
+            LocatedDocumentLine(text, line_no, "")
+            for line_no, text in enumerate(content.splitlines(), 1)
+        )
 
     async def execute(
         self,
@@ -827,18 +733,11 @@ class GrepTool(_SearchTool):
                 limit = max_results
             else:
                 limit = _DEFAULT_HEAD_LIMIT
-            blocks: list[str] = []
-            result_chars = 0
-            returned_matches = 0
-            seen_content_matches = 0
-            truncated = False
-            size_truncated = False
+            content_page = ContentPage(limit, offset, self._MAX_RESULT_CHARS, self._MAX_RENDERED_LINE_CHARS)
             skipped_binary = 0
             skipped_large = 0
             document_errors: list[str] = []
             document_continuations: list[str] = []
-            matching_files: list[str] = []
-            paged: list[str] = []
             counts: dict[str, int] = {}
             file_mtimes: dict[str, float] = {}
             root = target if target.is_dir() else target.parent
@@ -869,116 +768,30 @@ class GrepTool(_SearchTool):
                 source_iterator: Iterator[LocatedDocumentLine] | None = None
                 is_document = file_path.suffix.lower() in _DOCUMENT_EXTENSIONS
                 try:
-                    if is_document:
-                        source = open_document_line_source(file_path, pages=pages)
-                        if source is None:
-                            skipped_binary += 1
-                            continue
-                        source_iterator = source.lines
-                        source_lines: Iterable[LocatedDocumentLine] = source_iterator
-                        if source.continuation:
-                            document_continuations.append(
-                                f"({display_path}: continue PDF search with "
-                                f"{source.continuation})"
-                            )
-                    else:
-                        with file_path.open("rb") as file:
-                            raw = file.read(max_file_bytes + 1)
-                        if _is_binary(raw):
-                            skipped_binary += 1
-                            continue
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            skipped_binary += 1
-                            continue
-                        source_lines = (
-                            LocatedDocumentLine(text, line_no, "")
-                            for line_no, text in enumerate(content.splitlines(), 1)
+                    source = self._open_source(file_path, pages, max_file_bytes)
+                    if source is None:
+                        skipped_binary += 1
+                        continue
+                    source_iterator = source.lines
+                    if source.continuation:
+                        document_continuations.append(
+                            f"({display_path}: continue PDF search with {source.continuation})"
                         )
+                    source_lines = checked_lines(source_iterator)
 
                     file_had_match = False
                     if output_mode == "content":
-                        contexts = self._matching_contexts(
-                            checked_lines(source_lines),
-                            regex,
-                            context_before,
-                            context_after,
-                        )
-                        last_lines: list[LocatedDocumentLine] = []
-                        last_matches: dict[int, int] = {}
-                        for context_lines, match_index, match_start in contexts:
-                            file_had_match = True
-                            seen_content_matches += 1
-                            if seen_content_matches <= offset:
-                                continue
-                            if limit is not None and returned_matches >= limit:
-                                truncated = True
-                                break
-                            match_line = context_lines[match_index]
-                            merge = bool(
-                                last_lines
-                                and context_lines[0].extracted_line <= last_lines[-1].extracted_line
-                            )
-                            if merge:
-                                context_lines = last_lines + [
-                                    line for line in context_lines
-                                    if line.extracted_line > last_lines[-1].extracted_line
-                                ]
-                            matches = {
-                                **(last_matches if merge else {}),
-                                match_line.extracted_line: match_start,
-                            }
-                            first_match = next(iter(matches))
-                            match_index = next(
-                                index for index, line in enumerate(context_lines)
-                                if line.extracted_line == first_match
-                            )
-                            block = self._format_block(
-                                display_path,
-                                context_lines,
-                                match_index,
-                                matches[first_match],
-                                matches,
-                            )
-                            prior_chars = len(blocks[-1]) if merge else 0
-                            extra_sep = 2 if blocks and not merge else 0
-                            reduced_context = False
-                            if result_chars - prior_chars + extra_sep + len(block) > self._MAX_RESULT_CHARS:
-                                if not blocks:
-                                    # A large context must still yield a match and advance pagination.
-                                    context_lines = [match_line]
-                                    block = self._format_block(display_path, context_lines, 0, match_start)
-                                    reduced_context = True
-                                    if len(block) > self._MAX_RESULT_CHARS:
-                                        return ToolResult.error("Error: match exceeds output budget; narrow path or pattern")
-                                else:
-                                    size_truncated = True
-                                    break
-                            if merge:
-                                blocks[-1] = block
-                            else:
-                                blocks.append(block)
-                            result_chars += extra_sep + len(block) - prior_chars
-                            returned_matches += 1
-                            last_lines, last_matches = context_lines, matches
-                            if reduced_context:
-                                # Start a new page after falling back to a context-free match.
-                                size_truncated = True
-                                break
+                        content_page.scan(display_path, source_lines, regex, context_before, context_after)
                     else:
-                        for line in checked_lines(source_lines):
+                        for line in source_lines:
                             if not line.searchable or regex.search(line.text) is None:
                                 continue
                             file_had_match = True
                             if output_mode == "count":
                                 counts[display_path] = counts.get(display_path, 0) + 1
                                 continue
-                            if display_path not in matching_files:
-                                matching_files.append(display_path)
-                                file_mtimes[display_path] = mtime
                             break
-                except (_SearchCancelledError, _SearchBudgetExceededError):
+                except (_SearchCancelledError, _SearchBudgetExceededError, MatchTooLargeError):
                     raise
                 except Exception as e:
                     if not is_document:
@@ -998,62 +811,34 @@ class GrepTool(_SearchTool):
                     close = getattr(source_iterator, "close", None)
                     if close is not None:
                         close()
-                if output_mode == "count" and file_had_match:
-                    if display_path not in matching_files:
-                        matching_files.append(display_path)
-                        file_mtimes[display_path] = mtime
-                if output_mode in {"count", "files_with_matches"} and file_had_match:
-                    continue
-                if truncated or size_truncated:
+                if file_had_match:
+                    file_mtimes[display_path] = mtime
+                if content_page.stopped:
                     break
 
-            if output_mode == "files_with_matches":
-                if not matching_files:
-                    result = f"No matches found for pattern '{pattern}' in {path}"
-                else:
-                    ordered_files = sorted(
-                        matching_files,
-                        key=lambda name: (-file_mtimes.get(name, 0.0), name),
-                    )
-                    paged, truncated = _text_page(ordered_files, limit, offset, self._MAX_RESULT_CHARS)
-                    result = "\n".join(paged)
-            elif output_mode == "count":
-                if not counts:
-                    result = f"No matches found for pattern '{pattern}' in {path}"
-                else:
-                    ordered_files = sorted(
-                        matching_files,
-                        key=lambda name: (-file_mtimes.get(name, 0.0), name),
-                    )
-                    count_lines = [f"{name}: {counts[name]}" for name in ordered_files]
-                    paged, truncated = _text_page(count_lines, limit, offset, self._MAX_RESULT_CHARS)
-                    result = "\n".join(paged)
-            else:
-                if not blocks:
-                    result = f"No matches found for pattern '{pattern}' in {path}"
-                else:
-                    result = "\n\n".join(blocks)
-
+            no_matches = f"No matches found for pattern '{pattern}' in {path}"
             notes: list[str] = []
-            if output_mode == "content" and truncated:
-                notes.append(
-                    f"(pagination: limit={limit}, offset={offset}; "
-                    f"use offset={offset + returned_matches} to continue)"
+            if output_mode == "content":
+                result, note = content_page.render(no_matches)
+                if note:
+                    notes.append(note)
+            else:
+                ordered_files = sorted(
+                    file_mtimes, key=lambda name: (-file_mtimes.get(name, 0.0), name),
                 )
-            elif output_mode == "content" and size_truncated:
-                notes.append(
-                    "(output truncated due to size; "
-                    f"use offset={offset + returned_matches} to continue)"
+                entries = (
+                    [f"{name}: {counts[name]}" for name in ordered_files]
+                    if output_mode == "count" else ordered_files
                 )
-            elif truncated and output_mode in {"count", "files_with_matches"}:
-                notes.append(
-                    f"(pagination: limit={limit}, offset={offset}; "
-                    f"use offset={offset + len(paged)} to continue)"
-                )
-            elif output_mode in {"count", "files_with_matches"} and offset > 0:
-                notes.append(f"(pagination: offset={offset})")
-            elif output_mode == "content" and offset > 0 and blocks:
-                notes.append(f"(pagination: offset={offset})")
+                paged, truncated = _text_page(entries, limit, offset, self._MAX_RESULT_CHARS)
+                result = "\n".join(paged) if file_mtimes or counts else no_matches
+                if truncated:
+                    notes.append(
+                        f"(pagination: limit={limit}, offset={offset}; "
+                        f"use offset={offset + len(paged)} to continue)"
+                    )
+                elif offset > 0:
+                    notes.append(f"(pagination: offset={offset})")
             if skipped_binary:
                 notes.append(f"(skipped {skipped_binary} binary/unreadable files)")
             if skipped_large:
@@ -1068,6 +853,8 @@ class GrepTool(_SearchTool):
             if notes:
                 result += "\n\n" + "\n".join(notes)
             return result
+        except MatchTooLargeError as exc:
+            return ToolResult.error(f"Error: {exc}")
         except _SearchBudgetExceededError as exc:
             detail = f"{self._MAX_SCAN_PATHS} paths" if str(exc) == "paths" else f"{self._MAX_SCAN_SECONDS:g} seconds"
             return ToolResult.error(f"Error: grep scan exceeded {detail}; narrow path, glob, or type and retry.")

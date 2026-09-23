@@ -1174,6 +1174,7 @@ function Shell({
   const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
     chatId: string;
@@ -1295,12 +1296,17 @@ function Shell({
 
   useEffect(() => {
     let cancelled = false;
+    const requestGeneration = settingsRefreshGenerationRef.current;
     fetchSettings(getToken())
       .then((payload) => {
-        if (!cancelled) setSettingsSnapshot(payload);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(payload);
+        }
       })
       .catch(() => {
-        if (!cancelled) setSettingsSnapshot(null);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -2205,7 +2211,21 @@ function Shell({
   }, [client, navigate, filePreviewStore]);
 
   useEffect(() => {
-    return client.onStatus((status) => {
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    const refreshSettings = (generation: number, attempt = 0): void => {
+      void fetchSettings(getToken())
+        .then((payload) => {
+          if (!cancelled && generation === settingsRefreshGenerationRef.current) {
+            setSettingsSnapshot(payload);
+          }
+        })
+        .catch(() => {
+          if (cancelled || generation !== settingsRefreshGenerationRef.current || attempt >= 3) return;
+          retryTimer = window.setTimeout(() => refreshSettings(generation, attempt + 1), 250);
+        });
+    };
+    const unsubscribe = client.onStatus((status) => {
       const startedAt = (() => {
         try {
           return Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
@@ -2226,11 +2246,18 @@ function Shell({
       } catch {
         // ignore storage errors
       }
+      const refreshGeneration = ++settingsRefreshGenerationRef.current;
       setIsRestarting(false);
       setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
       window.setTimeout(() => setRestartToast(null), 3_500);
+      refreshSettings(refreshGeneration);
     });
-  }, [client, t]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [client, getToken, t]);
 
   const onTurnEnd = useDeferredTitleRefresh(
     temporaryChatActive ? null : activePaneSession,

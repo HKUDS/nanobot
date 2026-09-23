@@ -4,13 +4,13 @@
   "setup": {
     "docsLabel": "Buka panduan penyiapan Linear",
     "officialLabel": "Buat aplikasi OAuth Linear",
-    "tryIt": "Mention aplikasi dalam komentar issue. Pesan lanjutan di Agent Session tidak memerlukan mention lagi.",
-    "summary": "Buat aplikasi OAuth Linear privat, simpan kredensial dan URL publiknya, lalu otorisasi workspace. Setiap sesi baru memerlukan @mention eksplisit; komentar biasa akan diabaikan.",
+    "tryIt": "Mention aplikasi atau delegasikan issue kepadanya; percakapan lanjutan di Agent Session tidak memerlukan mention lagi.",
+    "summary": "Buat aplikasi OAuth Linear privat, simpan kredensial dan URL publiknya, lalu otorisasi workspace. Mulai sesi dengan mention aplikasi atau mendelegasikan issue; komentar biasa diabaikan.",
     "steps": [
       "Ekspos instans nanobot ini melalui URL HTTPS yang stabil (tunnel dapat digunakan).",
-      "Buat aplikasi OAuth privat di Linear dengan scope read, write, dan app:mentionable. Jangan tambahkan app:assignable.",
+      "Buat aplikasi OAuth privat di Linear dengan scope read, write, app:mentionable, dan app:assignable.",
       "Daftarkan webhook aplikasi untuk AgentSessionEvent, PermissionChange, dan OAuthAuthorization menggunakan URL yang dibuat.",
-      "Masukkan kredensial aplikasi, tunggu hingga tersimpan otomatis, hubungkan ruang kerja dengan OAuth, lalu sebut aplikasi dengan @ dalam issue."
+      "Hubungkan workspace melalui OAuth, lalu mention aplikasi atau delegasikan issue kepadanya."
     ],
     "fields": {
       "clientId": {
@@ -53,6 +53,10 @@
         "label": "Pengguna Linear yang diizinkan",
         "placeholder": "ID pengguna Linear, dipisahkan koma",
         "help": "Biarkan kosong untuk memakai pairing nanobot, atau gunakan * untuk mengizinkan semua pengguna di workspace yang terhubung."
+      },
+      "showReasoning": {
+        "label": "Tampilkan penalaran",
+        "help": "Kirim penalaran model sebagai aktivitas pemikiran di Linear. Nonaktifkan untuk sesi yang lebih ringkas."
       }
     }
   },
@@ -67,10 +71,23 @@
     "reconnect": "Hubungkan workspace lain",
     "connect": "Hubungkan Linear",
     "openLinear": "Lanjutkan di Linear",
-    "createApp": "Buat aplikasi Linear yang sudah diisi",
-    "savePublicUrl": "Masukkan URL HTTPS publik untuk membuat aplikasi Linear yang sudah terisi.",
-    "saveBeforeConnect": "Masukkan kredensial aplikasi dan tunggu hingga tersimpan sebelum menghubungkan.",
+    "createApp": "Buat aplikasi Linear",
+    "savePublicUrl": "Masukkan URL HTTPS publik untuk membuat aplikasi Linear.",
     "removeCredentials": "Hapus kredensial tersimpan",
-    "retrySave": "Coba lagi"
+    "retrySave": "Coba lagi",
+    "channelRunning": "Channel berjalan",
+    "accessAll": "Semua anggota workspace yang diotorisasi dapat menjalankan agen ini.",
+    "accessRestricted": "Hanya ID pengguna Linear yang tercantum di Lanjutan yang dapat menjalankan agen ini.",
+    "accessPairing": "Lakukan pairing saat pertama digunakan dan hubungkan Linear MCP untuk mencari atau mengedit issue.",
+    "configureTools": "Konfigurasi Linear MCP",
+    "workspacesTitle": "Workspace yang diotorisasi",
+    "refreshWorkspaces": "Muat ulang workspace",
+    "loadingWorkspaces": "Memuat workspace",
+    "noWorkspaces": "Belum ada workspace yang diotorisasi. Hubungkan workspace untuk menerima permintaan agen Linear.",
+    "refreshRequired": "Penyegaran otorisasi diperlukan",
+    "missingScopes": "Hubungkan ulang untuk memberikan: {{scopes}}",
+    "authorized": "Diotorisasi",
+    "confirmDisconnect": "Putuskan workspace",
+    "disconnect": "Putuskan"
   }
 }

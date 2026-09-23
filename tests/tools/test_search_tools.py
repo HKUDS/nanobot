@@ -989,3 +989,73 @@ async def test_grep_bounds_scans(tmp_path, monkeypatch, budget, value):
     monkeypatch.setattr(GrepTool, budget, value)
     result = await GrepTool(workspace=tmp_path).execute(pattern="absent")
     assert result.startswith("Error: grep scan exceeded 0")
+
+
+async def test_grep_context_page_counts_matches_across_files(tmp_path):
+    (tmp_path / "a.txt").write_text("needle a1\nneedle a2\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("needle b1\nneedle b2\n", encoding="utf-8")
+    tool = GrepTool(workspace=tmp_path)
+
+    result = await tool.execute(pattern="needle", offset=1, head_limit=2)
+
+    assert result == (
+        "a.txt:2\n  1| needle a1\n> 2| needle a2\n\n"
+        "b.txt:1\n> 1| needle b1\n  2| needle b2\n\n"
+        "(pagination: limit=2, offset=1; use offset=3 to continue)"
+    )
+    last_page = await tool.execute(pattern="needle", offset=3, head_limit=2)
+    assert last_page == (
+        "b.txt:2\n  1| needle b1\n> 2| needle b2\n\n(pagination: offset=3)"
+    )
+
+
+async def test_grep_marks_a_long_line_already_present_as_context(tmp_path):
+    (tmp_path / "source.txt").write_text(
+        "needle first\n" + "x" * 3000 + "needle late" + "y" * 1000, encoding="utf-8",
+    )
+    result = await GrepTool(workspace=tmp_path).execute(pattern="needle")
+
+    assert re.findall(r"^> (\d+)\|", result, re.M) == ["1", "2"]
+    assert "needle first" in result and "needle late" in result
+    assert result.count("source.txt:") == 1
+    assert len(result) < 2100
+
+
+@pytest.mark.parametrize("mode", ["content", "count", "files_with_matches"])
+async def test_grep_closes_document_stream_and_preserves_locators(tmp_path, monkeypatch, mode):
+    from nanobot.utils.document import DocumentLineSource, LocatedDocumentLine
+
+    (tmp_path / "source.pdf").write_bytes(b"placeholder")
+    visited = []
+    closed = []
+
+    def document_lines():
+        try:
+            yield LocatedDocumentLine("Page 1", 1, "", searchable=False)
+            for n in range(2, 102):
+                visited.append(n)
+                yield LocatedDocumentLine("needle", n, f"page=1,line={n - 1}")
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr(
+        "nanobot.agent.tools.search.open_document_line_source",
+        lambda *_args, **_kwargs: DocumentLineSource(document_lines(), "pages=2-3"),
+    )
+    result = await GrepTool(workspace=tmp_path).execute(
+        pattern="needle", path="source.pdf", output_mode=mode,
+        head_limit=1, context_before=0, context_after=1,
+    )
+
+    assert closed == [True]
+    assert "(source.pdf: continue PDF search with pages=2-3)" in result
+    if mode == "content":
+        assert result.startswith("source.pdf:2 [page=1,line=1]\n> 2 [page=1,line=1]| needle")
+        assert "use offset=1 to continue" in result
+        assert visited == [2, 3, 4]
+    elif mode == "count":
+        assert result.startswith("source.pdf: 100")
+        assert len(visited) == 100
+    else:
+        assert result.startswith("source.pdf\n")
+        assert visited == [2]
