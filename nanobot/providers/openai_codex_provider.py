@@ -226,6 +226,7 @@ class OpenAICodexProvider(LLMProvider):
                 stage = "codex_compaction"
                 history_items = responses_state_items(sanitized_state) or []
                 delta_items = input_items[len(history_items):]
+                history_items, delta_items = _split_compaction_input(history_items, delta_items)
                 compact_body = {
                     **body,
                     "input": [*history_items, {"type": "compaction_trigger"}],
@@ -438,6 +439,27 @@ def _without_response_item_ids(
     body = dict(request_body)
     body["input"] = sanitized_input
     return body
+
+
+def _split_compaction_input(
+    history_items: list[dict[str, Any]],
+    delta_items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep pending outputs and their function calls after the compaction boundary."""
+    pending_ids = {
+        item["call_id"] for item in delta_items
+        if item.get("type") == "function_call_output" and isinstance(item.get("call_id"), str)
+    }
+    history: list[dict[str, Any]] = []
+    pending_calls: list[dict[str, Any]] = []
+    for item in history_items:
+        if item.get("type") == "function_call" and item.get("call_id") in pending_ids:
+            pending_calls.append(item)
+        else:
+            history.append(item)
+    # Compaction rejects unanswered calls; the following generation request
+    # needs each original call before its still-unsubmitted output.
+    return history, [*pending_calls, *delta_items]
 
 
 def _retained_compaction_messages(

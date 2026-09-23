@@ -15,7 +15,7 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import ModelPresetConfig
-from nanobot.providers.base import LLMResponse, LLMUsage
+from nanobot.providers.base import LLMResponse, LLMUsage, ProviderCallContext
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.openai_codex_provider import OpenAICodexProvider, _CodexHTTPError
@@ -73,6 +73,12 @@ def transport(monkeypatch):
 
     async def request(_url, _headers, body, **_kwargs):
         bodies.append(deepcopy(body))
+        calls = {i["call_id"] for i in body["input"] if i.get("type") == "function_call"}
+        outputs = {i["call_id"] for i in body["input"] if i.get("type") == "function_call_output"}
+        if calls != outputs:
+            raise _CodexHTTPError(
+                "Function calls and outputs must be paired", status_code=400,
+            )
         if body["input"][-1].get("type") == "compaction_trigger":
             if behavior["error"] is not None:
                 raise behavior["error"]
@@ -128,7 +134,9 @@ async def test_pressure_compacts_resumable_state_before_sending_tool_result(
     assert len(pending) == 1
     assert pending[0]["call_id"] == "read-1"
     assert pending[0]["output"] == raw[-1]["content"]
-    assert bodies[1]["input"][-2]["type"] == "compaction"
+    assert [i.get("type") for i in bodies[1]["input"][-3:]] == [
+        "compaction", "function_call", "function_call_output",
+    ]
     assert not any(item.get("type") == "reasoning" for item in bodies[1]["input"])
 
 
@@ -145,6 +153,42 @@ async def test_unpressured_request_preserves_normal_provider_behavior(transport)
     assert response.content == "done"
     consolidate.assert_not_awaited()
     assert len(transport[0]) == 1
+
+
+async def test_compaction_preserves_parallel_calls_with_reordered_pending_outputs(transport):
+    provider = OpenAICodexProvider()
+    completed_exchange = [
+        {"type": "function_call", "call_id": "completed", "name": "read_file", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "completed", "output": "old source"},
+    ]
+    pending_calls = [
+        {"type": "function_call", "call_id": call_id, "name": "read_file", "arguments": "{}"}
+        for call_id in ("read-a", "read-b")
+    ]
+    saved = build_responses_state(
+        provider=provider._responses_state_provider(), model="gpt-5.6-sol",
+        input_items=[{"role": "user", "content": "read files"}, *completed_exchange],
+        output_items=[{"type": "reasoning", "encrypted_content": "opaque"}, *pending_calls],
+        usage=LLMUsage.reported(input_tokens=180_000, output_tokens=10),
+    ).with_pending_messages([
+        {"role": "tool", "tool_call_id": "read-b", "content": "source B"},
+        {"role": "tool", "tool_call_id": "read-a", "content": "source A"},
+    ])
+    response = await provider.chat(
+        [{"role": "user", "content": "read files"}], max_tokens=8192,
+        provider_context=ProviderCallContext(
+            conversation_state=saved, context_window_tokens=200_000,
+            compaction_input_budget=190_784,
+        ),
+    )
+    assert response.content == "done"
+    compact, generation = transport[0]
+    assert [i for i in compact["input"] if i.get("call_id")] == completed_exchange
+    assert [i for i in generation["input"] if i.get("type") == "function_call"] == pending_calls
+    assert [i for i in generation["input"] if i.get("type") == "function_call_output"] == [
+        {"type": "function_call_output", "call_id": "read-b", "output": "source B"},
+        {"type": "function_call_output", "call_id": "read-a", "output": "source A"},
+    ]
 
 
 @pytest.mark.parametrize("mode", ["disabled", "inline_only", "incompatible_state"])
