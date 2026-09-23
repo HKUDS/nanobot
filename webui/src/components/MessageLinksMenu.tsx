@@ -37,11 +37,12 @@ export function useMessageWebLinks(root: RefObject<HTMLElement>, open: boolean) 
 
 const itemClassName = `${floatingItemClassName} ${floatingItemFocusClassName} w-full min-h-11 text-start hover:bg-muted/70`;
 
-/** A drill-in inside the existing message popover, not another floating layer. */
-export function MessageLinksMenu({ links, onBack, onClose }: {
+/** A drill-in inside the message's action surface, not another floating layer. */
+export function MessageLinksMenu({ links, onBack, onClose, expanded = false }: {
   links: MessageWebLink[];
   onBack: () => void;
   onClose: () => void;
+  expanded?: boolean;
 }) {
   const { t } = useTranslation();
   const openPreview = useContext(WebPreviewContext);
@@ -49,7 +50,7 @@ export function MessageLinksMenu({ links, onBack, onClose }: {
   const active = links.find((link) => link.href === selected);
   const backRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => { backRef.current?.focus({ preventScroll: true }); }, [selected]);
-  return <div className="w-60 max-w-full">
+  return <div className={expanded ? "w-full" : "w-60 max-w-full"}>
     <button ref={backRef} type="button" className={itemClassName} aria-label={t("webPreview.back")}
       onClick={() => active && links.length > 1 ? setSelected(null) : onBack()}>
       <ArrowLeft aria-hidden /><span>{t("webPreview.viewLinks")}</span>

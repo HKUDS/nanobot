@@ -805,7 +805,8 @@
   padding-inline-end: max(0.75rem, calc((100% - var(--content-column-width)) / 2));
 }
 
-.message-block-menu-trigger {
+.message-block-menu-trigger,
+.message-block-hover-time {
   pointer-events: none;
   opacity: 0;
 }
@@ -815,9 +816,16 @@
   top: calc((1rem + 28px - var(--message-block-control-size)) / 2);
 }
 
+[data-user-text-bubble] > .message-block-hover-time {
+  top: calc((1rem + 28px + var(--message-block-control-size)) / 2);
+}
+
 [data-context-block-active] .message-block-menu-trigger,
 [data-message-context-menu-open] .message-block-menu-trigger,
-.message-block-menu-trigger:focus-visible {
+.message-block-menu-trigger:focus-visible,
+[data-context-block-active] .message-block-hover-time,
+[data-message-context-menu-open] .message-block-hover-time,
+.message-block-hover-time:focus-visible {
   pointer-events: auto;
   opacity: 1;
 }
@@ -856,6 +864,19 @@
   .touch-target {
     min-width: 2.75rem;
     min-height: 2.75rem;
+  }
+}
+
+/* On phones, actions follow the message instead of taking a separate gutter. */
+@media (max-width: 767px) {
+  .thread-message-row {
+    padding-inline: 1rem;
+  }
+
+  [data-message-mobile-actions],
+  [data-message-mobile-sheet] {
+    --message-block-control-size: 2.75rem;
+    --message-block-action-width: 2.75rem;
   }
 }
 

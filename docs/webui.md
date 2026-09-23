@@ -463,6 +463,14 @@ link menu. For in-app actions on touch devices, open the message's existing
 **Message actions → View links** entry. It lists only the web links rendered in
 that message, not URLs inside code blocks or file references. Choose a link to
 copy it, open it externally, or preview it beside the current conversation.
+On phone-sized screens, Copy and Message actions sit below the message, leaving
+the full text width available. Message actions opens a bottom sheet; close it
+with its close button, by tapping outside, or with Escape. Desktop keeps the
+hover-triggered message popover.
+On desktop, hovering or focusing a message also reveals a short timestamp below
+its actions: a 24-hour clock for today, or month/day for every other date. Hover
+or focus that label for the full local date and time, including the year. Replies
+use their completion timestamp when available, otherwise their creation timestamp.
 There is no persistent action button beside each link and no custom long-press
 gesture to interfere with scrolling or text selection.
 Ordinary clicks still open links in a browser tab. File and session links keep

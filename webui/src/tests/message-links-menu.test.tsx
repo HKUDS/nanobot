@@ -7,7 +7,7 @@ import { useMessageWebLinks } from "@/components/MessageLinksMenu";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 vi.mock("@/lib/clipboard", () => ({ copyTextToClipboard: vi.fn(async () => true) }));
-afterEach(() => { cleanup(); vi.mocked(copyTextToClipboard).mockReset().mockResolvedValue(true); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.mocked(copyTextToClipboard).mockReset().mockResolvedValue(true); });
 
 function view(content: string, openPreview?: (url: string) => void) {
   return <WebPreviewContext.Provider value={openPreview}>
@@ -22,6 +22,76 @@ async function openLinks() {
 }
 
 describe("message link actions", () => {
+  function mobileViewport() {
+    const listeners = new Set<() => void>();
+    let narrow = true;
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      get matches() { return query === "(max-width: 767px)" && narrow; },
+      media: query,
+      addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+    })));
+    return (value: boolean) => act(() => { narrow = value; listeners.forEach(listener => listener()); });
+  }
+
+  it("puts mobile actions after the reply and opens one bottom sheet with working back, copy and preview", async () => {
+    mobileViewport();
+    const preview = vi.fn();
+    const content = "[Website](https://example.com/demo)";
+    const { container } = render(view(content, preview));
+    const link = await screen.findByRole("link", { name: /Website/ });
+    const footer = container.querySelector("[data-message-mobile-actions]")!;
+    expect(link.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector(".message-block-menu-trigger")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-message-hover-time]")).not.toBeInTheDocument();
+    fireEvent.click(within(footer as HTMLElement).getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledWith(content));
+    const menu = await openLinks();
+    expect(menu).toHaveAttribute("data-message-mobile-sheet");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.click(within(menu).getByRole("button", { name: "Back" }));
+    expect(within(menu).queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Message actions" })).toHaveFocus();
+    await openLinks();
+    fireEvent.click(screen.getByRole("button", { name: "Preview website" }));
+    expect(preview).toHaveBeenCalledWith("https://example.com/demo");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("restores the desktop menu on resize without duplicating actions", async () => {
+    const resize = mobileViewport();
+    const { container } = render(view("[Website](https://example.com/demo)"));
+    await screen.findByRole("link", { name: /Website/ });
+    await openLinks();
+    resize(false);
+    await waitFor(() => expect(container.querySelector("[data-message-mobile-actions]")).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).not.toHaveAttribute("data-message-mobile-sheet");
+    expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
+    // Resizing may close the modal as focus is returned; either way its trigger stays usable.
+    if (!screen.queryByRole("dialog")) fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it("keeps user actions outside the bubble and exposes a labelled mobile fork action", async () => {
+    mobileViewport();
+    const fork = vi.fn();
+    const { container } = render(<ThreadMessages onForkFromMessage={fork} messages={[
+      { id: "user", role: "user", content: "A prompt", createdAt: 1 },
+      { id: "reply", role: "assistant", content: "A reply", createdAt: 2 },
+    ]} />);
+    await screen.findByText("A reply");
+    expect(container.querySelector("[data-user-text-bubble] [data-message-block-menu-trigger]")).toBeNull();
+    expect(container.querySelectorAll("[data-message-mobile-actions]")).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "Message actions" })[1]);
+    const menu = screen.getByRole("dialog");
+    expect(within(menu).getByRole("button", { name: "Fork" })).toHaveTextContent("Fork");
+    fireEvent.click(within(menu).getByRole("button", { name: "Fork" }));
+    expect(fork).toHaveBeenCalledWith(1);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("collects rendered links, deduplicates destinations and ignores code, images and file references", async () => {
     render(view("[First](https://example.com/) and [Again](https://example.com).\n\n[Second](https://example.org/demo)\n\nhttps://example.net/plain\n\n`https://code.invalid/inline`\n\n```text\nhttps://code.invalid/block\n```\n\n![Image](https://image.invalid/pic.png)\n\n[notes.txt](notes.txt)"));
     await screen.findByRole("link", { name: "First" });

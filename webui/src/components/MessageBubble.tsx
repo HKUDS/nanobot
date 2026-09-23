@@ -120,6 +120,34 @@ function useMessageCopy(content: string) {
   return { copied, label, onCopy };
 }
 
+function messageCopyContent(message: UIMessage, t: (key: string) => string) {
+  return message.role === "assistant" && message.compactReply === "empty"
+    ? t("thread.compaction.empty")
+    : message.role === "assistant" && message.compactReply === "failed"
+      ? t("thread.compaction.failed")
+      : message.content;
+}
+
+/** The same copy behavior in the desktop menu and the mobile reply footer. */
+export function MessageCopyButton({ message, className }: { message: UIMessage; className?: string }) {
+  const { t } = useTranslation();
+  const content = messageCopyContent(message, t);
+  const { copied, label, onCopy } = useMessageCopy(content);
+  if (!content.trim()) return null;
+  return <TooltipProvider><Tooltip><TooltipTrigger asChild><button type="button" data-message-block-copy-action
+    data-assistant-copy-action={message.role === "assistant" || undefined}
+    onClick={onCopy} aria-label={label}
+    className={cn(
+      "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
+      "text-muted-foreground transition-[color,background-color,scale] hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
+      className,
+    )}>
+    {copied ? <Check className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+      : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />}
+  </button></TooltipTrigger><TooltipContent side="top" align="center">{label}</TooltipContent></Tooltip></TooltipProvider>;
+}
+
 interface MessageBlockMenuActivity {
   label: string;
   expanded: boolean;
@@ -133,6 +161,7 @@ interface MessageBlockMenuActionsProps {
   onForkFromHere?: () => void;
   activity?: MessageBlockMenuActivity;
   onViewLinks?: () => void;
+  sheet?: boolean;
 }
 
 /** Actions and metadata shown after opening a visual message block's context panel. */
@@ -142,17 +171,11 @@ export function MessageBlockMenuActions({
   onForkFromHere,
   activity,
   onViewLinks,
+  sheet = false,
 }: MessageBlockMenuActionsProps) {
   const { t } = useTranslation();
-  const content = message.role === "assistant"
-    ? message.compactReply === "empty"
-      ? t("thread.compaction.empty")
-      : message.compactReply === "failed"
-        ? t("thread.compaction.failed")
-        : message.content
-    : message.content;
+  const content = messageCopyContent(message, t);
   const hasText = content.trim().length > 0;
-  const { copied, label: copyLabel, onCopy } = useMessageCopy(content);
   const showFork = message.role === "assistant"
     && !message.isStreaming
     && !isTurnStreaming
@@ -175,50 +198,16 @@ export function MessageBlockMenuActions({
     <TooltipProvider>
       <div
         data-message-block-menu-actions
-        className="flex w-max max-w-full flex-col items-start gap-1"
+        className={cn("flex max-w-full flex-col items-start gap-1", sheet ? "w-full" : "w-max")}
       >
-        {hasText || showFork || activity ? (
+        {(!sheet && hasText) || showFork || activity ? (
           <div
             data-message-block-toolbar
-            className="flex w-full flex-wrap items-center gap-x-1 gap-y-1"
+            className={cn("flex w-full flex-wrap gap-x-1 gap-y-1", sheet ? "flex-col items-stretch" : "items-center")}
           >
-            {hasText || showFork ? (
+            {(!sheet && hasText) || showFork ? (
               <div className="flex min-h-[var(--message-block-control-size)] items-center gap-0.5">
-                {hasText ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        data-message-block-copy-action
-                        data-assistant-copy-action={message.role === "assistant" || undefined}
-                        onClick={onCopy}
-                        aria-label={copyLabel}
-                        className={cn(
-                          "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
-                          "text-muted-foreground transition-[color,background-color,scale]",
-                          "hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          "motion-reduce:transform-none",
-                        )}
-                      >
-                        {copied ? (
-                          <Check
-                            className="h-3.5 w-3.5 -translate-x-px"
-                            strokeWidth={1.75}
-                            aria-hidden
-                          />
-                        ) : (
-                          <Copy
-                            className="h-3.5 w-3.5 -translate-x-px"
-                            strokeWidth={1.75}
-                            aria-hidden
-                          />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" align="center">{copyLabel}</TooltipContent>
-                  </Tooltip>
-                ) : null}
+                {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
                 {showFork ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -234,9 +223,11 @@ export function MessageBlockMenuActions({
                           "hover:bg-muted/70 hover:text-foreground active:scale-[0.96]",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                           "motion-reduce:transform-none",
+                          sheet && "w-full justify-start gap-2 px-2 text-sm",
                         )}
                       >
                         <ForkArrowIcon className="h-3.5 w-3.5" />
+                        {sheet ? <span>{t("message.forkFromHere")}</span> : null}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" align="center">
@@ -258,6 +249,7 @@ export function MessageBlockMenuActions({
                   "text-start text-[11px] leading-4",
                   "text-muted-foreground transition-colors hover:text-foreground",
                   "focus-visible:outline-none",
+                  sheet && "w-full rounded-control text-sm hover:bg-muted/70",
                 )}
               >
                 <span
@@ -289,7 +281,7 @@ export function MessageBlockMenuActions({
         {timestampLabel || automationSourceLabel ? (
           <div
             data-message-block-metadata
-            className="mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 text-[10px] leading-4 text-muted-foreground/45"
+            className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4", sheet ? "text-xs text-muted-foreground" : "text-[10px] text-muted-foreground/45")}
           >
             {timestampLabel ? (
               <time

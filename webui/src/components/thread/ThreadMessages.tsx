@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
+import { MessageBlockMenuActions, MessageBubble, MessageCopyButton } from "@/components/MessageBubble";
 import { MessageLinksMenu, useMessageWebLinks } from "@/components/MessageLinksMenu";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import {
@@ -11,6 +11,10 @@ import {
 } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { fmtDateTime, formatMessageHoverTime } from "@/lib/format";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
@@ -91,6 +95,7 @@ export function ThreadMessages({
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
   const messageListRef = useRef<HTMLDivElement>(null);
+  const mobileActions = useMediaQuery("(max-width: 767px)");
   const units = useMemo(
     () => buildDisplayUnits(messages),
     [messages],
@@ -222,6 +227,7 @@ export function ThreadMessages({
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
             unit={unit}
+            mobileActions={mobileActions}
             marginTop={marginTop}
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
@@ -323,6 +329,7 @@ function pendingTurnProjection(
 }
 
 interface ThreadDisplayUnitProps {
+  mobileActions: boolean;
   unitKey: string;
   unit: DisplayUnit;
   marginTop: string;
@@ -356,6 +363,7 @@ interface ThreadDisplayUnitProps {
 }
 
 interface MessageBlockMenuProps {
+  mobileActions: boolean;
   messageRoot: RefObject<HTMLElement>;
   message: UIMessage;
   isTurnStreaming: boolean;
@@ -374,6 +382,7 @@ interface MessageBlockMenuProps {
 }
 
 function MessageBlockMenu({
+  mobileActions,
   messageRoot,
   message,
   isTurnStreaming,
@@ -405,6 +414,43 @@ function MessageBlockMenu({
   const contextActiveRef = useRef(contextActive);
   contextActiveRef.current = contextActive;
   const label = t("message.actions");
+  const timestamp = message.role === "assistant" && Number.isFinite(message.completedAt)
+    ? message.completedAt
+    : message.createdAt;
+  // Re-evaluated when this message becomes active, including after an overnight idle.
+  const shortTime = mobileActions ? "" : formatMessageHoverTime(timestamp);
+  const fullTime = shortTime ? fmtDateTime(timestamp) : "";
+  const actions = linksShown && links.length > 0 ? <MessageLinksMenu links={links}
+    expanded={mobileActions}
+    onBack={() => { setLinksShown(false); contentRef.current?.focus({ preventScroll: true }); }}
+    onClose={() => onOpenChange(false)} /> : <MessageBlockMenuActions
+    message={message}
+    isTurnStreaming={isTurnStreaming}
+    onForkFromHere={onForkFromHere ? () => { if (mobileActions) onOpenChange(false); onForkFromHere(); } : undefined}
+    activity={activity}
+    sheet={mobileActions}
+    onViewLinks={links.length > 0 ? () => setLinksShown(true) : undefined}
+  />;
+  if (mobileActions) {
+    return <div data-message-mobile-actions className={cn("mt-1 flex items-center gap-0.5", message.role === "user" && "justify-end")}>
+      <MessageCopyButton message={message} className="h-11 w-11" />
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogTrigger asChild>
+          <button ref={triggerRef} type="button" data-message-block-menu-trigger aria-label={label}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+          </button>
+        </DialogTrigger>
+        <DialogContent ref={contentRef} placement="bottom" aria-describedby={undefined}
+          data-message-block-menu data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
+          className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
+          onCloseAutoFocus={(event) => { if (activity?.expanded) event.preventDefault(); }}>
+          <DialogTitle className="px-2 pb-2 pe-10 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
+          {actions}
+        </DialogContent>
+      </Dialog>
+    </div>;
+  }
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
@@ -434,6 +480,21 @@ function MessageBlockMenu({
           </span>
         </button>
       </PopoverTrigger>
+      {shortTime && fullTime && typeof timestamp === "number" ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <time data-message-hover-time dateTime={new Date(timestamp).toISOString()}
+                tabIndex={0} aria-label={fullTime}
+                className="message-block-hover-time absolute start-[calc(-1*var(--message-block-trigger-offset)-2px)] top-[var(--message-block-control-size)] z-10 w-[calc(var(--message-block-control-size)+4px)] truncate rounded-mark text-center text-[10px] leading-4 tabular-nums text-muted-foreground outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none">
+                {shortTime}
+              </time>
+            </TooltipTrigger>
+            <TooltipContent side="right" align="start" collisionPadding={12}
+              data-message-context-menu-block={contextBlockKey}>{fullTime}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : null}
       <PopoverContent
         ref={contentRef}
         data-message-block-menu
@@ -472,21 +533,14 @@ function MessageBlockMenu({
           "shadow-[0_2px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.24)]",
         )}
       >
-        {linksShown && links.length > 0 ? <MessageLinksMenu links={links}
-          onBack={() => { setLinksShown(false); contentRef.current?.focus({ preventScroll: true }); }}
-          onClose={() => onOpenChange(false)} /> : <MessageBlockMenuActions
-          message={message}
-          isTurnStreaming={isTurnStreaming}
-          onForkFromHere={onForkFromHere}
-          activity={activity}
-          onViewLinks={links.length > 0 ? () => setLinksShown(true) : undefined}
-        />}
+        {actions}
       </PopoverContent>
     </Popover>
   );
 }
 
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
+  mobileActions,
   unitKey,
   unit,
   marginTop,
@@ -579,6 +633,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   ]);
   const blockMenu = unit.type === "message" && contextBlockKey !== undefined ? (
     <MessageBlockMenu
+      mobileActions={mobileActions}
       messageRoot={elementRef}
       message={unit.message}
       isTurnStreaming={isTurnStreaming}
@@ -649,7 +704,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           )
         ) : (
           <div className={unit.message.role === "assistant" ? "relative" : undefined}>
-            {unit.message.role === "assistant" ? blockMenu : null}
+            {unit.message.role === "assistant" && !mobileActions ? blockMenu : null}
             {showBlockContext && blockActivity ? (
               <div className={blockActivityExpanded ? "mb-2" : undefined}>
                 <AgentActivityCluster
@@ -678,8 +733,9 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
               mcpPresets={mcpPresets}
               slashCommands={slashCommands}
               onOpenFilePreview={onOpenFilePreview}
-              contextMenu={unit.message.role === "user" ? blockMenu : undefined}
+              contextMenu={unit.message.role === "user" && !mobileActions ? blockMenu : undefined}
             />
+            {mobileActions ? blockMenu : null}
             {unit.message.role === "assistant"
             && unit.message.kind !== "compaction"
             && contextBlockKey === undefined ? (
@@ -702,6 +758,7 @@ function threadDisplayUnitPropsEqual(
 ): boolean {
   return (
     displayUnitsEqual(previous.unit, next.unit)
+    && previous.mobileActions === next.mobileActions
     && previous.marginTop === next.marginTop
     && previous.userPromptId === next.userPromptId
     && previous.hasBodyBelow === next.hasBodyBelow
