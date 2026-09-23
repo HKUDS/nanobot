@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink
+from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import (
     SessionSummary,
@@ -24,8 +25,6 @@ SessionEventFactory = Callable[[str], EventSink]
 
 
 class AutoCompact:
-    _INTERNAL_SESSION_PREFIXES = ("dream:",)
-
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0,
                  bind_events: SessionEventFactory | None = None):
@@ -61,10 +60,6 @@ class AutoCompact:
             for message in session.messages[session.last_archived:]
         )
 
-    @classmethod
-    def _is_internal_session(cls, key: str) -> bool:
-        return key.startswith(cls._INTERNAL_SESSION_PREFIXES)
-
     def check_expired(
         self,
         schedule_background: Callable[[Coroutine[Any, Any, None]], None],
@@ -75,7 +70,8 @@ class AutoCompact:
         now = datetime.now()
         for info in self.sessions.list_sessions():
             key = info.get("key", "")
-            if not key or self._is_internal_session(key) or key in self._archiving:
+            # Dream sessions are per-run; persistent maintenance sessions still compact.
+            if not key or is_dream_session(key) or key in self._archiving:
                 continue
             if key in active_session_keys:
                 continue
@@ -91,7 +87,7 @@ class AutoCompact:
                 schedule_background(self._archive(key, runtime=runtime))
 
     async def _archive(self, key: str, *, runtime: LLMRuntime) -> None:
-        if self._is_internal_session(key):
+        if is_dream_session(key):
             self._archiving.discard(key)
             return
         try:
@@ -114,7 +110,7 @@ class AutoCompact:
             self._archiving.discard(key)
 
     def prepare_session(self, session: Session, key: str) -> tuple[Session, SessionSummary | None]:
-        if self._is_internal_session(key):
+        if is_dream_session(key):
             self._archiving.discard(key)
             self._summaries.pop(key, None)
             return session, None

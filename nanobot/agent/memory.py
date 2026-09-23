@@ -26,6 +26,7 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.runtime_context import public_history_messages
+from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
@@ -751,7 +752,7 @@ class MemoryStore:
             dream_files: list[tuple[Path, str]] = []
             for path in sessions_dir.glob("*.jsonl"):
                 decoded_key = SessionManager.decode_storage_key(path.stem)
-                if decoded_key is not None and decoded_key.startswith("dream:"):
+                if decoded_key is not None and is_dream_session(decoded_key):
                     dream_files.append((path, decoded_key))
             dream_files.sort(key=lambda item: item[0].stat().st_mtime)
 
