@@ -148,8 +148,10 @@ rate when reported. Provider usage may be estimated or unavailable; these
 figures are not a billing statement.
 
 When nanobot compacts context, the timeline shows its progress and outcome.
-The compacted summary keeps earlier work available while recent messages remain
-in context. See [Memory](./memory.md) for compaction and Dream consolidation.
+The model continues with a summary and any messages after it; messages covered
+by the summary remain in your chat history but are no longer sent to the model
+verbatim. Use `/compact` to compact the current topic's context manually.
+See [Memory](./memory.md) for compaction and Dream consolidation.
 
 ## Temporary Chats
 

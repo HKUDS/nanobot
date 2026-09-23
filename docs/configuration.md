@@ -2273,7 +2273,7 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 
 ## Auto Compact
 
-When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
+When a session is idle for longer than a configured threshold, nanobot summarizes its conversation context. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. The original conversation remains in your saved chat history, but even its most recent messages are no longer included verbatim in the model's context after idle compaction.
 
 ```json
 {
@@ -2295,12 +2295,14 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 
 How it works:
 1. **Idle detection**: On each idle tick (~1 s), checks whether an idle-session scan is due. By default, the full scan runs at most once per minute.
-2. **Background compaction**: Older context is summarized while the most recent messages remain available.
+2. **Background compaction**: The conversation so far is summarized for the next turn.
 3. **Session preservation**: The complete session history remains stored for later inspection and reuse.
 4. **Restart-safe resume**: The compacted context remains available after a process restart.
 
 > [!NOTE]
 > Auto compact shortens the context sent to the model without deleting the session's structured message history.
+
+Use `/compact` in chat to compact the current session without waiting for the idle threshold.
 
 ## Timezone
 
