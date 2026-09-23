@@ -2716,7 +2716,10 @@ function QueuedPromptStack({
   onDragEnd: () => void;
   onDrop: (targetId: string) => void;
 }) {
-  const stripMaxHeight = Math.min(240, 14 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4);
+  const stripMaxHeight = Math.min(
+    320,
+    96 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4,
+  );
 
   return (
     <div
@@ -2732,6 +2735,9 @@ function QueuedPromptStack({
       style={{ "--composer-strip-max-height": `${stripMaxHeight}px` } as CSSProperties}
       aria-label={label}
     >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-2 pb-1">
+        <span className="text-[11.5px] font-semibold text-foreground/75">{label}</span>
+      </div>
       <div className="flex max-h-[216px] flex-col gap-1 overflow-y-auto">
         {prompts.map((prompt) => (
           <QueuedPromptRow

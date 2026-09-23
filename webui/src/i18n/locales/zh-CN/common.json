@@ -1633,8 +1633,8 @@
         "duration": "生成耗时"
       },
       "queued": {
-        "label": "排队中的引导消息",
-        "guide": "引导",
+        "label": "等待发送",
+        "guide": "立即发送",
         "delete": "删除引导",
         "edit": "编辑引导",
         "drag": "拖动排序"
@@ -1812,6 +1812,7 @@
     }
   },
   "message": {
+    "actions": "消息操作",
     "streaming": "流式输出中",
     "delivery": {
       "sending": "发送中…",
@@ -1836,7 +1837,11 @@
     "activityThoughtFor": "思考了 {{duration}}",
     "activityWorkingFor": "处理中 {{duration}}",
     "activityWorked": "已处理",
-    "activityWorkedFor": "处理了 {{duration}}",
+    "activityWorkedFor": "已处理 {{duration}}",
+    "collapseActivity": "收起处理过程",
+    "activityShow": "查看过程",
+    "activityShowFor": "查看过程 {{duration}}",
+    "activityHide": "收起过程",
     "traceDetailsLoadFailed": "无法加载完整活动详情。",
     "retryTraceDetails": "重试",
     "retryConnection": "连接失败",

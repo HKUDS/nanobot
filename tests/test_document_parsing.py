@@ -42,6 +42,14 @@ class TestExtractText:
         result = extract_text(txt_file)
         assert result == content
 
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    def test_extract_text_respects_unicode_bom(self, tmp_path: Path, encoding: str):
+        txt_file = tmp_path / "unicode.txt"
+        content = "Hello 世界\nSecond line"
+        txt_file.write_bytes(content.encode(encoding))
+
+        assert extract_text(txt_file) == content
+
     def test_extract_text_accepts_string_path(self, tmp_path: Path):
         """String paths retain the compatibility behavior of Path inputs."""
         txt_file = tmp_path / "string-path.txt"
