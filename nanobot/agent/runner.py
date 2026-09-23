@@ -159,7 +159,10 @@ class AgentRunner:
                 parts.append("[content hidden]")
                 continue
             metadata = message.get("_meta")
-            marker = metadata.get(RUNTIME_CONTEXT_MESSAGE_META) if isinstance(metadata, dict) else None
+            marker = (
+                cast(dict[object, object], metadata).get(RUNTIME_CONTEXT_MESSAGE_META)
+                if isinstance(metadata, dict) else None
+            )
             content = public_history_message({
                 "content": message.get("content"),
                 RUNTIME_CONTEXT_HISTORY_META: marker,
