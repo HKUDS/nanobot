@@ -92,6 +92,7 @@ def _make_fake_compact(
         max_suffix: int = 8,
         trigger: str = "policy",
         events=NO_EVENTS,
+        **_kwargs,
     ) -> str:
         state["count"] += 1
         session = loop.sessions.get_or_create(key)
@@ -198,6 +199,23 @@ class TestSessionTTLConfig:
         assert defaults.idle_compact_check_interval_seconds == 10
         data = defaults.model_dump(mode="json", by_alias=True)
         assert data["idleCompactCheckIntervalSeconds"] == 10
+
+    def test_replace_threshold_defaults_to_200k(self):
+        """Short sessions should keep their raw transcript for replay by default."""
+        defaults = AgentDefaults()
+        assert defaults.idle_compact_replace_after_tokens == 200_000
+
+    def test_replace_threshold_zero_always_replaces(self):
+        """0 preserves the pre-threshold behavior of always replacing replay."""
+        defaults = AgentDefaults(idle_compact_replace_after_tokens=0)
+        assert defaults.idle_compact_replace_after_tokens == 0
+
+    def test_replace_threshold_uses_camel_case_config_key(self):
+        """The JSON config should use the standard camelCase alias."""
+        defaults = AgentDefaults.model_validate({"idleCompactReplaceAfterTokens": 5_000})
+        assert defaults.idle_compact_replace_after_tokens == 5_000
+        data = defaults.model_dump(mode="json", by_alias=True)
+        assert data["idleCompactReplaceAfterTokens"] == 5_000
 
 class TestIdleScanThrottling:
     """Test scheduling of full idle-session scans."""
