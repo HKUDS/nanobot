@@ -1681,6 +1681,19 @@
     "next": "다음 이미지",
     "close": "미리보기 닫기"
   },
+  "fileActions": {
+    "menu": "{{name}} 파일 작업",
+    "title": "파일 작업",
+    "preview": "미리보기",
+    "copyAbsolute": "절대 경로 복사",
+    "copyRelative": "상대 경로 복사",
+    "copyReference": "원본 참조 복사",
+    "copied": "복사됨",
+    "failed": "복사하지 못했습니다. 다시 시도하세요.",
+    "unavailable": "파일을 확인할 수 없습니다. 원본 참조를 복사할 수 있습니다.",
+    "loading": "파일 확인 중…",
+    "gatewayPath": "경로는 게이트웨이 컴퓨터를 가리킵니다."
+  },
   "filePreview": {
     "aria": "파일 미리보기",
     "breadcrumb": "파일 경로",

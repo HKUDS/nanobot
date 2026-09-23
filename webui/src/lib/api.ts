@@ -8,6 +8,7 @@ import type {
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
+  FileReferenceMetadata,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   McpOAuthFlowPayload,
@@ -454,6 +455,20 @@ export async function fetchFilePreview(
   query.set("path", path);
   return request<FilePreviewPayload>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    { cache: "no-store" },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchFileReferenceMetadata(
+  token: string,
+  key: string,
+  path: string,
+): Promise<FileReferenceMetadata> {
+  const query = new URLSearchParams({ path, metadata: "1" });
+  return request<FileReferenceMetadata>(
+    `/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
     { cache: "no-store" },
     API_READ_TIMEOUT_MS,

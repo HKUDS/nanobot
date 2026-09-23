@@ -1682,6 +1682,19 @@
     "next": "Imagen siguiente",
     "close": "Cerrar vista previa"
   },
+  "fileActions": {
+    "menu": "Acciones de archivo para {{name}}",
+    "title": "Acciones de archivo",
+    "preview": "Vista previa",
+    "copyAbsolute": "Copiar ruta absoluta",
+    "copyRelative": "Copiar ruta relativa",
+    "copyReference": "Copiar referencia",
+    "copied": "Copiado",
+    "failed": "No se pudo copiar. Inténtalo de nuevo.",
+    "unavailable": "No se pudo resolver el archivo. Puedes copiar la referencia original.",
+    "loading": "Resolviendo archivo…",
+    "gatewayPath": "Las rutas pertenecen al equipo del gateway."
+  },
   "filePreview": {
     "aria": "Vista previa de archivo",
     "breadcrumb": "Ruta del archivo",

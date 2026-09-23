@@ -1881,6 +1881,19 @@
     "next": "下一张",
     "close": "关闭预览"
   },
+  "fileActions": {
+    "menu": "{{name}} 的文件操作",
+    "title": "文件操作",
+    "preview": "预览",
+    "copyAbsolute": "复制绝对路径",
+    "copyRelative": "复制相对路径",
+    "copyReference": "复制原始引用",
+    "copied": "已复制",
+    "failed": "复制失败，请重试。",
+    "unavailable": "无法解析此文件，可复制原始引用。",
+    "loading": "正在解析文件…",
+    "gatewayPath": "路径指向网关所在的机器。"
+  },
   "filePreview": {
     "aria": "文件预览",
     "breadcrumb": "文件路径",

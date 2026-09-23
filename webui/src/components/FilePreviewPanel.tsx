@@ -4,9 +4,10 @@ import { AlertCircle, ChevronRight, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CodeBlock } from "@/components/CodeBlock";
+import { FileActions } from "@/components/FileActions";
 import { splitFilePath } from "@/components/FileReferenceChip";
 import { ApiError, fetchFilePreview } from "@/lib/api";
-import type { FilePreviewPayload } from "@/lib/types";
+import type { FilePreviewPayload, FileReferenceMetadata } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface FilePreviewPanelProps {
@@ -64,6 +65,16 @@ export function FilePreviewPanel({
   }, [path, sessionKey]);
 
   const displayPath = state.status === "ready" ? state.payload.display_path : path;
+  const metadata = useMemo<FileReferenceMetadata | undefined>(() => {
+    if (state.status !== "ready") return undefined;
+    const { path: absolute, project_path: root, display_path: relative } = state.payload;
+    // display_path is absolute for files outside the session project (e.g. media).
+    const normalizedRoot = root?.replace(/\\/g, "/").replace(/\/+$/, "");
+    return {
+      path: absolute,
+      relative_path: normalizedRoot != null && absolute.replace(/\\/g, "/").startsWith(`${normalizedRoot}/`) ? relative : null,
+    };
+  }, [state]);
   const previewPath = state.status === "ready" ? state.payload.path : displayPath;
   const normalizedPreviewPath = previewPath.replace(/\\/g, "/");
   const hasRootPrefix = normalizedPreviewPath.startsWith("/");
@@ -201,6 +212,7 @@ export function FilePreviewPanel({
                 );
               })}
             </nav>
+            {metadata ? <FileActions path={previewPath} metadata={metadata} /> : null}
             <button
               type="button"
               onClick={onClose}

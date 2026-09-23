@@ -1695,6 +1695,19 @@
     "next": "Próxima imagem",
     "close": "Fechar pré-visualização"
   },
+  "fileActions": {
+    "menu": "Ações do arquivo {{name}}",
+    "title": "Ações do arquivo",
+    "preview": "Pré-visualizar",
+    "copyAbsolute": "Copiar caminho absoluto",
+    "copyRelative": "Copiar caminho relativo",
+    "copyReference": "Copiar referência",
+    "copied": "Copiado",
+    "failed": "Não foi possível copiar. Tente novamente.",
+    "unavailable": "Não foi possível localizar o arquivo. Você pode copiar a referência original.",
+    "loading": "Localizando arquivo…",
+    "gatewayPath": "Os caminhos se referem à máquina do gateway."
+  },
   "filePreview": {
     "aria": "Pré-visualização de arquivo",
     "breadcrumb": "Caminho do arquivo",

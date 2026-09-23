@@ -1681,6 +1681,19 @@
     "next": "次の画像",
     "close": "プレビューを閉じる"
   },
+  "fileActions": {
+    "menu": "{{name}} のファイル操作",
+    "title": "ファイル操作",
+    "preview": "プレビュー",
+    "copyAbsolute": "絶対パスをコピー",
+    "copyRelative": "相対パスをコピー",
+    "copyReference": "元の参照をコピー",
+    "copied": "コピーしました",
+    "failed": "コピーできませんでした。再試行してください。",
+    "unavailable": "ファイルを解決できません。元の参照をコピーできます。",
+    "loading": "ファイルを確認中…",
+    "gatewayPath": "パスはゲートウェイのマシンを指します。"
+  },
   "filePreview": {
     "aria": "ファイルプレビュー",
     "breadcrumb": "ファイルパス",

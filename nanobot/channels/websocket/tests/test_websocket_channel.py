@@ -324,11 +324,11 @@ async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tm
     channel._webui_connections.add(other)
     disk_before = {path for path in tmp_path.rglob("*") if path.is_file()}
 
-    async def preview(connection, path="notes.txt", probe=False):
+    async def preview(connection, path="notes.txt", probe=False, metadata=False):
         await channel._dispatch_envelope(connection, "webui-client", {
             "type": "webui_request", "request_id": "private-preview",
             "action": "temporary_chat.file_preview",
-            "payload": {"chat_id": chat_id, "path": path, "probe": probe},
+            "payload": {"chat_id": chat_id, "path": path, "probe": probe, "metadata": metadata},
         })
         return json.loads(connection.send.await_args.args[0])
 
@@ -336,6 +336,11 @@ async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tm
     assert result["ok"] is True
     assert result["result"]["content"] == "synthetic preview"
     assert (await preview(owner, probe=True))["result"] == {"available": True}
+    assert (await preview(owner, metadata=True))["result"] == {
+        "path": str((workspace / "notes.txt").resolve()), "relative_path": "notes.txt",
+    }
+    assert (await preview(other, metadata=True))["error"]["status"] == 404
+    assert (await preview(owner, str(outside), metadata=True))["error"]["status"] == 403
     assert (await preview(other))["error"]["status"] == 404
     assert (await preview(owner, str(outside)))["error"]["status"] == 403
     assert (await preview(owner, str(outside), probe=True))["result"] == {"available": False}
@@ -348,6 +353,7 @@ async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tm
         "type": "discard_temporary_chat", "chat_id": chat_id,
     })
     assert (await preview(owner))["error"]["status"] == 404
+    assert (await preview(owner, metadata=True))["error"]["status"] == 404
     assert not channel._webui_request_operations
 
 
@@ -6173,6 +6179,31 @@ def test_handle_webui_thread_get_returns_canonical_events_by_default(
         assert "response_sources" not in answer
     else:
         assert answer["response_sources"] == sources
+
+
+@pytest.mark.parametrize("authorized", [True, False])
+def test_handle_file_reference_metadata_is_authenticated_and_no_store(tmp_path, authorized) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    source = tmp_path / "notes.bin"
+    source.write_bytes(b"\0binary")
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote("websocket:file-actions", safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path=notes.bin&metadata=1",
+        Headers([("Authorization", "Bearer tok")]) if authorized else Headers(),
+    )
+    resp = gateway.http._handle_file_preview(req, enc)
+    assert resp.status_code == (200 if authorized else 401)
+    if authorized:
+        assert json.loads(resp.body.decode()) == {
+            "path": str(source.resolve()), "relative_path": "notes.bin",
+        }
+        assert resp.headers["Cache-Control"] == "no-store"
 
 
 def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:

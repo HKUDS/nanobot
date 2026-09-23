@@ -1,4 +1,5 @@
 import type { KeyboardEvent, MouseEvent } from "react";
+import { FileActions } from "@/components/FileActions";
 
 import {
   Tooltip,
@@ -60,6 +61,7 @@ export function FileReferenceChip({
     openPreview(event);
   };
   return (
+    <FileActions path={targetPath} onPreview={onOpen}>
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -120,6 +122,7 @@ export function FileReferenceChip({
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+    </FileActions>
   );
 }
 

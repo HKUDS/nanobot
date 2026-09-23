@@ -136,6 +136,15 @@ them with **View diff**. Large diffs may hide unchanged lines or truncate the
 inline preview. Select the filename in the activity row to open the read-only
 file preview panel.
 
+Use the **…** menu beside a file reference (or right-click it) to preview the file
+and copy its absolute or project-relative path. The same menu is available in
+the preview header. Keyboard users can focus a reference and press **Shift+F10**.
+Paths are resolved on the gateway machine, which may not be the computer running
+your browser. Files outside the project do not have a project-relative path.
+If a reference cannot be resolved, you can still copy the original reference;
+the menu does not invent an absolute path. Finder, external editor and terminal
+launching are not available from this browser menu.
+
 File previews follow the active topic's access mode. Restricted workspace access
 previews only files under the selected workspace. Full Access can preview files
 outside the workspace when that access mode is allowed by the gateway.

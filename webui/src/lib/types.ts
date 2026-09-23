@@ -1607,6 +1607,11 @@ export interface WebuiThreadTraceDetailPayload {
   events: ThreadProjectionEvent[];
 }
 
+export interface FileReferenceMetadata {
+  path: string;
+  relative_path: string | null;
+}
+
 interface FilePreviewMetadata {
   path: string;
   display_path: string;

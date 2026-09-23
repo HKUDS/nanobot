@@ -41,6 +41,7 @@ from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
     file_preview_payload,
+    file_reference_payload,
 )
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import JSONResponseMetrics
@@ -1122,14 +1123,17 @@ class GatewayHTTPHandler:
         query = _parse_query(request.path)
         path = _query_first(query, "path")
         is_probe = _query_first(query, "probe") == "1"
+        metadata_only = _query_first(query, "metadata") == "1"
         try:
             scope = self.workspaces.scope_for_session_key(decoded_key)
-            if is_probe:
+            if metadata_only:
+                payload = file_reference_payload(path, scope=scope)
+            elif is_probe:
                 payload = file_preview_availability_payload(path, scope=scope)
             else:
                 payload = file_preview_payload(path, scope=scope)
         except WebUIFilePreviewError as e:
-            if is_probe and e.status in {400, 403, 404, 413, 415}:
+            if is_probe and not metadata_only and e.status in {400, 403, 404, 413, 415}:
                 return _http_json_response({"available": False}, extra_headers=_NO_STORE_HEADERS)
             return _http_error(e.status, e.message)
         return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
