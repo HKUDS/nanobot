@@ -2391,6 +2391,7 @@ async def test_session_delete_removes_unpersisted_new_chat(
     channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=_free_port())
     connection = AsyncMock()
     connection.remote_address = ("127.0.0.1", 50123)
+    connection.request.headers = {"Host": "localhost"}
 
     await channel._dispatch_envelope(
         connection,

@@ -67,9 +67,6 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.http_utils import (
     is_local_browser_request as _is_local_browser_request,
 )
-from nanobot.webui.http_utils import (
-    is_localhost as _is_localhost,
-)
 from nanobot.webui.http_utils import is_loopback_host as _is_loopback_host
 from nanobot.webui.http_utils import (
     is_trusted_proxy_authenticated_request as _is_trusted_proxy_authenticated_request,
@@ -434,9 +431,7 @@ class GatewayHTTPHandler:
             request = getattr(connection, "request", None)
             headers = getattr(request, "headers", None)
         if not isinstance(headers, Mapping):
-            # Lightweight in-process test connections do not carry a
-            # handshake request. Real WebSocket connections do.
-            return _is_localhost(connection)
+            return False
         return _is_local_browser_request(connection, headers)
 
     def workspace_folder_picker_available(
