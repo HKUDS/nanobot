@@ -20,18 +20,20 @@ export function StarLink({ onSaved, fullWidth = false }: {
     setError(false);
     void starPromptAction(client, "dismiss").then(onSaved).catch(() => setError(true));
   };
+  const link = (
+    <a href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer"
+      className={fullWidth ? undefined : "settings-list-row flex select-none items-center gap-3 text-[14px] settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"}
+      onClick={dismiss} onAuxClick={(event) => { if (event.button === 1) dismiss(); }}>
+      <Github className={fullWidth ? "mr-2 h-4 w-4" : "h-4 w-4 text-muted-foreground"} aria-hidden />
+      <span className={fullWidth ? undefined : "flex-1"}>{t("starPrompt.action")}</span>
+      <ExternalLink className={fullWidth ? "ml-2 h-3.5 w-3.5" : "h-3.5 w-3.5 text-muted-foreground"} aria-hidden />
+    </a>
+  );
   return (
-    <div className="flex flex-col items-center gap-2">
-      <Button asChild className={fullWidth ? "w-full" : undefined} variant={fullWidth ? "default" : "outline"}>
-        <a href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer"
-          onClick={dismiss} onAuxClick={(event) => { if (event.button === 1) dismiss(); }}>
-          <Github className="mr-2 h-4 w-4" aria-hidden />
-          {t("starPrompt.action")}
-          <ExternalLink className="ml-2 h-3.5 w-3.5" aria-hidden />
-        </a>
-      </Button>
+    <>
+      {fullWidth ? <Button asChild className="w-full">{link}</Button> : link}
       {error && <p role="alert" className="text-sm text-destructive">{t("starPrompt.saveError")}</p>}
-    </div>
+    </>
   );
 }
 

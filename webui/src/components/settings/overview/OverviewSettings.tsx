@@ -146,9 +146,9 @@ export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
         <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
         <VersionCheckRow currentVersion={currentVersion} />
-        <StarLink />
       </div>
       <SettingsGroup>
+        <StarLink />
         {links.map(({ key, icon: Icon, href }) => (
           <a key={key} href={href} target="_blank" rel="noopener noreferrer"
             className="settings-list-row flex select-none items-center gap-3 text-[14px] settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
