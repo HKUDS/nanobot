@@ -32,7 +32,7 @@
   "starPrompt": {
     "footerAction": "Ajouter une étoile à nanobot",
     "title": "Merci d’utiliser nanobot",
-    "description": "Soutenez le développement de nanobot avec une étoile sur GitHub.",
+    "description": "Ajoutez une étoile sur GitHub pour nous aider à continuer à améliorer nanobot.",
     "action": "Mettre une étoile",
     "later": "Pas maintenant",
     "never": "Ne plus demander",

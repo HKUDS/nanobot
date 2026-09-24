@@ -32,7 +32,7 @@
   "starPrompt": {
     "footerAction": "nanobot에 스타 남기기",
     "title": "nanobot을 사용해 주셔서 감사합니다",
-    "description": "GitHub에서 스타를 눌러 nanobot의 개발을 응원해 주세요.",
+    "description": "GitHub에서 스타를 눌러 nanobot을 계속 개선할 수 있도록 응원해 주세요.",
     "action": "스타 남기기",
     "later": "나중에",
     "never": "다시 표시하지 않기",

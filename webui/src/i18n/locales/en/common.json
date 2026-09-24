@@ -32,7 +32,7 @@
   "starPrompt": {
     "footerAction": "Star nanobot on GitHub",
     "title": "Thanks for using nanobot",
-    "description": "Give us a star on GitHub to support nanobot’s development.",
+    "description": "Star nanobot on GitHub to help us keep improving it.",
     "action": "Star on GitHub",
     "later": "Not now",
     "never": "Don’t ask again",
