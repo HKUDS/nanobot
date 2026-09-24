@@ -45,34 +45,20 @@ def test_format_timing_cron_without_tz(tmp_path) -> None:
     assert tool._format_timing(s) == "cron: */5 * * * *"
 
 
-def test_format_timing_every_hours(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "expected, every_ms",
+    [
+        pytest.param("every 2h", 7200000, id="hours"),
+        pytest.param("every 30m", 1800000, id="minutes"),
+        pytest.param("every 30s", 30000, id="seconds"),
+        pytest.param("every 90s", 90000, id="non_minute_seconds"),
+        pytest.param("every 200ms", 200, id="milliseconds"),
+    ],
+)
+def test_format_timing_every_interval(tmp_path, expected, every_ms) -> None:
     tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=7_200_000)
-    assert tool._format_timing(s) == "every 2h"
-
-
-def test_format_timing_every_minutes(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=1_800_000)
-    assert tool._format_timing(s) == "every 30m"
-
-
-def test_format_timing_every_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=30_000)
-    assert tool._format_timing(s) == "every 30s"
-
-
-def test_format_timing_every_non_minute_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=90_000)
-    assert tool._format_timing(s) == "every 90s"
-
-
-def test_format_timing_every_milliseconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=200)
-    assert tool._format_timing(s) == "every 200ms"
+    s = CronSchedule(kind="every", every_ms=every_ms)
+    assert tool._format_timing(s) == expected
 
 
 def test_format_timing_at(tmp_path) -> None:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
 
 
@@ -89,7 +91,14 @@ def test_apply_patch_edits_add_to_existing_file(tmp_path):
     )
 
 
-def test_apply_patch_edits_add_to_existing_file_without_final_newline(tmp_path):
+@pytest.mark.parametrize(
+    "new_text",
+    [
+        pytest.param("beta", id="without_final_newline"),
+        pytest.param("\nbeta", id="respects_leading_newline"),
+    ],
+)
+def test_apply_patch_add_separates_existing_file_without_final_newline(tmp_path, new_text):
     target = tmp_path / "notes.txt"
     target.write_text("alpha", encoding="utf-8")
     tool = ApplyPatchTool(workspace=tmp_path)
@@ -100,7 +109,7 @@ def test_apply_patch_edits_add_to_existing_file_without_final_newline(tmp_path):
                 {
                     "path": "notes.txt",
                     "action": "add",
-                    "new_text": "beta",
+                    "new_text": new_text,
                 }
             ]
         )
@@ -129,27 +138,6 @@ def test_apply_patch_edits_add_to_existing_crlf_file_without_final_newline(tmp_p
 
     assert "update notes.txt" in result
     assert target.read_bytes() == b"alpha\r\nbravo\r\ncharlie\r\n"
-
-
-def test_apply_patch_edits_add_to_existing_file_respects_leading_newline(tmp_path):
-    target = tmp_path / "notes.txt"
-    target.write_text("alpha", encoding="utf-8")
-    tool = ApplyPatchTool(workspace=tmp_path)
-
-    result = asyncio.run(
-        tool.execute(
-            edits=[
-                {
-                    "path": "notes.txt",
-                    "action": "add",
-                    "new_text": "\nbeta",
-                }
-            ]
-        )
-    )
-
-    assert "update notes.txt" in result
-    assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
 
 
 def test_apply_patch_rejects_delete_action(tmp_path):

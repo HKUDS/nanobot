@@ -465,39 +465,20 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
 
 
 @pytest.mark.asyncio
-async def test_loop_stream_filter_hides_partial_trailing_think_prefix(tmp_path):
+@pytest.mark.parametrize(
+    "first_delta, second_delta",
+    [
+        pytest.param("Hello <thin", "k>hidden</think>World", id="partial_trailing_think_prefix"),
+        pytest.param("Hello <think>", "hidden</think>World", id="complete_trailing_think_tag"),
+    ],
+)
+async def test_loop_stream_filter_hides_split_think_tags(tmp_path, first_delta, second_delta):
     loop = _make_loop(tmp_path)
     deltas: list[str] = []
 
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
-        await on_content_delta("Hello <thin")
-        await on_content_delta("k>hidden</think>World")
-        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage=None)
-
-    loop.provider.chat_stream_with_retry = chat_stream_with_retry
-
-    async def on_stream(delta: str) -> None:
-        deltas.append(delta)
-
-    result = await loop._run_agent_loop(
-        TranscriptInput(history=[], current_message=None),
-        runtime=loop.llm_runtime(),
-        events=output_events(on_stream=on_stream),
-        streaming=True,
-    )
-
-    assert result.final_content == "Hello World"
-    assert deltas == ["Hello", " World"]
-
-
-@pytest.mark.asyncio
-async def test_loop_stream_filter_hides_complete_trailing_think_tag(tmp_path):
-    loop = _make_loop(tmp_path)
-    deltas: list[str] = []
-
-    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
-        await on_content_delta("Hello <think>")
-        await on_content_delta("hidden</think>World")
+        await on_content_delta(first_delta)
+        await on_content_delta(second_delta)
         return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage=None)
 
     loop.provider.chat_stream_with_retry = chat_stream_with_retry

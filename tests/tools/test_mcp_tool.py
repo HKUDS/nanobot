@@ -762,13 +762,22 @@ def _make_fake_session(tool_names: list[str]) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_supports_raw_names(
-    fake_mcp_runtime: dict[str, object | None],
+@pytest.mark.parametrize(
+    "enabled_tool",
+    [
+        pytest.param("demo", id="raw_names"),
+        pytest.param("mcp_test_demo", id="wrapped_names"),
+    ],
+)
+async def test_connect_mcp_servers_enabled_tools_accepts_raw_and_wrapped_names(
+    fake_mcp_runtime: dict[str,
+    object | None],
+    enabled_tool,
 ) -> None:
     fake_mcp_runtime["session"] = _make_fake_session(["demo", "other"])
     registry = ToolRegistry()
     stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=["demo"])},
+        {"test": MCPServerConfig(command="fake", enabled_tools=[enabled_tool])},
         registry,
     )
     for stack in stacks.values():
@@ -791,22 +800,6 @@ async def test_connect_mcp_servers_enabled_tools_defaults_to_all(
         await stack.aclose()
 
     assert registry.tool_names == ["mcp_test_demo", "mcp_test_other"]
-
-
-@pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_supports_wrapped_names(
-    fake_mcp_runtime: dict[str, object | None],
-) -> None:
-    fake_mcp_runtime["session"] = _make_fake_session(["demo", "other"])
-    registry = ToolRegistry()
-    stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=["mcp_test_demo"])},
-        registry,
-    )
-    for stack in stacks.values():
-        await stack.aclose()
-
-    assert registry.tool_names == ["mcp_test_demo"]
 
 
 @pytest.mark.asyncio

@@ -1426,8 +1426,32 @@ def test_non_dashscope_minimal_not_retranslated() -> None:
     assert kw["reasoning_effort"] == "minimal"
 
 
-def test_dashscope_no_extra_body_when_reasoning_effort_none() -> None:
-    kw = _build_kwargs_for("dashscope", "qwen-turbo", reasoning_effort=None)
+@pytest.mark.parametrize(
+    "provider_name, model",
+    [
+        pytest.param("dashscope", "qwen-turbo", id="dashscope_no_extra_body_when_reasoning_effort_none"),
+        pytest.param("minimax", "MiniMax-M2.7", id="minimax_no_extra_body_when_reasoning_effort_none"),
+        pytest.param(
+            "byteplus",
+            "doubao-seed-2-0-pro",
+            id="byteplus_no_extra_body_when_reasoning_effort_none",
+        ),
+        pytest.param("deepseek", "deepseek-chat", id="deepseek_no_extra_body_when_reasoning_effort_none"),
+        pytest.param("moonshot", "kimi-k2.5", id="kimi_k25_no_extra_body_when_reasoning_effort_none"),
+        pytest.param(
+            "openrouter",
+            "moonshotai/kimi-k2.5",
+            id="kimi_k25_thinking_disabled_with_openrouter_prefix",
+        ),
+        pytest.param(
+            "openrouter",
+            "qwen/qwen3.6-flash",
+            id="qwen_no_extra_body_when_reasoning_effort_omitted",
+        ),
+    ],
+)
+def test_provider_omits_extra_body_without_reasoning_effort(provider_name, model) -> None:
+    kw = _build_kwargs_for(provider_name, model, reasoning_effort=None)
     assert "extra_body" not in kw
 
 
@@ -1439,11 +1463,6 @@ def test_minimax_reasoning_split_enabled_with_reasoning_effort() -> None:
 def test_minimax_reasoning_split_disabled_for_minimal() -> None:
     kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="minimal")
     assert kw["extra_body"] == {"reasoning_split": False}
-
-
-def test_minimax_no_extra_body_when_reasoning_effort_none() -> None:
-    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort=None)
-    assert "extra_body" not in kw
 
 
 def test_volcengine_thinking_enabled() -> None:
@@ -1468,11 +1487,6 @@ def test_byteplus_thinking_disabled_for_minimal() -> None:
     assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
-def test_byteplus_no_extra_body_when_reasoning_effort_none() -> None:
-    kw = _build_kwargs_for("byteplus", "doubao-seed-2-0-pro", reasoning_effort=None)
-    assert "extra_body" not in kw
-
-
 def test_deepseek_thinking_enabled() -> None:
     """DeepSeek V4 requires extra_body.thinking when reasoning_effort is set."""
     kw = _build_kwargs_for("deepseek", "deepseek-v4-pro", reasoning_effort="high")
@@ -1483,12 +1497,6 @@ def test_deepseek_thinking_disabled_for_minimal() -> None:
     """reasoning_effort='minimal' must send thinking.type=disabled to DeepSeek."""
     kw = _build_kwargs_for("deepseek", "deepseek-v4-pro", reasoning_effort="minimal")
     assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
-
-
-def test_deepseek_no_extra_body_when_reasoning_effort_none() -> None:
-    """Without reasoning_effort the thinking param must not be injected."""
-    kw = _build_kwargs_for("deepseek", "deepseek-chat", reasoning_effort=None)
-    assert "extra_body" not in kw
 
 
 def test_deepseek_backfills_reasoning_content_on_legacy_tool_call_messages() -> None:
@@ -1753,25 +1761,47 @@ def test_openai_no_thinking_extra_body() -> None:
     assert "extra_body" not in kw
 
 
-def test_kimi_k25_thinking_enabled() -> None:
-    """kimi-k2.5 with reasoning_effort set should opt in to thinking."""
-    kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort="medium")
-    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+@pytest.mark.parametrize(
+    "provider_name, model, effort, thinking_type",
+    [
+        pytest.param("moonshot", "kimi-k2.5", "medium", "enabled", id="kimi_k25_thinking_enabled"),
+        pytest.param(
+            "moonshot",
+            "kimi-k2.5",
+            "minimal",
+            "disabled",
+            id="kimi_k25_thinking_disabled_for_minimal",
+        ),
+        pytest.param("moonshot", "kimi-k2.6", "medium", "enabled", id="kimi_k26_thinking_enabled"),
+        pytest.param("moonshot", "kimi-k2.7-code", "medium", "enabled", id="kimi_k27_code_thinking_enabled"),
+        pytest.param(
+            "moonshot",
+            "k2.6-code-preview",
+            "high",
+            "enabled",
+            id="kimi_k26_code_preview_thinking_enabled",
+        ),
+        pytest.param(
+            "deepseek",
+            "deepseek-v4-pro",
+            "none",
+            "disabled",
+            id="deepseek_thinking_disabled_for_none_string",
+        ),
+        pytest.param(
+            "moonshot",
+            "kimi-k2.5",
+            "none",
+            "disabled",
+            id="kimi_k25_thinking_disabled_for_none_string",
+        ),
+    ],
+)
+def test_provider_thinking_type_mapping(provider_name, model, effort, thinking_type) -> None:
+    kw = _build_kwargs_for(provider_name, model, reasoning_effort=effort)
+    assert kw.get("extra_body") == {"thinking": {"type": thinking_type}}
     # Moonshot rejects both 'reasoning_effort' and 'thinking' (#3939)
     assert "reasoning_effort" not in kw
-
-
-def test_kimi_k25_thinking_disabled_for_minimal() -> None:
-    """reasoning_effort='minimal' maps to thinking disabled for kimi-k2.5."""
-    kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort="minimal")
-    assert kw.get("extra_body") == {"thinking": {"type": "disabled"}}
-    assert "reasoning_effort" not in kw
-
-
-def test_kimi_k25_no_extra_body_when_reasoning_effort_none() -> None:
-    """Without reasoning_effort the thinking param must not be injected."""
-    kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort=None)
-    assert "extra_body" not in kw
 
 
 def test_kimi_k3_uses_native_defaults() -> None:
@@ -1811,53 +1841,25 @@ def test_kimi_k3_omits_disabled_reasoning_effort() -> None:
     assert "extra_body" not in kw
 
 
-def test_kimi_k25_thinking_enabled_with_openrouter_prefix() -> None:
-    """OpenRouter-style model names like moonshotai/kimi-k2.5 must trigger thinking.
-
-    OR drops upstream-provider `thinking` fields, so the same intent also has
-    to go through OR's `reasoning.effort` shape (#3851 follow-up).
-    """
-    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.5", reasoning_effort="medium")
+@pytest.mark.parametrize(
+    "model, effort",
+    [
+        pytest.param("moonshotai/kimi-k2.5", "medium", id="k25_thinking_enabled_with_openrouter_prefix"),
+        pytest.param("moonshotai/kimi-k2.6", "medium", id="k26_thinking_enabled_with_openrouter_prefix"),
+        pytest.param(
+            "moonshotai/kimi-k2.7-code",
+            "high",
+            id="k27_code_thinking_enabled_with_openrouter_prefix",
+        ),
+    ],
+)
+def test_openrouter_kimi_thinking_mapping(model, effort) -> None:
+    kw = _build_kwargs_for("openrouter", model, reasoning_effort=effort)
     assert kw.get("extra_body") == {
         "thinking": {"type": "enabled"},
-        "reasoning": {"effort": "medium"},
+        "reasoning": {"effort": effort},
     }
     # Even via OR, reasoning_effort wire kwarg is dropped for kimi models
-    assert "reasoning_effort" not in kw
-
-
-def test_kimi_k26_thinking_enabled() -> None:
-    """kimi-k2.6 with reasoning_effort set should opt in to thinking."""
-    kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort="medium")
-    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
-    assert "reasoning_effort" not in kw
-
-
-def test_kimi_k26_thinking_enabled_with_openrouter_prefix() -> None:
-    """OpenRouter-style names like moonshotai/kimi-k2.6 must trigger thinking
-    via both upstream `thinking` and OR's `reasoning.effort`."""
-    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.6", reasoning_effort="medium")
-    assert kw.get("extra_body") == {
-        "thinking": {"type": "enabled"},
-        "reasoning": {"effort": "medium"},
-    }
-    assert "reasoning_effort" not in kw
-
-
-def test_kimi_k27_code_thinking_enabled() -> None:
-    """Kimi K2.7 Code supports native thinking controls."""
-    kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort="medium")
-    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
-    assert "reasoning_effort" not in kw
-
-
-def test_kimi_k27_code_thinking_enabled_with_openrouter_prefix() -> None:
-    """OpenRouter-routed Kimi K2.7 Code should carry both thinking shapes."""
-    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.7-code", reasoning_effort="high")
-    assert kw.get("extra_body") == {
-        "thinking": {"type": "enabled"},
-        "reasoning": {"effort": "high"},
-    }
     assert "reasoning_effort" not in kw
 
 
@@ -1891,19 +1893,6 @@ def test_moonshot_kimi_k27_code_temperature_override() -> None:
     assert kw["temperature"] == 1.0
 
 
-def test_kimi_k25_thinking_disabled_with_openrouter_prefix() -> None:
-    """OpenRouter names must NOT trigger thinking without reasoning_effort."""
-    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.5", reasoning_effort=None)
-    assert "extra_body" not in kw
-
-
-def test_kimi_k26_code_preview_thinking_enabled() -> None:
-    """k2.6-code-preview also supports thinking; should behave like k2.5."""
-    kw = _build_kwargs_for("moonshot", "k2.6-code-preview", reasoning_effort="high")
-    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
-    assert "reasoning_effort" not in kw
-
-
 def test_kimi_k2_series_no_thinking_injection() -> None:
     """kimi-k2 (non-thinking) models must NOT receive extra_body.thinking."""
     kw = _build_kwargs_for("moonshot", "kimi-k2", reasoning_effort="high")
@@ -1919,20 +1908,6 @@ def test_kimi_k2_thinking_series_no_thinking_injection() -> None:
 # ---------------------------------------------------------------------------
 # reasoning_effort="none" — treated as thinking disabled
 # ---------------------------------------------------------------------------
-
-def test_deepseek_thinking_disabled_for_none_string() -> None:
-    """reasoning_effort='none' must send thinking.type=disabled and skip reasoning_effort field."""
-    kw = _build_kwargs_for("deepseek", "deepseek-v4-pro", reasoning_effort="none")
-    assert kw.get("extra_body") == {"thinking": {"type": "disabled"}}
-    assert "reasoning_effort" not in kw
-
-
-def test_kimi_k25_thinking_disabled_for_none_string() -> None:
-    """reasoning_effort='none' maps to thinking disabled for kimi-k2.5."""
-    kw = _build_kwargs_for("moonshot", "kimi-k2.5", reasoning_effort="none")
-    assert kw.get("extra_body") == {"thinking": {"type": "disabled"}}
-    assert "reasoning_effort" not in kw
-
 
 def test_dashscope_thinking_disabled_for_none_string() -> None:
     """reasoning_effort='none' disables thinking and must not emit reasoning_effort on DashScope."""
@@ -1954,13 +1929,6 @@ def test_qwen_thinking_disabled_via_model_level_mapping() -> None:
     reasoning.effort alongside the provider-level thinking control."""
     kw = _build_kwargs_for("openrouter", "qwen/qwen3.5-flash", reasoning_effort="none")
     assert kw["extra_body"] == {"enable_thinking": False, "reasoning": {"effort": "none"}}
-
-
-def test_qwen_no_extra_body_when_reasoning_effort_omitted() -> None:
-    """Without reasoning_effort the model-level mapping must not inject extra_body
-    on its own — the provider default applies."""
-    kw = _build_kwargs_for("openrouter", "qwen/qwen3.6-flash", reasoning_effort=None)
-    assert "extra_body" not in kw
 
 
 def test_deepseek_no_backfill_when_reasoning_effort_none_string() -> None:

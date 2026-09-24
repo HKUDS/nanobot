@@ -398,9 +398,19 @@ def test_create_model_configuration_rejects_dynamic_custom_provider_without_api_
         )
 
 
+@pytest.mark.parametrize(
+    "label, provider_name, model",
+    [
+        pytest.param("Deep", "openai", "openai/gpt-4.1", id="unconfigured_provider"),
+        pytest.param("Azure", "azure_openai", "my-deployment", id="azure_openai_without_base"),
+    ],
+)
 def test_create_model_configuration_rejects_unconfigured_provider(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    label,
+    provider_name,
+    model,
 ) -> None:
     config_path = tmp_path / "config.json"
     save_config(Config(), config_path)
@@ -409,9 +419,9 @@ def test_create_model_configuration_rejects_unconfigured_provider(
     with pytest.raises(WebUISettingsError, match="provider is not configured"):
         create_model_configuration(
             {
-                "label": ["Deep"],
-                "provider": ["openai"],
-                "model": ["openai/gpt-4.1"],
+                "label": [label],
+                "provider": [provider_name],
+                "model": [model],
             }
         )
 
@@ -1870,14 +1880,31 @@ def test_openai_codex_remote_login_uses_headless_dependency_mode(
     assert captured["cancelled"] is True
 
 
-def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
+@pytest.mark.parametrize(
+    "module_name, provider",
+    [
+        pytest.param(
+            "nanobot.providers.openai_codex_oauth",
+            "openai-codex",
+            id="openai_codex_oauth_login_reports_missing_oauth_cli_kit",
+        ),
+        pytest.param(
+            "nanobot.providers.github_copilot_oauth",
+            "github-copilot",
+            id="github_copilot_oauth_login_reports_missing_oauth_cli_kit",
+        ),
+    ],
+)
+def test_oauth_login_reports_missing_oauth_cli_kit(
     monkeypatch: pytest.MonkeyPatch,
     oauth_flows: WebUIOAuthFlowRegistry,
+    module_name,
+    provider,
 ) -> None:
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
-        if name == "nanobot.providers.openai_codex_oauth":
+        if name == module_name:
             raise ImportError("missing")
         return real_import(name, *args, **kwargs)
 
@@ -1885,32 +1912,7 @@ def test_openai_codex_oauth_login_reports_missing_oauth_cli_kit(
 
     with pytest.raises(WebUISettingsError) as exc:
         login_oauth_provider(
-            {"provider": ["openai-codex"]},
-            oauth_flows=oauth_flows,
-        )
-
-    assert str(exc.value) == (
-        "This nanobot installation is missing the required oauth-cli-kit package. "
-        "Reinstall or upgrade nanobot-ai using the same installation method."
-    )
-
-
-def test_github_copilot_oauth_login_reports_missing_oauth_cli_kit(
-    monkeypatch: pytest.MonkeyPatch,
-    oauth_flows: WebUIOAuthFlowRegistry,
-) -> None:
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "nanobot.providers.github_copilot_oauth":
-            raise ImportError("missing")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    with pytest.raises(WebUISettingsError) as exc:
-        login_oauth_provider(
-            {"provider": ["github-copilot"]},
+            {"provider": [provider]},
             oauth_flows=oauth_flows,
         )
 
@@ -2548,25 +2550,6 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
     saved = load_config(config_path)
     assert saved.model_presets["azure-aad"].provider == "azure_openai"
     assert saved.model_presets["azure-aad"].model == "my-deployment"
-
-
-def test_create_model_configuration_rejects_azure_openai_without_base(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """azure_openai without api_base must still be rejected as not configured."""
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    with pytest.raises(WebUISettingsError, match="provider is not configured"):
-        create_model_configuration(
-            {
-                "label": ["Azure"],
-                "provider": ["azure_openai"],
-                "model": ["my-deployment"],
-            }
-        )
 
 
 def test_azure_openai_spec_no_longer_requires_api_key() -> None:

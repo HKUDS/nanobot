@@ -223,10 +223,13 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByText("src/**/*.json").tagName).toBe("CODE");
   });
 
-  it("does not wrap complete fenced code blocks in an extra pre", () => {
+  it.each([
+    ["complete", "\n```"],
+    ["streaming", ""],
+  ])("renders a %s fenced code block in one shell", (_state, closingFence) => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>
-        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace\n```"}
+        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace" + closingFence}
       </MarkdownTextRenderer>,
     );
 
@@ -248,17 +251,6 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelectorAll("pre")).toHaveLength(1);
   });
 
-  it("keeps streaming unfinished fenced code blocks to a single shell", () => {
-    const { container } = render(
-      <MarkdownTextRenderer highlightCode={false}>
-        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace"}
-      </MarkdownTextRenderer>,
-    );
-
-    expect(screen.getByText("/Users/renxubin/.nanobot/workspace")).toBeInTheDocument();
-    expect(container.querySelectorAll("pre")).toHaveLength(1);
-    expect(container.querySelector("pre div")).toBeNull();
-  });
 
   it("renders markdown images as inline previews", () => {
     render(<MarkdownTextRenderer>![Diagram](/api/media/sig/payload)</MarkdownTextRenderer>);

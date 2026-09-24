@@ -99,8 +99,16 @@ def test_opus_4_8_omits_temperature_adaptive() -> None:
     assert "temperature" not in kw
 
 
-def test_opus_4_8_high_uses_adaptive_effort() -> None:
-    kw = _build(_make_provider("claude-opus-4-8"), "high", max_tokens=4096)
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param("claude-opus-4-8", id="opus_4_8_high_uses_adaptive_effort"),
+        pytest.param("claude-fable-5", id="fable_high_uses_adaptive_effort"),
+        pytest.param("claude-sonnet-5", id="sonnet_5_high_uses_adaptive_effort"),
+    ],
+)
+def test_adaptive_models_use_high_effort(model) -> None:
+    kw = _build(_make_provider(model), "high", max_tokens=4096)
     assert "temperature" not in kw
     assert kw["thinking"] == {"type": "adaptive"}
     assert kw["output_config"] == {"effort": "high"}
@@ -116,13 +124,6 @@ def test_fable_omits_temperature_adaptive() -> None:
     assert "temperature" not in kw
 
 
-def test_fable_high_uses_adaptive_effort() -> None:
-    kw = _build(_make_provider("claude-fable-5"), "high", max_tokens=4096)
-    assert "temperature" not in kw
-    assert kw["thinking"] == {"type": "adaptive"}
-    assert kw["output_config"] == {"effort": "high"}
-
-
 def test_fable_omits_temperature_none() -> None:
     kw = _build(_make_provider("claude-fable-5"), None)
     assert "temperature" not in kw
@@ -132,13 +133,6 @@ def test_sonnet_5_omits_temperature_adaptive() -> None:
     kw = _build(_make_provider("claude-sonnet-5"), "adaptive")
     assert "temperature" not in kw
     assert kw["thinking"] == {"type": "adaptive"}
-
-
-def test_sonnet_5_high_uses_adaptive_effort() -> None:
-    kw = _build(_make_provider("claude-sonnet-5"), "high", max_tokens=4096)
-    assert "temperature" not in kw
-    assert kw["thinking"] == {"type": "adaptive"}
-    assert kw["output_config"] == {"effort": "high"}
 
 
 def test_sonnet_5_omits_temperature_none() -> None:

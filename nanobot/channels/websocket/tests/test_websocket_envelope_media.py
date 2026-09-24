@@ -518,35 +518,21 @@ async def test_message_rejected_on_svg_mime(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_rejected_on_malformed_data_url(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "data_url",
+    [
+        pytest.param("http://evil.example/image.png", id="malformed_data_url"),
+        pytest.param("data:image/png;base64,not-valid-base64!!!", id="broken_base64"),
+    ],
+)
+async def test_message_rejects_invalid_media_data_url(tmp_path, data_url) -> None:
     channel = _make_channel()
     mock_conn = AsyncMock()
     envelope = {
         "type": "message",
         "chat_id": "abc123",
         "content": "nope",
-        "media": [{"data_url": "http://evil.example/image.png"}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["reason"] == "decode"
-
-
-@pytest.mark.asyncio
-async def test_message_rejected_on_broken_base64(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "nope",
-        "media": [{"data_url": "data:image/png;base64,not-valid-base64!!!"}],
+        "media": [{"data_url": data_url}],
     }
 
     with patch(

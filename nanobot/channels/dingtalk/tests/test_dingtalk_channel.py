@@ -990,8 +990,22 @@ async def test_read_media_bytes_follows_safe_redirect_when_explicitly_enabled() 
 
 
 @pytest.mark.asyncio
-async def test_read_media_bytes_blocks_cross_host_redirect_without_allowlist() -> None:
-    """Redirect opt-in should not allow arbitrary cross-host redirects by default."""
+@pytest.mark.parametrize(
+    "response_body, redirect_url",
+    [
+        pytest.param(
+            b'cross-host media',
+            "https://example.org/final.txt",
+            id="cross_host_redirect_without_allowlist",
+        ),
+        pytest.param(
+            b'internal secret',
+            "http://127.0.0.1/metadata",
+            id="private_redirect_even_when_redirects_enabled",
+        ),
+    ],
+)
+async def test_read_media_bytes_blocks_untrusted_redirects(response_body, redirect_url) -> None:
     channel = DingTalkChannel(
         DingTalkConfig(
             client_id="app",
@@ -1005,14 +1019,14 @@ async def test_read_media_bytes_blocks_cross_host_redirect_without_allowlist() -
         responses=[
             _FakeResponse(
                 302,
-                headers={"location": "https://example.org/final.txt"},
+                headers={"location": redirect_url},
                 url="https://example.com/redirect.txt",
             ),
             _FakeResponse(
                 200,
-                content=b"cross-host media",
+                content=response_body,
                 headers={"content-type": "text/plain"},
-                url="https://example.org/final.txt",
+                url=redirect_url,
             ),
         ]
     )
@@ -1059,40 +1073,6 @@ async def test_read_media_bytes_allows_cross_host_redirect_when_allowlisted() ->
         "https://example.com/redirect.txt",
         "https://example.org/final.txt",
     ]
-
-
-@pytest.mark.asyncio
-async def test_read_media_bytes_blocks_private_redirect_even_when_redirects_enabled() -> None:
-    """Redirect opt-in must still validate each hop before fetching it."""
-    channel = DingTalkChannel(
-        DingTalkConfig(
-            client_id="app",
-            client_secret="secret",
-            allow_from=["*"],
-            allow_remote_media_redirects=True,
-        ),
-        MessageBus(),
-    )
-    channel._http = _FakeHttp(
-        responses=[
-            _FakeResponse(
-                302,
-                headers={"location": "http://127.0.0.1/metadata"},
-                url="https://example.com/redirect.txt",
-            ),
-            _FakeResponse(
-                200,
-                content=b"internal secret",
-                headers={"content-type": "text/plain"},
-                url="http://127.0.0.1/metadata",
-            ),
-        ]
-    )
-
-    data, filename, content_type = await channel._read_media_bytes("https://example.com/redirect.txt")
-
-    assert (data, filename, content_type) == (None, None, None)
-    assert [call["url"] for call in channel._http.calls] == ["https://example.com/redirect.txt"]
 
 
 def test_normalize_upload_payload_zips_html_attachment() -> None:

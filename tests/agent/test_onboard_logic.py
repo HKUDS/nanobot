@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard as onboard_wizard
@@ -240,32 +241,20 @@ class TestGetFieldDisplayName:
         name = _get_field_display_name("user_name", field_info)
         assert name == "User Name"
 
-    def test_adds_url_suffix(self):
+    @pytest.mark.parametrize(
+        "field_name, suffix, prefix",
+        [
+            pytest.param("api_url", "Url", "Api", id="url_suffix"),
+            pytest.param("file_path", "Path", "File", id="path_suffix"),
+            pytest.param("user_id", "Id", "User", id="id_suffix"),
+            pytest.param("api_key", "Key", "Api", id="key_suffix"),
+            pytest.param("auth_token", "Token", "Auth", id="token_suffix"),
+        ],
+    )
+    def test_title_cases_field_name_parts(self, field_name, suffix, prefix):
         field_info = SimpleNamespace(description=None)
-        name = _get_field_display_name("api_url", field_info)
-        # Title case: "Api Url"
-        assert "Url" in name and "Api" in name
-
-    def test_adds_path_suffix(self):
-        field_info = SimpleNamespace(description=None)
-        name = _get_field_display_name("file_path", field_info)
-        assert "Path" in name and "File" in name
-
-    def test_adds_id_suffix(self):
-        field_info = SimpleNamespace(description=None)
-        name = _get_field_display_name("user_id", field_info)
-        # Title case: "User Id"
-        assert "Id" in name and "User" in name
-
-    def test_adds_key_suffix(self):
-        field_info = SimpleNamespace(description=None)
-        name = _get_field_display_name("api_key", field_info)
-        assert "Key" in name and "Api" in name
-
-    def test_adds_token_suffix(self):
-        field_info = SimpleNamespace(description=None)
-        name = _get_field_display_name("auth_token", field_info)
-        assert "Token" in name and "Auth" in name
+        name = _get_field_display_name(field_name, field_info)
+        assert suffix in name and prefix in name
 
     def test_adds_seconds_suffix(self):
         field_info = SimpleNamespace(description=None)
@@ -462,9 +451,16 @@ class TestConfigurePydanticModelDrafts:
             onboard_wizard, "_input_with_existing", lambda *_args, **_kwargs: text_value
         )
 
-    def test_back_commits_section_draft(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "exit_action",
+        [
+            pytest.param("back", id="back_commits_section_draft"),
+            pytest.param("done", id="completing_section_returns_updated_draft"),
+        ],
+    )
+    def test_leaving_section_commits_draft(self, monkeypatch, exit_action):
         model = _SimpleDraftModel()
-        self._patch_prompt_helpers(monkeypatch, ["first", "back"])
+        self._patch_prompt_helpers(monkeypatch, ["first", exit_action])
 
         result = _configure_pydantic_model(model, "Simple")
 
@@ -482,31 +478,16 @@ class TestConfigurePydanticModelDrafts:
         assert result is None
         assert model.api_key == ""
 
-    def test_completing_section_returns_updated_draft(self, monkeypatch):
-        model = _SimpleDraftModel()
-        self._patch_prompt_helpers(monkeypatch, ["first", "done"])
-
-        result = _configure_pydantic_model(model, "Simple")
-
-        assert result is not None
-        updated = cast(_SimpleDraftModel, result)
-        assert updated.api_key == "secret"
-        assert model.api_key == ""
-
-    def test_nested_section_back_commits_nested_edits(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "exit_action",
+        [
+            pytest.param("back", id="back_commits_nested_edits"),
+            pytest.param("done", id="done_commits_nested_edits"),
+        ],
+    )
+    def test_leaving_nested_section_commits_edits(self, monkeypatch, exit_action):
         model = _OuterDraftModel()
-        self._patch_prompt_helpers(monkeypatch, ["first", "first", "back", "done"])
-
-        result = _configure_pydantic_model(model, "Outer")
-
-        assert result is not None
-        updated = cast(_OuterDraftModel, result)
-        assert updated.nested.api_key == "secret"
-        assert model.nested.api_key == ""
-
-    def test_nested_section_done_commits_nested_edits(self, monkeypatch):
-        model = _OuterDraftModel()
-        self._patch_prompt_helpers(monkeypatch, ["first", "first", "done", "done"])
+        self._patch_prompt_helpers(monkeypatch, ["first", "first", exit_action, "done"])
 
         result = _configure_pydantic_model(model, "Outer")
 

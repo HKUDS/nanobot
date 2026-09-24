@@ -164,23 +164,26 @@ class TestHandlePairingCommand:
         assert "123" in reply
         assert store.is_approved("telegram", "123") is True
 
-    def test_approve_invalid(self) -> None:
-        reply = store.handle_pairing_command("telegram", "approve BAD-CODE")
-        assert "Invalid or expired" in reply
-
-    def test_approve_no_arg(self) -> None:
-        reply = store.handle_pairing_command("telegram", "approve")
-        assert "Usage:" in reply
+    @pytest.mark.parametrize(
+        "command, expected",
+        [
+            pytest.param("approve BAD-CODE", "Invalid or expired", id="approve_invalid"),
+            pytest.param("approve", "Usage:", id="approve_no_arg"),
+            pytest.param("deny BAD-CODE", "not found", id="deny_unknown"),
+            pytest.param("revoke 999", "was not in the approved list", id="revoke_unknown"),
+            pytest.param("revoke", "Usage:", id="revoke_no_arg"),
+            pytest.param("foo", "Unknown pairing command", id="unknown_subcommand"),
+        ],
+    )
+    def test_pairing_command_errors(self, command, expected) -> None:
+        reply = store.handle_pairing_command("telegram", command)
+        assert expected in reply
 
     def test_deny(self) -> None:
         code = store.generate_code("telegram", "123")
         reply = store.handle_pairing_command("telegram", f"deny {code}")
         assert "Denied" in reply
         assert store.approve_code(code) is None
-
-    def test_deny_unknown(self) -> None:
-        reply = store.handle_pairing_command("telegram", "deny BAD-CODE")
-        assert "not found" in reply
 
     def test_revoke_current_channel(self) -> None:
         code = store.generate_code("telegram", "123")
@@ -196,18 +199,6 @@ class TestHandlePairingCommand:
         reply = store.handle_pairing_command("telegram", "revoke discord 456")
         assert "Revoked" in reply
         assert store.is_approved("discord", "456") is False
-
-    def test_revoke_unknown(self) -> None:
-        reply = store.handle_pairing_command("telegram", "revoke 999")
-        assert "was not in the approved list" in reply
-
-    def test_revoke_no_arg(self) -> None:
-        reply = store.handle_pairing_command("telegram", "revoke")
-        assert "Usage:" in reply
-
-    def test_unknown_subcommand(self) -> None:
-        reply = store.handle_pairing_command("telegram", "foo")
-        assert "Unknown pairing command" in reply
 
     def test_default_to_list(self) -> None:
         store.generate_code("telegram", "123")

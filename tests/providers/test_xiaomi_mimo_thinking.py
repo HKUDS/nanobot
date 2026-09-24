@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from nanobot.config.schema import ProvidersConfig
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import PROVIDERS
@@ -183,10 +185,15 @@ def test_mimo_via_openrouter_reasoning_effort_medium_enables_thinking():
     }
 
 
-def test_mimo_via_openrouter_bare_slug_also_matches():
-    """Bare "mimo-v2.5-pro" (no publisher prefix) must also match the
-    allowlist, since gateways sometimes accept either form."""
-    provider = _openrouter_provider("mimo-v2.5-pro")
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param("mimo-v2.5-pro", id="mimo_via_openrouter_bare_slug_also_matches"),
+        pytest.param("moonshotai/kimi-k2.5", id="kimi_via_openrouter_also_injects_reasoning_effort"),
+    ],
+)
+def test_openrouter_thinking_allowlist_accepts_model_slugs(model):
+    provider = _openrouter_provider(model)
     kwargs = provider._build_kwargs(
         messages=_simple_messages(),
         tools=None, model=None, max_tokens=100,
@@ -198,40 +205,18 @@ def test_mimo_via_openrouter_bare_slug_also_matches():
     }
 
 
-def test_mimo_flash_via_openrouter_does_not_inject_thinking():
-    """mimo-v2-flash has no thinking mode per Xiaomi docs; the allowlist
-    excludes it, so neither the upstream `thinking` field nor OR's
-    `reasoning.effort` should be injected on the gateway path."""
-    provider = _openrouter_provider("xiaomi/mimo-v2-flash")
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param("xiaomi/mimo-v2-flash", id="mimo_flash_via_openrouter_does_not_inject_thinking"),
+        pytest.param("openai/gpt-4o", id="non_mimo_model_via_openrouter_unaffected"),
+    ],
+)
+def test_openrouter_non_thinking_models_omit_extra_body(model):
+    provider = _openrouter_provider(model)
     kwargs = provider._build_kwargs(
         messages=_simple_messages(),
         tools=None, model=None, max_tokens=100,
         temperature=0.7, reasoning_effort="none", tool_choice=None,
     )
     assert "extra_body" not in kwargs
-
-
-def test_non_mimo_model_via_openrouter_unaffected():
-    """Sanity: a non-MiMo, non-Kimi model through OpenRouter is untouched."""
-    provider = _openrouter_provider("openai/gpt-4o")
-    kwargs = provider._build_kwargs(
-        messages=_simple_messages(),
-        tools=None, model=None, max_tokens=100,
-        temperature=0.7, reasoning_effort="none", tool_choice=None,
-    )
-    assert "extra_body" not in kwargs
-
-
-def test_kimi_via_openrouter_also_injects_reasoning_effort():
-    """Kimi has the same gateway problem as MiMo: OR drops the upstream
-    `thinking` field. The same OR-reasoning injection should fire."""
-    provider = _openrouter_provider("moonshotai/kimi-k2.5")
-    kwargs = provider._build_kwargs(
-        messages=_simple_messages(),
-        tools=None, model=None, max_tokens=100,
-        temperature=0.7, reasoning_effort="none", tool_choice=None,
-    )
-    assert kwargs["extra_body"] == {
-        "thinking": {"type": "disabled"},
-        "reasoning": {"effort": "none"},
-    }

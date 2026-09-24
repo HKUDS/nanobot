@@ -71,13 +71,6 @@ def test_clean_url_passes_validation():
     assert is_valid
 
 
-def test_backtick_url_produces_empty_scheme_in_urlparse():
-    from urllib.parse import urlparse
-    p = urlparse("`https://example.com/page`")
-    assert p.scheme == ""
-    assert p.netloc == ""
-
-
 # --- WebFetchTool.execute integration tests ---
 
 @pytest.mark.asyncio
@@ -103,27 +96,17 @@ async def test_execute_accepts_cleanable_http_urls(url):
 # --- startswith guard tests ---
 
 @pytest.mark.asyncio
-async def test_execute_rejects_non_http_url_after_cleaning():
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("ftp://example.com/file", id="non_http_url_after_cleaning"),
+        pytest.param("`not a url at all`", id="garbage_after_cleaning"),
+        pytest.param("`example.com/page`", id="bare_domain_after_cleaning"),
+    ],
+)
+async def test_execute_rejects_invalid_url_after_cleaning(url):
     tool = WebFetchTool()
-    result = await tool.execute(url="ftp://example.com/file")
-    data = json.loads(result)
-    assert "error" in data
-    assert "URL validation failed" in data["error"]
-
-
-@pytest.mark.asyncio
-async def test_execute_rejects_garbage_after_cleaning():
-    tool = WebFetchTool()
-    result = await tool.execute(url="`not a url at all`")
-    data = json.loads(result)
-    assert "error" in data
-    assert "URL validation failed" in data["error"]
-
-
-@pytest.mark.asyncio
-async def test_execute_rejects_bare_domain_after_cleaning():
-    tool = WebFetchTool()
-    result = await tool.execute(url="`example.com/page`")
+    result = await tool.execute(url=url)
     data = json.loads(result)
     assert "error" in data
     assert "URL validation failed" in data["error"]

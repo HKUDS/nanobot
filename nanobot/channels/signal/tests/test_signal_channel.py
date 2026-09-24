@@ -508,31 +508,24 @@ class TestIsAllowed:
         ch = _make_channel(dm_enabled=False, group_enabled=False)
         assert ch.is_allowed("+19995550001") is False
 
-    def test_allows_wildcard(self):
-        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["*"])
-        assert ch.is_allowed("+19995550001|some-uuid") is True
-
-    def test_allows_composite_sender_against_split_allowlist(self):
-        """Composite sender_id, single-id allow_from — must match either part."""
-        ch = _make_channel(
-            dm_policy="allowlist",
-            dm_allow_from=["+19995550001"],
-        )
-        assert ch.is_allowed("+19995550001|1872ba20-uuid") is True
+    @pytest.mark.parametrize(
+        "expected, sender_id, allowed_id",
+        [
+            pytest.param(True, "+19995550001|some-uuid", "*", id="wildcard"),
+            pytest.param(True, "+19995550001|1872ba20-uuid", "+19995550001", id="phone"),
+            pytest.param(True, "+19995550001|1872ba20-uuid", "1872ba20-uuid", id="uuid"),
+            pytest.param(False, "+19995550001|1872ba20-uuid", "+12223334444", id="unknown"),
+        ],
+    )
+    def test_allowlist_matches_sender_identifiers(self, expected, sender_id, allowed_id):
+        ch = _make_channel(dm_policy="allowlist", dm_allow_from=[allowed_id])
+        assert ch.is_allowed(sender_id) is expected
 
     def test_allows_composite_sender_against_composite_allowlist_entry(self):
         """Backward compat: pipe-joined composite allowlist entries still match."""
         composite = "+19995550001|1872ba20-uuid"
         ch = _make_channel(dm_policy="allowlist", dm_allow_from=[composite])
         assert ch.is_allowed(composite) is True
-
-    def test_allows_when_only_uuid_part_is_listed(self):
-        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["1872ba20-uuid"])
-        assert ch.is_allowed("+19995550001|1872ba20-uuid") is True
-
-    def test_denies_when_no_part_matches(self):
-        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["+12223334444"])
-        assert ch.is_allowed("+19995550001|1872ba20-uuid") is False
 
     def test_allowlist_union_includes_group_ids(self):
         """allow_from is the union of dm.allow_from and group.allow_from."""

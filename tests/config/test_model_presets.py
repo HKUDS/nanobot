@@ -385,15 +385,22 @@ def test_resolve_preset_rejects_unknown_named_preset() -> None:
         Config().resolve_preset("missing")
 
 
-def test_match_provider_uses_preset_model() -> None:
+@pytest.mark.parametrize(
+    "provider_name, model",
+    [
+        pytest.param("openai", "openai/gpt-4.1", id="model"),
+        pytest.param("anthropic", "anthropic/claude-opus-4-5", id="provider_when_forced"),
+    ],
+)
+def test_match_provider_uses_model_preset(provider_name, model) -> None:
     config = Config.model_validate({
         "providers": {
-            "openai": {"apiKey": "sk-test"},
+            provider_name: {"apiKey": "sk-test"},
         },
         "model_presets": {
             "fast": {
-                "model": "openai/gpt-4.1",
-                "provider": "openai",
+                "model": model,
+                "provider": provider_name,
             }
         },
         "agents": {
@@ -403,28 +410,7 @@ def test_match_provider_uses_preset_model() -> None:
         },
     })
     name = config.get_provider_name()
-    assert name == "openai"
-
-
-def test_match_provider_uses_preset_provider_when_forced() -> None:
-    config = Config.model_validate({
-        "providers": {
-            "anthropic": {"apiKey": "sk-test"},
-        },
-        "model_presets": {
-            "fast": {
-                "model": "anthropic/claude-opus-4-5",
-                "provider": "anthropic",
-            }
-        },
-        "agents": {
-            "defaults": {
-                "modelPreset": "fast",
-            }
-        },
-    })
-    name = config.get_provider_name()
-    assert name == "anthropic"
+    assert name == provider_name
 
 
 def test_match_provider_routes_forced_novita_model_api_models() -> None:
