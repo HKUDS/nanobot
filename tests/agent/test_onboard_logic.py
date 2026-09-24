@@ -1016,7 +1016,7 @@ class TestMainMenuUpdate:
         def fail_api_key_prompt(*_args, **_kwargs):
             raise AssertionError("OpenAI Codex Quick Start should not ask for an API key")
 
-        def fake_model_input(prompt, current, provider):
+        def fake_model_input(prompt, current, provider, *, config):
             model_prompts.append((prompt, current, provider))
             return current
 
@@ -1351,7 +1351,7 @@ class TestMainMenuUpdate:
         monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "OpenRouter")
         monkeypatch.setattr(onboard_wizard, "_input_text", lambda *a, **kw: "sk-or-test")
 
-        def fake_model_input(prompt, current, provider):
+        def fake_model_input(prompt, current, provider, *, config):
             model_prompts.append((prompt, current, provider))
             return "openai/gpt-4o-mini"
 

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
+from agent.runner_helpers import failed_test_consolidator
 from openai import AsyncOpenAI
 
 from nanobot.agent.hook import AgentHook
@@ -196,6 +197,7 @@ async def test_runner_streams_past_old_wall_limit_with_optional_ui(
         tools=ToolRegistry(),
         runtime=LLMRuntime.capture(provider, "gpt-5.2", context_window_tokens=128_000),
         max_iterations=1, max_tool_result_chars=1_000, hook=Hook(),
+        consolidate_history=failed_test_consolidator,
     ))
     assert result.stop_reason == "completed"
     assert result.final_content == "done"
@@ -231,6 +233,7 @@ async def test_chat_only_provider_still_has_a_timeout(monkeypatch, finalize):
         tools=ToolRegistry(),
         runtime=LLMRuntime.capture(provider, "test", context_window_tokens=128_000),
         max_iterations=1, max_tool_result_chars=1_000,
+        consolidate_history=failed_test_consolidator,
         max_iterations_message="Tool budget exhausted.",
     )), timeout=1)
     assert provider.calls == (2 if finalize else 1)

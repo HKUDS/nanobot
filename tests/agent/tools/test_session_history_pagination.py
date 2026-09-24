@@ -87,15 +87,15 @@ async def test_read_releases_raw_pages_while_preserving_global_indexes(tmp_path,
         index = int(before) if before is not None else 0
         calls.append(index)
         start = (9 - index) * 5
-        messages = [
-            TrackedMessage(role="user", content=f"visible {start}"),
-            TrackedMessage(role="tool", content="private tool result"),
-            TrackedMessage(role="assistant", content=f"visible {start + 2}"),
-            TrackedMessage(role="user", content="hidden", _hidden_history=True),
-            TrackedMessage(role="assistant", content=""),
+        events = [
+            TrackedMessage(event="user_message", text=f"visible {start}"),
+            TrackedMessage(event="message", kind="progress", text="private tool result"),
+            TrackedMessage(event="message", text=f"visible {start + 2}"),
+            TrackedMessage(event="reasoning_delta", text="private reasoning"),
+            TrackedMessage(event="message", text=""),
         ]
-        refs.extend(weakref.ref(message) for message in messages)
-        return {"messages": messages, "page": {
+        refs.extend(weakref.ref(event) for event in events)
+        return {"events": events, "page": {
             "has_more_before": index < 9,
             "before_cursor": str(index + 1) if index < 9 else None,
         }}
@@ -105,9 +105,12 @@ async def test_read_releases_raw_pages_while_preserving_global_indexes(tmp_path,
         channel="websocket", chat_id="current", session_key="websocket:current",
     )):
         result = json.loads(await ReadSessionTool(manager).execute(session_key=key, query=query))
-    expected = [30, 32, 35, 37, 40, 42, 45, 47]
-    assert [item["message_index"] for item in result["messages"]] == expected
-    assert [item["content"] for item in result["messages"]] == [f"visible {i}" for i in expected]
+    expected_indexes = list(range(12, 20))
+    expected_values = [30, 32, 35, 37, 40, 42, 45, 47]
+    assert [item["message_index"] for item in result["messages"]] == expected_indexes
+    assert [item["content"] for item in result["messages"]] == [
+        f"visible {i}" for i in expected_values
+    ]
     assert calls == list(range(10))
     assert not any(ref() is not None for ref in refs)
 

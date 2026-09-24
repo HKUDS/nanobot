@@ -1,4 +1,43 @@
 {
+  "previewTabs": {
+    "title": "Preview",
+    "closeTab": "Close {{name}}",
+    "closeAll": "Close preview pane",
+    "websiteInfo": "About website previews"
+  },
+  "webPreview": {
+    "viewLinks": "View links",
+    "back": "Back",
+    "original": "Original link",
+    "actions": "Link actions",
+    "open": "Preview website",
+    "external": "Open in browser",
+    "copy": "Copy link",
+    "copied": "Link copied",
+    "copyFailed": "Could not copy link",
+    "title": "Website preview",
+    "resize": "Resize website preview",
+    "refresh": "Refresh website",
+    "close": "Close website preview",
+    "isolated": "Restricted, isolated preview. Sign-in and interactive features may not work.",
+    "blockedHint": "Some sites block embedding. If this view stays blank or fails, open it in your browser.",
+    "loopback": "Localhost points to this browser’s device, not a remote gateway. No ports are forwarded.",
+    "native": "Embedded previews are unavailable in the native host. Open this link in your browser.",
+    "unsupported": "This browser does not support credential-isolated previews. Open this link in a new tab.",
+    "sameOrigin": "The nanobot application itself cannot be embedded here. Open it in a new tab.",
+    "mixedContent": "An HTTPS page cannot preview an HTTP website here. Open it in a new tab.",
+    "invalid": "This address cannot be previewed.",
+    "frame": "Website preview: {{host}}"
+  },
+  "starPrompt": {
+    "footerAction": "Star nanobot on GitHub",
+    "title": "Thanks for using nanobot",
+    "description": "Star nanobot on GitHub to help us keep improving it.",
+    "action": "Star on GitHub",
+    "later": "Not now",
+    "never": "Don’t ask again",
+    "saveError": "There may be a network issue. This reminder may appear again."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
@@ -401,6 +440,10 @@
       "voiceInput": "Voice input"
     },
     "models": {
+      "catalogAuthRequired": "Authorization expired. Please sign in again.",
+      "catalogUnavailable": "Could not refresh models. Try again later.",
+      "catalogStale": "Showing cached models; the list may be out of date.",
+      "catalogFallback": "Showing built-in models; the list may be out of date.",
       "selectModel": "Select model",
       "addConfiguration": "Add configuration",
       "newConfiguration": "New model configuration",
@@ -422,6 +465,8 @@
       "presetNamePlaceholder": "e.g. Fast writing",
       "advancedOptions": "Advanced options",
       "advancedSummary": "Context {{context}} · Max {{max}} tokens",
+      "contextWindowHint": "{{tokens}} tokens",
+      "contextWindowError": "Enter a positive token count, such as 200k, 1m, or 131072.",
       "maxTokens": "Max output tokens",
       "temperature": "Temperature",
       "reasoningEffort": "Reasoning effort",
@@ -473,6 +518,7 @@
       "codeWrap": "Code wrapping",
       "brandLogos": "Brand logos",
       "browserNotifications": "Task notifications",
+      "notificationSound": "Completion sound",
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
@@ -518,6 +564,7 @@
       "codeWrap": "Keep long code lines readable on smaller screens.",
       "brandLogos": "Show third-party provider and CLI logos in Settings.",
       "browserNotifications": "Notify only when this page is in the background. Off by default.",
+      "notificationSound": "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
       "maxResults": "Maximum number of results returned by each web search.",
       "timeout": "How long to wait for a search request to finish.",
       "jinaReader": "Use Jina Reader to read web pages when available.",
@@ -880,6 +927,8 @@
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search.",
       "addOwnProvider": "Add your own model provider",
+      "addProvider": "Add provider",
+      "backToProviders": "Back to providers",
       "customProvider": "Custom provider",
       "customProviderName": "Provider name",
       "customProviderNamePlaceholder": "My model provider",
@@ -1254,6 +1303,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Device code",
+      "deviceCodeHelp": "Copy this code and enter it on GitHub. This window will update automatically after authorization.",
+      "waitingForDeviceApproval": "Waiting for GitHub authorization…",
+      "openGitHub": "Open GitHub",
       "authentication": "OAuth authentication",
       "signIn": "Sign in",
       "signingIn": "Signing in...",
@@ -1577,6 +1630,11 @@
       "chooseAI": "Choose your AI",
       "switchModel": "Switch model for this chat",
       "manageModels": "Manage models",
+      "fallbackNotice": "This response used a fallback model: {{model}}.",
+      "checkModelSettings": "Check model settings",
+      "reauthNotice": "{{provider}} authorization expired. Please sign in again.",
+      "reauthFallback": "A fallback model handled this response.",
+      "reauthSettings": "Open model settings",
       "context": {
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",
@@ -1590,8 +1648,8 @@
         "duration": "Generation time"
       },
       "queued": {
-        "label": "Queued guidance",
-        "guide": "Guide",
+        "label": "Waiting to send",
+        "guide": "Send now",
         "delete": "Delete guidance",
         "edit": "Edit guidance",
         "drag": "Drag to reorder"
@@ -1768,6 +1826,7 @@
     }
   },
   "message": {
+    "actions": "Message actions",
     "streaming": "streaming",
     "delivery": {
       "sending": "Sending…",
@@ -1793,6 +1852,10 @@
     "activityWorkingFor": "Working for {{duration}}",
     "activityWorked": "Worked",
     "activityWorkedFor": "Worked for {{duration}}",
+    "collapseActivity": "Collapse activity details",
+    "activityShow": "View activity",
+    "activityShowFor": "View activity {{duration}}",
+    "activityHide": "Hide activity",
     "traceDetailsLoadFailed": "Full activity details could not be loaded.",
     "retryTraceDetails": "Retry",
     "retryConnection": "Connection failed",
@@ -1824,6 +1887,7 @@
     "automationTriggered": "Triggered automatically",
     "askAboutSelection": "Ask about this",
     "forkFromHere": "Fork",
+    "fallbackResponse": "This reply switched to a fallback model, answered by {{preset}}.",
     "copyReply": "Copy",
     "copiedReply": "Copied",
     "turnLatencyTitle": "Response time (end-to-end)",
@@ -1854,11 +1918,29 @@
     "continue": "Continue"
   },
   "lightbox": {
+    "viewAll": "View all {{count}} images",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetZoom": "Fit image",
+    "gestures": "Pinch or double-click to zoom. Drag to move when zoomed. Use +, − or 0 to zoom or reset.",
     "title": "Image preview",
     "open": "View image",
     "prev": "Previous image",
     "next": "Next image",
     "close": "Close image preview"
+  },
+  "fileActions": {
+    "menu": "File actions for {{name}}",
+    "title": "File actions",
+    "preview": "Preview",
+    "copyAbsolute": "Copy absolute path",
+    "copyRelative": "Copy relative path",
+    "copyReference": "Copy reference",
+    "copied": "Copied",
+    "failed": "Could not copy. Please try again.",
+    "unavailable": "Could not resolve this file. You can copy the original reference.",
+    "loading": "Resolving file…",
+    "gatewayPath": "Paths refer to the gateway machine."
   },
   "filePreview": {
     "aria": "File preview",

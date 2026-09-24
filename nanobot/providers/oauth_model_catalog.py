@@ -6,13 +6,48 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Literal, cast
 
+import httpx
 from loguru import logger
 
 from nanobot.providers.registry import ProviderModelSpec
 
 CatalogSource = Literal["remote", "cache", "stale", "fallback"]
+CatalogErrorKind = Literal["auth_required", "unavailable"]
+
+
+class OAuthCatalogAuthRequiredError(RuntimeError):
+    """The provider's credentials are missing or were explicitly rejected."""
+
+
+def oauth_catalog_auth_rejected(status: int, payload: object = None) -> bool:
+    """Classify only explicit credential failures, never arbitrary response text."""
+    if status == 401:
+        return True
+    if status not in {400, 403} or not isinstance(payload, dict):
+        return False
+    error = cast(dict[object, object], payload).get("error")
+    code = cast(dict[object, object], error).get("code") if isinstance(error, dict) else error
+    return isinstance(code, str) and code in {
+        "invalid_grant", "invalid_token", "token_revoked", "refresh_token_expired",
+        "refresh_token_reused", "refresh_token_invalidated",
+    }
+
+
+def _catalog_error_kind(exc: Exception) -> CatalogErrorKind:
+    if isinstance(exc, OAuthCatalogAuthRequiredError):
+        return "auth_required"
+    if isinstance(exc, httpx.HTTPStatusError):
+        payload: object = None
+        if len(exc.response.content) <= 16_384:
+            try:
+                payload = exc.response.json()
+            except ValueError:
+                pass
+        if oauth_catalog_auth_rejected(exc.response.status_code, payload):
+            return "auth_required"
+    return "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +58,7 @@ class OAuthModelCatalogSnapshot:
     source: CatalogSource
     fetched_at: float
     message: str | None = None
+    error_kind: CatalogErrorKind | None = None
 
     def find(self, model: str) -> ProviderModelSpec | None:
         wire_id = model.split("/", 1)[-1]
@@ -36,6 +72,12 @@ class OAuthModelCatalogSnapshot:
 class _CacheEntry:
     snapshot: OAuthModelCatalogSnapshot
     stored_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class _FailureEntry:
+    retry_at: float
+    error_kind: CatalogErrorKind
 
 
 class OAuthModelCatalog:
@@ -67,7 +109,7 @@ class OAuthModelCatalog:
         self._wall_clock = wall_clock
         self._condition = threading.Condition()
         self._entries: dict[str, _CacheEntry] = {}
-        self._failures: dict[str, float] = {}
+        self._failures: dict[str, _FailureEntry] = {}
         self._inflight: set[str] = set()
         self._generation = 0
 
@@ -92,12 +134,13 @@ class OAuthModelCatalog:
             if not models:
                 raise ValueError("provider returned an empty model catalog")
         except Exception as exc:
-            logger.warning("OAuth model catalog refresh failed: type={}", type(exc).__name__)
+            error_kind = _catalog_error_kind(exc)
+            logger.warning("OAuth model catalog refresh failed: kind={}", error_kind)
             with self._condition:
                 result = (
                     self._stale_or_fallback(None, self._monotonic())
                     if generation != self._generation
-                    else self._failure_result(cache_key)
+                    else self._failure_result(cache_key, error_kind)
                 )
         else:
             now = self._monotonic()
@@ -132,35 +175,40 @@ class OAuthModelCatalog:
         entry = self._entries.get(cache_key)
         if entry is not None and now - entry.stored_at < self._fresh_ttl_s:
             return replace(entry.snapshot, source="cache")
-        failure_until = self._failures.get(cache_key)
-        if failure_until is not None and failure_until <= now:
+        failure = self._failures.get(cache_key)
+        if failure is not None and failure.retry_at <= now:
             self._failures.pop(cache_key, None)
-        elif failure_until is not None:
-            return self._stale_or_fallback(entry, now)
+        elif failure is not None:
+            return self._stale_or_fallback(entry, now, failure.error_kind)
         return None
 
-    def _failure_result(self, cache_key: str) -> OAuthModelCatalogSnapshot:
+    def _failure_result(
+        self, cache_key: str, error_kind: CatalogErrorKind,
+    ) -> OAuthModelCatalogSnapshot:
         now = self._monotonic()
         self._reserve(cache_key)
-        self._failures[cache_key] = now + self._failure_ttl_s
-        return self._stale_or_fallback(self._entries.get(cache_key), now)
+        self._failures[cache_key] = _FailureEntry(now + self._failure_ttl_s, error_kind)
+        return self._stale_or_fallback(self._entries.get(cache_key), now, error_kind)
 
     def _stale_or_fallback(
         self,
         entry: _CacheEntry | None,
         now: float,
+        error_kind: CatalogErrorKind = "unavailable",
     ) -> OAuthModelCatalogSnapshot:
         if entry is not None and now - entry.stored_at < self._stale_ttl_s:
             return replace(
                 entry.snapshot,
                 source="stale",
                 message="Could not refresh the online model list; showing cached models.",
+                error_kind=error_kind,
             )
         return OAuthModelCatalogSnapshot(
             models=self._fallback_models,
             source="fallback",
             fetched_at=self._wall_clock(),
             message="Could not load the online model list; showing built-in fallback models.",
+            error_kind=error_kind,
         )
 
     def _store(self, cache_key: str, entry: _CacheEntry) -> None:
@@ -176,7 +224,7 @@ class OAuthModelCatalog:
             key=lambda key: (
                 self._entries[key].stored_at
                 if key in self._entries
-                else self._failures[key] - self._failure_ttl_s
+                else self._failures[key].retry_at - self._failure_ttl_s
             ),
         )
         self._entries.pop(oldest, None)

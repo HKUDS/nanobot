@@ -3,7 +3,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -68,7 +67,6 @@ import type {
   UIMessage,
 } from "@/lib/types";
 
-const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
 const EMPTY_CLI_APPS: CliAppInfo[] = [];
 const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
 
@@ -164,6 +162,13 @@ interface AgentActivityClusterProps {
   traceDetailScope?: string | null;
   onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
+  /** Optional controlled expansion state for a completed inline activity block. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  /** Render only the controlled details; another control owns the disclosure label. */
+  hideHeader?: boolean;
+  /** Stable id used by an external disclosure control. */
+  detailsId?: string;
 }
 
 export function AgentActivityCluster(props: AgentActivityClusterProps) {
@@ -173,7 +178,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
     [messages, props.isTurnStreaming],
   );
-  if (displayMode === "summary" || !editsByMessage.size) {
+  if (props.expanded !== undefined || displayMode === "summary" || !editsByMessage.size) {
     return <FoldedAgentActivity {...props} />;
   }
 
@@ -237,6 +242,10 @@ function FoldedAgentActivity({
   traceDetailScope = null,
   onLoadTraceDetails,
   onOpenFilePreview,
+  expanded,
+  onExpandedChange,
+  hideHeader = false,
+  detailsId,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEditDisplayMode = useFileEditDisplayMode();
@@ -275,17 +284,14 @@ function FoldedAgentActivity({
   const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
   const [failedTraceDetailKey, setFailedTraceDetailKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [activityScrollFade, setActivityScrollFade] = useState({ top: false, bottom: false });
-  const activityScrollRef = useRef<HTMLDivElement>(null);
-  const activityContentRef = useRef<HTMLDivElement>(null);
-  const autoFollowActivityRef = useRef(true);
-  const scrollFrameRef = useRef<number | null>(null);
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
   /** Live work stays open; completed work briefly shows the done state, then tucks away. */
-  const outerExpanded = userToggledOuter
-    ? outerOpenLocal
-    : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
+  const outerExpanded = expanded ?? (
+    userToggledOuter
+      ? outerOpenLocal
+      : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming)
+  );
   const deferredTraceRefs = useMemo(
     () => Array.from(new Set(
       messages
@@ -319,6 +325,7 @@ function FoldedAgentActivity({
     startedAtMs,
   );
   const activityDuration = formatActivityDuration(durationMs);
+  const isCompletedDisclosure = !isTurnStreaming && expanded !== undefined;
   const retryError = retryStatus?.error_kind === "connection"
     ? t("message.retryConnection", { defaultValue: "Connection failed" })
     : retryStatus?.error_kind === "timeout"
@@ -358,75 +365,15 @@ function FoldedAgentActivity({
           defaultValue: "Worked for {{duration}}",
         });
 
-  const cancelActivityScrollFrame = useCallback(() => {
-    if (scrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-  }, []);
-
-  const syncActivityScrollFade = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    const scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop));
-    const next = {
-      top: scrollTop > 1,
-      bottom: maxScrollTop - scrollTop > 1,
-    };
-    setActivityScrollFade((current) =>
-      current.top === next.top && current.bottom === next.bottom ? current : next,
-    );
-  }, []);
-
-  const scrollActivityToBottom = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    syncActivityScrollFade();
-  }, [syncActivityScrollFade]);
-
-  const scheduleActivityScrollToBottom = useCallback(() => {
-    cancelActivityScrollFrame();
-    scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      scrollActivityToBottom();
-    });
-  }, [cancelActivityScrollFrame, scrollActivityToBottom]);
-
   const toggleOuter = () => {
-    const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
-    if (nextOpen) {
-      autoFollowActivityRef.current = true;
+    if (expanded !== undefined) {
+      onExpandedChange?.(!expanded);
+      return;
     }
+    const nextOpen = userToggledOuter ? !outerOpenLocal : !outerExpanded;
     setUserToggledOuter(true);
     setOuterOpenLocal(nextOpen);
   };
-
-  useLayoutEffect(() => {
-    if (!outerExpanded || !autoFollowActivityRef.current) return;
-    scheduleActivityScrollToBottom();
-  }, [outerExpanded, activityMessages, isTurnStreaming, scheduleActivityScrollToBottom]);
-
-  useEffect(() => {
-    if (!outerExpanded) {
-      autoFollowActivityRef.current = true;
-      return;
-    }
-    const target = activityContentRef.current;
-    if (!target || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (autoFollowActivityRef.current) {
-        scheduleActivityScrollToBottom();
-      } else {
-        syncActivityScrollFade();
-      }
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [outerExpanded, scheduleActivityScrollToBottom, syncActivityScrollFade]);
-
-  useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
 
   useEffect(() => {
     if (outerExpanded && deferredTraceRefs.length > 0) {
@@ -454,17 +401,9 @@ function FoldedAgentActivity({
     return () => window.clearTimeout(timeout);
   }, [isTurnStreaming, userToggledOuter]);
 
-  const onActivityScroll = useCallback(() => {
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    autoFollowActivityRef.current = distance < ACTIVITY_SCROLL_NEAR_BOTTOM_PX;
-    syncActivityScrollFade();
-  }, [syncActivityScrollFade]);
-
   if (!hasVisibleActivity && !isTurnStreaming) return null;
 
-  if (hasOnlyFileActivity) {
+  if (hasOnlyFileActivity && expanded === undefined) {
     return (
       <div className={cn("w-full", hasBodyBelow && "mb-2")}>
         <FileEditGroup
@@ -477,18 +416,17 @@ function FoldedAgentActivity({
   }
 
   return (
-    <div className={cn("w-full", hasBodyBelow && "mb-2")}>
+    <div className={cn("w-full", hasBodyBelow && expanded !== false && "mb-2")}>
       <ThinkingReasoningShell
         active={isTurnStreaming}
         expanded={outerExpanded}
+        contextual={isCompletedDisclosure}
+        showHeader={!hideHeader || outerExpanded}
+        collapseLabel={t("message.collapseActivity")}
+        contentId={detailsId}
         label={activityLabel}
-        viewportRef={activityScrollRef}
-        contentRef={activityContentRef}
-        fadeTop={activityScrollFade.top}
-        fadeBottom={activityScrollFade.bottom}
         hasDetails={hasVisibleActivity}
         onToggle={toggleOuter}
-        onScroll={onActivityScroll}
       >
         {traceDetailLoadFailed ? (
           <div role="alert" className="flex items-center gap-2 py-1 text-[12px] text-destructive">
@@ -550,7 +488,14 @@ function activityDurationMs(
   return Math.max(0, last - first);
 }
 
-function formatActivityDuration(ms: number): string {
+export function completedActivityDurationMs(
+  messages: UIMessage[],
+  completedLatencyMs?: number,
+): number {
+  return activityDurationMs(messages, false, 0, completedLatencyMs);
+}
+
+export function formatActivityDuration(ms: number): string {
   const seconds = ms > 0 && ms < 1000 ? 1 : Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);

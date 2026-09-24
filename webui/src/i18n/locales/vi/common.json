@@ -1,4 +1,43 @@
 {
+  "previewTabs": {
+    "title": "Xem trước",
+    "closeTab": "Đóng {{name}}",
+    "closeAll": "Đóng khung xem trước",
+    "websiteInfo": "Giới thiệu về xem trước trang web"
+  },
+  "webPreview": {
+    "viewLinks": "Xem liên kết",
+    "back": "Quay lại",
+    "original": "Liên kết gốc",
+    "actions": "Thao tác liên kết",
+    "open": "Xem trước trang web",
+    "external": "Mở trong trình duyệt",
+    "copy": "Sao chép liên kết",
+    "copied": "Đã sao chép liên kết",
+    "copyFailed": "Không thể sao chép liên kết",
+    "title": "Xem trước trang web",
+    "resize": "Đổi chiều rộng bản xem trước",
+    "refresh": "Tải lại trang web",
+    "close": "Đóng bản xem trước",
+    "isolated": "Bản xem trước cách ly và hạn chế. Đăng nhập và một số tương tác có thể không hoạt động.",
+    "blockedHint": "Một số trang chặn nhúng. Nếu nội dung trống hoặc bị lỗi, hãy mở trong trình duyệt.",
+    "loopback": "Localhost trỏ đến thiết bị của trình duyệt này, không phải gateway từ xa. Không có chuyển tiếp cổng.",
+    "native": "Ứng dụng gốc không hỗ trợ xem trước nhúng. Hãy mở liên kết trong trình duyệt.",
+    "unsupported": "Trình duyệt này không hỗ trợ xem trước cách ly thông tin xác thực. Hãy mở trong tab mới.",
+    "sameOrigin": "Không thể nhúng chính ứng dụng nanobot tại đây. Hãy mở trong tab mới.",
+    "mixedContent": "Trang HTTPS không thể xem trước trang HTTP tại đây. Hãy mở trong tab mới.",
+    "invalid": "Không thể xem trước địa chỉ này.",
+    "frame": "Xem trước trang web: {{host}}"
+  },
+  "starPrompt": {
+    "footerAction": "Tặng nanobot một sao",
+    "title": "Cảm ơn bạn đã dùng nanobot",
+    "description": "Hãy tặng một sao trên GitHub để ủng hộ chúng tôi tiếp tục cải thiện nanobot.",
+    "action": "Tặng sao",
+    "later": "Để sau",
+    "never": "Không nhắc lại",
+    "saveError": "Có thể đã xảy ra sự cố mạng. Lời nhắc này có thể xuất hiện lại."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
@@ -249,6 +288,7 @@
       "currentModel": "Cấu hình hiện tại",
       "brandLogos": "Logo thương hiệu",
       "browserNotifications": "Thông báo tác vụ",
+      "notificationSound": "Âm báo hoàn thành",
       "cliAppsCatalog": "Danh mục",
       "cliAppsFilter": "Bộ lọc",
       "engine": "Bộ máy",
@@ -292,6 +332,7 @@
       "selectedModelValue": "Được đặt bởi mô hình đã chọn.",
       "brandLogos": "Hiển thị logo nhà cung cấp bên thứ ba và CLI trong Cài đặt.",
       "browserNotifications": "Chỉ thông báo khi trang này ở nền. Mặc định tắt.",
+      "notificationSound": "Phát một tiếng chuông ngắn khi lượt kết thúc, ngay cả khi trang này đang ở nền. Tắt theo mặc định.",
       "cliAppsCatalog": "Cài các công cụ dòng lệnh mà nanobot có thể dùng trên máy này. Các ứng dụng trên máy tính không bị thay đổi.",
       "cliAppsFilter": "Tìm theo ứng dụng, danh mục hoặc khả năng.",
       "logs": "Mở thư mục nhật ký của ứng dụng trên máy tính.",
@@ -472,6 +513,8 @@
       "searchPlaceholder": "Tìm nhà cung cấp",
       "noMatches": "Không có nhà cung cấp phù hợp.",
       "addOwnProvider": "Thêm nhà cung cấp mô hình của bạn",
+      "addProvider": "Thêm nhà cung cấp",
+      "backToProviders": "Quay lại danh sách nhà cung cấp",
       "customProvider": "Nhà cung cấp tùy chỉnh",
       "customProviderName": "Tên nhà cung cấp",
       "customProviderNamePlaceholder": "Nhà cung cấp mô hình của tôi",
@@ -513,6 +556,10 @@
       "installing": "Đang cài các gói cần thiết…"
     },
     "models": {
+      "catalogAuthRequired": "Quyền truy cập đã hết hạn. Vui lòng đăng nhập lại.",
+      "catalogUnavailable": "Không thể cập nhật mô hình. Vui lòng thử lại sau.",
+      "catalogStale": "Đang hiển thị mô hình đã lưu đệm; danh sách có thể chưa được cập nhật.",
+      "catalogFallback": "Đang hiển thị mô hình tích hợp sẵn; danh sách có thể chưa được cập nhật.",
       "selectModel": "Chọn mô hình",
       "addConfiguration": "Thêm cấu hình",
       "newConfiguration": "Cấu hình mô hình mới",
@@ -534,6 +581,8 @@
       "presetNamePlaceholder": "ví dụ: Viết nhanh",
       "advancedOptions": "Tùy chọn nâng cao",
       "advancedSummary": "Ngữ cảnh {{context}} · Tối đa {{max}} token",
+      "contextWindowHint": "{{tokens}} token",
+      "contextWindowError": "Nhập số lượng token dương, chẳng hạn 200k, 1m hoặc 131072.",
       "maxTokens": "Token đầu ra tối đa",
       "temperature": "Nhiệt độ",
       "reasoningEffort": "Mức suy luận",
@@ -1054,6 +1103,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Mã thiết bị",
+      "deviceCodeHelp": "Sao chép mã này và nhập trên GitHub. Cửa sổ này sẽ tự động cập nhật sau khi ủy quyền.",
+      "waitingForDeviceApproval": "Đang chờ ủy quyền GitHub…",
+      "openGitHub": "Mở GitHub",
       "authentication": "Xác thực OAuth",
       "signIn": "Đăng nhập",
       "signingIn": "Đang đăng nhập...",
@@ -1377,6 +1430,11 @@
       "chooseAI": "Chọn AI của bạn",
       "switchModel": "Chuyển mô hình cho cuộc trò chuyện này",
       "manageModels": "Quản lý mô hình",
+      "fallbackNotice": "Phản hồi này đã sử dụng mô hình dự phòng: {{model}}.",
+      "checkModelSettings": "Kiểm tra cài đặt mô hình",
+      "reauthNotice": "Quyền truy cập {{provider}} đã hết hạn. Vui lòng đăng nhập lại.",
+      "reauthFallback": "Mô hình dự phòng đã xử lý phản hồi này.",
+      "reauthSettings": "Mở cài đặt mô hình",
       "context": {
         "tooltip": "Ngữ cảnh {{percent}}%",
         "detailsLabel": "Mở mức sử dụng ngữ cảnh",
@@ -1390,8 +1448,8 @@
         "duration": "Thời gian tạo"
       },
       "queued": {
-        "label": "Hướng dẫn đang chờ",
-        "guide": "Hướng dẫn",
+        "label": "Đang chờ gửi",
+        "guide": "Gửi ngay",
         "delete": "Xóa hướng dẫn",
         "edit": "Sửa hướng dẫn",
         "drag": "Kéo để sắp xếp"
@@ -1568,6 +1626,7 @@
     }
   },
   "message": {
+    "actions": "Thao tác tin nhắn",
     "streaming": "đang truyền",
     "delivery": {
       "sending": "Đang gửi…",
@@ -1598,6 +1657,7 @@
     "skill": "Kỹ năng: {{name}}",
     "askAboutSelection": "Hỏi về nội dung này",
     "forkFromHere": "Tách nhánh",
+    "fallbackResponse": "Phản hồi này đã chuyển sang mô hình dự phòng, do {{preset}} trả lời.",
     "copyReply": "Sao chép",
     "copiedReply": "Đã sao chép",
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
@@ -1620,6 +1680,10 @@
     "activityWorkingFor": "Đang xử lý trong {{duration}}",
     "activityWorked": "Đã xử lý",
     "activityWorkedFor": "Đã xử lý trong {{duration}}",
+    "collapseActivity": "Thu gọn chi tiết hoạt động",
+    "activityShow": "Xem quá trình",
+    "activityShowFor": "Xem quá trình {{duration}}",
+    "activityHide": "Ẩn quá trình",
     "traceDetailsLoadFailed": "Không thể tải đầy đủ chi tiết hoạt động.",
     "retryTraceDetails": "Thử lại",
     "retryConnection": "Kết nối thất bại",
@@ -1654,11 +1718,29 @@
     "continue": "Tiếp tục"
   },
   "lightbox": {
+    "viewAll": "Xem tất cả {{count}} ảnh",
+    "zoomIn": "Phóng to",
+    "zoomOut": "Thu nhỏ",
+    "resetZoom": "Vừa khung hình",
+    "gestures": "Chụm ngón tay hoặc nhấp đúp để thu phóng. Kéo để di chuyển. Dùng +, − hoặc 0 để thu phóng hoặc đặt lại.",
     "title": "Xem trước ảnh",
     "open": "Xem ảnh",
     "prev": "Ảnh trước",
     "next": "Ảnh tiếp theo",
     "close": "Đóng xem trước"
+  },
+  "fileActions": {
+    "menu": "Thao tác tệp {{name}}",
+    "title": "Thao tác tệp",
+    "preview": "Xem trước",
+    "copyAbsolute": "Sao chép đường dẫn tuyệt đối",
+    "copyRelative": "Sao chép đường dẫn tương đối",
+    "copyReference": "Sao chép tham chiếu",
+    "copied": "Đã sao chép",
+    "failed": "Không thể sao chép. Vui lòng thử lại.",
+    "unavailable": "Không thể xác định tệp. Bạn có thể sao chép tham chiếu gốc.",
+    "loading": "Đang xác định tệp…",
+    "gatewayPath": "Đường dẫn thuộc máy chạy gateway."
   },
   "filePreview": {
     "aria": "Xem trước tệp",

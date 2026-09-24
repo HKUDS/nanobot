@@ -160,6 +160,34 @@ class TestTurnTranscriptSummary:
         assert "SNIP" in call["messages"][-1]["content"]
         assert call["tools"] == tools
 
+    async def test_nonpersistent_failure_returns_raw_checkpoint_without_journaling(
+        self,
+        consolidator,
+        mock_provider,
+        runtime,
+        store,
+    ):
+        accepted = [
+            {"role": "system", "content": "stable system"},
+            {"role": "user", "content": "accepted history"},
+        ]
+        mock_provider.chat_stream_with_retry.return_value = LLMResponse(content="")
+        consolidator._SAFETY_BUFFER = 0
+
+        result = await consolidator.summarize_transcript(
+            accepted,
+            None,
+            runtime=runtime,
+            session_key="test:ephemeral-turn",
+            tools=[],
+            persist=False,
+        )
+
+        assert result is not None
+        assert "[RAW]" in result
+        assert "accepted history" in result
+        assert store.read_unprocessed_history(since_cursor=0) == []
+
     async def test_native_compaction_appends_only_archive_prompt(
         self,
         consolidator,

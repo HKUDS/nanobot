@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from loguru import logger
@@ -23,6 +23,8 @@ from nanobot.providers.base import (
     RetryEventCallback,
     RetryStatusCallback,
 )
+from nanobot.providers.oauth_model_catalog import oauth_catalog_auth_rejected
+from nanobot.providers.registry import find_by_name
 
 # Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
@@ -35,6 +37,7 @@ _FALLBACK_ERROR_KINDS = frozenset({
     "overloaded",
 })
 _AUTHENTICATION_ERROR_KINDS = frozenset({
+    "oauth_auth_required",
     "authentication",
     "auth",
     "permission",
@@ -96,7 +99,15 @@ _FALLBACK_ERROR_TOKENS = (
 )
 
 
-FallbackModelObserver = Callable[[str], Awaitable[None]]
+@dataclass(frozen=True)
+class FallbackModelSelection:
+    """Display-safe fallback result; no upstream error text or credentials."""
+
+    model: str
+    reauth_provider: str | None = None
+
+
+FallbackModelObserver = Callable[[FallbackModelSelection], Awaitable[None]]
 
 
 class FallbackProvider(LLMProvider):
@@ -128,12 +139,18 @@ class FallbackProvider(LLMProvider):
         provider_factory: Callable[[Any], LLMProvider],
         fallback_model_observer: FallbackModelObserver | None = None,
         primary_context_window_tokens: int | None = None,
+        fallback_preset_names: list[str | None] | None = None,
     ):
         primary_generation = primary.generation
         self._primary = primary
         super().__init__(provider_name=primary.provider_name)
         self._primary.generation = primary_generation
         self._fallback_presets = list(fallback_presets)
+        self._fallback_preset_names = tuple(
+            fallback_preset_names or [None] * len(fallback_presets)
+        )
+        if len(self._fallback_preset_names) != len(self._fallback_presets):
+            raise ValueError("fallback preset names must match fallback candidates")
         self._provider_factory = provider_factory
         self._fallback_model_observer = fallback_model_observer
         self._primary_context_window_tokens = primary_context_window_tokens
@@ -171,6 +188,9 @@ class FallbackProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         return self._primary.supports_native_compaction(model)
 
+    def supports_pre_request_compaction(self, model: str | None = None) -> bool:
+        return self._primary.supports_pre_request_compaction(model)
+
     def _primary_call_context(
         self,
         provider_context: ProviderCallContext,
@@ -183,12 +203,7 @@ class FallbackProvider(LLMProvider):
         )
         if not self._primary.supports_native_compaction(model):
             context_window_tokens = None
-        return ProviderCallContext(
-            conversation_state=provider_context.conversation_state,
-            context_window_tokens=context_window_tokens,
-            session_id=provider_context.session_id,
-            events=provider_context.events,
-        )
+        return replace(provider_context, context_window_tokens=context_window_tokens)
 
     def _primary_available(self) -> bool:
         """Return True if the primary provider is not currently tripped."""
@@ -569,16 +584,29 @@ class FallbackProvider(LLMProvider):
                     fallback_model,
                 ):
                     state = None
+                if provider_context.compaction_input_budget is not None and (
+                    state is None
+                    or not fallback_provider.supports_pre_request_compaction(fallback_model)
+                ):
+                    logger.warning(
+                        "Skipping fallback '{}': required pre-request compaction cannot resume",
+                        fallback_model,
+                    )
+                    continue
                 context_window_tokens = (
                     fallback.context_window_tokens
                     if fallback_provider.supports_native_compaction(fallback_model)
                     else None
                 )
-                fallback_kwargs["provider_context"] = ProviderCallContext(
+                fallback_kwargs["provider_context"] = replace(
+                    provider_context,
                     conversation_state=state,
                     context_window_tokens=context_window_tokens,
-                    session_id=provider_context.session_id,
-                    events=provider_context.events,
+                    response_preset=(
+                        self._fallback_preset_names[idx] or ""
+                        if provider_context.response_preset is not None else None
+                    ),
+                    response_is_fallback=provider_context.response_preset is not None,
                 )
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)
@@ -598,7 +626,7 @@ class FallbackProvider(LLMProvider):
                 # attempted.  A fallback can fail just like the primary, and
                 # the WebUI would otherwise show a misleading success signal.
                 # Publish only after this response is known to be usable.
-                await self._notify_fallback_model(fallback_model)
+                await self._notify_fallback_model(fallback_model, primary_response)
                 logger.info(
                     "Fallback '{}' succeeded after primary '{}' failed",
                     fallback_model, primary_model,
@@ -660,11 +688,22 @@ class FallbackProvider(LLMProvider):
                 response.error_kind = "authentication"
             return response, exc
 
-    async def _notify_fallback_model(self, model: str) -> None:
+    async def _notify_fallback_model(self, model: str, primary_response: LLMResponse | None) -> None:
         if self._fallback_model_observer is None:
             return
+        reauth_provider = None
+        spec = find_by_name(self._primary.provider_name)
+        if spec is not None and spec.is_oauth and primary_response is not None:
+            # Plain 403, rate limits, transport errors, and message substrings are
+            # not evidence of revoked credentials. A skipped circuit has no new
+            # auth result either; never retain credential state on this wrapper.
+            if primary_response.error_kind == "oauth_auth_required" or oauth_catalog_auth_rejected(
+                primary_response.error_status_code or 0,
+                {"error": {"code": primary_response.error_code}},
+            ):
+                reauth_provider = spec.name
         try:
-            await self._fallback_model_observer(model)
+            await self._fallback_model_observer(FallbackModelSelection(model, reauth_provider))
         except Exception:
             logger.exception("fallback model observer failed for '{}'", model)
 
@@ -679,6 +718,8 @@ class FallbackProvider(LLMProvider):
         text = (response.content or "").lower()
         structured_values = (kind, error_type, code)
 
+        if oauth_catalog_auth_rejected(status or 0, {"error": {"code": code}}):
+            return True
         if kind in _AUTHENTICATION_ERROR_KINDS:
             return True
         if any(

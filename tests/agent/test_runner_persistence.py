@@ -439,3 +439,38 @@ async def test_result_reference_survives_workspace_switch_without_bypassing_rest
             assert expected in result
         finally:
             reset_workspace_scope(token)
+
+
+@pytest.mark.parametrize("budget", [2048, 16000])
+def test_offload_preview_uses_budget_and_retains_tail(tmp_path, budget):
+    from nanobot.utils.helpers import maybe_persist_tool_result
+
+    content = "FIRST MATCH\n" + "x" * 20000 + "\n(use offset=250 to continue)"
+    result = maybe_persist_tool_result(tmp_path, "search", "call", content, max_chars=budget)
+
+    assert budget - 10 <= len(result) <= budget
+    assert "FIRST MATCH" in result
+    assert "use offset=250 to continue" in result
+    assert "Read the saved file" in result
+    assert (tmp_path / ".nanobot/tool-results/search/call.txt").read_text(encoding="utf-8") == content
+
+
+async def test_grep_page_survives_default_result_normalization(tmp_path):
+    from nanobot.agent.context_governance import ContextGovernanceConfig, ContextGovernor
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.agent.tools.search import GrepTool
+
+    (tmp_path / "source.txt").write_text(
+        "\n".join(f"needle {n} " + "x" * 100 for n in range(200)), encoding="utf-8",
+    )
+    page = await GrepTool(workspace=tmp_path).execute(pattern="needle", head_limit=0)
+    config = ContextGovernanceConfig(
+        provider=MagicMock(), model="test", tools=ToolRegistry(), workspace=tmp_path,
+        session_key="search", max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    normalized = ContextGovernor.normalize_tool_result(config, "call", "grep", page)
+
+    assert "use offset=" in normalized
+    assert len(normalized) <= _MAX_TOOL_RESULT_CHARS
+    assert normalized == page
+    assert not (tmp_path / ".nanobot/tool-results").exists()

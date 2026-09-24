@@ -1,4 +1,43 @@
 {
+  "previewTabs": {
+    "title": "プレビュー",
+    "closeTab": "{{name}} を閉じる",
+    "closeAll": "プレビューパネルを閉じる",
+    "websiteInfo": "ウェブプレビューについて"
+  },
+  "webPreview": {
+    "viewLinks": "リンクを表示",
+    "back": "戻る",
+    "original": "元のリンク",
+    "actions": "リンク操作",
+    "open": "ウェブサイトをプレビュー",
+    "external": "ブラウザーで開く",
+    "copy": "リンクをコピー",
+    "copied": "リンクをコピーしました",
+    "copyFailed": "リンクをコピーできませんでした",
+    "title": "ウェブプレビュー",
+    "resize": "プレビューの幅を変更",
+    "refresh": "ウェブサイトを再読み込み",
+    "close": "ウェブプレビューを閉じる",
+    "isolated": "制限付きの分離プレビューです。ログインや一部の操作は利用できない場合があります。",
+    "blockedHint": "埋め込みを許可しないサイトもあります。空白やエラーの場合はブラウザーで開いてください。",
+    "loopback": "localhost はリモートゲートウェイではなく、このブラウザーの端末を指します。ポート転送は行いません。",
+    "native": "ネイティブホストでは埋め込みプレビューを利用できません。ブラウザーで開いてください。",
+    "unsupported": "このブラウザーは認証情報を分離したプレビューに対応していません。新しいタブで開いてください。",
+    "sameOrigin": "nanobot 自体は埋め込めません。新しいタブで開いてください。",
+    "mixedContent": "HTTPS ページでは HTTP サイトをプレビューできません。新しいタブで開いてください。",
+    "invalid": "このアドレスはプレビューできません。",
+    "frame": "ウェブプレビュー：{{host}}"
+  },
+  "starPrompt": {
+    "footerAction": "nanobot にスターを付ける",
+    "title": "nanobot のご利用ありがとうございます",
+    "description": "GitHub でスターを付けて、nanobot をより良くしていく取り組みを応援してください。",
+    "action": "スターを付ける",
+    "later": "今はしない",
+    "never": "今後表示しない",
+    "saveError": "ネットワークに問題が発生した可能性があります。この案内が再び表示されることがあります。"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
@@ -249,6 +288,7 @@
       "currentModel": "現在の設定",
       "brandLogos": "ブランドロゴ",
       "browserNotifications": "タスク通知",
+      "notificationSound": "完了音",
       "cliAppsCatalog": "カタログ",
       "cliAppsFilter": "フィルター",
       "engine": "エンジン",
@@ -292,6 +332,7 @@
       "selectedModelValue": "選択したモデルによって設定されます。",
       "brandLogos": "設定で第三者プロバイダーと CLI のロゴを表示します。",
       "browserNotifications": "このページがバックグラウンドにある場合のみ通知します。既定ではオフです。",
+      "notificationSound": "ターンが完了したら、ページがバックグラウンドにあっても短いチャイムを再生します。既定ではオフです。",
       "cliAppsCatalog": "nanobot がこのマシンで使用できるコマンドラインツールをインストールします。デスクトップアプリは変更しません。",
       "cliAppsFilter": "アプリ、カテゴリ、機能で検索します。",
       "logs": "デスクトップアプリのログフォルダーを開きます。",
@@ -472,6 +513,8 @@
       "searchPlaceholder": "プロバイダーを検索",
       "noMatches": "一致するプロバイダーはありません。",
       "addOwnProvider": "独自のモデルプロバイダーを追加",
+      "addProvider": "プロバイダーを追加",
+      "backToProviders": "プロバイダー一覧に戻る",
       "customProvider": "カスタムプロバイダー",
       "customProviderName": "プロバイダー名",
       "customProviderNamePlaceholder": "マイモデルプロバイダー",
@@ -513,6 +556,10 @@
       "installing": "必要なパッケージをインストール中…"
     },
     "models": {
+      "catalogAuthRequired": "認証が失効しました。再度ログインしてください。",
+      "catalogUnavailable": "モデルを更新できません。しばらくしてから再試行してください。",
+      "catalogStale": "キャッシュ済みのモデルを表示しています。最新ではない可能性があります。",
+      "catalogFallback": "組み込みのモデルを表示しています。最新ではない可能性があります。",
       "selectModel": "モデルを選択",
       "addConfiguration": "設定を追加",
       "newConfiguration": "新しいモデル設定",
@@ -534,6 +581,8 @@
       "presetNamePlaceholder": "例：文章作成用",
       "advancedOptions": "詳細オプション",
       "advancedSummary": "コンテキスト {{context}} · 最大 {{max}} トークン",
+      "contextWindowHint": "{{tokens}} トークン",
+      "contextWindowError": "200k、1m、131072 など、正のトークン数を入力してください。",
       "maxTokens": "最大出力トークン",
       "temperature": "温度",
       "reasoningEffort": "推論の強度",
@@ -1054,6 +1103,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "デバイスコード",
+      "deviceCodeHelp": "このコードをコピーして GitHub で入力し、認証してください。完了すると、この画面は自動的に更新されます。",
+      "waitingForDeviceApproval": "GitHub の認証を待っています…",
+      "openGitHub": "GitHub を開く",
       "authentication": "OAuth 認証",
       "signIn": "サインイン",
       "signingIn": "サインイン中...",
@@ -1377,6 +1430,11 @@
       "chooseAI": "AI を選択",
       "switchModel": "この会話で使うモデルを切り替える",
       "manageModels": "モデルを管理",
+      "fallbackNotice": "この応答では代替モデルを使用しました：{{model}}。",
+      "checkModelSettings": "モデル設定を確認",
+      "reauthNotice": "{{provider}} の認証が失効しました。再ログインしてください。",
+      "reauthFallback": "今回の応答には代替モデルを使用しました。",
+      "reauthSettings": "モデル設定を開く",
       "context": {
         "tooltip": "コンテキスト {{percent}}%",
         "detailsLabel": "コンテキスト使用量を開く",
@@ -1390,8 +1448,8 @@
         "duration": "生成時間"
       },
       "queued": {
-        "label": "保留中のガイド",
-        "guide": "ガイド",
+        "label": "送信待ち",
+        "guide": "今すぐ送信",
         "delete": "ガイドを削除",
         "edit": "ガイドを編集",
         "drag": "ドラッグして並べ替え"
@@ -1568,6 +1626,7 @@
     }
   },
   "message": {
+    "actions": "メッセージ操作",
     "streaming": "生成中",
     "delivery": {
       "sending": "送信中…",
@@ -1598,6 +1657,7 @@
     "skill": "スキル: {{name}}",
     "askAboutSelection": "この内容について質問",
     "forkFromHere": "分岐",
+    "fallbackResponse": "この返信では代替モデルに切り替わり、{{preset}} が回答しています。",
     "copyReply": "コピー",
     "copiedReply": "コピー済み",
     "turnLatencyTitle": "応答時間（全行程）",
@@ -1620,6 +1680,10 @@
     "activityWorkingFor": "{{duration}}作業中",
     "activityWorked": "作業しました",
     "activityWorkedFor": "{{duration}}作業しました",
+    "collapseActivity": "アクティビティの詳細を折りたたむ",
+    "activityShow": "処理過程を表示",
+    "activityShowFor": "処理過程を表示 {{duration}}",
+    "activityHide": "処理過程を非表示",
     "traceDetailsLoadFailed": "アクティビティの詳細を読み込めませんでした。",
     "retryTraceDetails": "再試行",
     "retryConnection": "接続に失敗しました",
@@ -1654,11 +1718,29 @@
     "continue": "続行"
   },
   "lightbox": {
+    "viewAll": "すべての画像（{{count}} 枚）を表示",
+    "zoomIn": "拡大",
+    "zoomOut": "縮小",
+    "resetZoom": "画面に合わせる",
+    "gestures": "ピンチまたはダブルクリックで拡大し、ドラッグで移動できます。+、−、0 キーで拡大・縮小・リセットできます。",
     "title": "画像プレビュー",
     "open": "画像を表示",
     "prev": "前の画像",
     "next": "次の画像",
     "close": "プレビューを閉じる"
+  },
+  "fileActions": {
+    "menu": "{{name}} のファイル操作",
+    "title": "ファイル操作",
+    "preview": "プレビュー",
+    "copyAbsolute": "絶対パスをコピー",
+    "copyRelative": "相対パスをコピー",
+    "copyReference": "元の参照をコピー",
+    "copied": "コピーしました",
+    "failed": "コピーできませんでした。再試行してください。",
+    "unavailable": "ファイルを解決できません。元の参照をコピーできます。",
+    "loading": "ファイルを確認中…",
+    "gatewayPath": "パスはゲートウェイのマシンを指します。"
   },
   "filePreview": {
     "aria": "ファイルプレビュー",

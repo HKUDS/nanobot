@@ -7,7 +7,7 @@ import { channelValidationMessage } from "@/components/settings/channels/validat
 import type { ChannelValidationPayload, NanobotFeatureInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export function channelValidationStatusLabel(
+function channelValidationStatusLabel(
   status: string,
   t: ReturnType<typeof useTranslation>["t"],
 ): string {
