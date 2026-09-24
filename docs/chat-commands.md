@@ -32,9 +32,10 @@ These commands work inside chat channels and interactive agent sessions:
 ## Sustained goals
 
 An active goal can continue across tool-call iteration limits. If the model keeps
-answering without calling tools, nanobot allows at most two automatic nudges in
-the same run, including its internal continuation slices, then returns the answer
-and waits. The goal remains active; waiting is not completion. New user input or
+answering without calling tools, nanobot allows at most two consecutive automatic
+nudges, including across internal continuation slices, then ends the turn and
+waits. This allows the initial answer and up to two follow-up answers. The goal
+remains active; ending the turn is not completing the goal. New user input or
 tool execution resets this idle budget. Tool failures still count as executions;
 this guard bounds prose-only repetition, not every form of unsuccessful work.
 
