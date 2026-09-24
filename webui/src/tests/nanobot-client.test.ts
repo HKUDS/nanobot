@@ -1817,7 +1817,7 @@ describe("NanobotClient", () => {
     await expect(promise).resolves.toBe("fresh-id");
   });
 
-  it("retries new-chat initialization until its exact message is accepted", async () => {
+  it.each([false, true])("retries initialization until acceptance (broadcast first: %s)", async (broadcastFirst) => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -1868,6 +1868,15 @@ describe("NanobotClient", () => {
       session_initialization: { model_preset: "Codex" },
     });
 
+    if (broadcastFirst) {
+      lastSocket().fakeMessage({
+        event: "user_message",
+        chat_id: "fresh-id",
+        turn_id: "turn-accepted",
+        active_turn_id: "other-turn",
+        text: "retry",
+      });
+    }
     lastSocket().fakeMessage({
       event: "message_accepted",
       chat_id: "fresh-id",

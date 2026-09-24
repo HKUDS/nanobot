@@ -785,13 +785,22 @@ class AgentLoop:
                 try:
                     async with self._get_session_lock(key):
                         session = self._admit_message_session(msg, key)
+                        self.workspace_scopes.persist_message_scope(session, msg)
                         self.sessions.save(session)
                         runtime = self.runtime_for_session(session)
-                except Exception:
+                        if msg.admission is not None:
+                            msg.admission.accept()
+                except Exception as exc:
+                    if msg.admission is not None:
+                        msg.admission.reject(str(exc))
+                        return
                     logger.exception("Failed to initialize session {} for command", key)
                     await delivery.fail(publish_completion=True)
                     await delivery.idle()
                     return
+                finally:
+                    if msg.admission is not None:
+                        msg.admission.reject("session initialization cancelled")
             ctx = CommandContext(
                 msg=msg,
                 session=session,
@@ -1366,6 +1375,8 @@ class AgentLoop:
                     msg.require_existing_session
                     and self.sessions.get_cached(effective_key) is None
                 ):
+                    if msg.admission is not None:
+                        msg.admission.reject("required session is not active")
                     continue
                 if msg.is_user_input:
                     await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
@@ -1518,6 +1529,8 @@ class AgentLoop:
             pending.put_nowait(msg)
         while not pending.empty():
             msg = pending.get_nowait()
+            if msg.admission is not None:
+                msg.admission.reject("session initialization cancelled")
             for coordinator in self._automation_turn_coordinators:
                 coordinator.complete(msg, error=error)
             if (
@@ -1551,6 +1564,8 @@ class AgentLoop:
                     recovery_admission.register_recovery_task(session_key, current_task)
                     recovery_task_registered = True
             if not await recovery_admission.admit(msg):
+                if msg.admission is not None:
+                    msg.admission.reject("message superseded by recovery")
                 logger.info("Skipped stale recovery for session {}", session_key)
                 if recovery_task_registered and current_task is not None:
                     recovery_admission.unregister_recovery_task(session_key, current_task)
@@ -1588,6 +1603,11 @@ class AgentLoop:
                     for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, response=response)
                 except asyncio.CancelledError:
+                    if msg.admission is not None and (
+                        msg.admission.pending or msg.admission.rejected
+                    ):
+                        msg.admission.reject("session initialization cancelled")
+                        raise
                     logger.info("Task cancelled for session {}", session_key)
                     try:
                         await delivery.abort_stream()
@@ -1622,6 +1642,8 @@ class AgentLoop:
                         )
                     raise
                 except Exception as exc:
+                    if msg.admission is not None and msg.admission.rejected:
+                        return
                     logger.opt(exception=log_content).error(
                         "Error processing message for session {}", session_key,
                     )
@@ -1633,13 +1655,17 @@ class AgentLoop:
                     for coordinator in self._automation_turn_coordinators:
                         coordinator.complete(msg, error=exc)
                 finally:
-                    if not turn_continuation.internal_continuation_pending(msg.metadata):
+                    if not (
+                        msg.admission is not None and msg.admission.rejected
+                    ) and not turn_continuation.internal_continuation_pending(msg.metadata):
                         await delivery.idle()
         except asyncio.CancelledError:
             if not completion_published and normalize_command_text(msg.content).lower() == "/compact":
                 await delivery.complete(None, publish_completion=True)
             raise
         finally:
+            if msg.admission is not None:
+                msg.admission.reject("session initialization did not complete")
             if (
                 recovery_task_registered
                 and current_task is not None
@@ -1804,7 +1830,12 @@ class AgentLoop:
             ctx.events = EventSink(track_output, ctx.events.accepts)
 
         with logger.contextualize(turn_id=ctx.turn_id, session_key=ctx.session_key):
-            await self._run_turn_stage(ctx, "restore", self._restore_turn)
+            try:
+                await self._run_turn_stage(ctx, "restore", self._restore_turn)
+            except BaseException as exc:
+                if msg.admission is not None:
+                    msg.admission.reject(str(exc) or "session initialization cancelled")
+                raise
             await self._run_turn_stage(ctx, "compact", self._compact_session)
             if await self._run_turn_stage(ctx, "command", self._dispatch_command):
                 self._log_turn_completion(ctx, outcome="command")
@@ -1924,6 +1955,8 @@ class AgentLoop:
 
     def _admit_message_session(self, msg: InboundMessage, session_key: str) -> Session:
         """Create or reuse a session while enforcing one-shot initialization."""
+        if msg.admission is not None and msg.admission.rejected:
+            raise RuntimeError("session initialization cancelled")
         requested_preset: str | None = None
         if msg.session_initialization is not None:
             requested_runtime = self.runtime_resolver.resolve_preset(
@@ -1992,9 +2025,12 @@ class AgentLoop:
             delivery=ctx.delivery,
             is_user_turn=ctx.original_user_text is not None,
         )
-        await ctx.delivery.started()
         if ctx.kind is TurnKind.USER:
             self.workspace_scopes.persist_message_scope(session, msg)
+        if msg.admission is not None:
+            self.sessions.save(session)
+            msg.admission.accept()
+        await ctx.delivery.started()
 
         if restore_runtime_checkpoint(session):
             self.sessions.save(session)

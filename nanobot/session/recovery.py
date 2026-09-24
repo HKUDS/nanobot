@@ -559,6 +559,11 @@ class RecoveryCoordinator:
             )
         if message.channel != "websocket":
             return True
+        if (
+            self.sessions.get_cached(message.session_key) is None
+            and self.sessions.read_session_metadata(message.session_key) is None
+        ):
+            return True
         session = self.sessions.get_or_create(message.session_key)
         state = recovery_state_from_metadata(session.metadata)
         if state and state["status"] in {"resuming", "awaiting_user", "failed"}:

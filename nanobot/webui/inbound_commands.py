@@ -15,7 +15,11 @@ from typing import Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_USER_SHELL, SessionInitialization
+from nanobot.bus.events import (
+    INBOUND_META_USER_SHELL,
+    InboundAdmission,
+    SessionInitialization,
+)
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
@@ -117,6 +121,7 @@ class WebUICommandTransport(Protocol):
         session_key: str | None,
         require_existing_session: bool,
         session_initialization: SessionInitialization | None,
+        admission: InboundAdmission | None,
     ) -> None: ...
 
     async def send_session_updated(
@@ -705,6 +710,7 @@ class WebUICommandRouter:
             if queued_owner is not None:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
+        admission = InboundAdmission() if session_initialization is not None else None
         accepted = False
         try:
             if is_webui and (
@@ -752,10 +758,31 @@ class WebUICommandRouter:
                     else False
                 ),
                 session_initialization=session_initialization,
+                admission=admission,
             )
-            self._workspaces.persist_scope(chat_id, scope)
+            if admission is not None:
+                try:
+                    async with asyncio.timeout(30):
+                        admission_result = await admission.wait()
+                except TimeoutError:
+                    admission.reject("session initialization timed out")
+                    admission_result = await admission.wait()
+                if not admission_result.accepted:
+                    await self._transport.webui_send_event(
+                        connection,
+                        "error",
+                        detail="message_rejected",
+                        reason=admission_result.reason or "session initialization rejected",
+                        **rejection_fields,
+                    )
+                    return
+                self._workspaces.discard_draft_scope(webui_session_key(chat_id))
+            else:
+                self._workspaces.persist_scope(chat_id, scope)
             accepted = True
         finally:
+            if not accepted and admission is not None:
+                admission.reject("session initialization cancelled")
             if not accepted and queued_owner is not None:
                 clear_websocket_turn_if_current(chat_id, queued_owner)
 

@@ -1187,7 +1187,7 @@ export class NanobotClient {
     const turnId = "turn_id" in parsed && typeof parsed.turn_id === "string"
       ? parsed.turn_id
       : null;
-    if (parsed.event === "message_accepted") {
+    if ((parsed.event === "message_accepted" || parsed.event === "user_message") && parsed.turn_id) {
       // Canonical ownership may settle a locally guessed run before its ACK is
       // processed, so consume initialization while the exact send is still known.
       this.recordSessionInitializationAcceptance(parsed.chat_id, parsed.turn_id);

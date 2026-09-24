@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.bus.events import InboundMessage, SessionInitialization
+from nanobot.bus.events import InboundAdmission, InboundMessage, SessionInitialization
 from nanobot.bus.outbound_events import TurnEndEvent, TurnModelUpdatedEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ModelPresetConfig
@@ -554,6 +554,7 @@ async def test_run_rejects_initialized_commands_before_inline_dispatch(
         content,
         metadata={"webui_turn_id": "turn-command"},
         session_initialization=SessionInitialization(model_preset="Missing"),
+        admission=InboundAdmission(),
     )
     if has_active_queue:
         loop._pending_queues[msg.session_key] = asyncio.Queue()
@@ -573,6 +574,32 @@ async def test_run_rejects_initialized_commands_before_inline_dispatch(
     await loop.run()
 
     assert consume_count == 2
+    assert msg.admission is not None
+    assert not (await msg.admission.wait()).accepted
     assert loop.sessions.get_cached(msg.session_key) is None
     assert deep.calls == []
     assert base.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_initialization_does_not_create_a_session(tmp_path) -> None:
+    loop = AgentLoop(
+        bus=MessageBus(), provider=RecordingProvider("base"), workspace=tmp_path,
+        model="base",
+    )
+    admission = InboundAdmission()
+    msg = InboundMessage(
+        "websocket", "user", "cancelled", "hello",
+        session_initialization=SessionInitialization(model_preset="Fast"),
+        admission=admission,
+    )
+    async with loop._get_session_lock(msg.session_key):
+        task = asyncio.create_task(loop._dispatch_one(msg, asyncio.Queue()))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert not (await admission.wait()).accepted
+    assert loop.sessions.get_cached(msg.session_key) is None
+    assert loop.sessions.list_sessions() == []
+    await loop.aclose()

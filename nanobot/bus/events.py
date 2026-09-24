@@ -1,5 +1,6 @@
 """Event types for the message bus."""
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -28,6 +29,44 @@ class SessionInitialization:
     model_preset: str
 
 
+@dataclass(frozen=True)
+class InboundAdmissionResult:
+    """Core-owned disposition for an inbound message awaiting admission."""
+
+    accepted: bool
+    reason: str | None = None
+
+
+class InboundAdmission:
+    """One-shot handshake resolved after core admission is durably committed."""
+
+    def __init__(self) -> None:
+        self._future: asyncio.Future[InboundAdmissionResult] = (
+            asyncio.get_running_loop().create_future()
+        )
+
+    @property
+    def pending(self) -> bool:
+        return not self._future.done()
+
+    @property
+    def rejected(self) -> bool:
+        return self._future.done() and not self._future.result().accepted
+
+    def accept(self) -> None:
+        if self._future.done():
+            return
+        self._future.set_result(InboundAdmissionResult(accepted=True))
+
+    def reject(self, reason: str) -> None:
+        if self._future.done():
+            return
+        self._future.set_result(InboundAdmissionResult(accepted=False, reason=reason))
+
+    async def wait(self) -> InboundAdmissionResult:
+        return await asyncio.shield(self._future)
+
+
 @dataclass
 class InboundMessage:
     """Message received from a chat channel."""
@@ -42,6 +81,7 @@ class InboundMessage:
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
     require_existing_session: bool = False
     session_initialization: SessionInitialization | None = None
+    admission: InboundAdmission | None = None
     input_role: Literal["user", "system"] | None = None
 
     @property
