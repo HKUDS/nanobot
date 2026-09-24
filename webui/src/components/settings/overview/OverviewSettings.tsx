@@ -388,7 +388,7 @@ export function AppearanceSettings({
             title={tx("settings.rows.notificationSound", "Completion sound")}
             description={tx(
               "settings.help.notificationSound",
-              "Play a short chime when a turn finishes while this page is in the foreground. Off by default.",
+              "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
             )}
           >
             <ToggleButton

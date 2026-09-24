@@ -332,7 +332,7 @@
       "selectedModelValue": "Definido por el modelo seleccionado.",
       "brandLogos": "Muestra logos de proveedores de terceros y CLI en Ajustes.",
       "browserNotifications": "Notifica solo cuando esta página está en segundo plano. Desactivado de forma predeterminada.",
-      "notificationSound": "Reproduce un breve sonido cuando un turno termina mientras esta página está en primer plano. Desactivado por defecto.",
+      "notificationSound": "Reproduce un breve sonido cuando termina un turno, incluso si esta página está en segundo plano. Desactivado por defecto.",
       "cliAppsCatalog": "Instala las herramientas de línea de comandos que nanobot puede usar en este equipo. Las aplicaciones de escritorio no se modifican.",
       "cliAppsFilter": "Busca por aplicación, categoría o capacidad.",
       "logs": "Abre la carpeta de registros de la aplicación de escritorio.",

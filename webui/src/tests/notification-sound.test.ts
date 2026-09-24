@@ -46,7 +46,8 @@ describe("playTurnCompleteSound", () => {
     playTurnCompleteSound();
   }
 
-  it("stays silent by default", async () => {
+  it.each(["visible", "hidden"] as const)("stays silent by default when %s", async (visibility) => {
+    setVisibility(visibility);
     await play();
     expect(MockAudio.instances).toHaveLength(0);
   });
@@ -59,11 +60,12 @@ describe("playTurnCompleteSound", () => {
     expect(MockAudio.instances[0].play).toHaveBeenCalledTimes(1);
   });
 
-  it("stays silent when the page is in the background", async () => {
+  it("plays when enabled and the page is in the background", async () => {
     writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true });
     setVisibility("hidden");
     await play();
-    expect(MockAudio.instances).toHaveLength(0);
+    expect(MockAudio.instances).toHaveLength(1);
+    expect(MockAudio.instances[0].play).toHaveBeenCalledTimes(1);
   });
 
   it("reuses one audio element across turns and restarts it", async () => {

@@ -1,8 +1,5 @@
-// The short chime played when an agent turn completes while the page is
-// visible (#5524). The asset ships with the WebUI's static files; playback is
-// gated by the `notificationSound` local preference — off by default — and
-// by page visibility: the chime is for someone actively watching the tab, so
-// a background tab stays silent (browserNotifications covers that case).
+// The bundled completion chime is opt-in and plays in both foreground and
+// background tabs, independently of browser notification permissions.
 
 import { readLocalPreferences } from "@/lib/local-preferences";
 
@@ -12,7 +9,6 @@ let audio: HTMLAudioElement | null = null;
 
 export function playTurnCompleteSound(): void {
   try {
-    if (document.visibilityState !== "visible") return;
     if (!readLocalPreferences().notificationSound) return;
     if (audio === null) audio = new Audio(TURN_COMPLETE_SOUND_PATH);
     audio.currentTime = 0;

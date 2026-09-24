@@ -562,7 +562,7 @@
       "codeWrap": "Keep long code lines readable on smaller screens.",
       "brandLogos": "Show third-party provider and CLI logos in Settings.",
       "browserNotifications": "Notify only when this page is in the background. Off by default.",
-      "notificationSound": "Play a short chime when a turn finishes while this page is in the foreground. Off by default.",
+      "notificationSound": "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
       "maxResults": "Maximum number of results returned by each web search.",
       "timeout": "How long to wait for a search request to finish.",
       "jinaReader": "Use Jina Reader to read web pages when available.",
