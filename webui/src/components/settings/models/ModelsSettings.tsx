@@ -18,6 +18,8 @@ import {
   ProviderPicker,
   ProviderPickerIcon,
   formatContextWindow,
+  formatContextWindowInput,
+  parseContextWindowTokens,
   formatModelContextWindow,
   normalizeContextWindowTokens,
   settingsProviderConfigured,
@@ -514,7 +516,7 @@ export function ModelsSettings({
               "settings.models.advancedSummary",
               "Context {{context}} · Max {{max}} tokens",
               {
-                context: formatModelContextWindow(form.contextWindowTokens),
+                context: Number.isFinite(form.contextWindowTokens) ? formatModelContextWindow(form.contextWindowTokens) : "—",
                 max: formatContextWindow(form.maxTokens),
               },
             )}
@@ -894,6 +896,7 @@ function ModelAdvancedFields({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [contextDraft, setContextDraft] = useState<{ text: string; tokens: number } | null>(null);
   const contextWindowInputId = useId();
   const contextWindowHintId = useId();
   const contextWindowValid = Number.isSafeInteger(contextWindowTokens) && contextWindowTokens > 0;
@@ -940,20 +943,26 @@ function ModelAdvancedFields({
         </label>
         <Input
           id={contextWindowInputId}
-          type="number"
-          min={1}
-          step={1}
+          type="text"
+          autoCapitalize="none"
+          spellCheck={false}
           required
-          value={Number.isNaN(contextWindowTokens) ? "" : contextWindowTokens}
-          onChange={(event) => onChange({ contextWindowTokens: event.target.valueAsNumber })}
+          value={contextDraft && Object.is(contextDraft.tokens, contextWindowTokens)
+            ? contextDraft.text : formatContextWindowInput(contextWindowTokens)}
+          onChange={(event) => {
+            const text = event.target.value;
+            const tokens = parseContextWindowTokens(text);
+            setContextDraft({ text, tokens });
+            onChange({ contextWindowTokens: tokens });
+          }}
           aria-invalid={!contextWindowValid}
           aria-describedby={contextWindowHintId}
           className="h-9 text-[13px]"
         />
         <p id={contextWindowHintId} className={cn("mt-1.5 text-[12px]", contextWindowValid ? "text-muted-foreground" : "text-destructive")}>
           {contextWindowValid
-            ? tx("settings.models.contextWindowHint", "Context budget in tokens.")
-            : tx("settings.models.contextWindowError", "Enter a whole number of tokens greater than zero.")}
+            ? t("settings.models.contextWindowHint", { tokens: contextWindowTokens.toLocaleString(), defaultValue: "{{tokens}} tokens. K = 1,000; M = 1,000,000." })
+            : tx("settings.models.contextWindowError", "Enter a positive token count, such as 200k, 1m, or 131072.")}
         </p>
       </div>
       <label className="block">

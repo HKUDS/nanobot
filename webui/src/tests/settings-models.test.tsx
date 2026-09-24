@@ -283,14 +283,14 @@ describe("Settings models", () => {
 
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByText("Temperature")).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "Context window" })).toHaveValue(200000);
+    expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue("200k");
     const reasoningEffort = screen.getByLabelText("Reasoning effort");
     expect(reasoningEffort).toHaveProperty("type", "text");
     fireEvent.change(reasoningEffort, { target: { value: "provider-native-mode" } });
     expect(reasoningEffort).toHaveValue("provider-native-mode");
   });
 
-  it.each([128000, 131072])("saves an exact custom context budget (%s)", async (tokens) => {
+  it.each([["128000", 128000], ["131072", 131072], ["272k", 272000], ["256K", 256000], ["1.5m", 1500000], ["1.001k", 1001]] as const)("saves a custom context budget (%s)", async (input, tokens) => {
     const payload = settingsPayload();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
     requestMutationMock.mockResolvedValue({
@@ -300,29 +300,29 @@ describe("Settings models", () => {
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     await togglePresetEditor();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Context window" }), {
-      target: { value: String(tokens) },
+    fireEvent.change(screen.getByRole("textbox", { name: "Context window" }), {
+      target: { value: input },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.model_configuration.update", expect.objectContaining({ context_window_tokens: tokens }), expect.any(Number),
     ));
-    expect(screen.getByRole("spinbutton", { name: "Context window" })).toHaveValue(tokens);
+    expect(screen.getByRole("textbox", { name: "Context window" })).toHaveValue(input);
   });
 
-  it.each(["", "0", "-1", "1.5"])("keeps invalid context input unsaved (%s)", async (value) => {
+  it.each(["", "0", "-1", "1.5", "abc", "2ki", "0.0001k", "9007199254740992"])("keeps invalid context input unsaved (%s)", async (value) => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
     renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
     await togglePresetEditor();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
-    const input = screen.getByRole("spinbutton", { name: "Context window" });
+    const input = screen.getByRole("textbox", { name: "Context window" });
     fireEvent.change(input, { target: { value } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(input).toHaveAttribute("aria-invalid", "true");
-    expect(input).toHaveAccessibleDescription("Enter a whole number of tokens greater than zero.");
+    expect(input).toHaveAccessibleDescription("Enter a positive token count, such as 200k, 1m, or 131072.");
     await new Promise((resolve) => setTimeout(resolve, 750));
     expect(requestMutationMock).not.toHaveBeenCalled();
-    if (!value) expect(input).toHaveValue(null);
+    expect(input).toHaveValue(value);
   });
 
   it("opens the preset editor in a dialog and protects the primary preset", async () => {
