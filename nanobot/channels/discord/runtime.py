@@ -907,17 +907,18 @@ class DiscordChannel(BaseChannel):
 
     async def _clear_reactions(self, chat_id: str) -> None:
         """Remove all pending reactions after bot replies."""
-        # Cancel delayed working emoji if it hasn't fired yet
-        tasks = self._working_emoji_tasks.pop(chat_id, set())
+        # Keep tasks owned until done, so a concurrent reset can drain them too.
+        tasks = tuple(self._working_emoji_tasks.get(chat_id, ()))
+        # Snapshot before yielding; a newer receipt must survive this cleanup.
+        msg_obj = self._pending_reactions.pop(chat_id, None)
+        bot_user = self._client.user if self._client else None
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-        msg_obj = self._pending_reactions.pop(chat_id, None)
         if msg_obj is None:
             return
-        bot_user = self._client.user if self._client else None
         for emoji in (self.config.read_receipt_emoji, self.config.working_emoji):
             with suppress(Exception):
                 await msg_obj.remove_reaction(emoji, bot_user)
@@ -931,12 +932,12 @@ class DiscordChannel(BaseChannel):
     async def _cancel_all_reactions(self) -> None:
         """Stop delayed reactions and release their retained messages."""
         tasks = tuple(task for group in self._working_emoji_tasks.values() for task in group)
-        self._working_emoji_tasks.clear()
         self._pending_reactions.clear()
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        self._working_emoji_tasks.clear()
 
     async def _reset_runtime_state(self, close_client: bool) -> None:
         """Reset client and transient runtime state."""

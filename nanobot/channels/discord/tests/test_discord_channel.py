@@ -452,6 +452,104 @@ async def test_completed_reaction_tasks_release_registry_entries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reaction_cleanup_preserves_newer_message_while_draining() -> None:
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], working_emoji_delay=0), MessageBus()
+    )
+    client = DiscordBotClient(channel, intents=discord.Intents.default())
+    channel._client = client
+    channel._running = True
+    channel._handle_message = AsyncMock()
+    working = asyncio.Event()
+    cancelling = asyncio.Event()
+    release = asyncio.Event()
+
+    async def add_reaction(emoji):
+        if emoji == channel.config.working_emoji:
+            working.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelling.set()
+                await release.wait()
+
+    old_message = _make_message(message_id=1)
+    old_message.add_reaction = AsyncMock(side_effect=add_reaction)
+    old_message.remove_reaction = AsyncMock()
+    new_message = _make_message(message_id=2)
+    new_message.add_reaction = AsyncMock()
+    new_message.remove_reaction = AsyncMock()
+    await client.on_message(old_message)
+    await asyncio.wait_for(working.wait(), timeout=1)
+    clearing = asyncio.create_task(channel._clear_reactions("456"))
+    try:
+        await asyncio.wait_for(cancelling.wait(), timeout=1)
+        channel.config.working_emoji_delay = 60
+        await client.on_message(new_message)
+        release.set()
+        await asyncio.wait_for(clearing, timeout=1)
+
+        assert channel._pending_reactions.get("456") is new_message
+        new_message.remove_reaction.assert_not_awaited()
+        old_message.remove_reaction.assert_any_await(channel.config.read_receipt_emoji, client.user)
+        old_message.remove_reaction.assert_any_await(channel.config.working_emoji, client.user)
+        assert len(channel._working_emoji_tasks["456"]) == 1
+    finally:
+        release.set()
+        await asyncio.gather(clearing, return_exceptions=True)
+        await channel.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_kind", ["reply", "stop"])
+async def test_stop_waits_for_reaction_already_draining(monkeypatch, cleanup_kind: str) -> None:
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], working_emoji_delay=0), MessageBus()
+    )
+    client = DiscordBotClient(channel, intents=discord.Intents.default())
+    channel._client = client
+    channel._running = True
+    channel._handle_message = AsyncMock()
+    working = asyncio.Event()
+    cancelling = asyncio.Event()
+    release = asyncio.Event()
+
+    async def add_reaction(emoji):
+        if emoji == channel.config.working_emoji:
+            working.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelling.set()
+                await release.wait()
+
+    message = _make_message()
+    message.add_reaction = AsyncMock(side_effect=add_reaction)
+    message.remove_reaction = AsyncMock()
+    await client.on_message(message)
+    await asyncio.wait_for(working.wait(), timeout=1)
+    reaction = next(iter(channel._working_emoji_tasks["456"]))
+    done_at_close = []
+
+    async def close():
+        done_at_close.append(reaction.done())
+
+    monkeypatch.setattr(client, "close", close)
+    clearing = asyncio.create_task(
+        channel._clear_reactions("456") if cleanup_kind == "reply" else channel.stop()
+    )
+    try:
+        await asyncio.wait_for(cancelling.wait(), timeout=1)
+        await asyncio.wait_for(channel.stop(), timeout=1)
+        assert done_at_close == [True]
+        assert reaction.done()
+    finally:
+        release.set()
+        await asyncio.gather(clearing, return_exceptions=True)
+        await channel.stop()
+
+
+@pytest.mark.asyncio
 async def test_on_message_ignores_self_messages() -> None:
     # Self-loop guard: messages from this bot's own account must be dropped (#3217).
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
