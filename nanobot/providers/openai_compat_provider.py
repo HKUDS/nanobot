@@ -117,6 +117,7 @@ _KIMI_SERVER_MANAGED_TEMPERATURE_MODELS: frozenset[str] = frozenset({
     "kimi-k2.6",
 })
 _DEEPSEEK_MULTIMODAL_MODELS: frozenset[str] = frozenset({
+    "deepseek-flash",
     "deepseek-v4-flash-vision-exp",
 })
 _TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
