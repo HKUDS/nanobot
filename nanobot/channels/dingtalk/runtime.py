@@ -22,9 +22,11 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_resolved_url, validate_url_target
+from nanobot.session.automation_turns import is_automation_turn
 
 DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
 DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS = 3
+_DINGTALK_WEBHOOK_HOSTS = frozenset({"oapi.dingtalk.com"})
 _DINGTALK_MARKDOWN_INLINE_SPECIALS = frozenset(r"\`*_{}[]()<>#+-.!|~")
 _DINGTALK_SENDER_NAME_MAX_CHARS = 80
 
@@ -181,6 +183,17 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                     or message_data.get("openConversationId"),
                 )
             )
+            # sessionWebhook enables true @-mentions on replies (the robot API
+            # has no `at` structure); it is temporary and expires, so keep the
+            # expiry timestamp alongside it.
+            session_webhook = cast(
+                str | None,
+                message_data.get("sessionWebhook"),
+            )
+            session_webhook_expiry = cast(
+                int | None,
+                message_data.get("sessionWebhookExpiredTime"),
+            )
 
             if not self.channel._accepting_inbound_tasks:
                 self.channel.logger.debug(
@@ -201,6 +214,8 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                     sender_name,
                     conversation_type,
                     conversation_id,
+                    session_webhook,
+                    session_webhook_expiry,
                 )
             )
             self.channel._background_tasks.add(task)
@@ -673,6 +688,77 @@ class DingTalkChannel(BaseChannel):
             {"text": content, "title": "Nanobot Reply"},
         )
 
+    async def _send_at_reply(self, msg: OutboundMessage, content: str) -> bool:
+        """Try a true-@ group reply via the inbound sessionWebhook.
+
+        The robot group API carries no ``at`` structure, so real mention
+        notifications are only possible through the temporary webhook attached
+        to each inbound group message. Best-effort: any miss (missing/expired
+        webhook, API error) falls back to the robot API path.
+        """
+        metadata = msg.metadata or {}
+        webhook = metadata.get("session_webhook")
+        at_user_id = metadata.get("sender_id")
+        if not isinstance(webhook, str) or not isinstance(at_user_id, str) or not at_user_id:
+            return False
+        if is_automation_turn(metadata):
+            # Cron/trigger pushes are not replies to the message the webhook
+            # belongs to; they stay on the robot API path.
+            return False
+        parsed = urlparse(webhook)
+        host = (parsed.hostname or "").lower()
+        # The webhook arrives over DingTalk's stream, but the value travels in
+        # persisted session metadata; only the official host is ever accepted.
+        # Equivalent to validate_url_target for this pinned host: no redirects
+        # are followed and the target cannot vary, so resolved-IP checks add
+        # nothing here.
+        if parsed.scheme != "https" or host not in _DINGTALK_WEBHOOK_HOSTS:
+            self.logger.warning("ignoring sessionWebhook with unexpected host: {}", host)
+            return False
+        expiry = metadata.get("session_webhook_expiry")
+        if isinstance(expiry, int) and expiry <= time.time() * 1000:
+            self.logger.debug("sessionWebhook expired; replying via robot API")
+            return False
+        ok = await self._send_webhook_markdown(webhook, at_user_id, content)
+        if not ok:
+            self.logger.warning("sessionWebhook @ reply failed; falling back to robot API")
+        return ok
+
+    async def _send_webhook_markdown(self, webhook: str, at_user_id: str, content: str) -> bool:
+        if not self._http:
+            return False
+        # DingTalk requires BOTH the literal "@{userId}" in the text AND the
+        # atUserIds declaration, otherwise the mention has no effect.
+        body = {
+            "msgtype": "markdown",
+            "markdown": {"title": "Nanobot Reply", "text": f"@{at_user_id}\n\n{content}"},
+            "at": {"atUserIds": [at_user_id], "isAtAll": False},
+        }
+        try:
+            resp = await self._http.post(webhook, json=body)
+            if resp.status_code != 200:
+                self.logger.error(
+                    "sessionWebhook send failed status={} body={}",
+                    resp.status_code,
+                    resp.text[:500],
+                )
+                return False
+            result = cast(dict[str, Any], resp.json())
+            errcode = result.get("errcode")
+            if errcode not in (None, 0):
+                self.logger.error(
+                    "sessionWebhook send api error errcode={} body={}",
+                    errcode,
+                    resp.text[:500],
+                )
+                return False
+            return True
+        except Exception:
+            # Best-effort path: network failures fall back to the robot API,
+            # which surfaces real delivery errors if the network is down.
+            self.logger.opt(exception=True).warning("sessionWebhook send error")
+            return False
+
     async def _send_media_ref(self, token: str, chat_id: str, media_ref: str) -> bool:
         media_ref = (media_ref or "").strip()
         if not media_ref:
@@ -741,19 +827,24 @@ class DingTalkChannel(BaseChannel):
 
         content = msg.content.strip() if msg.content else ""
         if content:
-            # In group chats, prefix the reply with a markdown header naming the
-            # sender so the addressed user can spot the reply. Visual only —
-            # DingTalk's markdown robot messages do not push real @ notifications.
-            sender_name = msg.metadata.get("sender_name") if msg.metadata else None
-            safe_sender_name = (
-                _escape_markdown_sender_name(sender_name)
-                if isinstance(sender_name, str)
-                else ""
-            )
-            if msg.chat_id.startswith("group:") and safe_sender_name:
-                content = f"# @{safe_sender_name}\n\n{content}"
-            if not await self._send_markdown_text(token, msg.chat_id, content):
-                raise RuntimeError("DingTalk text message was not delivered")
+            is_group = msg.chat_id.startswith("group:")
+            # True @-mention first: group replies go out via the sessionWebhook
+            # when one is attached to the conversation.
+            delivered = is_group and await self._send_at_reply(msg, content)
+            if not delivered:
+                # Fallback: prefix the reply with a markdown header naming the
+                # sender so the addressed user can spot it. Visual only —
+                # DingTalk's markdown robot messages do not push real @ notices.
+                sender_name = msg.metadata.get("sender_name") if msg.metadata else None
+                safe_sender_name = (
+                    _escape_markdown_sender_name(sender_name)
+                    if isinstance(sender_name, str) and is_group
+                    else ""
+                )
+                if safe_sender_name:
+                    content = f"# @{safe_sender_name}\n\n{content}"
+                if not await self._send_markdown_text(token, msg.chat_id, content):
+                    raise RuntimeError("DingTalk text message was not delivered")
 
         for media_ref in msg.media or []:
             ok = await self._send_media_ref(token, msg.chat_id, media_ref)
@@ -776,6 +867,8 @@ class DingTalkChannel(BaseChannel):
         sender_name: str,
         conversation_type: str | None = None,
         conversation_id: str | None = None,
+        session_webhook: str | None = None,
+        session_webhook_expiry: int | None = None,
     ) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
@@ -807,15 +900,25 @@ class DingTalkChannel(BaseChannel):
                 )
                 return
 
+            meta: dict[str, Any] = {
+                "sender_name": sender_name,
+                "platform": "dingtalk",
+                "conversation_type": conversation_type,
+            }
+            if is_group:
+                # Reply context for true @-mentions in group chats; private
+                # chats do not need @ and get no webhook keys.
+                meta["sender_id"] = sender_id
+                if session_webhook:
+                    meta["session_webhook"] = session_webhook
+                    if session_webhook_expiry:
+                        meta["session_webhook_expiry"] = session_webhook_expiry
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=str(content),
-                metadata={
-                    "sender_name": sender_name,
-                    "platform": "dingtalk",
-                    "conversation_type": conversation_type,
-                },
+                metadata=meta,
                 session_key=session_key,
             )
         except Exception:
