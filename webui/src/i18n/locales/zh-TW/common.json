@@ -581,6 +581,8 @@
       "presetNamePlaceholder": "例如：快速寫作",
       "advancedOptions": "進階選項",
       "advancedSummary": "上下文 {{context}} · 輸出上限 {{max}} Token",
+      "contextWindowHint": "上下文預算，單位為 Token。",
+      "contextWindowError": "請輸入大於零的整數 Token 數量。",
       "maxTokens": "輸出 Token 上限",
       "temperature": "溫度",
       "reasoningEffort": "推理強度",

@@ -581,6 +581,8 @@
       "presetNamePlaceholder": "예: 빠른 작성",
       "advancedOptions": "고급 옵션",
       "advancedSummary": "컨텍스트 {{context}} · 최대 {{max}} 토큰",
+      "contextWindowHint": "토큰 단위의 컨텍스트 한도입니다.",
+      "contextWindowError": "0보다 큰 정수로 토큰 수를 입력하세요.",
       "maxTokens": "최대 출력 토큰",
       "temperature": "온도",
       "reasoningEffort": "추론 강도",

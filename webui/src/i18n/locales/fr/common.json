@@ -581,6 +581,8 @@
       "presetNamePlaceholder": "p. ex. Rédaction rapide",
       "advancedOptions": "Options avancées",
       "advancedSummary": "Contexte {{context}} · Max. {{max}} tokens",
+      "contextWindowHint": "Budget de contexte en tokens.",
+      "contextWindowError": "Saisissez un nombre entier de tokens supérieur à zéro.",
       "maxTokens": "Tokens de sortie max.",
       "temperature": "Température",
       "reasoningEffort": "Effort de raisonnement",

@@ -581,6 +581,8 @@
       "presetNamePlaceholder": "p. ej., Escritura rápida",
       "advancedOptions": "Opciones avanzadas",
       "advancedSummary": "Contexto {{context}} · Máx. {{max}} tokens",
+      "contextWindowHint": "Límite de contexto en tokens.",
+      "contextWindowError": "Introduce un número entero de tokens mayor que cero.",
       "maxTokens": "Máx. tokens de salida",
       "temperature": "Temperatura",
       "reasoningEffort": "Esfuerzo de razonamiento",

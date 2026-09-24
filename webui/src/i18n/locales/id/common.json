@@ -581,6 +581,8 @@
       "presetNamePlaceholder": "mis. Menulis cepat",
       "advancedOptions": "Opsi lanjutan",
       "advancedSummary": "Konteks {{context}} · Maks. {{max}} token",
+      "contextWindowHint": "Batas konteks dalam token.",
+      "contextWindowError": "Masukkan jumlah token berupa bilangan bulat lebih besar dari nol.",
       "maxTokens": "Maks. token keluaran",
       "temperature": "Temperatur",
       "reasoningEffort": "Upaya penalaran",
