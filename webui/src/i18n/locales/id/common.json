@@ -36,7 +36,7 @@
     "action": "Beri bintang",
     "later": "Tidak sekarang",
     "never": "Jangan tanyakan lagi",
-    "saveError": "Preferensi tidak dapat disimpan. Silakan coba lagi."
+    "saveError": "Mungkin ada masalah jaringan. Pengingat ini mungkin muncul lagi."
   },
   "app": {
     "brand": "nanobot",

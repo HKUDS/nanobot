@@ -36,7 +36,7 @@
     "action": "Mettre une étoile",
     "later": "Pas maintenant",
     "never": "Ne plus demander",
-    "saveError": "Impossible d’enregistrer votre préférence. Réessayez."
+    "saveError": "Il y a peut-être un problème de connexion. Ce rappel pourrait réapparaître."
   },
   "app": {
     "brand": "nanobot",

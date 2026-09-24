@@ -36,7 +36,7 @@
     "action": "Tặng sao",
     "later": "Để sau",
     "never": "Không nhắc lại",
-    "saveError": "Không thể lưu lựa chọn của bạn. Vui lòng thử lại."
+    "saveError": "Có thể đã xảy ra sự cố mạng. Lời nhắc này có thể xuất hiện lại."
   },
   "app": {
     "brand": "nanobot",

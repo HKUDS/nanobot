@@ -36,7 +36,7 @@
     "action": "Dar una estrella",
     "later": "Ahora no",
     "never": "No volver a preguntar",
-    "saveError": "No se pudo guardar tu preferencia. Inténtalo de nuevo."
+    "saveError": "Puede que haya un problema de conexión. Este recordatorio podría volver a aparecer."
   },
   "app": {
     "brand": "nanobot",

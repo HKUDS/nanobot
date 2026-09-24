@@ -36,7 +36,7 @@
     "action": "点个 Star",
     "later": "暂时不了",
     "never": "不再提醒",
-    "saveError": "未能保存提醒偏好，请重试。"
+    "saveError": "网络可能出了点问题，之后可能还会弹出此提醒。"
   },
   "app": {
     "brand": "nanobot",

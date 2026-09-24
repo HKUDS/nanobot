@@ -36,7 +36,7 @@
     "action": "Star on GitHub",
     "later": "Not now",
     "never": "Don’t ask again",
-    "saveError": "Could not save your preference. Please try again."
+    "saveError": "There may be a network issue. This reminder may appear again."
   },
   "app": {
     "brand": "nanobot",

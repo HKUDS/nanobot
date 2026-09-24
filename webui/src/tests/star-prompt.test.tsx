@@ -78,7 +78,7 @@ it("keeps a failed permanent dismissal retryable", async () => {
   await enter();
   action.mockRejectedValueOnce(new Error("offline"));
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Don’t ask again" })));
-  expect(screen.getByRole("alert")).toHaveTextContent("Could not save");
+  expect(screen.getByRole("alert")).toHaveTextContent("There may be a network issue. This reminder may appear again.");
   expect(screen.getByRole("dialog")).toBeVisible();
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Don’t ask again" })));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
