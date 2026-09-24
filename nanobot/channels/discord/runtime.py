@@ -902,9 +902,25 @@ class DiscordChannel(BaseChannel):
         for channel_id in channel_ids:
             await self._stop_typing(channel_id)
 
+    async def _cancel_all_reactions(self) -> None:
+        """Cancel every delayed working-emoji task and drop pending reactions."""
+        tasks = list(self._working_emoji_tasks.values())
+        self._working_emoji_tasks.clear()
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError):
+                await task
+        self._pending_reactions.clear()
+
     async def _reset_runtime_state(self, close_client: bool) -> None:
         """Reset client and typing state."""
         await self._cancel_all_typing()
+        # Cancel delayed reactions before the Discord client is detached so
+        # an old runtime cannot fire late add_reaction calls after a stop or
+        # hot restart, and so stale message references do not survive the
+        # lifecycle boundary.
+        await self._cancel_all_reactions()
         self._compaction_notices.clear()
         self._stream_bufs.clear()
         self._known_channels.clear()
