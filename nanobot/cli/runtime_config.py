@@ -147,25 +147,16 @@ def _validate_session_storage(config: Config, *, workspace_override: str | None 
         return
 
     source = "--workspace" if workspace_override else "agents.defaults.workspace"
-    console.print(Text("Cannot start: session storage must be outside the agent workspace.", style="red"))
-    console.print(Text(f"Config: {config_path}"))
+    console.print(Text("Cannot start: chat history must be outside the workspace.", style="red"))
+    console.print()
     console.print(Text(f"Workspace ({source}): {workspace}"))
-    console.print(Text(f"Sessions: {sessions}"))
-    console.print(
-        "Sessions are stored beside the active config file. --workspace overrides the "
-        "configured workspace; it does not move sessions."
-    )
-    console.print(
-        "Stop this instance and back up its config directory and workspace. Move the "
-        "config file and its runtime data, including sessions, to a directory outside the "
-        "workspace, then restart with --config pointing to the moved config file."
-    )
-    console.print("Example layout: bot/config.json, bot/sessions/, bot/workspace/.")
-    console.print(
-        "Keep the existing workspace path and its .nanobot/workspace-id to preserve "
-        "its session identity. See docs/troubleshooting.md#session-storage-overlaps-the-workspace "
-        "for layout and migration options."
-    )
+    console.print(Text(f"Chat history: {sessions}"))
+    console.print()
+    console.print("To fix, keep the workspace in place:")
+    console.print("  1. Stop the instance and back up its files.")
+    console.print("  2. Move config.json and its runtime data outside the workspace.")
+    console.print("  3. Restart with --config pointing to the moved config file.")
+    console.print("Migration help: docs/troubleshooting.md")
     raise typer.Exit(1)
 
 

@@ -46,8 +46,8 @@ def test_startup_rejects_nested_sessions_before_writing_files(
     output = "".join(result.stdout.splitlines())
 
     assert result.exit_code == 1, result.output
-    assert "session storage must be outside" in output
-    assert str(config_path) in output
+    assert "chat history must be outside" in output
+    assert config_path.name in output
     assert str(workspace) in output
     assert str(config_path.parent / "sessions") in output
     source = "--workspace" if override else "agents.defaults.workspace"
@@ -70,7 +70,7 @@ def test_startup_rejects_sessions_equal_to_workspace(tmp_path: Path) -> None:
     result = runner.invoke(app, ["gateway", "--config", str(config_path)])
 
     assert result.exit_code == 1
-    assert "session storage must be outside" in result.stdout
+    assert "chat history must be outside" in result.stdout
     assert not workspace.exists()
 
 
@@ -106,6 +106,6 @@ def test_webui_checks_resolved_workspace_before_saving(
     result = runner.invoke(app, ["webui", "--config", str(config_path), "--yes", "--no-open"])
 
     assert result.exit_code == 1
-    assert "session storage must be outside" in result.stdout
+    assert "chat history must be outside" in result.stdout
     assert config_path.read_bytes() == before
     assert set(tmp_path.iterdir()) == {config_path}
