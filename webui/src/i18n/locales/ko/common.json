@@ -581,7 +581,7 @@
       "presetNamePlaceholder": "예: 빠른 작성",
       "advancedOptions": "고급 옵션",
       "advancedSummary": "컨텍스트 {{context}} · 최대 {{max}} 토큰",
-      "contextWindowHint": "{{tokens}} 토큰. K = 1,000; M = 1,000,000.",
+      "contextWindowHint": "{{tokens}} 토큰",
       "contextWindowError": "200k, 1m, 131072처럼 양수 토큰 수를 입력하세요.",
       "maxTokens": "최대 출력 토큰",
       "temperature": "온도",

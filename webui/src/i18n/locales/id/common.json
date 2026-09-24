@@ -581,7 +581,7 @@
       "presetNamePlaceholder": "mis. Menulis cepat",
       "advancedOptions": "Opsi lanjutan",
       "advancedSummary": "Konteks {{context}} · Maks. {{max}} token",
-      "contextWindowHint": "{{tokens}} token. K = 1.000; M = 1.000.000.",
+      "contextWindowHint": "{{tokens}} token",
       "contextWindowError": "Masukkan jumlah token positif, seperti 200k, 1m, atau 131072.",
       "maxTokens": "Maks. token keluaran",
       "temperature": "Temperatur",

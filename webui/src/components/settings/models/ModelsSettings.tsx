@@ -961,7 +961,7 @@ function ModelAdvancedFields({
         />
         <p id={contextWindowHintId} className={cn("mt-1.5 text-[12px]", contextWindowValid ? "text-muted-foreground" : "text-destructive")}>
           {contextWindowValid
-            ? t("settings.models.contextWindowHint", { tokens: contextWindowTokens.toLocaleString(), defaultValue: "{{tokens}} tokens. K = 1,000; M = 1,000,000." })
+            ? t("settings.models.contextWindowHint", { tokens: contextWindowTokens.toLocaleString(), defaultValue: "{{tokens}} tokens" })
             : tx("settings.models.contextWindowError", "Enter a positive token count, such as 200k, 1m, or 131072.")}
         </p>
       </div>

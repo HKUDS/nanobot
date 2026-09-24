@@ -279,7 +279,7 @@
       "presetNamePlaceholder": "ex.: Escrita rápida",
       "advancedOptions": "Opções avançadas",
       "advancedSummary": "Contexto {{context}} · Máx. {{max}} tokens",
-      "contextWindowHint": "{{tokens}} tokens. K = 1.000; M = 1.000.000.",
+      "contextWindowHint": "{{tokens}} tokens",
       "contextWindowError": "Insira uma quantidade positiva de tokens, como 200k, 1m ou 131072.",
       "maxTokens": "Máx. de tokens de saída",
       "temperature": "Temperatura",

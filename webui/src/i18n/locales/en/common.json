@@ -465,7 +465,7 @@
       "presetNamePlaceholder": "e.g. Fast writing",
       "advancedOptions": "Advanced options",
       "advancedSummary": "Context {{context}} · Max {{max}} tokens",
-      "contextWindowHint": "{{tokens}} tokens. K = 1,000; M = 1,000,000.",
+      "contextWindowHint": "{{tokens}} tokens",
       "contextWindowError": "Enter a positive token count, such as 200k, 1m, or 131072.",
       "maxTokens": "Max output tokens",
       "temperature": "Temperature",

@@ -581,7 +581,7 @@
       "presetNamePlaceholder": "例如：快速寫作",
       "advancedOptions": "進階選項",
       "advancedSummary": "上下文 {{context}} · 輸出上限 {{max}} Token",
-      "contextWindowHint": "{{tokens}} Token。K = 1,000；M = 1,000,000。",
+      "contextWindowHint": "{{tokens}} Token",
       "contextWindowError": "請輸入正數 Token 數量，例如 200k、1m 或 131072。",
       "maxTokens": "輸出 Token 上限",
       "temperature": "溫度",
