@@ -1817,7 +1817,7 @@ describe("NanobotClient", () => {
     await expect(promise).resolves.toBe("fresh-id");
   });
 
-  it.each([false, true])("retries initialization until acceptance (broadcast first: %s)", async (broadcastFirst) => {
+  it("serializes workspace scope for new chats and messages", async () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -1832,138 +1832,23 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
 
-    const promise = client.newChat(1_000, workspaceScope, "Codex");
+    const promise = client.newChat(1_000, workspaceScope);
     expect(lastSocket().sent).toContain(
-      JSON.stringify({
-        type: "new_chat",
-        workspace_scope: workspaceScope,
-        model_preset: "Codex",
-      }),
+      JSON.stringify({ type: "new_chat", workspace_scope: workspaceScope }),
     );
     lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
     await expect(promise).resolves.toBe("fresh-id");
 
-    client.sendMessage("fresh-id", "hello", undefined, {
-      workspaceScope,
-      turnId: "turn-rejected",
-    });
-    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toMatchObject({
-      type: "message",
-      chat_id: "fresh-id",
-      content: "hello",
-      workspace_scope: workspaceScope,
-      turn_id: "turn-rejected",
-      session_initialization: { model_preset: "Codex" },
-      webui: true,
-    });
-
-    lastSocket().fakeMessage({
-      event: "error",
-      detail: "message_rejected",
-      chat_id: "fresh-id",
-      turn_id: "turn-rejected",
-    });
-    client.sendMessage("fresh-id", "retry", undefined, { turnId: "turn-accepted" });
-    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toMatchObject({
-      session_initialization: { model_preset: "Codex" },
-    });
-
-    if (broadcastFirst) {
-      lastSocket().fakeMessage({
-        event: "user_message",
+    client.sendMessage("fresh-id", "hello", undefined, { workspaceScope });
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
         chat_id: "fresh-id",
-        turn_id: "turn-accepted",
-        active_turn_id: "other-turn",
-        text: "retry",
-      });
-    }
-    lastSocket().fakeMessage({
-      event: "message_accepted",
-      chat_id: "fresh-id",
-      turn_id: "turn-accepted",
-      active_turn_id: "other-turn",
-    });
-    client.sendMessage("fresh-id", "later", undefined, { turnId: "turn-later" });
-    expect(JSON.parse(lastSocket().sent.at(-1) as string)).not.toHaveProperty(
-      "session_initialization",
+        content: "hello",
+        workspace_scope: workspaceScope,
+        webui: true,
+      }),
     );
-  });
-
-  it("clears initialization when an exact system-command send is accepted", async () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    client.connect();
-    const socket = lastSocket();
-    socket.fakeOpen();
-
-    const created = client.newChat(1_000, null, "Codex");
-    socket.fakeMessage({ event: "attached", chat_id: "fresh-id" });
-    await expect(created).resolves.toBe("fresh-id");
-
-    client.sendMessage("fresh-id", "rejected", undefined, { turnId: "turn-rejected" });
-    socket.fakeMessage({
-      event: "error",
-      detail: "message_rejected",
-      chat_id: "fresh-id",
-      turn_id: "turn-rejected",
-    });
-
-    const command = client.sendSystemCommand("fresh-id", "/model Deep", 1_000);
-    const commandFrame = JSON.parse(socket.sent.at(-1) as string);
-    expect(commandFrame).toMatchObject({
-      chat_id: "fresh-id",
-      content: "/model Deep",
-      session_initialization: { model_preset: "Codex" },
-    });
-
-    socket.fakeMessage({
-      event: "message_accepted",
-      chat_id: "fresh-id",
-      turn_id: commandFrame.turn_id,
-      starts_turn: false,
-    });
-    socket.fakeMessage({
-      event: "message",
-      chat_id: "fresh-id",
-      turn_id: commandFrame.turn_id,
-      text: "Switched model preset to Deep.",
-    });
-    await expect(command).resolves.toBeUndefined();
-
-    client.sendMessage("fresh-id", "next", undefined, { turnId: "turn-next" });
-    expect(JSON.parse(socket.sent.at(-1) as string)).not.toHaveProperty(
-      "session_initialization",
-    );
-  });
-
-  it("keeps new-chat initialization across reconnect before acknowledgement", async () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: true,
-      maxBackoffMs: 500,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    client.connect();
-    lastSocket().fakeOpen();
-
-    const created = client.newChat(1_000, null, "Codex");
-    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
-    await expect(created).resolves.toBe("fresh-id");
-    client.sendMessage("fresh-id", "before drop", undefined, { turnId: "turn-before" });
-    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toMatchObject({
-      session_initialization: { model_preset: "Codex" },
-    });
-
-    lastSocket().fakeCloseWithCode(1006);
-    await vi.advanceTimersByTimeAsync(500);
-    lastSocket().fakeOpen();
-    client.sendMessage("fresh-id", "after drop", undefined, { turnId: "turn-after" });
-    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toMatchObject({
-      session_initialization: { model_preset: "Codex" },
-    });
   });
 
   it("sends transcription requests and resolves transcription results outside chat dispatch", async () => {

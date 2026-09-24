@@ -1628,20 +1628,6 @@ class SessionManager:
         with self._jsonl_store.locked_session_files() as sessions_dir:
             yield sessions_dir
 
-    def get_or_create_with_status(self, key: str) -> tuple[Session, bool]:
-        """Return a session and whether this call created its in-memory identity."""
-        session = self._cached(key)
-        if session is not None:
-            return session, False
-
-        session = self._load(key)
-        created = session is None
-        if session is None:
-            session = Session(key=key)
-
-        self._remember(session)
-        return session, created
-
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
@@ -1652,7 +1638,15 @@ class SessionManager:
         Returns:
             The session.
         """
-        session, _ = self.get_or_create_with_status(key)
+        session = self._cached(key)
+        if session is not None:
+            return session
+
+        session = self._load(key)
+        if session is None:
+            session = Session(key=key)
+
+        self._remember(session)
         return session
 
     def get_or_create_transient(

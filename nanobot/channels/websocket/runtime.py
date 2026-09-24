@@ -23,9 +23,7 @@ from websockets.http11 import Request as WsRequest
 
 from nanobot.bus.events import (
     OUTBOUND_META_AGENT_UI,
-    InboundAdmission,
     OutboundMessage,
-    SessionInitialization,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -460,8 +458,6 @@ class WebSocketChannel(BaseChannel):
         is_dm: bool,
         session_key: str | None,
         require_existing_session: bool,
-        session_initialization: SessionInitialization | None,
-        admission: InboundAdmission | None,
     ) -> None:
         await self._handle_message(
             sender_id=sender_id,
@@ -472,8 +468,6 @@ class WebSocketChannel(BaseChannel):
             is_dm=is_dm,
             session_key=session_key,
             require_existing_session=require_existing_session,
-            session_initialization=session_initialization,
-            admission=admission,
         )
 
     def _attach(self, connection: ServerConnection, chat_id: str) -> None:

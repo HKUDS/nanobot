@@ -16,15 +16,12 @@ from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
-from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
     INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     RUNTIME_CONTROL_SESSION_DISCARD,
-    InboundMessage,
     OutboundMessage,
-    SessionInitialization,
 )
 from nanobot.bus.outbound_events import (
     ContextCompactionEvent,
@@ -50,14 +47,12 @@ from nanobot.channels.websocket.runtime import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
-from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage
-from nanobot.providers.factory import build_provider_snapshot
+from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
-from nanobot.session.recovery import RecoveryCoordinator
 from nanobot.session.session_handles import session_handle_for_name
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.http_utils import (
@@ -1691,195 +1686,6 @@ async def test_new_chat_without_message_does_not_create_session(
     await channel._cleanup_connection(conn)
 
     assert sessions.list_sessions() == []
-
-
-@pytest.mark.asyncio
-async def test_typed_session_initialization_is_forwarded_without_message_metadata(
-    bus: MagicMock,
-    tmp_path,
-) -> None:
-    async def accept(msg: InboundMessage) -> None:
-        if msg.admission is not None:
-            msg.admission.accept()
-
-    bus.publish_inbound.side_effect = accept
-    sessions = SessionManager(tmp_path / "sessions")
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
-        bus,
-        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
-    )
-    conn = AsyncMock()
-    conn.remote_address = ("127.0.0.1", 50123)
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "new_chat", "model_preset": "  Codex  "},
-    )
-
-    attached = json.loads(conn.send.await_args_list[0].args[0])
-    chat_id = attached["chat_id"]
-    assert attached["model_preset"] == "Codex"
-    assert sessions.list_sessions() == []
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {
-            "type": "message",
-            "chat_id": chat_id,
-            "content": "hello",
-            "webui": True,
-            "session_initialization": {"model_preset": "  Codex  "},
-        },
-    )
-
-    first = bus.publish_inbound.await_args.args[0]
-    assert first.session_initialization == SessionInitialization(model_preset="Codex")
-    assert SESSION_MODEL_PRESET_METADATA_KEY not in first.metadata
-
-    bus.publish_inbound.reset_mock()
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {"type": "message", "chat_id": chat_id, "content": "again", "webui": True},
-    )
-
-    second = bus.publish_inbound.await_args.args[0]
-    assert second.session_initialization is None
-    assert SESSION_MODEL_PRESET_METADATA_KEY not in second.metadata
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("reject_first", [False, True])
-async def test_first_preset_message_crosses_gateway_and_core(
-    tmp_path: Path, reject_first: bool, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class Provider(LLMProvider):
-        def __init__(self) -> None:
-            super().__init__(provider_name="test")
-            self.calls: list[str | None] = []
-
-        async def chat(self, messages, tools=None, model=None, **kwargs):
-            self.calls.append(model)
-            return LLMResponse(content="hello", finish_reason="stop")
-
-        def get_default_model(self) -> str:
-            return "default-model"
-
-    bus = MessageBus()
-    provider = Provider()
-    config = Config.model_validate({
-        "agents": {"defaults": {"fallbackModels": ["Small"]}},
-        "modelPresets": {
-            "Fast": {"model": "selected-model", "contextWindowTokens": 256_000},
-            "Small": {"model": "fallback-model", "contextWindowTokens": 200_000},
-        },
-    })
-    monkeypatch.setattr(
-        "nanobot.providers.factory._make_provider_core", lambda *args, **kwargs: provider,
-    )
-    loop = AgentLoop(
-        bus=bus, provider=provider, workspace=tmp_path, model="default-model",
-        context_window_tokens=200_000,
-        model_presets=config.model_presets,
-        preset_snapshot_loader=lambda name: build_provider_snapshot(config, preset_name=name),
-    )
-    loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
-    loop._recovery_admission = RecoveryCoordinator(loop.sessions, bus)
-    coordinator = wth.WebuiTurnCoordinator(
-        bus=bus, sessions=loop.sessions, schedule_background=lambda coro: coro.close(),
-    )
-    unsubscribe = coordinator.subscribe()
-    loop.turn_delivery_factory.route_policy = wth.WebuiTurnRoutePolicy(loop.sessions)
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"}, bus,
-        gateway=_basic_handler(bus, session_manager=loop.sessions, workspace_path=tmp_path),
-    )
-    conn = AsyncMock()
-    conn.remote_address = ("127.0.0.1", 50123)
-    worker = asyncio.create_task(loop.run())
-    try:
-        await channel._dispatch_envelope(
-            conn, "client", {"type": "new_chat", "model_preset": "Fast"},
-        )
-        chat_id = json.loads(conn.send.await_args_list[0].args[0])["chat_id"]
-        assert loop.sessions.list_sessions() == []
-        message = {
-            "type": "message", "chat_id": chat_id, "content": "hello", "webui": True,
-            "turn_id": "turn-first", "session_initialization": {"model_preset": "Fast"},
-        }
-        if reject_first:
-            await asyncio.wait_for(channel._dispatch_envelope(conn, "client", {
-                **message, "turn_id": "turn-invalid",
-                "session_initialization": {"model_preset": "Missing"},
-            }), timeout=5)
-            events = [json.loads(call.args[0]) for call in conn.send.await_args_list]
-            assert any(e.get("detail") == "message_rejected" for e in events)
-            assert not any(e["event"] == "message_accepted" for e in events)
-            assert loop.sessions.list_sessions() == []
-            assert provider.calls == []
-            conn.send.reset_mock()
-
-        await asyncio.wait_for(channel._dispatch_envelope(conn, "client", message), timeout=5)
-        events = [json.loads(call.args[0]) for call in conn.send.await_args_list]
-        assert any(e["event"] == "message_accepted" for e in events)
-        session_key = f"websocket:{chat_id}"
-        persisted = loop.sessions.read_session_metadata(session_key)
-        assert persisted is not None
-        assert persisted["metadata"][SESSION_MODEL_PRESET_METADATA_KEY] == "Fast"
-        assert WORKSPACE_SCOPE_METADATA_KEY in persisted["metadata"]
-
-        model_event = None
-        async with asyncio.timeout(5):
-            while True:
-                event = (await bus.consume_outbound()).event
-                if isinstance(event, TurnModelUpdatedEvent):
-                    model_event = event
-                if isinstance(event, TurnEndEvent):
-                    assert event.context_window_tokens == 256_000
-                    break
-        assert model_event is not None
-        assert model_event.context_window_tokens == 256_000
-        assert model_event.model_preset == "Fast"
-        assert provider.calls == ["selected-model"]
-        loop.sessions.invalidate(session_key)
-        restored = loop.sessions.get_or_create(session_key)
-        assert loop.runtime_for_session(restored).context_window_tokens == 256_000
-    finally:
-        loop.stop()
-        await asyncio.wait_for(worker, timeout=5)
-        unsubscribe()
-
-
-@pytest.mark.asyncio
-async def test_malformed_session_initialization_is_rejected_before_dispatch(
-    bus: MagicMock,
-) -> None:
-    channel = _ch(bus)
-    conn = AsyncMock()
-    conn.remote_address = ("127.0.0.1", 50123)
-
-    await channel._dispatch_envelope(
-        conn,
-        "webui-client",
-        {
-            "type": "message",
-            "chat_id": "new-chat",
-            "content": "hello",
-            "turn_id": "turn-invalid-init",
-            "session_initialization": {"model_preset": "Codex", "unexpected": True},
-        },
-    )
-
-    assert json.loads(conn.send.await_args.args[0]) == {
-        "event": "error",
-        "detail": "invalid session_initialization",
-        "chat_id": "new-chat",
-        "turn_id": "turn-invalid-init",
-    }
-    bus.publish_inbound.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -8,12 +8,7 @@ from typing import Any, cast
 
 from loguru import logger
 
-from nanobot.bus.events import (
-    InboundAdmission,
-    InboundMessage,
-    OutboundMessage,
-    SessionInitialization,
-)
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
@@ -268,8 +263,6 @@ class BaseChannel(ABC):
         is_dm: bool = False,
         authorization_id: str | None = None,
         require_existing_session: bool = False,
-        session_initialization: SessionInitialization | None = None,
-        admission: InboundAdmission | None = None,
     ) -> None:
         """Handle a message after checking its authorization subject.
 
@@ -280,8 +273,6 @@ class BaseChannel(ABC):
         """
         permission_id = authorization_id if authorization_id is not None else sender_id
         if not self.is_allowed(permission_id):
-            if admission is not None:
-                admission.reject("access denied")
             if is_dm:
                 try:
                     code = generate_code(self.name, str(sender_id))
@@ -325,8 +316,6 @@ class BaseChannel(ABC):
             metadata=meta,
             session_key_override=session_key,
             require_existing_session=require_existing_session,
-            session_initialization=session_initialization,
-            admission=admission,
         )
 
         await self.bus.publish_inbound(msg)

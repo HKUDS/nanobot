@@ -291,11 +291,7 @@ export function useSessions(): {
     workspaceScope?: WorkspaceScopePayload | null,
     modelPreset?: string | null,
   ): Promise<string> => {
-    const chatId = await client.newChat(
-      CHAT_CREATE_TIMEOUT_MS,
-      workspaceScope,
-      modelPreset,
-    );
+    const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the

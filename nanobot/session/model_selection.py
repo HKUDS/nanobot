@@ -20,13 +20,3 @@ def model_preset_from_metadata(metadata: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("session model preset must be a non-empty string")
     return value.strip()
-
-
-class SessionInitializationConflictError(ValueError):
-    """A session initialization disagrees with an identity that already exists."""
-
-    def __init__(self, session_key: str, requested_preset: str) -> None:
-        super().__init__(
-            f"session {session_key!r} already exists with a different model preset; "
-            f"cannot initialize it as {requested_preset!r}"
-        )

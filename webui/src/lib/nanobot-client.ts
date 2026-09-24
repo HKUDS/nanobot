@@ -133,11 +133,6 @@ class WebUIMutationError extends Error {
 
 interface PendingChatRequest extends PendingRequest<string> {
   temporary: boolean;
-  modelPreset?: string;
-}
-
-interface PendingSystemCommand extends PendingRequest<void> {
-  chatId: string;
 }
 
 const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
@@ -220,10 +215,6 @@ export class NanobotClient {
   private unsettledRunTurnIdsByChatId = new Map<string, Set<string>>();
   /** Correlated WebUI sends retained until protocol/canonical disposition. */
   private pendingMessageSends = new Map<string, PendingMessageSend>();
-  /** New-chat initialization retried until its exact message is acknowledged. */
-  private pendingSessionInitializationByChatId = new Map<string, string>();
-  /** Initialization attached to each exact outbound message, including system commands. */
-  private sessionInitializationBySendKey = new Map<string, string>();
   /** Message sends written to the current socket but not yet acknowledged. */
   private socketPendingMessageSendKeys = new Set<string>();
   /** Last application frame written, used only for conservative 1009 attribution. */
@@ -235,7 +226,7 @@ export class NanobotClient {
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
-  private pendingSystemCommands = new Map<string, PendingSystemCommand>();
+  private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
@@ -585,29 +576,12 @@ export class NanobotClient {
   private clearPendingMessageSend(chatId: string, turnId: string): void {
     const key = this.runSendKey(chatId, turnId);
     this.pendingMessageSends.delete(key);
-    this.sessionInitializationBySendKey.delete(key);
     this.socketPendingMessageSendKeys.delete(key);
     this.sendQueue = this.sendQueue.filter((frame) => !(
       frame.type === "message"
       && frame.chat_id === chatId
       && frame.turn_id === turnId
     ));
-  }
-
-  private clearSessionInitializationSend(chatId: string, turnId: string): void {
-    this.sessionInitializationBySendKey.delete(this.runSendKey(chatId, turnId));
-  }
-
-  private recordSessionInitializationAcceptance(chatId: string, turnId: string): void {
-    const key = this.runSendKey(chatId, turnId);
-    const acceptedPreset = this.sessionInitializationBySendKey.get(key);
-    this.sessionInitializationBySendKey.delete(key);
-    if (
-      acceptedPreset
-      && this.pendingSessionInitializationByChatId.get(chatId) === acceptedPreset
-    ) {
-      this.pendingSessionInitializationByChatId.delete(chatId);
-    }
   }
 
   private recordRunAcceptance(chatId: string, turnId?: string): void {
@@ -845,31 +819,19 @@ export class NanobotClient {
   }
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
-  newChat(
-    timeoutMs: number = 5_000,
-    workspaceScope?: WorkspaceScopePayload | null,
-    modelPreset?: string | null,
-  ): Promise<string> {
+  newChat(timeoutMs: number = 5_000, workspaceScope?: WorkspaceScopePayload | null): Promise<string> {
     if (this.pendingNewChat) {
       return Promise.reject(new Error("newChat already in flight"));
     }
-    const requestedModelPreset = modelPreset?.trim() || undefined;
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingNewChat = null;
         reject(new Error("newChat timed out"));
       }, timeoutMs);
-      this.pendingNewChat = {
-        resolve,
-        reject,
-        timer,
-        temporary: false,
-        ...(requestedModelPreset ? { modelPreset: requestedModelPreset } : {}),
-      };
+      this.pendingNewChat = { resolve, reject, timer, temporary: false };
       this.queueSend({
         type: "new_chat",
         ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
-        ...(requestedModelPreset ? { model_preset: requestedModelPreset } : {}),
       });
     });
   }
@@ -1023,9 +985,6 @@ export class NanobotClient {
   ): void {
     const temporary = this.temporaryChatIds.has(chatId);
     if (!temporary) this.knownChats.add(chatId);
-    const sessionInitializationModelPreset = temporary
-      ? undefined
-      : this.pendingSessionInitializationByChatId.get(chatId);
     const frame: Outbound = {
       type: "message",
       chat_id: chatId,
@@ -1040,9 +999,6 @@ export class NanobotClient {
       ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
-      ...(sessionInitializationModelPreset
-        ? { session_initialization: { model_preset: sessionInitializationModelPreset } }
-        : {}),
       webui: true,
     };
     if (!this.frameFitsTransport(frame)) {
@@ -1055,12 +1011,6 @@ export class NanobotClient {
         ...(options?.turnId ? { turnId: options.turnId } : {}),
       });
       return;
-    }
-    if (options?.turnId && sessionInitializationModelPreset) {
-      this.sessionInitializationBySendKey.set(
-        this.runSendKey(chatId, options.turnId),
-        sessionInitializationModelPreset,
-      );
     }
     if (options?.turnId && !isSystemCommandTurnId(options.turnId)) {
       const startsNewRun = options.startsNewRun !== false;
@@ -1076,10 +1026,9 @@ export class NanobotClient {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingSystemCommands.delete(turnId);
-        this.clearSessionInitializationSend(chatId, turnId);
         reject(new Error("system command timed out"));
       }, timeoutMs);
-      this.pendingSystemCommands.set(turnId, { resolve, reject, timer, chatId });
+      this.pendingSystemCommands.set(turnId, { resolve, reject, timer });
       this.sendMessage(chatId, normalized, undefined, { turnId });
     });
   }
@@ -1187,11 +1136,6 @@ export class NanobotClient {
     const turnId = "turn_id" in parsed && typeof parsed.turn_id === "string"
       ? parsed.turn_id
       : null;
-    if ((parsed.event === "message_accepted" || parsed.event === "user_message") && parsed.turn_id) {
-      // Canonical ownership may settle a locally guessed run before its ACK is
-      // processed, so consume initialization while the exact send is still known.
-      this.recordSessionInitializationAcceptance(parsed.chat_id, parsed.turn_id);
-    }
     if (parsed.event === "message_accepted" || parsed.event === "user_message") {
       this.recordCanonicalTurnOwnership(parsed);
     }
@@ -1248,15 +1192,8 @@ export class NanobotClient {
         this.pendingNewChat
         && this.pendingNewChat.temporary === (parsed.temporary === true)
       ) {
-        const pendingNewChat = this.pendingNewChat;
-        clearTimeout(pendingNewChat.timer);
-        if (!pendingNewChat.temporary && pendingNewChat.modelPreset) {
-          this.pendingSessionInitializationByChatId.set(
-            parsed.chat_id,
-            pendingNewChat.modelPreset,
-          );
-        }
-        pendingNewChat.resolve(parsed.chat_id);
+        clearTimeout(this.pendingNewChat.timer);
+        this.pendingNewChat.resolve(parsed.chat_id);
         this.pendingNewChat = null;
       }
       this.dispatch(parsed.chat_id, parsed);
@@ -1392,9 +1329,8 @@ export class NanobotClient {
       }
       this.pendingWebUIRequests.clear();
     }
-    for (const [turnId, pending] of this.pendingSystemCommands) {
+    for (const pending of this.pendingSystemCommands.values()) {
       clearTimeout(pending.timer);
-      this.clearSessionInitializationSend(pending.chatId, turnId);
       pending.reject(new Error("socket closed"));
     }
     this.pendingSystemCommands.clear();
@@ -1494,7 +1430,6 @@ export class NanobotClient {
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pendingSystemCommands.delete(turnId);
-    this.clearSessionInitializationSend(pending.chatId, turnId);
     pending.resolve();
   }
 
@@ -1503,7 +1438,6 @@ export class NanobotClient {
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pendingSystemCommands.delete(turnId);
-    this.clearSessionInitializationSend(pending.chatId, turnId);
     pending.reject(new Error(detail));
   }
 

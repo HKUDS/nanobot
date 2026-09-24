@@ -17,12 +17,7 @@ from typing import Any, TypedDict, cast
 import httpx
 from pydantic import Field, computed_field, field_validator
 
-from nanobot.bus.events import (
-    InboundAdmission,
-    InboundMessage,
-    OutboundMessage,
-    SessionInitialization,
-)
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -436,8 +431,6 @@ class SignalChannel(BaseChannel):
         is_dm: bool = False,
         authorization_id: str | None = None,
         require_existing_session: bool = False,
-        session_initialization: SessionInitialization | None = None,
-        admission: InboundAdmission | None = None,
     ) -> None:
         """Handle an inbound message whose policy has already been checked.
 
@@ -461,8 +454,6 @@ class SignalChannel(BaseChannel):
                 metadata=meta,
                 session_key_override=session_key,
                 require_existing_session=require_existing_session,
-                session_initialization=session_initialization,
-                admission=admission,
             )
         )
 

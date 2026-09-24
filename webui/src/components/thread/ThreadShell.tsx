@@ -1437,10 +1437,13 @@ export function ThreadShell({
         setBooting(false);
         return false;
       }
+      if (localModelPreset) {
+        await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
+      }
       setPendingFirstTargetChatId(newId);
       return true;
     },
-    [booting, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
+    [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
   );
 
   const handleThreadSend = useCallback(

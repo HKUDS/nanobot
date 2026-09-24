@@ -1618,11 +1618,7 @@ export interface FilePreviewPayload {
 }
 
 export type Outbound =
-  | {
-      type: "new_chat";
-      workspace_scope?: WorkspaceScopePayload;
-      model_preset?: string;
-    }
+  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
   | { type: "new_temporary_chat" }
   | {
       type: "webui_request";
@@ -1648,7 +1644,6 @@ export type Outbound =
       intent?: "create_automation";
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
-      session_initialization?: { model_preset: string };
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;

@@ -15,11 +15,7 @@ from typing import Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import (
-    INBOUND_META_USER_SHELL,
-    InboundAdmission,
-    SessionInitialization,
-)
+from nanobot.bus.events import INBOUND_META_USER_SHELL
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
@@ -57,7 +53,6 @@ from nanobot.webui.transcription_ws import webui_transcription_event
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
-_WEBUI_MODEL_PRESET_NAME_MAX_CHARS = 256
 
 
 @dataclass(frozen=True)
@@ -120,8 +115,6 @@ class WebUICommandTransport(Protocol):
         is_dm: bool,
         session_key: str | None,
         require_existing_session: bool,
-        session_initialization: SessionInitialization | None,
-        admission: InboundAdmission | None,
     ) -> None: ...
 
     async def send_session_updated(
@@ -301,19 +294,6 @@ class WebUICommandRouter:
             await self.start_webui_request(connection, envelope)
             return
         if command_type == "new_chat":
-            raw_model_preset = envelope.get("model_preset")
-            model_preset: str | None = None
-            if raw_model_preset is not None:
-                if not isinstance(raw_model_preset, str):
-                    await self.send_webui_protocol_error(connection, "invalid model_preset")
-                    return
-                model_preset = raw_model_preset.strip()
-                if (
-                    not model_preset
-                    or len(model_preset) > _WEBUI_MODEL_PRESET_NAME_MAX_CHARS
-                ):
-                    await self.send_webui_protocol_error(connection, "invalid model_preset")
-                    return
             new_id = str(uuid.uuid4())
             scope = await self.workspace_scope_or_error(
                 connection,
@@ -327,14 +307,11 @@ class WebUICommandRouter:
                 return
             self._workspaces.stage_scope(new_id, scope)
             self._transport.webui_attach(connection, new_id)
-            attach_fields = self._session_projection.attach_fields(webui_session_key(new_id))
-            if model_preset is not None:
-                attach_fields["model_preset"] = model_preset
             await self._transport.webui_send_event(
                 connection,
                 "attached",
                 chat_id=new_id,
-                **attach_fields,
+                **self._session_projection.attach_fields(webui_session_key(new_id)),
             )
             await self._transport.webui_send_event(
                 connection,
@@ -540,46 +517,6 @@ class WebUICommandRouter:
             )
             return
 
-        session_initialization: SessionInitialization | None = None
-        raw_initialization = envelope.get("session_initialization")
-        if raw_initialization is not None:
-            if not isinstance(raw_initialization, dict):
-                await self._transport.webui_send_event(
-                    connection,
-                    "error",
-                    detail="invalid session_initialization",
-                    **rejection_fields,
-                )
-                return
-            initialization = cast(dict[str, Any], raw_initialization)
-            if set(initialization) != {"model_preset"}:
-                await self._transport.webui_send_event(
-                    connection,
-                    "error",
-                    detail="invalid session_initialization",
-                    **rejection_fields,
-                )
-                return
-            raw_model_preset = initialization.get("model_preset")
-            if not isinstance(raw_model_preset, str):
-                await self._transport.webui_send_event(
-                    connection,
-                    "error",
-                    detail="invalid session_initialization",
-                    **rejection_fields,
-                )
-                return
-            model_preset = raw_model_preset.strip()
-            if not model_preset or len(model_preset) > _WEBUI_MODEL_PRESET_NAME_MAX_CHARS:
-                await self._transport.webui_send_event(
-                    connection,
-                    "error",
-                    detail="invalid session_initialization",
-                    **rejection_fields,
-                )
-                return
-            session_initialization = SessionInitialization(model_preset=model_preset)
-
         try:
             temporary_policy = self._temporary_chats.message_policy(
                 connection,
@@ -710,7 +647,6 @@ class WebUICommandRouter:
             if queued_owner is not None:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
-        admission = InboundAdmission() if session_initialization is not None else None
         accepted = False
         try:
             if is_webui and (
@@ -757,32 +693,10 @@ class WebUICommandRouter:
                     if temporary_policy is not None
                     else False
                 ),
-                session_initialization=session_initialization,
-                admission=admission,
             )
-            if admission is not None:
-                try:
-                    async with asyncio.timeout(30):
-                        admission_result = await admission.wait()
-                except TimeoutError:
-                    admission.reject("session initialization timed out")
-                    admission_result = await admission.wait()
-                if not admission_result.accepted:
-                    await self._transport.webui_send_event(
-                        connection,
-                        "error",
-                        detail="message_rejected",
-                        reason=admission_result.reason or "session initialization rejected",
-                        **rejection_fields,
-                    )
-                    return
-                self._workspaces.discard_draft_scope(webui_session_key(chat_id))
-            else:
-                self._workspaces.persist_scope(chat_id, scope)
+            self._workspaces.persist_scope(chat_id, scope)
             accepted = True
         finally:
-            if not accepted and admission is not None:
-                admission.reject("session initialization cancelled")
             if not accepted and queued_owner is not None:
                 clear_websocket_turn_if_current(chat_id, queued_owner)
 
