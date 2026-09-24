@@ -33,7 +33,7 @@
     "footerAction": "Dê uma estrela ao nanobot",
     "title": "Gostando do nanobot?",
     "description": "Se o nanobot está sendo útil, dê uma estrela no GitHub. Seu apoio nos motiva a continuar o desenvolvimento.",
-    "action": "Dar uma estrela no GitHub",
+    "action": "Dar uma estrela",
     "later": "Agora não",
     "never": "Não perguntar novamente",
     "saveError": "Não foi possível salvar sua preferência. Tente novamente."

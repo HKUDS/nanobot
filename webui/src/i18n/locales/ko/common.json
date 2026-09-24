@@ -33,7 +33,7 @@
     "footerAction": "nanobot에 스타 남기기",
     "title": "nanobot이 도움이 되었나요?",
     "description": "nanobot이 도움이 되었다면 GitHub에서 Star를 눌러 주세요. 여러분의 응원이 개발을 이어가는 힘이 됩니다.",
-    "action": "GitHub에서 Star 누르기",
+    "action": "스타 남기기",
     "later": "나중에",
     "never": "다시 표시하지 않기",
     "saveError": "설정을 저장하지 못했습니다. 다시 시도해 주세요."

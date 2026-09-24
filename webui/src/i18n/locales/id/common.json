@@ -33,7 +33,7 @@
     "footerAction": "Beri bintang untuk nanobot",
     "title": "Suka menggunakan nanobot?",
     "description": "Jika nanobot membantu Anda, beri bintang di GitHub. Dukungan Anda menyemangati kami untuk terus mengembangkannya.",
-    "action": "Beri bintang di GitHub",
+    "action": "Beri bintang",
     "later": "Tidak sekarang",
     "never": "Jangan tanyakan lagi",
     "saveError": "Preferensi tidak dapat disimpan. Silakan coba lagi."

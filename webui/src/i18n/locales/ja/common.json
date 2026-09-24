@@ -33,7 +33,7 @@
     "footerAction": "nanobot にスターを付ける",
     "title": "nanobot はお役に立っていますか？",
     "description": "nanobot が役に立ったら、GitHub でスターを付けて応援してください。皆さんの応援が開発を続ける励みになります。",
-    "action": "GitHub でスターを付ける",
+    "action": "スターを付ける",
     "later": "今はしない",
     "never": "今後表示しない",
     "saveError": "設定を保存できませんでした。もう一度お試しください。"

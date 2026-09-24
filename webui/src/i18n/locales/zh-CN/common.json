@@ -33,7 +33,7 @@
     "footerAction": "给 nanobot 点个 Star",
     "title": "喜欢 nanobot？",
     "description": "如果 nanobot 对你有帮助，欢迎来 GitHub 点个 Star。你的支持是我们持续维护的动力。",
-    "action": "去 GitHub 点个 Star",
+    "action": "点个 Star",
     "later": "暂时不了",
     "never": "不再提醒",
     "saveError": "未能保存提醒偏好，请重试。"
