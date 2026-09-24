@@ -2709,7 +2709,7 @@ function Shell({
 
   return (
     <ThemeProvider theme={theme}>
-      <StarPrompt ready={!loading && !sidebarStateLoading} busy={runningChatIds.size > 0} />
+      <StarPrompt ready={!loading && !sidebarStateLoading} />
       <div
         className={cn(
           "relative h-full w-full overflow-hidden",

@@ -39,35 +39,43 @@ export function StarLink({ onSaved, fullWidth = false }: {
   );
 }
 
-export function StarPrompt({ ready, busy }: { ready: boolean; busy: boolean }) {
+export function StarPrompt({ ready }: { ready: boolean }) {
   const { client } = useClient();
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
   const attempted = useRef(false);
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
+  const interacted = useRef(false);
   const previousFocus = useRef<HTMLElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
 
   useEffect(() => {
+    const cancel = () => { interacted.current = true; };
+    const events = ["pointerdown", "keydown", "input", "wheel"] as const;
+    for (const event of events) document.addEventListener(event, cancel, { capture: true, passive: true });
+    return () => {
+      for (const event of events) document.removeEventListener(event, cancel, true);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ready || attempted.current) return;
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (client.status !== "open") return;
+    const unsubscribe = client.onStatus((status) => {
+      if (status !== "open" || attempted.current) return;
       attempted.current = true;
-      // Only invite on entry, never after a running conversation finishes.
-      if (busyRef.current || document.visibilityState !== "visible"
+      if (interacted.current || document.visibilityState !== "visible"
         || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
-      previousFocus.current = document.activeElement instanceof HTMLElement
-        ? document.activeElement : null;
       void starPromptAction(client, "claim").then(({ show }) => {
-        if (!cancelled && show && !busyRef.current && document.visibilityState === "visible"
-          && !document.querySelector('[role="dialog"], [role="alertdialog"]')) setOpen(true);
+        if (cancelled || !show || interacted.current || document.visibilityState !== "visible"
+          || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+        previousFocus.current = document.activeElement instanceof HTMLElement
+          ? document.activeElement : null;
+        setOpen(true);
       }).catch(() => { /* Optional invitations stay hidden when storage is unavailable. */ });
-    }, 2000);
-    return () => { cancelled = true; window.clearTimeout(timer); };
+    });
+    return () => { cancelled = true; unsubscribe(); };
   }, [client, ready]);
 
   const dismissForever = async () => {
