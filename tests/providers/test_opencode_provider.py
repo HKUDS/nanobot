@@ -130,6 +130,19 @@ def test_opencode_prefixes_are_stripped_before_request() -> None:
     assert go_kwargs["model"] == "o3"
 
 
+@pytest.mark.parametrize("model", ["muse-spark-1.2-contributor", "muse-spark-1.3-contributor"])
+def test_opencode_go_muse_spark_contributor_models_use_responses(model) -> None:
+    provider = OpenAICompatProvider(
+        api_key=None,
+        default_model=f"opencode-go/{model}",
+        spec=find_by_name("opencode_go"),
+    )
+
+    assert provider._should_use_responses_api(model, None) is True
+    assert provider._should_use_responses_api(f"opencode-go/{model}", None) is True
+    assert provider._should_use_responses_api("opencode-go/kimi-k2.5", None) is False
+
+
 def _fake_responses_output() -> dict[str, object]:
     return {
         "output": [{
