@@ -4476,6 +4476,12 @@ describe("ThreadShell", () => {
   });
 
   it("loads mention catalogs only on demand and ignores window focus", async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input).includes("cli-apps")) return Promise.resolve(httpJson({ apps: [], installed_count: 0 }));
+      if (String(input).includes("mcp-presets")) return Promise.resolve(httpJson({ presets: [], installed_count: 0 }));
+      return originalFetch(input, init);
+    });
     render(wrap(makeClient(), <ThreadShell
       session={session("lazy-mentions")}
       title="Lazy mentions"
@@ -4496,6 +4502,29 @@ describe("ThreadShell", () => {
     fireEvent.change(input, { target: { value: "", selectionStart: 0 } });
     fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
     expect(catalogCalls()).toHaveLength(2);
+  });
+
+  it("retries a failed mention catalog when the user opens mentions again", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 503, json: async () => ({}) } as Response);
+    render(wrap(makeClient(), <ThreadShell
+      session={session("retry-mentions")}
+      title="Retry mentions"
+      onToggleSidebar={() => {}}
+      onGoHome={() => {}}
+      onNewChat={() => {}}
+    />));
+    const input = await screen.findByLabelText("Message input");
+    const catalogCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) =>
+      /cli-apps|mcp-presets/.test(String(url)));
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    });
+    expect(catalogCalls()).toHaveLength(2);
+    fireEvent.change(input, { target: { value: "", selectionStart: 0 } });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    });
+    expect(catalogCalls()).toHaveLength(4);
   });
 
   it("updates @ CLI app suggestions when settings broadcasts an install", async () => {

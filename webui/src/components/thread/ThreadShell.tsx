@@ -541,7 +541,7 @@ interface PendingFirstMessage {
 }
 
 interface InstalledSettingItemsOptions<Payload, Item> {
-  enabled: boolean;
+  requestCount: number;
   getToken: () => string;
   eventName: string;
   fetchPayload: (token: string) => Promise<Payload>;
@@ -550,7 +550,7 @@ interface InstalledSettingItemsOptions<Payload, Item> {
 }
 
 function useInstalledSettingItems<Payload, Item>({
-  enabled,
+  requestCount,
   getToken,
   eventName,
   fetchPayload,
@@ -558,6 +558,8 @@ function useInstalledSettingItems<Payload, Item>({
   selectItems,
 }: InstalledSettingItemsOptions<Payload, Item>): Item[] {
   const [items, setItems] = useState<Item[]>([]);
+  const loadedRef = useRef(false);
+  const pendingRef = useRef<Promise<Payload> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -569,14 +571,18 @@ function useInstalledSettingItems<Payload, Item>({
       if (refreshing) return;
       refreshing = true;
       const version = payloadVersion;
+      const pending = pendingRef.current ?? fetchPayload(getToken());
+      pendingRef.current = pending;
       try {
-        const payload = await fetchPayload(getToken());
+        const payload = await pending;
         if (!cancelled && version === payloadVersion) {
+          loadedRef.current = true;
           setItems(selectItems(payload));
         }
       } catch {
         // Keep the last successful catalog during transient refresh failures.
       } finally {
+        if (pendingRef.current === pending) pendingRef.current = null;
         refreshing = false;
         if (refreshAfterFlight && !cancelled) {
           refreshAfterFlight = false;
@@ -585,19 +591,20 @@ function useInstalledSettingItems<Payload, Item>({
       }
     };
     const queueRefresh = () => {
-      if (!enabled || document.visibilityState === "hidden" || refreshQueued) return;
+      if (!requestCount || document.visibilityState === "hidden" || refreshQueued) return;
       refreshQueued = true;
       queueMicrotask(() => {
         refreshQueued = false;
         if (!cancelled) void refresh();
       });
     };
-    if (enabled) void refresh();
+    if (requestCount && !loadedRef.current) void refresh();
 
     const refreshOnChanged = (event: Event) => {
       const payload = (event as CustomEvent<unknown>).detail;
       if (isPayload(payload)) {
         payloadVersion += 1;
+        loadedRef.current = true;
         setItems(selectItems(payload));
         return;
       }
@@ -613,7 +620,7 @@ function useInstalledSettingItems<Payload, Item>({
       cancelled = true;
       window.removeEventListener(eventName, refreshOnChanged);
     };
-  }, [enabled, eventName, fetchPayload, getToken, isPayload, selectItems]);
+  }, [requestCount, eventName, fetchPayload, getToken, isPayload, selectItems]);
 
   return items;
 }
@@ -696,10 +703,10 @@ export function ThreadShell({
   }, [client]);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
-  const [mentionCatalogsRequested, setMentionCatalogsRequested] = useState(false);
-  const requestMentionCatalogs = useCallback(() => setMentionCatalogsRequested(true), []);
+  const [mentionCatalogRequestCount, setMentionCatalogRequestCount] = useState(0);
+  const requestMentionCatalogs = useCallback(() => setMentionCatalogRequestCount((count) => count + 1), []);
   const cliApps = useInstalledSettingItems({
-    enabled: mentionCatalogsRequested,
+    requestCount: mentionCatalogRequestCount,
     getToken,
     eventName: CLI_APPS_CHANGED_EVENT,
     fetchPayload: fetchInstalledCliApps,
@@ -707,7 +714,7 @@ export function ThreadShell({
     selectItems: installedCliAppsFromPayload,
   });
   const mcpPresets = useInstalledSettingItems({
-    enabled: mentionCatalogsRequested,
+    requestCount: mentionCatalogRequestCount,
     getToken,
     eventName: MCP_PRESETS_CHANGED_EVENT,
     fetchPayload: fetchMcpPresets,
@@ -901,11 +908,10 @@ export function ThreadShell({
   }, []);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
+  const hasAppMentions = displayMessages.some((message) => message.cliApps?.length || message.mcpPresets?.length);
   useEffect(() => {
-    if (displayMessages.some((message) => message.cliApps?.length || message.mcpPresets?.length)) {
-      requestMentionCatalogs();
-    }
-  }, [displayMessages, requestMentionCatalogs]);
+    if (hasAppMentions) requestMentionCatalogs();
+  }, [hasAppMentions, requestMentionCatalogs]);
   const composerContextUsage = useMemo(
     () => latestComposerContextUsage(displayMessages),
     [displayMessages],
