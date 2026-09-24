@@ -21,6 +21,7 @@ from nanobot.bus.runtime_events import (
     UserInputAccepted,
 )
 from nanobot.providers.base import GenerationSettings
+from nanobot.providers.fallback_provider import FallbackModelSelection
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import session_handle_for_name
@@ -101,10 +102,13 @@ async def test_publish_turn_run_status_idle_retains_registry_until_delivery() ->
     assert wth.websocket_turn_id("chat-b") == "turn-b"
 
 
-def test_clear_websocket_turn_only_clears_matching_owner() -> None:
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-b"] = 1234.5
-    wth._WEBSOCKET_TURN_IDS["chat-b"] = "turn-new"
-    wth._WEBSOCKET_TURN_OWNERS["chat-b"] = "owner-new"
+async def test_clear_websocket_turn_only_clears_matching_owner() -> None:
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="websocket", sender_id="u", chat_id="chat-b", content="hi",
+        metadata={"webui_turn_id": "turn-new", WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-new"},
+    )
+    await wth.publish_turn_run_status(bus, msg, "running", started_at=1234.5)
 
     assert wth.clear_websocket_turn_if_current("chat-b", "owner-old") is False
     assert wth.websocket_turn_wall_started_at("chat-b") == 1234.5
@@ -177,7 +181,7 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
             metadata={"webui": True},
         )
     ):
-        await observer("deepseek/deepseek-chat")
+        await observer(FallbackModelSelection("deepseek/deepseek-chat", "openai_codex"))
 
     outbound = bus.publish_outbound.await_args.args[0]
     assert outbound.channel == "websocket"
@@ -186,6 +190,7 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
     assert outbound.event.model_preset == "Deep Research"
+    assert outbound.event.reauth_provider == "openai_codex"
 
 
 @pytest.mark.asyncio
@@ -343,6 +348,6 @@ async def test_fallback_model_ignores_non_websocket_requests() -> None:
     observer = wth.build_webui_fallback_model_observer(bus)
 
     with request_context(RequestContext(channel="telegram", chat_id="chat-model")):
-        await observer("fallback")
+        await observer(FallbackModelSelection("fallback", "openai_codex"))
 
     bus.publish_outbound.assert_not_awaited()

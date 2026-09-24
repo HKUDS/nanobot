@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import type { UIImage } from "@/lib/types";
+import { ZoomableImage } from "@/components/ZoomableImage";
 
 interface ImageLightboxProps {
   images: UIImage[];
@@ -19,8 +20,7 @@ interface ImageLightboxProps {
  * which is much too small for a photo preview).
  *
  * Implementation notes:
- * - `translate3d` + `will-change: transform` promote the image to a GPU
- *   compositing layer so open/swap stays at 60 FPS on long threads.
+ * - Image-local pinch/pan uses transforms; switching images resets the view.
  * - Adjacent images are rendered in hidden `<img>` tags so the browser
  *   decodes them eagerly; pressing left/right feels instant.
  * - Radix handles `Escape` + focus trapping; we only wire up ←/→ + Home/End.
@@ -37,6 +37,7 @@ export function ImageLightbox({
   const open = index !== null;
   const total = images.length;
   const current = index !== null ? images[index] : null;
+  const opener = useRef<HTMLElement | null>(null);
 
   const go = useCallback(
     (delta: number) => {
@@ -94,8 +95,13 @@ export function ImageLightbox({
         />
         <DialogPrimitive.Content
           aria-label={current.name ?? t("lightbox.title")}
+          aria-describedby={undefined}
+          onOpenAutoFocus={() => { opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
+          onCloseAutoFocus={(event) => {
+            if (opener.current?.isConnected) { event.preventDefault(); opener.current.focus(); }
+          }}
           className={cn(
-            "fixed inset-0 z-50 flex items-center justify-center",
+            "fixed inset-0 z-50 flex items-center justify-center overflow-hidden",
             "focus:outline-none",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
@@ -107,22 +113,7 @@ export function ImageLightbox({
             {current.name ?? t("lightbox.title")}
           </DialogPrimitive.Title>
 
-          <div
-            className="relative flex max-h-[92vh] max-w-[94vw] items-center justify-center"
-            style={{
-              transform: "translate3d(0,0,0)",
-              willChange: "transform",
-            }}
-          >
-            <img
-              key={current.url}
-              src={current.url}
-              alt={current.name ?? ""}
-              decoding="async"
-              draggable={false}
-              className="max-h-[92vh] max-w-[94vw] select-none rounded-compact object-contain shadow-2xl"
-            />
-          </div>
+          <ZoomableImage key={`${index}:${current.url}`} src={current.url} alt={current.name ?? ""} />
 
           {hasMany ? (
             <>
@@ -142,7 +133,7 @@ export function ImageLightbox({
                   go(1);
                 }}
               />
-              <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1 text-xs font-medium text-white/90 tabular-nums">
+              <div className="pointer-events-none absolute left-4 top-5 rounded-full bg-black/55 px-3 py-1 text-xs font-medium text-white/90 tabular-nums">
                 {counter}
               </div>
             </>

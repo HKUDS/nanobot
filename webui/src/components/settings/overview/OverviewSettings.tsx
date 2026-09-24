@@ -3,12 +3,12 @@ import {
   ArrowUpCircle,
   Bot,
   BookOpen,
-  Github,
   MessageCircle,
   Check,
   ChevronRight,
   ExternalLink,
   Globe2,
+  Github,
   ImageIcon,
   Loader2,
   Mic,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { StarLink } from "@/components/StarPrompt";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
@@ -38,6 +39,7 @@ import type {
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
 import type { SettingsPayload } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
 export function OverviewSettings({
@@ -136,12 +138,12 @@ export function OverviewSettings({
 export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
   const { t } = useTranslation();
   const links = [
-    { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
     { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
+    { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
     { key: "reportIssue", icon: MessageCircle, href: "https://github.com/HKUDS/nanobot/issues" },
   ];
   return (
-    <div className="settings-stack">
+    <div className="flex flex-1 flex-col gap-5">
       <div className="flex flex-col items-center gap-4 py-6 text-center">
         <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
@@ -157,6 +159,9 @@ export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
           </a>
         ))}
       </SettingsGroup>
+      <div className="mt-auto pt-8 text-center">
+        <StarLink />
+      </div>
     </div>
   );
 }
@@ -379,6 +384,23 @@ export function AppearanceSettings({
                 : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.notificationSound", "Completion sound")}
+            description={tx(
+              "settings.help.notificationSound",
+              "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
+            )}
+          >
+            <ToggleButton
+              checked={localPrefs.notificationSound}
+              onChange={(notificationSound) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, notificationSound }))}
+              ariaLabel={tx("settings.rows.notificationSound", "Completion sound")}
+              label={localPrefs.notificationSound
+                ? tx("settings.values.on", "On")
+                : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
         </SettingsGroup>
       </section>
     </div>
@@ -405,7 +427,8 @@ function OverviewValueLogo({
   showBrandLogos: boolean;
 }) {
   const brand = provider ? providerBrand(provider) : null;
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
 
   if (!provider || !showBrandLogos || !brand) return null;
 
@@ -413,7 +436,10 @@ function OverviewValueLogo({
     return (
       <span
         data-testid={`overview-logo-${provider}`}
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background"
+        className={cn(
+          "grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md",
+          logoLoaded ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
+        )}
         aria-hidden
       >
         <img
@@ -421,7 +447,13 @@ function OverviewValueLogo({
           alt=""
           decoding="async"
           loading="lazy"
-          className="h-3.5 w-3.5 object-contain"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          className={cn(
+            "object-contain",
+            isLogoTile ? "h-5 w-5" : "h-3.5 w-3.5",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />

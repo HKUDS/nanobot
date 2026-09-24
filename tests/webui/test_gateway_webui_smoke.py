@@ -202,7 +202,11 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             f"{base_url}/api/sessions/{encoded_key}/webui-thread",
             token=api_token,
         )
-        contents = [str(message.get("content") or "") for message in thread["messages"]]
+        contents = [
+            str(event.get("text") or "")
+            for event in thread["events"]
+            if event.get("event") in {"user_message", "message", "stream_end"}
+        ]
         assert "/model" in contents
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
         assert "!printf shell-ok" in contents

@@ -11,6 +11,7 @@ from typing import Any, cast
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import ToolCallRequest
@@ -253,7 +254,8 @@ def _classify_violation(
         logger.warning(
             "Tool {} blocked by SSRF guard; returning non-retryable tool error: {}",
             tool_call.name,
-            raw_text.replace("\n", " ").strip()[:200],
+            raw_text.replace("\n", " ").strip()[:200]
+            if tool_log_content_allowed() else "[content hidden]",
         )
         event["detail"] = _event_detail("ssrf_violation: ", raw_text)
         return _ssrf_soft_payload(raw_text), event

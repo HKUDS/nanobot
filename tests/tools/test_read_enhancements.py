@@ -23,13 +23,6 @@ def _document_source(text: str) -> DocumentLineSource:
     return DocumentLineSource(lines)
 
 
-@pytest.fixture(autouse=True)
-def _clear_file_state():
-    file_state.clear()
-    yield
-    file_state.clear()
-
-
 # ---------------------------------------------------------------------------
 # Description fix
 # ---------------------------------------------------------------------------
@@ -120,6 +113,33 @@ class TestReadDedup:
 
         assert "1| name" in result
         assert "2| café" in result
+
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    @pytest.mark.asyncio
+    async def test_bom_marked_unicode_text_uses_declared_encoding(
+        self,
+        tool,
+        tmp_path,
+        encoding,
+    ):
+        f = tmp_path / "unicode.txt"
+        f.write_bytes("Hello 世界\nSecond line".encode(encoding))
+
+        result = await tool.execute(path=str(f))
+
+        assert "1| Hello 世界" in result
+        assert "2| Second line" in result
+        assert "\x00" not in result
+
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    @pytest.mark.asyncio
+    async def test_bom_only_unicode_text_is_empty_file(self, tool, tmp_path, encoding):
+        f = tmp_path / "empty.txt"
+        f.write_bytes("".encode(encoding))
+
+        result = await tool.execute(path=str(f))
+
+        assert result == f"(Empty file: {f})"
 
 
 # ---------------------------------------------------------------------------

@@ -121,6 +121,7 @@ def _runtime_message(content, blocks: list[RuntimeContextBlock]) -> dict:
 
 def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
+    provider.provider_name = "test"
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
@@ -2105,8 +2106,8 @@ async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Pat
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
-    logs: list[str] = []
-    sink_id = logger.add(logs.append, level="DEBUG", format="{message}")
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="DEBUG")
     try:
         await loop._process_message(
             InboundMessage(
@@ -2129,9 +2130,64 @@ async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Pat
         "_persist_turn",
         "_prepare_outbound",
     ]
-    logged = "".join(logs)
+    logged = "\n".join(record["message"] for record in records)
     for stage in ("restore", "compact", "command", "build", "run", "save", "respond"):
         assert f"Stage {stage} completed in" in logged
+    stage_records = [record for record in records if record["extra"].get("event") == "turn_stage"]
+    assert {record["extra"]["stage"] for record in stage_records} == {
+        "restore",
+        "compact",
+        "command",
+        "build",
+        "run",
+        "save",
+        "respond",
+    }
+    assert {record["extra"]["session_key"] for record in stage_records} == {"cli:test"}
+    assert len({record["extra"]["turn_id"] for record in stage_records}) == 1
+    completion = next(
+        record for record in records if record["extra"].get("event") == "turn_completed"
+    )
+    assert completion["extra"]["outcome"] == "stop"
+    assert completion["extra"]["duration_ms"] >= 0
+    assert completion["extra"]["provider"] == "test"
+    assert completion["extra"]["model"] == "test-model"
+    assert "response=[content hidden]" in completion["message"]
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_stage_logs_exception_and_correlation(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    async def fail_restore(_ctx) -> None:
+        raise RuntimeError("restore failed")
+
+    loop._restore_turn = fail_restore  # type: ignore[method-assign]
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="ERROR")
+    try:
+        with pytest.raises(RuntimeError, match="restore failed"):
+            await loop._process_message(
+                InboundMessage(
+                    channel="cli",
+                    sender_id="user",
+                    chat_id="failure",
+                    content="hello",
+                )
+            )
+    finally:
+        logger.remove(sink_id)
+
+    failure = next(
+        record
+        for record in records
+        if record["extra"].get("event") == "turn_stage"
+        and record["extra"].get("outcome") == "error"
+    )
+    assert failure["exception"] is not None
+    assert failure["extra"]["stage"] == "restore"
+    assert failure["extra"]["session_key"] == "cli:failure"
+    assert failure["extra"]["turn_id"].startswith("cli:failure:")
 
 
 @pytest.mark.asyncio

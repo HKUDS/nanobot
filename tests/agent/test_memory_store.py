@@ -230,8 +230,6 @@ class TestHistoryWithCursor:
         store.append_history("event 1")
         entries = store.read_unprocessed_history(since_cursor=0)
 
-        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
-
         # Mock os.replace to raise an exception
         def failing_replace(*args, **kwargs):
             raise RuntimeError("Simulated failure")
@@ -241,8 +239,8 @@ class TestHistoryWithCursor:
         with pytest.raises(RuntimeError):
             store._write_entries(entries)
 
-        # Temp file should be cleaned up
-        assert not tmp_path_obj.exists()
+        # Temp file should be cleaned up, including uniquely named temps.
+        assert list(store.history_file.parent.glob("*.tmp")) == []
 
         # Original file should still exist (because replace failed)
         assert store.history_file.exists()

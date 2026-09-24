@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -260,6 +261,28 @@ async def test_background_authorization_request_clears_rejected_token(
 
     assert await storage.get_tokens() is None
     assert await storage.get_client_info() == client_info
+
+
+@pytest.mark.asyncio
+async def test_stale_authorization_preserves_new_credentials(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("linear", server_url)
+    await storage.set_tokens(OAuthToken(access_token="old-access"))
+    auth = await create_mcp_oauth_auth("linear", server_url)
+
+    replacement = MCPOAuthStorage("linear", server_url)
+    await replacement.prepare_redirect_uri("http://127.0.0.1/auth/mcp/callback")
+    await replacement.set_tokens(OAuthToken(access_token="new-access"))
+
+    with pytest.raises(MCPAuthorizationRequiredError):
+        await auth.context.redirect_handler("https://auth.example.com/authorize")
+
+    tokens = await MCPOAuthStorage("linear", server_url).get_tokens()
+    assert tokens is not None and tokens.access_token == "new-access"
 
 
 @pytest.mark.asyncio
@@ -581,13 +604,19 @@ async def test_stale_token_endpoint_is_rediscovered_once(
     ("error", "clears_client"),
     [("invalid_grant", False), ("invalid_client", True)],
 )
+@pytest.mark.parametrize("unexpected_failure", [False, True])
 async def test_unrecoverable_refresh_error_requires_authorization(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     error: str,
     clears_client: bool,
+    unexpected_failure: bool,
 ) -> None:
     _use_data_dir(tmp_path, monkeypatch)
+    caplog.set_level("INFO", logger="mcp.client.auth.oauth2")
+    log = MagicMock()
+    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.logger", log)
     server_url = "https://mcp.example.com/mcp"
     storage = MCPOAuthStorage("linear", server_url)
     await storage.set_oauth_metadata(_oauth_metadata())
@@ -601,6 +630,12 @@ async def test_unrecoverable_refresh_error_requires_authorization(
         client_id="registered-client",
     ))
     auth = await create_mcp_oauth_auth("linear", server_url)
+
+    if unexpected_failure:
+        async def fail_redirect(_url: str) -> None:
+            raise ValueError("invalid OAuth response")
+
+        auth.context.redirect_handler = fail_redirect
 
     async def respond(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth/token":
@@ -627,14 +662,25 @@ async def test_unrecoverable_refresh_error_requires_authorization(
             })
         return httpx.Response(404)
 
-    with pytest.raises(MCPAuthorizationRequiredError):
+    with pytest.raises(ValueError if unexpected_failure else MCPAuthorizationRequiredError):
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(respond),
             auth=auth,
         ) as client:
             await client.get(server_url)
 
+    if unexpected_failure:
+        errors = [record for record in caplog.records if record.getMessage() == "OAuth flow error"]
+        assert errors and errors[0].levelname == "ERROR"
+        assert errors[0].exc_info is not None
+        assert isinstance(errors[0].exc_info[1], ValueError)
+        return
+
     reloaded = MCPOAuthStorage("linear", server_url)
+    log.info.assert_any_call(
+        "MCP server '{}': OAuth request stopped at browser authorization", "linear",
+    )
+    assert "OAuth flow error" not in caplog.text
     assert await reloaded.get_tokens() is None
     client_info = await reloaded.get_client_info()
     assert client_info is not None

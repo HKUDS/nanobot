@@ -47,10 +47,14 @@ export function TokenUsageModelTrend({ days, modelDays, models }: {
   return <section className="mt-2">
     <h3 className="mb-4 text-sm font-medium">{title}</h3>
     <div className="relative pl-9">
-      <div className="pointer-events-none absolute inset-y-0 left-0 right-0 flex flex-col justify-between pb-6" aria-hidden>
-        {[peak, peak / 2, 0].map((value, index) => <div key={index} className="flex items-center gap-2"><span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{compact.format(value)}</span><span className="flex-1 border-t border-border/40" /></div>)}
-      </div>
-      <div role="group" aria-label={title} className="relative grid h-[clamp(144px,30vh,280px)] grid-cols-[repeat(30,minmax(0,1fr))] gap-px">
+      <div className="relative h-[clamp(144px,30vh,280px)]" data-model-usage-plot>
+        <div className="pointer-events-none absolute inset-y-0 -left-9 right-0" aria-hidden>
+          {[peak, peak / 2, 0].map((value, index) => <div key={index} className="absolute inset-x-0 flex items-center gap-2" style={{ top: `${index * 50}%` }}>
+            <span className="absolute top-0 w-7 -translate-y-1/2 text-right text-[10px] tabular-nums text-muted-foreground">{compact.format(value)}</span>
+            <span className="ml-9 flex-1 border-t border-border/40" data-model-usage-gridline={index} />
+          </div>)}
+        </div>
+      <div role="group" aria-label={title} className="relative grid h-full grid-cols-[repeat(30,minmax(0,1fr))] gap-px">
         <TooltipProvider>
           {columns.map(column => column.total === 0 ? (
             <span key={column.date} role="img" aria-label={`${column.date}: ${number.format(0)} tokens`} />
@@ -74,6 +78,7 @@ export function TokenUsageModelTrend({ days, modelDays, models }: {
             </TooltipContent>
           </Tooltip>)}
         </TooltipProvider>
+      </div>
       </div>
       <div className="relative mt-2 flex justify-between text-[10px] tabular-nums text-muted-foreground"><span>{days[0].date.slice(5)}</span><span>{days[14].date.slice(5)}</span><span>{days[days.length - 1].date.slice(5)}</span></div>
     </div>

@@ -103,6 +103,114 @@ class TestActiveTaskTracking:
         assert "test:c1" not in loop._active_tasks
 
 
+async def _wait_for_background_callbacks(loop) -> None:
+    for _ in range(10):
+        if not loop._background_tasks:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("background task callback did not run")
+
+
+class TestBackgroundTaskTracking:
+    @pytest.mark.asyncio
+    async def test_successful_background_task_is_removed(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+
+        loop.schedule_background(asyncio.sleep(0))
+        await _wait_for_background_callbacks(loop)
+
+        assert not loop._background_tasks
+        mock_logger.opt.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failed_background_task_is_retrieved_and_logged(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        failure = RuntimeError("background failure")
+        loop_errors: list[dict[str, object]] = []
+        event_loop = asyncio.get_running_loop()
+        previous_handler = event_loop.get_exception_handler()
+        event_loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+
+        async def fail():
+            raise failure
+
+        try:
+            loop.schedule_background(fail())
+            task_name = next(iter(loop._background_tasks)).get_name()
+            await _wait_for_background_callbacks(loop)
+        finally:
+            event_loop.set_exception_handler(previous_handler)
+
+        assert not loop._background_tasks
+        assert not loop_errors
+        mock_logger.opt.assert_called_once_with(exception=failure)
+        mock_logger.opt.return_value.error.assert_called_once_with(
+            "Background task '{}' failed",
+            task_name,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_background_task_is_removed_without_error(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def wait_forever():
+            started.set()
+            await release.wait()
+
+        loop.schedule_background(wait_forever())
+        await started.wait()
+        task = next(iter(loop._background_tasks))
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await _wait_for_background_callbacks(loop)
+
+        assert not loop._background_tasks
+        mock_logger.opt.assert_not_called()
+
+
+    @pytest.mark.asyncio
+    async def test_shutdown_drains_background_failure_and_logs_it_once(self, monkeypatch):
+        loop, _bus = _make_loop()
+        loop.subagents.close = AsyncMock()
+        loop._exec_session_manager.close_all = AsyncMock()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        failure = RuntimeError("failure while draining")
+
+        async def fail_later():
+            started.set()
+            await release.wait()
+            raise failure
+
+        loop.schedule_background(fail_later())
+        await started.wait()
+        closing = asyncio.create_task(loop.aclose())
+        try:
+            await asyncio.sleep(0)
+            assert not closing.done()
+            loop.subagents.close.assert_not_awaited()
+        finally:
+            release.set()
+            await closing
+
+        assert not loop._background_tasks
+        mock_logger.opt.assert_called_once_with(exception=failure)
+        mock_logger.opt.return_value.error.assert_called_once()
+        loop.subagents.close.assert_awaited_once()
+        loop._exec_session_manager.close_all.assert_awaited_once()
+
+
 class TestHandleStop:
     @pytest.mark.asyncio
     async def test_stop_no_active_task(self):
@@ -439,6 +547,7 @@ class TestSubagentCancellation:
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(),
         )
 
         async def fake_execute(self, **kwargs):
@@ -538,6 +647,7 @@ class TestSubagentCancellation:
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(),
         )
         mgr._announce_result = AsyncMock()
 
@@ -586,6 +696,7 @@ class TestSubagentCancellation:
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(),
         )
         mgr._announce_result = AsyncMock()
 

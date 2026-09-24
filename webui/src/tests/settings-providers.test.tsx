@@ -1,18 +1,164 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
 async function chooseProviderToConfigure(label: string) {
-  fireEvent.pointerDown(
-    await screen.findByRole("button", { name: "Add your own model provider" }),
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add provider" }),
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+  fireEvent.click(await screen.findByRole("option", { name: label }));
 }
 
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
+
+  it("searches provider aliases and configures in the same dialog without adding an unsaved row", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [
+      { name: "deepseek", label: "DeepSeek", configured: true },
+      { name: "volcengine", label: "VolcEngine", configured: false },
+      { name: "volcengine_coding_plan", label: "VolcEngine Coding Plan", configured: false },
+    ];
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    const trigger = screen.getByRole("button", { name: "Add provider" });
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Add provider" });
+    const search = within(dialog).getByRole("combobox", { name: "Search providers" });
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(within(dialog).queryByRole("option", { name: "DeepSeek" })).not.toBeInTheDocument();
+    await user.type(search, "火山");
+    expect(within(dialog).getAllByRole("option")).toHaveLength(2);
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByRole("dialog", { name: "VolcEngine Coding Plan" })).toBe(dialog);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(within(dialog).getByLabelText("API key", { selector: "input" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "VolcEngine Coding Plan" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Back to providers" }));
+    expect(screen.getByRole("dialog", { name: "Add provider" })).toBe(dialog);
+    expect(screen.getByRole("combobox")).toHaveValue("火山");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps custom provider creation available for empty searches and discards cancelled drafts", async () => {
+    const user = userEvent.setup();
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.type(screen.getByRole("combobox"), "does-not-exist");
+    expect(screen.getByRole("status")).toHaveTextContent("No providers match this search.");
+    await user.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await user.type(screen.getByPlaceholderText("My model provider"), "Unsaved gateway");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
+    expect(screen.getByPlaceholderText("My model provider")).toHaveValue("");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("uses a bottom sheet on mobile without opening the keyboard immediately", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query === "(max-width: 639px)", media: query,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    const dialog = screen.getByRole("dialog", { name: "Add provider" });
+    expect(dialog).toHaveClass("rounded-t-3xl", "bottom-0");
+    expect(screen.getByRole("combobox")).not.toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Custom provider", exact: true }));
+    expect(screen.getByRole("dialog", { name: "Custom provider" })).toBe(dialog);
+  });
+
+  it("adds a built-in provider only after saving and returns focus to Add", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [{ name: "moonshot", label: "Moonshot", configured: false }];
+    requestMutationMock.mockResolvedValueOnce({
+      ...payload, providers: [{ ...payload.providers[0], configured: true, api_key_hint: "configured" }],
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    const trigger = screen.getByRole("button", { name: "Add provider" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "Moonshot" }));
+    await user.type(screen.getByPlaceholderText("Enter API key"), "test-key");
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Moonshot", exact: true })).toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    await user.click(trigger);
+    expect(screen.queryByRole("option", { name: "Moonshot" })).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("retains the add-provider draft after a failed save (custom: %s)", async (custom) => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [{ name: "moonshot", label: "Moonshot", configured: false }];
+    requestMutationMock.mockRejectedValueOnce(new Error("Provider could not be saved"));
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.click(custom
+      ? screen.getByRole("button", { name: "Custom provider", exact: true })
+      : screen.getByRole("option", { name: "Moonshot" }));
+    const dialog = screen.getByRole("dialog");
+    if (custom) {
+      await user.type(screen.getByPlaceholderText("My model provider"), "Company gateway");
+      await user.type(screen.getByPlaceholderText("https://api.example.com/v1"), "https://gateway.example/v1");
+    }
+    await user.type(screen.getByPlaceholderText("Enter API key"), "test-key");
+    await user.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save provider" })).toBeEnabled());
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByPlaceholderText("Enter API key")).toHaveValue("test-key");
+    await user.click(within(dialog).getByRole("button", { name: "Back to providers" }));
+    expect(screen.getByRole("dialog", { name: "Add provider" })).toBe(dialog);
+    await user.click(custom
+      ? screen.getByRole("button", { name: "Custom provider", exact: true })
+      : screen.getByRole("option", { name: "Moonshot" }));
+    expect(screen.getByPlaceholderText("Enter API key")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Moonshot", exact: true })).not.toBeInTheDocument();
+  });
+
+  it("keeps provider labels and keyboard configuration accessible with decorative logos", async () => {
+    const user = userEvent.setup();
+    const payload: SettingsPayload = {
+      ...settingsPayload(),
+      providers: [{
+        name: "openai_codex",
+        label: "OpenAI Codex",
+        configured: true,
+        auth_type: "oauth",
+        api_key_required: false,
+        api_key_hint: null,
+        api_base: null,
+        model_catalog: "builtin",
+        oauth_account: "test-account",
+        oauth_login_supported: true,
+      }],
+    };
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const provider = await screen.findByRole("button", { name: "OpenAI Codex", exact: true });
+    expect(within(provider).getByText("Configure")).toBeInTheDocument();
+    expect(within(provider).queryByRole("img")).not.toBeInTheDocument();
+    provider.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "OpenAI Codex" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(provider).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
 
 
   it("signs in to the xAI Grok provider", async () => {
@@ -774,11 +920,11 @@ describe("Settings providers", () => {
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Add your own model provider" }),
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add provider" }),
     );
-    const customOption = await screen.findByRole("menuitem", { name: "Custom provider" });
-    const openRouterOption = screen.getByRole("menuitem", { name: "OpenRouter" });
+    const customOption = await screen.findByRole("button", { name: "Custom provider" });
+    const openRouterOption = screen.getByRole("option", { name: "OpenRouter" });
     expect(customOption.querySelector("svg, img")).not.toBeNull();
     expect(openRouterOption.querySelector("svg, img")).not.toBeNull();
     fireEvent.click(customOption);
@@ -832,7 +978,7 @@ describe("Settings providers", () => {
       await screen.findByRole("button", { name: /Company Gateway/ }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Add your own model provider" }),
+      screen.getByRole("button", { name: "Add provider" }),
     ).toBeInTheDocument();
   });
 });

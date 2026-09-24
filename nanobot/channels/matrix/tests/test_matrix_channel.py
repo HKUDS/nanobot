@@ -1917,8 +1917,9 @@ async def test_send_handles_upload_exception_and_reports_failure(tmp_path) -> No
         client.room_send_calls[0]["content"]["body"]
         == "Please review.\n[attachment: broken.txt - upload failed]"
     )
-    channel.logger.error.assert_called_once_with(
-        "Matrix media upload failed for {}", "broken.txt", exc_info=True
+    channel.logger.opt.assert_called_once_with(exception=True)
+    channel.logger.opt.return_value.error.assert_called_once_with(
+        "Matrix media upload failed for {}", "broken.txt"
     )
 
 
@@ -1940,10 +1941,10 @@ async def test_attachment_room_send_error_logs_room_id(tmp_path) -> None:
     )
 
     assert failure == "[attachment: report.txt - upload failed]"
-    channel.logger.error.assert_called_once_with(
+    channel.logger.opt.assert_called_once_with(exception=True)
+    channel.logger.opt.return_value.error.assert_called_once_with(
         "Matrix room content send failed for room_id={}",
         "!room:matrix.org",
-        exc_info=True,
     )
 
 
@@ -2635,8 +2636,9 @@ async def test_send_delta_on_error_restores_buffer_and_raises(monkeypatch) -> No
     assert len(client.room_send_calls) == 1
 
     assert len(client.typing_calls) == 1
-    channel.logger.error.assert_called_once_with(
-        "Stream send/edit failed for chat_id={}", "!room:matrix.org", exc_info=True
+    channel.logger.opt.assert_called_once_with(exception=True)
+    channel.logger.opt.return_value.error.assert_called_once_with(
+        "Stream send/edit failed for chat_id={}", "!room:matrix.org"
     )
 
     client.raise_on_send = False

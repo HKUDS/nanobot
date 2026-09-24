@@ -4,12 +4,14 @@ import {
   useLayoutEffect,
   useRef,
 } from "react";
+import { cn } from "@/lib/utils";
 
 interface SidebarSelectionHighlightProps extends HTMLAttributes<HTMLDivElement> {
   targetRef?: RefObject<HTMLElement>;
   targetSelector?: string;
   activeId: string | null;
   scope: string;
+  highlightClassName?: string;
 }
 
 export const SIDEBAR_SELECTION_ITEM_CLASS =
@@ -24,6 +26,7 @@ export function SidebarSelectionHighlight({
   targetSelector,
   activeId,
   scope,
+  highlightClassName,
   children,
   ...containerProps
 }: SidebarSelectionHighlightProps) {
@@ -114,7 +117,7 @@ export function SidebarSelectionHighlight({
         data-testid={`${scope}-selection-highlight`}
         data-active-id={activeId ?? undefined}
         aria-hidden="true"
-        className="pointer-events-none absolute left-0 top-0 z-0 !mt-0 rounded-xl bg-sidebar-foreground/[0.055] opacity-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none dark:bg-white/[0.07]"
+        className={cn("pointer-events-none absolute left-0 top-0 z-0 !mt-0 rounded-xl bg-sidebar-foreground/[0.055] opacity-0 transition-[transform,width,height] duration-300 ease-out will-change-transform motion-reduce:transition-none dark:bg-white/[0.07]", highlightClassName)}
       />
     </div>
   );

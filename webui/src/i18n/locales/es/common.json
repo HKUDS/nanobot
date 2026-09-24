@@ -1,4 +1,43 @@
 {
+  "previewTabs": {
+    "title": "Vista previa",
+    "closeTab": "Cerrar {{name}}",
+    "closeAll": "Cerrar panel de vista previa",
+    "websiteInfo": "Acerca de las vistas previas web"
+  },
+  "webPreview": {
+    "viewLinks": "Ver enlaces",
+    "back": "Atrás",
+    "original": "Enlace original",
+    "actions": "Acciones del enlace",
+    "open": "Vista previa del sitio",
+    "external": "Abrir en el navegador",
+    "copy": "Copiar enlace",
+    "copied": "Enlace copiado",
+    "copyFailed": "No se pudo copiar el enlace",
+    "title": "Vista previa web",
+    "resize": "Cambiar ancho de la vista previa",
+    "refresh": "Actualizar sitio",
+    "close": "Cerrar vista previa web",
+    "isolated": "Vista previa aislada y limitada. El inicio de sesión y algunas funciones pueden no funcionar.",
+    "blockedHint": "Algunos sitios bloquean la inserción. Si la vista está vacía o falla, ábrela en el navegador.",
+    "loopback": "Localhost apunta al dispositivo de este navegador, no a una pasarela remota. No se reenvían puertos.",
+    "native": "La aplicación nativa no admite vistas previas incrustadas. Abre el enlace en el navegador.",
+    "unsupported": "Este navegador no admite vistas previas con credenciales aisladas. Abre el enlace en una pestaña nueva.",
+    "sameOrigin": "No se puede incrustar la propia aplicación nanobot. Ábrela en una pestaña nueva.",
+    "mixedContent": "Una página HTTPS no puede previsualizar un sitio HTTP aquí. Ábrelo en una pestaña nueva.",
+    "invalid": "No se puede previsualizar esta dirección.",
+    "frame": "Vista previa web: {{host}}"
+  },
+  "starPrompt": {
+    "footerAction": "Dale una estrella a nanobot",
+    "title": "Gracias por usar nanobot",
+    "description": "Danos una estrella en GitHub para ayudarnos a seguir mejorando nanobot.",
+    "action": "Dar una estrella",
+    "later": "Ahora no",
+    "never": "No volver a preguntar",
+    "saveError": "Puede que haya un problema de conexión. Este recordatorio podría volver a aparecer."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
@@ -249,6 +288,7 @@
       "currentModel": "Configuración actual",
       "brandLogos": "Logos de marca",
       "browserNotifications": "Notificaciones de tareas",
+      "notificationSound": "Sonido de finalización",
       "cliAppsCatalog": "Catálogo",
       "cliAppsFilter": "Filtro",
       "engine": "Motor",
@@ -292,6 +332,7 @@
       "selectedModelValue": "Definido por el modelo seleccionado.",
       "brandLogos": "Muestra logos de proveedores de terceros y CLI en Ajustes.",
       "browserNotifications": "Notifica solo cuando esta página está en segundo plano. Desactivado de forma predeterminada.",
+      "notificationSound": "Reproduce un breve sonido cuando termina un turno, incluso si esta página está en segundo plano. Desactivado por defecto.",
       "cliAppsCatalog": "Instala las herramientas de línea de comandos que nanobot puede usar en este equipo. Las aplicaciones de escritorio no se modifican.",
       "cliAppsFilter": "Busca por aplicación, categoría o capacidad.",
       "logs": "Abre la carpeta de registros de la aplicación de escritorio.",
@@ -472,6 +513,8 @@
       "searchPlaceholder": "Buscar proveedores",
       "noMatches": "Ningún proveedor coincide con esta búsqueda.",
       "addOwnProvider": "Añadir tu propio proveedor de modelos",
+      "addProvider": "Añadir proveedor",
+      "backToProviders": "Volver a los proveedores",
       "customProvider": "Proveedor personalizado",
       "customProviderName": "Nombre del proveedor",
       "customProviderNamePlaceholder": "Mi proveedor de modelos",
@@ -513,6 +556,10 @@
       "installing": "Instalando dependencias…"
     },
     "models": {
+      "catalogAuthRequired": "La autorización ha caducado. Inicia sesión de nuevo.",
+      "catalogUnavailable": "No se pudieron actualizar los modelos. Inténtalo más tarde.",
+      "catalogStale": "Se muestran modelos en caché; la lista puede estar desactualizada.",
+      "catalogFallback": "Se muestran modelos integrados; la lista puede estar desactualizada.",
       "selectModel": "Seleccionar modelo",
       "addConfiguration": "Agregar configuración",
       "newConfiguration": "Nueva configuración de modelo",
@@ -534,6 +581,8 @@
       "presetNamePlaceholder": "p. ej., Escritura rápida",
       "advancedOptions": "Opciones avanzadas",
       "advancedSummary": "Contexto {{context}} · Máx. {{max}} tokens",
+      "contextWindowHint": "{{tokens}} tokens",
+      "contextWindowError": "Introduce una cantidad positiva de tokens, como 200k, 1m o 131072.",
       "maxTokens": "Máx. tokens de salida",
       "temperature": "Temperatura",
       "reasoningEffort": "Esfuerzo de razonamiento",
@@ -1055,6 +1104,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Código de dispositivo",
+      "deviceCodeHelp": "Copia este código e introdúcelo en GitHub. Esta ventana se actualizará automáticamente tras la autorización.",
+      "waitingForDeviceApproval": "Esperando la autorización de GitHub…",
+      "openGitHub": "Abrir GitHub",
       "authentication": "Autenticación OAuth",
       "signIn": "Iniciar sesión",
       "signingIn": "Iniciando sesión...",
@@ -1378,6 +1431,11 @@
       "chooseAI": "Elige tu IA",
       "switchModel": "Cambiar el modelo de este chat",
       "manageModels": "Gestionar modelos",
+      "fallbackNotice": "Esta respuesta usó un modelo alternativo: {{model}}.",
+      "checkModelSettings": "Revisar ajustes del modelo",
+      "reauthNotice": "La autorización de {{provider}} caducó. Vuelve a iniciar sesión.",
+      "reauthFallback": "Un modelo alternativo respondió esta vez.",
+      "reauthSettings": "Abrir ajustes del modelo",
       "context": {
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso del contexto",
@@ -1391,8 +1449,8 @@
         "duration": "Tiempo de generación"
       },
       "queued": {
-        "label": "Guía en cola",
-        "guide": "Guiar",
+        "label": "Pendiente de envío",
+        "guide": "Enviar ahora",
         "delete": "Eliminar guía",
         "edit": "Editar guía",
         "drag": "Arrastrar para reordenar"
@@ -1569,6 +1627,7 @@
     }
   },
   "message": {
+    "actions": "Acciones del mensaje",
     "streaming": "transmitiendo",
     "delivery": {
       "sending": "Enviando…",
@@ -1599,6 +1658,7 @@
     "skill": "Habilidad: {{name}}",
     "askAboutSelection": "Preguntar sobre esto",
     "forkFromHere": "Bifurcar",
+    "fallbackResponse": "Esta respuesta usa un modelo de respaldo: {{preset}}.",
     "copyReply": "Copiar",
     "copiedReply": "Copiado",
     "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)",
@@ -1621,6 +1681,10 @@
     "activityWorkingFor": "Trabajando durante {{duration}}",
     "activityWorked": "Trabajo completado",
     "activityWorkedFor": "Trabajó durante {{duration}}",
+    "collapseActivity": "Contraer detalles de actividad",
+    "activityShow": "Ver actividad",
+    "activityShowFor": "Ver actividad {{duration}}",
+    "activityHide": "Ocultar actividad",
     "traceDetailsLoadFailed": "No se pudieron cargar los detalles completos de la actividad.",
     "retryTraceDetails": "Reintentar",
     "retryConnection": "Error de conexión",
@@ -1655,11 +1719,29 @@
     "continue": "Continuar"
   },
   "lightbox": {
+    "viewAll": "Ver las {{count}} imágenes",
+    "zoomIn": "Acercar",
+    "zoomOut": "Alejar",
+    "resetZoom": "Ajustar imagen",
+    "gestures": "Pellizca o haz doble clic para ampliar. Arrastra para mover. Usa +, − o 0 para ampliar o restablecer.",
     "title": "Vista previa de imagen",
     "open": "Ver imagen",
     "prev": "Imagen anterior",
     "next": "Imagen siguiente",
     "close": "Cerrar vista previa"
+  },
+  "fileActions": {
+    "menu": "Acciones de archivo para {{name}}",
+    "title": "Acciones de archivo",
+    "preview": "Vista previa",
+    "copyAbsolute": "Copiar ruta absoluta",
+    "copyRelative": "Copiar ruta relativa",
+    "copyReference": "Copiar referencia",
+    "copied": "Copiado",
+    "failed": "No se pudo copiar. Inténtalo de nuevo.",
+    "unavailable": "No se pudo resolver el archivo. Puedes copiar la referencia original.",
+    "loading": "Resolviendo archivo…",
+    "gatewayPath": "Las rutas pertenecen al equipo del gateway."
   },
   "filePreview": {
     "aria": "Vista previa de archivo",

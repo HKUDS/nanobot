@@ -78,7 +78,3 @@ export function applyDocumentLocale(locale: SupportedLocale): void {
   if (typeof document === "undefined") return;
   document.documentElement.lang = locale;
 }
-
-export function localeOption(locale: SupportedLocale) {
-  return supportedLocales.find((entry) => entry.code === locale) ?? supportedLocales[0];
-}

@@ -5,8 +5,15 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { PreviewPane } from "@/components/PreviewPane";
+import { FileActionsProvider } from "@/components/FileActions";
+import { WebPreviewContext } from "@/components/WebLink";
+import { WebPreviewPanel } from "@/components/WebPreviewPanel";
+import { parseWebLink } from "@/lib/web-preview";
+import { createFilePreviewResource } from "@/lib/file-preview-resource";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -23,9 +30,12 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
+import { useFilePreviewState, type FilePreviewState, type FilePreviewStore } from "@/hooks/useFilePreviewState";
 import {
   ApiError,
   fetchFilePreviewAvailability,
+  fetchFilePreview,
+  fetchFileReferenceMetadata,
   fetchInstalledCliApps,
   fetchMcpPresets,
   fetchSettings,
@@ -45,6 +55,8 @@ import {
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import type {
   ChatSummary,
+  FilePreviewPayload,
+  FileReferenceMetadata,
   RoundUsage,
   SettingsPayload,
   SlashCommand,
@@ -53,8 +65,10 @@ import type {
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
-import { projectWebuiThreadMessages } from "@/lib/thread-display-compat";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
+import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -380,9 +394,12 @@ function clampFilePreviewWidth(width: number, maxWidth: number): number {
 }
 
 function maxFilePreviewWidth(containerWidth: number): number {
-  return Math.max(
-    FILE_PREVIEW_MIN_WIDTH,
-    Math.min(FILE_PREVIEW_MAX_WIDTH, containerWidth - FILE_PREVIEW_MIN_MAIN_WIDTH),
+  return Math.min(
+    containerWidth > 0 ? containerWidth : FILE_PREVIEW_MIN_WIDTH,
+    Math.max(
+      FILE_PREVIEW_MIN_WIDTH,
+      Math.min(FILE_PREVIEW_MAX_WIDTH, containerWidth - FILE_PREVIEW_MIN_MAIN_WIDTH),
+    ),
   );
 }
 
@@ -392,6 +409,8 @@ interface ThreadShellProps {
   title: string;
   temporary?: boolean;
   temporaryChatIds?: readonly string[];
+  messageCache?: ThreadMessageCache;
+  filePreviewStore?: FilePreviewStore;
   temporaryChatEnabled?: boolean;
   onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
@@ -606,6 +625,8 @@ export function ThreadShell({
   title,
   temporary = false,
   temporaryChatIds = [],
+  messageCache,
+  filePreviewStore,
   temporaryChatEnabled = false,
   onTemporaryChatEnabledChange,
   onToggleSidebar,
@@ -642,6 +663,7 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
+  const previewSessionKey = session?.key ?? null;
   const mentionSessions = useMemo(
     () => sessions.filter((candidate) => candidate.key !== historyKey),
     [historyKey, sessions],
@@ -672,7 +694,6 @@ export function ThreadShell({
     );
     return typeof response.path === "string" ? response.path : null;
   }, [client]);
-  const [fallbackModelName, setFallbackModelName] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const cliApps = useInstalledSettingItems({
@@ -690,26 +711,41 @@ export function ThreadShell({
     selectItems: installedMcpPresetsFromPayload,
   });
   const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
+  const [modelFallback, setModelFallback] = useState<{
+    chatId: string;
+    model: string;
+    reauthProvider?: string;
+    dismissed: boolean;
+  } | null>(null);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
-  const [filePreviewPath, setFilePreviewPath] = useState<string | null>(null);
-  const [filePreviewClosing, setFilePreviewClosing] = useState(false);
-  const [filePreviewWidth, setFilePreviewWidth] = useState(FILE_PREVIEW_DEFAULT_WIDTH);
+  const { state: previewState, openFile, openWeb, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
+    useFilePreviewState(previewSessionKey, filePreviewStore);
+  const [closingPreview, setClosingPreview] = useState<{ key: string; state: FilePreviewState } | null>(null);
+  const filePreviewClosing = closingPreview?.key === previewSessionKey;
+  const visiblePreview = filePreviewClosing ? closingPreview.state : previewState;
+  const activePreview = visiblePreview.tabs.find((tab) => tab.id === visiblePreview.activeId);
+  const previewOpen = Boolean(activePreview);
+  const [filePreviewMaxWidth, setFilePreviewMaxWidth] = useState(FILE_PREVIEW_MAX_WIDTH);
+  const filePreviewWidth = clampFilePreviewWidth(previewState.width, filePreviewMaxWidth);
   const [quotedContext, setQuotedContext] = useState<string | null>(null);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
   const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
+  const filePreviewResizeCleanupRef = useRef<(() => void) | null>(null);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
   const consumedPendingFirstMessageIdRef = useRef<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const knownTemporaryChatIdsRef = useRef(new Set<string>());
-  const messageCacheRef = useRef(new ThreadMessageCache(
+  const localMessageCacheRef = useRef(new ThreadMessageCache(
     (key) => knownTemporaryChatIdsRef.current.has(key),
   ));
+  const messageCacheRef = useRef(messageCache ?? localMessageCacheRef.current);
+  messageCacheRef.current = messageCache ?? localMessageCacheRef.current;
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
   /** Skip one message-cache write right after chatId changes (messages may not match yet). */
@@ -737,9 +773,11 @@ export function ThreadShell({
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
     setSubmittedViewportTurnId(null);
-    setFallbackModelName(null);
     onTurnEnd?.();
   }, [chatId, onTurnEnd]);
+  const handleStreamDetach = useCallback((snapshot: UIMessage[]) => {
+    if (chatId) messageCacheRef.current.set(chatId, projectWebuiThreadMessages(snapshot));
+  }, [chatId]);
   const {
     messages,
     messagesReady,
@@ -757,7 +795,7 @@ export function ThreadShell({
     setMessages,
     streamError,
     dismissStreamError,
-  } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
+  } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd, handleStreamDetach);
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const requestKey = historyKey;
@@ -773,17 +811,14 @@ export function ThreadShell({
       const request = fetchWebuiThreadTraceDetail(getToken(), requestKey, ref)
         .then((detail) => {
           if (activeHistoryKeyRef.current !== requestKey) return;
-          setMessages((current) => current.map((message) => (
-            message.traceDetail?.ref === ref
-              ? {
-                  ...message,
-                  content: detail.content,
-                  traces: detail.traces,
-                  toolEvents: detail.toolEvents,
-                  traceDetail: undefined,
-                }
-              : message
-          )));
+          const projected = projectThreadEvents(detail.events);
+          setMessages((current) => current.flatMap((message) => {
+            if (message.traceDetail?.ref !== ref) return [message];
+            return projected.map((replacement) => ({
+              ...replacement,
+              activitySegmentId: message.activitySegmentId ?? replacement.activitySegmentId,
+            }));
+          }));
         })
         .catch((error: unknown) => {
           if (activeHistoryKeyRef.current !== requestKey) return;
@@ -824,27 +859,28 @@ export function ThreadShell({
   }, [filePreviewWidth]);
 
   useEffect(() => {
+    filePreviewResizeCleanupRef.current?.();
     if (filePreviewCloseTimerRef.current !== null) {
       window.clearTimeout(filePreviewCloseTimerRef.current);
       filePreviewCloseTimerRef.current = null;
     }
-    setFilePreviewClosing(false);
-    setFilePreviewPath(null);
+    setClosingPreview(null);
     setQuotedContext(null);
     setSubmittedViewportTurnId(null);
-  }, [historyKey]);
+  }, [previewSessionKey]);
 
   useEffect(() => {
     const retained = new Set(temporaryChatIds);
     for (const chatId of retained) knownTemporaryChatIdsRef.current.add(chatId);
     for (const cachedChatId of knownTemporaryChatIdsRef.current) {
       if (!retained.has(cachedChatId)) {
-        messageCacheRef.current.delete(cachedChatId);
+        // Shared caches are retained/pruned by the app, not by individual panes.
+        if (!messageCache) messageCacheRef.current.delete(cachedChatId);
         activeViewportTurnByChatIdRef.current.delete(cachedChatId);
         knownTemporaryChatIdsRef.current.delete(cachedChatId);
       }
     }
-  }, [temporaryChatIds]);
+  }, [messageCache, temporaryChatIds]);
 
   const handleQuoteSelection = useCallback((text: string) => {
     setQuotedContext(text);
@@ -853,6 +889,7 @@ export function ThreadShell({
 
   useEffect(() => {
     return () => {
+      filePreviewResizeCleanupRef.current?.();
       if (filePreviewCloseTimerRef.current !== null) {
         window.clearTimeout(filePreviewCloseTimerRef.current);
       }
@@ -905,11 +942,11 @@ export function ThreadShell({
   }, [chatId, messagesReady, rememberedViewportTurnId, turnActive]);
   const filePreviewAvailabilityCache = useMemo(
     () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
-    [historyKey],
+    [previewSessionKey],
   );
   const filePreviewAvailabilityRevision = displayMessages.length;
   const resolveFilePreviewAvailability = useCallback((path: string) => {
-    if (!historyKey) return Promise.resolve(false);
+    if (!previewSessionKey) return Promise.resolve(false);
     const cached = filePreviewAvailabilityCache.get(path);
     if (
       cached
@@ -917,13 +954,18 @@ export function ThreadShell({
     ) {
       return cached.promise;
     }
-    const pending = fetchFilePreviewAvailability(getToken(), historyKey, path).catch(
+    const request = temporary
+      ? client.requestMutation<{ available: boolean }>("temporary_chat.file_preview", {
+          chat_id: chatId, path, probe: true,
+        }).then((result) => result.available)
+      : fetchFilePreviewAvailability(getToken(), previewSessionKey, path);
+    const pending = request.catch(
       (error: unknown) => {
         if (error instanceof ApiError) {
           if (error.status === 404 && /API route not found/i.test(error.message)) {
             return true;
           }
-          if ([400, 403, 404, 415].includes(error.status)) return false;
+          if ([400, 403, 404, 413, 415].includes(error.status)) return false;
         }
         return false;
       },
@@ -943,7 +985,10 @@ export function ThreadShell({
     filePreviewAvailabilityCache,
     filePreviewAvailabilityRevision,
     getToken,
-    historyKey,
+    previewSessionKey,
+    temporary,
+    client,
+    chatId,
   ]);
 
   const showHeroComposer = displayMessages.length === 0 && !loading;
@@ -968,6 +1013,33 @@ export function ThreadShell({
     || settings?.agent.model_preset
     || "default"
   );
+  useEffect(() => {
+    setModelFallback(null);
+    if (!chatId) return;
+    return client.onChat(chatId, (event) => {
+      if (event.event !== "turn_model_updated") return;
+      if (event.fallback !== true) {
+        // The next turn starts with its configured model, not the previous fallback.
+        setModelFallback(null);
+        return;
+      }
+      const model = event.model_name.trim();
+      if (!model) return;
+      const reauthProvider = typeof event.reauth_provider === "string"
+        ? event.reauth_provider.trim() || undefined : undefined;
+      // A tool loop may report the same fallback repeatedly. Closing the notice
+      // lasts until the next turn/model change, without changing the actual preset.
+      setModelFallback((current) => {
+        if (current?.chatId === chatId && current.model === model) {
+          // An explicit auth rejection is actionable even after dismissing a
+          // generic fallback. A circuit-skipped call must not erase that reason.
+          return reauthProvider && reauthProvider !== current.reauthProvider
+            ? { ...current, reauthProvider, dismissed: false } : current;
+        }
+        return { chatId, model, reauthProvider, dismissed: false };
+      });
+    });
+  }, [activeModelPreset, chatId, client]);
   const handleModelPresetChange = useCallback((name: string) => {
     setLocalModelPreset(name);
     if (chatId) {
@@ -1030,18 +1102,6 @@ export function ThreadShell({
       void refreshModelSettings();
     });
   }, [client, refreshModelSettings]);
-
-  useEffect(() => {
-    if (!chatId) {
-      setFallbackModelName(null);
-      return;
-    }
-    setFallbackModelName(null);
-    return client.onChat(chatId, (event) => {
-      if (event.event !== "turn_model_updated" || event.fallback !== true) return;
-      setFallbackModelName(event.model_name);
-    });
-  }, [chatId, client]);
 
   useEffect(() => {
     if (!historyKey || !chatId || loading) return;
@@ -1421,7 +1481,6 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
-      setFallbackModelName(null);
       const submitted = send(content, images, withWorkspaceScope(options));
       if (
         chatId
@@ -1436,26 +1495,95 @@ export function ThreadShell({
     [chatId, send, withWorkspaceScope],
   );
 
-  const handleOpenFilePreview = useCallback((path: string) => {
+  const loadTemporaryFilePreview = useCallback((path: string) =>
+    client.requestMutation<FilePreviewPayload>("temporary_chat.file_preview", {
+      chat_id: chatId, path,
+    }).catch((error: unknown) => {
+      if (error instanceof Error && "status" in error && typeof error.status === "number") {
+        throw new ApiError(error.status, error.message);
+      }
+      throw error;
+    }), [client, chatId]);
+
+  const handleCloseFilePreview = useCallback(() => {
+    if (!previewSessionKey || !previewState.activeId || filePreviewClosing) return;
+    filePreviewResizeCleanupRef.current?.();
+    setClosingPreview({ key: previewSessionKey, state: previewState });
+    // Record the closed state immediately, even if navigation interrupts the animation.
+    closePreview();
+    filePreviewCloseTimerRef.current = window.setTimeout(() => {
+      filePreviewCloseTimerRef.current = null;
+      setClosingPreview(null);
+    }, FILE_PREVIEW_CLOSE_ANIMATION_MS);
+  }, [previewSessionKey, filePreviewClosing, previewState, closePreview]);
+
+  const cancelPreviewClose = useCallback(() => {
+    filePreviewResizeCleanupRef.current?.();
     if (filePreviewCloseTimerRef.current !== null) {
       window.clearTimeout(filePreviewCloseTimerRef.current);
       filePreviewCloseTimerRef.current = null;
     }
-    setFilePreviewClosing(false);
-    setFilePreviewPath(path);
+    setClosingPreview(null);
   }, []);
 
-  const handleCloseFilePreview = useCallback(() => {
-    if (!filePreviewPath || filePreviewClosing) return;
-    setFilePreviewClosing(true);
-    filePreviewCloseTimerRef.current = window.setTimeout(() => {
-      filePreviewCloseTimerRef.current = null;
-      setFilePreviewPath(null);
-      setFilePreviewClosing(false);
-    }, FILE_PREVIEW_CLOSE_ANIMATION_MS);
-  }, [filePreviewClosing, filePreviewPath]);
+  const handleOpenFilePreview = useCallback((path: string) => {
+    cancelPreviewClose();
+    openFile(path);
+  }, [cancelPreviewClose, openFile]);
+
+  const handleClosePreviewTab = useCallback((id: string) => {
+    if (previewState.tabs.length === 1) handleCloseFilePreview();
+    else {
+      filePreviewResizeCleanupRef.current?.();
+      closeTab(id);
+    }
+  }, [previewState.tabs.length, handleCloseFilePreview, closeTab]);
+
+  // Markdown blocks can retain rendered links while their text is unchanged.
+  // Keep their callback stable, but always act on the current pane/session state.
+  const openFilePreviewRef = useRef(handleOpenFilePreview);
+  openFilePreviewRef.current = handleOpenFilePreview;
+  const openFilePreview = useCallback((path: string) => openFilePreviewRef.current(path), []);
+  const resolveFileMetadata = useCallback((path: string) => {
+    if (!previewSessionKey) return Promise.reject(new Error("No active session"));
+    return temporary
+      ? client.requestMutation<FileReferenceMetadata>("temporary_chat.file_preview", {
+        chat_id: chatId, path, metadata: true,
+      })
+      : fetchFileReferenceMetadata(getToken(), previewSessionKey, path);
+  }, [chatId, client, getToken, previewSessionKey, temporary]);
+  const loadFilePreview = useCallback((path: string) => {
+    if (!previewSessionKey) return Promise.reject(new Error("No active session"));
+    return temporary ? loadTemporaryFilePreview(path) : fetchFilePreview(getToken(), previewSessionKey, path);
+  }, [previewSessionKey, temporary, loadTemporaryFilePreview, getToken]);
+  const filePreviews = useMemo(() => createFilePreviewResource(loadFilePreview), [loadFilePreview]);
+  const fileActions = useMemo(() => ({
+    resolveMetadata: resolveFileMetadata,
+    loadPreview: filePreviews.load,
+  }), [resolveFileMetadata, filePreviews]);
+
+  const openWebPreview = useCallback((url: string) => {
+    const parsed = parseWebLink(url);
+    if (!parsed) return;
+    cancelPreviewClose();
+    openWeb(parsed.href);
+  }, [cancelPreviewClose, openWeb]);
+
+  useEffect(() => {
+    if (!previewOpen || !headerActive) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      // Let a dialog/menu above the pane consume Escape without closing this preview.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]')) return;
+      event.preventDefault();
+      handleCloseFilePreview();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewOpen, headerActive, handleCloseFilePreview]);
 
   const handleFilePreviewResizeStart = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    filePreviewResizeCleanupRef.current?.();
     event.preventDefault();
     event.stopPropagation();
     const panel = event.currentTarget.closest<HTMLElement>("[data-file-preview-panel]");
@@ -1465,12 +1593,15 @@ export function ThreadShell({
     const originalBodyCursor = document.body.style.cursor;
     const originalBodyUserSelect = document.body.style.userSelect;
     const originalPanelTransition = panel?.style.transition ?? "";
+    const frameElement = panel?.querySelector("iframe");
+    const originalFramePointerEvents = frameElement?.style.pointerEvents ?? "";
     let nextWidth = filePreviewWidthRef.current;
     let frame: number | null = null;
 
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     if (panel) panel.style.transition = "none";
+    if (frameElement) frameElement.style.pointerEvents = "none";
 
     const applyWidth = (clientX: number) => {
       nextWidth = clampFilePreviewWidth(rightEdge - clientX, maxWidth);
@@ -1486,7 +1617,7 @@ export function ThreadShell({
       moveEvent.preventDefault();
       applyWidth(moveEvent.clientX);
     };
-    const handlePointerUp = () => {
+    const stopResize = (commit: boolean) => {
       if (frame !== null) {
         window.cancelAnimationFrame(frame);
         frame = null;
@@ -1494,35 +1625,40 @@ export function ThreadShell({
       panel?.style.setProperty("--file-preview-width", `${nextWidth}px`);
       panel?.style.setProperty("--file-preview-slot-width", `${nextWidth}px`);
       if (panel) panel.style.transition = originalPanelTransition;
-      setFilePreviewWidth(nextWidth);
+      if (frameElement) frameElement.style.pointerEvents = originalFramePointerEvents;
+      if (commit) setFilePreviewWidth(nextWidth);
       document.body.style.cursor = originalBodyCursor;
       document.body.style.userSelect = originalBodyUserSelect;
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
+      filePreviewResizeCleanupRef.current = null;
     };
+    const handlePointerUp = () => stopResize(true);
+    filePreviewResizeCleanupRef.current = () => stopResize(false);
 
     applyWidth(event.clientX);
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
-  }, []);
+  }, [setFilePreviewWidth]);
 
   useEffect(() => {
-    if (!filePreviewPath) return;
+    if (!previewOpen) return;
     const clampToShell = () => {
       const shellWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
       const maxWidth = maxFilePreviewWidth(shellWidth);
-      const nextWidth = clampFilePreviewWidth(filePreviewWidthRef.current, maxWidth);
-      filePreviewWidthRef.current = nextWidth;
-      setFilePreviewWidth(nextWidth);
+      setFilePreviewMaxWidth(maxWidth);
     };
     clampToShell();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clampToShell);
+    if (shellRef.current) observer?.observe(shellRef.current);
     window.addEventListener("resize", clampToShell);
     return () => {
+      observer?.disconnect();
       window.removeEventListener("resize", clampToShell);
     };
-  }, [filePreviewPath]);
+  }, [previewOpen]);
 
   const handleForkFromMessage = useCallback(
     async (beforeUserIndex: number) => {
@@ -1538,6 +1674,17 @@ export function ThreadShell({
 
   const composer = (
     <>
+      {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
+        <ModelFallbackNotice
+          model={modelFallback.model}
+          reauthProvider={modelFallback.reauthProvider}
+          reauthProviderLabel={modelFallback.reauthProvider
+            ? providerDisplayLabel(settings?.providers ?? [], modelFallback.reauthProvider)
+            : undefined}
+          onOpenSettings={onOpenModelSettings}
+          onDismiss={() => setModelFallback((current) => current && { ...current, dismissed: true })}
+        />
+      ) : null}
       {recoveryState ? (
         <RecoveryNotice
           state={recoveryState}
@@ -1570,7 +1717,6 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
@@ -1620,7 +1766,6 @@ export function ThreadShell({
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
-          fallbackModelName={fallbackModelName}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
@@ -1672,6 +1817,7 @@ export function ThreadShell({
 
   const threadHeader = !hideHeader ? (
     <ThreadHeader
+      className={previewOpen ? "h-10" : undefined}
       title={title}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
@@ -1693,9 +1839,9 @@ export function ThreadShell({
   ) : null;
 
   return (
-    <section ref={shellRef} className="relative flex min-h-0 flex-1 overflow-hidden">
+    <section ref={shellRef} data-preview-open={previewOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
       <div className={cn(
-        "relative flex min-w-0 flex-1 flex-col overflow-hidden",
+        "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
         headerPortalTarget === undefined && !hideHeader && "thread-workspace",
       )}>
         {hideHeaderTitle && inlineHandle && !temporary && session?.handle ? (
@@ -1714,8 +1860,10 @@ export function ThreadShell({
         ) : null}
         {headerPortalTarget === undefined ? threadHeader : null}
         <FilePreviewAvailabilityProvider
-          resolve={historyKey ? resolveFilePreviewAvailability : undefined}
+          resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
+          <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
+          <WebPreviewContext.Provider value={previewSessionKey ? openWebPreview : undefined}>
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
@@ -1740,10 +1888,12 @@ export function ThreadShell({
             onLoadOlder={loadOlder}
             traceDetailScope={historyKey}
             onLoadTraceDetails={messagesReady ? loadTraceDetails : undefined}
-            onOpenFilePreview={historyKey ? handleOpenFilePreview : undefined}
+            onOpenFilePreview={previewSessionKey ? openFilePreview : undefined}
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
+          </WebPreviewContext.Provider>
+          </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>
       {headerPortalTarget && headerActive
@@ -1759,16 +1909,31 @@ export function ThreadShell({
         </div>,
         composerPortalTarget,
       ) : null}
-      {filePreviewPath && historyKey ? (
-        <FilePreviewPanel
-          sessionKey={historyKey}
-          path={filePreviewPath}
-          token={token}
-          desktopWidth={filePreviewWidth}
+      {activePreview && previewSessionKey ? (
+        <FileActionsProvider key={previewSessionKey} value={fileActions}>
+        <PreviewPane
+          key={previewSessionKey}
+          tabs={visiblePreview.tabs}
+          activeId={activePreview.id}
+          width={filePreviewWidth}
           isClosing={filePreviewClosing}
-          onResizeStart={handleFilePreviewResizeStart}
+          onSelect={selectTab}
+          onCloseTab={handleClosePreviewTab}
           onClose={handleCloseFilePreview}
-        />
+          onResizeStart={handleFilePreviewResizeStart}
+        >
+          {activePreview.kind === "file" ? (
+            <FilePreviewPanel
+              key={activePreview.id}
+              sessionKey={previewSessionKey}
+              path={activePreview.value}
+              token={token}
+              loadPreview={filePreviews.load}
+              initialPreview={filePreviews.peek(activePreview.value)}
+            />
+          ) : <WebPreviewPanel key={activePreview.id} url={activePreview.value} />}
+        </PreviewPane>
+        </FileActionsProvider>
       ) : null}
     </section>
   );
