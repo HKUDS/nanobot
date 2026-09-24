@@ -4475,6 +4475,29 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("from chat a")).not.toBeInTheDocument();
   });
 
+  it("loads mention catalogs only on demand and ignores window focus", async () => {
+    render(wrap(makeClient(), <ThreadShell
+      session={session("lazy-mentions")}
+      title="Lazy mentions"
+      onToggleSidebar={() => {}}
+      onGoHome={() => {}}
+      onNewChat={() => {}}
+    />));
+    const input = await screen.findByLabelText("Message input");
+    const catalogCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) =>
+      /cli-apps|mcp-presets/.test(String(url)));
+    fireEvent.change(input, { target: { value: "hello", selectionStart: 5 } });
+    fireEvent(window, new Event("focus"));
+    expect(catalogCalls()).toHaveLength(0);
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    await waitFor(() => expect(catalogCalls()).toHaveLength(2));
+    fireEvent(window, new Event("focus"));
+    fireEvent.change(input, { target: { value: "@app", selectionStart: 4 } });
+    fireEvent.change(input, { target: { value: "", selectionStart: 0 } });
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    expect(catalogCalls()).toHaveLength(2);
+  });
+
   it("updates @ CLI app suggestions when settings broadcasts an install", async () => {
     const client = makeClient();
     render(wrap(
@@ -4549,6 +4572,7 @@ describe("ThreadShell", () => {
     ));
 
     const input = await screen.findByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       "/api/settings/cli-apps?installed_only=1",
       expect.anything(),

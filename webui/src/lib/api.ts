@@ -369,7 +369,7 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
   throw new Error(`Invalid WebUI thread projection event: ${value.event}`);
 }
 
-function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPayload {
+export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPayload {
   if (!isRecord(value) || typeof value.schemaVersion !== "number") {
     throw new Error("Invalid WebUI thread response");
   }

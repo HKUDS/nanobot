@@ -18,6 +18,9 @@ import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/com
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
+import { StartupShell } from "@/components/StartupShell";
+import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
@@ -133,7 +136,8 @@ type ShellRoute = {
   settingsSection: SettingsSectionKey;
   temporary?: boolean;
 };
-const ThreadShell = lazy(() => import("@/components/thread/ThreadShell").then(
+const loadThreadShell = () => import("@/components/thread/ThreadShell");
+const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
 ));
 const loadSettingsView = () => import("@/components/settings/SettingsView");
@@ -917,6 +921,7 @@ export default function App() {
   const bootstrapWithSecret = useCallback(
     (secret: string) => {
       let cancelled = false;
+      if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
       (async () => {
         setState({ status: "loading" });
         try {
@@ -924,6 +929,7 @@ export default function App() {
           if (cancelled) return;
           if (secret) saveSecret(secret);
           const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+          activateReloadCache(url);
           const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, "browser");
           const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
           const client = new NanobotClient({
@@ -955,6 +961,8 @@ export default function App() {
         } catch (e) {
           if (cancelled) return;
           if (isBootstrapAuthRequired(e)) {
+            clearReloadCache();
+            webuiThreadCache.clear();
             setState({ status: "auth", failed: !!secret });
           } else {
             setState({
@@ -979,6 +987,8 @@ export default function App() {
         await refreshReadyClient(client, state.runtimeSurface);
       } catch (e) {
         if (isBootstrapAuthRequired(e)) {
+          clearReloadCache();
+          webuiThreadCache.clear();
           setState({ status: "auth", failed: !!bootstrapSecretRef.current });
         }
       }
@@ -992,19 +1002,7 @@ export default function App() {
   }, [bootstrapWithSecret]);
 
   if (state.status === "loading") {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="flex flex-col items-center gap-3 animate-in fade-in-0 duration-300">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-foreground/40" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-foreground/60" />
-            </span>
-            {t("app.loading.connecting")}
-          </div>
-        </div>
-      </div>
-    );
+    return <StartupShell />;
   }
   if (state.status === "auth") {
     return (
@@ -1039,6 +1037,8 @@ export default function App() {
       state.client.close();
     }
     clearSavedSecret();
+    clearReloadCache();
+    webuiThreadCache.clear();
     setState({ status: "auth" });
   };
 
@@ -2842,7 +2842,7 @@ function Shell({
               )}
             >
               <ThreadVisibilityContext.Provider value={view === "chat"}>
-                <Suspense fallback={<SurfaceLoadingFallback label={t("chat.loading")} />}>
+                <Suspense fallback={<StartupShell embedded />}>
                   <PaneWorkbench
                     panes={renderedWorkbenchPanes}
                     activePaneKey={renderedActivePaneKey}

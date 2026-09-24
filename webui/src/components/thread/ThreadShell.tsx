@@ -541,6 +541,7 @@ interface PendingFirstMessage {
 }
 
 interface InstalledSettingItemsOptions<Payload, Item> {
+  enabled: boolean;
   getToken: () => string;
   eventName: string;
   fetchPayload: (token: string) => Promise<Payload>;
@@ -549,6 +550,7 @@ interface InstalledSettingItemsOptions<Payload, Item> {
 }
 
 function useInstalledSettingItems<Payload, Item>({
+  enabled,
   getToken,
   eventName,
   fetchPayload,
@@ -583,14 +585,14 @@ function useInstalledSettingItems<Payload, Item>({
       }
     };
     const queueRefresh = () => {
-      if (document.visibilityState === "hidden" || refreshQueued) return;
+      if (!enabled || document.visibilityState === "hidden" || refreshQueued) return;
       refreshQueued = true;
       queueMicrotask(() => {
         refreshQueued = false;
         if (!cancelled) void refresh();
       });
     };
-    void refresh();
+    if (enabled) void refresh();
 
     const refreshOnChanged = (event: Event) => {
       const payload = (event as CustomEvent<unknown>).detail;
@@ -606,16 +608,12 @@ function useInstalledSettingItems<Payload, Item>({
       queueRefresh();
     };
 
-    window.addEventListener("focus", queueRefresh);
-    document.addEventListener("visibilitychange", queueRefresh);
     window.addEventListener(eventName, refreshOnChanged);
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", queueRefresh);
-      document.removeEventListener("visibilitychange", queueRefresh);
       window.removeEventListener(eventName, refreshOnChanged);
     };
-  }, [eventName, fetchPayload, getToken, isPayload, selectItems]);
+  }, [enabled, eventName, fetchPayload, getToken, isPayload, selectItems]);
 
   return items;
 }
@@ -698,7 +696,10 @@ export function ThreadShell({
   }, [client]);
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [mentionCatalogsRequested, setMentionCatalogsRequested] = useState(false);
+  const requestMentionCatalogs = useCallback(() => setMentionCatalogsRequested(true), []);
   const cliApps = useInstalledSettingItems({
+    enabled: mentionCatalogsRequested,
     getToken,
     eventName: CLI_APPS_CHANGED_EVENT,
     fetchPayload: fetchInstalledCliApps,
@@ -706,6 +707,7 @@ export function ThreadShell({
     selectItems: installedCliAppsFromPayload,
   });
   const mcpPresets = useInstalledSettingItems({
+    enabled: mentionCatalogsRequested,
     getToken,
     eventName: MCP_PRESETS_CHANGED_EVENT,
     fetchPayload: fetchMcpPresets,
@@ -899,6 +901,11 @@ export function ThreadShell({
   }, []);
 
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
+  useEffect(() => {
+    if (displayMessages.some((message) => message.cliApps?.length || message.mcpPresets?.length)) {
+      requestMentionCatalogs();
+    }
+  }, [displayMessages, requestMentionCatalogs]);
   const composerContextUsage = useMemo(
     () => latestComposerContextUsage(displayMessages),
     [displayMessages],
@@ -1725,6 +1732,7 @@ export function ThreadShell({
           recentRoundUsage={composerRoundUsage}
           variant={composerVariant}
           slashCommands={availableSlashCommands}
+          onMentionSearch={requestMentionCatalogs}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
@@ -1774,6 +1782,7 @@ export function ThreadShell({
           recentRoundUsage={composerRoundUsage}
           variant="hero"
           slashCommands={availableSlashCommands}
+          onMentionSearch={requestMentionCatalogs}
           cliApps={cliApps}
           mcpPresets={mcpPresets}
           sessions={mentionSessions}

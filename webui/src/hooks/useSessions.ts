@@ -13,6 +13,7 @@ import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { deriveTitle } from "@/lib/format";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
+import { readReloadSessions, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
   SessionAutomationJob,
@@ -214,7 +215,7 @@ export function useSessions(): {
   getSessionAutomations: (key: string) => Promise<SessionAutomationJob[]>;
 } {
   const { client, token } = useClient();
-  const [sessions, setSessions] = useState<ChatSummary[]>([]);
+  const [sessions, setSessions] = useState<ChatSummary[]>(readReloadSessions);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
@@ -222,6 +223,10 @@ export function useSessions(): {
   const refreshPendingRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   tokenRef.current = token;
+
+  useEffect(() => {
+    if (sessions.length || !loading) writeReloadCache("sessions", sessions.slice(0, 200));
+  }, [sessions, loading]);
 
   const refresh = useCallback((): Promise<void> => {
     refreshPendingRef.current = true;

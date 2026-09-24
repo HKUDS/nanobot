@@ -351,6 +351,16 @@ describe("App layout", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows only layout shadows while bootstrap is pending", () => {
+    vi.mocked(fetchBootstrap).mockReturnValueOnce(new Promise(() => {}));
+    render(<App />);
+    expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveClass("startup-status");
+    expect(screen.queryByText("Loading nanobot…")).not.toBeInTheDocument();
+  });
+
   it("shows the auth form without an invalid-password error on first load", async () => {
     vi.mocked(fetchBootstrap).mockRejectedValueOnce(
       new Error("bootstrap failed: HTTP 401"),

@@ -211,6 +211,7 @@ interface ThreadComposerProps {
   recentRoundUsage?: readonly ComposerRoundUsage[];
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
+  onMentionSearch?: () => void;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   sessions?: ChatSummary[];
@@ -912,6 +913,7 @@ export function ThreadComposer({
   recentRoundUsage = [],
   variant = "thread",
   slashCommands = [],
+  onMentionSearch,
   cliApps = [],
   mcpPresets = [],
   sessions = [],
@@ -1300,6 +1302,11 @@ export function ThreadComposer({
       end: caret,
     };
   }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
+
+  const mentionSearchActive = cliAppMention !== null;
+  useEffect(() => {
+    if (mentionSearchActive) onMentionSearch?.();
+  }, [mentionSearchActive, onMentionSearch]);
 
   const availableSessionMentions = useMemo(
     () => sessionMentionOptions(sessions),
