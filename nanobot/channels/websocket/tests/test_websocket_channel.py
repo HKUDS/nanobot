@@ -1623,6 +1623,7 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
     )
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
 
     await channel._dispatch_envelope(
         conn,
@@ -1744,6 +1745,7 @@ async def test_workspace_scope_change_invalidates_other_attached_clients(
     )
     origin = AsyncMock()
     origin.remote_address = ("127.0.0.1", 50123)
+    origin.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
     peer = AsyncMock()
     peer.remote_address = ("127.0.0.1", 50124)
     channel._attach(origin, "shared")
@@ -1866,6 +1868,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
     )
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
 
     await channel._dispatch_envelope(
         conn,
@@ -6493,3 +6496,37 @@ def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
     assert [message["content"] for message in _thread_conversation_events(body)] == [
         "subagent summary",
     ]
+
+
+@pytest.mark.parametrize("headers,allowed", [
+    (None, False),
+    ([], False),
+    ({}, False),
+    ({"Host": "localhost:8765"}, True),
+    ({"Host": "remote.example"}, False),
+    ({"Host": "localhost:8765", "X-Forwarded-For": "203.0.113.8"}, False),
+])
+async def test_full_access_requires_local_handshake(bus, tmp_path, headers, allowed):
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path,
+                               default_restrict_to_workspace=True),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=headers) if headers is not None else None
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "set_workspace_scope",
+        "chat_id": "handshake-scope",
+        "workspace_scope": {"project_path": str(tmp_path), "access_mode": "full"},
+    })
+    result = json.loads(conn.send.await_args.args[0])
+    if allowed:
+        assert result["event"] == "session_updated"
+        assert result["workspace_scope"]["access_mode"] == "full"
+    else:
+        assert result["event"] == "error"
+        assert result["reason"] == "full workspace access is unavailable for this connection"
+        assert sessions.read_session_file("websocket:handshake-scope") is None
