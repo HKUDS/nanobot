@@ -31,8 +31,8 @@
   },
   "starPrompt": {
     "footerAction": "Beri bintang untuk nanobot",
-    "title": "Suka menggunakan nanobot?",
-    "description": "Jika nanobot membantu Anda, beri bintang di GitHub. Dukungan Anda menyemangati kami untuk terus mengembangkannya.",
+    "title": "Terima kasih telah menggunakan nanobot",
+    "description": "Beri bintang di GitHub untuk mendukung pengembangan nanobot.",
     "action": "Beri bintang",
     "later": "Tidak sekarang",
     "never": "Jangan tanyakan lagi",

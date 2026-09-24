@@ -26,7 +26,7 @@ async function enter() {
 it("claims once on entry and lets users skip without permanently dismissing", async () => {
   const view = render(<StarPrompt ready busy={false} />);
   await enter();
-  expect(screen.getByRole("dialog")).toHaveAccessibleName("Enjoying nanobot?");
+  expect(screen.getByRole("dialog")).toHaveAccessibleName("Thanks for using nanobot");
   fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   view.rerender(<StarPrompt ready busy={false} />);
   await enter();

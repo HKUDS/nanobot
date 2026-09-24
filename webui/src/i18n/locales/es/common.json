@@ -31,8 +31,8 @@
   },
   "starPrompt": {
     "footerAction": "Dale una estrella a nanobot",
-    "title": "¿Te gusta nanobot?",
-    "description": "Si nanobot te resulta útil, dale una estrella en GitHub. Tu apoyo nos anima a seguir desarrollándolo.",
+    "title": "Gracias por usar nanobot",
+    "description": "Danos una estrella en GitHub para apoyar el desarrollo de nanobot.",
     "action": "Dar una estrella",
     "later": "Ahora no",
     "never": "No volver a preguntar",

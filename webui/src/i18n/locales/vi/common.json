@@ -31,8 +31,8 @@
   },
   "starPrompt": {
     "footerAction": "Tặng nanobot một sao",
-    "title": "Bạn thích nanobot chứ?",
-    "description": "Nếu nanobot hữu ích với bạn, hãy tặng một sao trên GitHub. Sự ủng hộ của bạn là động lực để chúng tôi tiếp tục phát triển.",
+    "title": "Cảm ơn bạn đã dùng nanobot",
+    "description": "Hãy tặng một sao trên GitHub để ủng hộ chúng tôi phát triển nanobot.",
     "action": "Tặng sao",
     "later": "Để sau",
     "never": "Không nhắc lại",

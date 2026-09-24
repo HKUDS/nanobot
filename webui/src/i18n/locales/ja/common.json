@@ -31,8 +31,8 @@
   },
   "starPrompt": {
     "footerAction": "nanobot にスターを付ける",
-    "title": "nanobot はお役に立っていますか？",
-    "description": "nanobot が役に立ったら、GitHub でスターを付けて応援してください。皆さんの応援が開発を続ける励みになります。",
+    "title": "nanobot のご利用ありがとうございます",
+    "description": "GitHub でスターを付けて、開発を応援していただけるとうれしいです。",
     "action": "スターを付ける",
     "later": "今はしない",
     "never": "今後表示しない",

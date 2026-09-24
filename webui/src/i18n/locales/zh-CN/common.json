@@ -31,8 +31,8 @@
   },
   "starPrompt": {
     "footerAction": "给 nanobot 点个 Star",
-    "title": "喜欢 nanobot？",
-    "description": "如果 nanobot 对你有帮助，欢迎来 GitHub 点个 Star。你的支持是我们持续维护的动力。",
+    "title": "感谢使用 nanobot",
+    "description": "欢迎来 GitHub 点个 Star，支持我们继续改进。",
     "action": "点个 Star",
     "later": "暂时不了",
     "never": "不再提醒",
