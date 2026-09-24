@@ -147,6 +147,55 @@ describe("temporary chat navigation", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each(["settings", "apps", "automations", "skills", "channels"])(
+    "opens %s directly without mounting chat or retaining a chat query",
+    async (view) => {
+      window.history.replaceState(null, "", `/#/${view}?chat=websocket%3Aregular`);
+      render(<App />);
+      await screen.findByRole("button", { name: "Back to chat" });
+      act(() => TestSocket.current.open());
+      await waitFor(() => expect(window.location.hash).toBe(`#/${view}`));
+      expect(window.history.state.nanobotReturnChat.key).toBe("websocket:regular");
+      expect(screen.queryByTestId("thread-message-region")).not.toBeInTheDocument();
+      const requests = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+      expect(requests.filter((url) => url.includes("/webui-thread") || url === "/api/commands")).toEqual([]);
+    },
+  );
+
+  it("restores the return destination after refreshing a clean settings URL", async () => {
+    const first = render(<App />);
+    await screen.findByRole("button", { name: "Temporary chat" });
+    act(() => TestSocket.current.open());
+    await selectTopic("Regular topic");
+    fireEvent.click(screen.getByRole("button", { name: "Settings", exact: true }));
+    await screen.findByRole("button", { name: "Back to chat" });
+    expect(window.location.hash).toBe("#/settings");
+    first.unmount();
+    vi.mocked(fetch).mockClear();
+    render(<App />);
+    await screen.findByRole("button", { name: "Back to chat" });
+    act(() => TestSocket.current.open());
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/webui-thread"))).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/chat/websocket%3Aregular"));
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/webui-thread"))).toBe(true));
+  });
+
+  it("returns from settings to the same temporary chat and keeps its live messages", async () => {
+    render(<App />);
+    await screen.findByRole("button", { name: "Temporary chat" });
+    act(() => TestSocket.current.open());
+    const chatId = await startTemporaryChat("Temporary navigation check");
+    fireEvent.click(screen.getByRole("button", { name: "Settings", exact: true }));
+    await screen.findByRole("button", { name: "Back to chat" });
+    expect(window.location.hash).toBe("#/settings");
+    act(() => TestSocket.current.receive({ event: "message", chat_id: chatId, text: "Reply while in settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    await waitFor(() => expect(window.location.hash).toBe(`#/temporary/${chatId}`));
+    await screen.findByText("Reply while in settings");
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes(chatId))).toEqual([]);
+  });
+
   it("keeps the preview resource stable across bootstrap token refresh", async () => {
     withFiles = true;
     vi.useFakeTimers({ shouldAdvanceTime: true });

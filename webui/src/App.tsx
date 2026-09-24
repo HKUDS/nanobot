@@ -254,26 +254,33 @@ function readShellRoute(): ShellRoute {
   const settingsSection = isSettingsSectionKey(rawSettingsSection)
     ? rawSettingsSection
     : "overview";
-  const activeKey = params.get("chat")?.trim() || null;
+  const saved: unknown = window.history.state?.nanobotReturnChat;
+  const returnChat = saved && typeof saved === "object" && "hash" in saved
+    && saved.hash === window.location.hash ? saved : null;
+  const activeKey = params.get("chat")?.trim()
+    || (returnChat && "key" in returnChat && typeof returnChat.key === "string"
+      ? returnChat.key : null);
+  const temporary = Boolean(returnChat && "temporary" in returnChat && returnChat.temporary === true);
 
   if (path === "/settings") {
     return {
       view: shellViewForSettingsSection(settingsSection),
       activeKey,
+      temporary,
       settingsSection,
     };
   }
   if (path === "/apps") {
-    return { view: "apps", activeKey, settingsSection: "apps" };
+    return { view: "apps", activeKey, temporary, settingsSection: "apps" };
   }
   if (path === "/automations") {
-    return { view: "automations", activeKey, settingsSection: "automations" };
+    return { view: "automations", activeKey, temporary, settingsSection: "automations" };
   }
   if (path === "/channels") {
-    return { view: "channels", activeKey, settingsSection: "channels" };
+    return { view: "channels", activeKey, temporary, settingsSection: "channels" };
   }
   if (path === "/skills") {
-    return { view: "skills", activeKey, settingsSection: "skills" };
+    return { view: "skills", activeKey, temporary, settingsSection: "skills" };
   }
   if (path.startsWith("/temporary/")) {
     const encoded = path.slice("/temporary/".length);
@@ -316,7 +323,6 @@ function shellRouteHash(route: ShellRoute): string {
       : "#/new";
   }
   const params = new URLSearchParams();
-  if (route.activeKey) params.set("chat", route.activeKey);
   if (route.view === "settings" && route.settingsSection !== "overview") {
     params.set("section", route.settingsSection);
   }
@@ -327,20 +333,20 @@ function shellRouteHash(route: ShellRoute): string {
 function writeShellRoute(route: ShellRoute, replace = false): void {
   if (typeof window === "undefined") return;
   const nextHash = shellRouteHash(route);
-  if (window.location.hash === nextHash) return;
-  if (replace) {
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${window.location.search}${nextHash}`,
-    );
-    return;
+  const state = {
+    ...window.history.state,
+    nanobotReturnChat: route.view === "chat" ? null : {
+      hash: nextHash,
+      key: route.activeKey,
+      temporary: route.temporary === true,
+    },
+  };
+  const url = `${window.location.pathname}${window.location.search}${nextHash}`;
+  if (replace || window.location.hash === nextHash) {
+    window.history.replaceState(state, "", url);
+  } else {
+    window.history.pushState(state, "", url);
   }
-  window.history.pushState(
-    null,
-    "",
-    `${window.location.pathname}${window.location.search}${nextHash}`,
-  );
 }
 
 function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
@@ -1119,6 +1125,16 @@ function Shell({
     initialRouteRef.current.activeKey,
   );
   const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
+  const [chatVisited, setChatVisited] = useState(initialRouteRef.current.view === "chat");
+  useEffect(() => {
+    if (view === "chat") setChatVisited(true);
+  }, [view]);
+  useEffect(() => {
+    // Normalize legacy links while retaining their return destination in history.
+    if (new URLSearchParams(window.location.hash.split("?")[1]).has("chat")) {
+      writeShellRoute(initialRouteRef.current!, true);
+    }
+  }, []);
   const [temporarySessions, setTemporarySessions] = useState<Record<string, ChatSummary>>({});
   const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
@@ -1186,7 +1202,10 @@ function Shell({
   } | null>(null);
   const settingsExitGuardRef = useRef<SettingsExitGuard | null>(null);
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
-  currentShellRouteRef.current = { view, activeKey, settingsSection: settingsInitialSection };
+  currentShellRouteRef.current = {
+    view, activeKey, settingsSection: settingsInitialSection,
+    temporary: Boolean(activeKey && temporarySessions[activeKey]),
+  };
   const registerSettingsExitGuard = useCallback((guard: SettingsExitGuard | null) => {
     settingsExitGuardRef.current = guard;
   }, []);
@@ -1205,7 +1224,7 @@ function Shell({
   const showMainSidebar = view !== "settings";
   const activeTemporarySession = activeKey ? temporarySessions[activeKey] ?? null : null;
   const temporaryChatId = activeTemporarySession?.chatId ?? null;
-  const temporaryChatActive = view === "chat" && temporaryChatId !== null;
+  const temporaryChatActive = temporaryChatId !== null;
   const temporaryChatRequested = temporaryChatActive || temporaryChatEnabled;
   const temporarySessionList = useMemo(
     () => Object.values(temporarySessions).sort((a, b) => (
@@ -1241,7 +1260,10 @@ function Shell({
         setActiveKey(route.activeKey);
         setView(route.view);
         setSettingsInitialSection(route.settingsSection);
-        writeShellRoute(route, options?.replace);
+        writeShellRoute({
+          ...route,
+          temporary: route.temporary || Boolean(route.activeKey && temporarySessionsRef.current[route.activeKey]),
+        }, options?.replace);
       };
       if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
         settingsExitGuardRef.current(leave);
@@ -1504,9 +1526,11 @@ function Shell({
     }
     if (!activeKey) return;
     const currentRoute = readShellRoute();
+    if (temporarySessions[activeKey]) return;
     if (currentRoute.temporary) {
-      if (temporarySessions[activeKey]) return;
-      navigate(defaultShellRoute(), { replace: true });
+      navigate(currentRoute.view === "chat" ? defaultShellRoute() : {
+        ...currentRoute, activeKey: null, temporary: false,
+      }, { replace: true });
       return;
     }
     if (sessions.some((session) => session.key === activeKey)) return;
@@ -2129,12 +2153,14 @@ function Shell({
     setMobileSidebarOpen(false);
     const nextKey = (() => {
       if (!activeKey) return null;
+      if (temporarySessionsRef.current[activeKey]) return activeKey;
       if (topicSessions.some((session) => session.key === activeKey)) return activeKey;
-      return topicSessions[0]?.key ?? null;
+      return null;
     })();
     navigate({
       view: "chat",
       activeKey: nextKey,
+      temporary: Boolean(nextKey && temporarySessionsRef.current[nextKey]),
       settingsSection: "overview",
     });
   }, [activeKey, navigate, topicSessions]);
@@ -2835,7 +2861,7 @@ function Shell({
             "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
           )}
         >
-            <div
+            {(view === "chat" || chatVisited) && <div
               className={cn(
                 "absolute inset-0 flex flex-col",
                 view !== "chat" && "hidden",
@@ -2983,7 +3009,7 @@ function Shell({
                   />
                 </Suspense>
               </ThreadVisibilityContext.Provider>
-            </div>
+            </div>}
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
                 <Suspense fallback={<SurfaceLoadingFallback />}>
