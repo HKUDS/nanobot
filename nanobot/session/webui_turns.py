@@ -390,26 +390,13 @@ def clear_websocket_turn_if_current(
     if not owner:
         return False
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
-    if turns is not None:
-        if owner not in turns:
-            return False
-        if preserve_persistence_failure and turns[owner].transcript_persistence_failed:
-            return False
-        turns.pop(owner)
-        _sync_websocket_turn_projection(chat_id)
-        return True
-
-    # Compatibility for callers/tests that populated the legacy projection
-    # directly before the multi-owner registry existed.
-    if (
-        chat_id in _WEBSOCKET_TURN_WALL_STARTED_AT
-        and _WEBSOCKET_TURN_OWNERS.get(chat_id) == owner
-    ):
-        _WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
-        _WEBSOCKET_TURN_IDS.pop(chat_id, None)
-        _WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
-        return True
-    return False
+    if turns is None or owner not in turns:
+        return False
+    if preserve_persistence_failure and turns[owner].transcript_persistence_failed:
+        return False
+    turns.pop(owner)
+    _sync_websocket_turn_projection(chat_id)
+    return True
 
 
 def clear_websocket_turns(chat_id: str) -> None:

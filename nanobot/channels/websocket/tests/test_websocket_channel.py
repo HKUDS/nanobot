@@ -21,6 +21,7 @@ from nanobot.bus.events import (
     INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     RUNTIME_CONTROL_SESSION_DISCARD,
+    InboundMessage,
     OutboundMessage,
 )
 from nanobot.bus.outbound_events import (
@@ -91,6 +92,20 @@ from .ws_test_client import http_get as _http_get
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
 _PORT = 29876
+
+
+async def _register_running_turn(
+    chat_id: str, started_at: float, *, owner: str | None = None,
+) -> None:
+    metadata = {}
+    if owner:
+        metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
+    await wth.publish_turn_run_status(
+        MessageBus(),
+        InboundMessage(channel="websocket", sender_id="user", chat_id=chat_id,
+                       content="hello", metadata=metadata),
+        "running", started_at=started_at,
+    )
 
 
 def _thread_conversation_events(body: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1879,7 +1894,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
             },
         },
     )
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
+    await _register_running_turn("chat-running", 123.0)
     try:
         await channel._dispatch_envelope(
             conn,
@@ -1897,7 +1912,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
             },
         )
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-running")
 
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
@@ -1943,7 +1958,7 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
     )
     conn.send.reset_mock()
 
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
+    await _register_running_turn("chat-running", 123.0)
     try:
         await channel._dispatch_envelope(
             conn,
@@ -1958,7 +1973,7 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
             },
         )
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-running")
 
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
@@ -3231,8 +3246,7 @@ async def test_turn_end_persists_and_conditionally_clears_when_delivery_fails(
     mock_ws.send.side_effect = RuntimeError("fanout failed")
     chat_id = f"turn-end-failure-{expected_cleared}"
     channel._attach(mock_ws, chat_id)
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT[chat_id] = 1234.5
-    wth._WEBSOCKET_TURN_OWNERS[chat_id] = active_owner
+    await _register_running_turn(chat_id, 1234.5, owner=active_owner)
 
     try:
         await channel.send(OutboundMessage(
@@ -3249,9 +3263,7 @@ async def test_turn_end_persists_and_conditionally_clears_when_delivery_fails(
         if not expected_cleared:
             assert wth._WEBSOCKET_TURN_OWNERS[chat_id] == active_owner
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
-        wth._WEBSOCKET_TURN_IDS.pop(chat_id, None)
-        wth._WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
+        wth.clear_websocket_turns(chat_id)
 
 
 @pytest.mark.asyncio
@@ -3626,8 +3638,7 @@ async def test_idle_clears_matching_owner_when_delivery_fails() -> None:
     chat_id = "idle-failure"
     owner = "owner-idle"
     channel._attach(mock_ws, chat_id)
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT[chat_id] = 1234.5
-    wth._WEBSOCKET_TURN_OWNERS[chat_id] = owner
+    await _register_running_turn(chat_id, 1234.5, owner=owner)
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -3916,10 +3927,10 @@ async def test_hydrate_replays_running_turn() -> None:
 
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     try:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        await _register_running_turn("chat-1", 1_700_000_000.0)
         await channel._outbound.hydrate("chat-1")
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop("chat-1", None)
+        wth.clear_websocket_turns("chat-1")
 
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
@@ -5586,13 +5597,13 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     )
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
 
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth.clear_websocket_turns("chat-1")
     try:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        asyncio.run(_register_running_turn("chat-1", 1_700_000_000.0))
         req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
         resp = asyncio.run(channel.gateway.http._handle_sessions_list(req))
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-1")
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
