@@ -391,6 +391,50 @@ async def test_stop_drains_inflight_message_before_reaction_cleanup(blocked_stag
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("send_fails", [False, True])
+async def test_reply_drains_all_same_channel_reactions(monkeypatch, send_fails: bool) -> None:
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], working_emoji_delay=60), MessageBus()
+    )
+    client = DiscordBotClient(channel, intents=discord.Intents.default())
+    channel._client = client
+    channel._running = True
+    channel._handle_message = AsyncMock()
+    monkeypatch.setattr(client, "is_ready", lambda: True)
+    monkeypatch.setattr(
+        client,
+        "send_outbound",
+        AsyncMock(side_effect=RuntimeError("send failed") if send_fails else None),
+    )
+    messages = [_make_message(message_id=1), _make_message(message_id=2)]
+    for message in messages:
+        message.add_reaction = AsyncMock()
+        message.remove_reaction = AsyncMock()
+        await client.on_message(message)
+    tasks = list(channel._working_emoji_tasks["456"])
+    assert len(tasks) == 2
+
+    try:
+        reply = OutboundMessage(channel="discord", chat_id="456", content="done")
+        if send_fails:
+            with pytest.raises(RuntimeError, match="send failed"):
+                await channel.send(reply)
+        else:
+            await channel.send(reply)
+
+        assert all(task.cancelled() for task in tasks)
+        assert not channel._working_emoji_tasks
+        assert not channel._pending_reactions
+        assert not channel._typing_tasks
+        for message in messages:
+            message.add_reaction.assert_awaited_once_with(channel.config.read_receipt_emoji)
+        messages[-1].remove_reaction.assert_any_await(channel.config.read_receipt_emoji, client.user)
+        messages[-1].remove_reaction.assert_any_await(channel.config.working_emoji, client.user)
+    finally:
+        await channel.stop()
+
+
+@pytest.mark.asyncio
 async def test_completed_reaction_tasks_release_registry_entries() -> None:
     channel = DiscordChannel(
         DiscordConfig(enabled=True, allow_from=["*"], working_emoji_delay=0), MessageBus()
