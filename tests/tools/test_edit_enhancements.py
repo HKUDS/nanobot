@@ -13,14 +13,6 @@ from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
 # Helpers
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(autouse=True)
-def _clear_file_state():
-    """Reset global read-state between tests."""
-    file_state.clear()
-    yield
-    file_state.clear()
-
-
 # ---------------------------------------------------------------------------
 # Read-independent editing
 # ---------------------------------------------------------------------------
