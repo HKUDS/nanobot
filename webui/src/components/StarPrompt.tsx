@@ -25,7 +25,9 @@ export function StarLink({ onSaved, fullWidth = false }: {
       className={fullWidth ? undefined : "settings-list-row flex select-none items-center gap-3 text-[14px] settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"}
       onClick={dismiss} onAuxClick={(event) => { if (event.button === 1) dismiss(); }}>
       <Github className={fullWidth ? "mr-2 h-4 w-4" : "h-4 w-4 text-muted-foreground"} aria-hidden />
-      <span className={fullWidth ? undefined : "flex-1"}>{t("starPrompt.action")}</span>
+      <span className={fullWidth ? undefined : "flex-1"}>
+        {t(fullWidth ? "starPrompt.action" : "settings.about.sourceCode")}
+      </span>
       <ExternalLink className={fullWidth ? "ml-2 h-3.5 w-3.5" : "h-3.5 w-3.5 text-muted-foreground"} aria-hidden />
     </a>
   );
