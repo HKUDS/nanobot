@@ -205,13 +205,13 @@ interface ThreadComposerProps {
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
-  fallbackModelName?: string | null;
   onModelBadgeClick?: () => void;
   onManageModels?: () => void;
   contextUsage?: ComposerContextUsage | null;
   recentRoundUsage?: readonly ComposerRoundUsage[];
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
+  onMentionSearch?: () => void;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
   sessions?: ChatSummary[];
@@ -907,13 +907,13 @@ export function ThreadComposer({
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
-  fallbackModelName = null,
   onModelBadgeClick,
   onManageModels,
   contextUsage = null,
   recentRoundUsage = [],
   variant = "thread",
   slashCommands = [],
+  onMentionSearch,
   cliApps = [],
   mcpPresets = [],
   sessions = [],
@@ -1302,6 +1302,11 @@ export function ThreadComposer({
       end: caret,
     };
   }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
+
+  const mentionSearchActive = cliAppMention !== null;
+  useEffect(() => {
+    if (mentionSearchActive) onMentionSearch?.();
+  }, [mentionSearchActive, onMentionSearch]);
 
   const availableSessionMentions = useMemo(
     () => sessionMentionOptions(sessions),
@@ -2274,7 +2279,6 @@ export function ThreadComposer({
       providerLabel={modelProviderLabel}
       needsSetup={modelNeedsSetup}
       attentionRequest={modelSetupAttentionRequest}
-      fallbackModelName={fallbackModelName}
       isHero={isHero && !compactControls}
       onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
     />
@@ -2716,7 +2720,10 @@ function QueuedPromptStack({
   onDragEnd: () => void;
   onDrop: (targetId: string) => void;
 }) {
-  const stripMaxHeight = Math.min(240, 14 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4);
+  const stripMaxHeight = Math.min(
+    320,
+    96 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4,
+  );
 
   return (
     <div
@@ -2732,6 +2739,9 @@ function QueuedPromptStack({
       style={{ "--composer-strip-max-height": `${stripMaxHeight}px` } as CSSProperties}
       aria-label={label}
     >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-2 pb-1">
+        <span className="text-[11.5px] font-semibold text-foreground/75">{label}</span>
+      </div>
       <div className="flex max-h-[216px] flex-col gap-1 overflow-y-auto">
         {prompts.map((prompt) => (
           <QueuedPromptRow

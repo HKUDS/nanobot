@@ -713,6 +713,7 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        consolidator=MagicMock(),
         max_iterations=2,
     )
     mgr._announce_result = AsyncMock()

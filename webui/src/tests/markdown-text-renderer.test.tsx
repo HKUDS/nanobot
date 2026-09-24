@@ -265,10 +265,7 @@ describe("MarkdownTextRenderer", () => {
 
     const image = screen.getByRole("img", { name: "Diagram" });
     expect(image).toHaveAttribute("src", "/api/media/sig/payload");
-    expect(screen.getByRole("link", { name: "Open Diagram" })).toHaveAttribute(
-      "href",
-      "/api/media/sig/payload",
-    );
+    expect(screen.getByRole("button", { name: "View image: Diagram" })).toBeInTheDocument();
   });
 
   it("renders markdown videos as inline players", () => {
@@ -378,10 +375,7 @@ describe("MarkdownTextRenderer", () => {
       "src",
       "/api/media/sig/payload",
     );
-    expect(screen.getByRole("link", { name: "Open Diagram" })).toHaveAttribute(
-      "href",
-      "/api/media/sig/payload",
-    );
+    expect(screen.getByRole("button", { name: "View image: Diagram" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Code" })).not.toBeInTheDocument();
   });
 
@@ -483,7 +477,16 @@ describe("MarkdownTextRenderer", () => {
     expect(surface).toHaveAttribute("role", "region");
     expect(surface).toHaveAttribute("tabindex", "0");
     expect(surface).toHaveAccessibleName("Data table");
-    expect(screen.getByRole("table")).toHaveTextContent("nanobot");
+    const table = screen.getByRole("table");
+    expect(table).toHaveTextContent("nanobot");
+    expect(table).not.toHaveClass("min-w-max");
+    expect(table).toHaveClass(
+      "table-fixed",
+      "[&_th]:whitespace-normal",
+      "[&_th]:[overflow-wrap:anywhere]",
+      "[&_td]:whitespace-normal",
+      "[&_td]:[overflow-wrap:anywhere]",
+    );
     expect(container.firstElementChild).toHaveClass("space-y-4");
     expect(container.firstElementChild).not.toHaveClass("space-y-0");
   });

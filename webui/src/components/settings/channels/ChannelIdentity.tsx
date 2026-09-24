@@ -20,6 +20,7 @@ import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { normalizeLocale } from "@/i18n/config";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { ChannelRuntimeStatus, NanobotFeatureInfo } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export const CHANNEL_SETUP_PANEL_CLASS_NAME =
   "min-h-full rounded-panel bg-settings-surface p-6";
@@ -145,48 +146,48 @@ export function ChannelLogo({
   const presentation = channelUiPresentation(feature.name, feature.webui)
     ?? channelUiPresentation(feature.name);
   const initials = presentation?.initials ?? feature.display_name.slice(0, 2).toUpperCase();
-  const color = presentation?.color ?? "#6B7280";
   const Icon = presentation?.icon;
-  const logoUrls = useMemo(() => logoFallbackUrls(presentation?.logoUrl), [presentation?.logoUrl]);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-
-  if (showBrandLogos && logoUrl) {
-    return (
-      <span
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-background"
-      >
-        <img
-          src={logoUrl}
-          alt=""
-          decoding="async"
-          loading="lazy"
-          className="h-5.5 w-5.5 max-h-6 max-w-6 object-contain"
-          onLoad={onLogoLoad}
-          onError={onLogoError}
-        />
-      </span>
-    );
-  }
-
-  if (Icon) {
-    return (
-      <span
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-background"
-        style={{ color }}
-        aria-hidden
-      >
-        <Icon className="h-5 w-5" strokeWidth={2.25} />
-      </span>
-    );
-  }
+  const logoUrls = useMemo(() => {
+    const fallbackUrls = logoFallbackUrls(presentation?.logoFallbackUrl ?? presentation?.logoUrl);
+    return presentation?.logoUrl && presentation.logoFallbackUrl
+      ? [...new Set([presentation.logoUrl, ...fallbackUrls])]
+      : fallbackUrls;
+  }, [presentation?.logoUrl, presentation?.logoFallbackUrl]);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
+  const showRemoteLogo = showBrandLogos && Boolean(logoUrl);
+  const showLoadedLogo = showRemoteLogo && logoLoaded;
+  const isLogoTile = presentation?.logoLayout === "tile" && logoUrl === presentation.logoUrl;
 
   return (
     <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-background text-[11px] font-bold"
-      style={{ color }}
+      data-testid={`channel-logo-${feature.name}`}
+      className={cn(
+        "relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-[9px] text-[11px] font-semibold text-muted-foreground",
+        showLoadedLogo ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
+      )}
       aria-hidden
     >
-      {initials}
+      <span className={cn(
+        "transition-opacity duration-150 motion-reduce:transition-none",
+        showLoadedLogo ? "opacity-0" : "opacity-100",
+      )}>
+        {Icon ? <Icon className="h-6 w-6" strokeWidth={2} /> : initials}
+      </span>
+      {showRemoteLogo ? <img
+        src={logoUrl}
+        alt=""
+        decoding="async"
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        draggable={false}
+        className={cn(
+          "absolute object-contain transition-opacity duration-150 motion-reduce:transition-none",
+          isLogoTile ? "h-8 w-8" : "h-6 w-6",
+          logoLoaded ? "opacity-100" : "opacity-0",
+        )}
+        onLoad={onLogoLoad}
+        onError={onLogoError}
+      /> : null}
     </span>
   );
 }

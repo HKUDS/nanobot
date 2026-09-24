@@ -23,6 +23,14 @@ from typing import Any, Generic, Literal, TypeVar, cast
 
 from filelock import FileLock
 
+from nanobot.utils.rotating_output import (
+    BACKGROUND_LOG_BACKUP_COUNT_ENV,
+    BACKGROUND_LOG_MAX_BYTES_ENV,
+    BACKGROUND_LOG_PATH_ENV,
+    DEFAULT_BACKUP_COUNT,
+    DEFAULT_MAX_BYTES,
+)
+
 
 @dataclass(frozen=True)
 class ProcessStartOptions:
@@ -110,12 +118,17 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         self.paths.run_dir.mkdir(parents=True, exist_ok=True)
         self.paths.logs_dir.mkdir(parents=True, exist_ok=True)
 
+        child_env = os.environ.copy()
+        child_env[BACKGROUND_LOG_PATH_ENV] = str(self.paths.log_path)
+        child_env[BACKGROUND_LOG_MAX_BYTES_ENV] = str(DEFAULT_MAX_BYTES)
+        child_env[BACKGROUND_LOG_BACKUP_COUNT_ENV] = str(DEFAULT_BACKUP_COUNT)
         with self.paths.log_path.open("a", encoding="utf-8") as log_handle:
             process = self._popen(
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
+                env=child_env,
                 **self._popen_platform_kwargs(),
             )
         self._owned_process = process
@@ -229,10 +242,22 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         """Return the last ``tail`` log lines."""
         if tail <= 0 or not self.paths.log_path.exists():
             return []
-        try:
-            lines = self.paths.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            return []
+        lines: list[str] = []
+        paths = [
+            self.paths.log_path,
+            *(
+                self.paths.log_path.with_name(f"{self.paths.log_path.name}.{index}")
+                for index in range(1, DEFAULT_BACKUP_COUNT + 1)
+            ),
+        ]
+        for path in paths:
+            try:
+                older_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            lines = older_lines + lines
+            if len(lines) >= tail:
+                break
         return lines[-tail:]
 
     def follow_logs(self, *, tail: int = 200) -> int:
@@ -241,17 +266,35 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             print(line)
         self.paths.logs_dir.mkdir(parents=True, exist_ok=True)
         self.paths.log_path.touch(exist_ok=True)
+        handle = self.paths.log_path.open("r", encoding="utf-8", errors="replace")
         try:
-            with self.paths.log_path.open("r", encoding="utf-8", errors="replace") as handle:
+            try:
                 handle.seek(0, os.SEEK_END)
                 while True:
                     line = handle.readline()
                     if line:
                         print(line.rstrip("\n"))
+                    elif self._log_file_replaced(handle):
+                        handle.close()
+                        handle = self.paths.log_path.open(
+                            "r", encoding="utf-8", errors="replace"
+                        )
                     else:
                         self._sleep(0.5)
-        except KeyboardInterrupt:
-            return 130
+            except KeyboardInterrupt:
+                return 130
+        finally:
+            handle.close()
+
+    def _log_file_replaced(self, handle: Any) -> bool:
+        """Return whether rotation replaced or truncated the followed log file."""
+        try:
+            opened = os.fstat(handle.fileno())
+            current = self.paths.log_path.stat()
+            same_file = (opened.st_dev, opened.st_ino) == (current.st_dev, current.st_ino)
+            return not same_file or current.st_size < handle.tell()
+        except OSError:
+            return False
 
     def process_identity(self, pid: int) -> str | int | None:
         """Return an identity that changes when an operating-system PID is reused."""

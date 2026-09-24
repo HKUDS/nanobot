@@ -11,7 +11,9 @@ import {
 } from "@/lib/api";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { deriveTitle } from "@/lib/format";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
+import { readReloadSessions, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
   SessionAutomationJob,
@@ -37,12 +39,20 @@ function isAbortError(error: unknown): boolean {
 
 export type SessionHistoryContinuity = "initial" | "overlap" | "reset";
 
-function persistedMessagesToUi(messages: UIMessage[]): UIMessage[] {
-  return messages.map((m, idx) => ({
-    ...m,
-    id: m.id ?? `hist-${idx}`,
-    createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
-  }));
+function projectPersistedThread(body: WebuiThreadPersistedPayload | null): {
+  messages: UIMessage[];
+  forkBoundaryMessageCount: number | null;
+} {
+  const events = body?.events ?? [];
+  const messages = projectThreadEvents(events);
+  const boundaryIndex = body?.fork_boundary_event_index;
+  const forkBoundaryMessageCount = typeof boundaryIndex === "number"
+    && Number.isInteger(boundaryIndex)
+    && boundaryIndex >= 0
+    && boundaryIndex <= events.length
+      ? projectThreadEvents(events.slice(0, boundaryIndex)).length
+      : null;
+  return { messages, forkBoundaryMessageCount };
 }
 
 function sameSemanticMessage(a: UIMessage, b: UIMessage): boolean {
@@ -166,7 +176,8 @@ function cachedHistoryState(
   body: WebuiThreadPersistedPayload,
   version: number,
 ): SessionHistoryState {
-  const messages = persistedMessagesToUi(body.messages ?? []);
+  const projected = projectPersistedThread(body);
+  const messages = projected.messages;
   return {
     key,
     messages,
@@ -175,9 +186,7 @@ function cachedHistoryState(
     error: null,
     hasPendingToolCalls: hasPendingToolCallsFromThread(body, messages),
     completedTurnIds: completedTurnIdsFromThread(body),
-    forkBoundaryMessageCount: typeof body.fork_boundary_message_count === "number"
-      ? Math.max(0, Math.min(body.fork_boundary_message_count, messages.length))
-      : null,
+    forkBoundaryMessageCount: projected.forkBoundaryMessageCount,
     beforeCursor: body.page?.before_cursor ?? null,
     hasMoreBefore: body.page?.has_more_before === true,
     userMessageOffset: Math.max(0, body.page?.user_message_offset ?? 0),
@@ -206,7 +215,7 @@ export function useSessions(): {
   getSessionAutomations: (key: string) => Promise<SessionAutomationJob[]>;
 } {
   const { client, token } = useClient();
-  const [sessions, setSessions] = useState<ChatSummary[]>([]);
+  const [sessions, setSessions] = useState<ChatSummary[]>(readReloadSessions);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
@@ -214,6 +223,10 @@ export function useSessions(): {
   const refreshPendingRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   tokenRef.current = token;
+
+  useEffect(() => {
+    if (sessions.length || !loading) writeReloadCache("sessions", sessions.slice(0, 200));
+  }, [sessions, loading]);
 
   const refresh = useCallback((): Promise<void> => {
     refreshPendingRef.current = true;
@@ -458,11 +471,10 @@ export function useSessionHistory(key: string | null): {
         historyVersionRef.current += 1;
         const responseVersion = historyVersionRef.current;
         const completedTurnIds = completedTurnIdsFromThread(body);
-        const ui = persistedMessagesToUi(body?.messages ?? []);
+        const projected = projectPersistedThread(body);
+        const ui = projected.messages;
         const hasPending = hasPendingToolCallsFromThread(body, ui);
-        const forkBoundary = typeof body?.fork_boundary_message_count === "number"
-          ? Math.max(0, Math.min(body.fork_boundary_message_count, ui.length))
-          : null;
+        const forkBoundary = projected.forkBoundaryMessageCount;
         setState((prev) => {
           const merged = prev.key === key
             ? mergeLatestHistory(prev.messages, ui, prev.lineage === 0)
@@ -571,7 +583,8 @@ export function useSessionHistory(key: string | null): {
       });
       setState((prev) => {
         if (!matchesRequest(prev)) return prev;
-        if (!body?.messages?.length) {
+        const projected = projectPersistedThread(body);
+        if (!body || !projected.messages.length) {
           return {
             ...prev,
             loadingOlder: false,
@@ -579,10 +592,8 @@ export function useSessionHistory(key: string | null): {
             beforeCursor: null,
           };
         }
-        const older = persistedMessagesToUi(body.messages);
-        const olderBoundary = typeof body.fork_boundary_message_count === "number"
-          ? Math.max(0, Math.min(body.fork_boundary_message_count, older.length))
-          : null;
+        const older = projected.messages;
+        const olderBoundary = projected.forkBoundaryMessageCount;
         const shiftedBoundary = prev.forkBoundaryMessageCount === null
           ? null
           : prev.forkBoundaryMessageCount + older.length;

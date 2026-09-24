@@ -11,12 +11,16 @@ import {
 import { ArrowRight, ChevronDown, Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
+import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
+import { StartupShell } from "@/components/StartupShell";
+import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
@@ -63,6 +67,8 @@ import {
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type {
   BootstrapResponse,
@@ -130,7 +136,8 @@ type ShellRoute = {
   settingsSection: SettingsSectionKey;
   temporary?: boolean;
 };
-const ThreadShell = lazy(() => import("@/components/thread/ThreadShell").then(
+const loadThreadShell = () => import("@/components/thread/ThreadShell");
+const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
 ));
 const loadSettingsView = () => import("@/components/settings/SettingsView");
@@ -914,6 +921,7 @@ export default function App() {
   const bootstrapWithSecret = useCallback(
     (secret: string) => {
       let cancelled = false;
+      if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
       (async () => {
         setState({ status: "loading" });
         try {
@@ -921,6 +929,7 @@ export default function App() {
           if (cancelled) return;
           if (secret) saveSecret(secret);
           const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+          activateReloadCache(url);
           const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, "browser");
           const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
           const client = new NanobotClient({
@@ -952,6 +961,8 @@ export default function App() {
         } catch (e) {
           if (cancelled) return;
           if (isBootstrapAuthRequired(e)) {
+            clearReloadCache();
+            webuiThreadCache.clear();
             setState({ status: "auth", failed: !!secret });
           } else {
             setState({
@@ -976,6 +987,8 @@ export default function App() {
         await refreshReadyClient(client, state.runtimeSurface);
       } catch (e) {
         if (isBootstrapAuthRequired(e)) {
+          clearReloadCache();
+          webuiThreadCache.clear();
           setState({ status: "auth", failed: !!bootstrapSecretRef.current });
         }
       }
@@ -989,19 +1002,7 @@ export default function App() {
   }, [bootstrapWithSecret]);
 
   if (state.status === "loading") {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="flex flex-col items-center gap-3 animate-in fade-in-0 duration-300">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-foreground/40" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-foreground/60" />
-            </span>
-            {t("app.loading.connecting")}
-          </div>
-        </div>
-      </div>
-    );
+    return <StartupShell />;
   }
   if (state.status === "auth") {
     return (
@@ -1036,6 +1037,8 @@ export default function App() {
       state.client.close();
     }
     clearSavedSecret();
+    clearReloadCache();
+    webuiThreadCache.clear();
     setState({ status: "auth" });
   };
 
@@ -1125,6 +1128,7 @@ function Shell({
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const mobileSidebarRef = useRef<HTMLDivElement>(null);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
   const workbenchState = sidebarState.workbench;
@@ -1171,6 +1175,8 @@ function Shell({
   const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
     chatId: string;
@@ -1211,6 +1217,23 @@ function Shell({
     () => temporarySessionList.map((session) => session.chatId),
     [temporarySessionList],
   );
+  // Pane shells can unmount during navigation. Keep replay state for this app
+  // session, pinning temporary chats because they cannot reload disk history.
+  const retainedTemporaryChatIdsRef = useRef(new Set<string>());
+  const [filePreviewStore] = useState(() => new FilePreviewStore());
+  const [threadMessageCache] = useState(() => new ThreadMessageCache(
+    (key) => retainedTemporaryChatIdsRef.current.has(key),
+  ));
+  useEffect(() => {
+    const retained = new Set(temporaryChatIds);
+    for (const chatId of retainedTemporaryChatIdsRef.current) {
+      if (!retained.has(chatId)) {
+        threadMessageCache.delete(chatId);
+        filePreviewStore.delete(`websocket:${chatId}`);
+      }
+    }
+    retainedTemporaryChatIdsRef.current = retained;
+  }, [temporaryChatIds, threadMessageCache, filePreviewStore]);
 
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean }) => {
@@ -1275,12 +1298,21 @@ function Shell({
 
   useEffect(() => {
     let cancelled = false;
+    const requestGeneration = settingsRefreshGenerationRef.current;
+    setSettingsLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
-        if (!cancelled) setSettingsSnapshot(payload);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(payload);
+        }
       })
       .catch(() => {
-        if (!cancelled) setSettingsSnapshot(null);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -2174,6 +2206,7 @@ function Shell({
       }
       if (!wasOpen) return;
       wasOpen = false;
+      filePreviewStore.clear();
       if (Object.keys(temporarySessionsRef.current).length === 0) return;
       temporarySessionsRef.current = {};
       setTemporarySessions({});
@@ -2181,10 +2214,24 @@ function Shell({
         navigate(defaultShellRoute(), { replace: true });
       }
     });
-  }, [client, navigate]);
+  }, [client, navigate, filePreviewStore]);
 
   useEffect(() => {
-    return client.onStatus((status) => {
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    const refreshSettings = (generation: number, attempt = 0): void => {
+      void fetchSettings(getToken())
+        .then((payload) => {
+          if (!cancelled && generation === settingsRefreshGenerationRef.current) {
+            setSettingsSnapshot(payload);
+          }
+        })
+        .catch(() => {
+          if (cancelled || generation !== settingsRefreshGenerationRef.current || attempt >= 3) return;
+          retryTimer = window.setTimeout(() => refreshSettings(generation, attempt + 1), 250);
+        });
+    };
+    const unsubscribe = client.onStatus((status) => {
       const startedAt = (() => {
         try {
           return Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
@@ -2205,11 +2252,18 @@ function Shell({
       } catch {
         // ignore storage errors
       }
+      const refreshGeneration = ++settingsRefreshGenerationRef.current;
       setIsRestarting(false);
       setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
       window.setTimeout(() => setRestartToast(null), 3_500);
+      refreshSettings(refreshGeneration);
     });
-  }, [client, t]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [client, getToken, t]);
 
   const onTurnEnd = useDeferredTitleRefresh(
     temporaryChatActive ? null : activePaneSession,
@@ -2255,6 +2309,7 @@ function Shell({
           });
           return;
         }
+        filePreviewStore.delete(item.key);
       }
       setPendingDelete(null);
       if (deletingActive) {
@@ -2267,7 +2322,7 @@ function Shell({
     } catch (e) {
       console.error("Failed to delete session", e);
     }
-  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions]);
+  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore]);
 
   const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[]) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
@@ -2659,6 +2714,7 @@ function Shell({
 
   return (
     <ThemeProvider theme={theme}>
+      <StarPrompt ready={!loading && !sidebarStateLoading} />
       <div
         className={cn(
           "relative h-full w-full overflow-hidden",
@@ -2739,6 +2795,12 @@ function Shell({
               onOpenChange={(open) => setMobileSidebarOpen(open)}
             >
               <SheetContent
+                ref={mobileSidebarRef}
+                onOpenAutoFocus={(event) => {
+                  // Keep opening navigation from focusing the search tooltip trigger.
+                  event.preventDefault();
+                  mobileSidebarRef.current?.focus({ preventScroll: true });
+                }}
                 side="left"
                 showCloseButton={false}
                 aria-describedby={undefined}
@@ -2780,7 +2842,7 @@ function Shell({
               )}
             >
               <ThreadVisibilityContext.Provider value={view === "chat"}>
-                <Suspense fallback={<SurfaceLoadingFallback label={t("chat.loading")} />}>
+                <Suspense fallback={<StartupShell embedded />}>
                   <PaneWorkbench
                     panes={renderedWorkbenchPanes}
                     activePaneKey={renderedActivePaneKey}
@@ -2823,6 +2885,8 @@ function Shell({
                             title={headerTitle}
                             temporary={temporaryChatRequested}
                             temporaryChatIds={temporaryChatIds}
+                            messageCache={threadMessageCache}
+                            filePreviewStore={filePreviewStore}
                             temporaryChatEnabled={temporaryChatEnabled}
                             onTemporaryChatEnabledChange={
                               !activeKey ? onTemporaryChatEnabledChange : undefined
@@ -2847,6 +2911,7 @@ function Shell({
                             workspaceError={workspaceError}
                             onWorkspaceScopeChange={applyWorkspaceScope}
                             settingsSnapshot={settingsSnapshot}
+                            settingsLoading={settingsLoading}
                             onOpenModelSettings={onOpenModelSettings}
                             skills={skills}
                           />
@@ -2867,6 +2932,9 @@ function Shell({
                           session={paneSession}
                           sessions={sessions}
                           title={pane.title}
+                          temporaryChatIds={temporaryChatIds}
+                          messageCache={threadMessageCache}
+                          filePreviewStore={filePreviewStore}
                           onToggleSidebar={toggleSidebar}
                           onNewChat={onNewChat}
                           onCreateChat={onCreateChat}
@@ -2906,6 +2974,7 @@ function Shell({
                             client.setWorkspaceScope(paneSession.chatId, next);
                           }}
                           settingsSnapshot={settingsSnapshot}
+                          settingsLoading={settingsLoading}
                           onOpenModelSettings={onOpenModelSettings}
                           skills={skills}
                         />

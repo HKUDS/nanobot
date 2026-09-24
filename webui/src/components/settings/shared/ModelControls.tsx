@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   Bot,
   Brain,
@@ -58,6 +58,21 @@ const DEFERRED_MODEL_LIST_QUERY_MIN_LENGTH = 2;
 
 export function normalizeContextWindowTokens(value: number | null | undefined): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 200_000;
+}
+
+export function parseContextWindowTokens(value: string): number {
+  const match = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(value.trim());
+  if (!match) return NaN;
+  const exponent = { k: 3, m: 6 }[match[2].toLowerCase()] ?? 0;
+  const tokens = Number(`${match[1]}e${exponent}`);
+  return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : NaN;
+}
+
+export function formatContextWindowInput(tokens: number): string {
+  if (!Number.isFinite(tokens)) return "";
+  if (tokens % 1_000_000 === 0) return `${tokens / 1_000_000}m`;
+  if (tokens % 1_000 === 0) return `${tokens / 1_000}k`;
+  return String(tokens);
 }
 
 function settingsProviderRow(
@@ -160,6 +175,8 @@ export function ModelIdPicker({
   emptyLabel,
   searchPlaceholder,
   emptyMessage,
+  onProviderOAuthLogin,
+  providerSigningIn = false,
   onChange,
 }: {
   token: string;
@@ -171,6 +188,8 @@ export function ModelIdPicker({
   emptyLabel?: string;
   searchPlaceholder?: string;
   emptyMessage?: string;
+  onProviderOAuthLogin?: (provider: string) => void;
+  providerSigningIn?: boolean;
   onChange: (model: string) => void;
 }) {
   const { t } = useTranslation();
@@ -182,6 +201,8 @@ export function ModelIdPicker({
   const [payload, setPayload] = useState<ProviderModelsPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const catalogNoticeId = useId();
+  const catalogSignInRef = useRef<HTMLButtonElement>(null);
   const effectiveProvider =
     provider === "auto" ? settings.agent.resolved_provider ?? provider : provider;
   const hasConcreteProvider = Boolean(effectiveProvider && effectiveProvider !== "auto");
@@ -228,17 +249,26 @@ export function ModelIdPicker({
   const waitingForModelSearch =
     open && canFetchModels && defersModelList && !hasDeferredSearchQuery;
   const hasModelList = hasStaticModels || payload?.status === "available";
+  const catalogNeedsSignIn = !hasStaticModels && payload?.error_kind === "auth_required";
   const showModels = Boolean(
-    hasModelList && (hasStaticModels || (payload && (!isCatalog || normalizedQuery))),
+    !catalogNeedsSignIn && hasModelList
+      && (hasStaticModels || (payload && (!isCatalog || normalizedQuery))),
   );
   const customCandidate = query.trim();
-  const allowCustomModel = !providerRequiresConfiguration;
+  const allowCustomModel = !providerRequiresConfiguration && !catalogNeedsSignIn;
   const exactQueryMatch = providerModels.some((model) => model.id === customCandidate);
   const showCustomModel = Boolean(
     allowCustomModel && customCandidate && !exactQueryMatch && customCandidate !== value,
   );
   const providerModelCount = payload?.model_count ?? providerModels.length;
   const modelUnconfigured = !value.trim() || !providerConfigured;
+  const showCatalogNotice = payload && (catalogNeedsSignIn
+    || (!loading && payload.status === "available"
+      && (payload.source === "stale" || payload.source === "fallback")));
+
+  useEffect(() => {
+    if (open && catalogNeedsSignIn && !loading) catalogSignInRef.current?.focus();
+  }, [open, catalogNeedsSignIn, loading]);
 
   useEffect(() => {
     if (!open) return;
@@ -246,16 +276,16 @@ export function ModelIdPicker({
   }, [open, effectiveProvider, hasConcreteProvider, providerUsesManualModelIds, value]);
 
   useEffect(() => {
+    // Reopening does not restore authorization. Keep a confirmed rejection until
+    // discovery completes, without carrying it into another provider's picker.
+    setPayload((current) => shouldFetchModels && current?.provider === effectiveProvider
+      && current.error_kind === "auth_required" ? current : null);
+    setError(null);
+    setLoading(open && shouldFetchModels);
     if (!open || !shouldFetchModels) {
-      setPayload(null);
-      setError(null);
-      setLoading(false);
       return;
     }
     let cancelled = false;
-    setPayload(null);
-    setError(null);
-    setLoading(true);
     fetchProviderModels(tokenRef.current, effectiveProvider)
       .then((nextPayload) => {
         if (!cancelled) setPayload(nextPayload);
@@ -269,7 +299,8 @@ export function ModelIdPicker({
     return () => {
       cancelled = true;
     };
-  }, [effectiveProvider, open, shouldFetchModels]);
+  // Successful OAuth completion replaces the settings row even for the same account.
+  }, [effectiveProvider, open, shouldFetchModels, providerRow]);
 
   const selectModel = (model: string) => {
     onChange(model);
@@ -361,7 +392,7 @@ export function ModelIdPicker({
         align="end"
         className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-1.5"
       >
-        <div className="p-1 pb-1.5">
+        {!catalogNeedsSignIn ? <div className="p-1 pb-1.5">
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
@@ -377,12 +408,55 @@ export function ModelIdPicker({
               aria-label={
                 searchPlaceholder || tx("settings.models.searchModels", "Search or type model ID")
               }
+              aria-describedby={showCatalogNotice ? catalogNoticeId : undefined}
               className="h-8 rounded-full pl-8 pr-3 text-[12px]"
             />
           </div>
-        </div>
+        </div> : null}
 
-        {providerRequiresConfiguration ? (
+        {showCatalogNotice ? (
+          <div className="mx-1 mb-1.5 flex items-start gap-2 rounded-control bg-muted/60 px-2.5 py-2 text-[11px] leading-4">
+            {catalogNeedsSignIn ? <ProviderPickerIcon
+              provider={effectiveProvider}
+              showBrandLogos={showProviderLogos}
+            /> : null}
+            <div className="min-w-0 flex-1">
+              <div id={catalogNoticeId} role="status">
+                <p className="font-medium text-foreground">
+                  {catalogNeedsSignIn
+                    ? tx("settings.models.catalogAuthRequired", "Authorization expired. Please sign in again.")
+                    : tx("settings.models.catalogUnavailable", "Could not refresh models. Try again later.")}
+                </p>
+                {!catalogNeedsSignIn ? <p className="mt-1 text-muted-foreground">
+                  {payload.source === "stale"
+                    ? tx("settings.models.catalogStale", "Showing cached models; the list may be out of date.")
+                    : tx("settings.models.catalogFallback", "Showing built-in models; the list may be out of date.")}
+                </p> : null}
+              </div>
+              {catalogNeedsSignIn && onProviderOAuthLogin && providerRow?.oauth_login_supported ? (
+                <Button
+                  ref={catalogSignInRef}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-2 h-7 rounded-full px-2.5 text-[11px]"
+                  disabled={providerSigningIn}
+                  aria-describedby={catalogNoticeId}
+                  onClick={() => {
+                    setOpen(false);
+                    onProviderOAuthLogin(effectiveProvider);
+                  }}
+                >
+                  {providerSigningIn
+                    ? tx("settings.oauth.signingIn", "Signing in...")
+                    : tx("settings.oauth.signInAgain", "Sign in again")}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {catalogNeedsSignIn ? null : providerRequiresConfiguration ? (
           <div className="px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
             {tx("settings.models.providerNotConfigured", "Configure this provider before loading models.")}
           </div>
@@ -501,7 +575,8 @@ export function ProviderPickerIcon({
 }) {
   const brand = providerBrand(provider);
   const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
 
   if (unconfigured) {
     return (
@@ -519,7 +594,10 @@ export function ProviderPickerIcon({
     return (
       <span
         data-testid={`provider-picker-logo-${provider}`}
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background"
+        className={cn(
+          "grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md",
+          logoLoaded ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
+        )}
         aria-hidden
       >
         <img
@@ -527,7 +605,13 @@ export function ProviderPickerIcon({
           alt=""
           decoding="async"
           loading="lazy"
-          className="h-3.5 w-3.5 object-contain"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          className={cn(
+            "object-contain",
+            isLogoTile ? "h-5 w-5" : "h-3.5 w-3.5",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />

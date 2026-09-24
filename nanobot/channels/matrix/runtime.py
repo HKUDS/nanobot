@@ -536,7 +536,7 @@ class MatrixChannel(BaseChannel):
         try:
             response = await self.client.content_repository_config()
         except Exception:
-            self.logger.error("Failed to fetch server upload limit", exc_info=True)
+            self.logger.opt(exception=True).error("Failed to fetch server upload limit")
             return None
         upload_size = getattr(response, "upload_size", None)
         if isinstance(upload_size, int) and upload_size > 0:
@@ -582,7 +582,7 @@ class MatrixChannel(BaseChannel):
                     filesize=size_bytes,
                 )
         except Exception:
-            self.logger.error("Matrix media upload failed for {}", filename, exc_info=True)
+            self.logger.opt(exception=True).error("Matrix media upload failed for {}", filename)
             return fail
 
         is_tuple_result = isinstance(cast(object, upload_result), tuple)
@@ -607,7 +607,9 @@ class MatrixChannel(BaseChannel):
         try:
             await self._send_room_content(room_id, content)
         except Exception:
-            self.logger.error("Matrix room content send failed for room_id={}", room_id, exc_info=True)
+            self.logger.opt(exception=True).error(
+                "Matrix room content send failed for room_id={}", room_id
+            )
             return fail
         return None
 
@@ -617,7 +619,7 @@ class MatrixChannel(BaseChannel):
             raise RuntimeError("Matrix client not initialized")
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
-        relates_to = self._build_thread_relates_to(msg.metadata)
+        relates_to = self._build_outbound_relates_to(msg.metadata)
         is_progress = isinstance(msg.event, ProgressEvent)
         try:
             failures: list[str] = []
@@ -655,7 +657,7 @@ class MatrixChannel(BaseChannel):
         resuming: bool = False,
         merge_next: bool = False,
     ) -> None:
-        relates_to = self._build_thread_relates_to(metadata)
+        relates_to = self._build_outbound_relates_to(metadata)
 
         if stream_end and merge_next:
             if not delta:
@@ -712,7 +714,9 @@ class MatrixChannel(BaseChannel):
                 buf.text = previous_text
                 if created_buf:
                     self._stream_bufs.pop(stream_key, None)
-                self.logger.error("Stream send/edit failed for chat_id={}", chat_id, exc_info=True)
+                self.logger.opt(exception=True).error(
+                    "Stream send/edit failed for chat_id={}", chat_id
+                )
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
                 raise
 
@@ -1011,7 +1015,9 @@ class MatrixChannel(BaseChannel):
                 ),
             )
         except Exception:
-            self.logger.error("Matrix join request exception for room={}", room_id, exc_info=True)
+            self.logger.opt(exception=True).error(
+                "Matrix join request exception for room={}", room_id
+            )
             return False
         if isinstance(resp, JoinError):
             self.logger.error("Matrix auto-join failed for room={}: {}", room_id, resp)
@@ -1194,6 +1200,25 @@ class MatrixChannel(BaseChannel):
         return {"rel_type": "m.thread", "event_id": root_id,
                 "m.in_reply_to": {"event_id": reply_to}, "is_falling_back": True}
 
+    @classmethod
+    def _build_outbound_relates_to(
+        cls, metadata: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Build Matrix relation metadata for outbound messages.
+
+        Threaded turns keep the existing ``m.thread`` relation. Non-thread
+        turns attach a plain ``m.in_reply_to`` so room-level responses link
+        back to the user event that started the agent turn (issue #5274).
+        """
+        if thread := cls._build_thread_relates_to(metadata):
+            return thread
+        if not metadata:
+            return None
+        reply_to = metadata.get("message_id") or metadata.get("event_id")
+        if not isinstance(reply_to, str) or not reply_to:
+            return None
+        return {"m.in_reply_to": {"event_id": reply_to}}
+
     def _event_attachment_type(self, event: MatrixMediaEvent) -> str:
         msgtype = self._event_source_content(event).get("msgtype")
         return _MSGTYPE_MAP.get(cast(str, msgtype), "file")
@@ -1287,7 +1312,7 @@ class MatrixChannel(BaseChannel):
         except _MediaTooLargeError:
             raise
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
-            self.logger.warning("download failed for {}", mxc_url, exc_info=True)
+            self.logger.opt(exception=True).warning("download failed for {}", mxc_url)
             return None
 
     def _decrypt_media_bytes(self, event: MatrixMediaEvent, ciphertext: bytes) -> bytes | None:
@@ -1364,10 +1389,16 @@ class MatrixChannel(BaseChannel):
         return attachment, _ATTACH_MARKER.format(path)
 
     def _base_metadata(self, room: MatrixRoom, event: RoomMessage) -> dict[str, Any]:
-        """Build common metadata for text and media handlers."""
+        """Build common metadata for text and media handlers.
+
+        ``message_id`` mirrors the Matrix event id so the agent loop and
+        message tool can round-trip a reply target the same way Telegram and
+        Discord do. ``event_id`` is kept for Matrix-specific callers.
+        """
         meta: dict[str, Any] = {"room": getattr(room, "display_name", room.room_id)}
         if isinstance(eid := getattr(event, "event_id", None), str) and eid:
             meta["event_id"] = eid
+            meta["message_id"] = eid
         if thread := self._thread_metadata(event):
             meta.update(thread)
         return meta

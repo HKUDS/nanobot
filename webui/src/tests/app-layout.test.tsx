@@ -287,8 +287,10 @@ import {
   fetchBootstrap,
 } from "@/lib/bootstrap";
 import App from "@/App";
+import { mockBrowserFocus } from "./browser-focus";
 
 describe("App layout", () => {
+  let restoreBrowserFocus: (() => void) | undefined;
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     mockSessions = [];
@@ -342,9 +344,21 @@ describe("App layout", () => {
 
   afterEach(() => {
     cleanup();
+    restoreBrowserFocus?.();
+    restoreBrowserFocus = undefined;
     Reflect.deleteProperty(window, "nanobotHost");
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("shows only layout shadows while bootstrap is pending", () => {
+    vi.mocked(fetchBootstrap).mockReturnValueOnce(new Promise(() => {}));
+    render(<App />);
+    expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveClass("startup-status");
+    expect(screen.queryByText("Loading nanobot…")).not.toBeInTheDocument();
   });
 
   it("shows the auth form without an invalid-password error on first load", async () => {
@@ -619,7 +633,7 @@ describe("App layout", () => {
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Model providers")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add your own model provider" }))
+    expect(screen.getByRole("button", { name: "Add provider" }))
       .toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Choose your AI" })).not.toBeInTheDocument();
   });
@@ -1054,6 +1068,56 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/settings?section=channels");
   });
 
+  it("refreshes settings after the browser reconnects from a restart", async () => {
+    let restartCompleted = false;
+    let refreshedSettingsRequests = 0;
+    let releaseRefreshedSettings!: () => void;
+    const refreshedSettingsReady = new Promise<void>((resolve) => {
+      releaseRefreshedSettings = resolve;
+    });
+    const pendingSettings = {
+      ...baseSettingsPayload(),
+      requires_restart: true,
+      restart_required_sections: ["runtime"],
+    };
+    const refreshedSettings = {
+      ...baseSettingsPayload(),
+      requires_restart: false,
+      restart_required_sections: [],
+    };
+    localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now() - 2_000));
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    mockFetchRoutes({
+      "/api/settings": () => {
+        if (!restartCompleted) return pendingSettings;
+        refreshedSettingsRequests += 1;
+        if (refreshedSettingsRequests === 1) throw new Error("gateway is still starting");
+        return refreshedSettingsReady.then(() => refreshedSettings);
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Saved. Restart to apply changes.").length).toBeGreaterThan(0);
+    }, { timeout: 10_000 });
+
+    restartCompleted = true;
+    act(() => {
+      for (const handler of statusHandlers) handler("reconnecting");
+      for (const handler of statusHandlers) handler("open");
+    });
+
+    await waitFor(() => expect(refreshedSettingsRequests).toBeGreaterThan(1));
+    await act(async () => {
+      releaseRefreshedSettings();
+      await refreshedSettingsReady;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/new"));
+    expect(await screen.findByText(HERO_GREETING_PATTERN, {}, { timeout: 10_000 })).toBeInTheDocument();
+  }, 30_000);
+
   it("opens Skills from the main sidebar", async () => {
     const longSkillDescription = [
       "Work with GitHub repositories, issues, pull requests, releases, workflows,",
@@ -1204,6 +1268,7 @@ describe("App layout", () => {
     expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
     const enabledSwitch = screen.getByRole("switch", { name: "Disable github" });
     expect(enabledSwitch).toHaveAttribute("aria-checked", "true");
+    expect(enabledSwitch).toHaveClass("h-5", "w-9", "bg-foreground");
     fireEvent.click(enabledSwitch);
     await waitFor(() => {
       expect(screen.getByRole("switch", { name: "Enable github" })).toHaveAttribute(
@@ -1211,6 +1276,7 @@ describe("App layout", () => {
         "false",
       );
     });
+    expect(screen.getByRole("switch", { name: "Enable github" })).toHaveClass("h-5", "w-9", "bg-muted-foreground/25");
   });
 
   it("deletes a custom skill from its detail sheet", async () => {
@@ -2196,6 +2262,43 @@ describe("App layout", () => {
     expect(deleteChatSpy).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument();
   }, 15_000);
+
+  it("opens a mobile topic with one click and closes the drawer without a search tooltip", async () => {
+    restoreBrowserFocus = mockBrowserFocus();
+    const user = userEvent.setup();
+    mockSessions = ["First", "Second"].map((title, index) => ({
+      key: `websocket:mobile-${index}`,
+      channel: "websocket",
+      chatId: `mobile-${index}`,
+      createdAt: "2026-04-16T10:00:00Z",
+      updatedAt: "2026-04-16T10:00:00Z",
+      preview: `${title} mobile chat`,
+    }));
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: !query.includes("1024px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    for (const title of ["First", "Second"]) {
+      await user.click(await screen.findByRole("button", { name: "Toggle sidebar" }));
+      const sheet = await screen.findByRole("dialog");
+      await waitFor(() => expect(sheet).toHaveFocus());
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      await user.click(await within(sheet).findByRole("button", { name: `${title} mobile chat` }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(document.title).toBe(`${title} mobile chat · nanobot`));
+      expect(screen.getByRole("button", { name: `${title} mobile chat` }))
+        .toHaveAttribute("aria-current", "page");
+    }
+  });
 
   it("keeps the mobile session action menu inside the sidebar sheet", async () => {
     mockSessions = [

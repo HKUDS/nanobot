@@ -82,7 +82,7 @@ Pick **one** install method:
 | Stable | installer, `uv`, or pip | the same package tool | one released Python/WebUI/TUI version |
 | Current source | editable Git checkout | `git pull --ff-only` + editable dependency sync | Python, WebUI, and TUI from that checkout |
 
-Prerequisites: Python 3.11 or newer. Git and [Bun](https://bun.sh/) are only needed for a source install. Published packages include the WebUI and fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
+Prerequisites: Python 3.11 or newer. Git and [Bun](https://bun.sh/) are only needed for a source install. Published packages include the WebUI, and supported platform wheels also include the native TUI. A source-distribution install can fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
 
 If terminals, API keys, or config files are new to you, use the guided zero-background walkthrough in [Start Without Technical Background](./docs/start-without-technical-background.md) instead of this compact README path.
 
@@ -130,10 +130,9 @@ If pip reports `externally-managed-environment` on macOS or Linux, use the one-c
 
 Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon
 and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2.
-Pip selects the matching wheel;
-opening the TUI does not need a separate GitHub download or Bun installation. On other platforms
-or when building from the source distribution, use `nanobot --classic` or the WebUI; native TUI
-availability depends on the platform runtime.
+Pip selects the matching wheel; opening the TUI does not need a separate GitHub download or Bun
+installation. A source-distribution install on a supported target can use the matching checksummed
+GitHub release archive. On other platforms, use `nanobot --classic` or the WebUI.
 
 **Install from source**
 
@@ -353,27 +352,26 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 
 ## Releases
 
-**Latest release: [v0.3.0 - The Agency Release](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)**
+**Latest release: [v0.3.5](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5)**
 
-The Agency Release turns nanobot from a durable workbench into an agent runtime that can coordinate helpers, switch models per session, and carry authorized work through to completion.
+v0.3.5 brings the workbench to the terminal and makes conversations easier to continue across the browser, terminal, and chat apps.
 
-- Consult inline subagents without leaving the current task
-- Switch model presets per session directly from the composer
-- Start from a guided WebUI setup with clearer execution controls
-- Apply configuration changes live across a more reliable provider, channel, and tool runtime
+- Use the native terminal workbench with the same gateway and saved conversations as the WebUI.
+- Arrange up to four browser conversations side by side, mention saved sessions, or open a temporary chat.
+- Inspect per-round context usage and compaction progress, with more durable history and recovery.
+- Discover Skills, connect Apps, and manage scheduled work through expanded WebUI flows.
 
-[Read the v0.3.0 release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.3.0)
+[Read the v0.3.5 release notes and upgrade notes](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5)
 
 ## Recent Updates
 
-- **2026-09-05** 🧠 Visible context-compaction progress in the WebUI, terminal, and chat channels.
-- **2026-09-04** 📊 WebUI context usage and cache reuse shown by conversation round.
-- **2026-08-29** 🖥️ `nanobot` opens the native terminal agent by default.
-- **2026-08-27** 📎 Clipboard image attachments in the native terminal.
-- **2026-08-19** 🔗 Session mentions let agents read and message other saved conversations.
-- **2026-08-12** 🖥️ A WebUI workbench with grouped conversation panes and adjustable layouts.
+- **2026-09-19** 🔎 Searchable provider setup, consistent provider identities, and smoother Linear onboarding.
+- **2026-09-18** ♻️ Clearer recovery for interrupted work and Discord reply-context support.
+- **2026-09-16** 📦 Platform wheels bundle the version-matched native terminal UI.
+- **2026-09-15** 🚀 Released [v0.3.5](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5) with a shared terminal workbench, multi-pane WebUI, and visible context continuity.
+- **2026-09-07** 🔌 WeCom media uploads use the SDK API, and CI skips unrelated jobs.
 
-For older updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
+For earlier updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
 
 ## Open Source Partners
 

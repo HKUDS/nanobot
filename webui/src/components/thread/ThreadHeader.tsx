@@ -20,6 +20,7 @@ const controlsClassName = cn(
 );
 
 interface ThreadHeaderProps {
+  className?: string;
   title: string;
   handle?: SessionHandle | null;
   onToggleSidebar: () => void;
@@ -39,6 +40,7 @@ interface ThreadHeaderProps {
 }
 
 export function ThreadHeader({
+  className,
   title,
   handle = null,
   onToggleSidebar,
@@ -65,6 +67,7 @@ export function ThreadHeader({
         "pointer-events-none inset-x-0 top-0 z-30 flex shrink-0 items-center justify-between gap-3 px-3 py-1",
         "[position:var(--thread-header-position,absolute)]",
         minimal && "h-11",
+        className,
       )}
     >
       <div

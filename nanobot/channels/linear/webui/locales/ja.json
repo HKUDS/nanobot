@@ -4,13 +4,13 @@
   "setup": {
     "docsLabel": "Linear セットアップガイドを開く",
     "officialLabel": "Linear OAuth アプリを作成",
-    "tryIt": "issue のコメントでアプリをメンションしてください。Agent Session 内の続きのメッセージでは、再度メンションする必要はありません。",
-    "summary": "非公開の Linear OAuth アプリを作成し、認証情報と公開 URL を保存してからワークスペースを認証します。新しいセッションの開始には明示的な @メンションが必要で、通常のコメントは無視されます。",
+    "tryIt": "アプリをメンションするか issue を委任してください。Agent Session 内では再度メンションする必要はありません。",
+    "summary": "非公開の Linear OAuth アプリを作成し、認証情報と公開 URL を保存してからワークスペースを認証します。メンションまたは issue の委任でセッションを開始でき、通常のコメントは無視されます。",
     "steps": [
       "この nanobot インスタンスを安定した HTTPS URL で公開します（トンネルも利用できます）。",
-      "Linear で read、write、app:mentionable スコープを持つ非公開 OAuth アプリを作成します。app:assignable は追加しないでください。",
+      "Linear で read、write、app:mentionable、app:assignable スコープを持つ非公開 OAuth アプリを作成します。",
       "生成された URL を使い、アプリの webhook を AgentSessionEvent、PermissionChange、OAuthAuthorization に登録します。",
-      "アプリの認証情報を入力し、自動保存の完了後に OAuth でワークスペースを接続して、issue でアプリを @メンションします。"
+      "OAuth でワークスペースを接続し、アプリをメンションするか issue を委任します。"
     ],
     "fields": {
       "clientId": {
@@ -53,6 +53,10 @@
         "label": "許可する Linear ユーザー",
         "placeholder": "Linear ユーザー ID（カンマ区切り）",
         "help": "nanobot のペアリングを使う場合は空欄にします。接続済みワークスペースの全ユーザーを許可する場合のみ * を指定してください。"
+      },
+      "showReasoning": {
+        "label": "推論を表示",
+        "help": "モデルの推論を Linear の思考アクティビティとして投稿します。静かなセッションにするにはオフにします。"
       }
     }
   },
@@ -67,10 +71,23 @@
     "reconnect": "別のワークスペースを接続",
     "connect": "Linear に接続",
     "openLinear": "Linear で続行",
-    "createApp": "入力済みの Linear アプリを作成",
-    "savePublicUrl": "公開 HTTPS URL を入力すると、入力済みの Linear アプリを作成できます。",
-    "saveBeforeConnect": "アプリの認証情報を入力し、自動保存が完了してから接続してください。",
+    "createApp": "Linear アプリを作成",
+    "savePublicUrl": "公開 HTTPS URL を入力してから Linear アプリを作成してください。",
     "removeCredentials": "保存済みの認証情報を削除",
-    "retrySave": "再試行"
+    "retrySave": "再試行",
+    "channelRunning": "チャンネル実行中",
+    "accessAll": "認証済みワークスペースの全メンバーがこのエージェントを実行できます。",
+    "accessRestricted": "詳細設定に記載された Linear ユーザー ID のみがこのエージェントを実行できます。",
+    "accessPairing": "初回にペアリングし、Linear MCP に接続すると issue を検索・編集できます。",
+    "configureTools": "Linear MCP を設定",
+    "workspacesTitle": "認証済みワークスペース",
+    "refreshWorkspaces": "ワークスペースを更新",
+    "loadingWorkspaces": "ワークスペースを読み込み中",
+    "noWorkspaces": "認証済みワークスペースがありません。Linear エージェントのリクエストを受け取るには接続してください。",
+    "refreshRequired": "認証の更新が必要です",
+    "missingScopes": "再接続して権限を付与: {{scopes}}",
+    "authorized": "認証済み",
+    "confirmDisconnect": "ワークスペースを切断",
+    "disconnect": "切断"
   }
 }

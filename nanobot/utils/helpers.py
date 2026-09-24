@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import shutil
 import stat
 import time
 import uuid
+from collections.abc import Iterable
 from contextlib import suppress
 from datetime import datetime
 from functools import lru_cache
@@ -364,7 +366,6 @@ def timestamp() -> str:
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
-_TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
@@ -553,6 +554,51 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def atomic_write_lines(path: Path, lines: Iterable[str], *, fsync: bool = True) -> None:
+    """Atomically replace *path* with already-serialized record lines.
+
+    Each item is one record. A trailing newline is added when the item does
+    not already end with one. The bytes are written to a uniquely named temp
+    file in the same directory, then published with ``os.replace``.
+
+    ``fsync=True`` (the default) flushes and fsyncs the file before the
+    replace, then fsyncs the parent directory. ``fsync=False`` skips both,
+    which session saves use when the caller does not ask for durability.
+    Directory fsync suppresses ``PermissionError`` (Windows cannot open a
+    directory this way) and ``EINVAL`` (filesystems that reject directory
+    fsync). Any other directory fsync error propagates. The temp file is
+    removed on every ``BaseException``.
+    """
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "x", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(line if line.endswith("\n") else f"{line}\n")
+            if fsync:
+                handle.flush()
+                os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        if fsync:
+            _fsync_directory_after_replace(path.parent)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def _fsync_directory_after_replace(directory: Path) -> None:
+    """Fsync *directory* after a replace, ignoring unsupported platforms."""
+    with suppress(PermissionError):
+        fd = os.open(str(directory), os.O_RDONLY)
+        try:
+            try:
+                os.fsync(fd)
+            except OSError as exc:
+                if exc.errno != errno.EINVAL:
+                    raise
+        finally:
+            os.close(fd)
+
+
 def _write_text_atomic(path: Path, content: str) -> None:
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     existing_mode: int | None = None
@@ -602,12 +648,23 @@ def maybe_persist_tool_result(
     if not path.exists():
         _write_text_atomic(path, content)
 
-    preview = content[:_TOOL_RESULT_PREVIEW_CHARS]
+    reference_path = str(path.resolve())
+    overhead = len(_render_tool_result_reference(
+        reference_path, original_size=len(content), preview="", truncated_preview=True,
+    ))
+    available = max(0, max_chars - overhead)
+    separator = "\n...\n"
+    tail_chars = min(1200, max(0, (available - len(separator)) // 4))
+    if tail_chars:
+        head_chars = available - tail_chars - len(separator)
+        preview = content[:head_chars] + separator + content[-tail_chars:]
+    else:
+        preview = content[:available]
     return _render_tool_result_reference(
-        str(path.resolve()),
+        reference_path,
         original_size=len(content),
         preview=preview,
-        truncated_preview=len(content) > _TOOL_RESULT_PREVIEW_CHARS,
+        truncated_preview=True,
         max_chars=max_chars,
     )
 
