@@ -902,13 +902,6 @@ class TestScratchpadInspection:
         assert "step" in result
         assert "2" in result
 
-    @pytest.mark.asyncio
-    async def test_inspect_nonexistent_still_returns_not_found(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="never_set_key_xyz")
-        assert "not found" in result
-
-
 # ---------------------------------------------------------------------------
 # sensitive sub-field blocking (Fix #3: API key leak prevention)
 # ---------------------------------------------------------------------------

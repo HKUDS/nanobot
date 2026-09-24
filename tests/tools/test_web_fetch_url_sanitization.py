@@ -81,57 +81,23 @@ def test_backtick_url_produces_empty_scheme_in_urlparse():
 # --- WebFetchTool.execute integration tests ---
 
 @pytest.mark.asyncio
-async def test_execute_strips_backticks_and_succeeds():
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("`https://example.com/page`", id="backticks"),
+        pytest.param('"https://example.com/page"', id="double-quotes"),
+        pytest.param("'https://example.com/page'", id="single-quotes"),
+        pytest.param("  `https://example.com/page`  ", id="space-and-backticks"),
+        pytest.param('"`https://example.com/page`"', id="mixed-markdown-and-quotes"),
+        pytest.param("HTTPS://example.com/page", id="uppercase-scheme"),
+    ],
+)
+async def test_execute_accepts_cleanable_http_urls(url):
     tool = WebFetchTool()
     with _patched_web_fetch():
-        result = await tool.execute(url="`https://example.com/page`")
+        result = await tool.execute(url=url)
     data = json.loads(result)
-    assert "error" not in data, f"unexpected error: {data}"
-
-
-@pytest.mark.asyncio
-async def test_execute_strips_double_quotes_and_succeeds():
-    tool = WebFetchTool()
-    with _patched_web_fetch():
-        result = await tool.execute(url='"https://example.com/page"')
-    data = json.loads(result)
-    assert "error" not in data, f"unexpected error: {data}"
-
-
-@pytest.mark.asyncio
-async def test_execute_strips_single_quotes_and_succeeds():
-    tool = WebFetchTool()
-    with _patched_web_fetch():
-        result = await tool.execute(url="'https://example.com/page'")
-    data = json.loads(result)
-    assert "error" not in data, f"unexpected error: {data}"
-
-
-@pytest.mark.asyncio
-async def test_execute_strips_space_and_backticks():
-    tool = WebFetchTool()
-    with _patched_web_fetch():
-        result = await tool.execute(url="  `https://example.com/page`  ")
-    data = json.loads(result)
-    assert "error" not in data, f"unexpected error: {data}"
-
-
-@pytest.mark.asyncio
-async def test_execute_strips_mixed_markdown_and_quotes():
-    tool = WebFetchTool()
-    with _patched_web_fetch():
-        result = await tool.execute(url='"`https://example.com/page`"')
-    data = json.loads(result)
-    assert "error" not in data, f"unexpected error: {data}"
-
-
-@pytest.mark.asyncio
-async def test_execute_keeps_case_insensitive_http_scheme():
-    tool = WebFetchTool()
-    with _patched_web_fetch():
-        result = await tool.execute(url="HTTPS://example.com/page")
-    data = json.loads(result)
-    assert "error" not in data, f"unexpected error: {data}"
+    assert data["status"] == 200
 
 
 # --- startswith guard tests ---

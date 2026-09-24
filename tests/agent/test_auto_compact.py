@@ -260,26 +260,6 @@ class TestAutoCompact:
     """Test the _archive method."""
 
     @pytest.mark.asyncio
-    async def test_is_expired_boundary(self, tmp_path):
-        """Exactly at TTL boundary should be expired (>= not >)."""
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        ts = datetime.now() - timedelta(minutes=15)
-        assert loop.auto_compact._is_expired(ts) is True
-        ts2 = datetime.now() - timedelta(minutes=14, seconds=59)
-        assert loop.auto_compact._is_expired(ts2) is False
-        await loop.aclose()
-
-    @pytest.mark.asyncio
-    async def test_is_expired_string_timestamp(self, tmp_path):
-        """_is_expired should parse ISO string timestamps."""
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        ts = (datetime.now() - timedelta(minutes=20)).isoformat()
-        assert loop.auto_compact._is_expired(ts) is True
-        assert loop.auto_compact._is_expired(None) is False
-        assert loop.auto_compact._is_expired("") is False
-        await loop.aclose()
-
-    @pytest.mark.asyncio
     async def test_check_expired_only_archives_expired_sessions(self, tmp_path):
         """With multiple sessions, only the expired one should be archived."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)

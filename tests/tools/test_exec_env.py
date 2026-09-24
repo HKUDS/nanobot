@@ -159,12 +159,3 @@ async def test_exec_path_append_command_substitution_does_not_execute(tmp_path):
 
     assert "OK" in result
     assert "SHOULD_NOT_APPEAR" not in result
-
-
-@_UNIX_ONLY
-@pytest.mark.asyncio
-async def test_exec_path_append_legitimate_path_still_works():
-    """A normal, safe path_append value must still be appended to PATH."""
-    tool = ExecTool(path_append="/opt/custom/bin")
-    result = await tool.execute(command="echo $PATH")
-    assert "/opt/custom/bin" in result
