@@ -136,6 +136,37 @@ them with **View diff**. Large diffs may hide unchanged lines or truncate the
 inline preview. Select the filename in the activity row to open the read-only
 file preview panel.
 
+Files open as tabs in one preview pane. Select another file to add or switch a
+tab without reopening the pane; close a tab with its **×**, or close the pane
+with **Escape**. Tabs and width follow each session while the WebUI remains open.
+They are kept only in memory and cleared when that session is deleted or the
+connection ends. The pane overlays the conversation on narrow screens.
+
+Text previews include up to 384 KiB, with a notice when the file is truncated.
+Large previews show readable text before adding syntax colors; very large or
+minified source stays plain text. All previewed text remains available for
+selection and browser search, and the code pane scrolls in both directions.
+
+PNG, JPEG, GIF and WebP files up to 8 MiB can be previewed as images.
+Hover or focus an image file reference for a compact quick look, or select it
+to open the pane. Select the preview image for the full-size viewer, which
+supports zoom controls, pinch-to-zoom and panning. HTML and SVG files remain
+read-only source previews rather than executable pages.
+
+A plain image file link does not automatically insert a large image into the
+reply. Explicit Markdown images appear inline; image attachments use a compact
+gallery, showing at most four thumbnails before a count of the remaining images.
+An image already displayed inline is not duplicated in the attachment gallery.
+
+Select a file reference to preview it. Right-click the reference or its preview
+tab to copy its absolute or project-relative path. Keyboard users can focus a
+reference and press **Shift+F10**.
+Paths are resolved on the gateway machine, which may not be the computer running
+your browser. Files outside the project do not have a project-relative path.
+If a reference cannot be resolved, you can still copy the original reference;
+the menu does not invent an absolute path. Finder, external editor and terminal
+launching are not available from this browser menu.
+
 File previews follow the active topic's access mode. Restricted workspace access
 previews only files under the selected workspace. Full Access can preview files
 outside the workspace when that access mode is allowed by the gateway.
@@ -148,8 +179,10 @@ rate when reported. Provider usage may be estimated or unavailable; these
 figures are not a billing statement.
 
 When nanobot compacts context, the timeline shows its progress and outcome.
-The compacted summary keeps earlier work available while recent messages remain
-in context. See [Memory](./memory.md) for compaction and Dream consolidation.
+The model continues with a summary and any messages after it; messages covered
+by the summary remain in your chat history but are no longer sent to the model
+verbatim. Use `/compact` to compact the current topic's context manually.
+See [Memory](./memory.md) for compaction and Dream consolidation.
 
 ## Temporary Chats
 
@@ -165,9 +198,16 @@ You can keep more than one temporary chat open and switch between them under
 open. Reloading or closing the page, restarting the gateway, or losing the
 WebSocket connection ends all of them. They cannot be recovered afterward.
 
+Temporary chats do not create saved files for oversized text tool results; these
+stay in memory and are truncated to the configured tool-result limit. Tool-call
+arguments and execution-error details are hidden from the built-in tool logs,
+while tool activity remains visible in the current chat.
+
 Temporary does not mean consequence-free. Requests still go to the configured
 model provider, and tools can still change files, run commands, or affect
-external services. Temporary chats always use the default workspace in
+external services. Files and image artifacts created or exported by tools
+(including images returned by MCP tools) are not erased when the chat closes.
+Temporary chats always use the default workspace in
 Restricted mode; the project picker and Full Access are unavailable. Commands
 and tools that create durable goals, automations, or subagent work are also
 unavailable. Use a regular topic when you need reusable context, scheduled work,
@@ -419,6 +459,55 @@ Leave remote package installs disabled when the WebUI is exposed beyond a
 private, trusted network.
 
 ## Troubleshooting
+
+### Links and website previews
+
+HTTP(S) links in replies have a **Link actions** menu: right-click the link or
+press Shift+F10 while it is focused. Touch and hold keeps the browser's native
+link menu. For in-app actions on touch devices, open the message's existing
+**Message actions → View links** entry. It lists only the web links rendered in
+that message, not URLs inside code blocks or file references. Choose a link to
+copy it, open it externally, or preview it beside the current conversation.
+On phone-sized screens, Copy and Message actions sit below the message, leaving
+the full text width available. Message actions opens a bottom sheet; close it
+with its close button, by tapping outside, or with Escape. Desktop keeps the
+hover-triggered message popover.
+On desktop, hovering or focusing a message also reveals a short timestamp below
+its actions: a 24-hour clock for today, or month/day for every other date. Hover
+or focus that label for the full local date and time, including the year. Replies
+use their completion timestamp when available, otherwise their creation timestamp.
+There is no persistent action button beside each link and no custom long-press
+gesture to interfere with scrolling or text selection.
+Ordinary clicks still open links in a browser tab. File and session links keep
+their own behavior.
+
+The sidebar shares space with file previews and has refresh, external-open and
+close controls. Escape closes it when focus is in the nanobot page, unless a
+menu or dialog handles Escape first. Once focus is inside a third-party page,
+use the sidebar's close button. The opened address and width are remembered
+per session for this app connection, not written to browser storage. Returning
+to a session reloads the original address; it does not preserve the website's
+DOM, navigation history or forms. The header shows the **original link**, not a
+live address bar for navigation inside the embedded page.
+
+This is a restricted preview, not a full browser. It requires browser support
+for credentialless iframes and is disabled in the native host until a separate
+untrusted-content boundary is available. Unsupported browsers can still copy
+links and open new tabs. Previews use an opaque-origin sandbox with scripts
+but without same-origin access, forms, popups, downloads or top navigation.
+No gateway token, host bridge or parent storage is passed into the frame.
+
+Sites may refuse embedding via CSP or X-Frame-Options, and sign-in or some
+interactive features may not work. Use **Open in browser** if the frame is blank
+or reports a failure. The browser does not reliably expose an embedding failure
+to nanobot, so a frame load event is not presented as a success signal. Nanobot
+does not proxy pages or bypass their headers. Same-origin nanobot URLs and
+HTTP pages embedded from an HTTPS WebUI are not previewed.
+
+`localhost` and loopback addresses refer to the device running your browser,
+not a remote nanobot gateway. This feature does not forward remote ports.
+
+### Connection checks
 
 If the page does not open, check these in order:
 

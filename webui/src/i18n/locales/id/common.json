@@ -1,4 +1,43 @@
 {
+  "previewTabs": {
+    "title": "Pratinjau",
+    "closeTab": "Tutup {{name}}",
+    "closeAll": "Tutup panel pratinjau",
+    "websiteInfo": "Tentang pratinjau situs"
+  },
+  "webPreview": {
+    "viewLinks": "Lihat tautan",
+    "back": "Kembali",
+    "original": "Tautan asli",
+    "actions": "Tindakan tautan",
+    "open": "Pratinjau situs",
+    "external": "Buka di browser",
+    "copy": "Salin tautan",
+    "copied": "Tautan disalin",
+    "copyFailed": "Tidak dapat menyalin tautan",
+    "title": "Pratinjau situs",
+    "resize": "Ubah lebar pratinjau",
+    "refresh": "Muat ulang situs",
+    "close": "Tutup pratinjau situs",
+    "isolated": "Pratinjau terisolasi dan terbatas. Login dan beberapa interaksi mungkin tidak berfungsi.",
+    "blockedHint": "Beberapa situs memblokir penyematan. Jika kosong atau gagal, buka di browser.",
+    "loopback": "Localhost merujuk ke perangkat browser ini, bukan gateway jarak jauh. Port tidak diteruskan.",
+    "native": "Aplikasi native tidak mendukung pratinjau tertanam. Buka tautan ini di browser.",
+    "unsupported": "Browser ini tidak mendukung pratinjau dengan kredensial terisolasi. Buka di tab baru.",
+    "sameOrigin": "Aplikasi nanobot sendiri tidak dapat disematkan di sini. Buka di tab baru.",
+    "mixedContent": "Halaman HTTPS tidak dapat menampilkan situs HTTP di sini. Buka di tab baru.",
+    "invalid": "Alamat ini tidak dapat dipratinjau.",
+    "frame": "Pratinjau situs: {{host}}"
+  },
+  "starPrompt": {
+    "footerAction": "Beri bintang untuk nanobot",
+    "title": "Terima kasih telah menggunakan nanobot",
+    "description": "Beri bintang di GitHub untuk membantu kami terus menyempurnakan nanobot.",
+    "action": "Beri bintang",
+    "later": "Tidak sekarang",
+    "never": "Jangan tanyakan lagi",
+    "saveError": "Mungkin ada masalah jaringan. Pengingat ini mungkin muncul lagi."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
@@ -249,6 +288,7 @@
       "currentModel": "Konfigurasi saat ini",
       "brandLogos": "Logo merek",
       "browserNotifications": "Notifikasi tugas",
+      "notificationSound": "Suara penyelesaian",
       "cliAppsCatalog": "Katalog",
       "cliAppsFilter": "Saring",
       "engine": "Mesin",
@@ -292,6 +332,7 @@
       "selectedModelValue": "Ditentukan oleh model yang dipilih.",
       "brandLogos": "Tampilkan logo penyedia pihak ketiga dan CLI di Pengaturan.",
       "browserNotifications": "Beri tahu hanya saat halaman ini di latar belakang. Nonaktif secara bawaan.",
+      "notificationSound": "Putar dentang singkat saat giliran selesai, meskipun halaman ini berada di latar belakang. Nonaktif secara default.",
       "cliAppsCatalog": "Memasang alat baris perintah yang dapat digunakan nanobot di komputer ini. Aplikasi desktop tidak diubah.",
       "cliAppsFilter": "Cari berdasarkan aplikasi, kategori, atau kemampuan.",
       "logs": "Membuka folder log aplikasi desktop.",
@@ -472,6 +513,8 @@
       "searchPlaceholder": "Cari penyedia",
       "noMatches": "Tidak ada penyedia yang cocok.",
       "addOwnProvider": "Tambahkan penyedia model Anda sendiri",
+      "addProvider": "Tambahkan penyedia",
+      "backToProviders": "Kembali ke penyedia",
       "customProvider": "Penyedia khusus",
       "customProviderName": "Nama penyedia",
       "customProviderNamePlaceholder": "Penyedia model saya",
@@ -513,6 +556,10 @@
       "installing": "Memasang paket yang diperlukan…"
     },
     "models": {
+      "catalogAuthRequired": "Otorisasi kedaluwarsa. Silakan masuk lagi.",
+      "catalogUnavailable": "Model tidak dapat diperbarui. Coba lagi nanti.",
+      "catalogStale": "Menampilkan model dari cache; daftar mungkin belum terbaru.",
+      "catalogFallback": "Menampilkan model bawaan; daftar mungkin belum terbaru.",
       "selectModel": "Pilih model",
       "addConfiguration": "Tambah konfigurasi",
       "newConfiguration": "Konfigurasi model baru",
@@ -534,6 +581,8 @@
       "presetNamePlaceholder": "mis. Menulis cepat",
       "advancedOptions": "Opsi lanjutan",
       "advancedSummary": "Konteks {{context}} · Maks. {{max}} token",
+      "contextWindowHint": "{{tokens}} token",
+      "contextWindowError": "Masukkan jumlah token positif, seperti 200k, 1m, atau 131072.",
       "maxTokens": "Maks. token keluaran",
       "temperature": "Temperatur",
       "reasoningEffort": "Upaya penalaran",
@@ -1054,6 +1103,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "Kode perangkat",
+      "deviceCodeHelp": "Salin kode ini dan masukkan di GitHub. Jendela ini akan diperbarui secara otomatis setelah otorisasi.",
+      "waitingForDeviceApproval": "Menunggu otorisasi GitHub…",
+      "openGitHub": "Buka GitHub",
       "authentication": "Autentikasi OAuth",
       "signIn": "Masuk",
       "signingIn": "Masuk...",
@@ -1377,6 +1430,11 @@
       "chooseAI": "Pilih AI Anda",
       "switchModel": "Ganti model untuk percakapan ini",
       "manageModels": "Kelola model",
+      "fallbackNotice": "Respons ini menggunakan model cadangan: {{model}}.",
+      "checkModelSettings": "Periksa pengaturan model",
+      "reauthNotice": "Otorisasi {{provider}} kedaluwarsa. Silakan masuk kembali.",
+      "reauthFallback": "Model cadangan menangani respons ini.",
+      "reauthSettings": "Buka pengaturan model",
       "context": {
         "tooltip": "Konteks {{percent}}%",
         "detailsLabel": "Buka penggunaan konteks",
@@ -1390,8 +1448,8 @@
         "duration": "Waktu pembuatan"
       },
       "queued": {
-        "label": "Panduan antrean",
-        "guide": "Pandu",
+        "label": "Menunggu dikirim",
+        "guide": "Kirim sekarang",
         "delete": "Hapus panduan",
         "edit": "Ubah panduan",
         "drag": "Seret untuk mengurutkan"
@@ -1568,6 +1626,7 @@
     }
   },
   "message": {
+    "actions": "Tindakan pesan",
     "streaming": "sedang mengalir",
     "delivery": {
       "sending": "Mengirim…",
@@ -1598,6 +1657,7 @@
     "skill": "Keterampilan: {{name}}",
     "askAboutSelection": "Tanyakan tentang ini",
     "forkFromHere": "Buat cabang",
+    "fallbackResponse": "Balasan ini beralih ke model cadangan dan dijawab oleh {{preset}}.",
     "copyReply": "Salin",
     "copiedReply": "Disalin",
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
@@ -1620,6 +1680,10 @@
     "activityWorkingFor": "Memproses selama {{duration}}",
     "activityWorked": "Selesai memproses",
     "activityWorkedFor": "Diproses selama {{duration}}",
+    "collapseActivity": "Ciutkan detail aktivitas",
+    "activityShow": "Lihat aktivitas",
+    "activityShowFor": "Lihat aktivitas {{duration}}",
+    "activityHide": "Sembunyikan aktivitas",
     "traceDetailsLoadFailed": "Detail aktivitas lengkap tidak dapat dimuat.",
     "retryTraceDetails": "Coba lagi",
     "retryConnection": "Koneksi gagal",
@@ -1654,11 +1718,29 @@
     "continue": "Lanjutkan"
   },
   "lightbox": {
+    "viewAll": "Lihat semua {{count}} gambar",
+    "zoomIn": "Perbesar",
+    "zoomOut": "Perkecil",
+    "resetZoom": "Sesuaikan gambar",
+    "gestures": "Cubit atau klik dua kali untuk memperbesar. Seret untuk menggeser. Gunakan +, − atau 0 untuk memperbesar atau mereset.",
     "title": "Pratinjau gambar",
     "open": "Lihat gambar",
     "prev": "Gambar sebelumnya",
     "next": "Gambar berikutnya",
     "close": "Tutup pratinjau"
+  },
+  "fileActions": {
+    "menu": "Tindakan file untuk {{name}}",
+    "title": "Tindakan file",
+    "preview": "Pratinjau",
+    "copyAbsolute": "Salin jalur absolut",
+    "copyRelative": "Salin jalur relatif",
+    "copyReference": "Salin referensi",
+    "copied": "Disalin",
+    "failed": "Tidak dapat menyalin. Coba lagi.",
+    "unavailable": "File tidak dapat ditemukan. Anda dapat menyalin referensi aslinya.",
+    "loading": "Memeriksa file…",
+    "gatewayPath": "Jalur merujuk ke komputer gateway."
   },
   "filePreview": {
     "aria": "Pratinjau file",

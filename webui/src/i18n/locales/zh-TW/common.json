@@ -1,4 +1,43 @@
 {
+  "previewTabs": {
+    "title": "預覽",
+    "closeTab": "關閉 {{name}}",
+    "closeAll": "關閉預覽欄",
+    "websiteInfo": "關於網頁預覽"
+  },
+  "webPreview": {
+    "viewLinks": "查看連結",
+    "back": "返回",
+    "original": "原始連結",
+    "actions": "連結操作",
+    "open": "預覽網頁",
+    "external": "在瀏覽器中開啟",
+    "copy": "複製連結",
+    "copied": "已複製連結",
+    "copyFailed": "無法複製連結",
+    "title": "網頁預覽",
+    "resize": "調整網頁預覽寬度",
+    "refresh": "重新整理網頁",
+    "close": "關閉網頁預覽",
+    "isolated": "受限的隔離預覽，登入及部分互動功能可能無法使用。",
+    "blockedHint": "部分網站禁止嵌入。若頁面空白或載入失敗，請在瀏覽器中開啟。",
+    "loopback": "localhost 指向目前瀏覽器所在裝置，而非遠端閘道。不會自動轉送連接埠。",
+    "native": "原生用戶端暫不支援嵌入預覽，請在瀏覽器中開啟此連結。",
+    "unsupported": "此瀏覽器不支援憑證隔離預覽，請在新分頁中開啟。",
+    "sameOrigin": "無法在此嵌入 nanobot 應用程式本身，請在新分頁中開啟。",
+    "mixedContent": "HTTPS 頁面無法在此預覽 HTTP 網站，請在新分頁中開啟。",
+    "invalid": "無法預覽此位址。",
+    "frame": "網頁預覽：{{host}}"
+  },
+  "starPrompt": {
+    "footerAction": "給 nanobot 一顆 Star",
+    "title": "感謝使用 nanobot",
+    "description": "歡迎到 GitHub 給顆 Star，支持我們持續改進。",
+    "action": "給個 Star",
+    "later": "暫時不用",
+    "never": "不再提醒",
+    "saveError": "網路可能出了點問題，之後可能還會跳出此提醒。"
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
@@ -249,6 +288,7 @@
       "currentModel": "目前設定",
       "brandLogos": "品牌圖示",
       "browserNotifications": "任務通知",
+      "notificationSound": "完成提示音",
       "cliAppsCatalog": "應用程式清單",
       "cliAppsFilter": "篩選",
       "engine": "引擎",
@@ -292,6 +332,7 @@
       "selectedModelValue": "由選取的模型決定。",
       "brandLogos": "在設定中顯示第三方供應商與 CLI 圖示。",
       "browserNotifications": "僅在頁面位於背景時通知，預設關閉。",
+      "notificationSound": "回合結束時播放短促提示音，頁面在背景時也會播放。預設關閉。",
       "cliAppsCatalog": "安裝供 nanobot 使用的命令列工具，不會安裝或修改對應的桌面應用程式。",
       "cliAppsFilter": "依應用程式、類別或功能搜尋。",
       "logs": "開啟原生引擎日誌資料夾。",
@@ -472,6 +513,8 @@
       "searchPlaceholder": "搜尋供應商",
       "noMatches": "沒有符合的供應商。",
       "addOwnProvider": "新增自己的模型供應商",
+      "addProvider": "新增供應商",
+      "backToProviders": "返回供應商列表",
       "customProvider": "自訂供應商",
       "customProviderName": "供應商名稱",
       "customProviderNamePlaceholder": "例如：公司模型閘道",
@@ -513,6 +556,10 @@
       "installing": "正在安裝所需套件…"
     },
     "models": {
+      "catalogAuthRequired": "授權已失效，請重新登入。",
+      "catalogUnavailable": "暫時無法更新模型，請稍後重試。",
+      "catalogStale": "目前顯示快取的模型清單，可能不是最新。",
+      "catalogFallback": "目前顯示內建模型清單，可能不是最新。",
       "selectModel": "選擇模型",
       "addConfiguration": "新增設定",
       "newConfiguration": "新增模型設定",
@@ -534,6 +581,8 @@
       "presetNamePlaceholder": "例如：快速寫作",
       "advancedOptions": "進階選項",
       "advancedSummary": "上下文 {{context}} · 輸出上限 {{max}} Token",
+      "contextWindowHint": "{{tokens}} Token",
+      "contextWindowError": "請輸入正數 Token 數量，例如 200k、1m 或 131072。",
       "maxTokens": "輸出 Token 上限",
       "temperature": "溫度",
       "reasoningEffort": "推理強度",
@@ -1054,6 +1103,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "裝置碼",
+      "deviceCodeHelp": "複製此裝置碼，前往 GitHub 輸入並授權。完成後此視窗會自動更新。",
+      "waitingForDeviceApproval": "等待 GitHub 授權…",
+      "openGitHub": "前往 GitHub",
       "authentication": "OAuth 認證",
       "signIn": "登入",
       "signingIn": "登入中…",
@@ -1377,6 +1430,11 @@
       "chooseAI": "選擇你的 AI",
       "switchModel": "切換此對話使用的模型",
       "manageModels": "管理模型預設",
+      "fallbackNotice": "本次已使用備用模型：{{model}}。",
+      "checkModelSettings": "檢查模型設定",
+      "reauthNotice": "{{provider}} 授權已失效，請重新登入。",
+      "reauthFallback": "本次已由備用模型繼續回覆。",
+      "reauthSettings": "開啟模型設定",
       "context": {
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "開啟上下文用量",
@@ -1390,8 +1448,8 @@
         "duration": "生成耗時"
       },
       "queued": {
-        "label": "佇列中的引導訊息",
-        "guide": "引導",
+        "label": "等待傳送",
+        "guide": "立即傳送",
         "delete": "刪除引導",
         "edit": "編輯引導",
         "drag": "拖曳排序"
@@ -1568,6 +1626,7 @@
     }
   },
   "message": {
+    "actions": "訊息操作",
     "streaming": "串流輸出中",
     "delivery": {
       "sending": "傳送中…",
@@ -1597,6 +1656,7 @@
     "openAttachment": "開啟 {{name}}",
     "skill": "技能：{{name}}",
     "forkFromHere": "建立分支",
+    "fallbackResponse": "本則回覆已切換至備用模型，由 {{preset}} 回答。",
     "copyReply": "複製",
     "copiedReply": "已複製",
     "turnLatencyTitle": "本輪耗時（端到端）",
@@ -1619,6 +1679,10 @@
     "activityWorkingFor": "處理中，已 {{duration}}",
     "activityWorked": "已處理",
     "activityWorkedFor": "已處理 {{duration}}",
+    "collapseActivity": "收合處理過程",
+    "activityShow": "查看過程",
+    "activityShowFor": "查看過程 {{duration}}",
+    "activityHide": "收合過程",
     "traceDetailsLoadFailed": "無法載入完整活動詳情。",
     "retryTraceDetails": "重試",
     "retryConnection": "連線失敗",
@@ -1654,11 +1718,29 @@
     "continue": "繼續"
   },
   "lightbox": {
+    "viewAll": "查看全部 {{count}} 張圖片",
+    "zoomIn": "放大",
+    "zoomOut": "縮小",
+    "resetZoom": "符合視窗",
+    "gestures": "雙指捏合或按兩下縮放，放大後拖曳查看。也可按 +、− 或 0 縮放或重設。",
     "title": "圖片預覽",
     "open": "檢視圖片",
     "prev": "上一張",
     "next": "下一張",
     "close": "關閉預覽"
+  },
+  "fileActions": {
+    "menu": "{{name}} 的檔案操作",
+    "title": "檔案操作",
+    "preview": "預覽",
+    "copyAbsolute": "複製絕對路徑",
+    "copyRelative": "複製相對路徑",
+    "copyReference": "複製原始參照",
+    "copied": "已複製",
+    "failed": "複製失敗，請重試。",
+    "unavailable": "無法解析此檔案，可複製原始參照。",
+    "loading": "正在解析檔案…",
+    "gatewayPath": "路徑指向閘道所在的電腦。"
   },
   "filePreview": {
     "aria": "檔案預覽",

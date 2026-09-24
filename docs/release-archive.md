@@ -6,6 +6,18 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
+- **2026-09-19** 🔌 Native Linear agent channel support, searchable provider setup, and consistent provider and channel identities across the WebUI.
+- **2026-09-18** ♻️ Explicit recovery continuations, Discord reply-context support, and clearer channel setup before model configuration is complete.
+- **2026-09-17** 📬 Per-session inbox serialization preserves message order and queued-turn completion; stale compaction continuations and canceled automations no longer leak into later work.
+- **2026-09-16** 📦 Platform wheels bundle the version-matched native terminal UI, terminal input stays responsive during output, and release checks verify TUI compliance materials before tagging.
+- **2026-09-15** 🚀 Released [v0.3.5](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5), bringing a shared terminal workbench, multi-pane WebUI, visible context continuity, and stronger session, provider, and channel reliability.
+- **2026-09-14** ⏰ Automation edits preserve pending runs, remote projects use host paths, and chat controls adapt to narrower layouts.
+- **2026-09-13** 📱 Automation calendar and per-run reply workflows, simpler mobile composer and settings interactions, and consistent app identities in mentions.
+- **2026-09-12** ⚡ Large history replay is bounded, cached, and deferred; Responses history drops provider-owned item identifiers before reuse.
+- **2026-09-11** 🧭 Guided chat-channel setup, simpler automation management, and in-place context-compaction notices across Telegram and Discord.
+- **2026-09-10** ⚙️ Expanded autosaving settings, automatic MCP OAuth token refresh, and a macOS Seatbelt sandbox backend with tighter boundaries.
+- **2026-09-09** 📊 Terminal `/usage` context and token charts, bounded WebUI history rendering, and fresher skill suggestions.
+- **2026-09-08** 💬 Rich Telegram streaming, AnySearch web search, attach-only Desktop terminal targets, and recursive glob filters for file searches.
 - **2026-09-07** 🔌 WeCom media uploads use the SDK API; CI runs tests in parallel and skips unrelated jobs.
 - **2026-09-06** 📊 Context-window usage in the terminal footer and consistent runtime notifications across clients.
 - **2026-09-05** 🧠 Visible context-compaction progress in the WebUI, terminal, and chat channels.

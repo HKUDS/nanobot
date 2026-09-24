@@ -1106,6 +1106,9 @@ class WebSocketChannel(BaseChannel):
     ) -> bool:
         """Persist one canonical turn event and retain unsafe owners on failure."""
         if not self._temporary_chats.should_persist_transcript(chat_id):
+            self._transcripts.prepare_event(
+                chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
+            )
             return True
         persisted = self._transcripts.prepare_and_append(
             chat_id,
@@ -1150,6 +1153,9 @@ class WebSocketChannel(BaseChannel):
     ) -> bool:
         """Persist the canonical end of a live stream, never its wire chunks."""
         if not self._temporary_chats.should_persist_transcript(chat_id):
+            self._transcripts.prepare_event(
+                chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
+            )
             return True
         persisted = self._transcripts.prepare_and_append_stream_event(
             chat_id,
@@ -1525,6 +1531,7 @@ class WebSocketChannel(BaseChannel):
         model_preset: Any = None,
         context_window_tokens: Any = None,
         fallback: bool = False,
+        reauth_provider: str | None = None,
     ) -> None:
         """Notify one chat's subscribers which model is handling its current request."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1545,6 +1552,8 @@ class WebSocketChannel(BaseChannel):
             body["context_window_tokens"] = context_window_tokens
         if fallback:
             body["fallback"] = True
+            if reauth_provider:
+                body["reauth_provider"] = reauth_provider
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_model_updated ")

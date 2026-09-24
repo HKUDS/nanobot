@@ -147,6 +147,27 @@ class LinearStateStore:
             ).fetchone()
         return _installation_from_row(row) if row is not None else None
 
+    def list_installations(
+        self,
+        oauth_client_id: str | None = None,
+    ) -> list[LinearInstallation]:
+        """Return installations, optionally restricted to one OAuth client."""
+        with self._guard, self._connect() as connection:
+            if oauth_client_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM installations ORDER BY organization_name, organization_id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM installations
+                    WHERE oauth_client_id = ?
+                    ORDER BY organization_name, organization_id
+                    """,
+                    (oauth_client_id,),
+                ).fetchall()
+        return [_installation_from_row(row) for row in rows]
+
     def delete_installation(self, organization_id: str) -> None:
         with self._guard, self._connect() as connection:
             connection.execute(

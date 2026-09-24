@@ -11,6 +11,7 @@ import {
   MockTreeSitterClient,
   TestRecorder,
   createTestRenderer,
+  setRendererCapabilities,
   type TestRendererSetup,
 } from "@opentui/core/testing"
 
@@ -2062,6 +2063,42 @@ describe("NanobotTui layout", () => {
       expect((app as unknown as {
         transcript: { root: HiddenScrollBox }
       }).transcript.root.horizontalScrollBar.visible).toBeFalse()
+    }
+  })
+
+  test("keeps finalized streamed Markdown link labels clickable", async () => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
+    setRendererCapabilities(setup.renderer, { hyperlinks: true })
+    const label = "HKUDS/nanobot#1234"
+    const url = "https://github.com/HKUDS/nanobot/pull/1234"
+    const content = `PR updated: [${label}](${url})`
+    const labelStart = content.indexOf(label)
+    const urlStart = content.indexOf(url)
+    const treeSitterClient = new MockTreeSitterClient({ autoResolveTimeout: 0 })
+    treeSitterClient.setMockResult({
+      highlights: [
+        [labelStart - 1, labelStart, "markup.link"],
+        [labelStart, labelStart + label.length, "markup.link.label"],
+        [labelStart + label.length, urlStart, "markup.link"],
+        [urlStart, urlStart + url.length, "markup.link.url"],
+        [urlStart + url.length, content.length, "markup.link"],
+      ],
+    })
+    const app = NanobotTui.mount(setup.renderer, options, client(), treeSitterClient)
+
+    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "delta", chat_id: "chat", text: content })
+    app.accept({ event: "stream_end", chat_id: "chat" })
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    await setup.flush()
+
+    const lines = setup.captureCharFrame().split("\n")
+    const y = lines.findIndex((line) => line.includes(label))
+    const x = y >= 0 ? lines[y]!.indexOf(label) : -1
+    expect([x, y]).not.toContain(-1)
+
+    for (let offset = 0; offset < label.length; offset += 1) {
+      expect(setup.renderer.getLinkAt(x + offset, y)).toBe(url)
     }
   })
 

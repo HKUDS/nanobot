@@ -611,7 +611,7 @@ class ExecTool(Tool):
 
         quote = stripped[0]
         end = stripped.find(quote, 1)
-        if end == -1 or end + 1 >= len(stripped) or not stripped[end + 1].isspace():
+        if end == -1 or (end + 1 < len(stripped) and not stripped[end + 1].isspace()):
             return command
 
         executable = stripped[1:end]

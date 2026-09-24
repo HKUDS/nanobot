@@ -536,7 +536,7 @@ class MatrixChannel(BaseChannel):
         try:
             response = await self.client.content_repository_config()
         except Exception:
-            self.logger.error("Failed to fetch server upload limit", exc_info=True)
+            self.logger.opt(exception=True).error("Failed to fetch server upload limit")
             return None
         upload_size = getattr(response, "upload_size", None)
         if isinstance(upload_size, int) and upload_size > 0:
@@ -582,7 +582,7 @@ class MatrixChannel(BaseChannel):
                     filesize=size_bytes,
                 )
         except Exception:
-            self.logger.error("Matrix media upload failed for {}", filename, exc_info=True)
+            self.logger.opt(exception=True).error("Matrix media upload failed for {}", filename)
             return fail
 
         is_tuple_result = isinstance(cast(object, upload_result), tuple)
@@ -607,7 +607,9 @@ class MatrixChannel(BaseChannel):
         try:
             await self._send_room_content(room_id, content)
         except Exception:
-            self.logger.error("Matrix room content send failed for room_id={}", room_id, exc_info=True)
+            self.logger.opt(exception=True).error(
+                "Matrix room content send failed for room_id={}", room_id
+            )
             return fail
         return None
 
@@ -712,7 +714,9 @@ class MatrixChannel(BaseChannel):
                 buf.text = previous_text
                 if created_buf:
                     self._stream_bufs.pop(stream_key, None)
-                self.logger.error("Stream send/edit failed for chat_id={}", chat_id, exc_info=True)
+                self.logger.opt(exception=True).error(
+                    "Stream send/edit failed for chat_id={}", chat_id
+                )
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
                 raise
 
@@ -1011,7 +1015,9 @@ class MatrixChannel(BaseChannel):
                 ),
             )
         except Exception:
-            self.logger.error("Matrix join request exception for room={}", room_id, exc_info=True)
+            self.logger.opt(exception=True).error(
+                "Matrix join request exception for room={}", room_id
+            )
             return False
         if isinstance(resp, JoinError):
             self.logger.error("Matrix auto-join failed for room={}: {}", room_id, resp)
@@ -1287,7 +1293,7 @@ class MatrixChannel(BaseChannel):
         except _MediaTooLargeError:
             raise
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
-            self.logger.warning("download failed for {}", mxc_url, exc_info=True)
+            self.logger.opt(exception=True).warning("download failed for {}", mxc_url)
             return None
 
     def _decrypt_media_bytes(self, event: MatrixMediaEvent, ciphertext: bytes) -> bytes | None:

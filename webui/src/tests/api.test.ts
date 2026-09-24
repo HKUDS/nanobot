@@ -81,7 +81,11 @@ describe("webui API helpers", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ deleted: true, key: "websocket:chat-1", messages: [] }),
+        json: async () => ({
+          schemaVersion: 3,
+          projection: "events",
+          events: [],
+        }),
       }),
     );
   });
@@ -123,7 +127,8 @@ describe("webui API helpers", () => {
     const cached = {
       schemaVersion: 3,
       revision: "rev-1",
-      messages: [],
+      projection: "events" as const,
+      events: [],
     };
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: false,
@@ -147,11 +152,136 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("rejects malformed canonical thread events at the HTTP boundary", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{ event: "file_edit", chat_id: "chat-1", edits: [{ tool: "edit_file" }] }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread projection event: file_edit",
+    );
+  });
+
+  it.each([
+    null,
+    "backup",
+    [null],
+    [{ provider: "xai", model: "grok" }],
+    [{ provider: "xai", model: "grok", preset: "backup", fallback: "true" }],
+  ])("rejects malformed response sources: %j", async (response_sources) => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{ event: "message", chat_id: "chat-1", text: "Reply", response_sources }],
+      }),
+    } as Response);
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread event metadata",
+    );
+  });
+
+  it.each([
+    undefined,
+    [],
+    [{ provider: "xai", model: "grok", preset: "snapshot", fallback: true }],
+    [{ provider: "xai", model: "grok", preset: "legacy snapshot" }],
+  ])("accepts optional recorded response sources: %j", async (response_sources) => {
+    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", response_sources };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ schemaVersion: 3, projection: "events", events: [event] }),
+    } as Response);
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({ events: [event] });
+  });
+
+  it("rejects legacy message-projected thread payloads", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ schemaVersion: 3, messages: [] }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread events",
+    );
+  });
+
+  it("accepts validated deferred trace metadata on canonical thread events", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{
+          event: "message",
+          chat_id: "chat-1",
+          text: "exec(…)",
+          kind: "progress",
+          trace_detail: {
+            ref: "2.history-aaaaaaaaaaaaaaaaaaaa",
+            bytes: 40_000,
+            traceCount: 1,
+          },
+        }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({
+      events: [{ trace_detail: { bytes: 40_000, traceCount: 1 } }],
+    });
+  });
+
+  it("rejects malformed deferred trace metadata at the HTTP boundary", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        schemaVersion: 3,
+        projection: "events",
+        events: [{
+          event: "message",
+          chat_id: "chat-1",
+          text: "exec(…)",
+          kind: "progress",
+          trace_detail: { ref: "bad", bytes: "many", traceCount: 1 },
+        }],
+      }),
+    } as Response);
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread projection event: message",
+    );
+  });
+
   it("fetches deferred trace details with encoded session and ref", async () => {
-    await fetchWebuiThreadTraceDetail("tok", "websocket:chat-1", "9.tr-deadbeefdeadbeef");
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        message_id: "history-aaaaaaaaaaaaaaaaaaaa",
+        events: [],
+      }),
+    } as Response);
+
+    await fetchWebuiThreadTraceDetail(
+      "tok",
+      "websocket:chat-1",
+      "9.history-aaaaaaaaaaaaaaaaaaaa",
+    );
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread/trace-detail?ref=9.tr-deadbeefdeadbeef",
+      "/api/sessions/websocket%3Achat-1/webui-thread/trace-detail?ref=9.history-aaaaaaaaaaaaaaaaaaaa",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",

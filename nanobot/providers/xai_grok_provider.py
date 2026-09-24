@@ -22,7 +22,11 @@ from nanobot.providers.base import (
     ToolCallRequest,
     resolve_stream_idle_timeout_s,
 )
-from nanobot.providers.oauth_model_catalog import OAuthModelCatalog, OAuthModelCatalogSnapshot
+from nanobot.providers.oauth_model_catalog import (
+    OAuthCatalogAuthRequiredError,
+    OAuthModelCatalog,
+    OAuthModelCatalogSnapshot,
+)
 from nanobot.providers.openai_responses import (
     consume_sse_with_reasoning,
     convert_messages,
@@ -31,6 +35,7 @@ from nanobot.providers.openai_responses import (
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
 from nanobot.providers.xai_oauth import (
     XAI_CLIENT_VERSION,
+    XAIOAuthReauthRequiredError,
     get_xai_oauth_login_status,
     get_xai_oauth_storage_path,
     get_xai_oauth_token,
@@ -593,6 +598,13 @@ def _friendly_error(status_code: int, response_body: str | None = None) -> str:
 
 
 def _xai_error_response(exc: Exception) -> LLMResponse:
+    if isinstance(exc, XAIOAuthReauthRequiredError):
+        return LLMResponse(
+            content="xAI authorization expired. Please sign in again.",
+            finish_reason="error",
+            error_kind="oauth_auth_required",
+            error_should_retry=False,
+        )
     status_code = getattr(exc, "status_code", None)
     should_retry = getattr(exc, "should_retry", None)
     error_kind: str | None = None
@@ -661,7 +673,10 @@ def invalidate_xai_grok_model_catalog() -> None:
 
 
 def _fetch_xai_grok_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
-    token = get_xai_oauth_token(proxy=proxy)
+    try:
+        token = get_xai_oauth_token(proxy=proxy)
+    except XAIOAuthReauthRequiredError:
+        raise OAuthCatalogAuthRequiredError() from None
     client_kwargs: dict[str, Any] = {"timeout": 10.0, "follow_redirects": False}
     if proxy:
         client_kwargs.update(proxy=proxy, trust_env=False)

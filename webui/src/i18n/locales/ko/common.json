@@ -1,4 +1,43 @@
 {
+  "previewTabs": {
+    "title": "미리보기",
+    "closeTab": "{{name}} 닫기",
+    "closeAll": "미리보기 패널 닫기",
+    "websiteInfo": "웹 미리보기 정보"
+  },
+  "webPreview": {
+    "viewLinks": "링크 보기",
+    "back": "뒤로",
+    "original": "원래 링크",
+    "actions": "링크 작업",
+    "open": "웹사이트 미리보기",
+    "external": "브라우저에서 열기",
+    "copy": "링크 복사",
+    "copied": "링크를 복사했습니다",
+    "copyFailed": "링크를 복사하지 못했습니다",
+    "title": "웹사이트 미리보기",
+    "resize": "웹 미리보기 너비 조절",
+    "refresh": "웹사이트 새로고침",
+    "close": "웹 미리보기 닫기",
+    "isolated": "제한된 격리 미리보기입니다. 로그인 및 일부 상호작용이 작동하지 않을 수 있습니다.",
+    "blockedHint": "일부 사이트는 삽입을 차단합니다. 비어 있거나 실패하면 브라우저에서 여세요.",
+    "loopback": "localhost는 원격 게이트웨이가 아닌 이 브라우저의 기기를 가리킵니다. 포트는 전달되지 않습니다.",
+    "native": "네이티브 호스트에서는 삽입 미리보기를 지원하지 않습니다. 브라우저에서 여세요.",
+    "unsupported": "이 브라우저는 인증 정보 격리 미리보기를 지원하지 않습니다. 새 탭에서 여세요.",
+    "sameOrigin": "nanobot 앱 자체는 여기에 삽입할 수 없습니다. 새 탭에서 여세요.",
+    "mixedContent": "HTTPS 페이지에서 HTTP 사이트를 미리 볼 수 없습니다. 새 탭에서 여세요.",
+    "invalid": "이 주소를 미리 볼 수 없습니다.",
+    "frame": "웹 미리보기: {{host}}"
+  },
+  "starPrompt": {
+    "footerAction": "nanobot에 스타 남기기",
+    "title": "nanobot을 사용해 주셔서 감사합니다",
+    "description": "GitHub에서 스타를 눌러 nanobot을 계속 개선할 수 있도록 응원해 주세요.",
+    "action": "스타 남기기",
+    "later": "나중에",
+    "never": "다시 표시하지 않기",
+    "saveError": "네트워크에 문제가 있는 것 같습니다. 이 알림이 다시 표시될 수 있습니다."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {
@@ -249,6 +288,7 @@
       "currentModel": "현재 설정",
       "brandLogos": "브랜드 로고",
       "browserNotifications": "작업 알림",
+      "notificationSound": "완료 알림음",
       "cliAppsCatalog": "카탈로그",
       "cliAppsFilter": "필터",
       "engine": "엔진",
@@ -292,6 +332,7 @@
       "selectedModelValue": "선택한 모델에 의해 설정됩니다.",
       "brandLogos": "설정에서 타사 제공업체와 CLI 로고를 표시합니다.",
       "browserNotifications": "이 페이지가 백그라운드에 있을 때만 알립니다. 기본값은 꺼짐입니다.",
+      "notificationSound": "턴이 끝나면 이 페이지가 백그라운드에 있어도 짧은 알림음을 재생합니다. 기본적으로 꺼져 있습니다.",
       "cliAppsCatalog": "nanobot이 이 컴퓨터에서 사용할 수 있는 명령줄 도구를 설치합니다. 데스크톱 앱은 변경하지 않습니다.",
       "cliAppsFilter": "앱, 카테고리 또는 기능으로 검색합니다.",
       "logs": "데스크톱 앱의 로그 폴더를 엽니다.",
@@ -472,6 +513,8 @@
       "searchPlaceholder": "제공업체 검색",
       "noMatches": "일치하는 제공업체가 없습니다.",
       "addOwnProvider": "내 모델 제공업체 추가",
+      "addProvider": "제공업체 추가",
+      "backToProviders": "제공업체 목록으로 돌아가기",
       "customProvider": "사용자 지정 제공업체",
       "customProviderName": "제공업체 이름",
       "customProviderNamePlaceholder": "내 모델 제공업체",
@@ -513,6 +556,10 @@
       "installing": "필수 패키지 설치 중…"
     },
     "models": {
+      "catalogAuthRequired": "인증이 만료되었습니다. 다시 로그인해 주세요.",
+      "catalogUnavailable": "모델 목록을 갱신할 수 없습니다. 나중에 다시 시도해 주세요.",
+      "catalogStale": "캐시된 모델을 표시합니다. 최신 목록이 아닐 수 있습니다.",
+      "catalogFallback": "기본 제공 모델을 표시합니다. 최신 목록이 아닐 수 있습니다.",
       "selectModel": "모델 선택",
       "addConfiguration": "설정 추가",
       "newConfiguration": "새 모델 설정",
@@ -534,6 +581,8 @@
       "presetNamePlaceholder": "예: 빠른 작성",
       "advancedOptions": "고급 옵션",
       "advancedSummary": "컨텍스트 {{context}} · 최대 {{max}} 토큰",
+      "contextWindowHint": "{{tokens}} 토큰",
+      "contextWindowError": "200k, 1m, 131072처럼 양수 토큰 수를 입력하세요.",
       "maxTokens": "최대 출력 토큰",
       "temperature": "온도",
       "reasoningEffort": "추론 강도",
@@ -1054,6 +1103,10 @@
       }
     },
     "oauth": {
+      "deviceCode": "기기 코드",
+      "deviceCodeHelp": "이 코드를 복사하여 GitHub에 입력하고 인증하세요. 완료되면 이 창이 자동으로 업데이트됩니다.",
+      "waitingForDeviceApproval": "GitHub 인증을 기다리는 중…",
+      "openGitHub": "GitHub 열기",
       "authentication": "OAuth 인증",
       "signIn": "로그인",
       "signingIn": "로그인 중...",
@@ -1377,6 +1430,11 @@
       "chooseAI": "AI 선택",
       "switchModel": "이 대화에서 사용할 모델 전환",
       "manageModels": "모델 관리",
+      "fallbackNotice": "이 응답은 대체 모델을 사용했습니다: {{model}}.",
+      "checkModelSettings": "모델 설정 확인",
+      "reauthNotice": "{{provider}} 인증이 만료되었습니다. 다시 로그인해 주세요.",
+      "reauthFallback": "이번 응답은 대체 모델이 처리했습니다.",
+      "reauthSettings": "모델 설정 열기",
       "context": {
         "tooltip": "컨텍스트 {{percent}}%",
         "detailsLabel": "컨텍스트 사용량 열기",
@@ -1390,8 +1448,8 @@
         "duration": "생성 시간"
       },
       "queued": {
-        "label": "대기 중인 안내",
-        "guide": "안내",
+        "label": "전송 대기 중",
+        "guide": "지금 보내기",
         "delete": "안내 삭제",
         "edit": "안내 수정",
         "drag": "드래그하여 순서 변경"
@@ -1568,6 +1626,7 @@
     }
   },
   "message": {
+    "actions": "메시지 작업",
     "streaming": "생성 중",
     "delivery": {
       "sending": "전송 중…",
@@ -1598,6 +1657,7 @@
     "skill": "스킬: {{name}}",
     "askAboutSelection": "이 내용에 대해 질문하기",
     "forkFromHere": "분기",
+    "fallbackResponse": "이 응답은 대체 모델로 전환되어 {{preset}}이(가) 답변합니다.",
     "copyReply": "복사",
     "copiedReply": "복사됨",
     "turnLatencyTitle": "응답 시간(엔드투엔드)",
@@ -1620,6 +1680,10 @@
     "activityWorkingFor": "{{duration}} 동안 작업 중",
     "activityWorked": "작업함",
     "activityWorkedFor": "{{duration}} 동안 작업함",
+    "collapseActivity": "활동 세부 정보 접기",
+    "activityShow": "작업 과정 보기",
+    "activityShowFor": "작업 과정 보기 {{duration}}",
+    "activityHide": "작업 과정 숨기기",
     "traceDetailsLoadFailed": "전체 활동 세부 정보를 불러올 수 없습니다.",
     "retryTraceDetails": "다시 시도",
     "retryConnection": "연결 실패",
@@ -1654,11 +1718,29 @@
     "continue": "계속"
   },
   "lightbox": {
+    "viewAll": "이미지 {{count}}개 모두 보기",
+    "zoomIn": "확대",
+    "zoomOut": "축소",
+    "resetZoom": "화면에 맞추기",
+    "gestures": "두 손가락이나 두 번 클릭으로 확대하고 드래그로 이동하세요. +, −, 0 키로 확대, 축소 또는 초기화할 수 있습니다.",
     "title": "이미지 미리보기",
     "open": "이미지 보기",
     "prev": "이전 이미지",
     "next": "다음 이미지",
     "close": "미리보기 닫기"
+  },
+  "fileActions": {
+    "menu": "{{name}} 파일 작업",
+    "title": "파일 작업",
+    "preview": "미리보기",
+    "copyAbsolute": "절대 경로 복사",
+    "copyRelative": "상대 경로 복사",
+    "copyReference": "원본 참조 복사",
+    "copied": "복사됨",
+    "failed": "복사하지 못했습니다. 다시 시도하세요.",
+    "unavailable": "파일을 확인할 수 없습니다. 원본 참조를 복사할 수 있습니다.",
+    "loading": "파일 확인 중…",
+    "gatewayPath": "경로는 게이트웨이 컴퓨터를 가리킵니다."
   },
   "filePreview": {
     "aria": "파일 미리보기",

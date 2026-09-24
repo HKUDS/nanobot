@@ -1,6 +1,7 @@
 import asyncio
 import json
 import zipfile
+from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -45,6 +46,9 @@ class _FakeResponse:
         self.headers = headers or {"content-type": "application/json"}
         self.url = httpx.URL(url)
 
+    async def aiter_bytes(self):
+        yield self.content
+
     def json(self) -> dict:
         return self._json_body
 
@@ -58,6 +62,11 @@ class _FakeHttp:
         if self._responses:
             return self._responses.pop(0)
         return _FakeResponse()
+
+    @asynccontextmanager
+    async def stream(self, method, url, **kwargs):
+        assert method == "GET"
+        yield await self.get(url, **kwargs)
 
     async def post(self, url: str, json=None, headers=None, **kwargs):
         self.calls.append(
@@ -1267,7 +1276,7 @@ async def test_send_media_ref_short_circuits_on_download_transport_error() -> No
     channel = DingTalkChannel(config, MessageBus())
 
     # First POST (sampleImageMsg) returns API error → False, then GET (download) raises transport error
-    class _MixedHttp:
+    class _MixedHttp(_FakeHttp):
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
@@ -1299,7 +1308,7 @@ async def test_send_media_ref_short_circuits_on_upload_transport_error() -> None
 
     image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # minimal JPEG-ish data
 
-    class _UploadFailsHttp:
+    class _UploadFailsHttp(_FakeHttp):
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
@@ -1326,3 +1335,29 @@ async def test_send_media_ref_short_circuits_on_upload_transport_error() -> None
     # POST (image URL), GET (download), POST (upload) attempted — no further sends
     methods = [c["method"] for c in channel._http.calls]
     assert methods == ["POST", "GET", "POST"]
+
+
+async def test_remote_media_stops_reading_at_limit_and_closes_stream(monkeypatch):
+    monkeypatch.setattr(dingtalk_module, "DINGTALK_MAX_REMOTE_MEDIA_BYTES", 8)
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    class BoundedStream(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield b"12345"
+            yield b"6789"
+            raise AssertionError("must stop consuming when the size limit is exceeded")
+
+        async def aclose(self):
+            self.closed = True
+
+    body = BoundedStream()
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=body))
+    async with httpx.AsyncClient(transport=transport) as client:
+        channel._http = client
+        assert await channel._fetch_remote_media_bytes("https://example.com/large") == (None, None)
+    assert body.closed

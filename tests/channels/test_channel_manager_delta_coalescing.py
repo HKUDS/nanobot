@@ -111,6 +111,16 @@ def _end(
 class TestDeltaCoalescing:
     """Tests for stream delta message coalescing."""
 
+    async def test_response_source_change_is_a_coalescing_boundary(self, manager, bus):
+        first, second = _delta("primary"), _delta("backup")
+        first.metadata["response_sources"] = [{"provider": "openai", "model": "m", "preset": "a"}]
+        second.metadata["response_sources"] = [{"provider": "openai", "model": "m", "preset": "b"}]
+        await bus.publish_outbound(second)
+        merged, pending = manager._coalesce_stream_deltas(first)
+        assert merged.content == "primary"
+        assert merged.metadata == first.metadata
+        assert pending == [second]
+
     @pytest.mark.asyncio
     async def test_single_delta_not_coalesced(self, manager, bus):
         msg = _delta("Hello")

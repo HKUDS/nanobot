@@ -962,7 +962,7 @@ export const ChatList = memo(function ChatList({
                             compact ? "min-h-7" : "min-h-8",
                             topicActive
                               ? "text-sidebar-foreground"
-                              : "text-sidebar-content hover:text-sidebar-accent-foreground",
+                              : "text-sidebar-content media-hover:hover:text-sidebar-accent-foreground",
                             deleteSelectionMode && (tabSelected || tabPartiallySelected)
                               && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
                           )}
@@ -1049,7 +1049,7 @@ export const ChatList = memo(function ChatList({
                             <DropdownMenuTrigger
                               className={cn(
                                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
-                                "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
+                                "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100",
                                 "focus-visible:opacity-100 data-[state=open]:opacity-100",
                               )}
                               aria-label={t("chat.actions", { title })}
@@ -1143,7 +1143,7 @@ export const ChatList = memo(function ChatList({
                   Math.min(totalSessionCount, limit + VISIBLE_SESSIONS_INCREMENT),
                 )
               }
-              className="h-8 w-full rounded-full text-[12px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-accent/65 hover:text-sidebar-muted-foreground"
+              className="h-8 w-full rounded-full text-[12px] font-medium text-sidebar-muted-foreground transition-colors media-hover:hover:bg-sidebar-accent/65 media-hover:hover:text-sidebar-muted-foreground"
             >
               {t("chat.showMore", { count: hiddenSessionCount })}
             </button>
@@ -1160,7 +1160,7 @@ export const ChatList = memo(function ChatList({
               aria-label={t("chat.cancelSelection", {
                 defaultValue: "Cancel selection",
               })}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted-foreground transition-colors media-hover:hover:bg-accent/60 media-hover:hover:text-foreground"
             >
               <X className="h-4 w-4" aria-hidden />
             </button>
@@ -1174,7 +1174,7 @@ export const ChatList = memo(function ChatList({
               type="button"
               disabled={selectedDeleteKeys.size === 0}
               onClick={confirmDeleteSelection}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-destructive px-3 text-[12px] font-semibold text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-40"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-destructive px-3 text-[12px] font-semibold text-destructive-foreground transition-colors media-hover:hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-40"
             >
               <Trash2 className="h-3.5 w-3.5" aria-hidden />
               {t("chat.deleteSelected", { defaultValue: "Delete" })}
@@ -1246,7 +1246,7 @@ function WorkbenchTabHeader({
               className={cn(
                 "relative inline-flex h-6 w-3.5 shrink-0 items-center justify-center rounded-md before:absolute before:-inset-x-1 before:inset-y-0",
                 "text-sidebar-muted-foreground transition-[background-color,color,transform] duration-150 ease-out",
-                "hover:bg-sidebar-accent hover:text-sidebar-foreground active:scale-[0.96]",
+                "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground active:scale-[0.96]",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                 "motion-reduce:transition-none motion-reduce:active:scale-100",
               )}
@@ -1297,7 +1297,7 @@ function WorkbenchTabHeader({
               className={cn(
                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
                 "text-sidebar-muted-foreground opacity-0 transition-opacity",
-                "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover/tab:opacity-100",
+                "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover/tab:opacity-100",
                 "focus-visible:opacity-100 data-[state=open]:opacity-100",
               )}
               aria-label={t("chat.actions", { title })}
@@ -1441,7 +1441,7 @@ function ActivePaneRows({
                 compact ? "min-h-7" : "min-h-8",
                 active
                   ? "text-sidebar-foreground"
-                  : "text-sidebar-content hover:text-sidebar-accent-foreground",
+                  : "text-sidebar-content media-hover:hover:text-sidebar-accent-foreground",
                 deleteSelectionMode && selected
                   && "bg-sidebar-accent/55 text-sidebar-accent-foreground",
               )}
@@ -1492,7 +1492,7 @@ function ActivePaneRows({
                 <DropdownMenuTrigger
                   className={cn(
                     "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
-                    "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover/pane:opacity-100",
+                    "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover/pane:opacity-100",
                     "focus-visible:opacity-100 data-[state=open]:opacity-100",
                   )}
                   aria-label={paneActionsLabel}
@@ -1657,7 +1657,7 @@ function TemporaryChatSection({
                   SIDEBAR_SELECTION_ITEM_CLASS,
                   active
                     ? "text-sidebar-accent-foreground"
-                    : "text-sidebar-content settings-hover hover:text-sidebar-accent-foreground",
+                    : "text-sidebar-content settings-hover media-hover:hover:text-sidebar-accent-foreground",
                 )}
               >
                 <button
@@ -1680,7 +1680,7 @@ function TemporaryChatSection({
                     type="button"
                     aria-label={t("temporaryChat.closeAction", { title })}
                     onClick={() => onClose(session.key)}
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground transition-colors media-hover:hover:bg-destructive/10 media-hover:hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     <X className="h-3.5 w-3.5" aria-hidden />
                   </button>
@@ -1726,7 +1726,7 @@ function ProjectGroupHeader({
       aria-expanded={!collapsed}
       onClick={onToggle}
       className={cn(
-        "flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left transition-colors hover:text-sidebar-foreground",
+        "flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left transition-colors media-hover:hover:text-sidebar-foreground",
         active ? "font-medium text-sidebar-foreground" : "font-normal",
       )}
     >
@@ -1751,7 +1751,7 @@ function ProjectGroupHeader({
             className={cn(
               "relative inline-flex h-6 w-3.5 shrink-0 items-center justify-center rounded-md before:absolute before:-inset-x-1 before:inset-y-0",
               "text-sidebar-muted-foreground transition-[background-color,color,transform] duration-150 ease-out",
-              "hover:bg-sidebar-accent hover:text-sidebar-foreground active:scale-[0.96]",
+              "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground active:scale-[0.96]",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
               "motion-reduce:transition-none motion-reduce:active:scale-100",
             )}
@@ -1788,7 +1788,7 @@ function ProjectGroupHeader({
             <DropdownMenuTrigger
               className={cn(
                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
-                "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100 focus-visible:opacity-100",
+                "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100 focus-visible:opacity-100",
                 "data-[state=open]:opacity-100",
               )}
               aria-label={t("chat.actions", { title: label })}
@@ -1861,7 +1861,7 @@ function ChatsFoldFooter({
       <button
         type="button"
         onClick={onToggle}
-        className="h-7 w-full rounded-xl text-left text-[12px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-muted-foreground"
+        className="h-7 w-full rounded-xl text-left text-[12px] font-medium text-sidebar-muted-foreground transition-colors media-hover:hover:bg-sidebar-accent/50 media-hover:hover:text-sidebar-muted-foreground"
       >
         <span className="px-2">
           {folded

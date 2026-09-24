@@ -29,7 +29,9 @@ Memory moves through nanobot in two stages.
 
 ### Stage 1: Consolidator
 
-When a conversation grows large, the `Consolidator` summarizes older turns and appends the result to `memory/history.jsonl`, while keeping recent conversation available. Each summary preserves useful long-term facts and a short handoff for active work.
+When a conversation grows large, nanobot summarizes the conversation covered by compaction and appends the result to `memory/history.jsonl`. The model continues with the summary and any messages after it. The original messages remain in your saved chat history, but messages covered by the summary are no longer sent to the model verbatim. Each summary preserves useful long-term facts and a short handoff for active work.
+
+Compaction also runs after a configured period of inactivity, or when you send `/compact`. See [Auto Compact](./configuration.md#auto-compact) for idle timing and how to disable automatic idle compaction.
 
 This file is:
 
@@ -130,6 +132,7 @@ Memory is not hidden behind the curtain. Users can inspect and guide it.
 
 | Command | What it does |
 |---------|--------------|
+| `/compact` | Summarize the current conversation context while keeping saved chat history |
 | `/dream` | Run Dream immediately |
 | `/dream-log` | Show the latest Dream memory change |
 | `/dream-log <sha>` | Show a specific Dream change |
