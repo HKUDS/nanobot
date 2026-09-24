@@ -32,6 +32,49 @@ If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram,
 `nanobot status` does not call the model. If provider/model setup is incomplete, it points to
 WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
 
+## Session storage overlaps the workspace
+
+If startup reports `session storage must be outside the agent workspace`, compare the
+printed Config, Workspace, and Sessions paths. Sessions live at
+`<config-dir>/sessions/<workspace-id>/`; that storage root must not equal the workspace
+or be inside it. This keeps internal conversation files out of the workspace exposed
+to agent tools. Moving files outside the workspace is not a substitute for restricting
+tool access.
+
+`agents.defaults.workspace` sets the default workspace. `--workspace` takes precedence
+for the selected command but does not change the session storage root. For `agent` and
+`gateway` this override is temporary; `webui --workspace` saves the workspace setting
+as part of WebUI setup.
+
+For an existing instance, stop its processes and back up both the workspace and config
+directory. Keep the workspace at its current path, including `.nanobot/workspace-id`,
+memory, and skills. Move the config file and its runtime data (including the entire
+`sessions` directory) to a separate directory outside that workspace. Update `--config`
+in your launch command or service. Check any relative paths in the config before restarting.
+Moving only `config.json` leaves the existing session history behind.
+
+For example, these paths keep runtime data separate from an existing workspace:
+
+```text
+bots/
+  bot-a-data/
+    config.json
+    sessions/
+  bot-a-workspace/
+    .nanobot/workspace-id
+    memory/
+    skills/
+```
+
+```bash
+nanobot gateway --config /path/to/bots/bot-a-data/config.json --workspace /path/to/bots/bot-a-workspace
+```
+
+For a new instance, `bot/config.json`, `bot/sessions/`, and `bot/workspace/` also work.
+Changing an existing instance to a new nested workspace requires moving its workspace
+contents, including memory, skills, and `.nanobot/workspace-id`; merely changing the
+setting can start an empty workspace with a different session identity.
+
 ## How to Read `nanobot status`
 
 `nanobot status` does not call a model. It checks the selected config and workspace,

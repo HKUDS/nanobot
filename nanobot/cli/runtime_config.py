@@ -21,6 +21,7 @@ __all__ = [
     "_print_model_setup_steps",
     "_print_runtime_config_validation_error",
     "_provider_setup_error",
+    "_validate_session_storage",
 ]
 
 console = Console()
@@ -130,7 +131,42 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     loaded = _load_config_for_cli(config_path, resolve_env=True)
     if workspace:
         loaded.agents.defaults.workspace = workspace
+    _validate_session_storage(loaded, workspace_override=workspace)
     return loaded
+
+
+def _validate_session_storage(config: Config, *, workspace_override: str | None = None) -> None:
+    """Reject overlapping session storage before startup creates workspace files."""
+    from nanobot.config.loader import get_config_path
+
+    config_path = get_config_path().expanduser().resolve(strict=False)
+    data_dir = config.runtime_data_dir or config_path.parent
+    sessions = (data_dir / "sessions").resolve(strict=False)
+    workspace = config.workspace_path.resolve(strict=False)
+    if not sessions.is_relative_to(workspace):
+        return
+
+    source = "--workspace" if workspace_override else "agents.defaults.workspace"
+    console.print(Text("Cannot start: session storage must be outside the agent workspace.", style="red"))
+    console.print(Text(f"Config: {config_path}"))
+    console.print(Text(f"Workspace ({source}): {workspace}"))
+    console.print(Text(f"Sessions: {sessions}"))
+    console.print(
+        "Sessions are stored beside the active config file. --workspace overrides the "
+        "configured workspace; it does not move sessions."
+    )
+    console.print(
+        "Stop this instance and back up its config directory and workspace. Move the "
+        "config file and its runtime data, including sessions, to a directory outside the "
+        "workspace, then restart with --config pointing to the moved config file."
+    )
+    console.print("Example layout: bot/config.json, bot/sessions/, bot/workspace/.")
+    console.print(
+        "Keep the existing workspace path and its .nanobot/workspace-id to preserve "
+        "its session identity. See docs/troubleshooting.md#session-storage-overlaps-the-workspace "
+        "for layout and migration options."
+    )
+    raise typer.Exit(1)
 
 
 def _load_inspection_config(
