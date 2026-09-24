@@ -287,6 +287,19 @@ export function useSessions(): {
     };
   }, [client, refresh]);
 
+  useEffect(() => {
+    const unsubscribe = client.onSessionTitle((chatId, title) => {
+      const key = `websocket:${chatId}`;
+      setSessions((prev) => {
+        const next = prev.map((row) =>
+          row.key === key && row.title !== title ? { ...row, title } : row,
+        );
+        return next.some((row, index) => row !== prev[index]) ? next : prev;
+      });
+    });
+    return unsubscribe;
+  }, [client]);
+
   const createChat = useCallback(async (
     workspaceScope?: WorkspaceScopePayload | null,
     modelPreset?: string | null,

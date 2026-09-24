@@ -255,6 +255,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
     };
+    onSessionTitle = () => () => {};
     onSidebarStateUpdate = (handler: (state: SidebarStatePayload) => void) => {
       sidebarStateUpdateHandlers.add(handler);
       return () => sidebarStateUpdateHandlers.delete(handler);

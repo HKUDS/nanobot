@@ -1478,6 +1478,20 @@ class WebSocketChannel(BaseChannel):
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" session_updated ")
 
+    async def send_session_title(self, chat_id: str, *, title: str) -> None:
+        """Push a generated session title to WebUI clients."""
+        conns = list(self._conn_chats)
+        if not conns or not title.strip():
+            return
+        body: dict[str, Any] = {
+            "event": "session_title",
+            "chat_id": chat_id,
+            "title": title.strip(),
+        }
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" session_title ")
+
     async def send_user_input(
         self,
         chat_id: str,

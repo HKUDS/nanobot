@@ -1493,6 +1493,11 @@ export type InboundEvent =
       workspace_scope?: WorkspaceScopePayload;
     }
   | {
+      event: "session_title";
+      chat_id: string;
+      title: string;
+    }
+  | {
       event: "sidebar_state_updated";
       state: SidebarStatePayload;
     }

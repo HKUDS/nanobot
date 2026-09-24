@@ -37,6 +37,7 @@ from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.keys import (
     LAST_CHANNEL_METADATA_KEY,
     UNIFIED_SESSION_KEY,
+    WEBUI_SESSION_METADATA_KEY,
 )
 from nanobot.session.manager import Session
 from nanobot.session.recovery import (
@@ -51,19 +52,18 @@ from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
     SessionSummaryCheckpoint,
 )
+from nanobot.session.titles import (
+    TITLE_GENERATION_MAX_TOKENS,
+    TITLE_GENERATION_REASONING_EFFORT,
+    TITLE_METADATA_KEY,
+    clean_generated_title,
+    maybe_generate_session_title,
+    maybe_generate_title_after_turn,
+)
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
 )
-from nanobot.session.webui_turns import (
-    TITLE_GENERATION_MAX_TOKENS,
-    TITLE_GENERATION_REASONING_EFFORT,
-    WEBUI_SESSION_METADATA_KEY,
-    WEBUI_TITLE_METADATA_KEY,
-    WebuiTurnCoordinator,
-    clean_generated_title,
-    maybe_generate_webui_title,
-    maybe_generate_webui_title_after_turn,
-)
+from nanobot.session.webui_turns import WebuiTurnCoordinator
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
 
@@ -345,15 +345,15 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     session.add_message("assistant", "可以，我会先调整布局和视觉层级。")
     loop.sessions.save(session)
 
-    generated = await maybe_generate_webui_title(
+    generated = await maybe_generate_session_title(
         sessions=loop.sessions,
         session_key="websocket:chat-title",
         provider=loop.provider,
         model=loop.model,
     )
 
-    assert generated is True
-    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
+    assert generated == "优化 WebUI 侧边栏"
+    assert session.metadata[TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
     loop.provider.chat_stream_with_retry.assert_awaited_once()
     assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
     assert (
@@ -372,15 +372,15 @@ async def test_generate_webui_title_skips_plain_websocket_sessions(tmp_path: Pat
     session.add_message("user", "hello from a custom websocket client")
     loop.sessions.save(session)
 
-    generated = await maybe_generate_webui_title(
+    generated = await maybe_generate_session_title(
         sessions=loop.sessions,
         session_key="websocket:custom-client",
         provider=loop.provider,
         model=loop.model,
     )
 
-    assert generated is False
-    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    assert generated is None
+    assert TITLE_METADATA_KEY not in session.metadata
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
@@ -397,15 +397,15 @@ async def test_generate_webui_title_ignores_command_only_sessions(tmp_path: Path
     )
     loop.sessions.save(session)
 
-    generated = await maybe_generate_webui_title(
+    generated = await maybe_generate_session_title(
         sessions=loop.sessions,
         session_key="websocket:command-title",
         provider=loop.provider,
         model=loop.model,
     )
 
-    assert generated is False
-    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    assert generated is None
+    assert TITLE_METADATA_KEY not in session.metadata
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
@@ -422,15 +422,15 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
     session.add_message("assistant", "提醒已经到期。")
     loop.sessions.save(session)
 
-    generated = await maybe_generate_webui_title(
+    generated = await maybe_generate_session_title(
         sessions=loop.sessions,
         session_key="websocket:cron-title",
         provider=loop.provider,
         model=loop.model,
     )
 
-    assert generated is False
-    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    assert generated is None
+    assert TITLE_METADATA_KEY not in session.metadata
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
@@ -444,14 +444,14 @@ async def test_generate_webui_title_projects_onto_chat_session_under_unified_rou
     )
     unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
     unified.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    unified.metadata[WEBUI_TITLE_METADATA_KEY] = "开启私聊Topic功能"
+    unified.metadata[TITLE_METADATA_KEY] = "开启私聊Topic功能"
     unified.add_message("user", "很早以前的问题")
     unified.add_message("assistant", "很久以前的回答。")
     unified.add_message("user", "帮我查一下临期IP有哪些")
     unified.add_message("assistant", "以下是临期 IP 列表。")
     loop.sessions.save(unified)
 
-    generated = await maybe_generate_webui_title_after_turn(
+    generated = await maybe_generate_title_after_turn(
         channel="websocket",
         chat_id="chat-projection",
         metadata={WEBUI_SESSION_METADATA_KEY: True},
@@ -461,10 +461,10 @@ async def test_generate_webui_title_projects_onto_chat_session_under_unified_rou
         model=loop.model,
     )
 
-    assert generated is True
+    assert generated == "查询临期 IP"
     chat = loop.sessions.get_or_create("websocket:chat-projection")
-    assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "查询临期 IP"
-    assert unified.metadata[WEBUI_TITLE_METADATA_KEY] == "开启私聊Topic功能"
+    assert chat.metadata[TITLE_METADATA_KEY] == "查询临期 IP"
+    assert unified.metadata[TITLE_METADATA_KEY] == "开启私聊Topic功能"
     prompt = loop.provider.chat_stream_with_retry.await_args.args[0][1]["content"]
     assert "帮我查一下临期IP有哪些" in prompt
     assert "很早以前的问题" not in prompt
@@ -478,10 +478,10 @@ async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Pa
     unified.add_message("user", "帮我查一下临期IP有哪些")
     unified.add_message("assistant", "以下是临期 IP 列表。")
     chat = loop.sessions.get_or_create("websocket:chat-existing")
-    chat.metadata[WEBUI_TITLE_METADATA_KEY] = "Existing title"
+    chat.metadata[TITLE_METADATA_KEY] = "Existing title"
     loop.sessions.save(unified)
 
-    generated = await maybe_generate_webui_title_after_turn(
+    generated = await maybe_generate_title_after_turn(
         channel="websocket",
         chat_id="chat-existing",
         metadata={WEBUI_SESSION_METADATA_KEY: True},
@@ -491,9 +491,156 @@ async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Pa
         model=loop.model,
     )
 
-    assert generated is False
-    assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "Existing title"
+    assert generated is None
+    assert chat.metadata[TITLE_METADATA_KEY] == "Existing title"
     loop.provider.chat_stream_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_title_for_telegram_chat(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_stream_with_retry = AsyncMock(
+        return_value=LLMResponse(content='"查询临期 IP。"', finish_reason="stop")
+    )
+    session = loop.sessions.get_or_create("telegram:100200300")
+    session.add_message("user", "帮我查一下临期IP有哪些")
+    session.add_message("assistant", "以下是临期 IP 列表。")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_session_title(
+        sessions=loop.sessions,
+        session_key="telegram:100200300",
+        provider=loop.provider,
+        model=loop.model,
+        channel="telegram",
+    )
+
+    assert generated == "查询临期 IP"
+    assert session.metadata[TITLE_METADATA_KEY] == "查询临期 IP"
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_telegram_title_generation_projects_onto_chat_session(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_stream_with_retry = AsyncMock(
+        return_value=LLMResponse(content="临期 IP 查询", finish_reason="stop")
+    )
+    unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    unified.add_message("user", "帮我查一下临期IP有哪些")
+    unified.add_message("assistant", "以下是临期 IP 列表。")
+    loop.sessions.save(unified)
+
+    generated = await maybe_generate_title_after_turn(
+        channel="telegram",
+        chat_id="100200300",
+        metadata={},
+        sessions=loop.sessions,
+        session_key=UNIFIED_SESSION_KEY,
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated == "临期 IP 查询"
+    chat = loop.sessions.get_or_create("telegram:100200300")
+    assert chat.metadata[TITLE_METADATA_KEY] == "临期 IP 查询"
+    assert TITLE_METADATA_KEY not in unified.metadata
+
+
+@pytest.mark.asyncio
+async def test_telegram_title_generation_is_scoped_to_each_topic(
+    tmp_path: Path,
+) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="Первый топик", finish_reason="stop"),
+        LLMResponse(content="Второй топик", finish_reason="stop"),
+    ])
+
+    for topic_id, expected_title in ((42, "Первый топик"), (43, "Второй топик")):
+        session_key = f"telegram:100200300:topic:{topic_id}"
+        session = loop.sessions.get_or_create(session_key)
+        session.add_message("user", f"Вопрос в топике {topic_id}")
+        session.add_message("assistant", f"Ответ в топике {topic_id}")
+        loop.sessions.save(session)
+
+        generated = await maybe_generate_title_after_turn(
+            channel="telegram",
+            chat_id="100200300",
+            metadata={"message_thread_id": topic_id, "is_forum": True},
+            sessions=loop.sessions,
+            session_key=session_key,
+            provider=loop.provider,
+            model=loop.model,
+        )
+
+        assert generated == expected_title
+        assert session.metadata[TITLE_METADATA_KEY] == expected_title
+
+    assert loop.provider.chat_stream_with_retry.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_telegram_title_generation_skips_existing_title(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("telegram:100200300")
+    session.metadata[TITLE_METADATA_KEY] = "Existing title"
+    session.add_message("user", "帮我查一下临期IP有哪些")
+    session.add_message("assistant", "以下是临期 IP 列表。")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_title_after_turn(
+        channel="telegram",
+        chat_id="100200300",
+        metadata={},
+        sessions=loop.sessions,
+        session_key=session.key,
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is None
+    assert session.metadata[TITLE_METADATA_KEY] == "Existing title"
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_manual_rename_during_generation_is_not_clobbered(tmp_path: Path) -> None:
+    from nanobot.session.titles import TITLE_USER_EDITED_METADATA_KEY
+
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("telegram:100200300")
+    session.add_message("user", "帮我查一下临期IP有哪些")
+    session.add_message("assistant", "以下是临期 IP 列表。")
+    loop.sessions.save(session)
+
+    async def rename_mid_flight(*args: object, **kwargs: object) -> LLMResponse:
+        # A manual rename lands in the same process while the title LLM call
+        # is in flight; the shared cached Session sees it immediately.
+        session.metadata[TITLE_USER_EDITED_METADATA_KEY] = True
+        session.metadata[TITLE_METADATA_KEY] = "Ручное название"
+        loop.sessions.save(session)
+        return LLMResponse(content="AI title", finish_reason="stop")
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=rename_mid_flight)
+
+    generated = await maybe_generate_title_after_turn(
+        channel="telegram",
+        chat_id="100200300",
+        metadata={},
+        sessions=loop.sessions,
+        session_key=session.key,
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is None
+    assert session.metadata[TITLE_METADATA_KEY] == "Ручное название"
+    persisted = loop.sessions.read_session_metadata("telegram:100200300")
+    assert persisted is not None
+    assert persisted["metadata"]["title"] == "Ручное название"
 
 
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:

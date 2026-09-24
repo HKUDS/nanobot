@@ -30,6 +30,7 @@ fetchThreadMock.mockResolvedValueOnce = ((value) => rawMockResolvedValueOnce(
 
 function fakeClient() {
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+  const sessionTitleHandlers = new Set<(chatId: string, title: string) => void>();
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
@@ -43,6 +44,13 @@ function fakeClient() {
     },
     emitSessionUpdate: (chatId: string, scope?: string) => {
       for (const handler of sessionUpdateHandlers) handler(chatId, scope);
+    },
+    onSessionTitle: (handler: (chatId: string, title: string) => void) => {
+      sessionTitleHandlers.add(handler);
+      return () => sessionTitleHandlers.delete(handler);
+    },
+    emitSessionTitle: (chatId: string, title: string) => {
+      for (const handler of sessionTitleHandlers) handler(chatId, title);
     },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
