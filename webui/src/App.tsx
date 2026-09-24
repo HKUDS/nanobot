@@ -1175,6 +1175,7 @@ function Shell({
   const skills = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
@@ -1298,6 +1299,7 @@ function Shell({
   useEffect(() => {
     let cancelled = false;
     const requestGeneration = settingsRefreshGenerationRef.current;
+    setSettingsLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
         if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
@@ -1308,6 +1310,9 @@ function Shell({
         if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
           setSettingsSnapshot(null);
         }
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -2906,6 +2911,7 @@ function Shell({
                             workspaceError={workspaceError}
                             onWorkspaceScopeChange={applyWorkspaceScope}
                             settingsSnapshot={settingsSnapshot}
+                            settingsLoading={settingsLoading}
                             onOpenModelSettings={onOpenModelSettings}
                             skills={skills}
                           />
@@ -2968,6 +2974,7 @@ function Shell({
                             client.setWorkspaceScope(paneSession.chatId, next);
                           }}
                           settingsSnapshot={settingsSnapshot}
+                          settingsLoading={settingsLoading}
                           onOpenModelSettings={onOpenModelSettings}
                           skills={skills}
                         />

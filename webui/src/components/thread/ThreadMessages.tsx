@@ -432,12 +432,12 @@ function MessageBlockMenu({
     onViewLinks={links.length > 0 ? () => setLinksShown(true) : undefined}
   />;
   if (mobileActions) {
-    return <div data-message-mobile-actions className={cn("mt-1 flex items-center gap-0.5", message.role === "user" && "justify-end")}>
-      <MessageCopyButton message={message} className="h-11 w-11" />
+    return <div data-message-mobile-actions className={cn("mt-1 flex items-center", message.role === "user" ? "me-2 justify-end" : "-ms-2")}>
+      <MessageCopyButton message={message} className="h-11 w-8 [&_svg]:h-4 [&_svg]:w-4" />
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogTrigger asChild>
           <button ref={triggerRef} type="button" data-message-block-menu-trigger aria-label={label}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           </button>
         </DialogTrigger>

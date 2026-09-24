@@ -935,6 +935,29 @@ describe("ThreadShell", () => {
     expect(onGoHome).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])("waits for parent settings and retries only on failure (success: %s)", async (success) => {
+    const client = makeClient();
+    const settings = modelSettings("deepseek-v4-pro", "deepseek");
+    const settingsRequest = vi.fn(() => Promise.resolve(httpJson(settings)));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => (
+      String(input).endsWith("/api/settings")
+        ? settingsRequest()
+        : Promise.resolve(httpJson({}))
+    )));
+    const view = (loading: boolean, snapshot: SettingsPayload | null) => wrap(
+      client,
+      <ThreadShell session={null} title="New topic" onToggleSidebar={() => {}}
+        settingsLoading={loading} settingsSnapshot={snapshot} />,
+    );
+    const { rerender } = render(view(true, null));
+    await act(async () => {});
+    expect(settingsRequest).not.toHaveBeenCalled();
+
+    rerender(view(false, success ? settings : null));
+    expect(await screen.findByTestId("composer-model-logo-deepseek")).toBeInTheDocument();
+    expect(settingsRequest).toHaveBeenCalledTimes(success ? 0 : 1);
+  });
+
   it("updates the composer model logo when settings snapshot changes", async () => {
     const client = makeClient();
     const { rerender } = render(

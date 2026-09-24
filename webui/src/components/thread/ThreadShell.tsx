@@ -447,6 +447,7 @@ interface ThreadShellProps {
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   settingsSnapshot?: SettingsPayload | null;
+  settingsLoading?: boolean;
   onOpenModelSettings?: () => void;
   skills?: SkillSummary[];
 }
@@ -657,6 +658,7 @@ export function ThreadShell({
   workspaceError = null,
   onWorkspaceScopeChange,
   settingsSnapshot = null,
+  settingsLoading = false,
   onOpenModelSettings,
   skills = [],
 }: ThreadShellProps) {
@@ -1094,8 +1096,8 @@ export function ThreadShell({
       setSettings(settingsSnapshot);
       return;
     }
-    void refreshModelSettings();
-  }, [refreshModelSettings, settingsSnapshot]);
+    if (!settingsLoading) void refreshModelSettings();
+  }, [refreshModelSettings, settingsLoading, settingsSnapshot]);
 
   useEffect(() => {
     return client.onRuntimeModelUpdate(() => {

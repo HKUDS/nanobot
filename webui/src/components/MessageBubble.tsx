@@ -249,7 +249,7 @@ export function MessageBlockMenuActions({
                   "text-start text-[11px] leading-4",
                   "text-muted-foreground transition-colors hover:text-foreground",
                   "focus-visible:outline-none",
-                  sheet && "w-full rounded-control text-sm hover:bg-muted/70",
+                  sheet && "w-full gap-2 rounded-control px-2 text-sm hover:bg-muted/70",
                 )}
               >
                 <span
@@ -260,6 +260,7 @@ export function MessageBlockMenuActions({
                     "group-hover:bg-muted/70 group-active:scale-[0.96]",
                     "group-focus-visible:ring-2 group-focus-visible:ring-ring",
                     "motion-reduce:transform-none",
+                    sheet && "w-3.5",
                   )}
                 >
                   <Activity className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />
@@ -281,7 +282,7 @@ export function MessageBlockMenuActions({
         {timestampLabel || automationSourceLabel ? (
           <div
             data-message-block-metadata
-            className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4", sheet ? "text-xs text-muted-foreground" : "text-[10px] text-muted-foreground/45")}
+            className={cn("mt-0.5 w-full border-t border-border/45 px-1.5 pt-1 leading-4", sheet ? "px-2 text-xs text-muted-foreground" : "text-[10px] text-muted-foreground/45")}
           >
             {timestampLabel ? (
               <time
