@@ -30,6 +30,7 @@
     "frame": "ウェブプレビュー：{{host}}"
   },
   "starPrompt": {
+    "footerAction": "nanobot にスターを付ける",
     "title": "nanobot はお役に立っていますか？",
     "description": "nanobot が役に立ったら、GitHub でスターを付けて応援してください。皆さんの応援が開発を続ける励みになります。",
     "action": "GitHub でスターを付ける",

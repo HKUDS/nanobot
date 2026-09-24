@@ -30,6 +30,7 @@
     "frame": "Pratinjau situs: {{host}}"
   },
   "starPrompt": {
+    "footerAction": "Beri bintang untuk nanobot",
     "title": "Suka menggunakan nanobot?",
     "description": "Jika nanobot membantu Anda, beri bintang di GitHub. Dukungan Anda menyemangati kami untuk terus mengembangkannya.",
     "action": "Beri bintang di GitHub",

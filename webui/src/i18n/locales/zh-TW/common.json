@@ -30,6 +30,7 @@
     "frame": "網頁預覽：{{host}}"
   },
   "starPrompt": {
+    "footerAction": "給 nanobot 一顆 Star",
     "title": "喜歡 nanobot？",
     "description": "如果 nanobot 對你有幫助，歡迎來 GitHub 點個 Star。你的支持是我們持續維護的動力。",
     "action": "去 GitHub 點個 Star",

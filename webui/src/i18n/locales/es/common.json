@@ -30,6 +30,7 @@
     "frame": "Vista previa web: {{host}}"
   },
   "starPrompt": {
+    "footerAction": "Dale una estrella a nanobot",
     "title": "¿Te gusta nanobot?",
     "description": "Si nanobot te resulta útil, dale una estrella en GitHub. Tu apoyo nos anima a seguir desarrollándolo.",
     "action": "Dar una estrella en GitHub",
