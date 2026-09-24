@@ -393,6 +393,112 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+async def test_session_id_owns_its_chat_route(aiohttp_client, mock_agent) -> None:
+    """A session_id must not reuse the shared default chat id."""
+    app = create_app(mock_agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "hi"}], "session_id": " chat-a "},
+    )
+
+    assert resp.status == 200
+    call_kwargs = mock_agent.process_direct.call_args.kwargs
+    assert call_kwargs["session_key"] == "api:chat-a"
+    assert call_kwargs["channel"] == "api"
+    assert call_kwargs["chat_id"] == "chat-a"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_blank_session_id_uses_default_session(aiohttp_client, mock_agent) -> None:
+    app = create_app(mock_agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "hi"}], "session_id": "  "},
+    )
+
+    assert resp.status == 200
+    call_kwargs = mock_agent.process_direct.call_args.kwargs
+    assert call_kwargs["session_key"] == API_SESSION_KEY
+    assert call_kwargs["chat_id"] == API_CHAT_ID
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_non_string_session_id_is_rejected(aiohttp_client, mock_agent) -> None:
+    app = create_app(mock_agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "hi"}], "session_id": {"id": 1}},
+    )
+
+    assert resp.status == 400
+    body = await resp.json()
+    assert body["error"]["message"] == "session_id must be a string"
+    mock_agent.process_direct.assert_not_called()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_sessions_keep_their_own_reply_while_another_session_runs(
+    aiohttp_client,
+) -> None:
+    """A reply for one session must never be produced under another session's route."""
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    routes: dict[str, tuple[str, str]] = {}
+
+    async def fake_process(content, session_key="", channel="", chat_id="", **kwargs):
+        routes[content] = (session_key, chat_id)
+        if content == "first":
+            first_started.set()
+            await release_first.wait()
+        return f"reply to {content}"
+
+    agent = MagicMock()
+    agent.process_direct = fake_process
+    agent.aclose = AsyncMock()
+
+    app = create_app(agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    first = asyncio.create_task(client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "first"}], "session_id": "chat-a"},
+    ))
+    await asyncio.wait_for(first_started.wait(), timeout=5)
+
+    second = await asyncio.wait_for(client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "second"}], "session_id": "chat-b"},
+    ), timeout=5)
+    assert second.status == 200
+    assert (await second.json())["choices"][0]["message"]["content"] == "reply to second"
+    assert not first.done()
+
+    release_first.set()
+    first_resp = await asyncio.wait_for(first, timeout=5)
+    assert first_resp.status == 200
+    assert (await first_resp.json())["choices"][0]["message"]["content"] == "reply to first"
+    assert routes == {
+        "first": ("api:chat-a", "chat-a"),
+        "second": ("api:chat-b", "chat-b"),
+    }
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     order: list[str] = []
     first_started = asyncio.Event()

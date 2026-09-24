@@ -40,7 +40,7 @@ curl http://127.0.0.1:8900/v1/models \
 
 ## Behavior
 
-- Session isolation: pass `"session_id"` in the request body to isolate conversations; omit for a shared default session (`api:default`)
+- Session isolation: pass `"session_id"` in the request body to isolate conversations; omit for a shared default session (`api:default`). Each `session_id` runs as its own `api:<session_id>` session with its own chat route, so replies, follow-ups, cron jobs and subagent results stay inside that session. Clients that keep several conversations open must send a distinct `session_id` per conversation, otherwise they all share `api:default`
 - Single-message input: each request must contain exactly one `user` message
 - Fixed model: omit `model`, or pass the same model shown by `/v1/models`
 - Streaming: set `stream=true` to receive Server-Sent Events (`text/event-stream`) with OpenAI-compatible delta chunks, terminated by `data: [DONE]`; omit or set `stream=false` for a single JSON response
