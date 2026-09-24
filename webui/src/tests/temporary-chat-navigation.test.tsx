@@ -269,7 +269,12 @@ describe("temporary chat navigation", () => {
     act(() => TestSocket.current.open());
     await startTemporaryChat("Synthetic separate session");
     await selectTopic("Regular topic");
-    fireEvent.contextMenu(await screen.findByRole("link", { name: "Website" }));
+    const website = await screen.findByRole("link", { name: "Website" });
+    const storedWebsiteValues = () => [localStorage, sessionStorage].map((storage) =>
+      Array.from({ length: storage.length }, (_, i) => storage.getItem(storage.key(i)!))
+        .filter((value) => value?.includes("https://example.com/demo")));
+    const beforePreview = storedWebsiteValues();
+    fireEvent.contextMenu(website);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
     await screen.findByTestId("web-preview-panel");
     await selectTopic("Synthetic separate session");
@@ -298,10 +303,8 @@ describe("temporary chat navigation", () => {
     expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close preview pane" }));
     await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
-    for (const storage of [localStorage, sessionStorage]) {
-      const values = Array.from({ length: storage.length }, (_, i) => storage.getItem(storage.key(i)!));
-      expect(JSON.stringify(values)).not.toContain("https://example.com/demo");
-    }
+    // The transcript may cache its link; preview targets must not add persisted state.
+    expect(storedWebsiteValues()).toEqual(beforePreview);
   });
 
   it("keeps the sidebar mounted across tabs, deduplicates repeated opens, and handles Escape below dialogs", async () => {
