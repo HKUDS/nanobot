@@ -15,15 +15,18 @@ vi.mock("react-syntax-highlighter/dist/esm/prism-async-light", () => ({
     children,
     language,
     style,
+    customStyle,
   }: {
     children: string;
     language?: string;
     style: Record<string, unknown>;
+    customStyle?: React.CSSProperties;
   }) => (
     <pre
       data-testid="highlighted-code"
       data-language={language}
       data-theme={style === mockedStyles.dark ? "dark" : "light"}
+      style={customStyle}
     >
       <code>{children}</code>
     </pre>
@@ -92,7 +95,15 @@ describe("CodeBlock", () => {
         showLineNumbers wrapLongLines={false} viewportHighlight />);
       expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
       expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
+      expect(screen.getByTestId("plain-code-fallback")).toHaveClass("overflow-visible");
+      expect(screen.getByTestId("plain-code-fallback").parentElement).toHaveClass("overflow-visible");
+      // Clicking a tab can clear a previous selection. That browser event must
+      // not bypass the initial paint opportunity reserved for the new tab.
+      await act(async () => { document.dispatchEvent(new Event("selectionchange")); });
+      expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
       await act(async () => { callbacks.get(1)?.(0); });
+      expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
+      await act(async () => { document.dispatchEvent(new Event("selectionchange")); });
       expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
       const selection = document.getSelection()!;
       const range = document.createRange();
@@ -102,6 +113,7 @@ describe("CodeBlock", () => {
       expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
       await act(async () => { selection.removeAllRanges(); document.dispatchEvent(new Event("selectionchange")); });
       expect(await screen.findByTestId("highlighted-code")).toBeInTheDocument();
+      expect(screen.getByTestId("highlighted-code")).toHaveStyle({ overflow: "visible" });
       unmount();
       expect(cancel).toHaveBeenCalledWith(2);
       const second = render(<CodeBlock code={code} language="ts" chrome="none"

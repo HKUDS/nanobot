@@ -142,7 +142,12 @@ with **Escape**. Tabs and width follow each session while the WebUI remains open
 They are kept only in memory and cleared when that session is deleted or the
 connection ends. The pane overlays the conversation on narrow screens.
 
-PNG, JPEG, GIF and WebP files can be previewed as images within the size limit.
+Text previews include up to 384 KiB, with a notice when the file is truncated.
+Large previews show readable text before adding syntax colors; very large or
+minified source stays plain text. All previewed text remains available for
+selection and browser search, and the code pane scrolls in both directions.
+
+PNG, JPEG, GIF and WebP files up to 8 MiB can be previewed as images.
 Hover or focus an image file reference for a compact quick look, or select it
 to open the pane. Select the preview image for the full-size viewer, which
 supports zoom controls, pinch-to-zoom and panning. HTML and SVG files remain

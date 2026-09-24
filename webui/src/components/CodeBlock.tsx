@@ -91,6 +91,9 @@ const LazyHighlightedCode = lazy(async () => {
             fontSize: "13px",
             lineHeight: chrome === "none" ? 1.55 : 1.6,
             tabSize: 2,
+            // FilePreviewPanel owns both scroll axes. Replacing this <pre>
+            // during progressive highlighting must not reset horizontal scroll.
+            ...(viewportHighlight ? { overflow: "visible" } : {}),
           }}
           codeTagProps={{
             style: {
@@ -151,7 +154,8 @@ function CodeTextBlock({
   return (
     <pre
       className={cn(
-        "m-0 overflow-x-auto bg-transparent font-mono text-[13px] text-foreground/90",
+        "m-0 bg-transparent font-mono text-[13px] text-foreground/90",
+        compact ? "overflow-visible" : "overflow-x-auto",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
         chrome === "default"
           ? "py-4 pl-5 pr-14 leading-[1.6]"
@@ -223,10 +227,17 @@ export const CodeBlock = memo(function CodeBlock({
     if (!deferHighlight) return;
     // Paint the tab and full plain source first. Color is a progressive enhancement,
     // not a reason to hold up switching tabs (including an already cached file).
+    let readyToEnhance = false;
     let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(enhance);
+      frame = requestAnimationFrame(() => {
+        readyToEnhance = true;
+        enhance();
+      });
     });
     function enhance() {
+      // A tab click may clear a selection before the first frame. Only resume
+      // selection-blocked work here after the initial paint opportunity.
+      if (!readyToEnhance) return;
       const selection = document.getSelection();
       if (rootRef.current && selection && !selection.isCollapsed && selection.rangeCount
         && selection.getRangeAt(0).intersectsNode(rootRef.current)) return;
@@ -253,7 +264,8 @@ export const CodeBlock = memo(function CodeBlock({
     <div
       ref={rootRef}
       className={cn(
-        "not-prose relative overflow-hidden",
+        "not-prose relative",
+        useViewportHighlight ? "overflow-visible" : "overflow-hidden",
         hasChrome && "rounded-floating bg-secondary/70",
         className,
       )}
