@@ -44,10 +44,13 @@ export function FilePreviewPanel({
     let cancelled = false;
     setImageOpen(false);
     const cached = initialPreviewRef.current;
-    setState(cached ? { status: "ready", payload: cached } : { status: "loading" });
+    setState(previous => cached
+      ? (previous.status === "ready" && previous.payload === cached ? previous : { status: "ready", payload: cached })
+      : (previous.status === "loading" ? previous : { status: "loading" }));
     (loadPreview?.(path) ?? fetchFilePreview(tokenRef.current, sessionKey, path))
       .then((payload) => {
-        if (!cancelled) setState({ status: "ready", payload });
+        if (!cancelled) setState(previous => previous.status === "ready" && previous.payload === payload
+          ? previous : { status: "ready", payload });
       })
       .catch((error: unknown) => {
         if (!cancelled) setState({ status: "error", error });
@@ -72,7 +75,8 @@ export function FilePreviewPanel({
 
   return (
     <section aria-label={t("filePreview.aria")} data-testid="file-preview-panel" className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div data-file-preview-scroll tabIndex={0}
+            className="min-h-0 flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
             {state.status === "loading" ? (
               <div role="status" aria-label={t("filePreview.loading", { defaultValue: "Loading preview..." })}
                 className="flex h-full flex-col justify-center gap-3 p-6" aria-busy="true">
@@ -123,6 +127,7 @@ export function FilePreviewPanel({
                   highlight
                   showLineNumbers
                   wrapLongLines={false}
+                  viewportHighlight
                   className="min-h-full"
                 />
               </div>

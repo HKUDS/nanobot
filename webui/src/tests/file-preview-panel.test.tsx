@@ -2,11 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { CodeBlock } from "@/components/CodeBlock";
 import { setAppLanguage } from "@/i18n";
 import { fetchFilePreview } from "@/lib/api";
 
 vi.mock("@/components/CodeBlock", () => ({
-  CodeBlock: ({
+  CodeBlock: vi.fn(({
     code,
     language,
     highlight,
@@ -22,7 +23,7 @@ vi.mock("@/components/CodeBlock", () => ({
     >
       {code}
     </pre>
-  ),
+  )),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -37,6 +38,7 @@ describe("FilePreviewPanel", () => {
   beforeEach(async () => {
     await setAppLanguage("en");
     vi.mocked(fetchFilePreview).mockReset();
+    vi.mocked(CodeBlock).mockClear();
   });
 
   it("renders a raster instead of source and reports failed image decoding", async () => {
@@ -137,6 +139,16 @@ describe("FilePreviewPanel", () => {
       loadPreview={vi.fn().mockRejectedValue(new Error("Forbidden"))} />);
     await screen.findByText("Could not preview this file.");
     expect(screen.queryByText("Cached")).not.toBeInTheDocument();
+  });
+
+  it("does not repaint a cache hit twice after its initial synchronous paint", async () => {
+    const cached = { path: "notes.txt", display_path: "notes.txt", language: "text", content: "Cached", truncated: false };
+    const loadPreview = vi.fn().mockResolvedValue(cached);
+    render(<FilePreviewPanel sessionKey="a" path="notes.txt" token="test"
+      initialPreview={cached} loadPreview={loadPreview} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(loadPreview).toHaveBeenCalledOnce();
+    expect(CodeBlock).toHaveBeenCalledOnce();
   });
 
   it("updates translated chrome without refetching the open file", async () => {
