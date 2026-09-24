@@ -164,6 +164,8 @@ export function useModelSettingsActions({
       return;
     }
 
+    if (!Number.isSafeInteger(form.contextWindowTokens) || form.contextWindowTokens <= 0) return;
+
     if (modelPresetCreating) {
       const name = form.modelPreset.trim();
       const provider = form.provider.trim();

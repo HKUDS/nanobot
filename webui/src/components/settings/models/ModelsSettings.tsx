@@ -39,7 +39,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import type { SettingsPayload } from "@/lib/types";
 
@@ -54,8 +53,6 @@ export interface AgentSettingsDraft {
   timezone: string;
   toolHintMaxLength: number;
 }
-
-const CONTEXT_WINDOW_TOKEN_OPTIONS = [65_536, 200_000, 262_144, 500_000, 1_048_576] as const;
 
 function modelPresetValue(payload: SettingsPayload): string {
   return (
@@ -897,9 +894,9 @@ function ModelAdvancedFields({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const contextWindowOptions = Array.from(
-    new Set([...CONTEXT_WINDOW_TOKEN_OPTIONS, contextWindowTokens]),
-  ).sort((left, right) => left - right);
+  const contextWindowInputId = useId();
+  const contextWindowHintId = useId();
+  const contextWindowValid = Number.isSafeInteger(contextWindowTokens) && contextWindowTokens > 0;
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -938,20 +935,26 @@ function ModelAdvancedFields({
         </label>
       </div>
       <div>
-        <span className="mb-2 block text-[12px] font-medium text-muted-foreground">
+        <label htmlFor={contextWindowInputId} className="mb-1.5 block text-[12px] font-medium text-muted-foreground">
           {tx("settings.rows.contextWindow", "Context window")}
-        </span>
-        <SegmentedControl
-          value={String(contextWindowTokens)}
-          animateIndicator={false}
-          options={contextWindowOptions.map((tokens) => ({
-            value: String(tokens),
-            label: formatModelContextWindow(tokens),
-          }))}
-          onChange={(value) =>
-            onChange({ contextWindowTokens: normalizeContextWindowTokens(Number(value)) })
-          }
+        </label>
+        <Input
+          id={contextWindowInputId}
+          type="number"
+          min={1}
+          step={1}
+          required
+          value={Number.isNaN(contextWindowTokens) ? "" : contextWindowTokens}
+          onChange={(event) => onChange({ contextWindowTokens: event.target.valueAsNumber })}
+          aria-invalid={!contextWindowValid}
+          aria-describedby={contextWindowHintId}
+          className="h-9 text-[13px]"
         />
+        <p id={contextWindowHintId} className={cn("mt-1.5 text-[12px]", contextWindowValid ? "text-muted-foreground" : "text-destructive")}>
+          {contextWindowValid
+            ? tx("settings.models.contextWindowHint", "Context budget in tokens.")
+            : tx("settings.models.contextWindowError", "Enter a whole number of tokens greater than zero.")}
+        </p>
       </div>
       <label className="block">
         <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">

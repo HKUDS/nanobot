@@ -1066,7 +1066,7 @@ def test_update_model_configuration_preserves_custom_context_windows(
     assert saved.model_presets["codex"].context_window_tokens == 128000
 
 
-def test_update_context_window_rejects_unknown_values(
+def test_update_context_window_persists_custom_value(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1074,11 +1074,9 @@ def test_update_context_window_rejects_unknown_values(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(
-        WebUISettingsError,
-        match="context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576",
-    ):
-        update_agent_settings({"context_window_tokens": ["128000"]})
+    payload = update_agent_settings({"context_window_tokens": ["128000"]})
+    assert payload["agent"]["context_window_tokens"] == 128000
+    assert load_config(config_path).agents.defaults.context_window_tokens == 128000
 
 
 def test_update_model_configuration_rejects_default_preset(

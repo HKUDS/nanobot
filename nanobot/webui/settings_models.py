@@ -85,7 +85,6 @@ class ModelSettingsPayload(TypedDict):
     providers: list[dict[str, Any]]
 
 
-_CONTEXT_WINDOW_TOKEN_OPTIONS = {65_536, 200_000, 262_144, 500_000, 1_048_576}
 _OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
 _WEBUI_OAUTH_TIMEOUT_S = 600
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
@@ -758,20 +757,6 @@ def provider_models_payload(
     }
 
 
-def _parse_context_window_tokens(value: str | None) -> int | None:
-    if value is None:
-        return None
-    try:
-        parsed = int(value)
-    except ValueError:
-        raise WebUISettingsError("context_window_tokens must be an integer") from None
-    if parsed not in _CONTEXT_WINDOW_TOKEN_OPTIONS:
-        raise WebUISettingsError(
-            "context_window_tokens must be 65536, 200000, 262144, 500000, or 1048576"
-        )
-    return parsed
-
-
 def _parse_positive_int(value: str | None, field: str) -> int | None:
     if value is None:
         return None
@@ -1162,8 +1147,9 @@ def update_agent_model_settings(
             defaults.provider = provider
             changed = True
 
-    context_window_tokens = _parse_context_window_tokens(
-        query_first_alias(query, "context_window_tokens", "contextWindowTokens")
+    context_window_tokens = _parse_positive_int(
+        query_first_alias(query, "context_window_tokens", "contextWindowTokens"),
+        "context_window_tokens",
     )
     if (
         context_window_tokens is not None

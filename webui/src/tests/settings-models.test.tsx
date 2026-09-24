@@ -283,15 +283,46 @@ describe("Settings models", () => {
 
     expect(await screen.findByText("Context window")).toBeInTheDocument();
     expect(screen.getByText("Temperature")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "64K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "200K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "256K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "500K" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "1M" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Context window" })).toHaveValue(200000);
     const reasoningEffort = screen.getByLabelText("Reasoning effort");
     expect(reasoningEffort).toHaveProperty("type", "text");
     fireEvent.change(reasoningEffort, { target: { value: "provider-native-mode" } });
     expect(reasoningEffort).toHaveValue("provider-native-mode");
+  });
+
+  it.each([128000, 131072])("saves an exact custom context budget (%s)", async (tokens) => {
+    const payload = settingsPayload();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    requestMutationMock.mockResolvedValue({
+      ...payload,
+      model_presets: payload.model_presets.map((preset) => ({ ...preset, context_window_tokens: tokens })),
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Context window" }), {
+      target: { value: String(tokens) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", expect.objectContaining({ context_window_tokens: tokens }), expect.any(Number),
+    ));
+    expect(screen.getByRole("spinbutton", { name: "Context window" })).toHaveValue(tokens);
+  });
+
+  it.each(["", "0", "-1", "1.5"])("keeps invalid context input unsaved (%s)", async (value) => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    await togglePresetEditor();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    const input = screen.getByRole("spinbutton", { name: "Context window" });
+    fireEvent.change(input, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription("Enter a whole number of tokens greater than zero.");
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    if (!value) expect(input).toHaveValue(null);
   });
 
   it("opens the preset editor in a dialog and protects the primary preset", async () => {

@@ -465,6 +465,8 @@
       "presetNamePlaceholder": "e.g. Fast writing",
       "advancedOptions": "Advanced options",
       "advancedSummary": "Context {{context}} · Max {{max}} tokens",
+      "contextWindowHint": "Context budget in tokens.",
+      "contextWindowError": "Enter a whole number of tokens greater than zero.",
       "maxTokens": "Max output tokens",
       "temperature": "Temperature",
       "reasoningEffort": "Reasoning effort",
