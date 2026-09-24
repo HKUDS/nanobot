@@ -159,12 +159,12 @@ export function useModelSettingsActions({
       !settings ||
       saving ||
       modelCallOrderSaving ||
-      modelConfigurationSaving
+      modelConfigurationSaving ||
+      !Number.isSafeInteger(form.contextWindowTokens) ||
+      form.contextWindowTokens <= 0
     ) {
       return;
     }
-
-    if (!Number.isSafeInteger(form.contextWindowTokens) || form.contextWindowTokens <= 0) return;
 
     if (modelPresetCreating) {
       const name = form.modelPreset.trim();
@@ -175,7 +175,6 @@ export function useModelSettingsActions({
         !provider ||
         !model ||
         form.maxTokens <= 0 ||
-        form.contextWindowTokens <= 0 ||
         form.temperature < 0 ||
         form.temperature > 2
       ) {

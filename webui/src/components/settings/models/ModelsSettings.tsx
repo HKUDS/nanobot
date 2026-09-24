@@ -898,7 +898,7 @@ function ModelAdvancedFields({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [contextDraft, setContextDraft] = useState<{ text: string; tokens: number } | null>(null);
   const contextWindowInputId = useId();
-  const contextWindowHintId = useId();
+  const contextWindowHintId = `${contextWindowInputId}-hint`;
   const contextWindowValid = Number.isSafeInteger(contextWindowTokens) && contextWindowTokens > 0;
   return (
     <div className="space-y-4">
