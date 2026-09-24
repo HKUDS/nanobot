@@ -56,6 +56,7 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.session_identity import is_webui_session_key
+from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import append_session_message_input
 
 WEBUI_SESSION_METADATA_KEY = "webui"
@@ -705,6 +706,13 @@ class WebuiTurnCoordinator:
         )
         if self.recovery is not None:
             await self.recovery.turn_completed(event.context.session_key)
+        if event.outcome == "completed" and is_webui_session_key(event.context.session_key):
+            turn_id = event.context.metadata.get(WEBUI_TURN_METADATA_KEY)
+            if isinstance(turn_id, str) and turn_id:
+                try:
+                    update_star_prompt("completed", turn_id=turn_id)
+                except (OSError, ValueError, TimeoutError):
+                    logger.warning("Could not persist Star invitation usage")
         self._schedule_title_update_from_event(event)
 
     async def _handle_goal_state_changed(self, event: GoalStateChanged) -> None:

@@ -11,6 +11,7 @@ import {
 import { ArrowRight, ChevronDown, Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
+import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
@@ -2708,6 +2709,7 @@ function Shell({
 
   return (
     <ThemeProvider theme={theme}>
+      <StarPrompt ready={!loading && !sidebarStateLoading} busy={runningChatIds.size > 0} />
       <div
         className={cn(
           "relative h-full w-full overflow-hidden",

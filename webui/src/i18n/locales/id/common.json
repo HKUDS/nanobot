@@ -29,6 +29,14 @@
     "invalid": "Alamat ini tidak dapat dipratinjau.",
     "frame": "Pratinjau situs: {{host}}"
   },
+  "starPrompt": {
+    "title": "Suka menggunakan nanobot?",
+    "description": "Jika nanobot membantu Anda, beri bintang di GitHub. Dukungan Anda menyemangati kami untuk terus mengembangkannya.",
+    "action": "Beri bintang di GitHub",
+    "later": "Tidak sekarang",
+    "never": "Jangan tanyakan lagi",
+    "saveError": "Preferensi tidak dapat disimpan. Silakan coba lagi."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

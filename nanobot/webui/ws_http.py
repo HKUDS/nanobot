@@ -127,6 +127,7 @@ from nanobot.webui.skills_marketplace import (
     search_marketplace_skills,
     trending_marketplace_skills,
 )
+from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import (
     TranscriptReplayStats,
@@ -171,6 +172,8 @@ _WEBUI_MUTATION_PATHS = {
     "skill.install": "/api/webui/skills/install",
     "skill.update": "/api/webui/skills/update",
     "skill.delete": "/api/webui/skills/delete",
+    "star_prompt.claim": "/api/webui/star-prompt/claim",
+    "star_prompt.dismiss": "/api/webui/star-prompt/dismiss",
     "sidebar.update": "/api/webui/sidebar-state/update",
     "workspace.pick_folder": "/api/workspaces/pick-folder",
     "recovery.continue": "/api/webui/recovery/continue",
@@ -521,6 +524,8 @@ class GatewayHTTPHandler:
             "/api/webui/skills/install",
             "/api/webui/skills/update",
             "/api/webui/skills/delete",
+            "/api/webui/star-prompt/claim",
+            "/api/webui/star-prompt/dismiss",
             "/api/webui/sidebar-state/update",
             "/api/workspaces/pick-folder",
         }
@@ -1450,6 +1455,15 @@ class GatewayHTTPHandler:
         m = re.match(r"^/api/webui/skills/([^/]+)$", got)
         if m:
             return self._handle_webui_skill_detail(request, m.group(1))
+        if got in {"/api/webui/star-prompt/claim", "/api/webui/star-prompt/dismiss"}:
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            try:
+                show = update_star_prompt("claim" if got.endswith("/claim") else "dismiss")
+            except (OSError, ValueError, TimeoutError):
+                self._log.exception("failed to persist star invitation state")
+                return _http_error(500, "failed to save reminder preference")
+            return _http_json_response({"show": show})
         if got == "/api/webui/sidebar-state":
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":

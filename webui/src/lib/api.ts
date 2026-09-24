@@ -1311,3 +1311,10 @@ export async function updateRuntimeConfigSettings(
 ): Promise<SettingsPayload> {
   return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
 }
+
+export function starPromptAction(
+  transport: WebUIMutationTransport,
+  action: "claim" | "dismiss",
+): Promise<{ show: boolean }> {
+  return mutation<{ show: boolean }>(transport, `star_prompt.${action}`);
+}

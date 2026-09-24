@@ -4204,3 +4204,33 @@ def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_star_prompt_requires_authenticated_mutation_and_persists_dismissal(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nanobot.webui.star_prompt import StarPromptState
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    state_path = tmp_path / "webui" / "star-prompt.json"
+    state_path.parent.mkdir()
+    state_path.write_text(StarPromptState(
+        completed_replies=10, active_days=["2026-09-20", "2026-09-21", "2026-09-22"]
+    ).model_dump_json(), encoding="utf-8")
+    channel = _ch(bus, port=29912)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        raw = await _http_get("http://127.0.0.1:29912/api/webui/star-prompt/claim")
+        assert raw.status_code in {401, 405}
+        first = await _webui_mutate(channel, "star_prompt.claim", {})
+        assert first.status_code == 200
+        assert first.json() == {"show": True}
+        second = await _webui_mutate(channel, "star_prompt.claim", {})
+        assert second.json() == {"show": False}
+        dismissed = await _webui_mutate(channel, "star_prompt.dismiss", {})
+        assert dismissed.status_code == 200
+        assert StarPromptState.model_validate_json(state_path.read_text()).dismissed_forever
+    finally:
+        await channel.stop()
+        await server_task

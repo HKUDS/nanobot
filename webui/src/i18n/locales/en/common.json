@@ -29,6 +29,14 @@
     "invalid": "This address cannot be previewed.",
     "frame": "Website preview: {{host}}"
   },
+  "starPrompt": {
+    "title": "Enjoying nanobot?",
+    "description": "If nanobot has been helpful, give us a star on GitHub. Your support keeps us going.",
+    "action": "Star on GitHub",
+    "later": "Not now",
+    "never": "Don’t ask again",
+    "saveError": "Could not save your preference. Please try again."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

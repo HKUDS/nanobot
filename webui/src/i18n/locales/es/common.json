@@ -29,6 +29,14 @@
     "invalid": "No se puede previsualizar esta dirección.",
     "frame": "Vista previa web: {{host}}"
   },
+  "starPrompt": {
+    "title": "¿Te gusta nanobot?",
+    "description": "Si nanobot te resulta útil, dale una estrella en GitHub. Tu apoyo nos anima a seguir desarrollándolo.",
+    "action": "Dar una estrella en GitHub",
+    "later": "Ahora no",
+    "never": "No volver a preguntar",
+    "saveError": "No se pudo guardar tu preferencia. Inténtalo de nuevo."
+  },
   "app": {
     "brand": "nanobot",
     "loading": {

@@ -3,7 +3,6 @@ import {
   ArrowUpCircle,
   Bot,
   BookOpen,
-  Github,
   MessageCircle,
   Check,
   ChevronRight,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { StarLink } from "@/components/StarPrompt";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
@@ -138,7 +138,6 @@ export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
   const { t } = useTranslation();
   const links = [
     { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
-    { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
     { key: "reportIssue", icon: MessageCircle, href: "https://github.com/HKUDS/nanobot/issues" },
   ];
   return (
@@ -147,6 +146,7 @@ export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
         <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
         <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
         <VersionCheckRow currentVersion={currentVersion} />
+        <StarLink />
       </div>
       <SettingsGroup>
         {links.map(({ key, icon: Icon, href }) => (
