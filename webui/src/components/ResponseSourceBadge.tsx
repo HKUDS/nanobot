@@ -31,7 +31,7 @@ export function FallbackResponseSources({
 }
 
 /** A persisted invocation identity; deliberately independent of live settings. */
-export function ResponseSourceBadge({
+function ResponseSourceBadge({
   source,
   className,
 }: {

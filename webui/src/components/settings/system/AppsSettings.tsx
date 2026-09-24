@@ -910,7 +910,7 @@ type AppsActionButtonProps = Omit<
   children?: ReactNode;
 };
 
-export const AppsActionButton = forwardRef<HTMLButtonElement, AppsActionButtonProps>(
+const AppsActionButton = forwardRef<HTMLButtonElement, AppsActionButtonProps>(
   function AppsActionButton({
     ariaLabel,
     visibleLabel,

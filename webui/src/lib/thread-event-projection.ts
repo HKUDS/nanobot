@@ -55,14 +55,14 @@ export function turnFieldsFromEvent(
   return fields;
 }
 
-export function matchesTurn(message: UIMessage, turn: UIMessageTurnFields): boolean {
+function matchesTurn(message: UIMessage, turn: UIMessageTurnFields): boolean {
   return !turn.turnId || !message.turnId || message.turnId === turn.turnId;
 }
 
 /** Find a still-open streamed assistant turn. Closed stream segments stay visible
  * as streaming until ``turn_end`` for visual continuity, but they must not
  * receive later delta segments. */
-export function findStreamingAssistantIndex(
+function findStreamingAssistantIndex(
   prev: UIMessage[],
   closedStreamIds: ReadonlySet<string>,
   turn: UIMessageTurnFields = {},
@@ -85,7 +85,7 @@ export function findStreamingAssistantIndex(
  * Find the most recent assistant placeholder that an incoming answer
  * delta should adopt instead of spawning a parallel row.
  */
-export function findActiveAssistantPlaceholderIndex(
+function findActiveAssistantPlaceholderIndex(
   prev: UIMessage[],
   turn: UIMessageTurnFields = {},
 ): number | null {
@@ -98,7 +98,7 @@ export function findActiveAssistantPlaceholderIndex(
   return prev.length - 1;
 }
 
-export function replaceMessageAt(
+function replaceMessageAt(
   prev: UIMessage[],
   index: number,
   message: UIMessage,
@@ -110,7 +110,7 @@ export function replaceMessageAt(
 
 /** Close the active reasoning stream segment. ``now`` is supplied by the caller
  * so the projection remains deterministic for replay and fixture tests. */
-export function closeReasoningStream(prev: UIMessage[], now?: number): UIMessage[] {
+function closeReasoningStream(prev: UIMessage[], now?: number): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i];
     if (!candidate.reasoningStreaming) continue;
@@ -131,7 +131,7 @@ export function closeReasoningStream(prev: UIMessage[], now?: number): UIMessage
   return prev;
 }
 
-export function isReasoningOnlyPlaceholder(message: UIMessage): boolean {
+function isReasoningOnlyPlaceholder(message: UIMessage): boolean {
   return (
     message.role === "assistant"
     && message.kind !== "trace"
@@ -142,7 +142,7 @@ export function isReasoningOnlyPlaceholder(message: UIMessage): boolean {
   );
 }
 
-export function stampLastAssistantCompletion(
+function stampLastAssistantCompletion(
   prev: UIMessage[],
   completion: Pick<
     UIMessage,
@@ -197,7 +197,7 @@ function hasFileEditForToolEvent(messages: UIMessage[], event: ToolProgressEvent
   );
 }
 
-export function filterCoveredFileEditToolEvents(
+function filterCoveredFileEditToolEvents(
   messages: UIMessage[],
   events: ToolProgressEvent[],
 ): ToolProgressEvent[] {
@@ -254,7 +254,7 @@ function traceMessageIsEmpty(message: UIMessage): boolean {
   );
 }
 
-export function stripCoveredFileEditToolHintsFromMessages(
+function stripCoveredFileEditToolHintsFromMessages(
   messages: UIMessage[],
   edits: UIFileEdit[],
   turn: UIMessageTurnFields,
@@ -299,7 +299,7 @@ function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
   return normalized;
 }
 
-export function mergeFileEdits(
+function mergeFileEdits(
   existing: UIFileEdit[] | undefined,
   incoming: UIFileEdit[],
 ): UIFileEdit[] {
@@ -330,7 +330,7 @@ export function mergeFileEdits(
   return next;
 }
 
-export function findFileEditTraceIndex(
+function findFileEditTraceIndex(
   prev: UIMessage[],
   segmentId: string | null,
   incoming: UIFileEdit[],
