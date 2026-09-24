@@ -1624,31 +1624,49 @@ def test_deepseek_coerces_list_content_to_string() -> None:
     assert "world" in kw["messages"][0]["content"]
 
 
-def test_deepseek_vision_preserves_multimodal_content() -> None:
-    """DeepSeek's vision model requires OpenAI-compatible content blocks."""
+@pytest.mark.parametrize("model", [
+    "deepseek-flash",
+    "deepseek-v4-flash-vision-exp",
+])
+@pytest.mark.parametrize("prefixed", [False, True])
+@pytest.mark.parametrize("with_text", [False, True])
+@pytest.mark.parametrize("responses", [False, True])
+def test_deepseek_vision_preserves_multimodal_content(
+    model: str, prefixed: bool, with_text: bool, responses: bool,
+) -> None:
+    """DeepSeek vision models must preserve images on both API surfaces."""
+    if prefixed:
+        model = f"deepseek/{model}"
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         p = OpenAICompatProvider(
             api_key="k",
-            default_model="deepseek-v4-flash-vision-exp",
+            default_model=model,
             spec=spec,
         )
-    content = [
-        {"type": "text", "text": "describe this image"},
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
-    ]
+    urls = ["data:image/png;base64,AA==", "https://example.com/image.png"]
+    content = [{"type": "text", "text": "describe these images"}] if with_text else []
+    content.extend({"type": "image_url", "image_url": {"url": url}} for url in urls)
 
-    kw = p._build_kwargs(
+    build_request = p._build_responses_body if responses else p._build_kwargs
+    kw = build_request(
         messages=[{"role": "user", "content": content}],
         tools=None,
-        model="deepseek-v4-flash-vision-exp",
+        model=model,
         max_tokens=1024,
         temperature=0.7,
         reasoning_effort=None,
         tool_choice=None,
     )
 
-    assert kw["messages"][0]["content"] == content
+    if responses:
+        expected = [{"type": "input_text", "text": "describe these images"}] if with_text else []
+        expected.extend(
+            {"type": "input_image", "image_url": url, "detail": "auto"} for url in urls
+        )
+        assert kw["input"] == [{"role": "user", "content": expected}]
+    else:
+        assert kw["messages"][0]["content"] == content
 
 
 def test_non_deepseek_keeps_list_content() -> None:
