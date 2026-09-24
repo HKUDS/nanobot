@@ -34,46 +34,23 @@ WebUI **Settings → Models** or the CLI setup wizard, then prints the command t
 
 ## Session storage overlaps the workspace
 
-If startup reports `session storage must be outside the agent workspace`, compare the
-printed Config, Workspace, and Sessions paths. Sessions live at
-`<config-dir>/sessions/<workspace-id>/`; that storage root must not equal the workspace
-or be inside it. This keeps internal conversation files out of the workspace exposed
-to agent tools. Moving files outside the workspace is not a substitute for restricting
-tool access.
+Sessions live at `<config-dir>/sessions/<workspace-id>/`, outside the agent workspace.
+If startup reports a conflict, compare the printed paths. A valid layout is
+`bot/config.json`, `bot/sessions/`, and `bot/workspace/`.
 
-`agents.defaults.workspace` sets the default workspace. `--workspace` takes precedence
-for the selected command but does not change the session storage root. For `agent` and
-`gateway` this override is temporary; `webui --workspace` saves the workspace setting
-as part of WebUI setup.
+`--workspace` overrides `agents.defaults.workspace` without moving sessions. The override
+is temporary for `agent` and `gateway`; `webui --workspace` saves it to the config.
 
-For an existing instance, stop its processes and back up both the workspace and config
-directory. Keep the workspace at its current path, including `.nanobot/workspace-id`,
-memory, and skills. Move the config file and its runtime data (including the entire
-`sessions` directory) to a separate directory outside that workspace. Update `--config`
-in your launch command or service. Check any relative paths in the config before restarting.
-Moving only `config.json` leaves the existing session history behind.
+To fix an existing instance:
 
-For example, these paths keep runtime data separate from an existing workspace:
+1. Stop the instance and back up its config directory and workspace.
+2. Keep the workspace and `.nanobot/workspace-id` in place. Move the config file **and its
+   runtime data, including sessions**, to a directory outside the workspace.
+3. Update `--config` in your launch command or service, check relative paths, and restart.
 
-```text
-bots/
-  bot-a-data/
-    config.json
-    sessions/
-  bot-a-workspace/
-    .nanobot/workspace-id
-    memory/
-    skills/
-```
-
-```bash
-nanobot gateway --config /path/to/bots/bot-a-data/config.json --workspace /path/to/bots/bot-a-workspace
-```
-
-For a new instance, `bot/config.json`, `bot/sessions/`, and `bot/workspace/` also work.
-Changing an existing instance to a new nested workspace requires moving its workspace
-contents, including memory, skills, and `.nanobot/workspace-id`; merely changing the
-setting can start an empty workspace with a different session identity.
+Moving only the config leaves history behind. Choosing a new workspace without moving
+its contents (including memory, skills, and `.nanobot/workspace-id`) can start an empty
+workspace with a different session identity.
 
 ## How to Read `nanobot status`
 
