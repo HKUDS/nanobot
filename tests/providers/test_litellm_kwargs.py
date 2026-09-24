@@ -1570,6 +1570,60 @@ def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit
     assert kw["messages"][-1]["content"] == "thanks"
 
 
+@pytest.mark.parametrize("model", ["deepseek-flash", "deepseek/deepseek-flash"])
+@pytest.mark.parametrize("effort", [None, "high", "none", "minimal"])
+@pytest.mark.parametrize("history_reasoning", [None, "", "Existing reasoning."])
+def test_deepseek_flash_backfills_missing_tool_history_reasoning(
+    model: str, effort: str | None, history_reasoning: str | None,
+) -> None:
+    """Default thinking rejects tool-call history without reasoning_content."""
+    provider = OpenAICompatProvider(
+        api_key="k", default_model=model, spec=find_by_name("deepseek"),
+    )
+    assistant = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{
+            "id": "call_read_file", "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path": "example.txt"}'},
+        }],
+    }
+    if history_reasoning is not None:
+        assistant["reasoning_content"] = history_reasoning
+    messages = [
+        {"role": "user", "content": "Read example.txt and tell me its contents."},
+        assistant,
+        {"role": "tool", "tool_call_id": "call_read_file", "content": "hello world"},
+    ]
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "read_file", "description": "Read a file.",
+            "parameters": {
+                "type": "object", "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        },
+    }]
+    kwargs = provider._build_kwargs(
+        messages=messages, tools=tools, model=model,
+        max_tokens=128, temperature=0.7, reasoning_effort=effort, tool_choice=None,
+    )
+    sent_assistant = kwargs["messages"][1]
+    if history_reasoning is not None:
+        assert sent_assistant["reasoning_content"] == history_reasoning
+    elif effort in ("none", "minimal"):
+        assert "reasoning_content" not in sent_assistant
+    else:
+        assert sent_assistant["reasoning_content"] == ""
+    assert sent_assistant["tool_calls"] == assistant["tool_calls"]
+    assert kwargs["messages"][2] == messages[2]
+    assert ("reasoning_content" in assistant) == (history_reasoning is not None)
+    if effort is None:
+        assert "reasoning_effort" not in kwargs
+        assert "extra_body" not in kwargs
+
+
 def test_deepseek_chat_keeps_tool_history_when_effort_implicit() -> None:
     """Non-thinking deepseek-chat must keep history untouched and must NOT
     receive backfilled reasoning_content (#3554, #3584)."""

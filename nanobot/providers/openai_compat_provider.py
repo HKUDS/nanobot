@@ -1073,7 +1073,7 @@ class OpenAICompatProvider(LLMProvider):
 
         # Backfill reasoning_content="" on assistants missing it: DeepSeek
         # thinking mode rejects history otherwise (#3554, #3584); "" reads
-        # as "no thinking that turn". DeepSeek-V4/reasoner reason natively,
+        # as "no thinking that turn". DeepSeek Flash/V4/reasoner reason natively,
         # so backfill even without explicit reasoning_effort.
         explicit_thinking = (
             reasoning_effort is not None
@@ -1087,7 +1087,10 @@ class OpenAICompatProvider(LLMProvider):
             spec is not None
             and spec.name == "deepseek"
             and semantic_effort not in ("none", "minimal", "minimum")
-            and any(t in model_name.lower() for t in ("deepseek-v4", "deepseek-reasoner"))
+            and (
+                slug == "deepseek-flash"
+                or any(t in model_name.lower() for t in ("deepseek-v4", "deepseek-reasoner"))
+            )
         )
         if explicit_thinking or implicit_deepseek_thinking:
             for msg in kwargs["messages"]:
