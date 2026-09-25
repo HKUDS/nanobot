@@ -1540,7 +1540,9 @@ def _compaction_message(
         channel="discord",
         chat_id=chat_id,
         content=content,
-        event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase),  # type: ignore[arg-type]
+        event=ContextCompactionEvent(
+            compaction_id=compaction_id, phase=phase, notify=True,
+        ),  # type: ignore[arg-type]
     )
 
 
@@ -1573,6 +1575,19 @@ async def test_compaction_outcome_edits_the_start_notice_in_place() -> None:
     assert [payload["content"] for payload in target.sent_payloads] == ["Compressing context…"]
     assert target.sent_messages[0].content == "Context compacted."
     assert owner._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_automatic_compaction_is_received_but_not_sent() -> None:
+    target = _FakeChannel(channel_id=123)
+    _owner, client = _client_with_channel(target)
+
+    await client.send_outbound(OutboundMessage(
+        channel="discord", chat_id="123", content="Compressing context…",
+        event=ContextCompactionEvent(compaction_id="c1", phase="started"),
+    ))
+
+    assert target.sent_payloads == []
 
 
 @pytest.mark.asyncio

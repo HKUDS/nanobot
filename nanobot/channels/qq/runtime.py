@@ -311,7 +311,7 @@ class QQChannel(BaseChannel):
         # (#5784); showCompactionNotices: true restores them.
         if (
             isinstance(msg.event, ContextCompactionEvent)
-            and not self.config.show_compaction_notices
+            and (not msg.event.notify or not self.config.show_compaction_notices)
         ):
             return
 

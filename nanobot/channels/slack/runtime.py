@@ -20,6 +20,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import is_approved
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -201,6 +202,8 @@ class SlackChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         if not self._web_client:
             self.logger.warning("client not running")
             return
