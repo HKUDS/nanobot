@@ -14,6 +14,28 @@ import { useClient } from "@/providers/ClientProvider";
 
 import { linearMemberAccessStore } from "./member-access-store";
 
+function LinearMemberAvatar({ name, url }: { name: string; url?: string | null }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  let source: string | null = null;
+  try {
+    const parsed = new URL(url ?? "");
+    // Keep image requests on Linear's CDNs rather than arbitrary profile URLs.
+    // Unknown sources fall back to initials.
+    if (parsed.protocol === "https:" && !parsed.username && !parsed.password
+      && (!parsed.port || parsed.port === "443")
+      && ["public.linear.app", "uploads.linear.app"].includes(parsed.hostname)) {
+      source = parsed.href;
+    }
+  } catch { /* Missing or malformed avatars use the same fallback. */ }
+  return <span aria-hidden className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-xs font-medium text-muted-foreground">
+    {name.slice(0, 2).toLocaleUpperCase()}
+    {source && source !== failedUrl ? <img src={source} alt="" width={32} height={32}
+      loading="lazy" decoding="async" referrerPolicy="no-referrer"
+      className="absolute inset-0 h-full w-full object-cover"
+      onError={() => setFailedUrl(source)} /> : null}
+  </span>;
+}
+
 export function LinearMemberAccess({ organizationId, configScope = "", disabled = false }: {
   organizationId: string;
   configScope?: string;
@@ -102,9 +124,7 @@ export function LinearMemberAccess({ organizationId, configScope = "", disabled 
               const statusId = `${panelId}-${member.id}-status`;
               return <li key={member.id}>
                 <SettingsRow title={<div className="flex min-w-0 items-center gap-3">
-                  <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                    {member.name.slice(0, 2).toLocaleUpperCase()}
-                  </span>
+                  <LinearMemberAvatar name={member.name} url={member.avatar_url} />
                   <div className="min-w-0">
                     <p className="truncate" title={member.id}>{member.name}</p>
                     <div className="flex flex-wrap items-center gap-x-2 text-[12px] font-normal text-muted-foreground">

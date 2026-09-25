@@ -20,6 +20,7 @@ export interface LinearMember {
   id: string;
   name: string;
   teams: string[];
+  avatar_url?: string | null;
   allowed: boolean;
 }
 

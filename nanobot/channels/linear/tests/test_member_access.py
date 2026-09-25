@@ -74,7 +74,9 @@ async def test_directory_paginates_teams_and_members_filters_apps_and_deduplicat
         if "NanobotMemberTeams" in body["query"]:
             teams = connection([{"id": "t1", "name": "One"}], "team-next") if not variables["after"] else connection([{"id": "t2", "name": "Two"}])
             return httpx.Response(200, json={"data": {"teams": teams}})
-        human = {"id": "u1", "name": "Yongru", "active": True, "app": False}
+        assert "avatarUrl" in body["query"]
+        human = {"id": "u1", "name": "Yongru", "active": True, "app": False,
+                 "avatarUrl": "https://public.linear.app/u1/avatar"}
         if variables["team"] == "t1" and not variables["after"]:
             members = connection([human, {**human, "id": "bot", "app": True}], "member-next")
         elif variables["after"]:
@@ -85,7 +87,10 @@ async def test_directory_paginates_teams_and_members_filters_apps_and_deduplicat
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         client = LinearClient(_config(), state, http)
-        assert await client.list_members("org-1") == [{"id": "u1", "name": "Yongru", "teams": ["One", "Two"]}]
+        assert await client.list_members("org-1") == [{
+            "id": "u1", "name": "Yongru", "teams": ["One", "Two"],
+            "avatar_url": "https://public.linear.app/u1/avatar",
+        }]
     assert len(calls) == 5
 
 
@@ -97,8 +102,25 @@ async def test_filtered_lookup_sends_user_filter(tmp_path: Path) -> None:
         {"team": {"members": connection([{"id": "u1", "name": "Yongru", "active": True, "app": False}])}},
     ])
     try:
-        assert len(await client.list_members("org-1", user_id="u1")) == 1
+        members = await client.list_members("org-1", user_id="u1")
+        assert len(members) == 1
+        assert members[0]["avatar_url"] is None
         assert client.graphql.call_args.args[2]["filter"] == {"id": {"eq": "u1"}}
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize("avatar", [None, 42, {"url": "unexpected"}])
+async def test_directory_ignores_missing_or_invalid_avatars(tmp_path: Path, avatar: Any) -> None:
+    client = LinearClient(_config(), LinearStateStore(tmp_path / "state.sqlite3"))
+    client.graphql = AsyncMock(side_effect=[
+        {"teams": connection([{"id": "t1", "name": "Team"}])},
+        {"team": {"members": connection([
+            {"id": "u1", "name": "Yongru", "active": True, "app": False, "avatarUrl": avatar},
+        ])}},
+    ])
+    try:
+        assert (await client.list_members("org-1"))[0]["avatar_url"] is None
     finally:
         await client.close()
 
@@ -137,7 +159,8 @@ async def test_member_management_reads_effective_access_and_saves_without_pairin
     state = LinearStateStore(tmp_path / "state.sqlite3")
     state.save_installation(_installation())
     fake = AsyncMock()
-    fake.list_members.return_value = [{"id": "user-1", "name": "Yongru", "teams": ["Team"]}]
+    fake.list_members.return_value = [{"id": "user-1", "name": "Yongru", "teams": ["Team"],
+                                       "avatar_url": "https://public.linear.app/user-1/avatar"}]
     monkeypatch.setattr(linear_connect, "_load_linear_config", lambda: config)
     monkeypatch.setattr(linear_connect, "LinearStateStore", lambda: state)
     monkeypatch.setattr(linear_connect, "LinearClient", lambda *_args: fake)
@@ -148,6 +171,7 @@ async def test_member_management_reads_effective_access_and_saves_without_pairin
         result = await store.handle("start", {**params, "operation": ["member_access"], "user_id": ["user-1"], "allowed": [value]})
         assert result["status"] == "member_access_saved"
         assert result["members"][0]["allowed"] is (value == "true")
+        assert result["members"][0]["avatar_url"] == "https://public.linear.app/user-1/avatar"
     assert not member_allowed(config, state, "org-1", "user-1")
     fake.close.assert_awaited()
 

@@ -49,6 +49,41 @@ async function openMembers() {
 }
 
 describe("Linear member access", () => {
+  it("renders Linear avatars without referrers and falls back when an image fails", async () => {
+    const avatar = "https://public.linear.app/u2/avatar";
+    requestMutation.mockResolvedValue({ ...roster, members: roster.members.map(member => ({
+      ...member, avatar_url: member.id === "u2" ? avatar : null,
+    })) });
+    const view = await openMembers();
+    const image = view.container.querySelector("img");
+    expect(image).toHaveAttribute("src", avatar);
+    expect(image).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(image).toHaveAttribute("loading", "lazy");
+    expect(image).toHaveAttribute("width", "32");
+    fireEvent.error(image!);
+    expect(view.container.querySelector("img")).toBeNull();
+    expect(screen.getByText("YO")).toBeVisible();
+    expect(yongru()).toBeEnabled();
+    requestMutation.mockResolvedValueOnce({ ...roster, members: roster.members.map(member => ({
+      ...member, avatar_url: member.id === "u2" ? "https://uploads.linear.app/u2/new-avatar" : null,
+    })) });
+    refresh();
+    await waitFor(() => expect(view.container.querySelector("img"))
+      .toHaveAttribute("src", "https://uploads.linear.app/u2/new-avatar"));
+  });
+
+  it.each([
+    "javascript:alert(1)", "http://public.linear.app/u2/avatar", "https://127.0.0.1/avatar",
+    "https://public.linear.app.evil.example/avatar", "https://public.linear.app@evil.example/avatar",
+    "https://public.linear.app:8443/avatar", "https://user:secret@public.linear.app/avatar",
+    "data:image/svg+xml,<svg/>",
+  ])("uses initials for an untrusted avatar URL: %s", async (avatar_url) => {
+    requestMutation.mockResolvedValue({ ...roster, members: roster.members.map(member => ({ ...member, avatar_url })) });
+    const view = await openMembers();
+    expect(view.container.querySelector("img")).toBeNull();
+    expect(xubin()).toBeEnabled();
+  });
+
   it("shows permissions, a summary and short guidance; details are available on demand", async () => {
     await openMembers();
     expect(yongru()).not.toBeChecked();

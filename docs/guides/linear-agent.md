@@ -239,6 +239,9 @@ agent without copying a pairing code or authorizing another OAuth installation.
 The list contains active human members of teams this app can access. It does not
 grant access to additional Linear teams or to the nanobot admin UI. Names are for
 display; permissions use stable user IDs scoped to the OAuth client and workspace.
+Profile images come from Linear's `avatarUrl` field and load directly from its
+`public.linear.app` or `uploads.linear.app` CDN without a referrer. Missing,
+unsupported or failed images fall back to initials; no extra account linking is needed.
 Use **Refresh members** to refresh the directory and effective permission state.
 The UI prefetches on hover or keyboard focus and keeps visited lists in memory,
 scoped to this gateway, admin login, app configuration and workspace. Lists older

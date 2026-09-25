@@ -6,7 +6,7 @@ import asyncio
 import mimetypes
 import time
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, NotRequired, TypedDict, cast
 
 import httpx
 
@@ -26,6 +26,7 @@ class LinearMember(TypedDict):
     id: str
     name: str
     teams: list[str]
+    avatar_url: NotRequired[str | None]
 
 
 class LinearApiError(RuntimeError):
@@ -141,7 +142,7 @@ class LinearClient:
                 """query NanobotTeamMembers($team: String!, $after: String, $filter: UserFilter) {
                   team(id: $team) {
                     members(first: 50, after: $after, filter: $filter) {
-                      nodes { id name active app }
+                      nodes { id name active app avatarUrl }
                       pageInfo { hasNextPage endCursor }
                     }
                   }
@@ -159,6 +160,8 @@ class LinearClient:
                 if user_id is not None and member_id != user_id:
                     raise LinearApiError("Linear returned an unexpected member identity")
                 member = members.setdefault(member_id, {"id": member_id, "name": name, "teams": []})
+                avatar_url = node.get("avatarUrl")
+                member["avatar_url"] = avatar_url if isinstance(avatar_url, str) else None
                 if team_name not in member["teams"]:
                     member["teams"].append(team_name)
         return sorted(members.values(), key=lambda member: (member["name"].casefold(), member["id"]))
