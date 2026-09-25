@@ -1050,10 +1050,12 @@ export function ThreadComposer({
   const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
     useAttachedImages({ ingressLimits });
   const restoredDraftAttachments = useRef(false);
+  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.files.length);
   useLayoutEffect(() => {
     if (restoredDraftAttachments.current) return;
     restoredDraftAttachments.current = true;
     if (initialDraft?.files.length) enqueue(initialDraft.files);
+    setDraftAttachmentsReady(true);
   }, [enqueue, initialDraft]);
 
   const formatRejection = useCallback(
@@ -1349,7 +1351,7 @@ export function ThreadComposer({
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
   const draftText = composerMentionText(mentionInput.segments).raw;
   useLayoutEffect(() => {
-    if (!draftKey || !draftStore) return;
+    if (!draftKey || !draftStore || !draftAttachmentsReady) return;
     if (!draftText && images.length === 0 && !quotedContext) {
       draftStore.delete(draftKey);
       return;
@@ -1360,7 +1362,7 @@ export function ThreadComposer({
       sessionMentions: selectedSessionMentions,
       quotedContext,
     }, persistDraft);
-  }, [draftKey, draftStore, images, persistDraft, quotedContext, selectedSessionMentions, draftText]);
+  }, [draftAttachmentsReady, draftKey, draftStore, images, persistDraft, quotedContext, selectedSessionMentions, draftText]);
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
         value,

@@ -65,7 +65,16 @@ export class ComposerDraftStore extends Map<string, ComposerDraft> {
   }
 
   override set(key: string, draft: ComposerDraft, persist = false): this {
-    super.set(key, draft);
+    const previous = super.get(key);
+    const unchanged = previous
+      && previous.text === draft.text
+      && previous.quotedContext === draft.quotedContext
+      && previous.files.length === draft.files.length
+      && previous.files.every((file, index) => file === draft.files[index])
+      && previous.sessionMentions.length === draft.sessionMentions.length
+      && previous.sessionMentions.every((mention, index) => mention === draft.sessionMentions[index]);
+    // Restoring a composer is not an edit. Pending sends retain this identity across mounts.
+    super.set(key, unchanged ? previous : draft);
     if (!persist) return this;
     if (!draft.text && !draft.quotedContext) {
       removeStoredDraft(key);

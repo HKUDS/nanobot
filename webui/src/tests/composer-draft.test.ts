@@ -26,6 +26,19 @@ describe("composer draft storage", () => {
     expect(localStorage.getItem(storageKey)).not.toContain("files");
   });
 
+  it("keeps the identity of an unchanged restored draft but advances it for edits", () => {
+    const store = new ComposerDraftStore();
+    store.set(key, draft, true);
+    store.set(key, { ...draft, files: [...draft.files], sessionMentions: [...draft.sessionMentions] }, true);
+    expect(store.get(key)).toBe(draft);
+    const edited = { ...draft, text: "edited draft" };
+    store.set(key, edited, true);
+    expect(store.get(key)).toBe(edited);
+    const reverted = { ...draft };
+    store.set(key, reverted, true);
+    expect(store.get(key)).toBe(reverted);
+  });
+
   it("requires explicit opt-in for both saving and restoring", () => {
     const store = new ComposerDraftStore();
     store.set(key, draft);

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import type { ComposerDraftStore } from "@/lib/composer-draft";
+import { ComposerDraftStore } from "@/lib/composer-draft";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
 
@@ -3555,7 +3555,7 @@ describe("ThreadComposer", () => {
 
 describe("session composer drafts", () => {
   it("restores independent drafts across session switches and remounts", () => {
-    const draftStore: ComposerDraftStore = new Map();
+    const draftStore = new ComposerDraftStore();
     const composer = (key: string) => (
       <ThreadComposer key={key} draftKey={key} draftStore={draftStore} onSend={vi.fn()} />
     );
@@ -3574,7 +3574,7 @@ describe("session composer drafts", () => {
   });
 
   it("retains in-progress IME text without carrying composition into another chat", () => {
-    const draftStore: ComposerDraftStore = new Map();
+    const draftStore = new ComposerDraftStore();
     const composer = (key: string) => (
       <ThreadComposer key={key} draftKey={key} draftStore={draftStore} onSend={vi.fn()} cliApps={CLI_APPS} />
     );
@@ -3590,7 +3590,7 @@ describe("session composer drafts", () => {
   });
 
   it.each([true, false])("clears only accepted sends (accepted=%s)", (accepted) => {
-    const draftStore: ComposerDraftStore = new Map();
+    const draftStore = new ComposerDraftStore();
     const composer = (key: string) => (
       <ThreadComposer key={key} draftKey={key} draftStore={draftStore} onSend={() => accepted} />
     );
@@ -3602,8 +3602,33 @@ describe("session composer drafts", () => {
     expect(screen.getByLabelText("Message input")).toHaveValue(accepted ? "" : "send me");
   });
 
+  it.each([false, true])("clears an accepted draft after restoring it unchanged (attachment=%s)", async (attachment) => {
+    mockBlobUrls();
+    const draftStore = new ComposerDraftStore();
+    let resolveSend!: (accepted: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => { resolveSend = resolve; }));
+    const composer = (key: string) => (
+      <ThreadComposer key={key} draftKey={key} draftStore={draftStore} persistDraft onSend={onSend} />
+    );
+    const view = render(composer("unchanged-draft"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "send once" } });
+    if (attachment) {
+      const file = new File(["image"], "draft.png", { type: "image/png" });
+      fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+      await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled());
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    view.rerender(composer("other-draft"));
+    view.rerender(composer("unchanged-draft"));
+    expect(screen.getByRole("textbox")).toHaveValue("send once");
+    if (attachment) await screen.findByText("draft.png");
+    await act(async () => resolveSend(true));
+    view.unmount();
+    expect(new ComposerDraftStore().get("unchanged-draft", true)).toBeUndefined();
+  });
+
   it("does not delete a newer draft when an earlier async send completes", async () => {
-    const draftStore: ComposerDraftStore = new Map();
+    const draftStore = new ComposerDraftStore();
     let resolveSend!: (accepted: boolean) => void;
     const onSend = vi.fn(() => new Promise<boolean>((resolve) => { resolveSend = resolve; }));
     const composer = (key: string) => (
@@ -3623,7 +3648,7 @@ describe("session composer drafts", () => {
 
   it("restores attachments and quoted context with their original session", async () => {
     mockBlobUrls();
-    const draftStore: ComposerDraftStore = new Map();
+    const draftStore = new ComposerDraftStore();
     const onSend = vi.fn();
     const composer = (key: string, quote = draftStore.get(key)?.quotedContext) => (
       <ThreadComposer key={key} draftKey={key} draftStore={draftStore} quotedContext={quote} onSend={onSend} />
