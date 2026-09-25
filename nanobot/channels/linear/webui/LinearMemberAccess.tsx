@@ -1,142 +1,138 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { Check, ChevronDown, Loader2, RefreshCw } from "lucide-react";
+import { useEffect, useId, useState, useSyncExternalStore } from "react";
+import { Check, ChevronDown, Info, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
 import { ToggleButton } from "@/components/settings/ToggleButton";
+import { SETTINGS_SEARCH_INPUT_CLASS, SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Button } from "@/components/ui/button";
+import { DisclosureContent } from "@/components/ui/disclosure";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-import { manageLinearMembers } from "./api";
-import type { LinearMember } from "./types";
+import { linearMemberAccessStore } from "./member-access-store";
 
-export function LinearMemberAccess({ organizationId, disabled = false }: {
+export function LinearMemberAccess({ organizationId, configScope = "", disabled = false }: {
   organizationId: string;
+  configScope?: string;
   disabled?: boolean;
 }) {
-  const { client } = useClient();
+  const { client, token } = useClient();
   const { t } = useTranslation();
   const tx = channelTranslator(t, "linear");
   const panelId = useId();
   const [expanded, setExpanded] = useState(false);
-  const [members, setMembers] = useState<LinearMember[]>([]);
   const [search, setSearch] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [allowAll, setAllowAll] = useState(false);
-  const generation = useRef(0);
-  useEffect(() => () => { generation.current += 1; }, [organizationId]);
+  const store = linearMemberAccessStore(client, token, configScope, organizationId);
+  const { payload, loading, error, saves } = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const members = payload?.members ?? [];
+  const saving = Object.values(saves).some((save) => save.status === "saving");
 
-  const refresh = async () => {
-    const request = ++generation.current;
-    setBusy(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const payload = await manageLinearMembers(client, { operation: "members", organization_id: organizationId });
-      if (request !== generation.current) return;
-      setMembers(payload.members);
-      setAllowAll(payload.legacy_allow_all);
-    } catch (err) {
-      if (request === generation.current) setError((err as Error).message);
-    } finally {
-      if (request === generation.current) setBusy(false);
-    }
-  };
+  useEffect(() => {
+    if (expanded && !disabled) void store.load();
+  }, [store, expanded, disabled]);
 
-  const setAllowed = async (member: LinearMember, allowed: boolean) => {
-    const request = ++generation.current;
-    setBusy(true);
-    setSavingId(member.id);
-    setError(null);
-    setSaved(false);
-    try {
-      const payload = await manageLinearMembers(client, {
-        operation: "member_access", organization_id: organizationId, user_id: member.id, allowed,
-      });
-      if (request !== generation.current) return;
-      const updated = payload.members.find((item) => item.id === member.id);
-      if (!updated || updated.allowed !== allowed) throw new Error(tx("members.saveUnconfirmed", "Access was not confirmed. Refresh members before trying again."));
-      setMembers((current) => current.map((item) => item.id === member.id ? updated : item));
-      setAllowAll(payload.legacy_allow_all);
-      setSaved(true);
-    } catch (err) {
-      if (request === generation.current) setError((err as Error).message);
-    } finally {
-      if (request === generation.current) {
-        setBusy(false);
-        setSavingId(null);
-      }
-    }
-  };
-
+  const prefetch = () => { if (!disabled) void store.load(); };
   const needle = search.trim().toLocaleLowerCase();
   const visible = members.filter((member) => [member.name, member.id, ...member.teams]
     .some((value) => value.toLocaleLowerCase().includes(needle)));
+  const names = new Set<string>();
+  const duplicateNames = new Set<string>();
+  for (const member of members) {
+    if (names.has(member.name)) duplicateNames.add(member.name);
+    names.add(member.name);
+  }
 
   return (
-    <section className="w-full border-t border-border/50 pt-2">
+    <section className="w-full border-t border-border/50 pt-1">
       <button type="button" aria-expanded={expanded} aria-controls={panelId}
-        disabled={disabled || busy}
-        className="flex min-h-10 w-full items-center justify-between gap-2 text-start text-[12px] font-medium disabled:opacity-50"
-        onClick={() => {
-          setExpanded(!expanded);
-          if (!expanded) void refresh();
-        }}>
-        {tx("members.title", "Member access")}
-        <ChevronDown className={cn("h-4 w-4", expanded && "rotate-180")} aria-hidden />
+        disabled={disabled} onMouseEnter={prefetch} onFocus={prefetch}
+        className="settings-list-inset flex min-h-12 w-full items-center justify-between gap-3 rounded-xl text-start text-[13px] font-medium settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        onClick={() => setExpanded(!expanded)}>
+        <span>{tx("members.title", "Member access")}</span>
+        <span className="flex items-center gap-2">
+          <span role="status" aria-live="polite" className="text-[12px] font-normal text-muted-foreground">
+            {loading ? payload
+              ? tx("members.refreshing", "Checking for updates…")
+              : tx("members.loading", "Finding your teammates…")
+              : payload ? tx("members.summary", "{{allowed}} of {{total}} enabled", {
+              allowed: members.filter((member) => member.allowed).length, total: members.length,
+            }) : null}
+          </span>
+          <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none", expanded && "rotate-180")} aria-hidden />
+        </span>
       </button>
-      {expanded ? (
-        <div id={panelId} className="space-y-3 pb-1">
-          <p className="text-[12px] leading-5 text-muted-foreground">
-            {tx("members.help", "Choose who can use nanobot in Linear without a pairing code. This does not grant access to the nanobot admin UI. Turning access off blocks new requests, not tasks already running.")}
-          </p>
-          {allowAll ? <p className="rounded-control bg-muted p-2 text-[12px] leading-5">
-            {tx("members.allowAll", "Advanced settings currently allow all members (*), including new members. Individual off switches still take precedence. Remove * to require approval for new members.")}
-          </p> : null}
-          <div className="flex items-center gap-2">
+      <DisclosureContent id={panelId} open={expanded} className="space-y-3 pb-2">
+        <div className="settings-list-inset flex items-center gap-2 text-[12px] leading-5 text-muted-foreground">
+          <p>{tx("members.intro", "Choose who can use nanobot in Linear. No pairing codes needed.")}</p>
+          <SettingsHint description={tx("members.help", "Choose who can use nanobot in Linear without a pairing code. This does not grant access to the nanobot admin UI. Turning access off blocks new requests, not tasks already running.")}>
+            <Info className="h-4 w-4 shrink-0" aria-hidden />
+            <span className="sr-only">{tx("members.details", "About member access")}</span>
+          </SettingsHint>
+        </div>
+        {payload?.legacy_allow_all ? <p className="settings-list-inset rounded-control bg-muted py-2 text-[12px] leading-5">
+          {tx("members.allowAll", "Advanced settings currently allow all members (*), including new members. Individual off switches still take precedence. Remove * to require approval for new members.")}
+        </p> : null}
+        <div className="settings-list-inset flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <Input value={search} onChange={(event) => setSearch(event.target.value)}
               aria-label={tx("members.search", "Search members")}
-              placeholder={tx("members.search", "Search members")} className="min-w-0 text-[12px]" />
-            <Button type="button" variant="ghost" size="sm" disabled={disabled || busy}
-              onClick={() => void refresh()} aria-label={tx("members.refresh", "Refresh members")}>
-              <RefreshCw className={cn("h-4 w-4", busy && !savingId && "animate-spin motion-reduce:animate-none")} aria-hidden />
-            </Button>
+              placeholder={tx("members.search", "Search members")}
+              className={cn(SETTINGS_SEARCH_INPUT_CLASS, "pl-9 text-[13px]")} />
           </div>
-          <div role="status" aria-live="polite" className="text-[12px] text-muted-foreground">
-            {busy ? tx("members.working", "Updating member access…") : saved ? <span className="inline-flex items-center gap-1">
-              <Check className="h-3 w-3" aria-hidden />{tx("members.saved", "Member access saved.")}
-            </span> : null}
-          </div>
-          {error ? <p role="alert" className="text-[12px] leading-5 text-destructive">
-            {error} {tx("members.retry", "Refresh members to check the current state and try again.")}
-          </p> : null}
-          {!busy && !error && visible.length === 0 ? <p className="text-[12px] text-muted-foreground">
-            {tx("members.empty", "No matching active members in the teams this app can access.")}
-          </p> : null}
-          <ul className="max-h-72 space-y-1 overflow-y-auto">
-            {visible.map((member) => <li key={member.id} className="flex min-h-14 items-center gap-3 rounded-control px-2 py-2">
-              <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                {member.name.slice(0, 2).toLocaleUpperCase()}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[12.5px] font-medium" title={member.id}>{member.name}</p>
-                <p className="truncate text-[11px] text-muted-foreground">{member.teams.join(" · ")}</p>
-                {members.some((other) => other.id !== member.id && other.name === member.name) ?
-                  <p className="truncate text-[10px] text-muted-foreground">{member.id}</p> : null}
-              </div>
-              {savingId === member.id ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
-              <ToggleButton checked={member.allowed} disabled={disabled || busy || Boolean(error)}
-                label={tx("members.allow", "Allow {{name}} to use nanobot", { name: member.name })}
-                onChange={(allowed) => void setAllowed(member, allowed)} />
-            </li>)}
-          </ul>
+          <Button type="button" variant="ghost" size="icon" disabled={disabled || loading || saving}
+            onClick={() => void store.load(true)} aria-label={tx("members.refresh", "Refresh members")}
+            title={tx("members.refresh", "Refresh members")}>
+            <RefreshCw className="h-4 w-4 text-muted-foreground" aria-hidden />
+          </Button>
         </div>
-      ) : null}
+        {error ? <p role="alert" className="settings-list-inset break-words text-[12px] leading-5 text-destructive">
+          {error} {tx("members.retry", "Refresh members to check the current state and try again.")}
+        </p> : null}
+        {payload && !error && visible.length === 0 ? <p className="settings-list-inset py-3 text-[12px] text-muted-foreground">
+          {tx("members.empty", "No matching active members in the teams this app can access.")}
+        </p> : null}
+        <SettingsGroup>
+          <ul className="max-h-80 overflow-y-auto" aria-label={tx("members.title", "Member access")}>
+            {visible.map((member) => {
+              const save = saves[member.id];
+              const statusId = `${panelId}-${member.id}-status`;
+              return <li key={member.id}>
+                <SettingsRow title={<div className="flex min-w-0 items-center gap-3">
+                  <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+                    {member.name.slice(0, 2).toLocaleUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate" title={member.id}>{member.name}</p>
+                    <div className="flex flex-wrap items-center gap-x-2 text-[12px] font-normal text-muted-foreground">
+                      <span className="truncate">{member.teams.join(" · ")}</span>
+                      <span id={save?.status === "error" ? undefined : statusId} role="status" aria-live="polite" className="inline-flex items-center gap-1">
+                        {save?.status === "saving" ? tx("members.working", "Saving…") : null}
+                        {save?.status === "saved" ? <><Check className="h-3 w-3" aria-hidden />{tx("members.saved", "Saved")}</> : null}
+                      </span>
+                    </div>
+                    {duplicateNames.has(member.name) ?
+                      <p className="break-all text-[11px] font-normal text-muted-foreground">{member.id}</p> : null}
+                  </div>
+                </div>}>
+                  <ToggleButton checked={member.allowed}
+                    disabled={disabled || save?.status === "saving" || save?.status === "error"}
+                    aria-describedby={save ? statusId : undefined} aria-invalid={save?.status === "error" || undefined}
+                    label={tx("members.allow", "Allow {{name}} to use nanobot", { name: member.name })}
+                    onChange={(allowed) => void store.setAllowed(member.id, allowed,
+                      tx("members.saveUnconfirmed", "Access was not confirmed. Refresh members before trying again."))} />
+                </SettingsRow>
+                {save?.status === "error" ? <p id={statusId} role="alert" className="settings-list-inset break-words pb-3 text-[12px] leading-5 text-destructive">
+                  {save.message} {tx("members.retry", "Refresh members to check the current state and try again.")}
+                </p> : null}
+              </li>;
+            })}
+          </ul>
+        </SettingsGroup>
+      </DisclosureContent>
     </section>
   );
 }

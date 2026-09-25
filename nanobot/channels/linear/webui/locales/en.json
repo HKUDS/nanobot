@@ -96,12 +96,17 @@
     "allowAll": "Advanced settings currently allow all members (*), including new members. Individual off switches still take precedence. Remove * to require approval for new members.",
     "search": "Search members",
     "refresh": "Refresh members",
-    "working": "Updating member access…",
-    "saved": "Member access saved.",
+    "working": "Saving…",
+    "saved": "Saved",
     "retry": "Refresh members to check the current state and try again.",
     "empty": "No matching active members in the teams this app can access.",
     "allow": "Allow {{name}} to use nanobot",
     "saveUnconfirmed": "Access was not confirmed. Refresh members before trying again.",
-    "guide": "Use Member access to approve teammates without pairing codes. Existing approvals still work unless switched off. Connect Linear MCP to search or edit issues."
+    "guide": "Use Member access to approve teammates without pairing codes. Existing approvals still work unless switched off. Connect Linear MCP to search or edit issues.",
+    "intro": "Choose who can use nanobot in Linear. No pairing codes needed.",
+    "details": "About member access",
+    "summary": "{{allowed}} of {{total}} enabled",
+    "loading": "Finding your teammates…",
+    "refreshing": "Checking for updates…"
   }
 }

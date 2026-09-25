@@ -369,6 +369,10 @@ export function LinearPanel({
                     </Button>
                   </div>
                   <LinearMemberAccess organizationId={installation.organization_id}
+                    configScope={JSON.stringify([
+                      feature.config_values?.["channels.linear.clientId"],
+                      feature.config_values?.["channels.linear.allowFrom"],
+                    ])}
                     disabled={busy || dirty || connecting || loadingInstallations || disconnectingId !== null} />
                 </article>
               );

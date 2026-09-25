@@ -96,12 +96,17 @@
     "allowAll": "Cài đặt nâng cao đang cho phép mọi thành viên (*), kể cả người mới. Lựa chọn tắt riêng vẫn được ưu tiên. Xóa * để yêu cầu phê duyệt thành viên mới.",
     "search": "Tìm thành viên",
     "refresh": "Làm mới thành viên",
-    "working": "Đang cập nhật quyền…",
-    "saved": "Đã lưu quyền truy cập.",
+    "working": "Đang lưu…",
+    "saved": "Đã lưu",
     "retry": "Làm mới danh sách để kiểm tra trạng thái hiện tại rồi thử lại.",
     "empty": "Không có thành viên đang hoạt động phù hợp trong các nhóm ứng dụng có thể truy cập.",
     "allow": "Cho phép {{name}} dùng nanobot",
     "saveUnconfirmed": "Chưa xác nhận được quyền. Hãy làm mới danh sách trước khi thử lại.",
-    "guide": "Dùng Quyền truy cập của thành viên để phê duyệt đồng nghiệp không cần mã. Phê duyệt cũ vẫn có hiệu lực trừ khi bị tắt. Kết nối Linear MCP để tìm hoặc sửa issue."
+    "guide": "Dùng Quyền truy cập của thành viên để phê duyệt đồng nghiệp không cần mã. Phê duyệt cũ vẫn có hiệu lực trừ khi bị tắt. Kết nối Linear MCP để tìm hoặc sửa issue.",
+    "intro": "Chọn ai có thể dùng nanobot trong Linear mà không cần mã ghép nối.",
+    "details": "Về quyền truy cập của thành viên",
+    "summary": "Đã cho phép {{allowed}} / {{total}} người",
+    "loading": "Đang tìm thành viên nhóm…",
+    "refreshing": "Đang kiểm tra cập nhật…"
   }
 }

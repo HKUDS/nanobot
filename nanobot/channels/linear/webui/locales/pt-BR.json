@@ -96,12 +96,17 @@
     "allowAll": "As configurações avançadas permitem todos os membros (*), inclusive novos. Desativações individuais têm prioridade. Remova * para exigir aprovação de novos membros.",
     "search": "Buscar membros",
     "refresh": "Atualizar membros",
-    "working": "Atualizando acesso…",
-    "saved": "Acesso dos membros salvo.",
+    "working": "Salvando…",
+    "saved": "Salvo",
     "retry": "Atualize os membros para conferir o estado atual e tente novamente.",
     "empty": "Nenhum membro ativo correspondente nas equipes acessíveis ao aplicativo.",
     "allow": "Permitir que {{name}} use nanobot",
     "saveUnconfirmed": "O acesso não foi confirmado. Atualize os membros antes de tentar novamente.",
-    "guide": "Use Acesso de membros para aprovar colegas sem códigos. Aprovações existentes continuam válidas até serem desativadas. Conecte o Linear MCP para buscar ou editar issues."
+    "guide": "Use Acesso de membros para aprovar colegas sem códigos. Aprovações existentes continuam válidas até serem desativadas. Conecte o Linear MCP para buscar ou editar issues.",
+    "intro": "Escolha quem pode usar o nanobot no Linear, sem códigos de pareamento.",
+    "details": "Sobre o acesso de membros",
+    "summary": "{{allowed}} de {{total}} habilitados",
+    "loading": "Buscando membros da equipe…",
+    "refreshing": "Verificando atualizações…"
   }
 }

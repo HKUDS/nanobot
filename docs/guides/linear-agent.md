@@ -233,15 +233,22 @@ refreshes each workspace installation separately.
 
 Before inviting teammates, open **Member access** under the authorized workspace
 in **Settings → Channels → Linear**. Search for a member and switch on **Allow
-… to use nanobot**. Wait for **Member access saved.** They can then mention the
+… to use nanobot**. Wait for **Saved** beside that member. They can then mention the
 agent without copying a pairing code or authorizing another OAuth installation.
 
 The list contains active human members of teams this app can access. It does not
 grant access to additional Linear teams or to the nanobot admin UI. Names are for
 display; permissions use stable user IDs scoped to the OAuth client and workspace.
 Use **Refresh members** to refresh the directory and effective permission state.
-If a read or save fails, the UI reports the failure and requires a refresh before
-another edit; it does not pretend a switch was saved.
+The UI prefetches on hover or keyboard focus and keeps visited lists in memory,
+scoped to this gateway, admin login, app configuration and workspace. Lists older
+than one minute stay visible while refreshing. This display cache is not used to
+authorize agent requests.
+
+Each switch changes only after the server confirms the save; other members remain
+editable while it saves. A failed save may have an uncertain outcome (for example,
+after a timeout), so refresh before editing that member again. Failed refreshes keep
+the last confirmed list visible and show an error, rather than an empty directory.
 
 New members are off by default. Existing pairing approvals and **Advanced →
 Allowed Linear users** remain valid until explicitly overridden by a member
