@@ -89,5 +89,19 @@
     "authorized": "Diotorisasi",
     "confirmDisconnect": "Putuskan workspace",
     "disconnect": "Putuskan"
+  },
+  "members": {
+    "title": "Akses anggota",
+    "help": "Pilih siapa yang dapat memakai nanobot di Linear tanpa kode pairing. Ini tidak memberikan akses admin. Menonaktifkan memblokir permintaan baru, bukan tugas yang sedang berjalan.",
+    "allowAll": "Pengaturan lanjutan mengizinkan semua anggota (*), termasuk anggota baru. Penonaktifan per anggota tetap diutamakan. Hapus * agar anggota baru memerlukan persetujuan.",
+    "search": "Cari anggota",
+    "refresh": "Segarkan anggota",
+    "working": "Memperbarui akses…",
+    "saved": "Akses anggota disimpan.",
+    "retry": "Segarkan anggota untuk memeriksa status terkini, lalu coba lagi.",
+    "empty": "Tidak ada anggota aktif yang cocok di tim yang dapat diakses aplikasi ini.",
+    "allow": "Izinkan {{name}} memakai nanobot",
+    "saveUnconfirmed": "Akses belum dikonfirmasi. Segarkan anggota sebelum mencoba lagi.",
+    "guide": "Gunakan Akses anggota untuk menyetujui rekan tanpa kode pairing. Persetujuan lama tetap berlaku kecuali dinonaktifkan. Hubungkan Linear MCP untuk mencari atau mengedit issue."
   }
 }

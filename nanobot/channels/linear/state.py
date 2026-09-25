@@ -82,6 +82,13 @@ class LinearStateStore:
                     delivery_id TEXT PRIMARY KEY,
                     received_at REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS member_access (
+                    oauth_client_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    allowed INTEGER NOT NULL CHECK (allowed IN (0, 1)),
+                    PRIMARY KEY (oauth_client_id, organization_id, user_id)
+                );
                 """
             )
             columns = {
@@ -173,6 +180,34 @@ class LinearStateStore:
             connection.execute(
                 "DELETE FROM installations WHERE organization_id = ?",
                 (organization_id,),
+            )
+
+    def member_access(self, client_id: str, organization_id: str, user_id: str) -> bool | None:
+        """An explicit choice overrides legacy pairing and allowFrom, including '*'."""
+        with self._guard, self._connect() as connection:
+            row = connection.execute(
+                "SELECT allowed FROM member_access "
+                "WHERE oauth_client_id = ? AND organization_id = ? AND user_id = ?",
+                (client_id, organization_id, user_id),
+            ).fetchone()
+        return bool(row["allowed"]) if row is not None else None
+
+    def set_member_access(
+        self, client_id: str, organization_id: str, user_id: str, *, allowed: bool,
+    ) -> None:
+        with self._guard, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            installed = connection.execute(
+                "SELECT 1 FROM installations WHERE oauth_client_id = ? AND organization_id = ?",
+                (client_id, organization_id),
+            ).fetchone()
+            if installed is None:
+                raise ValueError("Linear workspace is not connected")
+            connection.execute(
+                "INSERT INTO member_access (oauth_client_id, organization_id, user_id, allowed) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(oauth_client_id, organization_id, user_id) "
+                "DO UPDATE SET allowed = excluded.allowed",
+                (client_id, organization_id, user_id, int(allowed)),
             )
 
     def enqueue_webhook(self, delivery_id: str, payload: dict[str, Any]) -> bool:

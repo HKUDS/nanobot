@@ -15,3 +15,18 @@ export interface LinearWorkspacePayload {
   webhook_url?: string;
   redirect_uri?: string;
 }
+
+export interface LinearMember {
+  id: string;
+  name: string;
+  teams: string[];
+  allowed: boolean;
+}
+
+export interface LinearMembersPayload {
+  session_id: string;
+  status: "members" | "member_access_saved";
+  organization_id: string;
+  legacy_allow_all: boolean;
+  members: LinearMember[];
+}

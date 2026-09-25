@@ -111,9 +111,9 @@ describe("Linear channel UI", () => {
     renderSettingsView({ initialSection: "channels" });
     fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
     await screen.findByRole("textbox", { name: "OAuth client ID" });
-    expect(screen.queryByText("Pair on first use; connect Linear MCP to search or edit issues.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Use Member access to approve teammates/)).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("button", { name: "Help" }), { key: "ArrowDown" });
-    expect(await screen.findByText("Pair on first use; connect Linear MCP to search or edit issues.")).toBeVisible();
+    expect(await screen.findByText(/Use Member access to approve teammates/)).toBeVisible();
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     fireEvent.click(await screen.findByRole("button", { name: "Configure Linear MCP" }));
     const dialog = await screen.findByRole("dialog", { name: "Linear" });

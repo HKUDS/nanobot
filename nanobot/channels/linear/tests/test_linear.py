@@ -28,7 +28,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.linear import client as linear_client
 from nanobot.channels.linear import connect as linear_connect
 from nanobot.channels.linear import runtime as linear_runtime
-from nanobot.channels.linear.client import LinearApiError, LinearClient
+from nanobot.channels.linear.client import LinearApiError, LinearClient, LinearMember
 from nanobot.channels.linear.config import LinearConfig, validate_public_base_url
 from nanobot.channels.linear.oauth import OAUTH_FLOWS, authorization_url
 from nanobot.channels.linear.runtime import LinearChannel
@@ -660,6 +660,11 @@ class _FakeLinearClient:
         self.activities: list[dict[str, Any]] = []
         self.downloads: list[str] = []
 
+    async def list_members(
+        self, _organization_id: str, *, user_id: str | None = None,
+    ) -> list[LinearMember]:
+        return [{"id": user_id or "user-1", "name": "Member", "teams": ["Team"]}]
+
     async def create_activity(
         self,
         organization_id: str,
@@ -976,7 +981,6 @@ async def test_inbound_attachments_enforce_the_count_limit(
 @pytest.mark.asyncio
 async def test_prompted_stop_signal_becomes_priority_stop_command(tmp_path: Path) -> None:
     channel, client = _runtime(tmp_path)
-    channel.config.allow_from = []
     await channel._process_webhook(  # pyright: ignore[reportPrivateUsage]
         "delivery-2",
         _agent_webhook(action="prompted", signal="stop"),

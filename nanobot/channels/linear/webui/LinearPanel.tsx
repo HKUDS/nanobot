@@ -36,6 +36,7 @@ import { useClient } from "@/providers/ClientProvider";
 import { manageLinearWorkspace } from "./api";
 import type { LinearInstallationSummary } from "./types";
 import { LinearConnectFlow } from "./LinearConnectFlow";
+import { LinearMemberAccess } from "./LinearMemberAccess";
 import { linearManifestUrl } from "./manifest";
 
 const PUBLIC_BASE_URL_KEY = "channels.linear.publicBaseUrl";
@@ -367,6 +368,8 @@ export function LinearPanel({
                         : tx("custom.disconnect", "Disconnect")}
                     </Button>
                   </div>
+                  <LinearMemberAccess organizationId={installation.organization_id}
+                    disabled={busy || dirty || connecting || loadingInstallations || disconnectingId !== null} />
                 </article>
               );
             })}

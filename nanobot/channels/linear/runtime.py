@@ -16,11 +16,13 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent, RetryWaitEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.linear.access import member_allowed
 from nanobot.channels.linear.client import MAX_DOWNLOAD_BYTES, LinearApiError, LinearClient
 from nanobot.channels.linear.config import LinearConfig
 from nanobot.channels.linear.server import LinearServerLease, acquire_http_server
 from nanobot.channels.linear.state import LinearStateStore, QueuedWebhook
 from nanobot.config.paths import get_media_dir
+from nanobot.pairing import PAIRING_CODE_META_KEY
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import safe_filename
 
@@ -100,7 +102,29 @@ class LinearChannel(BaseChannel):
     def start_error_message(self, error: Exception) -> str | None:
         return f"Linear channel failed to start: {error}"
 
+    def is_allowed(self, sender_id: str) -> bool:
+        # _handle_message accepts a separate authorization subject, while the
+        # actual sender ID (including legacy pairing codes) remains unchanged.
+        try:
+            subject: object = json.loads(sender_id)
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(subject, list):
+            return False
+        parts = cast(list[object], subject)
+        if len(parts) != 2:
+            return False
+        organization_id, user_id = parts
+        if not isinstance(organization_id, str) or not isinstance(user_id, str):
+            return False
+        return member_allowed(self.config, self._state, organization_id, user_id)
+
     async def send(self, msg: OutboundMessage) -> None:
+        if PAIRING_CODE_META_KEY in msg.metadata:
+            msg.content = (
+                "Ask your nanobot administrator to enable your access in Linear member settings. "
+                "Alternatively, an administrator can approve this pairing request.\n\n" + msg.content
+            )
         event = msg.event
         if isinstance(event, ContextCompactionEvent):
             if event.phase == "succeeded":
@@ -355,7 +379,7 @@ class LinearChannel(BaseChannel):
         if str(session.get("organizationId") or organization_id) != organization_id:
             raise LinearPayloadError("organization mismatch")
         installation = self._state.installation(organization_id)
-        if installation is None:
+        if installation is None or installation.oauth_client_id != self.config.client_id:
             raise LinearPayloadError("organization is not installed")
         activity = _optional_object(payload.get("agentActivity"))
         if activity and str(activity.get("userId") or "") == installation.app_user_id:
@@ -368,6 +392,7 @@ class LinearChannel(BaseChannel):
         ).strip()
         if not sender_id:
             raise LinearPayloadError("missing sender identity")
+        authorization_id = json.dumps([organization_id, sender_id])
         issue_context = _issue_context(session)
         prompt_content = _prompt_text(
             payload, session, activity, action, issue_context=issue_context,
@@ -397,7 +422,25 @@ class LinearChannel(BaseChannel):
         self._routes[agent_session_id] = cast(dict[str, Any], metadata["linear"])
         if len(self._routes) > 1000:
             self._routes.pop(next(iter(self._routes)))
+        choice = self._state.member_access(self.config.client_id, organization_id, sender_id)
+        if choice is False:
+            await self._create_activity(
+                agent_session_id, metadata,
+                {"type": "response", "body": "Access is disabled. Ask your nanobot administrator to enable your access in Linear member settings."},
+                key="access-denied",
+            )
+            return
+        if self.is_allowed(authorization_id):
+            client = self._client
+            if client is None:
+                raise RuntimeError("Linear HTTP client is not initialized")
+            # Read current membership on admission, without caching grants. API
+            # failures take the normal error path and never publish an agent turn.
+            if not await client.list_members(organization_id, user_id=sender_id):
+                raise LinearPayloadError("sender is not active in an accessible Linear team")
         if signal == "stop":
+            if not self.is_allowed(authorization_id):
+                return
             await self.bus.publish_inbound(
                 InboundMessage(
                     channel=self.name,
@@ -411,7 +454,7 @@ class LinearChannel(BaseChannel):
             return
         media: list[str] = []
         context_delivered = False
-        if self.is_allowed(sender_id):
+        if self.is_allowed(authorization_id):
             await self._create_activity(
                 agent_session_id,
                 metadata,
@@ -436,6 +479,7 @@ class LinearChannel(BaseChannel):
             metadata=metadata,
             session_key=f"linear:{organization_id}:{agent_session_id}",
             is_dm=True,
+            authorization_id=authorization_id,
         )
         if context_delivered:
             self._issue_contexts[agent_session_id] = issue_context

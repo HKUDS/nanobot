@@ -89,5 +89,19 @@
     "authorized": "Đã cấp quyền",
     "confirmDisconnect": "Ngắt kết nối workspace",
     "disconnect": "Ngắt kết nối"
+  },
+  "members": {
+    "title": "Quyền truy cập của thành viên",
+    "help": "Chọn người được dùng nanobot trong Linear mà không cần mã ghép nối. Quyền này không cho phép truy cập trang quản trị. Tắt chỉ chặn yêu cầu mới, không hủy tác vụ đang chạy.",
+    "allowAll": "Cài đặt nâng cao đang cho phép mọi thành viên (*), kể cả người mới. Lựa chọn tắt riêng vẫn được ưu tiên. Xóa * để yêu cầu phê duyệt thành viên mới.",
+    "search": "Tìm thành viên",
+    "refresh": "Làm mới thành viên",
+    "working": "Đang cập nhật quyền…",
+    "saved": "Đã lưu quyền truy cập.",
+    "retry": "Làm mới danh sách để kiểm tra trạng thái hiện tại rồi thử lại.",
+    "empty": "Không có thành viên đang hoạt động phù hợp trong các nhóm ứng dụng có thể truy cập.",
+    "allow": "Cho phép {{name}} dùng nanobot",
+    "saveUnconfirmed": "Chưa xác nhận được quyền. Hãy làm mới danh sách trước khi thử lại.",
+    "guide": "Dùng Quyền truy cập của thành viên để phê duyệt đồng nghiệp không cần mã. Phê duyệt cũ vẫn có hiệu lực trừ khi bị tắt. Kết nối Linear MCP để tìm hoặc sửa issue."
   }
 }

@@ -16,9 +16,9 @@ and confirm that webhook delivery is enabled before testing a task.
 - An ordinary issue comment does not invoke nanobot.
 - A follow-up inside the existing Agent Session continues the same nanobot
   session without another @mention.
-- Linear's stop control asks nanobot to cancel the active turn without requiring
-  the sender to complete pairing first. An activity already delivered to Linear
-  cannot be recalled.
+- Linear's stop control asks nanobot to cancel the active turn. The sender must
+  have access, just as for other requests. An activity already delivered to
+  Linear cannot be recalled.
 - nanobot reports its acknowledgement, tool activity, reasoning, and final
   answer as native Linear Agent Activities.
 - Button choices are sent as Linear selection activities, and local outbound
@@ -231,17 +231,69 @@ refreshes each workspace installation separately.
 4. Send a follow-up inside that Agent Session. You do not need to @mention the
    app again there.
 
-If **Allowed Linear users** is empty, the first mention returns a nanobot pairing
-code. Approve the pending request in the WebUI pairing dialog, then repeat the
-prompt in the same Agent Session. For a static allowlist, enter Linear user IDs
-in **Allowed Linear users**. Enter `*` only if every member of every connected
-workspace should be able to invoke the agent.
+Before inviting teammates, open **Member access** under the authorized workspace
+in **Settings → Channels → Linear**. Search for a member and switch on **Allow
+… to use nanobot**. Wait for **Member access saved.** They can then mention the
+agent without copying a pairing code or authorizing another OAuth installation.
+
+The list contains active human members of teams this app can access. It does not
+grant access to additional Linear teams or to the nanobot admin UI. Names are for
+display; permissions use stable user IDs scoped to the OAuth client and workspace.
+Use **Refresh members** to refresh the directory and effective permission state.
+If a read or save fails, the UI reports the failure and requires a refresh before
+another edit; it does not pretend a switch was saved.
+
+New members are off by default. Existing pairing approvals and **Advanced →
+Allowed Linear users** remain valid until explicitly overridden by a member
+switch. An explicit **off** wins over both legacy approvals and `*`, even if a
+new pairing code is subsequently approved. Use the switch to enable that member
+again. If you keep `*`, new members will still be allowed automatically; the UI
+displays a warning. Remove `*` to require approval for new members.
+
+Pairing remains a fallback for members without an explicit switch setting:
+approve their pending request in the WebUI pairing dialog, then repeat the prompt
+in the same Agent Session. You may also keep a static list of IDs in **Allowed
+Linear users**. Other channels' pairing behavior is unchanged.
+
+At request admission nanobot checks current team membership through the app's
+Linear API authorization, including active status and excluding app accounts.
+Directory/API failure does not authorize a task; transient failures use the
+channel's bounded webhook retry path. This adds API requests and latency, rather
+than relying on stale cached permissions. Turning a member off blocks new
+requests (including stop requests); it does not cancel already admitted/running
+tasks or recall replies. Administrators should stop ongoing tasks separately.
 
 By default, reasoning is posted as Linear thought activities. Turn off **Show
 reasoning** under **Advanced** for a quieter session. Use **Configure Linear
 MCP**, to the left of **Create Linear app**, to open Linear MCP's connection
 settings when prompts need to search, edit, or transition issues. Pairing and
 access guidance is available in the dialog's **Help** menu.
+
+### Updating a remote installation
+
+Member management includes both Python channel code and WebUI assets. A local
+branch does not update an already running remote gateway, and the browser UI
+served by that remote gateway is not replaced by installing a local client.
+
+1. Develop and test in a separate checkout with test-only config/state. Do not
+   copy production OAuth tokens, model keys, or pairing state into a development
+   profile, or run a second gateway against the production webhook installation.
+2. After review and deployment approval, back up the remote config, pairing file,
+   and Linear SQLite state consistently (stop the gateway or use SQLite backup;
+   copying just the database while WAL writes are active is not sufficient).
+3. Update the remote source and dependencies to the reviewed revision, build the
+   WebUI from that same revision, and restart the gateway. Preserve remote
+   credentials and state. Existing OAuth scopes and webhook routes need not change.
+4. Verify member listing, the existing owner's access, enable/disable behavior,
+   and that the admin UI remains private. Grant teammate access only deliberately.
+
+Member switches are stored in the instance's `linear/state.sqlite3`, separately
+from legacy pairing and config. Older code ignores those overrides: **do not
+blindly roll back after revoking access with a switch**, because old code could
+re-enable a member through a retained pairing approval or wildcard. Keep the
+channel disabled during rollback until the older allowlist/pairing configuration
+has been reconciled. Ordinary restarts and reconnecting the same OAuth app keep
+the saved member choices.
 
 ## Verify the setup
 
@@ -338,7 +390,7 @@ secret.
 | The local health URL does not load | Start **Connect Linear** or enable the connected channel, then check the configured listen host and port. |
 | **Agent didn't start**, **nanobot failed to start**, or a session stays on **Thinking…** without a response | First check **Webhooks → Delivery status** in the Linear app. If **Disabled**, enable it from **…**. Confirm the current Webhook URL and `AgentSessionEvent` subscription, then select **Retry** in the Linear session. OAuth success and a working `/linear/health` endpoint do not prove that Linear is sending events. |
 | An @mention still gets no response with delivery enabled | Inspect **Webhook delivery failures** in the Linear app and run `nanobot gateway logs`. A 404 points to the webhook path; a 502 points to the listener or tunnel; a 401 can indicate a signing-secret mismatch or stale event timestamp. Confirm the Client ID and signing secret belong to the same app and the workspace authorization has not been revoked. |
-| The first @mention returns a pairing code | Approve it in the WebUI pairing dialog, then repeat the prompt in the same Agent Session. Alternatively, configure a narrow **Allowed Linear users** list. |
+| The first @mention returns a pairing code | Enable the member under the workspace's **Member access**, or approve the code in the WebUI pairing dialog, then repeat the prompt. An explicit off switch must be changed in **Member access**; pairing or allowlist changes do not override it. |
 | Normal comments do nothing | This is intentional. Start a task by @mentioning the app, or continue inside an existing Agent Session. |
 | Delegating an issue does not start a session | Reconnect the workspace so the installation grants `app:assignable`, then confirm the app can be selected as the issue delegate. |
 | The agent can discuss an issue but cannot search or change it | Connect the Linear MCP app from **Configure Linear MCP**. The native channel transports the conversation but does not add issue-management tools. |

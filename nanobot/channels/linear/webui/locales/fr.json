@@ -89,5 +89,19 @@
     "authorized": "Autorisé",
     "confirmDisconnect": "Déconnecter l’espace",
     "disconnect": "Déconnecter"
+  },
+  "members": {
+    "title": "Accès des membres",
+    "help": "Choisissez qui peut utiliser nanobot dans Linear sans code d’association. Cela ne donne pas accès à l’administration. Désactiver bloque les nouvelles demandes, pas les tâches en cours.",
+    "allowAll": "Les paramètres avancés autorisent tous les membres (*), y compris les nouveaux. Une désactivation individuelle reste prioritaire. Retirez * pour exiger l’approbation des nouveaux membres.",
+    "search": "Rechercher des membres",
+    "refresh": "Actualiser les membres",
+    "working": "Mise à jour des accès…",
+    "saved": "Accès enregistré.",
+    "retry": "Actualisez les membres pour vérifier l’état actuel et réessayez.",
+    "empty": "Aucun membre actif correspondant dans les équipes accessibles à cette application.",
+    "allow": "Autoriser {{name}} à utiliser nanobot",
+    "saveUnconfirmed": "L’accès n’a pas été confirmé. Actualisez les membres avant de réessayer.",
+    "guide": "Utilisez Accès des membres pour approuver vos collègues sans code. Les autorisations existantes restent valables sauf désactivation. Connectez Linear MCP pour rechercher ou modifier des issues."
   }
 }

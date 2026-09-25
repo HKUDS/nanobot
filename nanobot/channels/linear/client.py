@@ -6,7 +6,7 @@ import asyncio
 import mimetypes
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import httpx
 
@@ -20,6 +20,12 @@ LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token"
 LINEAR_REVOKE_URL = "https://api.linear.app/oauth/revoke"
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
+
+
+class LinearMember(TypedDict):
+    id: str
+    name: str
+    teams: list[str]
 
 
 class LinearApiError(RuntimeError):
@@ -107,6 +113,83 @@ class LinearClient:
                 raise
         installation = await self._refresh(organization_id, force=True)
         return await self._graphql_with_token(installation.access_token, query, variables)
+
+    async def list_members(
+        self, organization_id: str, *, user_id: str | None = None,
+    ) -> list[LinearMember]:
+        """Read active humans in teams visible to this app, never workspace-wide users.
+
+        A filtered lookup is also used at request admission: departed members and
+        revoked team access must not keep working through old local approvals.
+        No stale directory cache is used to authorize a request.
+        """
+        teams = await self._connection_nodes(
+            organization_id,
+            """query NanobotMemberTeams($after: String) {
+              teams(first: 50, after: $after) {
+                nodes { id name } pageInfo { hasNextPage endCursor }
+              }
+            }""",
+            {}, ("teams",),
+        )
+        members: dict[str, LinearMember] = {}
+        for team in teams:
+            team_id = _required_string(team, "id")
+            team_name = _required_string(team, "name")
+            nodes = await self._connection_nodes(
+                organization_id,
+                """query NanobotTeamMembers($team: String!, $after: String, $filter: UserFilter) {
+                  team(id: $team) {
+                    members(first: 50, after: $after, filter: $filter) {
+                      nodes { id name active app }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }""",
+                {"team": team_id, "filter": {"id": {"eq": user_id}} if user_id else None},
+                ("team", "members"),
+            )
+            for node in nodes:
+                if not isinstance(node.get("active"), bool) or not isinstance(node.get("app"), bool):
+                    raise LinearApiError("Linear returned an incomplete member identity")
+                if node["active"] is not True or node["app"] is True:
+                    continue
+                member_id = _required_string(node, "id")
+                name = _required_string(node, "name")
+                if user_id is not None and member_id != user_id:
+                    raise LinearApiError("Linear returned an unexpected member identity")
+                member = members.setdefault(member_id, {"id": member_id, "name": name, "teams": []})
+                if team_name not in member["teams"]:
+                    member["teams"].append(team_name)
+        return sorted(members.values(), key=lambda member: (member["name"].casefold(), member["id"]))
+
+    async def _connection_nodes(
+        self, organization_id: str, query: str, variables: dict[str, Any], path: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        nodes: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        for _ in range(200):
+            connection = await self.graphql(organization_id, query, {**variables, "after": cursor})
+            for key in path:
+                connection = _required_mapping(connection, key)
+            raw_nodes = connection.get("nodes")
+            if not isinstance(raw_nodes, list):
+                raise LinearApiError("Linear returned an invalid member directory")
+            for raw_node in cast(list[object], raw_nodes):
+                if not isinstance(raw_node, dict):
+                    raise LinearApiError("Linear returned an invalid member directory")
+                nodes.append(cast(dict[str, Any], raw_node))
+            page = _required_mapping(connection, "pageInfo")
+            if page.get("hasNextPage") is False:
+                return nodes
+            if page.get("hasNextPage") is not True:
+                raise LinearApiError("Linear returned incomplete pagination information")
+            cursor = _required_string(page, "endCursor")
+            if cursor in seen:
+                raise LinearApiError("Linear returned a repeated member directory cursor")
+            seen.add(cursor)
+        raise LinearApiError("Linear member directory is too large; no partial result was saved")
 
     async def create_activity(
         self,
