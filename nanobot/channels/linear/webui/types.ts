@@ -6,6 +6,11 @@ export interface LinearInstallationSummary {
   missing_scopes?: string[];
 }
 
+export interface LinearWorkspaceProfile {
+  organization_id: string;
+  logo_url: string | null;
+}
+
 export interface LinearWorkspacePayload {
   session_id: string;
   status: "inspected" | "disconnected";

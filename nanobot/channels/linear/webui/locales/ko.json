@@ -105,7 +105,7 @@
     "guide": "멤버 접근 권한에서 코드 없이 동료를 승인하세요. 기존 승인은 끄지 않는 한 유지됩니다. Issue 검색이나 수정에는 Linear MCP를 연결하세요.",
     "intro": "페어링 코드 없이 Linear에서 nanobot을 사용할 멤버를 선택하세요.",
     "details": "멤버 접근 권한 안내",
-    "summary": "{{total}}명 중 {{allowed}}명 허용",
+    "summary": "{{allowed}}명 사용 가능",
     "loading": "팀 멤버를 불러오는 중…",
     "refreshing": "업데이트 확인 중…"
   }

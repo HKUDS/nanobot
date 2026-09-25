@@ -1,6 +1,14 @@
 import { startChannelConnect, type WebUIMutationTransport } from "@/lib/api";
 
-import type { LinearMembersPayload, LinearWorkspacePayload } from "./types";
+import type { LinearMembersPayload, LinearWorkspacePayload, LinearWorkspaceProfile } from "./types";
+
+export function getLinearWorkspaceProfile(
+  transport: WebUIMutationTransport, organizationId: string,
+): Promise<LinearWorkspaceProfile> {
+  return startChannelConnect<LinearWorkspaceProfile>(transport, "linear", {
+    operation: "workspace_profile", organization_id: organizationId,
+  });
+}
 
 export function manageLinearWorkspace(
   transport: WebUIMutationTransport,

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { AlertCircle, Building2, Check, ChevronDown, ExternalLink, Info, Loader2, RefreshCw, Unplug } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AlertCircle, Check, ChevronDown, ExternalLink, Loader2, RefreshCw, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
@@ -29,7 +29,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { channelValidationStatusClass } from "@/components/settings/channels/ChannelValidationProgress";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { configureChannel, disableNanobotFeature } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
@@ -38,7 +37,9 @@ import { manageLinearWorkspace } from "./api";
 import type { LinearInstallationSummary } from "./types";
 import { LinearConnectFlow } from "./LinearConnectFlow";
 import { LinearMemberAccess } from "./LinearMemberAccess";
+import { LinearAvatar } from "./LinearAvatar";
 import { linearManifestUrl } from "./manifest";
+import { linearWorkspaceStore } from "./workspace-store";
 
 const PUBLIC_BASE_URL_KEY = "channels.linear.publicBaseUrl";
 const WEBHOOK_PATH_KEY = "channels.linear.webhookPath";
@@ -78,8 +79,13 @@ export function LinearPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [publicUrlPromptOpen, setPublicUrlPromptOpen] = useState(false);
-  const [installations, setInstallations] = useState<LinearInstallationSummary[]>([]);
-  const [loadingInstallations, setLoadingInstallations] = useState(false);
+  const workspaceStore = linearWorkspaceStore(client, token, JSON.stringify([
+    feature.config_values?.["channels.linear.clientId"],
+    feature.config_values?.[PUBLIC_BASE_URL_KEY],
+  ]));
+  const { installations: cachedInstallations, logos, loading: loadingInstallations,
+    error: inspectionError } = useSyncExternalStore(workspaceStore.subscribe, workspaceStore.getSnapshot);
+  const installations = cachedInstallations ?? [];
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [disconnectConfirmId, setDisconnectConfirmId] = useState<string | null>(null);
   const [workspaceNotice, setWorkspaceNotice] = useState<string | null>(null);
@@ -119,20 +125,12 @@ export function LinearPanel({
     )
     : null;
 
-  const loadInstallations = useCallback(async () => {
+  const loadInstallations = useCallback(async (force = false) => {
     if (!credentialsSaved || dirty) return;
-    setLoadingInstallations(true);
     setWorkspaceNotice(null);
     setWorkspaceError(null);
-    try {
-      const payload = await manageLinearWorkspace(client, { operation: "inspect" });
-      setInstallations(payload.installations ?? []);
-    } catch (err) {
-      setWorkspaceError((err as Error).message);
-    } finally {
-      setLoadingInstallations(false);
-    }
-  }, [client, credentialsSaved, dirty]);
+    await workspaceStore.load(force);
+  }, [workspaceStore, credentialsSaved, dirty]);
 
   useEffect(() => {
     if (feature.runtime_status === "running") void loadInstallations();
@@ -148,7 +146,7 @@ export function LinearPanel({
         organization_id: installation.organization_id,
       });
       const remaining = payload.installations ?? [];
-      setInstallations(remaining);
+      workspaceStore.replace(remaining);
       setWorkspaceNotice(payload.message ?? null);
       setDisconnectConfirmId(null);
       if (remaining.length === 0) {
@@ -287,6 +285,16 @@ export function LinearPanel({
         <CredentialForm {...formProps} fields={fields.filter((field) => field.key !== PUBLIC_BASE_URL_KEY)} />
         <div id={advancedPanelId} hidden={!advancedOpen}>
           <CredentialForm {...formProps} fields={advancedFields} />
+          {installations.some(installation => installation.scopes?.length) ? (
+            <div className="mt-3 space-y-2 rounded-control bg-muted/45 p-3 text-[12px] text-muted-foreground">
+              <p className="font-medium">{tx("custom.workspacesTitle", "Authorized workspaces")}</p>
+              {installations.filter(installation => installation.scopes?.length).map(installation => (
+                <p key={installation.organization_id} className="break-words">
+                  {installation.organization_name || installation.organization_id}: {installation.scopes?.join(", ")}
+                </p>
+              ))}
+            </div>
+          ) : null}
         </div>
         {notice ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-muted/55 px-3 py-2.5 text-[12px] leading-5">
@@ -307,15 +315,20 @@ export function LinearPanel({
             <Button type="button" variant="ghost" size="sm"
               disabled={loadingInstallations || disconnectingId !== null}
               className="h-8 gap-2 rounded-full text-[12px] text-muted-foreground"
-              onClick={() => void loadInstallations()}>
-              <RefreshCw className={cn("h-3.5 w-3.5", loadingInstallations && "animate-spin motion-reduce:animate-none")} aria-hidden />
+              onClick={() => void loadInstallations(true)}>
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
               {tx("custom.refreshWorkspaces", "Refresh workspaces")}
             </Button>
           </div>
           <div role="status" aria-live="polite" className="sr-only">
             {loadingInstallations ? tx("custom.loadingWorkspaces", "Loading workspaces") : ""}
           </div>
-          {!loadingInstallations && !workspaceError && installations.length === 0 ? (
+          {loadingInstallations && !cachedInstallations ? (
+            <p className="px-3 py-2.5 text-[12px] text-muted-foreground">
+              {tx("custom.loadingWorkspaces", "Loading workspaces")}
+            </p>
+          ) : null}
+          {!loadingInstallations && !workspaceError && !inspectionError && cachedInstallations?.length === 0 ? (
             <p className="rounded-control bg-muted/45 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground">
               {tx("custom.noWorkspaces", "No workspaces are authorized. Connect a workspace to receive Linear agent requests.")}
             </p>
@@ -327,11 +340,9 @@ export function LinearPanel({
               const name = installation.organization_name || installation.organization_id;
               const needsAuthorization = installation.authorization_status === "missing_scopes"
                 || installation.authorization_status === "refresh_required";
-              const authorizationLabel = (
+              const authorizationWarning = needsAuthorization ? (
                 <span className="inline-flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
-                  {needsAuthorization
-                    ? <AlertCircle className="h-3 w-3 shrink-0" aria-hidden />
-                    : <Check className="h-3 w-3 shrink-0" aria-hidden />}
+                  <AlertCircle className="h-3 w-3 shrink-0" aria-hidden />
                   {installation.authorization_status === "missing_scopes"
                     ? tx("custom.missingScopes", "Reconnect to grant: {{scopes}}", {
                       scopes: installation.missing_scopes?.join(", ") || "required scopes",
@@ -339,26 +350,17 @@ export function LinearPanel({
                     : installation.authorization_status === "refresh_required"
                       ? tx("custom.refreshRequired", "Authorization refresh required")
                       : tx("custom.authorized", "Authorized")}
-                  {installation.scopes?.length ? <Info className="h-3 w-3 shrink-0" aria-hidden /> : null}
                 </span>
-              );
+              ) : null;
               return (
                 <article key={installation.organization_id} aria-label={name}
                   className="overflow-hidden rounded-panel border border-border/70 bg-background">
                   <header className="flex flex-wrap items-center justify-between gap-3 p-4">
                     <div className="flex min-w-0 flex-1 items-center gap-3">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control bg-muted text-muted-foreground">
-                        <Building2 className="h-4 w-4" aria-hidden />
-                      </span>
+                      <LinearAvatar name={name} url={logos[installation.organization_id]} workspace />
                       <div className="min-w-0">
                         <h5 className="truncate text-[14px] font-semibold text-foreground" title={name}>{name}</h5>
-                        <div className="mt-1">
-                          {installation.scopes?.length ? (
-                            <SettingsHint description={installation.scopes.join(", ")}>
-                              {authorizationLabel}
-                            </SettingsHint>
-                          ) : authorizationLabel}
-                        </div>
+                        {authorizationWarning ? <div className="mt-1">{authorizationWarning}</div> : null}
                       </div>
                     </div>
                     <div className="ms-auto flex flex-wrap items-center gap-2">
@@ -389,13 +391,13 @@ export function LinearPanel({
                       feature.config_values?.["channels.linear.clientId"],
                       feature.config_values?.["channels.linear.allowFrom"],
                     ])}
-                    disabled={busy || dirty || connecting || loadingInstallations || disconnectingId !== null} />
+                    disabled={busy || dirty || connecting || disconnectingId !== null} />
                 </article>
               );
             })}
           </div>
-          {workspaceError ? (
-            <p role="alert" className="text-[12px] leading-5 text-destructive">{workspaceError}</p>
+          {workspaceError || inspectionError ? (
+            <p role="alert" className="text-[12px] leading-5 text-destructive">{workspaceError || inspectionError}</p>
           ) : null}
           {workspaceNotice ? (
             <p role="status" className="text-[12px] leading-5 text-muted-foreground">
@@ -405,7 +407,10 @@ export function LinearPanel({
         </section>
       ) : null}
       <LinearConnectFlow token={token} feature={feature}
-        idleLabel={tx("custom.connect", "Connect Linear")} onFeaturesUpdate={onFeaturesUpdate}
+        idleLabel={tx("custom.connect", "Connect Linear")} onFeaturesUpdate={(payload) => {
+          onFeaturesUpdate(payload);
+          void workspaceStore.load(true);
+        }}
         onActiveChange={setConnecting}
         renderActions={(connectButton) => (
           <div className="flex flex-wrap items-center justify-end gap-2 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_auto]">

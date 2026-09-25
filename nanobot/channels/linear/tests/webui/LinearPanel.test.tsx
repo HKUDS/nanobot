@@ -14,6 +14,13 @@ import {
 
 import { linearManifestUrl } from "../../webui/manifest";
 
+vi.mock("../../webui/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../webui/api")>(),
+  getLinearWorkspaceProfile: vi.fn(async (_client: unknown, organizationId: string) => ({
+    organization_id: organizationId, logo_url: null,
+  })),
+}));
+
 const linearSetup: ChannelSetupContract = {
   fields: [
     field("clientId", "string", true),
@@ -479,10 +486,11 @@ describe("Linear channel UI", () => {
     const workspace = screen.getByRole("article", { name: "Example workspace" });
     expect(within(workspace).getByRole("heading", { name: "Example workspace", level: 5 })).toBeVisible();
     expect(within(workspace).getByRole("button", { name: "Member access" })).toBeVisible();
-    expect(screen.queryByText(/app:assignable/)).not.toBeInTheDocument();
-    fireEvent.click(within(workspace).getByRole("button", { name: "Authorized" }));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("read, write, app:mentionable, app:assignable");
-    fireEvent.keyDown(document, { key: "Escape" });
+    expect(within(workspace).queryByText("Authorized")).not.toBeInTheDocument();
+    expect(screen.getByText(/Example workspace: read, write/)).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByText(/Example workspace: read, write, app:mentionable, app:assignable/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     fireEvent.click(screen.getByRole("button", { name: "Disconnect workspace" }));
 

@@ -105,7 +105,7 @@
     "guide": "「メンバーのアクセス」でコードなしで同僚を承認できます。既存の承認はオフにしない限り有効です。Issue の検索・編集には Linear MCP を接続してください。",
     "intro": "Linear で nanobot を使えるメンバーを選びます。ペアリングコードは不要です。",
     "details": "メンバーのアクセスについて",
-    "summary": "{{total}} 人中 {{allowed}} 人が有効",
+    "summary": "{{allowed}} 人が利用可能",
     "loading": "チームメンバーを取得中…",
     "refreshing": "更新を確認中…"
   }

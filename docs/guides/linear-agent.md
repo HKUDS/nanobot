@@ -242,11 +242,19 @@ display; permissions use stable user IDs scoped to the OAuth client and workspac
 Profile images come from Linear's `avatarUrl` field and load directly from its
 `public.linear.app` or `uploads.linear.app` CDN without a referrer. Missing,
 unsupported or failed images fall back to initials; no extra account linking is needed.
+Workspace logos use Linear's optional `Organization.logoUrl` field with the same
+CDN restrictions. They load independently of the workspace and member lists; a
+missing or unavailable logo falls back to a workspace icon. Existing installations
+do not need to authorize again to retrieve a logo.
 Use **Refresh members** to refresh the directory and effective permission state.
 The UI prefetches on hover or keyboard focus and keeps visited lists in memory,
 scoped to this gateway, admin login, app configuration and workspace. Lists older
 than one minute stay visible while refreshing. This display cache is not used to
 authorize agent requests.
+Workspace cards are also cached for one minute within the current gateway, admin
+login and app configuration. Refreshing keeps existing cards visible, and a slow
+logo request never blocks member access controls. Expand **Advanced** to inspect
+OAuth scopes; authorization problems remain visible on the workspace card.
 
 Each switch changes only after the server confirms the save; other members remain
 editable while it saves. A failed save may have an uncertain outcome (for example,

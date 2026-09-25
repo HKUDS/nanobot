@@ -88,11 +88,14 @@ describe("Linear member access", () => {
     await openMembers();
     expect(yongru()).not.toBeChecked();
     expect(xubin()).toBeChecked();
-    expect(header()).toHaveTextContent("1 of 2 enabled");
+    expect(header()).not.toHaveTextContent("1 enabled");
+    fireEvent.click(header());
+    expect(header()).toHaveTextContent("1 enabled");
+    fireEvent.click(header());
     expect(requestMutation).toHaveBeenCalledWith("settings.channel.connect.start", {
       channel: "linear", operation: "members", organization_id: "org-1",
     }, 150_000);
-    expect(screen.getByText(/No pairing codes needed/)).toBeVisible();
+    expect(screen.queryByText(/No pairing codes needed/)).not.toBeInTheDocument();
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "About member access" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("does not grant access");

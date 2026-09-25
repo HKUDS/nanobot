@@ -105,7 +105,7 @@
     "guide": "Utilisez Accès des membres pour approuver vos collègues sans code. Les autorisations existantes restent valables sauf désactivation. Connectez Linear MCP pour rechercher ou modifier des issues.",
     "intro": "Choisissez qui peut utiliser nanobot dans Linear, sans code d’association.",
     "details": "À propos de l’accès des membres",
-    "summary": "{{allowed}} sur {{total}} autorisés",
+    "summary": "{{allowed}} autorisés",
     "loading": "Recherche des membres de votre équipe…",
     "refreshing": "Recherche de mises à jour…"
   }

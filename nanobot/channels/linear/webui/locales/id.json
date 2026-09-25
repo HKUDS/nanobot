@@ -105,7 +105,7 @@
     "guide": "Gunakan Akses anggota untuk menyetujui rekan tanpa kode pairing. Persetujuan lama tetap berlaku kecuali dinonaktifkan. Hubungkan Linear MCP untuk mencari atau mengedit issue.",
     "intro": "Pilih siapa yang boleh memakai nanobot di Linear, tanpa kode pairing.",
     "details": "Tentang akses anggota",
-    "summary": "{{allowed}} dari {{total}} diizinkan",
+    "summary": "{{allowed}} diizinkan",
     "loading": "Mencari anggota tim…",
     "refreshing": "Memeriksa pembaruan…"
   }

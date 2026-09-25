@@ -29,6 +29,11 @@ class LinearMember(TypedDict):
     avatar_url: NotRequired[str | None]
 
 
+class LinearWorkspaceProfile(TypedDict):
+    organization_id: str
+    logo_url: str | None
+
+
 class LinearApiError(RuntimeError):
     """Linear returned a transport, authentication, or GraphQL error."""
 
@@ -114,6 +119,25 @@ class LinearClient:
                 raise
         installation = await self._refresh(organization_id, force=True)
         return await self._graphql_with_token(installation.access_token, query, variables)
+
+    async def workspace_profile(self, organization_id: str) -> LinearWorkspaceProfile:
+        """Optional display metadata must not race token rotation for real agent work."""
+        installation = self.state.installation(organization_id)
+        if (installation is None or installation.oauth_client_id != self.config.client_id
+                or installation.expires_at <= time.time()):
+            raise LinearApiError("No current Linear authorization for workspace profile")
+        # Cosmetic prefetch never refreshes credentials. A failed/expired read uses
+        # the UI fallback and can be retried after normal channel work refreshes OAuth.
+        data = await self._graphql_with_token(
+            installation.access_token,
+            "query NanobotWorkspaceProfile { organization { id logoUrl } }",
+            {},
+        )
+        organization = _required_mapping(data, "organization")
+        if _required_string(organization, "id") != organization_id:
+            raise LinearApiError("Linear returned an unexpected workspace identity")
+        logo = organization.get("logoUrl")
+        return {"organization_id": organization_id, "logo_url": logo if isinstance(logo, str) else None}
 
     async def list_members(
         self, organization_id: str, *, user_id: str | None = None,

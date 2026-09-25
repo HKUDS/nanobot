@@ -45,6 +45,11 @@ class LinearConnectStore:
             operation = (query_first(query, "operation") or "connect").strip().lower()
             if operation == "inspect":
                 return self.inspect()
+            if operation == "workspace_profile":
+                organization_id = (query_first(query, "organization_id") or "").strip()
+                if not organization_id:
+                    raise ChannelConnectError("missing Linear workspace")
+                return await self.workspace_profile(organization_id)
             if operation == "disconnect":
                 organization_id = (query_first(query, "organization_id") or "").strip()
                 if not organization_id:
@@ -193,6 +198,21 @@ class LinearConnectStore:
             "webhook_url": config.webhook_url if config.public_base_url else "",
             "redirect_uri": config.redirect_uri if config.public_base_url else "",
         }
+
+    async def workspace_profile(self, organization_id: str) -> dict[str, Any]:
+        config = _load_linear_config()
+        state = LinearStateStore()
+        installation = state.installation(organization_id)
+        if installation is None or installation.oauth_client_id != config.client_id:
+            raise ChannelConnectError("Linear workspace is not connected", status=404)
+        client = LinearClient(config, state)
+        try:
+            profile = await client.workspace_profile(organization_id)
+        except LinearApiError as exc:
+            raise ChannelConnectError("Unable to read Linear workspace profile", status=502) from exc
+        finally:
+            await client.close()
+        return {"session_id": "", "status": "workspace_profile", **profile}
 
     async def members(
         self, organization_id: str, *, user_id: str | None = None, allowed: bool | None = None,

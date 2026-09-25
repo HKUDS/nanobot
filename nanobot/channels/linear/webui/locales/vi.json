@@ -105,7 +105,7 @@
     "guide": "Dùng Quyền truy cập của thành viên để phê duyệt đồng nghiệp không cần mã. Phê duyệt cũ vẫn có hiệu lực trừ khi bị tắt. Kết nối Linear MCP để tìm hoặc sửa issue.",
     "intro": "Chọn ai có thể dùng nanobot trong Linear mà không cần mã ghép nối.",
     "details": "Về quyền truy cập của thành viên",
-    "summary": "Đã cho phép {{allowed}} / {{total}} người",
+    "summary": "{{allowed}} người được phép",
     "loading": "Đang tìm thành viên nhóm…",
     "refreshing": "Đang kiểm tra cập nhật…"
   }
