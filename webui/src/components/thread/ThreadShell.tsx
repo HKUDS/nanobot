@@ -16,6 +16,7 @@ import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import type {
   ComposerContextUsage,
@@ -411,6 +412,7 @@ interface ThreadShellProps {
   temporaryChatIds?: readonly string[];
   messageCache?: ThreadMessageCache;
   filePreviewStore?: FilePreviewStore;
+  draftStore?: ComposerDraftStore;
   temporaryChatEnabled?: boolean;
   onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
@@ -633,6 +635,7 @@ export function ThreadShell({
   temporaryChatIds = [],
   messageCache,
   filePreviewStore,
+  draftStore,
   temporaryChatEnabled = false,
   onTemporaryChatEnabledChange,
   onToggleSidebar,
@@ -739,7 +742,14 @@ export function ThreadShell({
   const previewOpen = Boolean(activePreview);
   const [filePreviewMaxWidth, setFilePreviewMaxWidth] = useState(FILE_PREVIEW_MAX_WIDTH);
   const filePreviewWidth = clampFilePreviewWidth(previewState.width, filePreviewMaxWidth);
-  const [quotedContext, setQuotedContext] = useState<string | null>(null);
+  const draftKey = session?.key ?? (temporaryChatEnabled ? "new:temporary" : "new:chat");
+  const [quote, setQuote] = useState<{ key: string; text: string | null } | null>(null);
+  const quotedContext = quote?.key === draftKey
+    ? quote.text
+    : draftStore?.get(draftKey)?.quotedContext ?? null;
+  const setQuotedContext = useCallback((text: string | null) => {
+    setQuote({ key: draftKey, text });
+  }, [draftKey]);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
   const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
@@ -876,7 +886,6 @@ export function ThreadShell({
       filePreviewCloseTimerRef.current = null;
     }
     setClosingPreview(null);
-    setQuotedContext(null);
     setSubmittedViewportTurnId(null);
   }, [previewSessionKey]);
 
@@ -896,7 +905,7 @@ export function ThreadShell({
   const handleQuoteSelection = useCallback((text: string) => {
     setQuotedContext(text);
     setComposerFocusSignal((value) => value + 1);
-  }, []);
+  }, [setQuotedContext]);
 
   useEffect(() => {
     return () => {
@@ -1506,6 +1515,7 @@ export function ThreadShell({
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
         setSubmittedViewportTurnId(submitted.turnId);
       }
+      return submitted !== null;
     },
     [chatId, send, withWorkspaceScope],
   );
@@ -1715,6 +1725,9 @@ export function ThreadShell({
       ) : null}
       {session ? (
         <ThreadComposer
+          key={draftKey}
+          draftKey={draftKey}
+          draftStore={draftStore}
           onSend={handleThreadSend}
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
@@ -1765,6 +1778,9 @@ export function ThreadShell({
         />
       ) : (
         <ThreadComposer
+          key={draftKey}
+          draftKey={draftKey}
+          draftStore={draftStore}
           onSend={handleWelcomeSend}
           disabled={booting}
           inputAriaLabel={composerInputAriaLabel}
@@ -1808,6 +1824,8 @@ export function ThreadShell({
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
+          quotedContext={quotedContext}
+          onQuotedContextChange={setQuotedContext}
         />
       )}
     </>

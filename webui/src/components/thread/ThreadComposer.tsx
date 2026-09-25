@@ -121,6 +121,8 @@ import {
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
+import { composerMentionText } from "@/lib/composer-mention-text";
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
@@ -230,6 +232,8 @@ interface ThreadComposerProps {
   onPickWorkspaceFolder?: () => Promise<string | null>;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
   pendingQueueKey?: string | null;
+  draftKey?: string;
+  draftStore?: ComposerDraftStore;
   transcriptionProvider?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
   quotedContext?: string | null;
@@ -931,6 +935,8 @@ export function ThreadComposer({
   onPickWorkspaceFolder,
   onWorkspaceScopeChange,
   pendingQueueKey = null,
+  draftKey,
+  draftStore,
   transcriptionProvider = null,
   ingressLimits = null,
   quotedContext = null,
@@ -938,10 +944,13 @@ export function ThreadComposer({
   onQuotedContextChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
-  const [value, setValue] = useState("");
+  const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey) : undefined);
+  const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
   const blurFrame = useRef<number | null>(null);
-  const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>([]);
+  const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>(
+    initialDraft?.sessionMentions ?? [],
+  );
   const [sessionDragPreview, setSessionDragPreview] = useState<{
     mention: SessionMention;
     start: number;
@@ -1038,6 +1047,12 @@ export function ThreadComposer({
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
   const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
     useAttachedImages({ ingressLimits });
+  const restoredDraftAttachments = useRef(false);
+  useLayoutEffect(() => {
+    if (restoredDraftAttachments.current) return;
+    restoredDraftAttachments.current = true;
+    if (initialDraft?.files.length) enqueue(initialDraft.files);
+  }, [enqueue, initialDraft]);
 
   const formatRejection = useCallback(
     (reason: AttachmentError): string => {
@@ -1330,6 +1345,20 @@ export function ThreadComposer({
     resetKey: pendingQueueKey,
   });
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
+  const draftText = composerMentionText(mentionInput.segments).raw;
+  useLayoutEffect(() => {
+    if (!draftKey || !draftStore) return;
+    if (!draftText && images.length === 0 && !quotedContext) {
+      draftStore.delete(draftKey);
+      return;
+    }
+    draftStore.set(draftKey, {
+      text: draftText,
+      files: images.map((image) => image.file),
+      sessionMentions: selectedSessionMentions,
+      quotedContext,
+    });
+  }, [draftKey, draftStore, images, quotedContext, selectedSessionMentions, draftText]);
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
         value,
@@ -2035,7 +2064,11 @@ export function ThreadComposer({
     const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
+    const submittedDraft = draftKey ? draftStore?.get(draftKey) : undefined;
     const finishSend = () => {
+      // A pending send can finish after this composer unmounts and a newer draft is started.
+      if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
+      if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
       setQueuedPrompts([]);
       // Bubble owns the data URL copy; safe to revoke every staged blob
@@ -2073,6 +2106,8 @@ export function ThreadComposer({
     activeMcpPresetMentions,
     activeSessionMentions,
     canSend,
+    draftKey,
+    draftStore,
     clear,
     clearComposerText,
     hasTouchPrimaryPointer,

@@ -6,6 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import i18n from "@/i18n";
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
@@ -482,6 +483,35 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it.each([false, true])("keeps text and quote drafts scoped to the session (temporary=%s)", async (temporary) => {
+    const client = makeClient();
+    const draftStore: ComposerDraftStore = new Map([
+      ["websocket:draft-a", { text: "draft A", files: [], sessionMentions: [], quotedContext: "quote A" }],
+      ["websocket:draft-b", { text: "draft B", files: [], sessionMentions: [], quotedContext: "quote B" }],
+    ]);
+    const shell = (chatId: string) => wrap(client, (
+      <ThreadShell session={session(chatId)} title="Draft test" temporary={temporary}
+        draftStore={draftStore} onToggleSidebar={() => {}} />
+    ));
+    const view = render(shell("draft-a"));
+    expect(screen.getByRole("textbox")).toHaveValue("draft A");
+    expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quote A");
+    fireEvent.click(screen.getByRole("button", { name: "Remove quoted context" }));
+    view.rerender(shell("draft-b"));
+    expect(screen.getByRole("textbox")).toHaveValue("draft B");
+    expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quote B");
+    view.rerender(shell("draft-a"));
+    expect(screen.getByRole("textbox")).toHaveValue("draft A");
+    expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalled());
+    view.rerender(shell("draft-b"));
+    view.rerender(shell("draft-a"));
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(draftStore.has("websocket:draft-a")).toBe(false);
+    await act(async () => {});
   });
 
   it("surfaces and retries a deferred trace-detail request failure", async () => {

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
 
@@ -3549,4 +3550,97 @@ describe("ThreadComposer", () => {
     ).toBeNull();
   });
 
+});
+
+
+describe("session composer drafts", () => {
+  it("restores independent drafts across session switches and remounts", () => {
+    const draftStore: ComposerDraftStore = new Map();
+    const composer = (key: string) => (
+      <ThreadComposer key={key} draftKey={key} draftStore={draftStore} onSend={vi.fn()} />
+    );
+    const view = render(composer("chat-a"));
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "  draft A\nnext line" } });
+    view.rerender(composer("chat-b"));
+    expect(screen.getByLabelText("Message input")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "draft B" } });
+    view.rerender(composer("chat-a"));
+    expect(screen.getByLabelText("Message input")).toHaveValue("  draft A\nnext line");
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "z", ctrlKey: true });
+    expect(screen.getByLabelText("Message input")).toHaveValue("  draft A\nnext line");
+    view.unmount();
+    render(composer("chat-b"));
+    expect(screen.getByLabelText("Message input")).toHaveValue("draft B");
+  });
+
+  it("retains in-progress IME text without carrying composition into another chat", () => {
+    const draftStore: ComposerDraftStore = new Map();
+    const composer = (key: string) => (
+      <ThreadComposer key={key} draftKey={key} draftStore={draftStore} onSend={vi.fn()} cliApps={CLI_APPS} />
+    );
+    const view = render(composer("chat-a"));
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@gimp " } });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "@\u00a0GIMP 草稿" } });
+    view.rerender(composer("chat-b"));
+    expect(screen.getByLabelText("Message input")).toHaveValue("");
+    view.rerender(composer("chat-a"));
+    expect(screen.getByLabelText("Message input")).toHaveValue("@\u00a0GIMP 草稿");
+  });
+
+  it.each([true, false])("clears only accepted sends (accepted=%s)", (accepted) => {
+    const draftStore: ComposerDraftStore = new Map();
+    const composer = (key: string) => (
+      <ThreadComposer key={key} draftKey={key} draftStore={draftStore} onSend={() => accepted} />
+    );
+    const view = render(composer("chat-a"));
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "send me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    view.rerender(composer("chat-b"));
+    view.rerender(composer("chat-a"));
+    expect(screen.getByLabelText("Message input")).toHaveValue(accepted ? "" : "send me");
+  });
+
+  it("does not delete a newer draft when an earlier async send completes", async () => {
+    const draftStore: ComposerDraftStore = new Map();
+    let resolveSend!: (accepted: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => { resolveSend = resolve; }));
+    const composer = (key: string) => (
+      <ThreadComposer key={key} draftKey={key} draftStore={draftStore} onSend={onSend} />
+    );
+    const view = render(composer("chat-a"));
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "first" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    view.rerender(composer("chat-b"));
+    view.rerender(composer("chat-a"));
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "newer draft" } });
+    await act(async () => resolveSend(true));
+    view.rerender(composer("chat-b"));
+    view.rerender(composer("chat-a"));
+    expect(screen.getByLabelText("Message input")).toHaveValue("newer draft");
+  });
+
+  it("restores attachments and quoted context with their original session", async () => {
+    mockBlobUrls();
+    const draftStore: ComposerDraftStore = new Map();
+    const onSend = vi.fn();
+    const composer = (key: string, quote = draftStore.get(key)?.quotedContext) => (
+      <ThreadComposer key={key} draftKey={key} draftStore={draftStore} quotedContext={quote} onSend={onSend} />
+    );
+    const view = render(composer("chat-a", "quoted answer"));
+    const file = new File(["image"], "draft.png", { type: "image/png" });
+    fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    view.rerender(composer("chat-b"));
+    expect(screen.queryByText("draft.png")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+    view.rerender(composer("chat-a"));
+    expect(await screen.findByText("draft.png")).toBeInTheDocument();
+    expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quoted answer");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("", [expect.objectContaining({
+      media: expect.objectContaining({ name: "draft.png" }),
+    })], { quotedContext: "quoted answer" });
+  });
 });

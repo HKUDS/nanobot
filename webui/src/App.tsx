@@ -19,6 +19,7 @@ import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
@@ -1239,6 +1240,7 @@ function Shell({
   // Pane shells can unmount during navigation. Keep replay state for this app
   // session, pinning temporary chats because they cannot reload disk history.
   const retainedTemporaryChatIdsRef = useRef(new Set<string>());
+  const [draftStore] = useState<ComposerDraftStore>(() => new Map());
   const [filePreviewStore] = useState(() => new FilePreviewStore());
   const [threadMessageCache] = useState(() => new ThreadMessageCache(
     (key) => retainedTemporaryChatIdsRef.current.has(key),
@@ -1249,10 +1251,11 @@ function Shell({
       if (!retained.has(chatId)) {
         threadMessageCache.delete(chatId);
         filePreviewStore.delete(`websocket:${chatId}`);
+        draftStore.delete(`websocket:${chatId}`);
       }
     }
     retainedTemporaryChatIdsRef.current = retained;
-  }, [temporaryChatIds, threadMessageCache, filePreviewStore]);
+  }, [temporaryChatIds, threadMessageCache, filePreviewStore, draftStore]);
 
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean }) => {
@@ -2336,6 +2339,7 @@ function Shell({
           return;
         }
         filePreviewStore.delete(item.key);
+        draftStore.delete(item.key);
       }
       setPendingDelete(null);
       if (deletingActive) {
@@ -2348,7 +2352,7 @@ function Shell({
     } catch (e) {
       console.error("Failed to delete session", e);
     }
-  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore]);
+  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore, draftStore]);
 
   const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[]) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
@@ -2913,6 +2917,7 @@ function Shell({
                             temporaryChatIds={temporaryChatIds}
                             messageCache={threadMessageCache}
                             filePreviewStore={filePreviewStore}
+                            draftStore={draftStore}
                             temporaryChatEnabled={temporaryChatEnabled}
                             onTemporaryChatEnabledChange={
                               !activeKey ? onTemporaryChatEnabledChange : undefined
@@ -2961,6 +2966,7 @@ function Shell({
                           temporaryChatIds={temporaryChatIds}
                           messageCache={threadMessageCache}
                           filePreviewStore={filePreviewStore}
+                          draftStore={draftStore}
                           onToggleSidebar={toggleSidebar}
                           onNewChat={onNewChat}
                           onCreateChat={onCreateChat}
