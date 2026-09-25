@@ -476,7 +476,13 @@ describe("Linear channel UI", () => {
     renderSettingsView({ initialSection: "channels" });
     fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
     expect(await screen.findByText("Example workspace")).toBeVisible();
-    expect(screen.getByText(/app:assignable/)).toBeVisible();
+    const workspace = screen.getByRole("article", { name: "Example workspace" });
+    expect(within(workspace).getByRole("heading", { name: "Example workspace", level: 5 })).toBeVisible();
+    expect(within(workspace).getByRole("button", { name: "Member access" })).toBeVisible();
+    expect(screen.queryByText(/app:assignable/)).not.toBeInTheDocument();
+    fireEvent.click(within(workspace).getByRole("button", { name: "Authorized" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("read, write, app:mentionable, app:assignable");
+    fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     fireEvent.click(screen.getByRole("button", { name: "Disconnect workspace" }));
 
@@ -488,6 +494,46 @@ describe("Linear channel UI", () => {
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.feature.disable", { name: "linear" }, 20_000,
     );
+  });
+
+  it("keeps member access inside its own workspace card and leaves other cards collapsed", async () => {
+    mockFeature({ ...savedFeature(), enabled: true, running: true, runtime_status: "running" });
+    requestMutationMock.mockImplementation(async (_method, params) => {
+      if (params.operation === "members") return {
+        session_id: "", status: "members", organization_id: params.organization_id,
+        legacy_allow_all: false,
+        members: [{ id: "u1", name: "Xubin", teams: ["nanobot"], allowed: true }],
+      };
+      return { session_id: "", status: "inspected", installations: [
+        { organization_id: "org-1", organization_name: "nanobot", authorization_status: "authorized" },
+        { organization_id: "org-2", organization_name: "Design workspace", authorization_status: "authorized" },
+      ] };
+    });
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    const workspace = await screen.findByRole("article", { name: "nanobot" });
+    const other = screen.getByRole("article", { name: "Design workspace" });
+    fireEvent.click(within(workspace).getByRole("button", { name: "Member access" }));
+    expect(await within(workspace).findByRole("switch", { name: "Allow Xubin to use nanobot" })).toBeVisible();
+    expect(within(other).getByRole("button", { name: "Member access" })).toHaveAttribute("aria-expanded", "false");
+    expect(within(other).queryByRole("switch")).not.toBeInTheDocument();
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.channel.connect.start", {
+      channel: "linear", operation: "members", organization_id: "org-1",
+    }, 150_000);
+    expect(requestMutationMock.mock.calls.some(([, params]) => params.operation === "member_access")).toBe(false);
+  });
+
+  it("keeps missing authorization scopes visible without opening a tooltip", async () => {
+    mockFeature({ ...savedFeature(), enabled: true, running: true, runtime_status: "running" });
+    requestMutationMock.mockResolvedValue({ session_id: "", status: "inspected", installations: [{
+      organization_id: "org-1", organization_name: "nanobot", authorization_status: "missing_scopes",
+      scopes: ["read"], missing_scopes: ["write", "app:mentionable"],
+    }] });
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
+    const workspace = await screen.findByRole("article", { name: "nanobot" });
+    expect(within(workspace).getByText("Reconnect to grant: write, app:mentionable")).toBeVisible();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("prevents disconnecting a workspace while its status is refreshing", async () => {

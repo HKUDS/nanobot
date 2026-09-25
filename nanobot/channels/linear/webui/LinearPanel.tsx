@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Loader2, RefreshCw, Unplug } from "lucide-react";
+import { AlertCircle, Building2, Check, ChevronDown, ExternalLink, Info, Loader2, RefreshCw, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { channelValidationStatusClass } from "@/components/settings/channels/ChannelValidationProgress";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { configureChannel, disableNanobotFeature } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
@@ -253,29 +254,25 @@ export function LinearPanel({
         event.preventDefault();
         void saveSettings();
       }}>
-        <div className="flex flex-wrap items-center justify-between gap-3 pe-20">
+        <div className="flex min-h-10 flex-wrap items-center justify-between gap-3 pe-20">
           <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
           <h3 className="sr-only">{displayName}</h3>
+          <span role="status" aria-live="polite" aria-atomic="true"
+            className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+            {saving ? t("settings.actions.saving", { defaultValue: "Saving" })
+              : saved ? t("settings.channels.savedSettings", { defaultValue: "Settings saved." }) : ""}
+          </span>
           {feature.runtime_status === "running" ? (
             <span role="status" className={cn(
-              "ms-auto inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium",
+              "ms-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] font-medium leading-none",
               channelValidationStatusClass("connected"),
             )}>
               <Check className="h-3.5 w-3.5" aria-hidden />
               {tx("custom.channelRunning", "Channel running")}
             </span>
           ) : null}
-          <span role="status" aria-live="polite" aria-atomic="true" className={cn(
-            "ms-auto inline-flex items-center gap-1.5 text-[11px] text-muted-foreground",
-            !saving && !saved && "sr-only",
-          )}>
-            {saving ? <><Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden />
-              {t("settings.actions.saving", { defaultValue: "Saving" })}</> : saved ? <>
-              <Check className="h-3 w-3" aria-hidden />
-              {t("settings.channels.savedSettings", { defaultValue: "Settings saved." })}</> : null}
-          </span>
           <button type="button"
-            className="inline-flex min-h-8 items-center gap-1.5 rounded px-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-offset-2"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded px-1 text-[12px] leading-none text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-offset-2"
             aria-expanded={advancedOpen} aria-controls={advancedPanelId}
             onClick={() => setAdvancedOpen((current) => !current)}>
             {t("settings.channels.advanced", { defaultValue: "Advanced" })}
@@ -309,7 +306,7 @@ export function LinearPanel({
             </h4>
             <Button type="button" variant="ghost" size="sm"
               disabled={loadingInstallations || disconnectingId !== null}
-              className="min-h-10 gap-2 rounded-full text-[12px]"
+              className="h-8 gap-2 rounded-full text-[12px] text-muted-foreground"
               onClick={() => void loadInstallations()}>
               <RefreshCw className={cn("h-3.5 w-3.5", loadingInstallations && "animate-spin motion-reduce:animate-none")} aria-hidden />
               {tx("custom.refreshWorkspaces", "Refresh workspaces")}
@@ -328,46 +325,65 @@ export function LinearPanel({
               const confirming = disconnectConfirmId === installation.organization_id;
               const disconnecting = disconnectingId === installation.organization_id;
               const name = installation.organization_name || installation.organization_id;
+              const needsAuthorization = installation.authorization_status === "missing_scopes"
+                || installation.authorization_status === "refresh_required";
+              const authorizationLabel = (
+                <span className="inline-flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
+                  {needsAuthorization
+                    ? <AlertCircle className="h-3 w-3 shrink-0" aria-hidden />
+                    : <Check className="h-3 w-3 shrink-0" aria-hidden />}
+                  {installation.authorization_status === "missing_scopes"
+                    ? tx("custom.missingScopes", "Reconnect to grant: {{scopes}}", {
+                      scopes: installation.missing_scopes?.join(", ") || "required scopes",
+                    })
+                    : installation.authorization_status === "refresh_required"
+                      ? tx("custom.refreshRequired", "Authorization refresh required")
+                      : tx("custom.authorized", "Authorized")}
+                  {installation.scopes?.length ? <Info className="h-3 w-3 shrink-0" aria-hidden /> : null}
+                </span>
+              );
               return (
-                <article key={installation.organization_id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-muted/45 px-3 py-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-[12.5px] font-medium text-foreground">{name}</p>
-                    <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-                      {installation.authorization_status === "missing_scopes"
-                        ? tx(
-                          "custom.missingScopes",
-                          "Reconnect to grant: {{scopes}}",
-                          { scopes: installation.missing_scopes?.join(", ") || "required scopes" },
-                        )
-                        : installation.authorization_status === "refresh_required"
-                          ? tx("custom.refreshRequired", "Authorization refresh required")
-                          : tx("custom.authorized", "Authorized")}
-                      {installation.scopes?.length ? ` · ${installation.scopes.join(", ")}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {confirming ? (
-                      <Button type="button" variant="ghost" size="sm"
-                        disabled={loadingInstallations || disconnecting}
-                        className="min-h-10 rounded-full text-[12px]"
-                        onClick={() => setDisconnectConfirmId(null)}>
-                        {t("settings.actions.cancel", { defaultValue: "Cancel" })}
+                <article key={installation.organization_id} aria-label={name}
+                  className="overflow-hidden rounded-panel border border-border/70 bg-background">
+                  <header className="flex flex-wrap items-center justify-between gap-3 p-4">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control bg-muted text-muted-foreground">
+                        <Building2 className="h-4 w-4" aria-hidden />
+                      </span>
+                      <div className="min-w-0">
+                        <h5 className="truncate text-[14px] font-semibold text-foreground" title={name}>{name}</h5>
+                        <div className="mt-1">
+                          {installation.scopes?.length ? (
+                            <SettingsHint description={installation.scopes.join(", ")}>
+                              {authorizationLabel}
+                            </SettingsHint>
+                          ) : authorizationLabel}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="ms-auto flex flex-wrap items-center gap-2">
+                      {confirming ? (
+                        <Button type="button" variant="ghost" size="sm"
+                          disabled={loadingInstallations || disconnecting}
+                          className="h-8 rounded-full text-[12px]"
+                          onClick={() => setDisconnectConfirmId(null)}>
+                          {t("settings.actions.cancel", { defaultValue: "Cancel" })}
+                        </Button>
+                      ) : null}
+                      <Button type="button" variant={confirming ? "destructive" : "ghost"} size="sm"
+                        disabled={loadingInstallations || disconnectingId !== null}
+                        className={cn("h-8 gap-2 rounded-full text-[12px]", !confirming && "text-muted-foreground")}
+                        onClick={() => confirming
+                          ? void disconnectWorkspace(installation)
+                          : setDisconnectConfirmId(installation.organization_id)}>
+                        {disconnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+                          : <Unplug className="h-3.5 w-3.5" aria-hidden />}
+                        {confirming
+                          ? tx("custom.confirmDisconnect", "Disconnect workspace")
+                          : tx("custom.disconnect", "Disconnect")}
                       </Button>
-                    ) : null}
-                    <Button type="button" variant={confirming ? "destructive" : "outline"} size="sm"
-                      disabled={loadingInstallations || disconnectingId !== null}
-                      className="min-h-10 gap-2 rounded-full text-[12px]"
-                      onClick={() => confirming
-                        ? void disconnectWorkspace(installation)
-                        : setDisconnectConfirmId(installation.organization_id)}>
-                      {disconnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
-                        : <Unplug className="h-3.5 w-3.5" aria-hidden />}
-                      {confirming
-                        ? tx("custom.confirmDisconnect", "Disconnect workspace")
-                        : tx("custom.disconnect", "Disconnect")}
-                    </Button>
-                  </div>
+                    </div>
+                  </header>
                   <LinearMemberAccess organizationId={installation.organization_id}
                     configScope={JSON.stringify([
                       feature.config_values?.["channels.linear.clientId"],

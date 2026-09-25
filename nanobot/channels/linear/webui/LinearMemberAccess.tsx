@@ -68,14 +68,14 @@ export function LinearMemberAccess({ organizationId, configScope = "", disabled 
   }
 
   return (
-    <section className="w-full border-t border-border/50 pt-1">
+    <section className="w-full border-t border-border/50 bg-settings-surface">
       <button type="button" aria-expanded={expanded} aria-controls={panelId}
         disabled={disabled} onMouseEnter={prefetch} onFocus={prefetch}
-        className="settings-list-inset flex min-h-12 w-full items-center justify-between gap-3 rounded-xl text-start text-[13px] font-medium settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        className="settings-list-inset flex min-h-12 w-full items-center justify-between gap-3 py-2 text-start text-[12px] font-medium settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50"
         onClick={() => setExpanded(!expanded)}>
-        <span>{tx("members.title", "Member access")}</span>
-        <span className="flex items-center gap-2">
-          <span role="status" aria-live="polite" className="text-[12px] font-normal text-muted-foreground">
+        <span className="shrink-0">{tx("members.title", "Member access")}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span role="status" aria-live="polite" className="text-end text-[11px] font-normal text-muted-foreground">
             {loading ? payload
               ? tx("members.refreshing", "Checking for updates…")
               : tx("members.loading", "Finding your teammates…")
