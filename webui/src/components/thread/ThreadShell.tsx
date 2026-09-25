@@ -743,10 +743,11 @@ export function ThreadShell({
   const [filePreviewMaxWidth, setFilePreviewMaxWidth] = useState(FILE_PREVIEW_MAX_WIDTH);
   const filePreviewWidth = clampFilePreviewWidth(previewState.width, filePreviewMaxWidth);
   const draftKey = session?.key ?? (temporaryChatEnabled ? "new:temporary" : "new:chat");
+  const persistDraft = session ? !temporary : !temporaryChatEnabled;
   const [quote, setQuote] = useState<{ key: string; text: string | null } | null>(null);
   const quotedContext = quote?.key === draftKey
     ? quote.text
-    : draftStore?.get(draftKey)?.quotedContext ?? null;
+    : draftStore?.get(draftKey, persistDraft)?.quotedContext ?? null;
   const setQuotedContext = useCallback((text: string | null) => {
     setQuote({ key: draftKey, text });
   }, [draftKey]);
@@ -1728,6 +1729,7 @@ export function ThreadShell({
           key={draftKey}
           draftKey={draftKey}
           draftStore={draftStore}
+          persistDraft={persistDraft}
           onSend={handleThreadSend}
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
@@ -1781,6 +1783,7 @@ export function ThreadShell({
           key={draftKey}
           draftKey={draftKey}
           draftStore={draftStore}
+          persistDraft={persistDraft}
           onSend={handleWelcomeSend}
           disabled={booting}
           inputAriaLabel={composerInputAriaLabel}

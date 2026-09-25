@@ -19,7 +19,7 @@ import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
-import type { ComposerDraftStore } from "@/lib/composer-draft";
+import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
@@ -969,6 +969,7 @@ export default function App() {
           if (cancelled) return;
           if (isBootstrapAuthRequired(e)) {
             clearReloadCache();
+            clearStoredComposerDrafts();
             webuiThreadCache.clear();
             setState({ status: "auth", failed: !!secret });
           } else {
@@ -995,6 +996,7 @@ export default function App() {
       } catch (e) {
         if (isBootstrapAuthRequired(e)) {
           clearReloadCache();
+          clearStoredComposerDrafts();
           webuiThreadCache.clear();
           setState({ status: "auth", failed: !!bootstrapSecretRef.current });
         }
@@ -1045,6 +1047,7 @@ export default function App() {
     }
     clearSavedSecret();
     clearReloadCache();
+    clearStoredComposerDrafts();
     webuiThreadCache.clear();
     setState({ status: "auth" });
   };
@@ -1240,7 +1243,7 @@ function Shell({
   // Pane shells can unmount during navigation. Keep replay state for this app
   // session, pinning temporary chats because they cannot reload disk history.
   const retainedTemporaryChatIdsRef = useRef(new Set<string>());
-  const [draftStore] = useState<ComposerDraftStore>(() => new Map());
+  const [draftStore] = useState(() => new ComposerDraftStore());
   const [filePreviewStore] = useState(() => new FilePreviewStore());
   const [threadMessageCache] = useState(() => new ThreadMessageCache(
     (key) => retainedTemporaryChatIdsRef.current.has(key),

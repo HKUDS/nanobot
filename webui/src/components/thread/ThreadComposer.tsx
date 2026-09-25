@@ -234,6 +234,7 @@ interface ThreadComposerProps {
   pendingQueueKey?: string | null;
   draftKey?: string;
   draftStore?: ComposerDraftStore;
+  persistDraft?: boolean;
   transcriptionProvider?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
   quotedContext?: string | null;
@@ -937,6 +938,7 @@ export function ThreadComposer({
   pendingQueueKey = null,
   draftKey,
   draftStore,
+  persistDraft = false,
   transcriptionProvider = null,
   ingressLimits = null,
   quotedContext = null,
@@ -944,7 +946,7 @@ export function ThreadComposer({
   onQuotedContextChange,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
-  const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey) : undefined);
+  const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey, persistDraft) : undefined);
   const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
   const blurFrame = useRef<number | null>(null);
@@ -1357,8 +1359,8 @@ export function ThreadComposer({
       files: images.map((image) => image.file),
       sessionMentions: selectedSessionMentions,
       quotedContext,
-    });
-  }, [draftKey, draftStore, images, quotedContext, selectedSessionMentions, draftText]);
+    }, persistDraft);
+  }, [draftKey, draftStore, images, persistDraft, quotedContext, selectedSessionMentions, draftText]);
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
         value,

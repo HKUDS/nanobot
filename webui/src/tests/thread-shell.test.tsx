@@ -6,7 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import i18n from "@/i18n";
-import type { ComposerDraftStore } from "@/lib/composer-draft";
+import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
@@ -475,6 +475,7 @@ function settingsWithFastPreset(): SettingsPayload {
 describe("ThreadShell", () => {
   beforeEach(() => {
     webuiThreadCache.clear();
+    clearStoredComposerDrafts();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -483,6 +484,53 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it.each([false, true])("restores regular drafts after reload but excludes temporary chats (temporary=%s)", async (temporary) => {
+    const client = makeClient();
+    let draftStore = new ComposerDraftStore();
+    draftStore.set("websocket:reload-draft", {
+      text: "original", files: [], sessionMentions: [], quotedContext: "quoted answer",
+    });
+    const shell = () => wrap(client, (
+      <ThreadShell session={session("reload-draft")} title="Reload test" temporary={temporary}
+        draftStore={draftStore} onToggleSidebar={() => {}} />
+    ));
+    const first = render(shell());
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "  unsent draft\n第二行" } });
+    first.unmount();
+    draftStore = new ComposerDraftStore();
+    const reloaded = render(shell());
+    expect(screen.getByRole("textbox")).toHaveValue(temporary ? "" : "  unsent draft\n第二行");
+    if (temporary) {
+      expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quoted answer");
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+      await waitFor(() => expect(client.sendMessage).toHaveBeenCalled());
+      reloaded.unmount();
+      draftStore = new ComposerDraftStore();
+      render(shell());
+      expect(screen.getByRole("textbox")).toHaveValue("");
+      expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+    }
+    await act(async () => {});
+    clearStoredComposerDrafts();
+  });
+
+  it.each([false, true])("persists only ordinary new-topic drafts (temporary=%s)", async (temporary) => {
+    const client = makeClient();
+    const shell = () => wrap(client, (
+      <ThreadShell session={null} title="New topic" temporaryChatEnabled={temporary}
+        draftStore={new ComposerDraftStore()} onToggleSidebar={() => {}} />
+    ));
+    const first = render(shell());
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "new topic draft" } });
+    first.unmount();
+    render(shell());
+    expect(screen.getByRole("textbox")).toHaveValue(temporary ? "" : "new topic draft");
+    await act(async () => {});
+    clearStoredComposerDrafts();
   });
 
   it.each([false, true])("keeps text and quote drafts scoped to the session (temporary=%s)", async (temporary) => {
