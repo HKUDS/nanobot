@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WebUIMutationTransport } from "@/lib/api";
+import { NanobotClient } from "@/lib/nanobot-client";
 
 import { linearWorkspaceStore } from "../../../nanobot/channels/linear/webui/workspace-store";
 
 const installation = { organization_id: "org-1", organization_name: "nanobot" };
 const logo = "https://public.linear.app/org-1/logo";
 function fixture() {
-  const requestMutation = vi.fn<WebUIMutationTransport["requestMutation"]>(async (_action, params) =>
+  // Keep the real generic transport type; this client is never connected.
+  const client = new NanobotClient({ url: "ws://preview.invalid", reconnect: false });
+  const requestMutation = vi.spyOn(client, "requestMutation").mockImplementation(async (_action, params) =>
     params?.operation === "inspect"
       ? { installations: [installation] }
       : { organization_id: "org-1", logo_url: logo });
-  const client = { requestMutation };
   const store = linearWorkspaceStore(client, "session", "app");
   return { requestMutation, client, store };
 }
