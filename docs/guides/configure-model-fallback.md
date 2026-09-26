@@ -69,8 +69,8 @@ for common providers.
   primary replies have no fallback badge. Saved replies retain the name used
   for that invocation, even after a preset is renamed or deleted. Older replies
   without recorded attribution and unnamed inline fallback objects are not labeled.
-- Keep fallback context windows realistic; smaller fallback windows constrain
-  how much context can fit.
+- Keep fallback context windows realistic. The primary preset determines the
+  context budget; smaller fallback windows may fail on long prompts.
 - Put cheaper or faster fallbacks before expensive ones when acceptable.
 - Use `/model <preset>` for runtime switching without editing config.
 - Keep preset names human-readable; the same name appears in the WebUI and `/model`.

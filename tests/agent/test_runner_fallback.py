@@ -248,7 +248,8 @@ def test_provider_signature_tracks_fallback_presets_and_provider_config() -> Non
     assert signature != provider_signature(Config.model_validate(changed_key))
 
 
-def test_provider_snapshot_uses_smallest_fallback_context_window() -> None:
+@pytest.mark.parametrize("preset_name", [None, "fast"])
+def test_provider_snapshot_preserves_primary_context_window(preset_name: str | None) -> None:
     from nanobot.config.schema import Config
     from nanobot.providers.factory import build_provider_snapshot
 
@@ -278,9 +279,9 @@ def test_provider_snapshot_uses_smallest_fallback_context_window() -> None:
     })
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        snapshot = build_provider_snapshot(config)
+        snapshot = build_provider_snapshot(config, preset_name=preset_name)
 
-    assert snapshot.context_window_tokens == 64000
+    assert snapshot.context_window_tokens == 128000
     assert isinstance(snapshot.provider, FallbackProvider)
     assert snapshot.provider._primary_context_window_tokens == 128000
 
