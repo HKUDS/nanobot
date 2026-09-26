@@ -7,6 +7,8 @@ import os
 import sqlite3
 import threading
 import time
+from collections.abc import Generator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -49,12 +51,16 @@ class LinearStateStore:
         except OSError:
             pass
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=FULL")
-        return connection
+    @contextmanager
+    def _connect(self) -> Generator[sqlite3.Connection, None, None]:
+        # SQLite's transaction context commits/rolls back but does not close.
+        # Release file descriptors on every operation, including setup failures.
+        with closing(sqlite3.connect(self.path, timeout=10)) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+            with connection:
+                yield connection
 
     def _initialize(self) -> None:
         with self._guard, self._connect() as connection:
