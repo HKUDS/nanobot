@@ -402,6 +402,31 @@ async def test_loop_max_iterations_message_stays_stable(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("max_iterations", [1, 2, 20])
+async def test_goal_idle_guard_survives_session_runner_slices(loop_factory, max_iterations):
+    from agent.session_helpers import run_session
+
+    loop = loop_factory()
+    loop.max_iterations = max_iterations
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Need your input"))
+    session = loop.sessions.get_or_create("cli:idle-goal")
+    session.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Make a plan"}
+    loop.sessions.save(session)
+    try:
+        for expected_calls in (3, 6):
+            await run_session(loop, InboundMessage(
+                channel="cli", sender_id="user", chat_id="idle-goal", content="Continue the plan",
+            ))
+            assert loop.provider.chat_stream_with_retry.await_count == expected_calls
+            loop.sessions.invalidate(session.key)
+            reloaded = loop.sessions.get_or_create(session.key)
+            assert reloaded.metadata[GOAL_STATE_KEY]["status"] == "active"
+            assert reloaded.messages[-1]["content"] == "Need your input"
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
 async def test_loop_goal_turn_uses_standard_iteration_budget(tmp_path):
     loop = _make_loop(tmp_path)
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
