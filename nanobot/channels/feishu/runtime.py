@@ -30,6 +30,7 @@ from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.contracts import ChannelInstanceSpec
+from nanobot.channels.feishu.bot_senders import BotHopGuard, bot_sender_allowed
 from nanobot.channels.feishu.config import FeishuConfig, feishu_default_config
 from nanobot.channels.feishu.instances import (
     DEFAULT_INSTANCE_ID,
@@ -996,6 +997,7 @@ class FeishuChannel(BaseChannel):
         self._bot_open_id: str | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._reaction_ids: dict[str, str] = {}  # message_id → reaction_id
+        self._bot_hops = BotHopGuard(limit=config.bot_hop_limit)
 
     # ------------------------------------------------------------------
     # QR login — writes credentials directly to config.json
@@ -2288,6 +2290,10 @@ class FeishuChannel(BaseChannel):
         """
         if not self._client:
             return
+        if self.config.reply_with_mention and self._bot_hops.pending_peer(chat_id):
+            # A peer bot only receives group messages that mention it and streaming cards
+            # cannot carry a real mention; send() emits the final text with an <at> tag.
+            return
         meta = metadata or {}
         stream_key = self._stream_key(chat_id, meta)
         loop = asyncio.get_running_loop()
@@ -2583,6 +2589,15 @@ class FeishuChannel(BaseChannel):
                             json.dumps({"file_key": key}, ensure_ascii=False),
                         )
 
+            peer_open_id = self._bot_hops.consume_peer(msg.chat_id)
+            if peer_open_id and self.config.reply_with_mention and msg.content.strip():
+                # Feishu only routes group messages that @ the target bot, so a reply to an
+                # allowed peer bot is sent as plain text carrying a real mention.
+                mention = f'<at user_id="{peer_open_id}"></at> '
+                text_body = json.dumps({"text": mention + msg.content.strip()}, ensure_ascii=False)
+                await loop.run_in_executor(None, _do_send, "text", text_body)
+                return
+
             if msg.content and msg.content.strip():
                 fmt = self._detect_msg_format(msg.content)
 
@@ -2639,9 +2654,23 @@ class FeishuChannel(BaseChannel):
 
             message_id = message.message_id
 
-            # Skip bot messages
+            # Bot authors are dropped unless explicitly allowed. Feishu pushes group events
+            # for other bots when the app holds `im:message.group_at_msg.include_bot`, and
+            # the message still has to @ this bot; two bots would otherwise reply forever.
             if sender.sender_type == "bot":
-                return
+                bot_open_id = sender.sender_id.open_id if sender.sender_id else ""
+                if not bot_sender_allowed(bot_open_id, self.config.allow_bot_senders):
+                    return
+                if not self._bot_hops.accept(message.chat_id, bot_open_id):
+                    self.logger.warning(
+                        "Bot hop limit ({}) reached in chat {}; dropping bot message from {}",
+                        self.config.bot_hop_limit,
+                        message.chat_id,
+                        bot_open_id or "<unknown>",
+                    )
+                    return
+            else:
+                self._bot_hops.human_message(message.chat_id)
 
             sender_id = sender.sender_id.open_id if sender.sender_id else "unknown"
             chat_id = message.chat_id
