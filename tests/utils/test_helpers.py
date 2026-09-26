@@ -123,6 +123,28 @@ def test_truncate_text_to_tokens_non_positive_budget_returns_text():
     assert truncate_text_to_tokens(text, 0) == text
 
 
+@pytest.mark.parametrize(
+    ("text", "max_tokens", "expected"),
+    [
+        ("🙂" * 10, 1, ""),
+        ("汉" * 10, 1, ""),
+        ("a🙂" * 10, 2, "a"),
+        ("🙂" * 10, 2, "🙂"),
+        ("🙂" * 10, 7, "\n... (truncated)"),
+        ("汉" * 10, 9, "汉\n... (truncated)"),
+        ("a🙂" * 10, 8, "a\n... (truncated)"),
+        ("🙂" * 10, 8, "🙂\n... (truncated)"),
+    ],
+)
+def test_truncate_text_to_tokens_preserves_complete_unicode_characters(
+    text: str, max_tokens: int, expected: str
+) -> None:
+    result = truncate_text_to_tokens(text, max_tokens)
+
+    assert result == expected
+    assert len(tiktoken.get_encoding("cl100k_base").encode(result)) <= max_tokens
+
+
 def test_content_with_media_breadcrumbs_preserves_valid_paths():
     assert content_with_media_breadcrumbs(
         "user",

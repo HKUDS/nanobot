@@ -423,13 +423,14 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
             return text
         suffix_tokens = enc.encode(_TRUNCATED_SUFFIX)
         body_budget = max_tokens - len(suffix_tokens)
+        # Token boundaries can split UTF-8 characters; discard incomplete trailing bytes.
         if body_budget <= 0:
-            return enc.decode(tokens[:max_tokens])
+            return enc.decode(tokens[:max_tokens], errors="ignore")
         for candidate_budget in range(body_budget, -1, -1):
-            result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
+            result = enc.decode(tokens[:candidate_budget], errors="ignore") + _TRUNCATED_SUFFIX
             if len(enc.encode(result)) <= max_tokens:
                 return result
-        return enc.decode(tokens[:max_tokens])
+        return enc.decode(tokens[:max_tokens], errors="ignore")
     except Exception:
         if len(text.encode("utf-8")) <= max_tokens:
             return text
