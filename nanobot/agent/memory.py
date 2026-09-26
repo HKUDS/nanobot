@@ -1115,6 +1115,64 @@ class Consolidator:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
 
+    def _bounded_summary_history(
+        self,
+        accepted_messages: list[dict[str, Any]],
+        *,
+        source_message_count: int,
+        runtime: LLMRuntime,
+        input_token_budget: int,
+        tools: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Keep a recent history tail that fits alongside the archive prompt."""
+        instruction_end = 0
+        for message in accepted_messages:
+            if message.get("role") not in {"system", "developer"}:
+                break
+            instruction_end += 1
+
+        instructions = [dict(message) for message in accepted_messages[:instruction_end]]
+        conversation = [dict(message) for message in accepted_messages[instruction_end:]]
+        prompt = render_template(
+            "agent/consolidator_archive.md",
+            strip=True,
+            archive_count=source_message_count,
+        )
+        fixed_messages = [
+            *instructions,
+            {"role": "user", "content": prompt},
+        ]
+        reserved_tokens, _source = estimate_prompt_tokens_chain(
+            runtime.provider,
+            runtime.model,
+            fixed_messages,
+            tools,
+        )
+        full_request = [
+            *fixed_messages,
+            *conversation,
+        ]
+        full_request_tokens, _source = estimate_prompt_tokens_chain(
+            runtime.provider,
+            runtime.model,
+            full_request,
+            tools,
+        )
+        if full_request_tokens <= input_token_budget:
+            return [dict(message) for message in accepted_messages]
+        history_budget = input_token_budget - self._SAFETY_BUFFER - reserved_tokens
+        if history_budget <= 0:
+            bounded_history: list[dict[str, Any]] = []
+        else:
+            bounded_history = Session(
+                key="consolidation",
+                messages=conversation,
+            ).get_history(max_tokens=history_budget)
+
+        if bounded_history == conversation:
+            return [dict(message) for message in accepted_messages]
+        return [*instructions, *bounded_history]
+
     async def summarize_transcript(
         self,
         accepted_messages: list[dict[str, Any]],
@@ -1141,12 +1199,23 @@ class Consolidator:
             max_output_tokens,
             max(1, (input_token_budget - self._SAFETY_BUFFER) // 2),
         )
+        summary_history = (
+            accepted_messages
+            if provider_state is not None
+            else self._bounded_summary_history(
+                accepted_messages,
+                source_message_count=len(source_messages),
+                runtime=runtime,
+                input_token_budget=input_token_budget,
+                tools=tools,
+            )
+        )
 
         summary = await self.archiver.archive(
             source_messages,
             runtime=runtime,
             session_key=session_key,
-            history=accepted_messages,
+            history=summary_history,
             request_tools=tools,
             previous_summary=previous_summary,
             input_token_budget=input_token_budget,
