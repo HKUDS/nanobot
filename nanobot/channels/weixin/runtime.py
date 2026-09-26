@@ -1495,7 +1495,7 @@ class WeixinChannel(BaseChannel):
             if not filename:
                 ts = int(time.time())
                 hash_seed = encrypt_query_param or full_url
-                h = abs(hash(hash_seed)) % 100000
+                h = hashlib.sha1(hash_seed.encode()).hexdigest()[:10]
                 filename = f"{media_type}_{ts}_{h}{ext}"
             safe_name = os.path.basename(filename)
             file_path = media_dir / safe_name
