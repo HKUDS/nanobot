@@ -41,6 +41,7 @@ class RequestContext:
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
     log_content: bool = True
+    topic_id: str | int | None = None
 
 
 @runtime_checkable

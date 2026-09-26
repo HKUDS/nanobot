@@ -11,9 +11,12 @@ from nanobot.agent.tools.context import (
     RequestContext,
     bind_request_context,
     current_request_context,
+    request_context,
     reset_request_context,
 )
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.runtime_control import AgentRuntimeControl
+from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import Config
@@ -295,3 +298,45 @@ async def test_process_message_captures_original_text_before_restore(
         )
 
     assert seen == [(expected, runtime)]
+
+
+@pytest.mark.asyncio
+async def test_process_message_binds_telegram_topic_id_for_my_tool(tmp_path: Path) -> None:
+    """Telegram message_thread_id metadata must reach my.request.topic_id."""
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    captured: list[RequestContext] = []
+
+    async def capture_request_context(ctx) -> None:
+        ctx.session = loop.sessions.get_or_create(ctx.session_key)
+        captured.append(loop._request_context_for_turn(ctx))
+        raise RuntimeError("captured")
+
+    loop._restore_turn = capture_request_context  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="captured"):
+        await loop._process_message(
+            InboundMessage(
+                channel="telegram",
+                sender_id="user",
+                chat_id="-100123",
+                content="hello",
+                metadata={"message_id": "10", "message_thread_id": 42},
+            ),
+            runtime=loop.llm_runtime(),
+        )
+
+    request_ctx = captured[-1]
+    assert request_ctx.topic_id == 42
+
+    tool = MyTool(runtime_control=AgentRuntimeControl(loop))
+    with request_context(request_ctx):
+        assert await tool.execute(action="check", key="request.topic_id") == (
+            "request.topic_id: 42"
+        )

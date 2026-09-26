@@ -23,7 +23,10 @@ from nanobot.channels.telegram.runtime import (
     TelegramChannel,
     TelegramConfig,
     _markdown_to_telegram_html,
+    _rich_message_markdown,
+    _rich_message_payload,
     _split_telegram_markdown,
+    _split_telegram_rich_chunks,
     _StreamBuf,
     _telegram_command_text,
 )
@@ -64,6 +67,7 @@ class _FakeBot:
     def __init__(self) -> None:
         self.sent_messages: list[dict] = []
         self.sent_media: list[dict] = []
+        self.chat_actions: list[dict] = []
         self.get_me_calls = 0
         self.shutdown_calls = 0
 
@@ -97,7 +101,7 @@ class _FakeBot:
         self.sent_media.append({"kind": "document", **kwargs})
 
     async def send_chat_action(self, **kwargs) -> None:
-        pass
+        self.chat_actions.append(kwargs)
 
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
@@ -204,6 +208,105 @@ def _assert_code_blocks_render_balanced(chunks: list[str]) -> None:
     for chunk in chunks:
         html = _markdown_to_telegram_html(chunk)
         assert html.count("<pre><code>") == html.count("</code></pre>")
+
+
+def test_rich_message_payload_hard_breaks_single_newlines() -> None:
+    content = "one\ntwo\n\nthree"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "one  \ntwo\n\nthree"}
+
+
+def test_rich_message_payload_preserves_backslash_hard_break() -> None:
+    """A trailing backslash is already a hard break; spaces would corrupt it."""
+    content = "one\\\ntwo"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "one\\\ntwo"}
+
+
+def test_rich_message_payload_hard_breaks_after_escaped_backslash() -> None:
+    """An even backslash run is a literal backslash, not a break."""
+    content = "one\\\\\ntwo"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "one\\\\  \ntwo"}
+
+
+def test_rich_message_payload_skips_fenced_code() -> None:
+    content = "intro\n```py\na\nb\n```\n\ntail"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "intro  \n```py\na\nb\n```\n\ntail"}
+
+
+def test_rich_message_payload_skips_long_fences_and_blank_lines() -> None:
+    content = "a\n````py\nx\n````\n\nb\n"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "a  \n````py\nx\n````\n\nb\n"}
+
+
+def test_rich_message_payload_skips_tilde_fenced_code() -> None:
+    content = "intro\n~~~py\na\nb\n~~~\n\ntail"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": "intro  \n~~~py\na\nb\n~~~\n\ntail"}
+
+
+def test_rich_message_payload_tilde_fence_may_contain_backtick_fences() -> None:
+    """Backtick lines are content inside a tilde-fenced block."""
+    content = "~~~\n```\nx\n```\n~~~\ntail"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": content}
+
+
+def test_rich_message_payload_tilde_fence_ignores_backtick_closer() -> None:
+    """A backtick-only line must not close an open tilde fence."""
+    content = "~~~\na\n```\nb\n```\nc\n~~~\n\ntail"
+
+    payload = _rich_message_payload(content)
+
+    assert payload == {"markdown": content}
+
+
+def test_rich_message_payload_single_line_untouched() -> None:
+    assert _rich_message_payload("# head") == {"markdown": "# head"}
+    assert _rich_message_payload("") == {"markdown": ""}
+
+
+def test_rich_message_markdown_is_idempotent() -> None:
+    content = "one\ntwo  \n\n```py\na\nb\n```\n~~~\nx\n~~~\nthree"
+
+    once = _rich_message_markdown(content)
+    assert _rich_message_markdown(once) == once
+
+
+def test_split_telegram_rich_chunks_counts_inserted_hard_break_spaces() -> None:
+    """Inserted hard-break spaces must count toward the rich-message limit."""
+    content = "\n".join("ab" for _ in range(10923))
+    assert len(content) <= TELEGRAM_RICH_MAX_LEN
+
+    chunks = _split_telegram_rich_chunks(content, TELEGRAM_RICH_MAX_LEN)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= TELEGRAM_RICH_MAX_LEN for chunk in chunks)
+    assert all(
+        len(_rich_message_markdown(chunk)) <= TELEGRAM_RICH_MAX_LEN
+        for chunk in chunks
+    )
+    assert "".join(
+        _rich_message_markdown(chunk).replace(" ", "").replace("\n", "")
+        for chunk in chunks
+    ) == content.replace("\n", "")
 
 
 def test_split_telegram_markdown_inside_code_block_moves_before_fence() -> None:
@@ -1013,7 +1116,7 @@ async def test_send_delta_rich_draft_rejection_falls_back_to_legacy_preview() ->
     assert channel._app.bot.do_api_request.call_args.args[0] == "sendRichMessageDraft"
     rich_kwargs = channel._app.bot.do_api_request.call_args.kwargs["api_kwargs"]
     assert rich_kwargs["draft_id"] == 17
-    assert rich_kwargs["rich_message"] == {"markdown": "# head\nbody"}
+    assert rich_kwargs["rich_message"] == {"markdown": "# head  \nbody"}
     assert channel._app.bot.sent_messages[0]["text"] == "head\nbody"
     assert channel._stream_bufs["123"].message_id == 1
     assert channel._stream_bufs["123"].draft_id is None
@@ -1263,6 +1366,38 @@ async def test_flush_stream_overflow_rich_limit_counts_unicode_characters() -> N
     assert len(first) == TELEGRAM_RICH_MAX_LEN
     assert len(first.encode("utf-8")) > TELEGRAM_RICH_MAX_LEN
     assert buf.text == "尾"
+
+
+@pytest.mark.asyncio
+async def test_send_delta_rich_stream_end_splits_by_transformed_limit() -> None:
+    """A raw payload within the rich limit must not ship over it as one chunk.
+
+    Short lines gain two hard-break spaces per line, so a 32,767-character
+    payload can exceed the limit after transformation. Splitting must operate
+    on the transformed markdown and each sendRichMessage call stays within it.
+    """
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], rich_messages=True),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    content = "\n".join("ab" for _ in range(10923))
+    assert len(_rich_message_markdown(content)) > TELEGRAM_RICH_MAX_LEN
+    channel._stream_bufs["123"] = _StreamBuf(
+        text=content, draft_id=17, last_edit=0.0, stream_id="s:0",
+    )
+    channel._app.bot.do_api_request = AsyncMock(return_value=True)
+
+    await channel.send_delta("123", "", stream_id="s:0", stream_end=True)
+
+    calls = channel._app.bot.do_api_request.call_args_list
+    assert len(calls) > 1
+    assert all(call.args[0] == "sendRichMessage" for call in calls)
+    assert all(
+        len(call.kwargs["api_kwargs"]["rich_message"]["markdown"]) <= TELEGRAM_RICH_MAX_LEN
+        for call in calls
+    )
+    assert "123" not in channel._stream_bufs
 
 
 @pytest.mark.asyncio
@@ -1996,7 +2131,7 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     await channel._on_message(_make_telegram_update(text="hello everyone"), None)
 
@@ -2018,7 +2153,7 @@ async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(_make_telegram_update(text="@nanobot_test hi", entities=[mention]), None)
@@ -2042,7 +2177,7 @@ async def test_group_policy_mention_accepts_caption_mention() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
     await channel._on_message(
@@ -2068,7 +2203,7 @@ async def test_group_policy_mention_accepts_reply_to_bot() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply = SimpleNamespace(from_user=SimpleNamespace(id=999))
     await channel._on_message(_make_telegram_update(text="reply", reply_to_message=reply), None)
@@ -2090,7 +2225,7 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
         handled.append(kwargs)
 
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     await channel._on_message(_make_telegram_update(text="hello group"), None)
 
@@ -2162,7 +2297,7 @@ async def test_on_message_includes_reply_context() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply = SimpleNamespace(text="Hello", message_id=2, from_user=SimpleNamespace(id=1))
     update = _make_telegram_update(text="translate this", reply_to_message=reply)
@@ -2283,7 +2418,7 @@ async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tm
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply_with_photo = SimpleNamespace(
         text=None,
@@ -2322,7 +2457,7 @@ async def test_on_message_reply_to_media_fallback_when_download_fails() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply_with_photo = SimpleNamespace(
         text=None,
@@ -2366,7 +2501,7 @@ async def test_on_message_reply_to_caption_and_media(monkeypatch, tmp_path) -> N
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     reply_with_caption_and_photo = SimpleNamespace(
         text=None,
@@ -2661,7 +2796,7 @@ async def test_on_message_pairs_unauthorized_private_user_before_side_effects(
     )
     _install_ready_app(channel)
     started_typing: list[str] = []
-    channel._start_typing = lambda chat_id: started_typing.append(chat_id)
+    channel._start_typing = lambda chat_id, *_args: started_typing.append(chat_id)
     channel._add_reaction = AsyncMock(return_value=None)
     channel._download_message_media = AsyncMock(return_value=([], []))
     monkeypatch.setattr(
@@ -2689,7 +2824,7 @@ async def test_on_message_location_content() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     location = SimpleNamespace(latitude=48.8566, longitude=2.3522)
     update = _make_telegram_update(location=location)
@@ -2711,7 +2846,7 @@ async def test_on_message_location_with_text() -> None:
     async def capture_handle(**kwargs) -> None:
         handled.append(kwargs)
     channel._handle_message = capture_handle
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     location = SimpleNamespace(latitude=51.5074, longitude=-0.1278)
     update = _make_telegram_update(text="meet me here", location=location)
@@ -3188,7 +3323,7 @@ async def test_callback_query_handles_inaccessible_message() -> None:
         MessageBus(),
     )
     channel._handle_message = AsyncMock()
-    channel._start_typing = lambda _chat_id: None
+    channel._start_typing = lambda *_args: None
 
     query = SimpleNamespace(
         id="cb_inaccessible",
@@ -3357,3 +3492,65 @@ async def test_compaction_notices_are_tracked_per_compaction_id() -> None:
         chat_id=999, message_id=101, text="Context compacted.",
     )
     assert channel._compaction_notices == {("999", "c2"): 202}
+
+
+@pytest.mark.asyncio
+async def test_typing_action_scopes_to_topic_when_thread_id_available() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+
+    channel._start_typing("123", 42)
+    await asyncio.sleep(0.01)
+    channel._stop_typing("123", 42)
+
+    actions = list(channel._app.bot.chat_actions)
+    assert actions
+    assert all(a.get("message_thread_id") == 42 for a in actions)
+
+    channel._start_typing("123")
+    await asyncio.sleep(0.01)
+    channel._stop_typing("123", None)
+
+    more_actions = channel._app.bot.chat_actions[len(actions):]
+    assert more_actions
+    assert all("message_thread_id" not in a for a in more_actions)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_topic_turns_stop_typing_independently() -> None:
+    """Two overlapping topic turns must not cancel each other's typing tasks."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+
+    channel._start_typing("123", 42)
+    channel._start_typing("123", 43)
+    task_a = channel._typing_tasks[("123", 42)]
+    task_b = channel._typing_tasks[("123", 43)]
+    assert task_a is not task_b
+    assert not task_a.done()
+    await asyncio.sleep(0.01)
+    threads_streamed = {a.get("message_thread_id") for a in channel._app.bot.chat_actions}
+    assert {42, 43} <= threads_streamed
+
+    # Topic A's turn completes: its typing stops, topic B's keeps running.
+    await channel.send(
+        OutboundMessage(channel="telegram", chat_id="123", content="done",
+                        metadata={"message_thread_id": 42}),
+    )
+    assert ("123", 42) not in channel._typing_tasks
+    assert ("123", 43) in channel._typing_tasks
+    assert not task_b.done()
+
+    await task_a
+    assert task_a.done()
+
+    channel._stop_typing("123", 43)
+    await task_b
+    assert task_b.done()
+    assert channel._typing_tasks == {}
