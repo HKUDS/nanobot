@@ -1393,6 +1393,46 @@ class TestConsumeSse:
         assert reasoning == "part summary"
 
     @pytest.mark.asyncio
+    async def test_reasoning_text_streamed(self):
+        response = _SseResponse([
+            {"type": "response.reasoning_text.delta", "delta": "step 1 "},
+            {"type": "response.reasoning_text.delta", "delta": "step 2"},
+            {"type": "response.reasoning_text.done", "text": "step 1 step 2"},
+            {"type": "response.completed", "response": {"status": "completed", "output": []}},
+        ])
+        deltas: list[str] = []
+
+        async def on_reasoning(delta: str) -> None:
+            deltas.append(delta)
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning,
+        )
+
+        assert reasoning == "step 1 step 2"
+        assert deltas == ["step 1 ", "step 2"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_text_done_without_deltas(self):
+        response = _SseResponse([
+            {"type": "response.reasoning_text.done", "text": "final reasoning"},
+            {"type": "response.completed", "response": {"status": "completed", "output": []}},
+        ])
+        deltas: list[str] = []
+
+        async def on_reasoning(delta: str) -> None:
+            deltas.append(delta)
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning,
+        )
+
+        assert reasoning == "final reasoning"
+        assert deltas == ["final reasoning"]
+
+    @pytest.mark.asyncio
     async def test_raw_sse_usage_extracted(self):
         response = _SseResponse([
             {
