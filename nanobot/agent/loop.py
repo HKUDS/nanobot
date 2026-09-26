@@ -118,6 +118,32 @@ _T = TypeVar("_T")
 _SUBAGENT_PROVIDER_TASK_META = "subagent_provider_task_id"
 _SUBAGENT_TERMINAL_WAIT_SECONDS = 300.0
 
+MAX_CONCURRENT_REQUESTS_ENV = "NANOBOT_MAX_CONCURRENT_REQUESTS"
+
+
+def resolve_max_concurrent_requests(env_value: str | None = None) -> int | None:
+    """Return the concurrent-request cap, or ``None`` for unlimited.
+
+    Mirrors ``resolve_stream_idle_timeout_s``: an unusable value degrades to the
+    documented default (unlimited) instead of raising, so a stray entry in an
+    environment file cannot stop the gateway from starting.
+    """
+    raw = (
+        os.environ.get(MAX_CONCURRENT_REQUESTS_ENV) if env_value is None else env_value
+    )
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid {}={!r}; using unlimited", MAX_CONCURRENT_REQUESTS_ENV, raw
+        )
+        return None
+    if value <= 0:
+        return None
+    return value
+
 
 class TurnKind(Enum):
     USER = auto()
@@ -428,9 +454,9 @@ class AgentLoop:
             self._local_trigger_turns,
         )
         # NANOBOT_MAX_CONCURRENT_REQUESTS: unset or <=0 means unlimited.
-        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "0"))
+        _max = resolve_max_concurrent_requests()
         self._concurrency_gate: asyncio.Semaphore | None = (
-            asyncio.Semaphore(_max) if _max > 0 else None
+            asyncio.Semaphore(_max) if _max is not None else None
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
