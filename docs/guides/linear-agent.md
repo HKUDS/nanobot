@@ -348,6 +348,11 @@ allow that installation in Linear; changing a nanobot field cannot bypass this.
   If a step fails, the UI reports an incomplete reset; removed workspaces stay
   removed, and you can retry the remaining steps.
 
+If authorization changes while a member refresh or removal is in progress,
+nanobot discards the stale result instead of restoring a removed connection or
+overwriting a new authorization. Refresh the workspace/member list and retry the
+action against the current connection.
+
 Neither removal nor reset deletes the Linear workspace, app, issues or comments,
 nor nanobot conversation history or pairing approvals. Deleting the app itself
 is a separate action in Linear. After removing and reconnecting a workspace,

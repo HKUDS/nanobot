@@ -7,7 +7,7 @@ import os
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,6 +24,8 @@ class LinearInstallation:
     expires_at: float
     scope: tuple[str, ...] = ()
     organization_name: str = ""
+    # Store-owned lifecycle metadata, separate from the credential value's equality.
+    authorized_at: float = field(default=0, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +160,28 @@ class LinearStateStore:
                 ),
             )
 
+    def refresh_installation(
+        self, previous: LinearInstallation, refreshed: LinearInstallation,
+    ) -> bool:
+        """Rotate only the credentials read before the request, never insert a grant."""
+        if (refreshed.organization_id != previous.organization_id
+                or refreshed.oauth_client_id != previous.oauth_client_id):
+            raise ValueError("A token refresh cannot change the Linear workspace or app")
+        with self._guard, self._connect() as connection:
+            result = connection.execute(
+                """
+                UPDATE installations
+                SET access_token = ?, refresh_token = ?, expires_at = ?, scope_json = ?, updated_at = ?
+                WHERE organization_id = ? AND oauth_client_id = ? AND authorized_at = ?
+                    AND access_token = ? AND refresh_token = ?
+                """,
+                (refreshed.access_token, refreshed.refresh_token, refreshed.expires_at,
+                 json.dumps(refreshed.scope), time.time(), previous.organization_id,
+                 previous.oauth_client_id, previous.authorized_at,
+                 previous.access_token, previous.refresh_token),
+            )
+            return result.rowcount == 1
+
     def installation(self, organization_id: str) -> LinearInstallation | None:
         with self._guard, self._connect() as connection:
             row = connection.execute(
@@ -189,16 +213,21 @@ class LinearStateStore:
 
     def delete_installation(
         self, organization_id: str, *, oauth_client_id: str | None = None,
-        revoked_at: float | None = None,
+        revoked_at: float | None = None, expected: LinearInstallation | None = None,
     ) -> bool:
         """Remove an installation, ignoring revocations from an older authorization."""
         with self._guard, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             current = connection.execute(
-                "SELECT oauth_client_id, authorized_at FROM installations WHERE organization_id = ?",
+                "SELECT * FROM installations WHERE organization_id = ?",
                 (organization_id,),
             ).fetchone()
             if current is None:
+                return False
+            if expected is not None and (
+                _installation_from_row(current) != expected
+                or float(current["authorized_at"]) != expected.authorized_at
+            ):
                 return False
             if oauth_client_id is not None and current["oauth_client_id"] != oauth_client_id:
                 return False
@@ -351,6 +380,7 @@ def _installation_from_row(row: sqlite3.Row) -> LinearInstallation:
         expires_at=float(row["expires_at"]),
         scope=scope,
         organization_name=str(row["organization_name"]),
+        authorized_at=float(row["authorized_at"]),
     )
 
 

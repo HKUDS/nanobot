@@ -436,6 +436,8 @@ class LinearClient:
                 raise LinearApiError(
                     f"No Linear OAuth installation for organization {organization_id}"
                 )
+            if installation.oauth_client_id != self.config.client_id:
+                raise LinearApiError("Linear authorization changed; reconnect the workspace")
             if not force and installation.expires_at > time.time() + 60:
                 return installation
             token = await self._token_request(
@@ -455,6 +457,7 @@ class LinearClient:
                 refresh_token=_required_string(token, "refresh_token"),
                 expires_at=time.time() + _expires_in(token),
                 scope=_scopes(token.get("scope")) or installation.scope,
+                authorized_at=installation.authorized_at,
             )
             missing_scopes = set(LINEAR_SCOPES) - set(refreshed.scope)
             if missing_scopes:
@@ -462,7 +465,13 @@ class LinearClient:
                     "Refreshed Linear authorization is missing required scope(s): "
                     + ", ".join(sorted(missing_scopes))
                 )
-            self.state.save_installation(refreshed)
+            # Other clients/processes can remove, reauthorize or rotate this grant
+            # while the HTTP request is in flight. Never persist or use a stale result.
+            if not self.state.refresh_installation(installation, refreshed):
+                raise LinearApiError(
+                    "Linear authorization changed during token refresh; retry the request",
+                    retryable=True,
+                )
             return refreshed
 
     async def _token_request(self, form: dict[str, str]) -> dict[str, Any]:

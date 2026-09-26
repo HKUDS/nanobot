@@ -263,7 +263,12 @@ class LinearConnectStore:
             ) from exc
         finally:
             await client.close()
-        state.delete_installation(organization_id)
+        removed = state.delete_installation(organization_id, expected=installation)
+        if not removed and state.installation(organization_id) is not None:
+            raise ChannelConnectError(
+                "Linear workspace authorization changed while disconnecting. Refresh and try again.",
+                status=409,
+            )
         installations = _installation_payloads(state, config.client_id)
         return {
             "session_id": "",
