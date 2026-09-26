@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,45 @@ from nanobot.channels.linear.tests.test_linear import (
     _runtime,
 )
 from nanobot.pairing.store import approve_code, generate_code
+
+
+def test_upgrade_preserves_existing_installation_and_pairing(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite3"
+    original = _installation()
+    # Schema immediately before member access and authorization-generation tracking.
+    with sqlite3.connect(path) as connection:
+        connection.execute("""CREATE TABLE installations (
+            organization_id TEXT PRIMARY KEY, oauth_client_id TEXT NOT NULL,
+            app_user_id TEXT NOT NULL, access_token TEXT NOT NULL, refresh_token TEXT NOT NULL,
+            expires_at REAL NOT NULL, scope_json TEXT NOT NULL,
+            organization_name TEXT NOT NULL, updated_at REAL NOT NULL
+        )""")
+        connection.execute(
+            "INSERT INTO installations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (original.organization_id, original.oauth_client_id, original.app_user_id,
+             original.access_token, original.refresh_token, original.expires_at,
+             json.dumps(original.scope), original.organization_name, 1),
+        )
+    approve_code(generate_code("linear", "user-1"))
+    config = _config()
+    config.allow_from = []
+
+    migrated = LinearStateStore(path)
+    assert migrated.list_installations(config.client_id) == [original]
+    assert migrated.member_access(config.client_id, "org-1", "user-1") is None
+    assert member_allowed(config, migrated, "org-1", "user-1")
+    migrated.set_member_access(config.client_id, "org-1", "user-1", allowed=False)
+
+    reopened = LinearStateStore(path)
+    assert reopened.installation("org-1") == original
+    assert not member_allowed(config, reopened, "org-1", "user-1")
+    with sqlite3.connect(path) as connection:
+        # Additive migration retains the old reader's columns and token values.
+        row = connection.execute(
+            "SELECT access_token, refresh_token, authorized_at FROM installations "
+            "WHERE organization_id = ?", ("org-1",),
+        ).fetchone()
+    assert row == (original.access_token, original.refresh_token, 0)
 
 
 @pytest.mark.parametrize("legacy", ["pairing", "allowlist", "wildcard", "none"])
