@@ -40,6 +40,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 
 MSTEAMS_AVAILABLE = (
     importlib.util.find_spec("jwt") is not None
@@ -250,6 +251,8 @@ class MSTeamsChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a plain text reply into an existing Teams conversation."""
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         if not self._http:
             raise RuntimeError("MSTeams HTTP client not initialized")
 

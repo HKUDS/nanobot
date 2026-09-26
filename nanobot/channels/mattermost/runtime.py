@@ -16,6 +16,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import PAIRING_CODE_META_KEY, format_pairing_reply, generate_code, is_approved
 from nanobot.utils.helpers import safe_filename, split_message
 
@@ -492,6 +493,8 @@ class MattermostChannel(BaseChannel):
     # Send ---------------------------------------------------------------------
 
     async def send(self, msg: OutboundMessage) -> None:
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         if not self._http_client:
             self.logger.warning("client not initialized")
             return
