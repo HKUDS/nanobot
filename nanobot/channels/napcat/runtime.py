@@ -544,6 +544,16 @@ class NapcatChannel(BaseChannel):
                 return None
         except (TypeError, KeyError):
             pass
+        except ValueError:
+            # Napcat reports file_size as a string, and it is not always numeric.
+            # Skip the upfront check; the streamed download below still caps the
+            # image at max_bytes, so nothing unbounded reaches disk.
+            logger.warning(
+                "napcat: unparsable image file_size={!r} url={}, enforcing the size cap "
+                "while streaming",
+                info["file_size"],
+                url,
+            )
 
         try:
             async with self._http.get(url, allow_redirects=False) as resp:
