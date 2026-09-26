@@ -226,6 +226,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="edenai",
         default_api_base="https://api.edenai.run/v3",
     ),
+    # Cheaper Inference: OpenAI-compatible gateway, keys start with "ci_live_".
+    # Model ids are bare (e.g. "gpt-5.4-mini") and are sent upstream unchanged.
+    ProviderSpec(
+        name="cheaperinference",
+        keywords=("cheaperinference",),
+        env_key="CHEAPERINFERENCE_API_KEY",
+        display_name="Cheaper Inference",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_key_prefix="ci_live_",
+        detect_by_base_keyword="cheaperinference",
+        default_api_base="https://api.cheaperinference.com/v1",
+    ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
     # models.dev/OpenCode use provider id "opencode" and model ids like
     # "opencode/<model>"; send the bare model upstream.

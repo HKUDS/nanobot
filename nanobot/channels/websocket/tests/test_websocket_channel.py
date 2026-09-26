@@ -4282,6 +4282,12 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert providers["orcarouter"]["configured"] is False
         assert providers["orcarouter"]["api_key_required"] is True
         assert providers["orcarouter"]["default_api_base"] == "https://api.orcarouter.ai/v1"
+        assert providers["cheaperinference"]["label"] == "Cheaper Inference"
+        assert providers["cheaperinference"]["configured"] is False
+        assert providers["cheaperinference"]["api_key_required"] is True
+        assert providers["cheaperinference"]["default_api_base"] == (
+            "https://api.cheaperinference.com/v1"
+        )
         assert providers["skywork"]["label"] == "Skywork"
         assert providers["skywork"]["default_api_base"] == "https://api.apifree.ai/agent/v1"
         assert providers["ant_ling"]["label"] == "Ant Ling"
