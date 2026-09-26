@@ -579,7 +579,7 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown content")
             fp = self._resolve_write(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8")
+            fp.write_text(content, encoding="utf-8", newline="")
             self._file_states.record_write(fp)
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
@@ -939,7 +939,7 @@ class EditFileTool(_FsTool):
             if not file_exists:
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
-                    fp.write_text(new_text, encoding="utf-8")
+                    fp.write_text(new_text, encoding="utf-8", newline="")
                     self._file_states.record_write(fp)
                     return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
                 return self._file_not_found_msg(path, fp)
@@ -958,7 +958,7 @@ class EditFileTool(_FsTool):
                 content = raw.decode("utf-8")
                 if content.strip():
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
-                fp.write_text(new_text, encoding="utf-8")
+                fp.write_text(new_text, encoding="utf-8", newline="")
                 self._file_states.record_write(fp)
                 return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
 

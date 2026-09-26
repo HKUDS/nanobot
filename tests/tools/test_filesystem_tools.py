@@ -10,6 +10,28 @@ from nanobot.agent.tools.filesystem import (
     WriteFileTool,
 )
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("operation", ["write", "edit_new", "edit_empty"])
+async def test_file_creation_preserves_provided_newlines(tmp_path, newline, operation):
+    target = tmp_path / "nested" / "script.py"
+    content = f"first = 1{newline}second = 2{newline}"
+    if operation == "write":
+        result = await WriteFileTool(workspace=tmp_path).execute(
+            path=str(target), content=content,
+        )
+    else:
+        if operation == "edit_empty":
+            target.parent.mkdir()
+            target.touch()
+        result = await EditFileTool(workspace=tmp_path).execute(
+            path=str(target), old_text="", new_text=content,
+        )
+
+    assert "Error" not in result
+    assert target.read_bytes() == content.encode("utf-8")
+
 # ---------------------------------------------------------------------------
 # ReadFileTool
 # ---------------------------------------------------------------------------
