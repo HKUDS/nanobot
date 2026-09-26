@@ -1158,11 +1158,11 @@ class ListDirTool(_FsTool):
 
             if recursive:
                 for item in sorted(dp.rglob("*")):
-                    if any(p in self._IGNORE_DIRS for p in item.parts):
+                    rel = item.relative_to(dp)
+                    if any(p in self._IGNORE_DIRS for p in rel.parts):
                         continue
                     total += 1
                     if len(items) < cap:
-                        rel = item.relative_to(dp)
                         items.append(f"{rel}/" if item.is_dir() else str(rel))
             else:
                 for item in sorted(dp.iterdir()):

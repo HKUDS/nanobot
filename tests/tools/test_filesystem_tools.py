@@ -306,6 +306,24 @@ class TestListDirTool:
         assert "node_modules" not in result
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("relative_root", ["build", "build/project"])
+    async def test_recursive_ignores_only_descendants(self, tool, tmp_path, relative_root):
+        root = tmp_path / relative_root
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "main.py").write_text("pass")
+        (root / "README.md").write_text("hi")
+        (root / ".git").mkdir()
+        (root / ".git" / "config").write_text("ignored")
+        (root / "src" / "node_modules").mkdir()
+        (root / "src" / "node_modules" / "package.json").write_text("{}")
+
+        result = await tool.execute(path=str(root), recursive=True)
+
+        assert set(result.replace("\\", "/").splitlines()) == {
+            "README.md", "src/", "src/main.py",
+        }
+
+    @pytest.mark.asyncio
     async def test_max_entries_truncation(self, tool, tmp_path):
         for i in range(10):
             (tmp_path / f"file_{i}.txt").write_text("x")
