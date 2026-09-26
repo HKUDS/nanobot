@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
@@ -19,6 +18,7 @@ from nanobot.bus.outbound_events import (
     GoalStateSyncEvent,
     GoalStatusEvent,
     RuntimeModelUpdatedEvent,
+    SessionTitleEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
@@ -30,18 +30,17 @@ from nanobot.bus.runtime_events import (
     GoalStateChanged,
     RuntimeEventContext,
     RuntimeModelChanged,
+    SessionTitleOverridden,
     SessionTurnStarted,
     TurnCompleted,
     TurnRunStatusChanged,
     TurnRuntimeAdmitted,
     UserInputAccepted,
 )
-from nanobot.llm_usage.context import llm_usage_source
-from nanobot.providers.base import LLMProvider, LLMUsage
+from nanobot.providers.base import LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackModelSelection
-from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
-from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.keys import WEBUI_SESSION_METADATA_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import RecoveryCoordinator
 from nanobot.session.session_handles import session_handle_for_name
@@ -49,7 +48,14 @@ from nanobot.session.session_messages import (
     SessionMessageEnvelope,
     session_message_envelope,
 )
-from nanobot.utils.helpers import strip_think, truncate_text
+from nanobot.session.titles import (
+    TITLE_GENERATION_CHANNELS,
+    TITLE_MAX_CHARS,
+    TITLE_METADATA_KEY,
+    TITLE_USER_EDITED_METADATA_KEY,
+    maybe_generate_title_after_turn,
+    validated_llm_runtime,
+)
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
@@ -58,13 +64,6 @@ from nanobot.webui.metadata import (
 from nanobot.webui.session_identity import is_webui_session_key
 from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import append_session_message_input
-
-WEBUI_SESSION_METADATA_KEY = "webui"
-WEBUI_TITLE_METADATA_KEY = "title"
-WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
-TITLE_MAX_CHARS = 60
-TITLE_GENERATION_MAX_TOKENS = 96
-TITLE_GENERATION_REASONING_EFFORT = "none"
 
 # Latest active turn projection per ``chat_id`` (websocket only). It survives browser refresh
 # while the gateway process stays up and is implicitly dropped on restart.
@@ -98,11 +97,6 @@ def _session_message_public_metadata(
     }
 
 
-def _validated_llm_runtime(value: object) -> LLMRuntime | None:
-    """Keep runtime-event consumers defensive if an external publisher violates the contract."""
-    return value if isinstance(value, LLMRuntime) else None
-
-
 def _sync_websocket_turn_projection(chat_id: str) -> None:
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
     if not turns:
@@ -128,194 +122,6 @@ def mark_webui_session(session: Session, metadata: dict[str, Any]) -> bool:
         return False
     session.metadata[WEBUI_SESSION_METADATA_KEY] = True
     return True
-
-
-def clean_generated_title(raw: str | None) -> str:
-    text = (raw or "").strip()
-    if not text:
-        return ""
-    text = re.sub(r"^\s*(title|标题)\s*[:：]\s*", "", text, flags=re.IGNORECASE)
-    text = text.strip().strip("\"'`“”‘’")
-    text = strip_think(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    text = text.rstrip("。.!！?？,，;；:")
-    if len(text) > TITLE_MAX_CHARS:
-        text = text[: TITLE_MAX_CHARS - 1].rstrip() + "…"
-    return text
-
-
-def _title_inputs(session: Session) -> tuple[str, str]:
-    user_text = ""
-    assistant_text = ""
-    for message in session.messages:
-        if message.get("_command") is True:
-            continue
-        if is_hidden_history_message(message):
-            continue
-        message = public_history_message(message)
-        role = message.get("role")
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            continue
-        content = strip_think(content)
-        if not content:
-            continue
-        if role == "user" and not user_text:
-            user_text = content.strip()
-        elif role == "assistant" and not assistant_text:
-            assistant_text = content.strip()
-        if user_text and assistant_text:
-            break
-    return user_text, assistant_text
-
-
-def _latest_title_inputs(session: Session) -> tuple[str, str]:
-    """Latest user/assistant texts, for turns executed on a shared session."""
-    user_text = ""
-    assistant_text = ""
-    for message in reversed(session.messages):
-        if message.get("_command") is True:
-            continue
-        if is_hidden_history_message(message):
-            continue
-        message = public_history_message(message)
-        role = message.get("role")
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            continue
-        content = strip_think(content)
-        if not content:
-            continue
-        if role == "user" and not user_text:
-            user_text = content.strip()
-        elif role == "assistant" and not assistant_text:
-            assistant_text = content.strip()
-        if user_text and assistant_text:
-            break
-    return user_text, assistant_text
-
-
-async def maybe_generate_webui_title(
-    *,
-    sessions: SessionManager,
-    session_key: str,
-    provider: LLMProvider,
-    model: str,
-    target_session_key: str | None = None,
-) -> bool:
-    """Generate and persist a short title for WebUI-owned sessions.
-
-    ``session_key`` owns the conversation content. Under unified-session
-    routing this is the shared session while WebUI renders per-chat sessions,
-    so pass ``target_session_key`` to project the title onto that per-chat
-    session instead of storing it on the shared one.
-    """
-    routed_session = sessions.get_or_create(session_key)
-    target_is_routed = target_session_key is None or target_session_key == session_key
-    if target_is_routed or target_session_key is None:
-        target_session = routed_session
-    else:
-        target_session = sessions.get_or_create(target_session_key)
-    if (
-        routed_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
-        and target_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
-    ):
-        return False
-    if target_session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
-        return False
-    current_title = target_session.metadata.get(WEBUI_TITLE_METADATA_KEY)
-    if isinstance(current_title, str) and current_title.strip():
-        cleaned_current_title = clean_generated_title(current_title)
-        if cleaned_current_title:
-            if cleaned_current_title != current_title:
-                target_session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                sessions.save(target_session)
-            return False
-        target_session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
-
-    if target_is_routed:
-        user_text, assistant_text = _title_inputs(routed_session)
-    else:
-        # Shared-session content mixes every channel; generation runs right
-        # after this turn, so its exchange is the latest pair.
-        user_text, assistant_text = _latest_title_inputs(routed_session)
-    if not user_text:
-        return False
-
-    prompt = (
-        "Generate a concise title for this chat.\n"
-        "Rules:\n"
-        "- Use the same language as the user when practical.\n"
-        "- 3 to 8 words.\n"
-        "- No quotes.\n"
-        "- No punctuation at the end.\n"
-        "- Return only the title.\n\n"
-        f"User: {truncate_text(user_text, 1_000)}"
-    )
-    if assistant_text:
-        prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
-
-    try:
-        with llm_usage_source("system"):
-            response = await provider.chat_stream_with_retry(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You write short, neutral chat titles. "
-                            "Return only the title text."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                tools=None,
-                model=model,
-                max_tokens=TITLE_GENERATION_MAX_TOKENS,
-                temperature=0.2,
-                reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
-                retry_mode="standard",
-            )
-    except Exception:
-        logger.opt(exception=True).debug(
-            "Failed to generate webui session title for {}", session_key
-        )
-        return False
-
-    title = clean_generated_title(response.content)
-    if not title or title.lower().startswith("error"):
-        logger.debug(
-            "WebUI title generation returned no usable title for {} (finish_reason={})",
-            session_key,
-            response.finish_reason,
-        )
-        return False
-    target_session.metadata[WEBUI_TITLE_METADATA_KEY] = title
-    sessions.save(target_session)
-    return True
-
-
-async def maybe_generate_webui_title_after_turn(
-    *,
-    channel: str,
-    chat_id: str,
-    metadata: dict[str, Any],
-    sessions: SessionManager,
-    session_key: str,
-    provider: LLMProvider,
-    model: str,
-) -> bool:
-    if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
-        return False
-    origin_session_key = f"{channel}:{chat_id}"
-    return await maybe_generate_webui_title(
-        sessions=sessions,
-        session_key=session_key,
-        provider=provider,
-        model=model,
-        target_session_key=(
-            origin_session_key if origin_session_key != session_key else None
-        ),
-    )
 
 
 def websocket_turn_wall_started_at(chat_id: str) -> float | None:
@@ -573,6 +379,10 @@ class WebuiTurnCoordinator:
                 TurnCompleted,
             ),
             self.bus.subscribe(
+                self._handle_session_title_overridden,
+                SessionTitleOverridden,
+            ),
+            self.bus.subscribe(
                 self._handle_goal_state_changed,
                 GoalStateChanged,
             ),
@@ -688,6 +498,7 @@ class WebuiTurnCoordinator:
 
     async def _handle_turn_completed_event(self, event: TurnCompleted) -> None:
         if not self._is_websocket_event(event.context):
+            self._schedule_title_update_from_event(event)
             return
         msg = self._ctx_msg(event.context)
         await self.handle_turn_end(
@@ -790,33 +601,71 @@ class WebuiTurnCoordinator:
         )
 
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
-        title_context = _validated_llm_runtime(event.runtime)
+        ctx = event.context
+        title_context = validated_llm_runtime(event.runtime)
+        if title_context is None or ctx.channel not in TITLE_GENERATION_CHANNELS:
+            return
         if (
-            event.context.metadata.get("webui") is not True
-            or title_context is None
+            ctx.channel == "websocket"
+            and ctx.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
         ):
+            return
+        # Telegram applies generated titles only to private-topic chats, so
+        # skip the generation round-trip for any other chat type.
+        if ctx.channel == "telegram" and ctx.metadata.get("chat_type") != "private":
             return
 
         async def _generate_title_and_notify(
             title_llm: LLMRuntime = title_context,
         ) -> None:
-            generated = await maybe_generate_webui_title_after_turn(
-                channel=event.context.channel,
-                chat_id=event.context.chat_id,
-                metadata=event.context.metadata,
+            title = await maybe_generate_title_after_turn(
+                channel=ctx.channel,
+                chat_id=ctx.chat_id,
+                metadata=ctx.metadata,
                 sessions=self.sessions,
-                session_key=event.context.session_key,
+                session_key=ctx.session_key,
                 provider=title_llm.provider,
                 model=title_llm.model,
             )
-            if generated:
+            if not title:
+                return
+            await self.bus.publish_outbound(
+                outbound_message_for_event(
+                    channel=ctx.channel,
+                    chat_id=ctx.chat_id,
+                    event=SessionTitleEvent(title=title),
+                    metadata=ctx.metadata,
+                ),
+            )
+            if ctx.channel == "websocket":
                 await self._publish_session_metadata_updated(
-                    channel=event.context.channel,
-                    chat_id=event.context.chat_id,
-                    metadata=event.context.metadata,
+                    channel=ctx.channel,
+                    chat_id=ctx.chat_id,
+                    metadata=ctx.metadata,
                 )
 
         self.schedule_background(_generate_title_and_notify())
+
+    async def _handle_session_title_overridden(self, event: SessionTitleOverridden) -> None:
+        """Adopt a manually renamed topic as the session's authoritative title."""
+        title = event.title.strip()[:TITLE_MAX_CHARS]
+        if not title or event.context.channel != "telegram":
+            return
+        # Manual renames arrive from the Telegram channel; re-derive the topic
+        # session key instead of trusting the publisher, and adopt it only for
+        # an actual topic.
+        from nanobot.channels.telegram.runtime import TelegramChannel
+
+        metadata = event.context.metadata or {}
+        session_key = TelegramChannel.derive_topic_session_key(
+            event.context.chat_id, metadata.get("message_thread_id"),
+        )
+        if session_key is None or session_key != event.context.session_key:
+            return
+        session = self.sessions.get_or_create(session_key)
+        session.metadata[TITLE_METADATA_KEY] = title
+        session.metadata[TITLE_USER_EDITED_METADATA_KEY] = True
+        self.sessions.save(session)
 
     async def _publish_session_metadata_updated(
         self,

@@ -30,8 +30,9 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes, Messag
 from telegram.request import BaseRequest, HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, SessionTitleEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeEventContext, SessionTitleOverridden
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
@@ -55,6 +56,9 @@ TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for repl
 TELEGRAM_RICH_DRAFT_MIN_INTERVAL = 0.75  # 40 draft updates per 30 seconds per chat
 # Bound for in-flight compaction notices in case a terminal phase never arrives.
 COMPACTION_NOTICES_MAX = 64
+
+# Telegram forum topic names accept up to 128 characters.
+FORUM_TOPIC_NAME_MAX_LEN = 128
 
 # python-telegram-bot exposes a six-parameter Application generic. Nanobot
 # doesn't customize its context/data/job-queue types, so keep that SDK boundary
@@ -704,6 +708,15 @@ class TelegramChannel(BaseChannel):
         )
         self._app.add_handler(MessageHandler(filters.Regex(r"^/help(?:@\w+)?$"), self._on_help))
 
+        # Manual topic renames arrive as forum_topic_edited service messages.
+        # A dedicated group keeps it independent from the message handler in
+        # group 0: PTB runs only the first matching handler per group, so a
+        # broadened message filter must not be able to shadow this one.
+        self._app.add_handler(
+            MessageHandler(filters.StatusUpdate.FORUM_TOPIC_EDITED, self._on_forum_topic_edited),
+            group=1,
+        )
+
         # Add message handler for text, photos, video, voice, documents, and locations
         self._app.add_handler(
             MessageHandler(
@@ -1063,6 +1076,16 @@ class TelegramChannel(BaseChannel):
             self.logger.warning("bot not running")
             return
 
+        try:
+            chat_id = int(msg.chat_id)
+        except ValueError:
+            self.logger.exception("Invalid chat_id: {}", msg.chat_id)
+            return
+
+        if isinstance(msg.event, SessionTitleEvent):
+            await self._apply_generated_title(app, chat_id, msg)
+            return
+
         progress_event = msg.event if isinstance(msg.event, ProgressEvent) else None
 
         # Only stop typing indicator and remove reaction for final responses
@@ -1072,11 +1095,6 @@ class TelegramChannel(BaseChannel):
                 with suppress(ValueError):
                     await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
 
-        try:
-            chat_id = int(msg.chat_id)
-        except ValueError:
-            self.logger.exception("Invalid chat_id: {}", msg.chat_id)
-            return
         reply_to_message_id = msg.metadata.get("message_id")
         message_thread_id = msg.metadata.get("message_thread_id")
         if message_thread_id is None and reply_to_message_id is not None:
@@ -1191,6 +1209,40 @@ class TelegramChannel(BaseChannel):
                     render_as_blockquote=render_as_blockquote,
                     reply_markup=reply_markup if is_last else None,
                 )
+
+    async def _apply_generated_title(
+        self,
+        app: TelegramApplication,
+        chat_id: int,
+        msg: OutboundMessage,
+    ) -> None:
+        """Apply a generated session title to the originating forum topic.
+
+        Renames the topic in private bot chats. Chats that are not private or
+        lack a message_thread_id are ignored.
+        """
+        title_event = cast(SessionTitleEvent, msg.event)
+        metadata = msg.metadata or {}
+        thread_id = metadata.get("message_thread_id")
+        if not isinstance(thread_id, int):
+            return
+        if metadata.get("chat_type") != "private":
+            return
+        name = title_event.title.strip()[:FORUM_TOPIC_NAME_MAX_LEN]
+        if not name:
+            return
+        rename = self._call_with_retry(
+            app.bot.edit_forum_topic,
+            chat_id=chat_id,
+            message_thread_id=thread_id,
+            name=name,
+        )
+        try:
+            await rename
+        except Exception as e:
+            self.logger.warning(
+                "forum topic rename failed for {}:{}: {}", chat_id, thread_id, e,
+            )
 
     async def _call_with_retry(
         self,
@@ -1662,12 +1714,42 @@ class TelegramChannel(BaseChannel):
         )
 
     @staticmethod
-    def _derive_topic_session_key(message: Message) -> str | None:
-        """Derive topic-scoped session key for Telegram chats with threads."""
-        message_thread_id = getattr(message, "message_thread_id", None)
-        if message_thread_id is None:
+    def derive_topic_session_key(
+        chat_id: str | int, message_thread_id: object,
+    ) -> str | None:
+        """Topic-scoped session key for Telegram chats with threads."""
+        if not isinstance(message_thread_id, int):
             return None
-        return f"telegram:{message.chat_id}:topic:{message_thread_id}"
+        return f"telegram:{chat_id}:topic:{message_thread_id}"
+
+    async def _on_forum_topic_edited(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Adopt manual topic renames as the session's authoritative title."""
+        message = update.message
+        edited = getattr(message, "forum_topic_edited", None) if message is not None else None
+        if message is None or edited is None:
+            return
+        name = getattr(edited, "name", None)
+        thread_id = getattr(message, "message_thread_id", None)
+        if not name or not name.strip() or not isinstance(thread_id, int):
+            return
+        session_key = self.derive_topic_session_key(str(message.chat_id), getattr(message, "message_thread_id", None))
+        if session_key is None:
+            return
+        await self.bus.publish(SessionTitleOverridden(
+            context=RuntimeEventContext(
+                channel=self.name,
+                chat_id=str(message.chat_id),
+                session_key=session_key,
+                metadata={
+                    "message_id": message.message_id,
+                    "message_thread_id": thread_id,
+                    "chat_type": getattr(message.chat, "type", None),
+                },
+            ),
+            title=name.strip()[:FORUM_TOPIC_NAME_MAX_LEN],
+        ))
 
     @staticmethod
     def _build_message_metadata(message: Message, user: User) -> dict[str, Any]:
@@ -1678,6 +1760,7 @@ class TelegramChannel(BaseChannel):
             "user_id": user.id,
             "username": user.username,
             "first_name": user.first_name,
+            "chat_type": message.chat.type,
             "is_group": message.chat.type != "private",
             "message_thread_id": getattr(message, "message_thread_id", None),
             "is_forum": bool(getattr(message.chat, "is_forum", False)),
@@ -1839,7 +1922,9 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _queue_key_for_message(message: Message) -> str:
         """Return the final nanobot session key used for ordered Telegram ingress."""
-        return TelegramChannel._derive_topic_session_key(message) or f"telegram:{message.chat_id}"
+        return TelegramChannel.derive_topic_session_key(
+            str(message.chat_id), getattr(message, "message_thread_id", None),
+        ) or f"telegram:{message.chat_id}"
 
     @staticmethod
     def _sort_key_for_update(update: Update) -> tuple[int, int]:
@@ -1940,7 +2025,7 @@ class TelegramChannel(BaseChannel):
             chat_id=str(message.chat_id),
             content=content,
             metadata=self._build_message_metadata(message, user),
-            session_key=self._derive_topic_session_key(message),
+            session_key=self.derive_topic_session_key(str(message.chat_id), getattr(message, "message_thread_id", None)),
             is_dm=message.chat.type == "private",
         )
 
@@ -2012,7 +2097,7 @@ class TelegramChannel(BaseChannel):
 
         str_chat_id = str(chat_id)
         metadata = self._build_message_metadata(message, user)
-        session_key = self._derive_topic_session_key(message)
+        session_key = self.derive_topic_session_key(str(message.chat_id), getattr(message, "message_thread_id", None))
 
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):

@@ -1803,6 +1803,29 @@ describe("NanobotClient", () => {
     expect(chatHandler).not.toHaveBeenCalled();
   });
 
+  it("dispatches generated session titles globally", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const titleHandler = vi.fn();
+    const chatHandler = vi.fn();
+    client.onSessionTitle(titleHandler);
+    client.onChat("chat-title", chatHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      event: "session_title",
+      chat_id: "chat-title",
+      title: "Generated title",
+    });
+
+    expect(titleHandler).toHaveBeenCalledWith("chat-title", "Generated title");
+    expect(chatHandler).not.toHaveBeenCalled();
+  });
+
   it("resolves newChat() via the server-assigned chat_id", async () => {
     const client = new NanobotClient({
       url: "ws://test",

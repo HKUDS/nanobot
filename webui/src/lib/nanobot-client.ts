@@ -74,6 +74,7 @@ type SessionUpdateHandler = (
   scope?: SessionUpdateScope,
   workspaceScope?: WorkspaceScopePayload,
 ) => void;
+type SessionTitleHandler = (chatId: string, title: string) => void;
 type SidebarStateUpdateHandler = (state: SidebarStatePayload) => void;
 type RunStatusHandler = (chatId: string, startedAt: number | null) => void;
 
@@ -191,6 +192,7 @@ export class NanobotClient {
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
+  private sessionTitleHandlers = new Set<SessionTitleHandler>();
   private sidebarStateUpdateHandlers = new Set<SidebarStateUpdateHandler>();
   private runStatusHandlers = new Set<RunStatusHandler>();
   private errorHandlers = new Set<ErrorHandler>();
@@ -286,6 +288,13 @@ export class NanobotClient {
     this.sessionUpdateHandlers.add(handler);
     return () => {
       this.sessionUpdateHandlers.delete(handler);
+    };
+  }
+
+  onSessionTitle(handler: SessionTitleHandler): Unsubscribe {
+    this.sessionTitleHandlers.add(handler);
+    return () => {
+      this.sessionTitleHandlers.delete(handler);
     };
   }
 
@@ -1220,6 +1229,11 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "session_title") {
+      this.emitSessionTitle(parsed.chat_id, parsed.title);
+      return;
+    }
+
     if (parsed.event === "sidebar_state_updated") {
       this.emitSidebarStateUpdate(parsed.state);
       return;
@@ -1271,6 +1285,12 @@ export class NanobotClient {
   ): void {
     for (const handler of this.sessionUpdateHandlers) {
       handler(chatId, scope, workspaceScope);
+    }
+  }
+
+  private emitSessionTitle(chatId: string, title: string): void {
+    for (const handler of this.sessionTitleHandlers) {
+      handler(chatId, title);
     }
   }
 

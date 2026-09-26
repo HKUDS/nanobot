@@ -13,8 +13,9 @@ except ImportError:
     pytest.skip("Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True)
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, SessionTitleEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import SessionTitleOverridden
 from nanobot.channels.telegram.runtime import (
     TELEGRAM_MAX_MESSAGE_LEN,
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
@@ -116,8 +117,8 @@ class _FakeApp:
     def add_error_handler(self, handler) -> None:
         self.error_handlers.append(handler)
 
-    def add_handler(self, handler) -> None:
-        self.handlers.append(handler)
+    def add_handler(self, handler, group: int = 0) -> None:
+        self.handlers.append((group, handler))
 
     async def initialize(self) -> None:
         pass
@@ -1798,34 +1799,20 @@ async def test_send_delta_initial_send_keeps_message_in_thread() -> None:
 
 
 def test_derive_topic_session_key_uses_thread_id() -> None:
-    message = SimpleNamespace(
-        chat=SimpleNamespace(type="supergroup"),
-        chat_id=-100123,
-        message_thread_id=42,
+    assert (
+        TelegramChannel.derive_topic_session_key(-100123, 42) == "telegram:-100123:topic:42"
     )
-
-    assert TelegramChannel._derive_topic_session_key(message) == "telegram:-100123:topic:42"
 
 
 def test_derive_topic_session_key_private_dm_thread() -> None:
     """Private DM threads (Telegram Threaded Mode) must get their own session key."""
-    message = SimpleNamespace(
-        chat=SimpleNamespace(type="private"),
-        chat_id=999,
-        message_thread_id=7,
-    )
-    assert TelegramChannel._derive_topic_session_key(message) == "telegram:999:topic:7"
+    assert TelegramChannel.derive_topic_session_key(999, 7) == "telegram:999:topic:7"
 
 
 def test_derive_topic_session_key_none_without_thread() -> None:
     """No thread id → no topic session key, regardless of chat type."""
-    for chat_type in ("private", "supergroup", "group"):
-        message = SimpleNamespace(
-            chat=SimpleNamespace(type=chat_type),
-            chat_id=123,
-            message_thread_id=None,
-        )
-        assert TelegramChannel._derive_topic_session_key(message) is None
+    for chat_id in (123, "123"):
+        assert TelegramChannel.derive_topic_session_key(chat_id, None) is None
 
 
 def test_get_extension_falls_back_to_original_filename() -> None:
@@ -2568,7 +2555,9 @@ async def test_telegram_command_handlers_preserve_core_names(monkeypatch, comman
                 }],
             },
         }, None)
-        handler = next(handler for handler in app.handlers if handler.check_update(update))
+        handler = next(
+            handler for _, handler in app.handlers if handler.check_update(update)
+        )
         assert handler.callback == channel._forward_command
         await handler.callback(update, None)
         message = await asyncio.wait_for(bus.consume_inbound(), timeout=1)
@@ -3357,3 +3346,142 @@ async def test_compaction_notices_are_tracked_per_compaction_id() -> None:
         chat_id=999, message_id=101, text="Context compacted.",
     )
     assert channel._compaction_notices == {("999", "c2"): 202}
+
+
+# ---------------------------------------------------------------------------
+# Generated session titles rename the originating forum topic
+# ---------------------------------------------------------------------------
+
+def _session_title_message(metadata: dict[str, object]) -> OutboundMessage:
+    return OutboundMessage(
+        channel="telegram",
+        chat_id="999",
+        content="",
+        event=SessionTitleEvent(title="临期 IP 查询"),
+        metadata=metadata,
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_title_event_renames_dm_topic() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.edit_forum_topic = AsyncMock()
+    channel._app.bot.send_message = AsyncMock()
+
+    await channel.send(_session_title_message({
+        "message_id": 10,
+        "message_thread_id": 42,
+        "chat_type": "private",
+    }))
+
+    channel._app.bot.edit_forum_topic.assert_awaited_once_with(
+        chat_id=999, message_thread_id=42, name="临期 IP 查询",
+    )
+    channel._app.bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_session_title_event_skips_non_private_chats_or_missing_topic() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.edit_forum_topic = AsyncMock()
+    channel._app.bot.send_message = AsyncMock()
+
+    for metadata in (
+        {"message_id": 10},
+        {"message_id": 10, "message_thread_id": None, "chat_type": "private"},
+        {"message_id": 10, "message_thread_id": 42, "chat_type": "supergroup"},
+        {"message_id": 10, "message_thread_id": 42, "chat_type": "group"},
+        {"message_id": 10, "message_thread_id": 42, "chat_type": "channel"},
+        {"message_id": 10, "message_thread_id": 42},
+    ):
+        await channel.send(_session_title_message(metadata))
+
+    channel._app.bot.edit_forum_topic.assert_not_awaited()
+    channel._app.bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_session_title_event_rename_failure_is_best_effort() -> None:
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.edit_forum_topic = AsyncMock(
+        side_effect=BadRequest("not enough rights to manage topics")
+    )
+    channel._app.bot.send_message = AsyncMock()
+
+    await channel.send(_session_title_message({
+        "message_id": 10,
+        "message_thread_id": 42,
+        "chat_type": "private",
+    }))
+
+    channel._app.bot.edit_forum_topic.assert_awaited_once()
+    channel._app.bot.send_message.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Manual topic renames are adopted as the session's authoritative title
+# ---------------------------------------------------------------------------
+
+def _topic_edited_update(name: str | None, thread_id: int | None = 42) -> SimpleNamespace:
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type="supergroup", is_forum=True),
+        chat_id=-100123,
+        message_thread_id=thread_id,
+        message_id=5,
+        forum_topic_edited=SimpleNamespace(name=name),
+    )
+    return SimpleNamespace(
+        message=message,
+        effective_user=SimpleNamespace(id=77, username="u", first_name="U"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_forum_topic_edited_publishes_title_override() -> None:
+    bus = MessageBus()
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        bus,
+    )
+    received: list[SessionTitleOverridden] = []
+    bus.subscribe(lambda event: received.append(event), SessionTitleOverridden)
+
+    await channel._on_forum_topic_edited(_topic_edited_update("Ручное название"), None)
+
+    assert len(received) == 1
+    assert received[0].context.session_key == "telegram:-100123:topic:42"
+    assert received[0].context.chat_id == "-100123"
+    assert received[0].title == "Ручное название"
+
+
+@pytest.mark.asyncio
+async def test_forum_topic_edited_icon_change_publishes_nothing() -> None:
+    bus = MessageBus()
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        bus,
+    )
+    received: list[SessionTitleOverridden] = []
+    bus.subscribe(lambda event: received.append(event), SessionTitleOverridden)
+
+    await channel._on_forum_topic_edited(_topic_edited_update(None), None)
+    await channel._on_forum_topic_edited(_topic_edited_update("   "), None)
+    await channel._on_forum_topic_edited(
+        _topic_edited_update("Без потока", thread_id=None), None,
+    )
+
+    assert received == []

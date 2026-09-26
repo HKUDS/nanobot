@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from loguru import logger
 
 from nanobot.session.manager import SessionManager
-from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
+from nanobot.session.titles import TITLE_METADATA_KEY, clean_generated_title
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
 from nanobot.webui.transcript import (
     append_fork_marker,
@@ -73,7 +73,7 @@ def create_webui_chat_fork(
 
         fork_title = clean_generated_title(title)
         if fork_title:
-            forked.metadata[WEBUI_TITLE_METADATA_KEY] = fork_title
+            forked.metadata[TITLE_METADATA_KEY] = fork_title
             session_manager.save(forked, fsync=True)
     except Exception:
         delete_webui_transcript(target_key)
