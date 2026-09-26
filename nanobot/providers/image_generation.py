@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import binascii
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -120,7 +119,7 @@ def _b64_image_data_url(value: str) -> str:
     encoded = "".join(value.split())
     try:
         raw = base64.b64decode(encoded, validate=True)
-    except binascii.Error as exc:
+    except ValueError as exc:
         raise ImageGenerationError("generated image payload was not valid base64") from exc
     mime = detect_image_mime(raw)
     if mime is None:
