@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 import httpx
 from loguru import logger
 
+from nanobot import __version__
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.registry import ToolRegistry
@@ -296,6 +297,20 @@ def _pinned_transport_kwargs() -> dict[str, Any]:
     if mounts:
         kwargs["mounts"] = mounts
     return kwargs
+
+
+def _mcp_http_headers(url: str, headers: Mapping[str, str]) -> dict[str, str]:
+    parsed = httpx.URL(url)
+    if parsed.scheme != "https" or parsed.host != "search.parallel.ai" or parsed.path.rstrip("/") != "/mcp":
+        return dict(headers)
+
+    merged = httpx.Headers(headers)
+    user_agent = merged.get("User-Agent", f"python-httpx/{httpx.__version__}")
+    if not any(token == "nanobot" or token.startswith("nanobot/") for token in user_agent.split()):
+        # Project-wide aggregate adoption measurement. Keep this on the HTTP
+        # transport so tool calls and reconnects retain attribution.
+        merged["User-Agent"] = f"{user_agent} nanobot/{__version__}".strip()
+    return dict(merged)
 
 
 async def _validate_mcp_request_url(request: httpx.Request) -> None:
@@ -1117,7 +1132,7 @@ async def connect_mcp_servers(
                     return False
 
                 http_client_kwargs: dict[str, Any] = {
-                    "headers": cfg.headers or None,
+                    "headers": _mcp_http_headers(cfg.url, cfg.headers or {}) or None,
                     "event_hooks": {"request": [_validate_mcp_request_url]},
                     "follow_redirects": True,
                     "timeout": httpx.Timeout(30.0, connect=10.0),
