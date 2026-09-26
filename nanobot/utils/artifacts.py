@@ -21,6 +21,11 @@ _MIME_EXTENSIONS = {
     "image/webp": ".webp",
     "image/gif": ".gif",
 }
+_AUDIO_FORMATS = {
+    "mp3": ("audio/mpeg", ".mp3"),
+    "wav": ("audio/wav", ".wav"),
+    "pcm": ("audio/L16", ".pcm"),
+}
 
 class ArtifactError(ValueError):
     """Raised when an artifact cannot be safely decoded or stored."""
@@ -44,6 +49,18 @@ def decode_image_data_url(data_url: str) -> tuple[bytes, str]:
     if declared_mime != detected_mime:
         declared_mime = detected_mime
     return raw, declared_mime
+
+
+def decode_audio_hex(audio_hex: str) -> bytes:
+    """Decode hexadecimal audio returned by a generation provider."""
+    normalized = "".join(audio_hex.split())
+    try:
+        raw = bytes.fromhex(normalized)
+    except ValueError as exc:
+        raise ArtifactError("invalid hexadecimal audio payload") from exc
+    if not raw:
+        raise ArtifactError("empty audio payload")
+    return raw
 
 
 def _safe_relative_dir(save_dir: str) -> Path:
@@ -106,6 +123,49 @@ def store_generated_image_artifact(
     return metadata
 
 
+def store_generated_audio_artifact(
+    audio_hex: str,
+    *,
+    prompt: str | None,
+    lyrics: str | None,
+    model: str,
+    audio_format: str,
+    save_dir: str = "generated",
+    provider: str = "minimax",
+    created_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Persist generated hexadecimal audio and sidecar metadata."""
+    format_info = _AUDIO_FORMATS.get(audio_format)
+    if format_info is None:
+        raise ArtifactError(f"unsupported audio format: {audio_format}")
+    mime, ext = format_info
+    raw = decode_audio_hex(audio_hex)
+
+    now = created_at or datetime.now().astimezone()
+    day_dir = ensure_dir(_artifact_root(save_dir) / now.strftime("%Y-%m-%d"))
+    artifact_id = f"audio_{uuid.uuid4().hex[:12]}"
+    audio_path = day_dir / f"{artifact_id}{ext}"
+    metadata_path = day_dir / f"{artifact_id}.json"
+
+    audio_path.write_bytes(raw)
+    metadata: dict[str, Any] = {
+        "id": artifact_id,
+        "path": str(audio_path),
+        "mime": mime,
+        "prompt": prompt,
+        "lyrics": lyrics,
+        "model": model,
+        "provider": provider,
+        "output_format": "hex",
+        "created_at": now.isoformat(),
+    }
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return metadata
+
+
 def generated_image_tool_result(artifacts: list[dict[str, Any]]) -> str:
     """Return the compact structured result exposed to the LLM."""
     return json.dumps(
@@ -116,6 +176,20 @@ def generated_image_tool_result(artifacts: list[dict[str, Any]]) -> str:
                 "Call the message tool with the artifact paths in the media parameter "
                 "to deliver the images to the user. Keep raw paths internal unless the "
                 "user asks for debug details."
+            ),
+        },
+        ensure_ascii=False,
+    )
+
+
+def generated_audio_tool_result(artifacts: list[dict[str, Any]]) -> str:
+    """Return the compact structured result exposed by audio generation tools."""
+    return json.dumps(
+        {
+            "artifacts": artifacts,
+            "next_step": (
+                "Call the message tool with each artifact path or URL in the media parameter "
+                "to deliver the generated audio. Provider URLs expire after 24 hours."
             ),
         },
         ensure_ascii=False,
