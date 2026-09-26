@@ -15,6 +15,7 @@ Match the recipe to the credential or endpoint you already have:
 | What you have | Recipe | Must match |
 |---|---|---|
 | A gateway key and model IDs that include a model family path, such as `provider/model-name` | [OpenRouter Gateway](#recipe-openrouter-gateway) | API key, provider config key, preset provider, and gateway model ID |
+| An Opper key, or one key across many model families with EU hosting | [Opper Gateway](#recipe-opper-gateway) | `OPPER_API_KEY`, `provider: "opper"`, and a model ID from Opper's catalog |
 | An OpenCode Zen or Go key | [OpenCode Zen or Go](#recipe-opencode-zen-or-go) | `OPENCODE_API_KEY`, the Zen/Go provider key, and a model ID from the matching OpenCode endpoint |
 | An OpenAI platform API key and OpenAI model ID | [OpenAI Direct](#recipe-openai-direct) | `OPENAI_API_KEY`, `provider: "openai"`, and an OpenAI model available to that account |
 | An Anthropic API key and Anthropic model ID | [Anthropic Direct](#recipe-anthropic-direct) | `ANTHROPIC_API_KEY`, `provider: "anthropic"`, and a non-gateway model ID |
@@ -94,6 +95,48 @@ nanobot agent -m "Hello!"
 ```
 
 If this fails with `401` or `unauthorized`, check that `OPENROUTER_API_KEY` is visible in the same terminal or service that starts nanobot. If it fails with `model not found`, choose a model ID that OpenRouter lists for your account.
+
+## Recipe: Opper Gateway
+
+This recipe applies when your key comes from Opper, the EU-hosted AI gateway that serves
+700+ models from 30+ providers behind one OpenAI-compatible API.
+
+```json
+{
+  "providers": {
+    "opper": {
+      "apiKey": "${OPPER_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "opper",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 4096,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+Verify:
+
+```bash
+nanobot status
+nanobot agent -m "Hello!"
+```
+
+Create the key at [platform.opper.ai](https://platform.opper.ai). The default base URL is
+`https://api.opper.ai/v3/compat`. Model IDs are bare pool names such as `claude-sonnet-4-6`,
+`gpt-5.5`, `gpt-5.4-mini`, `gemini-3.8-flash`, or `deepseek-v4-pro`; use `provider/model`
+(for example `azure/gpt-5.5`) to pin one provider or region. If a model fails with
+`model not found`, pick an ID from [opper.ai/models](https://opper.ai/models).
 
 ## Recipe: OpenCode Zen or Go
 

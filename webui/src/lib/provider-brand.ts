@@ -209,6 +209,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   openrouter: brand("openrouter.ai", "#111827", "OR", [
     "https://openrouter.ai/brand/logos/transparent/glyph/svg/glyph-grape.svg",
   ]),
+  opper: brand("opper.ai", "#111827", "OP"),
   orcarouter: brand("orcarouter.ai", "#111827", "OR"),
   ovms: brand("openvino.ai", "#0071C5", "OV"),
   qianfan: brand("cloud.baidu.com", "#2932E1", "QF"),
