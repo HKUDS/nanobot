@@ -2920,6 +2920,34 @@ def test_markdown_to_html_headers_become_bold() -> None:
     assert _markdown_to_telegram_html("### Deep") == "<b>Deep</b>"
 
 
+def test_markdown_to_html_tilde_fence_is_code() -> None:
+    from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
+
+    text = "Run:\n~~~python\n# setup\ndef __init__(self): pass\n~~~\nDone"
+    assert _markdown_to_telegram_html(text) == (
+        "Run:\n<pre><code># setup\ndef __init__(self): pass\n</code></pre>\nDone"
+    )
+
+
+def test_markdown_to_html_longer_fence_keeps_nested_example() -> None:
+    from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
+
+    text = "Example:\n````markdown\n```python\nx = a * b\n```\n**raw**\n````\nAfter **bold**"
+    assert _markdown_to_telegram_html(text) == (
+        "Example:\n<pre><code>```python\nx = a * b\n```\n**raw**\n</code></pre>\n"
+        "After <b>bold</b>"
+    )
+
+
+def test_markdown_to_html_single_line_and_backtick_fences_unchanged() -> None:
+    from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
+
+    assert _markdown_to_telegram_html("```py\n# c\nx = __y__\n```") == (
+        "<pre><code># c\nx = __y__\n</code></pre>"
+    )
+    assert _markdown_to_telegram_html("Use ```ls -la``` now") == "Use <pre><code>ls -la</code></pre> now"
+
+
 def test_markdown_to_html_numbered_lists_preserved() -> None:
     from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
 
@@ -2986,6 +3014,12 @@ def test_strip_md_block_converts_bullets_and_numbers() -> None:
     assert "\u2022 item a" in result
     assert "1. item b" in result
     assert "2. item c" in result
+
+
+def test_strip_md_block_strips_tilde_fences() -> None:
+    from nanobot.channels.telegram.runtime import _strip_md_block
+
+    assert _strip_md_block("~~~bash\nls\n~~~\nDone") == "ls\n\nDone"
 
 
 def test_strip_md_block_strips_links() -> None:
