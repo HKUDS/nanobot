@@ -44,6 +44,18 @@ class Schema(ABC):
         return cast(str | None, t)
 
     @staticmethod
+    def match_json_schema_type(val: Any, types: list[Any]) -> str | None:
+        """Select a union member matching the value without coercion."""
+        for t in types:
+            if not isinstance(t, str) or t not in _JSON_TYPE_MAP:
+                continue
+            if t in ("integer", "number") and isinstance(val, bool):
+                continue
+            if isinstance(val, _JSON_TYPE_MAP[t]):
+                return t
+        return None
+
+    @staticmethod
     def subpath(path: str, key: str) -> str:
         return f"{path}.{key}" if path else key
 
@@ -65,6 +77,12 @@ class Schema(ABC):
 
         if nullable and val is None:
             return []
+        if isinstance(raw_type, list):
+            types = [item for item in cast(list[Any], raw_type) if item != "null"]
+            if len(types) > 1:
+                t = Schema.match_json_schema_type(val, types)
+                if t is None:
+                    return [f"{label} should match one of the types {types}"]
         if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
             return [f"{label} should be integer"]
         if t == "number" and (
@@ -263,7 +281,15 @@ class Tool(ABC):
     def _cast_value(self, val: Any, schema: dict[str, Any] | bool) -> Any:
         if isinstance(schema, bool):
             return val
-        t = self._resolve_type(schema.get("type"))
+        raw_type = schema.get("type")
+        t = self._resolve_type(raw_type)
+        if isinstance(raw_type, list):
+            types = [item for item in cast(list[Any], raw_type) if item != "null"]
+            if len(types) > 1:
+                # A union does not imply a preferred type or a safe conversion target.
+                t = Schema.match_json_schema_type(val, types)
+                if t is None:
+                    return val
 
         if t == "boolean" and isinstance(val, bool):
             return val
