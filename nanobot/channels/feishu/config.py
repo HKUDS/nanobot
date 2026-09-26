@@ -19,6 +19,13 @@ class FeishuConfig(Base):
     encrypt_key: str = ""
     verification_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    # Bot-to-bot groups: open_ids of peer bots allowed to trigger this bot (empty keeps the
+    # default of dropping every bot message), plus a cap on consecutive bot-triggered turns
+    # per chat. A human message resets that cap.
+    allow_bot_senders: list[str] = Field(default_factory=list)
+    bot_hop_limit: int = 2
+    # Mention the peer bot on replies: Feishu only routes group messages that @ the target.
+    reply_with_mention: bool = False
     react_emoji: str = "THUMBSUP"
     done_emoji: str | None = None
     tool_hint_prefix: str = "\U0001f527"
