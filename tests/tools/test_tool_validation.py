@@ -573,6 +573,94 @@ def test_cast_params_nested_object() -> None:
     assert result["config"]["debug"] is True
 
 
+@pytest.mark.parametrize("types", [["array", "object"], ["object", "array"]])
+@pytest.mark.parametrize(
+    "value, expected", [(["2"], [2]), ({"count": "2"}, {"count": 2})],
+)
+def test_cast_type_union_recurses_into_matching_container(types, value, expected) -> None:
+    tool = CastTestTool({
+        "type": "object",
+        "properties": {"value": {
+            "type": types,
+            "properties": {"count": {"type": "integer", "minimum": 1}},
+            "items": {"type": "integer", "minimum": 1},
+        }},
+    })
+
+    result = tool.cast_params({"value": value})
+
+    assert result == {"value": expected}
+    assert tool.validate_params(result) == []
+    invalid = {"count": 0} if isinstance(value, dict) else [0]
+    assert "must be >= 1" in "; ".join(tool.validate_params({"value": invalid}))
+
+
+@pytest.mark.parametrize("types", [["integer", "string"], ["string", "integer"]])
+@pytest.mark.parametrize(
+    "value, error", [(0, "must be >= 1"), ("ab", "must be at least 3 chars")],
+)
+def test_type_union_enforces_matching_type_constraints(types, value, error) -> None:
+    tool = CastTestTool({
+        "type": "object",
+        "properties": {"value": {"type": types, "minimum": 1, "minLength": 3}},
+    })
+
+    result = tool.cast_params({"value": value})
+
+    assert result["value"] is value
+    assert error in "; ".join(tool.validate_params(result))
+
+
+@pytest.mark.parametrize("types", [["integer", "string"], ["string", "integer"]])
+@pytest.mark.parametrize("value", [True, 1.5, None])
+def test_type_union_rejects_undeclared_types_without_coercion(types, value) -> None:
+    tool = CastTestTool({
+        "type": "object",
+        "properties": {"value": {"type": types}},
+    })
+
+    result = tool.cast_params({"value": value})
+
+    assert result["value"] is value
+    assert tool.validate_params(result)
+
+
+@pytest.mark.parametrize(
+    "types, value, error",
+    [
+        (["number", "boolean", "null"], True, None),
+        (["number", "boolean", "null"], 1.5, None),
+        (["number", "boolean", "null"], None, None),
+        (["string", "number"], float("inf"), "value must be finite"),
+        (["string", "number"], float("nan"), "value must be finite"),
+    ],
+)
+def test_type_union_preserves_numeric_boolean_and_null_values(types, value, error) -> None:
+    for order in (types, types[::-1]):
+        tool = CastTestTool({
+            "type": "object",
+            "properties": {"value": {"type": order}},
+        })
+
+        result = tool.cast_params({"value": value})
+
+        assert result["value"] is value
+        assert tool.validate_params(result) == ([error] if error else [])
+
+
+@pytest.mark.parametrize("value, expected", [("42", 42), (None, None)])
+def test_nullable_integer_retains_safe_casts(value, expected) -> None:
+    tool = CastTestTool({
+        "type": "object",
+        "properties": {"value": {"type": ["integer", "null"]}},
+    })
+
+    result = tool.cast_params({"value": value})
+
+    assert result == {"value": expected}
+    assert tool.validate_params(result) == []
+
+
 def test_cast_params_bool_not_cast_to_int() -> None:
     """Booleans should not be silently cast to integers."""
     tool = CastTestTool(
