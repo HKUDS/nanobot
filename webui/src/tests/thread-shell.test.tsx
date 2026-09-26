@@ -6,6 +6,7 @@ import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import i18n from "@/i18n";
+import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
@@ -474,6 +475,7 @@ function settingsWithFastPreset(): SettingsPayload {
 describe("ThreadShell", () => {
   beforeEach(() => {
     webuiThreadCache.clear();
+    clearStoredComposerDrafts();
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -482,6 +484,107 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("clears the welcome draft after a delayed new-chat send and an unchanged round-trip", async () => {
+    const client = makeClient();
+    const store = new ComposerDraftStore();
+    let completeCreate!: (id: string) => void;
+    const onCreateChat = vi.fn(() => new Promise<string>((resolve) => { completeCreate = resolve; }));
+    const shell = (id: string | null) => wrap(client,
+      <ThreadShell session={id ? session(id) : null} title="Draft race" draftStore={store}
+        onToggleSidebar={() => {}} onCreateChat={onCreateChat} />);
+    const view = render(shell(null));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "original first message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onCreateChat).toHaveBeenCalledTimes(1);
+    view.rerender(shell("other"));
+    view.rerender(shell(null));
+    expect(screen.getByRole("textbox")).toHaveValue("original first message");
+    await act(async () => {
+      view.rerender(shell("created"));
+      completeCreate("created");
+    });
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith(
+      "created", "original first message", undefined, expect.anything()));
+    view.unmount();
+    expect(new ComposerDraftStore().get("new:chat", true)).toBeUndefined();
+  });
+
+  it.each([false, true])("restores regular drafts after reload but excludes temporary chats (temporary=%s)", async (temporary) => {
+    const client = makeClient();
+    let draftStore = new ComposerDraftStore();
+    draftStore.set("websocket:reload-draft", {
+      text: "original", files: [], sessionMentions: [], quotedContext: "quoted answer",
+    });
+    const shell = () => wrap(client, (
+      <ThreadShell session={session("reload-draft")} title="Reload test" temporary={temporary}
+        draftStore={draftStore} onToggleSidebar={() => {}} />
+    ));
+    const first = render(shell());
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "  unsent draft\n第二行" } });
+    first.unmount();
+    draftStore = new ComposerDraftStore();
+    const reloaded = render(shell());
+    expect(screen.getByRole("textbox")).toHaveValue(temporary ? "" : "  unsent draft\n第二行");
+    if (temporary) {
+      expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quoted answer");
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+      await waitFor(() => expect(client.sendMessage).toHaveBeenCalled());
+      reloaded.unmount();
+      draftStore = new ComposerDraftStore();
+      render(shell());
+      expect(screen.getByRole("textbox")).toHaveValue("");
+      expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+    }
+    await act(async () => {});
+    clearStoredComposerDrafts();
+  });
+
+  it.each([false, true])("persists only ordinary new-topic drafts (temporary=%s)", async (temporary) => {
+    const client = makeClient();
+    const shell = () => wrap(client, (
+      <ThreadShell session={null} title="New topic" temporaryChatEnabled={temporary}
+        draftStore={new ComposerDraftStore()} onToggleSidebar={() => {}} />
+    ));
+    const first = render(shell());
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "new topic draft" } });
+    first.unmount();
+    render(shell());
+    expect(screen.getByRole("textbox")).toHaveValue(temporary ? "" : "new topic draft");
+    await act(async () => {});
+    clearStoredComposerDrafts();
+  });
+
+  it.each([false, true])("keeps text and quote drafts scoped to the session (temporary=%s)", async (temporary) => {
+    const client = makeClient();
+    const draftStore: ComposerDraftStore = new Map([
+      ["websocket:draft-a", { text: "draft A", files: [], sessionMentions: [], quotedContext: "quote A" }],
+      ["websocket:draft-b", { text: "draft B", files: [], sessionMentions: [], quotedContext: "quote B" }],
+    ]);
+    const shell = (chatId: string) => wrap(client, (
+      <ThreadShell session={session(chatId)} title="Draft test" temporary={temporary}
+        draftStore={draftStore} onToggleSidebar={() => {}} />
+    ));
+    const view = render(shell("draft-a"));
+    expect(screen.getByRole("textbox")).toHaveValue("draft A");
+    expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quote A");
+    fireEvent.click(screen.getByRole("button", { name: "Remove quoted context" }));
+    view.rerender(shell("draft-b"));
+    expect(screen.getByRole("textbox")).toHaveValue("draft B");
+    expect(screen.getByLabelText("Quoted context")).toHaveTextContent("quote B");
+    view.rerender(shell("draft-a"));
+    expect(screen.getByRole("textbox")).toHaveValue("draft A");
+    expect(screen.queryByLabelText("Quoted context")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalled());
+    view.rerender(shell("draft-b"));
+    view.rerender(shell("draft-a"));
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(draftStore.has("websocket:draft-a")).toBe(false);
+    await act(async () => {});
   });
 
   it("surfaces and retries a deferred trace-detail request failure", async () => {
