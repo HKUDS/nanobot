@@ -669,19 +669,23 @@ async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_notes_unstorable_image_block(tmp_path: Path) -> None:
+@pytest.mark.parametrize("payload", ["not-valid-base64!!", "不是base64", "\ud800"])
+async def test_execute_notes_unstorable_image_block(tmp_path: Path, payload: str) -> None:
     from nanobot.config.loader import set_config_path
 
     set_config_path(tmp_path / "config.json")
 
     async def call_tool(_name: str, arguments: dict) -> object:
-        return SimpleNamespace(content=[_FakeImageContent("not-valid-base64!!", "image/png")])
+        return SimpleNamespace(
+            content=[_FakeTextContent("report ready"), _FakeImageContent(payload, "image/png")]
+        )
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
 
     result = await wrapper.execute()
 
-    assert result == "(MCP tool returned an image that could not be stored)"
+    assert result == "report ready\n(MCP tool returned an image that could not be stored)"
+    assert not is_tool_error_result(result)
 
 
 @pytest.mark.asyncio

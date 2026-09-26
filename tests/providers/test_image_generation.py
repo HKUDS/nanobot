@@ -329,6 +329,19 @@ RAW_B64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("payload", ["not-base64", "不是base64", "\ud800"])
+async def test_aihubmix_rejects_invalid_base64_payload(payload: str) -> None:
+    fake = FakeClient(FakeResponse({"output": {"b64_json": payload}}))
+    client = AIHubMixImageGenerationClient(
+        api_key="sk-ahm-test",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ImageGenerationError, match="not valid base64"):
+        await client.generate(prompt="draw", model="gpt-image-2-free")
+
+
+@pytest.mark.asyncio
 async def test_gemini_imagen_payload_and_response() -> None:
     fake = FakeClient(
         FakeResponse({"predictions": [{"bytesBase64Encoded": RAW_B64, "mimeType": "image/png"}]})
