@@ -306,6 +306,32 @@ async def test_registry_executes_mcp_tools_with_boolean_subschemas(
         session.call_tool.assert_not_awaited()
 
 
+@pytest.mark.parametrize("types", [["integer", "string"], ["string", "integer"]])
+@pytest.mark.parametrize("value", ["00123", "doc-A", 42])
+async def test_registry_preserves_mcp_type_union_arguments(types, value) -> None:
+    session = SimpleNamespace(
+        call_tool=AsyncMock(return_value=SimpleNamespace(content=[_FakeTextContent("ok")])),
+    )
+    tool_def = SimpleNamespace(
+        name="lookup",
+        description="Look up an id without changing its type or value.",
+        inputSchema={
+            "type": "object",
+            "properties": {"id": {"type": types}},
+            "required": ["id"],
+        },
+    )
+    wrapper = MCPToolWrapper(session, "test", tool_def)
+    registry = ToolRegistry()
+    registry.register(wrapper)
+
+    result = await registry.execute(wrapper.name, {"id": value})
+
+    assert result == "ok"
+    session.call_tool.assert_awaited_once_with("lookup", arguments={"id": value})
+    assert type(session.call_tool.call_args.kwargs["arguments"]["id"]) is type(value)
+
+
 def test_wrapper_preserves_non_nullable_unions() -> None:
     tool_def = SimpleNamespace(
         name="demo",
