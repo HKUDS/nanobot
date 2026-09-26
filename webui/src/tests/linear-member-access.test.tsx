@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LinearMemberAccess } from "../../../nanobot/channels/linear/webui/LinearMemberAccess";
+import { linearMemberAccessStore } from "../../../nanobot/channels/linear/webui/member-access-store";
 import type { LinearMembersPayload } from "../../../nanobot/channels/linear/webui/types";
 
 const { requestMutation, context } = vi.hoisted(() => {
@@ -49,6 +50,61 @@ async function openMembers() {
 }
 
 describe("Linear member access", () => {
+  it("forgets a removed workspace's cached permissions and ignores its old in-flight save", async () => {
+    const store = linearMemberAccessStore(context.client, context.token, "", "org-1");
+    await store.load();
+    const deferred = deferNextRequest();
+    const saving = store.setAllowed("u2", true, "not confirmed");
+    store.invalidate();
+    deferred.resolve({ ...roster, members: roster.members.map(member => ({ ...member, allowed: true })) });
+    await saving;
+    expect(store.getSnapshot()).toMatchObject({ payload: null, saves: {}, loading: false });
+    requestMutation.mockResolvedValue({ ...roster, members: roster.members.map(member => ({ ...member, allowed: false })) });
+    await store.load();
+    expect(store.getSnapshot().payload?.members.every(member => !member.allowed)).toBe(true);
+  });
+
+  it("shows members without team subtitles or a team filter", async () => {
+    await openMembers();
+    expect(screen.queryByRole("combobox", { name: "Filter by team" })).not.toBeInTheDocument();
+    expect(screen.queryByText("nanobot", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("keeps one workspace-level switch per member regardless of team membership", async () => {
+    requestMutation.mockResolvedValue({ ...roster, members: [
+      { ...roster.members[0], teams: ["Core", "Desktop"] },
+      { ...roster.members[1], teams: ["Core"] },
+    ] });
+    await openMembers();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Core|Desktop/)).not.toBeInTheDocument();
+    expect(requestMutation).toHaveBeenCalledTimes(1);
+    expect(xubin()).toBeChecked();
+    expect(yongru()).not.toBeChecked();
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
+  });
+
+  it("searches names and user IDs, not hidden team metadata", async () => {
+    requestMutation.mockResolvedValue({ ...roster, members: [
+      { ...roster.members[0], teams: ["Core", "Desktop"] },
+      { ...roster.members[1], teams: ["Core"] },
+    ] });
+    await openMembers();
+    const search = screen.getByRole("textbox", { name: "Search members" });
+    fireEvent.change(search, { target: { value: " xubin " } });
+    expect(xubin()).toBeVisible();
+    expect(screen.getAllByRole("switch")).toHaveLength(1);
+    fireEvent.change(search, { target: { value: "u2" } });
+    expect(yongru()).toBeVisible();
+    expect(screen.getAllByRole("switch")).toHaveLength(1);
+    fireEvent.change(search, { target: { value: "Desktop" } });
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.getByText("No matching active members.")).toBeVisible();
+    fireEvent.change(search, { target: { value: "" } });
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
+    expect(requestMutation).toHaveBeenCalledTimes(1);
+  });
+
   it("renders Linear avatars without referrers and falls back when an image fails", async () => {
     const avatar = "https://public.linear.app/u2/avatar";
     requestMutation.mockResolvedValue({ ...roster, members: roster.members.map(member => ({
@@ -112,7 +168,7 @@ describe("Linear member access", () => {
     expect(requestMutation).toHaveBeenCalledTimes(1);
     fireEvent.click(header());
     expect(requestMutation).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Finding your teammates…")).toBeVisible();
+    expect(screen.getByText("Finding members…")).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Search members" })).toBeEnabled();
     expect(header()).toBeEnabled();
     expect(document.querySelector(".animate-spin")).toBeNull();
@@ -139,7 +195,7 @@ describe("Linear member access", () => {
     fireEvent.click(header());
     expect(yongru()).toBeVisible();
     expect(requestMutation).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("Finding your teammates…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Finding members…")).not.toBeInTheDocument();
   });
 
   it("shows a stale list immediately while revalidating, without disabling the list", async () => {

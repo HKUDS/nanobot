@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlertCircle, Check, ChevronDown, ExternalLink, Loader2, RefreshCw, Unplug } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, ExternalLink, Info, Loader2, MoreHorizontal, Plus, RefreshCw, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
@@ -19,6 +19,13 @@ import {
 } from "@/components/settings/channels/ChannelIdentity";
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
@@ -29,7 +36,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { channelValidationStatusClass } from "@/components/settings/channels/ChannelValidationProgress";
 import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { configureChannel, disableNanobotFeature } from "@/lib/api";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
+import { configureChannel, disableNanobotFeature, fetchNanobotFeatures } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -40,6 +48,9 @@ import { LinearMemberAccess } from "./LinearMemberAccess";
 import { LinearAvatar } from "./LinearAvatar";
 import { linearManifestUrl } from "./manifest";
 import { linearWorkspaceStore } from "./workspace-store";
+import { linearMemberAccessStore } from "./member-access-store";
+import { LinearResetConnection } from "./LinearResetConnection";
+import { LinearSecretField } from "./LinearSecretField";
 
 const PUBLIC_BASE_URL_KEY = "channels.linear.publicBaseUrl";
 const WEBHOOK_PATH_KEY = "channels.linear.webhookPath";
@@ -75,7 +86,10 @@ export function LinearPanel({
   const [clearedSecrets, setClearedSecrets] = useState<Set<string>>(() => new Set());
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [connectRequestId, setConnectRequestId] = useState(0);
+  const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [publicUrlPromptOpen, setPublicUrlPromptOpen] = useState(false);
@@ -90,7 +104,11 @@ export function LinearPanel({
   const [disconnectConfirmId, setDisconnectConfirmId] = useState<string | null>(null);
   const [workspaceNotice, setWorkspaceNotice] = useState<string | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const workspaceActionRef = useRef<HTMLButtonElement | null>(null);
+  const skipMenuRestoreFocus = useRef(false);
+  const disconnectTarget = installations.find(item => item.organization_id === disconnectConfirmId);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const secretSavePromiseRef = useRef<Promise<void> | null>(null);
   const advancedPanelId = useId();
 
   useEffect(() => {
@@ -100,7 +118,7 @@ export function LinearPanel({
     setClearedSecrets(new Set());
   }, [savedValuesKey, feature.name]);
 
-  const busy = saving || Boolean(actionKey);
+  const busy = saving || resetting || Boolean(actionKey);
   const savedValues = defaultChannelFieldValues(editableFields, feature.config_values);
   const dirty = clearedSecrets.size > 0 || editableFields.some(
     (field) => fieldValues[field.key] !== savedValues[field.key],
@@ -110,12 +128,21 @@ export function LinearPanel({
     touchedFields.has(field.key) && Boolean(fieldValues[field.key]?.trim()),
   );
   const hasSavedSecrets = secretFields.some((field) => configuredFields.has(field.key));
+  const memberConfigScope = JSON.stringify([
+    feature.config_values?.["channels.linear.clientId"],
+    feature.config_values?.["channels.linear.allowFrom"],
+  ]);
+  const forgetWorkspaceMembers = (organizationId: string) => {
+    linearMemberAccessStore(client, token, memberConfigScope, organizationId).invalidate();
+  };
   const manifestDirty = [PUBLIC_BASE_URL_KEY, WEBHOOK_PATH_KEY, CALLBACK_PATH_KEY].some(
     (key) => fieldValues[key] !== savedValues[key],
   );
   const credentialsSaved = fields.filter((field) => !field.optional).every((field) =>
     configuredFields.has(field.key) || Boolean(feature.config_values?.[field.key]?.trim()),
   );
+  const workspaceActionsDisabled = busy || dirty || connecting || loadingInstallations
+    || disconnectingId !== null;
   const savedBaseUrl = feature.config_values?.[PUBLIC_BASE_URL_KEY]?.replace(/\/$/, "");
   const manifestUrl = savedBaseUrl
     ? linearManifestUrl(
@@ -133,8 +160,16 @@ export function LinearPanel({
   }, [workspaceStore, credentialsSaved, dirty]);
 
   useEffect(() => {
-    if (feature.runtime_status === "running") void loadInstallations();
-  }, [feature.runtime_status, loadInstallations]);
+    // Stopping message delivery does not revoke workspace authorizations.
+    void loadInstallations();
+    let wasOpen = client.status === "open";
+    return client.onStatus((status) => {
+      // A gateway restart can interrupt the initial inspection. Recover without
+      // making the user refresh or begin a second OAuth authorization.
+      if (status === "open" && !wasOpen) void loadInstallations(true);
+      wasOpen = status === "open";
+    });
+  }, [client, feature.runtime_status, loadInstallations]);
 
   const disconnectWorkspace = async (installation: LinearInstallationSummary) => {
     setDisconnectingId(installation.organization_id);
@@ -145,10 +180,16 @@ export function LinearPanel({
         operation: "disconnect",
         organization_id: installation.organization_id,
       });
-      const remaining = payload.installations ?? [];
+      const remaining = payload.installations;
+      if (!remaining || remaining.some(item => item.organization_id === installation.organization_id)) {
+        throw new Error(tx("custom.resetInspectFailed", "Could not verify connected workspaces. App settings were kept."));
+      }
+      forgetWorkspaceMembers(installation.organization_id);
       workspaceStore.replace(remaining);
       setWorkspaceNotice(payload.message ?? null);
       setDisconnectConfirmId(null);
+      setConnectRequestId(0);
+      setConnectionGeneration(value => value + 1);
       if (remaining.length === 0) {
         onFeaturesUpdate(await disableNanobotFeature(client, "linear"));
       }
@@ -218,18 +259,34 @@ export function LinearPanel({
   );
 
   useEffect(() => {
-    onBeforeCloseChange?.(dirty ? saveSettings : null);
+    onBeforeCloseChange?.(dirty || saving ? async () => {
+      if (secretSavePromiseRef.current) {
+        try { await secretSavePromiseRef.current; } catch { return false; }
+      }
+      return saveSettings();
+    } : null);
     return () => onBeforeCloseChange?.(null);
-  }, [dirty, saveSettings, onBeforeCloseChange]);
+  }, [dirty, saving, saveSettings, onBeforeCloseChange]);
 
-  const removeSavedCredentials = () => {
-    setClearedSecrets(new Set(secretFields.map((field) => field.key)));
-    setFieldValues((current) => ({
-      ...current,
-      ...Object.fromEntries(secretFields.map((field) => [field.key, ""])),
-    }));
-    setNotice(null);
-    setSaved(false);
+  const saveSecret = async (key: string, value: string) => {
+    if (busy || dirty || connecting || savePromiseRef.current || secretSavePromiseRef.current) {
+      throw new Error("Settings are busy");
+    }
+    const save = (async () => {
+      setSaving(true);
+      setSaved(false);
+      try {
+        // Explicit, single-field commit: blur, visibility toggles and cancellation never save.
+        const payload = await configureChannel(client, feature.name, { [key]: value });
+        if (!payload.saved) throw new Error("Secret was not saved");
+        onFeaturesUpdate(payload.nanobot_features ?? await fetchNanobotFeatures(token));
+        setSaved(true);
+      } finally {
+        setSaving(false);
+      }
+    })();
+    secretSavePromiseRef.current = save;
+    try { await save; } finally { secretSavePromiseRef.current = null; }
   };
 
   const formProps = {
@@ -282,7 +339,12 @@ export function LinearPanel({
         </div>
         <ChannelRuntimeError message={feature.runtime_error} />
         <CredentialForm {...formProps} fields={fields.filter((field) => field.key === PUBLIC_BASE_URL_KEY)} />
-        <CredentialForm {...formProps} fields={fields.filter((field) => field.key !== PUBLIC_BASE_URL_KEY)} />
+        <div className="grid gap-y-4">
+          {fields.filter(field => field.key !== PUBLIC_BASE_URL_KEY).map(field => field.secret ? (
+            <LinearSecretField key={`${field.key}:${connectionGeneration}`} field={field} configured={configuredFields.has(field.key)}
+              disabled={busy || dirty || connecting} onSave={saveSecret} />
+          ) : <CredentialForm key={field.key} {...formProps} fields={[field]} />)}
+        </div>
         <div id={advancedPanelId} hidden={!advancedOpen}>
           <CredentialForm {...formProps} fields={advancedFields} />
           {installations.some(installation => installation.scopes?.length) ? (
@@ -295,6 +357,18 @@ export function LinearPanel({
               ))}
             </div>
           ) : null}
+          <LinearResetConnection fields={editableFields}
+            disabled={busy || dirty || connecting || loadingInstallations || disconnectingId !== null
+              || !(hasSavedSecrets || feature.config_values?.["channels.linear.clientId"] || savedBaseUrl)}
+            onBusyChange={setResetting} onWorkspacesChange={workspaceStore.replace}
+            onWorkspaceRemoved={forgetWorkspaceMembers} onFeaturesUpdate={onFeaturesUpdate}
+            onComplete={() => {
+              setConnectRequestId(0);
+              setConnectionGeneration(value => value + 1);
+              setAdvancedOpen(false);
+              setWorkspaceNotice(null);
+              setWorkspaceError(null);
+            }} />
         </div>
         {notice ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-muted/55 px-3 py-2.5 text-[12px] leading-5">
@@ -306,14 +380,14 @@ export function LinearPanel({
           </div>
         ) : null}
       </form>
-      {feature.runtime_status === "running" ? (
+      {credentialsSaved || installations.length > 0 ? (
         <section className="mt-5 space-y-3" aria-labelledby="linear-workspaces-heading">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 id="linear-workspaces-heading" className="text-[13px] font-semibold text-foreground">
               {tx("custom.workspacesTitle", "Authorized workspaces")}
             </h4>
             <Button type="button" variant="ghost" size="sm"
-              disabled={loadingInstallations || disconnectingId !== null}
+              disabled={busy || dirty || connecting || loadingInstallations || disconnectingId !== null}
               className="h-8 gap-2 rounded-full text-[12px] text-muted-foreground"
               onClick={() => void loadInstallations(true)}>
               <RefreshCw className="h-3.5 w-3.5" aria-hidden />
@@ -335,8 +409,6 @@ export function LinearPanel({
           ) : null}
           <div className="space-y-2">
             {installations.map((installation) => {
-              const confirming = disconnectConfirmId === installation.organization_id;
-              const disconnecting = disconnectingId === installation.organization_id;
               const name = installation.organization_name || installation.organization_id;
               const needsAuthorization = installation.authorization_status === "missing_scopes"
                 || installation.authorization_status === "refresh_required";
@@ -356,47 +428,75 @@ export function LinearPanel({
                 <article key={installation.organization_id} aria-label={name}
                   className="overflow-hidden rounded-panel border border-border/70 bg-background">
                   <header className="flex flex-wrap items-center justify-between gap-3 p-4">
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
                       <LinearAvatar name={name} url={logos[installation.organization_id]} workspace />
                       <div className="min-w-0">
                         <h5 className="truncate text-[14px] font-semibold text-foreground" title={name}>{name}</h5>
                         {authorizationWarning ? <div className="mt-1">{authorizationWarning}</div> : null}
                       </div>
                     </div>
-                    <div className="ms-auto flex flex-wrap items-center gap-2">
-                      {confirming ? (
-                        <Button type="button" variant="ghost" size="sm"
-                          disabled={loadingInstallations || disconnecting}
-                          className="h-8 rounded-full text-[12px]"
-                          onClick={() => setDisconnectConfirmId(null)}>
-                          {t("settings.actions.cancel", { defaultValue: "Cancel" })}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button type="button" variant="ghost" size="icon"
+                          disabled={workspaceActionsDisabled}
+                          onPointerDown={event => { workspaceActionRef.current = event.currentTarget; }}
+                          onFocus={event => { workspaceActionRef.current = event.currentTarget; }}
+                          aria-label={tx("custom.workspaceActions", "Manage {{name}}", { name })}
+                          title={tx("custom.workspaceActions", "Manage {{name}}", { name })}
+                          className="h-8 w-8 shrink-0 rounded-full text-muted-foreground">
+                          <MoreHorizontal className="h-4 w-4" aria-hidden />
                         </Button>
-                      ) : null}
-                      <Button type="button" variant={confirming ? "destructive" : "ghost"} size="sm"
-                        disabled={loadingInstallations || disconnectingId !== null}
-                        className={cn("h-8 gap-2 rounded-full text-[12px]", !confirming && "text-muted-foreground")}
-                        onClick={() => confirming
-                          ? void disconnectWorkspace(installation)
-                          : setDisconnectConfirmId(installation.organization_id)}>
-                        {disconnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
-                          : <Unplug className="h-3.5 w-3.5" aria-hidden />}
-                        {confirming
-                          ? tx("custom.confirmDisconnect", "Disconnect workspace")
-                          : tx("custom.disconnect", "Disconnect")}
-                      </Button>
-                    </div>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" onCloseAutoFocus={event => {
+                        if (skipMenuRestoreFocus.current) event.preventDefault();
+                        skipMenuRestoreFocus.current = false;
+                      }}>
+                        <DropdownMenuItem disabled={workspaceActionsDisabled || !credentialsSaved}
+                          onSelect={() => {
+                            skipMenuRestoreFocus.current = true;
+                            setConnectRequestId(id => id + 1);
+                          }}>
+                          <RefreshCw className="h-4 w-4" aria-hidden />
+                          {tx("custom.reauthorize", "Reauthorize")}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem tone="destructive" disabled={workspaceActionsDisabled}
+                          onSelect={() => {
+                            skipMenuRestoreFocus.current = true;
+                            setWorkspaceError(null);
+                            setDisconnectConfirmId(installation.organization_id);
+                          }}>
+                          <Unplug className="h-4 w-4" aria-hidden />
+                          {tx("custom.disconnect", "Remove workspace")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </header>
                   <LinearMemberAccess organizationId={installation.organization_id}
-                    configScope={JSON.stringify([
-                      feature.config_values?.["channels.linear.clientId"],
-                      feature.config_values?.["channels.linear.allowFrom"],
-                    ])}
+                    configScope={memberConfigScope}
                     disabled={busy || dirty || connecting || disconnectingId !== null} />
                 </article>
               );
             })}
           </div>
-          {workspaceError || inspectionError ? (
+          {installations.length > 0 ? (
+            <div className="flex items-center gap-1">
+              <Button type="button" variant="ghost" size="sm"
+                disabled={workspaceActionsDisabled || !credentialsSaved}
+                className="h-9 gap-2 rounded-full text-[12px] text-muted-foreground"
+                onClick={() => setConnectRequestId(id => id + 1)}>
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                {tx("custom.addWorkspace", "Connect workspace")}
+              </Button>
+              <SettingsHint description={tx("custom.addWorkspaceHelp", "Uses the current Linear app. To connect another workspace, the app must allow installation in other workspaces; private apps only work in their own workspace. Authorizing an existing workspace updates its connection without creating a duplicate.")}>
+                <span className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground">
+                  <Info className="h-3.5 w-3.5" aria-hidden />
+                  <span className="sr-only">{tx("custom.addWorkspaceDetails", "About connecting workspaces")}</span>
+                </span>
+              </SettingsHint>
+            </div>
+          ) : null}
+          {(workspaceError && !disconnectTarget) || inspectionError ? (
             <p role="alert" className="text-[12px] leading-5 text-destructive">{workspaceError || inspectionError}</p>
           ) : null}
           {workspaceNotice ? (
@@ -406,7 +506,9 @@ export function LinearPanel({
           ) : null}
         </section>
       ) : null}
-      <LinearConnectFlow token={token} feature={feature}
+      <LinearConnectFlow key={connectionGeneration} token={token} feature={feature}
+        connectRequestId={connectRequestId}
+        connected={feature.runtime_status === "running" && installations.length > 0}
         idleLabel={tx("custom.connect", "Connect Linear")} onFeaturesUpdate={(payload) => {
           onFeaturesUpdate(payload);
           void workspaceStore.load(true);
@@ -440,19 +542,55 @@ export function LinearPanel({
                 </Button>
               )}
             </div>
-            {hasSavedSecrets ? (
-              <Button type="button" variant="ghost" size="sm" disabled={busy || connecting}
-                className="h-auto min-h-10 whitespace-normal rounded-full text-[12px] text-muted-foreground"
-                onClick={removeSavedCredentials}>
-                {tx("custom.removeCredentials", "Remove saved credentials")}
-              </Button>
+            {installations.length === 0 || feature.runtime_status !== "running" || connecting ? (
+              <fieldset disabled={busy || dirty || !credentialsSaved || loadingInstallations || disconnectingId !== null}
+                className="min-w-0 sm:col-start-3">
+                <legend className="sr-only">{tx("custom.authorizeTitle", "Authorize in Linear")}</legend>
+                {connectButton}
+              </fieldset>
             ) : null}
-            <fieldset disabled={busy || dirty || !credentialsSaved} className="min-w-0 sm:col-start-3">
-              <legend className="sr-only">{tx("custom.authorizeTitle", "Authorize in Linear")}</legend>
-              {connectButton}
-            </fieldset>
           </div>
         )} />
+      <AlertDialog open={Boolean(disconnectTarget)} onOpenChange={open => {
+        if (!open && !disconnectingId) {
+          setDisconnectConfirmId(null);
+          setWorkspaceError(null);
+        }
+      }}>
+        <AlertDialogContent onEscapeKeyDown={event => {
+          if (disconnectingId) event.preventDefault();
+        }} onCloseAutoFocus={event => {
+          event.preventDefault();
+          if (workspaceActionRef.current?.isConnected) workspaceActionRef.current.focus();
+          else document.getElementById(channelFieldInputId(PUBLIC_BASE_URL_KEY))?.focus();
+        }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {tx("custom.disconnectTitle", "Remove {{name}}?", {
+                name: disconnectTarget?.organization_name || disconnectTarget?.organization_id || "",
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {tx("custom.disconnectDescription", "Revoke this workspace's authorization and clear its member access settings in nanobot. Linear issues, comments, and nanobot conversation history will be kept. Other workspaces are not affected. You can authorize this workspace again later.")}
+              {installations.length === 1 ? <> {tx("custom.disconnectLast", "This is the last connected workspace, so the Linear channel will also be turned off.")}</> : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {workspaceError ? <p role="alert" className="text-[12px] leading-5 text-destructive">{workspaceError}</p> : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={disconnectingId !== null}>
+              {t("settings.actions.cancel", { defaultValue: "Cancel" })}
+            </AlertDialogCancel>
+            <Button type="button" variant="destructive"
+              disabled={workspaceActionsDisabled || !disconnectTarget}
+              onClick={() => { if (disconnectTarget) void disconnectWorkspace(disconnectTarget); }}>
+              {disconnectingId ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
+              {disconnectingId
+                ? tx("custom.disconnecting", "Removing…")
+                : tx("custom.confirmDisconnect", "Remove workspace")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog open={publicUrlPromptOpen} onOpenChange={setPublicUrlPromptOpen}>
         <AlertDialogContent onCloseAutoFocus={(event) => {
           event.preventDefault();

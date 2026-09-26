@@ -99,6 +99,10 @@ class LinearStateStore:
                 connection.execute(
                     "ALTER TABLE installations ADD COLUMN oauth_client_id TEXT NOT NULL DEFAULT ''"
                 )
+            if "authorized_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE installations ADD COLUMN authorized_at REAL NOT NULL DEFAULT 0"
+                )
             connection.execute(
                 "DELETE FROM webhook_receipts WHERE received_at < ?",
                 (time.time() - 30 * 24 * 60 * 60,),
@@ -115,14 +119,17 @@ class LinearStateStore:
                 ).fetchone()
         return row is not None
 
-    def save_installation(self, installation: LinearInstallation) -> None:
+    def save_installation(
+        self, installation: LinearInstallation, *, reauthorize: bool = False,
+    ) -> None:
+        now = time.time()
         with self._guard, self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO installations (
                     organization_id, oauth_client_id, app_user_id, access_token, refresh_token,
-                    expires_at, scope_json, organization_name, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    expires_at, scope_json, organization_name, updated_at, authorized_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(organization_id) DO UPDATE SET
                     oauth_client_id=excluded.oauth_client_id,
                     app_user_id=excluded.app_user_id,
@@ -131,7 +138,10 @@ class LinearStateStore:
                     expires_at=excluded.expires_at,
                     scope_json=excluded.scope_json,
                     organization_name=excluded.organization_name,
-                    updated_at=excluded.updated_at
+                    updated_at=excluded.updated_at,
+                    authorized_at=CASE
+                        WHEN ? OR installations.oauth_client_id != excluded.oauth_client_id
+                        THEN excluded.authorized_at ELSE installations.authorized_at END
                 """,
                 (
                     installation.organization_id,
@@ -142,7 +152,9 @@ class LinearStateStore:
                     installation.expires_at,
                     json.dumps(installation.scope),
                     installation.organization_name,
-                    time.time(),
+                    now,
+                    now,
+                    reauthorize,
                 ),
             )
 
@@ -175,12 +187,34 @@ class LinearStateStore:
                 ).fetchall()
         return [_installation_from_row(row) for row in rows]
 
-    def delete_installation(self, organization_id: str) -> None:
+    def delete_installation(
+        self, organization_id: str, *, oauth_client_id: str | None = None,
+        revoked_at: float | None = None,
+    ) -> bool:
+        """Remove an installation, ignoring revocations from an older authorization."""
         with self._guard, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT oauth_client_id, authorized_at FROM installations WHERE organization_id = ?",
+                (organization_id,),
+            ).fetchone()
+            if current is None:
+                return False
+            if oauth_client_id is not None and current["oauth_client_id"] != oauth_client_id:
+                return False
+            if revoked_at is not None and revoked_at < float(current["authorized_at"]):
+                return False
+            connection.execute(
+                "DELETE FROM member_access WHERE organization_id = ? "
+                "AND oauth_client_id IN (SELECT oauth_client_id FROM installations "
+                "WHERE organization_id = ?)",
+                (organization_id, organization_id),
+            )
             connection.execute(
                 "DELETE FROM installations WHERE organization_id = ?",
                 (organization_id,),
             )
+        return True
 
     def member_access(self, client_id: str, organization_id: str, user_id: str) -> bool | None:
         """An explicit choice overrides legacy pairing and allowFrom, including '*'."""

@@ -17,15 +17,17 @@ export function LinearAvatar({ name, url, workspace = false }: {
       source = parsed.href;
     }
   } catch { /* Missing or malformed images use the same fallback. */ }
-  const size = workspace ? 36 : 32;
+  const size = workspace ? 28 : 32;
+  const showImage = source !== null && source !== failedUrl;
   return <span aria-hidden className={cn(
-    "relative flex shrink-0 items-center justify-center overflow-hidden bg-muted text-xs font-medium text-muted-foreground",
-    workspace ? "h-9 w-9 rounded-control" : "h-8 w-8 rounded-full",
+    "relative flex shrink-0 items-center justify-center text-xs font-medium text-muted-foreground",
+    workspace ? "h-7 w-7" : "h-8 w-8 overflow-hidden rounded-full bg-muted",
+    workspace && !showImage && "rounded-md bg-muted",
   )}>
-    {workspace ? <Building2 className="h-4 w-4" /> : name.slice(0, 2).toLocaleUpperCase()}
-    {source && source !== failedUrl ? <img src={source} alt="" width={size} height={size}
+    {workspace ? !showImage ? <Building2 className="h-4 w-4" /> : null : name.slice(0, 2).toLocaleUpperCase()}
+    {source && showImage ? <img src={source} alt="" width={size} height={size}
       loading="lazy" decoding="async" referrerPolicy="no-referrer"
-      className="absolute inset-0 h-full w-full bg-muted object-cover"
+      className={cn("absolute inset-0 h-full w-full", workspace ? "object-contain" : "bg-muted object-cover")}
       onError={() => setFailedUrl(source)} /> : null}
   </span>;
 }

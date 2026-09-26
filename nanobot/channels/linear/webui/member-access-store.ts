@@ -19,6 +19,7 @@ class LinearMemberAccessStore {
   private listeners = new Set<() => void>();
   private readVersion = 0;
   private fetchedAt = 0;
+  private generation = 0;
 
   constructor(private client: WebUIMutationTransport, private organizationId: string) {}
 
@@ -40,6 +41,13 @@ class LinearMemberAccessStore {
   get canEvict() {
     return !this.listeners.size && !this.saving && !this.snapshot.loading;
   }
+
+  invalidate = () => {
+    this.generation += 1;
+    this.readVersion += 1;
+    this.fetchedAt = 0;
+    this.update({ payload: null, loading: false, error: null, saves: {} });
+  };
 
   load = async (force = false) => {
     if (this.snapshot.loading || this.saving) return;
@@ -63,6 +71,7 @@ class LinearMemberAccessStore {
     const previous = this.snapshot.saves[userId];
     if (previous?.status === "saving" || previous?.status === "error") return;
     if (!this.snapshot.payload?.members.some((member) => member.id === userId)) return;
+    const generation = this.generation;
     // An older directory response must not overwrite a newer permission change.
     this.readVersion += 1;
     this.update({ loading: false, saves: { ...this.snapshot.saves, [userId]: { status: "saving" } } });
@@ -70,6 +79,7 @@ class LinearMemberAccessStore {
       const payload = await manageLinearMembers(this.client, {
         operation: "member_access", organization_id: this.organizationId, user_id: userId, allowed,
       });
+      if (generation !== this.generation) return;
       const updated = payload.members.find((member) => member.id === userId);
       if (payload.organization_id !== this.organizationId || !updated || updated.allowed !== allowed) {
         throw new Error(unconfirmedMessage);
@@ -86,6 +96,7 @@ class LinearMemberAccessStore {
       });
     } catch (error) {
       // A timeout can mean the server saved the change. Re-read before retrying this member.
+      if (generation !== this.generation) return;
       this.fetchedAt = 0;
       this.update({ saves: { ...this.snapshot.saves, [userId]: {
         status: "error", message: error instanceof Error ? error.message : String(error),

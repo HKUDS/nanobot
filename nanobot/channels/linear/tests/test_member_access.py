@@ -57,6 +57,59 @@ def test_access_is_scoped_to_app_and_workspace(tmp_path: Path) -> None:
     assert not member_allowed(config, state, "org-1", "user-1")
 
 
+def test_removing_workspace_forgets_member_choices_only_for_that_installation(tmp_path: Path) -> None:
+    state = LinearStateStore(tmp_path / "state.sqlite3")
+    first = _installation()
+    second = replace(first, organization_id="org-2")
+    state.save_installation(first)
+    state.save_installation(second)
+    state.set_member_access(first.oauth_client_id, "org-1", "user-1", allowed=True)
+    state.set_member_access(first.oauth_client_id, "org-1", "user-2", allowed=False)
+    state.set_member_access(first.oauth_client_id, "org-2", "user-1", allowed=True)
+
+    state.delete_installation("org-1")
+
+    assert state.installation("org-1") is None
+    assert state.member_access(first.oauth_client_id, "org-1", "user-1") is None
+    assert state.member_access(first.oauth_client_id, "org-1", "user-2") is None
+    assert state.installation("org-2") == second
+    assert state.member_access(first.oauth_client_id, "org-2", "user-1") is True
+    state.save_installation(first)
+    assert state.member_access(first.oauth_client_id, "org-1", "user-1") is None
+
+
+@pytest.mark.parametrize("paired", [False, True])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_reauthorize_keeps_choices_but_remove_and_reconnect_uses_legacy_fallback(
+    tmp_path: Path, paired: bool, allowed: bool,
+) -> None:
+    config = _config()
+    config.allow_from = []
+    if paired:
+        approve_code(generate_code("linear", "user-1"))
+    state = LinearStateStore(tmp_path / "state.sqlite3")
+    first = _installation()
+    state.save_installation(first)
+    state.save_installation(replace(first, organization_id="org-2"))
+    state.set_member_access(config.client_id, "org-1", "user-1", allowed=allowed)
+    state.set_member_access(config.client_id, "org-2", "user-1", allowed=not allowed)
+
+    # Reauthorization updates tokens without duplicating the workspace or resetting choices.
+    renewed = replace(first, access_token="renewed", refresh_token="renewed-refresh")
+    state.save_installation(renewed)
+    reopened = LinearStateStore(state.path)
+    assert len(reopened.list_installations(config.client_id)) == 2
+    assert member_allowed(config, reopened, "org-1", "user-1") is allowed
+    assert member_allowed(config, reopened, "org-2", "user-1") is not allowed
+
+    # Deliberately removing a workspace clears only its explicit choices, not pairing.
+    reopened.delete_installation("org-1")
+    assert not member_allowed(config, reopened, "org-1", "user-1")
+    reopened.save_installation(renewed)
+    assert member_allowed(config, reopened, "org-1", "user-1") is paired
+    assert member_allowed(config, reopened, "org-2", "user-1") is not allowed
+
+
 def connection(nodes: list[dict[str, Any]], cursor: str | None = None) -> dict[str, Any]:
     return {"nodes": nodes, "pageInfo": {"hasNextPage": cursor is not None, "endCursor": cursor}}
 

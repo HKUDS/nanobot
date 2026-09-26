@@ -37,7 +37,7 @@ export function LinearMemberAccess({ organizationId, configScope = "", disabled 
 
   const prefetch = () => { if (!disabled) void store.load(); };
   const needle = search.trim().toLocaleLowerCase();
-  const visible = members.filter((member) => [member.name, member.id, ...member.teams]
+  const visible = members.filter((member) => [member.name, member.id]
     .some((value) => value.toLocaleLowerCase().includes(needle)));
   const names = new Set<string>();
   const duplicateNames = new Set<string>();
@@ -57,7 +57,7 @@ export function LinearMemberAccess({ organizationId, configScope = "", disabled 
           <span role="status" aria-live="polite" className="text-end text-[11px] font-normal text-muted-foreground">
             {payload ? !expanded ? tx("members.summary", "{{allowed}} enabled", {
               allowed: members.filter((member) => member.allowed).length,
-            }) : null : loading ? tx("members.loading", "Finding your teammates…") : null}
+            }) : null : loading ? tx("members.loading", "Finding members…") : null}
           </span>
           <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none", expanded && "rotate-180")} aria-hidden />
         </span>
@@ -82,7 +82,7 @@ export function LinearMemberAccess({ organizationId, configScope = "", disabled 
             title={tx("members.refresh", "Refresh members")}>
             <RefreshCw className="h-4 w-4 text-muted-foreground" aria-hidden />
           </Button>
-          <SettingsHint description={tx("members.help", "Choose who can use nanobot in Linear without a pairing code. This does not grant access to the nanobot admin UI. Turning access off blocks new requests, not tasks already running.")}>
+          <SettingsHint description={tx("members.help", "Enable members to use nanobot without a pairing code. Linear's existing authorization still applies. This does not grant access to the nanobot admin UI. Turning access off blocks new requests, not tasks already running.")}>
             <span className="flex h-9 w-9 items-center justify-center text-muted-foreground">
               <Info className="h-4 w-4" aria-hidden />
               <span className="sr-only">{tx("members.details", "About member access")}</span>
@@ -93,7 +93,7 @@ export function LinearMemberAccess({ organizationId, configScope = "", disabled 
           {error} {tx("members.retry", "Refresh members to check the current state and try again.")}
         </p> : null}
         {payload && !error && visible.length === 0 ? <p className="settings-list-inset py-3 text-[12px] text-muted-foreground">
-          {tx("members.empty", "No matching active members in the teams this app can access.")}
+          {tx("members.empty", "No matching active members.")}
         </p> : null}
         <SettingsGroup>
           <ul className="max-h-80 overflow-y-auto" aria-label={tx("members.title", "Member access")}>
@@ -105,8 +105,7 @@ export function LinearMemberAccess({ organizationId, configScope = "", disabled 
                   <LinearAvatar name={member.name} url={member.avatar_url} />
                   <div className="min-w-0">
                     <p className="truncate" title={member.id}>{member.name}</p>
-                    <div className="flex flex-wrap items-center gap-x-2 text-[12px] font-normal text-muted-foreground">
-                      <span className="truncate">{member.teams.join(" · ")}</span>
+                    <div className="flex flex-wrap items-center gap-x-2 text-[12px] font-normal leading-4 text-muted-foreground">
                       <span id={save?.status === "error" ? undefined : statusId} role="status" aria-live="polite" className="inline-flex items-center gap-1">
                         {save?.status === "saving" ? tx("members.working", "Saving…") : null}
                         {save?.status === "saved" ? <><Check className="h-3 w-3" aria-hidden />{tx("members.saved", "Saved")}</> : null}

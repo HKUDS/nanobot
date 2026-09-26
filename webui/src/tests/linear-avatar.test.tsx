@@ -5,13 +5,16 @@ import { LinearAvatar } from "../../../nanobot/channels/linear/webui/LinearAvata
 
 afterEach(cleanup);
 describe("Linear workspace logo", () => {
-  it("loads a real CDN logo in a fixed-size square and recovers to the workspace icon", () => {
+  it("keeps workspace artwork uncropped without a background plate and recovers to an icon", () => {
     const view = render(<LinearAvatar workspace name="nanobot" url="https://public.linear.app/org/logo" />);
     const image = view.container.querySelector("img")!;
-    expect(image).toHaveAttribute("width", "36");
-    expect(image).toHaveAttribute("height", "36");
+    expect(image).toHaveAttribute("width", "28");
+    expect(image).toHaveAttribute("height", "28");
     expect(image).toHaveAttribute("referrerpolicy", "no-referrer");
-    expect(image.parentElement).toHaveClass("h-9", "w-9", "rounded-control");
+    expect(image.parentElement).toHaveClass("h-7", "w-7");
+    expect(image.parentElement).not.toHaveClass("overflow-hidden", "bg-muted");
+    expect(image).toHaveClass("object-contain");
+    expect(view.container.querySelector("svg")).toBeNull();
     fireEvent.error(image);
     expect(view.container.querySelector("img")).toBeNull();
     expect(view.container.querySelector("svg")).not.toBeNull();

@@ -8,6 +8,7 @@ import mimetypes
 import re
 import uuid
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -542,8 +543,19 @@ class LinearChannel(BaseChannel):
         action = str(payload.get("action") or "").lower()
         organization_id = str(payload.get("organizationId") or "").strip()
         if organization_id and action in {"remove", "removed", "revoke", "revoked"}:
-            self._state.delete_installation(organization_id)
-            self.logger.info("Removed revoked Linear workspace installation {}", organization_id)
+            # Delivery may be retried or queued while stopped. Compare the action's
+            # timestamp, not webhookTimestamp (delivery time), with the latest grant.
+            try:
+                created_at = datetime.fromisoformat(str(payload.get("createdAt") or ""))
+                if created_at.tzinfo is None:
+                    raise ValueError("Missing timezone")
+            except ValueError as exc:
+                raise LinearPayloadError("Linear revocation is missing a valid createdAt") from exc
+            if self._state.delete_installation(
+                organization_id, oauth_client_id=self.config.client_id,
+                revoked_at=created_at.timestamp(),
+            ):
+                self.logger.info("Removed revoked Linear workspace installation {}", organization_id)
 
 
 def _linear_route(metadata: dict[str, Any]) -> dict[str, Any] | None:

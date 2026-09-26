@@ -251,7 +251,7 @@ def _oauth_html(status: str) -> bytes:
         ),
         "cancelled": (
             "Authorization not completed",
-            "Return to nanobot to try again or leave Linear disconnected.",
+            "Existing workspace connections are unchanged. Return to nanobot to try again.",
         ),
         "invalid": (
             "Linear connection failed",

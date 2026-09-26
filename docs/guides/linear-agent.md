@@ -39,6 +39,20 @@ the channel's OAuth installation, webhook, or Agent Session transport.
 
 ## Before you start
 
+There are two separate decisions: **connect a workspace**, then **choose who can
+use nanobot**. The administrator sets up the app once; teammates do not need to
+create their own apps, paste credentials, or scan a code.
+
+```text
+Prepare HTTPS → Create the Linear app → Save credentials in nanobot
+             → Authorize a workspace → Enable members → Try an @mention
+```
+
+The HTTPS address receives Linear events. OAuth installs the app in a workspace.
+Member access controls who may ask your nanobot to do work. These steps serve
+different purposes; authorizing a workspace does not automatically approve all
+its members.
+
 Prepare these four things:
 
 | Requirement | What you need |
@@ -93,6 +107,11 @@ host** field to `127.0.0.1` so the listener is not exposed directly on the local
 network. Containers and separate reverse-proxy hosts may require `0.0.0.0`.
 The Linear listener serves plain HTTP locally; terminate HTTPS at the proxy or
 tunnel instead of exposing port `3979` directly to the internet.
+
+Only the callback and webhook need public routes. Keep the nanobot WebUI and
+admin API private, for example behind a VPN or SSH tunnel. Do not point your
+public hostname at the WebUI port. An HTTPS endpoint is not an invitation to run
+the agent: webhooks must pass signature checks, and senders must pass access checks.
 
 ### Temporary HTTPS for a local test
 
@@ -182,16 +201,20 @@ In the new Linear app's settings, copy these values:
 | Webhook signing secret | **Webhook signing secret** |
 
 Return to **Settings → Channels → Linear** and paste all three values. Ordinary
-fields save automatically after a short pause; secret fields save when you leave
-the field. Wait for **Settings saved.** before entering the next credential.
+fields save automatically after a short pause. For each secret, select **Save**
+beside that field and wait for its **Saved** status.
 **Connect Linear** becomes available once the required settings are saved.
 Listener settings, callback paths, and allowed users are in **Advanced**; setup
 guides are in the dialog's **Help** menu.
 
-Closing the dialog waits for pending edits to save. If saving fails, the dialog
-keeps your input and offers **Retry**. **Remove saved credentials** clears both
-the client secret and webhook signing secret while keeping the client ID and
-public URL.
+A masked value with **Saved** means this instance already has the secret; it is
+not an empty input. To change it, select **Replace**, enter the new secret, then
+**Save**. **Cancel** or Escape leaves the saved secret unchanged. Leaving the
+field or showing the newly typed value does not save it. A failed save retains
+the draft for retry; the old secret is never sent back to the browser.
+
+Closing the dialog waits for in-flight saves, but does not save an unsubmitted
+secret draft. Save each secret explicitly before continuing.
 
 Treat the Client Secret and Webhook signing secret like passwords. They belong
 only in the nanobot configuration and the Linear application settings.
@@ -199,24 +222,41 @@ only in the nanobot configuration and the Linear application settings.
 ### 4. Authorize the workspace
 
 1. Select **Connect Linear**.
-2. Open the displayed authorization link, or scan the QR code.
-3. Choose the workspace and approve the installation as a workspace admin.
+2. Select **Continue in Linear** to open authorization in your browser. There is
+   no QR step.
+3. Choose the workspace, review the app's permissions and team access, and
+   approve the installation as a workspace admin.
 4. Return to nanobot and wait for the **Channel running** badge. The
    **Authorized workspaces** section lists the workspace separately.
 
 nanobot enables the channel automatically after authorization. The gateway must
 remain running so Linear can deliver webhooks. Reopening the panel shows the
 running channel and its authorized workspaces without another authorization
-attempt. Use **Disconnect** on a workspace to revoke its Linear OAuth tokens and
-remove the local installation; removing the last workspace also disables the channel.
-To replace an authorization, select
-**Connect another workspace** and authorize the same workspace again.
+attempt. Use **… → Remove workspace** on a workspace to revoke its Linear OAuth
+tokens and remove the local installation; see the lifecycle controls below for
+what is kept.
 
 The pre-filled manifest creates a private app for the current workspace. A
 distributable OAuth app can authorize additional workspaces; nanobot stores and
 refreshes each workspace installation separately.
 
-### 5. Test the first task
+### 5. Choose who can use nanobot
+
+Under the workspace card, expand **Member access**, find yourself, and turn on
+your switch. Do the same for any teammates you want to invite. Wait for **Saved**
+beside each member; they can then use the agent without a pairing code.
+
+You manage two levels here: **workspace → members**. A Linear team groups issues
+and has its own workflow; it is not another installation to configure in nanobot.
+The app can only work within the teams authorized in Linear. A member switch
+does not expand that team access or grant access to the nanobot admin UI.
+
+Pairing codes remain available as an alternative: a member without an explicit
+switch setting can send a first prompt, have an administrator approve the code,
+and repeat the prompt. An explicit **off** switch overrides pairing approval;
+turn the switch on again to restore access.
+
+### 6. Test the first task
 
 1. Open an issue in the connected Linear workspace.
 2. Add a comment that @mentions the app and includes a request, for example:
@@ -231,10 +271,7 @@ refreshes each workspace installation separately.
 4. Send a follow-up inside that Agent Session. You do not need to @mention the
    app again there.
 
-Before inviting teammates, open **Member access** under the authorized workspace
-in **Settings → Channels → Linear**. Search for a member and switch on **Allow
-… to use nanobot**. Wait for **Saved** beside that member. They can then mention the
-agent without copying a pairing code or authorizing another OAuth installation.
+### Member access details
 
 The list contains active human members of teams this app can access. It does not
 grant access to additional Linear teams or to the nanobot admin UI. Names are for
@@ -287,7 +324,37 @@ MCP**, to the left of **Create Linear app**, to open Linear MCP's connection
 settings when prompts need to search, edit, or transition issues. Pairing and
 access guidance is available in the dialog's **Help** menu.
 
-### Updating a remote installation
+## Connect, remove, or reset workspaces
+
+Each nanobot instance uses one configured Linear OAuth app, which may have
+multiple workspace installations. A **private** app can only be installed in its
+own workspace. To use the same app in another workspace, its distribution must
+allow that installation in Linear; changing a nanobot field cannot bypass this.
+
+- **Connect workspace** uses the current app and opens the same browser
+  authorization flow. Choose the other workspace in Linear, review team access,
+  and authorize. You do not need another HTTPS address or another set of app
+  credentials for the same app. Review member access in the new workspace.
+- **… → Reauthorize** on a workspace updates its connection, without creating a
+  duplicate or clearing its member choices. Use it to renew authorization or
+  grant missing scopes. Cancelling authorization leaves existing connections alone.
+- **… → Remove workspace** revokes that workspace's tokens and clears its local
+  installation and member switches. Other workspaces are unaffected. Removing
+  the last workspace also stops the channel. App credentials remain available
+  for connecting again.
+- **Advanced → Reset Linear connection** removes all installations for the
+  current app, stops the channel, and clears this instance's Linear app settings,
+  including its saved credentials. Use this when starting over or switching apps.
+  If a step fails, the UI reports an incomplete reset; removed workspaces stay
+  removed, and you can retry the remaining steps.
+
+Neither removal nor reset deletes the Linear workspace, app, issues or comments,
+nor nanobot conversation history or pairing approvals. Deleting the app itself
+is a separate action in Linear. After removing and reconnecting a workspace,
+member switches start fresh, but retained pairing approvals or an `allowFrom`
+entry can still grant access. **Reset is not a wipe of all authorization history.**
+
+## Updating a remote installation
 
 Member management includes both Python channel code and WebUI assets. A local
 branch does not update an already running remote gateway, and the browser UI
@@ -323,9 +390,10 @@ The setup is complete when all of these checks pass:
 - While the channel is running, opening
   `http://127.0.0.1:3979/linear/health` on the nanobot machine returns
   `{"ok":true}`. Use your configured host and port if you changed them.
-- Opening `https://nanobot.example.com/linear/health` through the public route
-  also returns `{"ok":true}`. Substitute your actual public origin. This checks
-  tunnel or proxy reachability; the task checks below verify the Linear connection.
+- If your proxy also forwards `/linear/health`, its public URL returns
+  `{"ok":true}`. This is optional: a proxy exposing only the callback and webhook
+  can correctly return 404 for public health. Use successful OAuth and webhook
+  delivery to verify those two routes; do not expose the admin UI for this check.
 - A new comment with an explicit @mention creates an Agent Session and receives
   a response.
 - Delegating an issue to the app creates an Agent Session and receives a response.
@@ -405,6 +473,8 @@ secret.
 | Public health returns 502 | Start **Connect Linear** or enable the connected channel. Check local health first, then confirm the tunnel or proxy targets the same listener port. |
 | OAuth opens but cannot finish | Keep `nanobot webui` running. Confirm the proxy forwards `/linear/oauth/callback` to the configured listen host and port. Then start **Connect Linear** again. |
 | OAuth finishes in Linear but nanobot keeps waiting | Keep the nanobot connection dialog open. Confirm the Redirect URI reaches the same nanobot process, and inspect gateway logs for callback or token exchange errors. |
+| A secret shows **Saved**, but no readable value | This is expected. The secret is stored on this instance and not returned to the browser. Use **Replace → Save** only when changing it. |
+| Another workspace is unavailable during authorization | Check the current app's distribution and your installation permissions in Linear. A private app only works in its own workspace. **Connect workspace** does not create a new app. |
 | The local health URL does not load | Start **Connect Linear** or enable the connected channel, then check the configured listen host and port. |
 | **Agent didn't start**, **nanobot failed to start**, or a session stays on **Thinking…** without a response | First check **Webhooks → Delivery status** in the Linear app. If **Disabled**, enable it from **…**. Confirm the current Webhook URL and `AgentSessionEvent` subscription, then select **Retry** in the Linear session. OAuth success and a working `/linear/health` endpoint do not prove that Linear is sending events. |
 | An @mention still gets no response with delivery enabled | Inspect **Webhook delivery failures** in the Linear app and run `nanobot gateway logs`. A 404 points to the webhook path; a 502 points to the listener or tunnel; a 401 can indicate a signing-secret mismatch or stale event timestamp. Confirm the Client ID and signing secret belong to the same app and the workspace authorization has not been revoked. |

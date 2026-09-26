@@ -102,7 +102,7 @@ class LinearClient:
             expires_at=time.time() + _expires_in(token),
             scope=scopes,
         )
-        self.state.save_installation(installation)
+        self.state.save_installation(installation, reauthorize=True)
         return installation
 
     async def graphql(
