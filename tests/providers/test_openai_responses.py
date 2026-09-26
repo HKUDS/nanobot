@@ -73,18 +73,22 @@ class TestConvertUserMessage:
         assert result["content"] == [{"type": "input_text", "text": "hi"}]
 
     def test_image_url_block(self):
-        result = convert_user_message([
-            {"type": "image_url", "image_url": {"url": "https://img.example/a.png"}},
-        ])
+        result = convert_user_message(
+            [
+                {"type": "image_url", "image_url": {"url": "https://img.example/a.png"}},
+            ]
+        )
         assert result["content"] == [
             {"type": "input_image", "image_url": "https://img.example/a.png", "detail": "auto"},
         ]
 
     def test_mixed_text_and_image(self):
-        result = convert_user_message([
-            {"type": "text", "text": "what's this?"},
-            {"type": "image_url", "image_url": {"url": "https://img.example/b.png"}},
-        ])
+        result = convert_user_message(
+            [
+                {"type": "text", "text": "what's this?"},
+                {"type": "image_url", "image_url": {"url": "https://img.example/b.png"}},
+            ]
+        )
         assert len(result["content"]) == 2
         assert result["content"][0]["type"] == "input_text"
         assert result["content"][1]["type"] == "input_image"
@@ -103,9 +107,11 @@ class TestConvertUserMessage:
 
     def test_meta_fields_not_leaked(self):
         """_meta on content blocks must never appear in converted output."""
-        result = convert_user_message([
-            {"type": "text", "text": "hi", "_meta": {"path": "/tmp/x"}},
-        ])
+        result = convert_user_message(
+            [
+                {"type": "text", "text": "hi", "_meta": {"path": "/tmp/x"}},
+            ]
+        )
         assert "_meta" not in result["content"][0]
 
     def test_non_dict_items_skipped(self):
@@ -144,9 +150,11 @@ class TestConvertMessages:
         assert items[0]["content"][0]["type"] == "input_text"
 
     def test_assistant_text_message(self):
-        _, items = convert_messages([
-            {"role": "assistant", "content": "I'll help"},
-        ])
+        _, items = convert_messages(
+            [
+                {"role": "assistant", "content": "I'll help"},
+            ]
+        )
         assert items[0]["type"] == "message"
         assert items[0]["role"] == "assistant"
         assert items[0]["content"][0]["type"] == "output_text"
@@ -154,9 +162,12 @@ class TestConvertMessages:
         assert "id" not in items[0]
 
     def test_preserves_deepseek_reasoning_content(self):
-        _, items = convert_messages([
-            {"role": "assistant", "reasoning_content": "think first", "content": "answer"},
-        ], preserve_reasoning=True)
+        _, items = convert_messages(
+            [
+                {"role": "assistant", "reasoning_content": "think first", "content": "answer"},
+            ],
+            preserve_reasoning=True,
+        )
 
         assert items == [
             {
@@ -179,17 +190,22 @@ class TestConvertMessages:
         # full-history conversion). ``content`` must be a list of parts,
         # matching both the OpenAI Responses schema and DeepSeek's accepted
         # wire shape.
-        _, items = convert_messages([
-            {
-                "role": "assistant",
-                "reasoning_content": "Michael topped up DeepSeek with $10.",
-                "content": "",
-                "tool_calls": [{
-                    "id": "call_1|fc_1",
-                    "function": {"name": "list_dir", "arguments": "{}"},
-                }],
-            },
-        ], preserve_reasoning=True)
+        _, items = convert_messages(
+            [
+                {
+                    "role": "assistant",
+                    "reasoning_content": "Michael topped up DeepSeek with $10.",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1|fc_1",
+                            "function": {"name": "list_dir", "arguments": "{}"},
+                        }
+                    ],
+                },
+            ],
+            preserve_reasoning=True,
+        )
 
         assert items[0]["type"] == "reasoning"
         assert items[0]["content"] == [
@@ -202,14 +218,20 @@ class TestConvertMessages:
         assert len(items) == 0
 
     def test_assistant_with_tool_calls(self):
-        _, items = convert_messages([{
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{
-                "id": "call_abc|fc_1",
-                "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
-            }],
-        }])
+        _, items = convert_messages(
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_abc|fc_1",
+                            "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
+                        }
+                    ],
+                }
+            ]
+        )
         assert items[0]["type"] == "function_call"
         assert items[0]["call_id"] == "call_abc"
         assert "id" not in items[0]
@@ -217,29 +239,39 @@ class TestConvertMessages:
         assert items[0]["arguments"] == '{"city": "SF"}'
 
     def test_assistant_tool_call_history_repairs_malformed_arguments(self):
-        _, items = convert_messages([{
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{
-                "id": "call_abc|fc_1",
-                "function": {"name": "read_file", "arguments": '{path:"foo.txt"}'},
-            }],
-        }])
+        _, items = convert_messages(
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_abc|fc_1",
+                            "function": {"name": "read_file", "arguments": '{path:"foo.txt"}'},
+                        }
+                    ],
+                }
+            ]
+        )
 
         assert json.loads(items[0]["arguments"]) == {"path": "foo.txt"}
 
     def test_discards_provider_item_ids_without_changing_call_ids(self):
-        _, items = convert_messages([
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{
-                    "id": "call_1|fc_1",
-                    "function": {"name": "get_weather", "arguments": "{}"},
-                }],
-            },
-            {"role": "tool", "tool_call_id": "call_1|fc_1", "content": "ok"},
-        ])
+        _, items = convert_messages(
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1|fc_1",
+                            "function": {"name": "get_weather", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1|fc_1", "content": "ok"},
+            ]
+        )
 
         assert all("id" not in item for item in items)
         assert items[0]["call_id"] == "call_1"
@@ -247,45 +279,61 @@ class TestConvertMessages:
 
     def test_assistant_with_tool_calls_no_id(self):
         """Fallback call IDs still work when tool_call.id is missing."""
-        _, items = convert_messages([{
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{"function": {"name": "f1", "arguments": "{}"}}],
-        }])
+        _, items = convert_messages(
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{"function": {"name": "f1", "arguments": "{}"}}],
+                }
+            ]
+        )
         assert items[0]["call_id"] == "call_0"
         assert "id" not in items[0]
 
     def test_tool_message(self):
-        _, items = convert_messages([{
-            "role": "tool",
-            "tool_call_id": "call_abc",
-            "content": "result text",
-        }])
+        _, items = convert_messages(
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_abc",
+                    "content": "result text",
+                }
+            ]
+        )
         assert items[0]["type"] == "function_call_output"
         assert items[0]["call_id"] == "call_abc"
         assert items[0]["output"] == "result text"
 
     def test_tool_message_dict_content(self):
-        _, items = convert_messages([{
-            "role": "tool",
-            "tool_call_id": "call_1",
-            "content": {"key": "value"},
-        }])
+        _, items = convert_messages(
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": {"key": "value"},
+                }
+            ]
+        )
         assert items[0]["output"] == '{"key": "value"}'
 
     def test_tool_message_preserves_image_content(self):
-        _, items = convert_messages([{
-            "role": "tool",
-            "tool_call_id": "call_1",
-            "content": [
+        _, items = convert_messages(
+            [
                 {
-                    "type": "image_url",
-                    "image_url": {"url": "data:image/png;base64,abc"},
-                    "_meta": {"path": "/private/image.png"},
-                },
-                {"type": "text", "text": "(Image file: image.png)"},
-            ],
-        }])
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,abc"},
+                            "_meta": {"path": "/private/image.png"},
+                        },
+                        {"type": "text", "text": "(Image file: image.png)"},
+                    ],
+                }
+            ]
+        )
 
         assert items[0]["output"] == [
             {
@@ -298,22 +346,30 @@ class TestConvertMessages:
         assert "_meta" not in str(items[0])
 
     def test_tool_message_preserves_file_content(self):
-        _, items = convert_messages([{
-            "role": "tool",
-            "tool_call_id": "call_1",
-            "content": [{
+        _, items = convert_messages(
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": [
+                        {
+                            "type": "input_file",
+                            "file_id": "file_123",
+                            "filename": "report.pdf",
+                            "_meta": {"path": "/private/report.pdf"},
+                        }
+                    ],
+                }
+            ]
+        )
+
+        assert items[0]["output"] == [
+            {
                 "type": "input_file",
                 "file_id": "file_123",
                 "filename": "report.pdf",
-                "_meta": {"path": "/private/report.pdf"},
-            }],
-        }])
-
-        assert items[0]["output"] == [{
-            "type": "input_file",
-            "file_id": "file_123",
-            "filename": "report.pdf",
-        }]
+            }
+        ]
         assert "_meta" not in str(items[0])
 
     def test_tool_message_preserves_unknown_list_as_json(self):
@@ -322,22 +378,30 @@ class TestConvertMessages:
             {"kind": "record", "value": 42},
         ]
 
-        _, items = convert_messages([{
-            "role": "tool",
-            "tool_call_id": "call_1",
-            "content": content,
-        }])
+        _, items = convert_messages(
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": content,
+                }
+            ]
+        )
 
         assert items[0]["output"] == json.dumps(content, ensure_ascii=False)
 
     def test_non_standard_keys_not_leaked(self):
         """Extra keys on messages must not appear in converted items."""
-        _, items = convert_messages([{
-            "role": "user",
-            "content": "hi",
-            "extra_field": "should vanish",
-            "_meta": {"path": "/tmp"},
-        }])
+        _, items = convert_messages(
+            [
+                {
+                    "role": "user",
+                    "content": "hi",
+                    "extra_field": "should vanish",
+                    "_meta": {"path": "/tmp"},
+                }
+            ]
+        )
         item = items[0]
         assert "extra_field" not in str(item)
         assert "_meta" not in str(item)
@@ -348,11 +412,14 @@ class TestConvertMessages:
             {"role": "system", "content": "Be concise."},
             {"role": "user", "content": "Weather in SF?"},
             {
-                "role": "assistant", "content": None,
-                "tool_calls": [{
-                    "id": "c1|fc1",
-                    "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
-                }],
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1|fc1",
+                        "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
+                    }
+                ],
             },
             {"role": "tool", "tool_call_id": "c1", "content": '{"temp":72}'},
         ]
@@ -371,11 +438,16 @@ class TestConvertMessages:
 
 class TestConvertTools:
     def test_standard_function_tool(self):
-        tools = [{"type": "function", "function": {
-            "name": "get_weather",
-            "description": "Get weather",
-            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
-        }}]
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+                },
+            }
+        ]
         result = convert_tools(tools)
         assert len(result) == 1
         assert result[0]["type"] == "function"
@@ -451,8 +523,13 @@ class TestMapFinishReason:
 class TestParseResponseOutput:
     def test_text_response(self):
         resp = {
-            "output": [{"type": "message", "role": "assistant",
-                         "content": [{"type": "output_text", "text": "Hello!"}]}],
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Hello!"}],
+                }
+            ],
             "status": "completed",
             "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
         }
@@ -465,11 +542,13 @@ class TestParseResponseOutput:
     def test_refusal_response_surfaces_text_without_advancing_state(self):
         refusal = "I can’t help with that request."
         resp = {
-            "output": [{
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "refusal", "refusal": refusal}],
-            }],
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "refusal", "refusal": refusal}],
+                }
+            ],
             "status": "completed",
             "usage": {},
         }
@@ -487,12 +566,15 @@ class TestParseResponseOutput:
 
     def test_tool_call_response(self):
         resp = {
-            "output": [{
-                "type": "function_call",
-                "call_id": "call_1", "id": "fc_1",
-                "name": "get_weather",
-                "arguments": '{"city": "SF"}',
-            }],
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "id": "fc_1",
+                    "name": "get_weather",
+                    "arguments": '{"city": "SF"}',
+                }
+            ],
             "status": "completed",
             "usage": {},
         }
@@ -512,12 +594,17 @@ class TestParseResponseOutput:
     def test_malformed_tool_arguments_logged(self):
         """Malformed JSON arguments should log a warning and remain non-object."""
         resp = {
-            "output": [{
-                "type": "function_call",
-                "call_id": "c1", "id": "fc1",
-                "name": "f", "arguments": "{bad json",
-            }],
-            "status": "completed", "usage": {},
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "id": "fc1",
+                    "name": "f",
+                    "arguments": "{bad json",
+                }
+            ],
+            "status": "completed",
+            "usage": {},
         }
         with patch("nanobot.providers.openai_responses.parsing.logger") as mock_logger:
             result = parse_response_output(resp)
@@ -528,13 +615,15 @@ class TestParseResponseOutput:
     @pytest.mark.parametrize("arguments", [[], False, 0])
     def test_falsy_non_object_tool_arguments_preserved(self, arguments):
         resp = {
-            "output": [{
-                "type": "function_call",
-                "call_id": "c1",
-                "id": "fc1",
-                "name": "f",
-                "arguments": arguments,
-            }],
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "id": "fc1",
+                    "name": "f",
+                    "arguments": arguments,
+                }
+            ],
             "status": "completed",
             "usage": {},
         }
@@ -547,14 +636,21 @@ class TestParseResponseOutput:
     def test_reasoning_content_extracted(self):
         resp = {
             "output": [
-                {"type": "reasoning", "summary": [
-                    {"type": "summary_text", "text": "I think "},
-                    {"type": "summary_text", "text": "therefore I am."},
-                ]},
-                {"type": "message", "role": "assistant",
-                 "content": [{"type": "output_text", "text": "42"}]},
+                {
+                    "type": "reasoning",
+                    "summary": [
+                        {"type": "summary_text", "text": "I think "},
+                        {"type": "summary_text", "text": "therefore I am."},
+                    ],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "42"}],
+                },
             ],
-            "status": "completed", "usage": {},
+            "status": "completed",
+            "usage": {},
         }
         result = parse_response_output(resp)
         assert result.content == "42"
@@ -564,11 +660,15 @@ class TestParseResponseOutput:
         resp = {
             "output": [
                 {"type": "reasoning", "content": "think first"},
-                {"type": "message", "content": [
-                    {"type": "output_text", "text": "answer"},
-                ]},
+                {
+                    "type": "message",
+                    "content": [
+                        {"type": "output_text", "text": "answer"},
+                    ],
+                },
             ],
-            "status": "completed", "usage": {},
+            "status": "completed",
+            "usage": {},
         }
 
         result = parse_response_output(resp)
@@ -620,8 +720,13 @@ class TestParseResponseOutput:
         """parse_response_output should handle SDK objects with model_dump()."""
         mock = MagicMock()
         mock.model_dump.return_value = {
-            "output": [{"type": "message", "role": "assistant",
-                         "content": [{"type": "output_text", "text": "sdk"}]}],
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "sdk"}],
+                }
+            ],
             "status": "completed",
             "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
         }
@@ -641,11 +746,13 @@ class TestParseResponseOutput:
         assert result.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
 
     def test_non_stream_preserves_provider_reported_total(self):
-        result = parse_response_output({
-            "output": [],
-            "status": "completed",
-            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 999},
-        })
+        result = parse_response_output(
+            {
+                "output": [],
+                "status": "completed",
+                "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 999},
+            }
+        )
 
         assert result.usage == LLMUsage.reported(
             input_tokens=10,
@@ -732,15 +839,19 @@ class TestResponsesConversationState:
             provider="openai:test",
             model="gpt-5.6",
             input_items=[{"role": "user", "content": "previous"}],
-            output_items=[{
-                "type": "reasoning",
-                "id": "rs_1",
-                "status": None,
-                "encrypted_content": "opaque",
-            }],
-        ).with_pending_messages([
-            {"role": "user", "content": "continue"},
-        ])
+            output_items=[
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "status": None,
+                    "encrypted_content": "opaque",
+                }
+            ],
+        ).with_pending_messages(
+            [
+                {"role": "user", "content": "continue"},
+            ]
+        )
 
         _, items, replayed = prepare_responses_input(
             [{"role": "user", "content": "current"}],
@@ -750,10 +861,7 @@ class TestResponsesConversationState:
         )
 
         assert replayed is True
-        reasoning_item = next(
-            item for item in items
-            if item.get("type") == "reasoning"
-        )
+        reasoning_item = next(item for item in items if item.get("type") == "reasoning")
         assert "status" not in reasoning_item
         assert reasoning_item["encrypted_content"] == "opaque"
 
@@ -857,14 +965,18 @@ class TestResponsesConversationState:
         assert secret not in log_text
 
     def test_fresh_and_pending_conversions_omit_item_ids(self):
-        pending_messages = [{
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{
-                "id": "call_1|fc_1",
-                "function": {"name": "read_file", "arguments": "{}"},
-            }],
-        }]
+        pending_messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1|fc_1",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            }
+        ]
 
         _, fresh_items, replayed = prepare_responses_input(
             pending_messages,
@@ -917,14 +1029,16 @@ class TestResponsesConversationState:
             model="gpt-5.6",
             input_items=prior_items[:1],
             output_items=prior_items[1:],
-        ).with_pending_messages([
-            {
-                "role": "tool",
-                "tool_call_id": "call_1|fc_1",
-                "content": "file contents",
-            },
-            {"role": "user", "content": "continue"},
-        ])
+        ).with_pending_messages(
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1|fc_1",
+                    "content": "file contents",
+                },
+                {"role": "user", "content": "continue"},
+            ]
+        )
 
         instructions, items, replayed = prepare_responses_input(
             [
@@ -975,14 +1089,16 @@ class TestResponsesConversationState:
             model="deepseek-v4-flash",
             input_items=prior_items,
             output_items=[],
-        ).with_pending_messages([
-            {
-                "role": "assistant",
-                "reasoning_content": "think before acting",
-                "content": "answer",
-            },
-            {"role": "user", "content": "audit the tools"},
-        ])
+        ).with_pending_messages(
+            [
+                {
+                    "role": "assistant",
+                    "reasoning_content": "think before acting",
+                    "content": "answer",
+                },
+                {"role": "user", "content": "audit the tools"},
+            ]
+        )
 
         instructions, items, replayed = prepare_responses_input(
             [
@@ -1030,10 +1146,12 @@ class TestConsumeSse:
 
     @pytest.mark.asyncio
     async def test_legacy_consume_sse_returns_three_tuple(self):
-        response = _SseResponse([
-            {"type": "response.output_text.delta", "delta": "hi"},
-            {"type": "response.completed", "response": {"status": "completed"}},
-        ])
+        response = _SseResponse(
+            [
+                {"type": "response.output_text.delta", "delta": "hi"},
+                {"type": "response.completed", "response": {"status": "completed"}},
+            ]
+        )
 
         content, tool_calls, finish_reason = await consume_sse(response)
 
@@ -1046,52 +1164,56 @@ class TestConsumeSse:
         refusal = "First and second sentence. Done-only. Terminal suffix."
         terminal_response = {
             "status": "completed",
-            "output": [{
-                "type": "message",
-                "id": "msg_2",
-                "role": "assistant",
-                "content": [{"type": "refusal", "refusal": refusal}],
-            }],
+            "output": [
+                {
+                    "type": "message",
+                    "id": "msg_2",
+                    "role": "assistant",
+                    "content": [{"type": "refusal", "refusal": refusal}],
+                }
+            ],
         }
-        response = _SseResponse([
-            {
-                "type": "response.refusal.delta",
-                "item_id": "msg_1",
-                "content_index": 0,
-                "delta": "First",
-            },
-            {
-                "type": "response.refusal.delta",
-                "item_id": "msg_1",
-                "content_index": 1,
-                "delta": " and second",
-            },
-            {
-                "type": "response.refusal.done",
-                "item_id": "msg_1",
-                "content_index": 0,
-                "refusal": "First",
-            },
-            {
-                "type": "response.refusal.done",
-                "item_id": "msg_1",
-                "content_index": 1,
-                "refusal": " and second sentence.",
-            },
-            {
-                "type": "response.refusal.done",
-                "item_id": "msg_2",
-                "content_index": 0,
-                "refusal": " Done-only.",
-            },
-            {
-                "type": "response.refusal.delta",
-                "item_id": "msg_2",
-                "content_index": 1,
-                "delta": " Terminal",
-            },
-            {"type": "response.completed", "response": terminal_response},
-        ])
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.refusal.delta",
+                    "item_id": "msg_1",
+                    "content_index": 0,
+                    "delta": "First",
+                },
+                {
+                    "type": "response.refusal.delta",
+                    "item_id": "msg_1",
+                    "content_index": 1,
+                    "delta": " and second",
+                },
+                {
+                    "type": "response.refusal.done",
+                    "item_id": "msg_1",
+                    "content_index": 0,
+                    "refusal": "First",
+                },
+                {
+                    "type": "response.refusal.done",
+                    "item_id": "msg_1",
+                    "content_index": 1,
+                    "refusal": " and second sentence.",
+                },
+                {
+                    "type": "response.refusal.done",
+                    "item_id": "msg_2",
+                    "content_index": 0,
+                    "refusal": " Done-only.",
+                },
+                {
+                    "type": "response.refusal.delta",
+                    "item_id": "msg_2",
+                    "content_index": 1,
+                    "delta": " Terminal",
+                },
+                {"type": "response.completed", "response": terminal_response},
+            ]
+        )
         capture = ResponsesStreamCapture()
         deltas: list[str] = []
 
@@ -1123,12 +1245,14 @@ class TestConsumeSse:
         refusal = "I can’t help with that request."
         terminal_response = {
             "status": "completed",
-            "output": [{
-                "type": "message",
-                "id": "msg_1",
-                "role": "assistant",
-                "content": [{"type": "refusal", "refusal": refusal}],
-            }],
+            "output": [
+                {
+                    "type": "message",
+                    "id": "msg_1",
+                    "role": "assistant",
+                    "content": [{"type": "refusal", "refusal": refusal}],
+                }
+            ],
         }
         events = (
             [
@@ -1159,28 +1283,30 @@ class TestConsumeSse:
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_delta_extracted(self):
-        response = _SseResponse([
-            {
-                "type": "response.reasoning_summary_text.delta",
-                "item_id": "rs_1",
-                "summary_index": 0,
-                "delta": "thinking ",
-            },
-            {
-                "type": "response.reasoning_summary_text.delta",
-                "item_id": "rs_1",
-                "summary_index": 0,
-                "delta": "briefly",
-            },
-            {
-                "type": "response.reasoning_summary_text.delta",
-                "item_id": "rs_1",
-                "summary_index": 1,
-                "delta": "Checking result",
-            },
-            {"type": "response.output_text.delta", "delta": "answer"},
-            {"type": "response.completed", "response": {"status": "completed"}},
-        ])
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.reasoning_summary_text.delta",
+                    "item_id": "rs_1",
+                    "summary_index": 0,
+                    "delta": "thinking ",
+                },
+                {
+                    "type": "response.reasoning_summary_text.delta",
+                    "item_id": "rs_1",
+                    "summary_index": 0,
+                    "delta": "briefly",
+                },
+                {
+                    "type": "response.reasoning_summary_text.delta",
+                    "item_id": "rs_1",
+                    "summary_index": 1,
+                    "delta": "Checking result",
+                },
+                {"type": "response.output_text.delta", "delta": "answer"},
+                {"type": "response.completed", "response": {"status": "completed"}},
+            ]
+        )
         deltas: list[str] = []
 
         async def on_reasoning(delta: str) -> None:
@@ -1200,24 +1326,74 @@ class TestConsumeSse:
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_from_completed_response(self):
-        response = _SseResponse([
-            {
-                "type": "response.completed",
-                "response": {
-                    "status": "completed",
-                    "output": [
-                        {"type": "reasoning", "summary": [
-                            {"type": "summary_text", "text": "cached"},
-                            {"type": "summary_text", "text": "summary"},
-                        ]},
-                    ],
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "output": [
+                            {
+                                "type": "reasoning",
+                                "summary": [
+                                    {"type": "summary_text", "text": "cached"},
+                                    {"type": "summary_text", "text": "summary"},
+                                ],
+                            },
+                        ],
+                    },
                 },
-            },
-        ])
+            ]
+        )
 
         _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
         assert reasoning == "cached\nsummary"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_text_streamed_over_sse(self):
+        """Raw reasoning-text deltas must not be dropped by the SSE consumer.
+
+        Mirrors the SDK path (`test_deepseek_reasoning_text_streamed`): the
+        xAI Grok and OpenAI Codex providers consume the Responses API over
+        raw SSE, and endpoints that stream raw reasoning text (DeepSeek
+        style) instead of summaries were silently producing no reasoning.
+        """
+        response = _SseResponse(
+            [
+                {"type": "response.reasoning_text.delta", "delta": "step 1 "},
+                {"type": "response.reasoning_text.delta", "delta": "step 2"},
+                {"type": "response.reasoning_text.done", "text": "step 1 step 2"},
+                {"type": "response.completed", "response": {"status": "completed", "output": []}},
+            ]
+        )
+        emitted: list[str] = []
+
+        async def on_reasoning_delta(delta: str) -> None:
+            emitted.append(delta)
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning_delta,
+        )
+
+        assert reasoning == "step 1 step 2"
+        assert emitted == ["step 1 ", "step 2"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_text_done_is_fallback_only_over_sse(self):
+        """A reasoning_text.done event must not double-count streamed deltas."""
+        response = _SseResponse(
+            [
+                {"type": "response.reasoning_text.delta", "delta": "step 1 "},
+                {"type": "response.reasoning_text.done", "text": "step 1 "},
+                {"type": "response.completed", "response": {"status": "completed", "output": []}},
+            ]
+        )
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
+
+        assert reasoning == "step 1 "
 
     @pytest.mark.asyncio
     async def test_capture_commits_exact_items_only_after_completed_event(self):
@@ -1230,22 +1406,24 @@ class TestConsumeSse:
             {"type": "future_item_type", "id": "future_1", "value": 7},
         ]
         capture = ResponsesStreamCapture()
-        response = _SseResponse([
-            {
-                "type": "response.output_item.done",
-                "output_index": 0,
-                "item": output[0],
-            },
-            {
-                "type": "response.output_item.done",
-                "output_index": 1,
-                "item": output[1],
-            },
-            {
-                "type": "response.completed",
-                "response": {"status": "completed", "output": output},
-            },
-        ])
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": output[0],
+                },
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 1,
+                    "item": output[1],
+                },
+                {
+                    "type": "response.completed",
+                    "response": {"status": "completed", "output": output},
+                },
+            ]
+        )
 
         await consume_sse_with_reasoning(response, capture=capture)
 
@@ -1270,17 +1448,22 @@ class TestConsumeSse:
             },
         ]
         capture = ResponsesStreamCapture()
-        response = _SseResponse([
-            {
-                "type": "response.output_item.done",
-                "output_index": index,
-                "item": item,
-            }
-            for index, item in enumerate(output)
-        ] + [{
-            "type": "response.completed",
-            "response": {"status": "completed", "output": []},
-        }])
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.output_item.done",
+                    "output_index": index,
+                    "item": item,
+                }
+                for index, item in enumerate(output)
+            ]
+            + [
+                {
+                    "type": "response.completed",
+                    "response": {"status": "completed", "output": []},
+                }
+            ]
+        )
 
         await consume_sse_with_reasoning(response, capture=capture)
 
@@ -1316,10 +1499,12 @@ class TestConsumeSse:
             "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
         }
         capture = ResponsesStreamCapture()
-        response = _SseResponse([
-            {"type": "response.output_text.delta", "delta": "partial"},
-            {"type": "response.incomplete", "response": terminal_response},
-        ])
+        response = _SseResponse(
+            [
+                {"type": "response.output_text.delta", "delta": "partial"},
+                {"type": "response.incomplete", "response": terminal_response},
+            ]
+        )
 
         content, _, finish_reason, usage, _ = await consume_sse_with_reasoning(
             response,
@@ -1336,17 +1521,19 @@ class TestConsumeSse:
     @pytest.mark.asyncio
     async def test_capture_does_not_commit_interrupted_stream(self):
         capture = ResponsesStreamCapture()
-        response = _SseResponse([
-            {
-                "type": "response.output_item.done",
-                "output_index": 0,
-                "item": {
-                    "type": "reasoning",
-                    "id": "rs_1",
-                    "encrypted_content": "opaque-secret",
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "type": "reasoning",
+                        "id": "rs_1",
+                        "encrypted_content": "opaque-secret",
+                    },
                 },
-            },
-        ])
+            ]
+        )
 
         with pytest.raises(ConnectionError, match="terminal response event"):
             await consume_sse_with_reasoning(response, capture=capture)
@@ -1355,16 +1542,18 @@ class TestConsumeSse:
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_from_done_item(self):
-        response = _SseResponse([
-            {
-                "type": "response.output_item.done",
-                "item": {
-                    "type": "reasoning",
-                    "summary": [{"type": "summary_text", "text": "done summary"}],
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text", "text": "done summary"}],
+                    },
                 },
-            },
-            {"type": "response.completed", "response": {"status": "completed", "output": []}},
-        ])
+                {"type": "response.completed", "response": {"status": "completed", "output": []}},
+            ]
+        )
         deltas: list[str] = []
 
         async def on_reasoning(delta: str) -> None:
@@ -1380,13 +1569,15 @@ class TestConsumeSse:
 
     @pytest.mark.asyncio
     async def test_reasoning_summary_part_done_extracted(self):
-        response = _SseResponse([
-            {
-                "type": "response.reasoning_summary_part.done",
-                "part": {"type": "summary_text", "text": "part summary"},
-            },
-            {"type": "response.completed", "response": {"status": "completed"}},
-        ])
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.reasoning_summary_part.done",
+                    "part": {"type": "summary_text", "text": "part summary"},
+                },
+                {"type": "response.completed", "response": {"status": "completed"}},
+            ]
+        )
 
         _, _, _, _, reasoning = await consume_sse_with_reasoning(response)
 
@@ -1394,23 +1585,25 @@ class TestConsumeSse:
 
     @pytest.mark.asyncio
     async def test_raw_sse_usage_extracted(self):
-        response = _SseResponse([
-            {
-                "type": "response.completed",
-                "response": {
-                    "status": "completed",
-                    "usage": {
-                        "input_tokens": 10,
-                        "input_tokens_details": {
-                            "cached_tokens": 8,
-                            "cache_write_tokens": 0,
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "status": "completed",
+                        "usage": {
+                            "input_tokens": 10,
+                            "input_tokens_details": {
+                                "cached_tokens": 8,
+                                "cache_write_tokens": 0,
+                            },
+                            "output_tokens": 5,
+                            "total_tokens": 15,
                         },
-                        "output_tokens": 5,
-                        "total_tokens": 15,
                     },
                 },
-            },
-        ])
+            ]
+        )
 
         _, _, _, usage, _ = await consume_sse_with_reasoning(response)
 
@@ -1437,9 +1630,11 @@ class TestConsumeSse:
             },
         }
         non_stream = parse_response_output(terminal).usage
-        sse = _SseResponse([
-            {"type": "response.completed", "response": terminal},
-        ])
+        sse = _SseResponse(
+            [
+                {"type": "response.completed", "response": terminal},
+            ]
+        )
         _, _, _, streamed, _ = await consume_sse_with_reasoning(sse)
 
         sdk_response = SimpleNamespace(**terminal)
@@ -1468,45 +1663,49 @@ class TestConsumeSse:
 
     def test_missing_usage_is_not_explicit_zero_usage(self):
         missing = parse_response_output({"status": "completed", "output": []})
-        explicit_zero = parse_response_output({
-            "status": "completed",
-            "output": [],
-            "usage": {"input_tokens": 0, "output_tokens": 0},
-        })
+        explicit_zero = parse_response_output(
+            {
+                "status": "completed",
+                "output": [],
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            }
+        )
 
         assert missing.usage is None
         assert explicit_zero.usage == LLMUsage.reported(input_tokens=0, output_tokens=0)
 
     @pytest.mark.asyncio
     async def test_tool_call_done_arguments_callback(self):
-        response = _SseResponse([
-            {
-                "type": "response.output_item.added",
-                "item": {
-                    "type": "function_call",
-                    "call_id": "c1",
-                    "id": "fc1",
-                    "name": "write_file",
-                    "arguments": "",
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.output_item.added",
+                    "item": {
+                        "type": "function_call",
+                        "call_id": "c1",
+                        "id": "fc1",
+                        "name": "write_file",
+                        "arguments": "",
+                    },
                 },
-            },
-            {
-                "type": "response.function_call_arguments.done",
-                "call_id": "c1",
-                "arguments": '{"path":"a.txt","content":"hello\\n"}',
-            },
-            {
-                "type": "response.output_item.done",
-                "item": {
-                    "type": "function_call",
+                {
+                    "type": "response.function_call_arguments.done",
                     "call_id": "c1",
-                    "id": "fc1",
-                    "name": "write_file",
                     "arguments": '{"path":"a.txt","content":"hello\\n"}',
                 },
-            },
-            {"type": "response.completed", "response": {"status": "completed"}},
-        ])
+                {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "function_call",
+                        "call_id": "c1",
+                        "id": "fc1",
+                        "name": "write_file",
+                        "arguments": '{"path":"a.txt","content":"hello\\n"}',
+                    },
+                },
+                {"type": "response.completed", "response": {"status": "completed"}},
+            ]
+        )
         deltas: list[dict] = []
 
         async def cb(delta: dict) -> None:
@@ -1526,29 +1725,31 @@ class TestConsumeSse:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("arguments", [[], False, 0])
     async def test_falsy_non_object_tool_arguments_preserved(self, arguments):
-        response = _SseResponse([
-            {
-                "type": "response.output_item.added",
-                "item": {
-                    "type": "function_call",
-                    "call_id": "c1",
-                    "id": "fc1",
-                    "name": "f",
-                    "arguments": "",
+        response = _SseResponse(
+            [
+                {
+                    "type": "response.output_item.added",
+                    "item": {
+                        "type": "function_call",
+                        "call_id": "c1",
+                        "id": "fc1",
+                        "name": "f",
+                        "arguments": "",
+                    },
                 },
-            },
-            {
-                "type": "response.output_item.done",
-                "item": {
-                    "type": "function_call",
-                    "call_id": "c1",
-                    "id": "fc1",
-                    "name": "f",
-                    "arguments": arguments,
+                {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "function_call",
+                        "call_id": "c1",
+                        "id": "fc1",
+                        "name": "f",
+                        "arguments": arguments,
+                    },
                 },
-            },
-            {"type": "response.completed", "response": {"status": "completed"}},
-        ])
+                {"type": "response.completed", "response": {"status": "completed"}},
+            ]
+        )
 
         _, tool_calls, _, _, _ = await consume_sse_with_reasoning(response)
 
@@ -1664,10 +1865,12 @@ class TestConsumeSdkStream:
                 },
                 "result": {
                     "status": "completed",
-                    "sources": [{
-                        "title": "DeepSeek Responses API",
-                        "url": "https://api-docs.deepseek.com/guides/responses_api/",
-                    }],
+                    "sources": [
+                        {
+                            "title": "DeepSeek Responses API",
+                            "url": "https://api-docs.deepseek.com/guides/responses_api/",
+                        }
+                    ],
                 },
             },
         ]
@@ -1677,12 +1880,14 @@ class TestConsumeSdkStream:
         refusal = "First and second sentence. Done-only. Terminal suffix."
         terminal_response = {
             "status": "completed",
-            "output": [{
-                "type": "message",
-                "id": "msg_2",
-                "role": "assistant",
-                "content": [{"type": "refusal", "refusal": refusal}],
-            }],
+            "output": [
+                {
+                    "type": "message",
+                    "id": "msg_2",
+                    "role": "assistant",
+                    "content": [{"type": "refusal", "refusal": refusal}],
+                }
+            ],
         }
         resp_obj = MagicMock(status="completed", usage=None, output=[])
         resp_obj.model_dump.return_value = terminal_response
@@ -1760,12 +1965,14 @@ class TestConsumeSdkStream:
         refusal = "I can’t help with that request."
         terminal_response = {
             "status": "completed",
-            "output": [{
-                "type": "message",
-                "id": "msg_1",
-                "role": "assistant",
-                "content": [{"type": "refusal", "refusal": refusal}],
-            }],
+            "output": [
+                {
+                    "type": "message",
+                    "id": "msg_1",
+                    "role": "assistant",
+                    "content": [{"type": "refusal", "refusal": refusal}],
+                }
+            ],
         }
         resp_obj = MagicMock(status="completed", usage=None, output=[])
         resp_obj.model_dump.return_value = terminal_response
@@ -1820,8 +2027,12 @@ class TestConsumeSdkStream:
         item_added.name = "get_weather"
         ev1 = MagicMock(type="response.output_item.added", item=item_added)
         ev2 = MagicMock(type="response.function_call_arguments.delta", call_id="c1", delta='{"ci')
-        ev3 = MagicMock(type="response.function_call_arguments.done", call_id="c1", arguments='{"city":"SF"}')
-        item_done = MagicMock(type="function_call", call_id="c1", id="fc1", arguments='{"city":"SF"}')
+        ev3 = MagicMock(
+            type="response.function_call_arguments.done", call_id="c1", arguments='{"city":"SF"}'
+        )
+        item_done = MagicMock(
+            type="function_call", call_id="c1", id="fc1", arguments='{"city":"SF"}'
+        )
         item_done.name = "get_weather"
         ev4 = MagicMock(type="response.output_item.done", item=item_done)
         resp_obj = MagicMock(status="completed", usage=None, output=[])
@@ -1850,7 +2061,7 @@ class TestConsumeSdkStream:
         ev3 = MagicMock(
             type="response.function_call_arguments.delta",
             call_id="c1",
-            delta='hello\\n',
+            delta="hello\\n",
         )
         ev4 = MagicMock(
             type="response.function_call_arguments.done",
@@ -2095,7 +2306,9 @@ class TestConsumeSdkStream:
         item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
         item_added.name = "f"
         ev1 = MagicMock(type="response.output_item.added", item=item_added)
-        ev2 = MagicMock(type="response.function_call_arguments.done", call_id="c1", arguments="{bad")
+        ev2 = MagicMock(
+            type="response.function_call_arguments.done", call_id="c1", arguments="{bad"
+        )
         item_done = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="{bad")
         item_done.name = "f"
         ev3 = MagicMock(type="response.output_item.done", item=item_done)
