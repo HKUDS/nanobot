@@ -23,14 +23,21 @@ nanobot webui
 ```
 
 `nanobot webui` creates the config/workspace when needed, enables the local
-WebSocket channel after confirmation, generates a WebUI bootstrap secret when
-one is missing, starts or joins the same on-demand gateway used by the native
-TUI, and opens the browser. With a fresh config,
+WebSocket channel after confirmation, generates and saves a WebUI bootstrap
+secret as `channels.websocket.tokenIssueSecret` when one is missing, starts or
+joins the same on-demand gateway used by the native TUI, and opens the browser.
+With a fresh config,
 it can open before a model is configured so you can finish setup in **Settings
 → Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so
 it is not available from other devices on your LAN. While the launcher remains
 attached, it mirrors new log output from that exact gateway instance in the
 terminal without replaying older logs.
+
+If you run nanobot on a headless server, the generated value is the password
+for the WebUI login form. It is stored in the active config file, normally
+`~/.nanobot/config.json`; the CLI also prints the exact config path. A browser
+on another machine still cannot reach the default `127.0.0.1` bind, so follow
+[LAN Access](#lan-access) to choose a reachable host and keep the secret set.
 
 After model setup, explicitly promote the shared gateway when you do not want to keep a client open:
 
