@@ -98,6 +98,26 @@ def test_settings_payload_includes_versioned_docs(
     }
 
 
+def test_settings_payload_exposes_aimlapi_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.aimlapi.api_key = "aimlapi-test-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    aimlapi = next(row for row in payload["providers"] if row["name"] == "aimlapi")
+
+    assert aimlapi["label"] == "aimlapi.com"
+    assert aimlapi["configured"] is True
+    assert aimlapi["default_api_base"] == "https://api.aimlapi.com/v1"
+    assert aimlapi["model_catalog"] == "catalog"
+    assert aimlapi["model_selectable"] is True
+
+
 def test_settings_payload_exposes_edenai_provider(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
