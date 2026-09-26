@@ -1293,12 +1293,64 @@ def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
         "nanobot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
     )
-    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+    monkeypatch.setattr("nanobot.channels.registry.discover_plugins", lambda: {})
 
     result = runner.invoke(app, ["channels", "status", "--config", str(config_path)])
 
     assert result.exit_code == 0
     assert seen["config_path"] == config_path.resolve()
+
+
+def test_channels_status_reports_plugin_availability(monkeypatch):
+    from typer.testing import CliRunner
+
+    from nanobot.channels.plugin import ChannelPlugin
+    from nanobot.cli import commands
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+
+    class _MissingDependencyPlugin(_FakePlugin):
+        name = "missing_dependency"
+        display_name = "Missing Dependency Channel"
+
+    available = _channel_plugin(_FakePlugin)
+    missing_dependency = _channel_plugin(
+        _MissingDependencyPlugin,
+        dependencies=("missing-sdk>=1",),
+    )
+    invalid = ChannelPlugin(
+        name="invalid",
+        display_name="Invalid Channel",
+        runtime=f"{__name__}:NotAChannel",
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_plugins",
+        lambda: {
+            "fakeplugin": available,
+            "missing_dependency": missing_dependency,
+            "invalid": invalid,
+        },
+    )
+    monkeypatch.setattr(commands, "_load_inspection_config", lambda **_kwargs: (None, Config()))
+    monkeypatch.setattr(
+        commands.feature_support,
+        "extra_installed",
+        lambda name, _dependencies: name != "missing_dependency",
+    )
+
+    result = CliRunner().invoke(app, ["channels", "status"])
+
+    assert result.exit_code == 0
+    status_by_channel = {}
+    for line in result.stdout.splitlines():
+        columns = line.split("│")
+        if len(columns) == 5 and columns[1].strip() != "Channel":
+            status_by_channel[columns[1].strip()] = columns[3].strip()
+    assert status_by_channel == {
+        "Fake Plugin": "✓",
+        "Invalid Channel": "Unavailable",
+        "Missing Dependency Channel": "Missing dependency",
+    }
 
 
 def test_plugins_list_shows_available_features(monkeypatch):
