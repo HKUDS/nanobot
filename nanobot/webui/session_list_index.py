@@ -64,6 +64,18 @@ _TRANSCRIPT_NON_ANSWER_KINDS = {"progress", "reasoning", "tool_hint"}
 
 def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]:
     """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
+    rows = _list_webui_session_index_rows(session_manager)
+    sessions = [
+        _public_row(session_manager.sessions_dir, get_webui_dir(), row)
+        for row in rows
+    ]
+    return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
+
+
+def _list_webui_session_index_rows(
+    session_manager: SessionManager,
+) -> list[dict[str, Any]]:
+    """Return internal cache rows, including source signatures, for sibling indexes."""
     with session_manager.locked_session_files():
         rows, changed = _reconcile_index(session_manager)
         if changed:
@@ -71,11 +83,7 @@ def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]
                 _write_index_rows(session_manager.sessions_dir, rows)
             except Exception as e:
                 logger.debug("Failed to write WebUI session list index: {}", e)
-    sessions = [
-        _public_row(session_manager.sessions_dir, get_webui_dir(), row)
-        for row in rows
-    ]
-    return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
+    return rows
 
 
 def _reconcile_index(session_manager: SessionManager) -> tuple[list[dict[str, Any]], bool]:
