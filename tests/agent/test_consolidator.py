@@ -1578,6 +1578,130 @@ class TestCompactIdleSession:
         await task
         assert not lock.locked()
 
+    @pytest.mark.asyncio
+    async def test_below_replace_threshold_journals_without_replacing_replay(
+        self, real_consolidator, mock_provider, store, runtime
+    ):
+        """Below the token threshold, Dream is fed but replay keeps the raw transcript."""
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(
+            content="Chunk summary.", finish_reason="stop"
+        )
+        mock_provider.estimate_prompt_tokens.return_value = (100, "test")
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:below-threshold")
+        session.add_message("user", "hello")
+        session.add_message("assistant", "hi")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:below-threshold",
+            runtime=runtime,
+            replace_after_tokens=1_000_000,
+        )
+
+        assert result == ""
+        assert len(store.read_unprocessed_history(since_cursor=0)) == 1
+        reloaded = sessions.get_or_create("cli:below-threshold")
+        assert "_last_summary" not in reloaded.metadata
+        assert reloaded.last_archived == 0
+        assert reloaded.history_archived == 2
+        assert [m["content"] for m in reloaded.get_history()] == ["hello", "hi"]
+
+    @pytest.mark.asyncio
+    async def test_below_threshold_is_idempotent_across_scans(
+        self, real_consolidator, mock_provider, store, runtime
+    ):
+        """A second idle scan must not re-journal the same transcript."""
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(
+            content="Chunk summary.", finish_reason="stop"
+        )
+        mock_provider.estimate_prompt_tokens.return_value = (100, "test")
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:below-idempotent")
+        session.add_message("user", "hello")
+        sessions.save(session)
+
+        first = await real_consolidator.compact_idle_session(
+            "cli:below-idempotent", runtime=runtime, replace_after_tokens=1_000_000
+        )
+        second = await real_consolidator.compact_idle_session(
+            "cli:below-idempotent", runtime=runtime, replace_after_tokens=1_000_000
+        )
+
+        assert first == ""
+        assert second == ""
+        mock_provider.chat_stream_with_retry.assert_awaited_once()
+        assert len(store.read_unprocessed_history(since_cursor=0)) == 1
+
+    @pytest.mark.asyncio
+    async def test_crossing_threshold_replaces_full_replay_without_rejournaling(
+        self, real_consolidator, mock_provider, store, runtime
+    ):
+        """Once the transcript exceeds the threshold the full replay is replaced."""
+        mock_provider.chat_stream_with_retry.return_value = MagicMock(
+            content="Summary.", finish_reason="stop"
+        )
+        mock_provider.estimate_prompt_tokens.return_value = (100, "test")
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:cross")
+        session.add_message("user", "one")
+        sessions.save(session)
+
+        await real_consolidator.compact_idle_session(
+            "cli:cross", runtime=runtime, replace_after_tokens=1_000_000
+        )
+        assert len(store.read_unprocessed_history(since_cursor=0)) == 1
+
+        session = sessions.get_or_create("cli:cross")
+        session.add_message("assistant", "two")
+        session.add_message("user", "three")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session(
+            "cli:cross", runtime=runtime, replace_after_tokens=1
+        )
+
+        assert result == "Summary."
+        # The tail appended since the first feed is journaled once; the full
+        # replay summary replaces replay but is not appended again.
+        assert len(store.read_unprocessed_history(since_cursor=0)) == 2
+        reloaded = sessions.get_or_create("cli:cross")
+        assert reloaded.last_archived == 3
+        assert reloaded.history_archived == 3
+        assert reloaded.metadata["_last_summary"]["text"] == "Summary."
+
+
+class TestHistoryArchivedCursor:
+    """Session.history_archived tracks the Dream journal cursor, not replay."""
+
+    def test_defaults_to_replay_boundary(self):
+        session = Session(key="cli:default")
+        session.add_message("user", "a")
+        session.add_message("assistant", "b")
+        session.last_archived = 1
+        assert session.history_archived == 1
+
+    def test_round_trips_through_metadata(self):
+        session = Session(key="cli:meta")
+        session.add_message("user", "a")
+        session.add_message("assistant", "b")
+        session.history_archived = 2
+        assert session.metadata["_history_archived"] == 2
+        assert session.history_archived == 2
+
+    def test_out_of_range_value_is_clamped_to_zero(self):
+        session = Session(key="cli:oob")
+        session.add_message("user", "a")
+        session.history_archived = 99
+        assert session.history_archived == 0
+
+    def test_clear_resets_cursor(self):
+        session = Session(key="cli:clear")
+        session.add_message("user", "a")
+        session.history_archived = 1
+        session.clear()
+        assert session.history_archived == 0
+
 
 class TestRawArchiveTruncation:
     """raw_archive() keeps complete journal content with bounded individual entries."""

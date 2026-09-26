@@ -27,10 +27,12 @@ SessionEventFactory = Callable[[str], EventSink]
 class AutoCompact:
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0,
+                 replace_after_tokens: int = 0,
                  bind_events: SessionEventFactory | None = None):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
+        self._replace_after_tokens = replace_after_tokens
         self._archiving: set[str] = set()
         self._summaries: dict[str, SessionSummary] = {}
         self._bind_events = bind_events
@@ -57,7 +59,7 @@ class AutoCompact:
         session = self.sessions.get_or_create(key)
         return any(
             not message.get("_command") and not is_summary_checkpoint(message)
-            for message in session.messages[session.last_archived:]
+            for message in session.messages[session.history_archived:]
         )
 
     def check_expired(
@@ -95,6 +97,7 @@ class AutoCompact:
                 key,
                 runtime=runtime,
                 events=self._bind_events(key) if self._bind_events else NO_EVENTS,
+                replace_after_tokens=self._replace_after_tokens,
             )
             if summary:
                 session = self.sessions.get_or_create(key)

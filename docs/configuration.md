@@ -2273,14 +2273,15 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 
 ## Auto Compact
 
-When a session is idle for longer than a configured threshold, nanobot summarizes its conversation context. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. The original conversation remains in your saved chat history, but even its most recent messages are no longer included verbatim in the model's context after idle compaction.
+When a session is idle for longer than a configured threshold, nanobot journals its new messages to memory (so Dream can learn from short chats) and, once the replayable prompt grows past `idleCompactReplaceAfterTokens`, replaces it with a summary. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. Below the token threshold the raw transcript is kept for replay, so short sessions resume with full fidelity rather than a lossy summary. The original conversation remains in your saved chat history either way.
 
 ```json
 {
   "agents": {
     "defaults": {
       "idleCompactAfterMinutes": 15,
-      "idleCompactCheckIntervalSeconds": 60
+      "idleCompactCheckIntervalSeconds": 60,
+      "idleCompactReplaceAfterTokens": 200000
     }
   }
 }
@@ -2290,14 +2291,16 @@ When a session is idle for longer than a configured threshold, nanobot summarize
 |--------|---------|-------------|
 | `agents.defaults.idleCompactAfterMinutes` | `15` | Minutes of idle time before auto-compaction starts. Set to `0` to disable. The default is close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
 | `agents.defaults.idleCompactCheckIntervalSeconds` | `60` | Minimum number of seconds between scans for idle sessions. Set to `0` to scan on every idle tick (~1 s). |
+| `agents.defaults.idleCompactReplaceAfterTokens` | `200000` | Replayable prompt size at which idle compaction replaces the transcript with a summary. Below it, the transcript is journaled to memory for Dream but replayed verbatim. Set to `0` to always replace. |
 
 `sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
 
 How it works:
 1. **Idle detection**: On each idle tick (~1 s), checks whether an idle-session scan is due. By default, the full scan runs at most once per minute.
-2. **Background compaction**: The conversation so far is summarized for the next turn.
-3. **Session preservation**: The complete session history remains stored for later inspection and reuse.
-4. **Restart-safe resume**: The compacted context remains available after a process restart.
+2. **Memory journaling**: New messages are summarized into `history.jsonl` for Dream, regardless of size.
+3. **Threshold-gated replacement**: Only once the replayable prompt exceeds `idleCompactReplaceAfterTokens` is the transcript replaced by a summary for the next turn. Otherwise the raw transcript is replayed.
+4. **Session preservation**: The complete session history remains stored for later inspection and reuse.
+5. **Restart-safe resume**: The compacted context remains available after a process restart.
 
 > [!NOTE]
 > Auto compact shortens the context sent to the model without deleting the session's structured message history.

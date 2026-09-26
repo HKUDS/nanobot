@@ -37,6 +37,7 @@ def _make_autocompact(
     ttl: int = 15,
     sessions: SessionManager | None = None,
     consolidator: MagicMock | None = None,
+    replace_after_tokens: int = 0,
 ) -> AutoCompact:
     """Create an AutoCompact with mock dependencies."""
     if sessions is None:
@@ -48,6 +49,7 @@ def _make_autocompact(
         sessions=sessions,
         consolidator=consolidator,
         session_ttl_minutes=ttl,
+        replace_after_tokens=replace_after_tokens,
     )
 
 
@@ -72,6 +74,11 @@ def test_default_ttl_disables_idle_compaction():
     ac.check_expired(schedule, _runtime)
 
     assert schedule.call_count == 0
+
+    def test_stores_replace_after_tokens(self):
+        """_replace_after_tokens should match the constructor argument."""
+        ac = _make_autocompact(replace_after_tokens=123)
+        assert ac._replace_after_tokens == 123
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +251,7 @@ class TestCheckExpired:
             "cli:old",
             runtime=admitted,
             events=NO_EVENTS,
+            replace_after_tokens=0,
         )
 
     @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
@@ -419,6 +427,23 @@ class TestArchiveDelegates:
             "cli:test",
             runtime=runtime,
             events=NO_EVENTS,
+            replace_after_tokens=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_forwards_replace_after_tokens(self):
+        ac = _make_autocompact(replace_after_tokens=500_000)
+        ac.sessions = MagicMock(spec=SessionManager)
+        ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
+
+        runtime = _runtime()
+        await ac._archive("cli:threshold", runtime=runtime)
+
+        ac.consolidator.compact_idle_session.assert_awaited_once_with(
+            "cli:threshold",
+            runtime=runtime,
+            events=NO_EVENTS,
+            replace_after_tokens=500_000,
         )
 
     @pytest.mark.asyncio
