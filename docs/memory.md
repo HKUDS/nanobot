@@ -155,6 +155,14 @@ This gives memory a history of its own:
 
 That turns memory from a silent mutation into an auditable process.
 
+New memory repositories ignore runtime files such as `memory/history.jsonl` and
+`memory/.cursor`, while keeping the versioned memory files and Dream cursor tracked.
+On startup, nanobot backfills these rules only when it recognizes its generated
+legacy `.gitignore` prefix. Rules you appended after that prefix keep precedence;
+unknown, non-UTF-8, or symlinked ignore files are left unchanged. This does not delete files or
+remove files already in the Git index. If you maintain a custom ignore policy, add
+the runtime-file exclusions there yourself.
+
 ## Guiding Dream
 
 Dream decides what to keep, update, or forget using nanobot's built-in memory instructions. Most users can leave this alone.

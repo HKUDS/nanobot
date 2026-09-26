@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.utils.gitstore import GitStore
+from nanobot.utils.gitstore import GitStore, GitStoreError
 
 
 @pytest.fixture
@@ -248,3 +248,159 @@ class TestCommitIdEncoding:
             capture_output=True, text=True, check=True,
         ).stdout.strip()
         assert git._resolve_sha(real) is not None
+
+
+class TestRuntimeFileIgnoring:
+    """Regression tests for GitHub issue #5246.
+
+    Runtime files created inside tracked directories (memory/history.jsonl,
+    memory/.cursor) must not show up as untracked in the workspace repo.
+    """
+
+    TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor"]
+
+    def test_new_workspace_ignores_runtime_files(self, tmp_path):
+        g = GitStore(tmp_path, tracked_files=self.TRACKED)
+        g.init()
+        (tmp_path / "memory" / "history.jsonl").write_text("{}\n", encoding="utf-8")
+        (tmp_path / "memory" / ".cursor").write_text("0", encoding="utf-8")
+        status = subprocess.run(
+            ["git", "-C", str(tmp_path), "status", "--porcelain"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        assert "history.jsonl" not in status
+        assert ".cursor" not in status
+
+    def test_tracked_files_remain_unignored(self, tmp_path):
+        g = GitStore(tmp_path, tracked_files=self.TRACKED)
+        g.init()
+        result = subprocess.run(
+            ["git", "-C", str(tmp_path), "check-ignore", "memory/MEMORY.md", "SOUL.md"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1  # exit 1: no path ignored
+
+    def test_ensure_gitignore_backfills_legacy_workspace(self, tmp_path):
+        from dulwich import porcelain
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        porcelain.init(str(workspace))
+        legacy = "/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n"
+        (workspace / ".gitignore").write_text(legacy, encoding="utf-8")
+
+        g = GitStore(workspace, tracked_files=self.TRACKED)
+        assert g.ensure_gitignore() is True
+
+        lines = (workspace / ".gitignore").read_text(encoding="utf-8").splitlines()
+        assert "memory/*" in lines
+        ignore_idx = lines.index("memory/*")
+        # Negations must follow the ignore rule to keep tracked files visible.
+        last_negations = {
+            line: idx for idx, line in enumerate(lines) if line.startswith("!memory/")
+        }
+        assert last_negations["!memory/MEMORY.md"] > ignore_idx
+        assert last_negations["!memory/.dream_cursor"] > ignore_idx
+        assert legacy.strip() in "\n".join(lines)  # legacy content preserved
+        assert g.ensure_gitignore() is False  # idempotent
+
+        memory_dir = workspace / "memory"
+        memory_dir.mkdir(exist_ok=True)
+        (memory_dir / "history.jsonl").write_text("{}\n", encoding="utf-8")
+        result = subprocess.run(
+            ["git", "-C", str(workspace), "check-ignore", "memory/history.jsonl"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+    def test_ensure_gitignore_noop_when_not_initialized(self, tmp_path):
+        g = GitStore(tmp_path, tracked_files=self.TRACKED)
+        assert g.ensure_gitignore() is False
+        assert not (tmp_path / ".gitignore").exists()
+
+    @pytest.mark.parametrize("fresh", [False, True])
+    def test_user_unignore_keeps_precedence(self, tmp_path, fresh):
+        from dulwich import porcelain
+
+        legacy = "/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n"
+        custom = "# Keep project notes\n!memory/team-notes.md\n"
+        ignore = tmp_path / ".gitignore"
+        ignore.write_text(legacy + custom, encoding="utf-8")
+        (tmp_path / "memory").mkdir()
+        (tmp_path / "memory/team-notes.md").write_text("user notes", encoding="utf-8")
+        store = GitStore(tmp_path, tracked_files=self.TRACKED)
+        if fresh:
+            store.init()
+        else:
+            porcelain.init(str(tmp_path))
+            assert store.ensure_gitignore()
+        assert ignore.read_text(encoding="utf-8").endswith(custom)
+        assert not store.ensure_gitignore()
+        result = subprocess.run(
+            ["git", "-C", str(tmp_path), "check-ignore", "memory/team-notes.md"],
+            capture_output=True,
+        )
+        assert result.returncode == 1
+        assert (tmp_path / "memory/team-notes.md").read_text() == "user notes"
+
+    @pytest.mark.parametrize("existing", [None, "*.pyc\n", "/*\n!memory/\n!memory/team-notes.md\n!.gitignore\n"])
+    def test_unknown_user_policy_is_not_migrated(self, tmp_path, existing):
+        from dulwich import porcelain
+
+        porcelain.init(str(tmp_path))
+        ignore = tmp_path / ".gitignore"
+        if existing is not None:
+            ignore.write_text(existing, encoding="utf-8")
+        assert not GitStore(tmp_path, tracked_files=self.TRACKED).ensure_gitignore()
+        assert (ignore.read_text(encoding="utf-8") if ignore.exists() else None) == existing
+
+    def test_failed_replace_preserves_legacy_file_and_can_retry(self, tmp_path, monkeypatch):
+        from dulwich import porcelain
+
+        porcelain.init(str(tmp_path))
+        legacy = "/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n"
+        ignore = tmp_path / ".gitignore"
+        ignore.write_text(legacy, encoding="utf-8")
+        store = GitStore(tmp_path, tracked_files=self.TRACKED)
+        with monkeypatch.context() as m:
+            def denied(*args):
+                raise PermissionError("read-only workspace")
+            m.setattr(Path, "replace", denied)
+            with pytest.raises(GitStoreError):
+                store.ensure_gitignore()
+        assert ignore.read_text(encoding="utf-8") == legacy
+        assert not list(tmp_path.glob("..gitignore.*.tmp"))
+        assert store.ensure_gitignore()
+
+    def test_symlinked_ignore_policy_is_not_migrated(self, tmp_path):
+        from dulwich import porcelain
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        porcelain.init(str(workspace))
+        target = tmp_path / "shared-ignore"
+        legacy = b"/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n"
+        target.write_bytes(legacy)
+        ignore = workspace / ".gitignore"
+        try:
+            ignore.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"symlinks unavailable: {exc}")
+
+        assert not GitStore(workspace, tracked_files=self.TRACKED).ensure_gitignore()
+        assert ignore.is_symlink()
+        assert target.read_bytes() == legacy
+
+    def test_migration_does_not_untrack_existing_runtime_files(self, tmp_path):
+        store = GitStore(tmp_path, tracked_files=self.TRACKED)
+        store.init()
+        (tmp_path / "memory/history.jsonl").write_text("{}\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(tmp_path), "add", "-f", "memory/history.jsonl"], check=True)
+        (tmp_path / ".gitignore").write_text(
+            "/*\n!memory/\n!SOUL.md\n!USER.md\n!memory/MEMORY.md\n!.gitignore\n",
+            encoding="utf-8",
+        )
+        assert store.ensure_gitignore()
+        assert b"memory/history.jsonl" in subprocess.run(
+            ["git", "-C", str(tmp_path), "ls-files"], capture_output=True, check=True,
+        ).stdout
