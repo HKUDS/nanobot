@@ -651,8 +651,9 @@ def _leading_ws(line: str) -> str:
 
 def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
     """Preserve the outer indentation from the actual matched block."""
-    old_lines = old_text.split("\n")
-    actual_lines = actual_text.split("\n")
+    # A terminal newline does not add a logical line, even at an unterminated EOF.
+    old_lines = old_text.removesuffix("\n").split("\n")
+    actual_lines = actual_text.removesuffix("\n").split("\n")
     if len(old_lines) != len(actual_lines):
         return new_text
 
@@ -756,7 +757,11 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
 
         start = offsets[i]
         end = offsets[i + window_size]
-        if content_lines_keepends[i + window_size - 1].endswith("\n"):
+        # Include the line terminator only when the requested match includes it.
+        if (
+            not old_text.endswith("\n")
+            and content_lines_keepends[i + window_size - 1].endswith("\n")
+        ):
             end -= 1
         matches.append(
             _MatchSpan(
