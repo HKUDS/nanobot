@@ -69,6 +69,31 @@ def test_email_only_enables_final_reply_delivery() -> None:
     assert type(channel).send_reasoning_delta is BaseChannel.send_reasoning_delta
 
 
+@pytest.mark.parametrize("multipart", [False, True])
+@pytest.mark.parametrize("subtype", ["plain", "html"])
+def test_fetch_unknown_charset_falls_back_to_utf8(monkeypatch, multipart, subtype) -> None:
+    msg = EmailMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = "Charset fallback"
+    body = "Hello 世界" if subtype == "plain" else "<p>Hello 世界</p>"
+    msg.set_content(body, subtype=subtype, charset="utf-8")
+    msg.set_param("charset", "unknown-charset", header="Content-Type")
+    if multipart:
+        msg.add_attachment(b"attachment", maintype="application", subtype="octet-stream")
+    fake = _make_fake_imap(msg.as_bytes(), uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(), MessageBus())
+    items, skipped_uids = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert "Hello 世界" in items[0]["content"]
+    assert "<p>" not in items[0]["content"]
+    assert skipped_uids == set()
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+
+
 def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     raw = _make_raw_email(subject="Invoice", body="Please pay")
 

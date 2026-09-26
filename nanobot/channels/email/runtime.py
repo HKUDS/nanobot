@@ -852,7 +852,10 @@ class EmailChannel(BaseChannel):
                 except Exception:
                     payload_bytes = part.get_payload(decode=True) or b""
                     charset = part.get_content_charset() or "utf-8"
-                    payload = payload_bytes.decode(charset, errors="replace")
+                    try:
+                        payload = payload_bytes.decode(charset, errors="replace")
+                    except LookupError:
+                        payload = payload_bytes.decode("utf-8", errors="replace")
                 if not isinstance(payload, str):
                     continue
                 if content_type == "text/plain":
@@ -870,7 +873,10 @@ class EmailChannel(BaseChannel):
         except Exception:
             payload_bytes = msg.get_payload(decode=True) or b""
             charset = msg.get_content_charset() or "utf-8"
-            payload = payload_bytes.decode(charset, errors="replace")
+            try:
+                payload = payload_bytes.decode(charset, errors="replace")
+            except LookupError:
+                payload = payload_bytes.decode("utf-8", errors="replace")
         if not isinstance(payload, str):
             return ""
         if msg.get_content_type() == "text/html":
