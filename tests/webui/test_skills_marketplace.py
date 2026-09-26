@@ -1,8 +1,10 @@
+import asyncio
 import hashlib
 import io
 import zipfile
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -40,6 +42,12 @@ async def test_search_marketplace_skills_filters_and_marks_installed(
                         "skillId": "react-testing",
                         "source": "acme/agent-skills",
                         "installs": 42,
+                    },
+                    {
+                        "name": "Anti UI Slop",
+                        "skillId": "anti-ui-slop",
+                        "source": "uizze.com",
+                        "installs": 62063,
                     },
                     {"skillId": "../escape", "source": "acme/agent-skills"},
                     {"skillId": "valid-name", "source": "not-a-repository"},
@@ -91,7 +99,19 @@ async def test_search_marketplace_skills_filters_and_marks_installed(
                 "installed": True,
                 "install_supported": True,
                 "metric": "installs_total",
-            }
+            },
+            {
+                "id": "uizze.com/anti-ui-slop",
+                "skill_id": "anti-ui-slop",
+                "name": "Anti UI Slop",
+                "source": "uizze.com",
+                "provider": "skills_sh",
+                "installs": 62063,
+                "url": "https://skills.sh/uizze.com/anti-ui-slop",
+                "installed": False,
+                "install_supported": True,
+                "metric": "installs_total",
+            },
         ],
     }
 
@@ -252,6 +272,7 @@ async def test_marketplace_skill_trends_returns_history_separately(
     async def weekly_installs(_client: object) -> dict[tuple[str, str], list[int]]:
         return {
             ("acme/skills", "first"): [2, 4, 3, 8],
+            ("uizze.com", "anti-ui-slop"): [13, 21, 34],
         }
 
     monkeypatch.setattr(
@@ -267,12 +288,14 @@ async def test_marketplace_skill_trends_returns_history_separately(
         [
             "acme/skills/first",
             "other/skills/second",
+            "uizze.com/anti-ui-slop",
             "invalid",
         ]
     ) == {
         "trends": {
             "acme/skills/first": [2, 4, 3, 8],
             "other/skills/second": [3, 5, 8, 13],
+            "uizze.com/anti-ui-slop": [13, 21, 34],
         }
     }
 
@@ -305,7 +328,16 @@ async def test_search_marketplace_skills_returns_safe_upstream_error(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "cli_source"),
+    [
+        ("acme/agent-skills", "acme/agent-skills"),
+        ("uizze.com", "https://uizze.com"),
+    ],
+)
 async def test_install_marketplace_skill_uses_official_cli_and_workspace(
+    source: str,
+    cli_source: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -335,12 +367,16 @@ async def test_install_marketplace_skill_uses_official_cli_and_workspace(
         lambda executable: "/usr/local/bin/npx" if executable == "npx" else None,
     )
     monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace.validate_url_target",
+        lambda _url: (True, ""),
+    )
+    monkeypatch.setattr(
         "nanobot.webui.skills_marketplace.asyncio.create_subprocess_exec",
         create_subprocess_exec,
     )
 
     result = await install_marketplace_skill(
-        "acme/agent-skills",
+        source,
         "react-testing",
         tmp_path,
     )
@@ -355,7 +391,7 @@ async def test_install_marketplace_skill_uses_official_cli_and_workspace(
         "--yes",
         "skills@latest",
         "add",
-        "acme/agent-skills",
+        cli_source,
         "--skill",
         "react-testing",
         "--agent",
@@ -365,6 +401,48 @@ async def test_install_marketplace_skill_uses_official_cli_and_workspace(
     )
     assert seen["cwd"] == str(tmp_path.resolve())
     assert seen["env"]["DISABLE_TELEMETRY"] == "1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source",
+    [
+        "https://uizze.com",
+        "uizze.com/path",
+        "uizze.com:443",
+        "localhost",
+        "127.0.0.1",
+        "uizze",
+    ],
+)
+async def test_install_marketplace_skill_rejects_malformed_well_known_sources(
+    source: str,
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(SkillsMarketplaceError, match="invalid skill source"):
+        await install_marketplace_skill(source, "react-testing", tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_install_marketplace_skill_rejects_private_well_known_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace.shutil.which",
+        lambda executable: "/usr/local/bin/npx" if executable == "npx" else None,
+    )
+    monkeypatch.setattr(
+        "nanobot.webui.skills_marketplace.validate_url_target",
+        lambda _url: (False, "private network target"),
+    )
+    create_process = AsyncMock()
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+
+    with pytest.raises(SkillsMarketplaceError, match="not publicly reachable"):
+        await install_marketplace_skill("internal.example.com", "react-testing", tmp_path)
+
+    create_process.assert_not_awaited()
 
 
 @pytest.mark.asyncio
