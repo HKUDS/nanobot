@@ -212,6 +212,66 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "old_turn,new_turn,old_message,new_message,expected",
+    [
+        (None, None, None, None, 0),
+        ("old-turn", "new-turn", None, None, 0),
+        ("same-turn", "same-turn", None, None, 1),
+        ("old-turn", "new-turn", "same-wire-id", "same-wire-id", 0),
+        (None, None, "old-message", "new-message", 0),
+        (None, None, "same-message", "same-message", 1),
+    ],
+)
+async def test_background_pending_hints_follow_originating_turn(
+    tmp_path, old_turn, new_turn, old_message, new_message, expected
+):
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.context import request_context
+    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.bus.queue import MessageBus
+    from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
+
+    manager = SubagentManager(
+        workspace=tmp_path, bus=MessageBus(), max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def run(spec):
+        task = spec.initial_messages[-1]["content"]
+        if task == "older task":
+            started.set()
+            await release.wait()
+        return SimpleNamespace(stop_reason="completed", final_content=task, error=None)
+
+    manager.runner.run = AsyncMock(side_effect=run)
+    tool = SpawnTool(manager)
+    runtime = _runtime(MagicMock())
+    try:
+        with request_context(RequestContext(
+            channel="api", chat_id="s", session_key="api:s", runtime=runtime,
+            turn_id=old_turn, message_id=old_message,
+        )):
+            await tool.execute(task="older task")
+        await asyncio.wait_for(started.wait(), timeout=1)
+        with request_context(RequestContext(
+            channel="api", chat_id="s", session_key="api:s", runtime=runtime,
+            turn_id=new_turn, message_id=new_message,
+        )):
+            await tool.execute(task="newer task")
+        result = await asyncio.wait_for(manager.bus.consume_inbound(), timeout=1)
+        assert result.metadata["subagent_remaining_count"] == expected
+        assert ("still running for this turn" in result.content) is bool(expected)
+        assert "still running for this turn" not in scrub_subagent_announce_body(result.content)
+        assert result.metadata.get("origin_message_id") == new_message
+    finally:
+        release.set()
+        await manager.close()
+    assert manager._pending_announcements == {}
+
+
+@pytest.mark.asyncio
 async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
     """Background tasks should be accepted and start when capacity becomes available."""
     from nanobot.agent.subagent import SubagentManager
