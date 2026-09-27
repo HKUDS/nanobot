@@ -5,7 +5,26 @@ import threading
 
 import pytest
 
+from nanobot.bus.events import InboundMessage
 from nanobot.session.manager import SessionManager
+
+
+@pytest.mark.parametrize("channel", ["cli", "telegram", "system"])
+async def test_non_websocket_followup_does_not_access_storage(tmp_path, monkeypatch, channel):
+    manager = SessionManager(tmp_path)
+
+    def unexpected_transaction(*args, **kwargs):
+        pytest.fail("a non-recoverable follow-up must not access session storage")
+
+    monkeypatch.setattr(manager._store, "transaction", unexpected_transaction)
+    state = manager.state
+    try:
+        assert await state.queue_followup(
+            f"{channel}:chat",
+            InboundMessage(channel=channel, sender_id="u", chat_id="chat", content="follow-up"),
+        ) is None
+    finally:
+        await state.aclose()
 
 
 async def test_writes_run_in_submission_order(tmp_path):
