@@ -51,8 +51,8 @@ from nanobot.utils.helpers import estimate_prompt_tokens
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
-# The server gates model visibility by client version; older catalogs omit Astra.
-OPENAI_CODEX_CATALOG_CLIENT_VERSION = "0.153.4"
+# The server gates model visibility by client version; older catalogs omit GPT-6 Sol/Luna.
+OPENAI_CODEX_CATALOG_CLIENT_VERSION = "0.158.0"
 DEFAULT_ORIGINATOR = "nanobot"
 _COMPACTION_RETAINED_CHAR_BUDGET = 256_000
 
