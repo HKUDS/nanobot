@@ -43,7 +43,7 @@ describe("ThreadHistoryStatus", () => {
     const onRetry = vi.fn();
     render(<ThreadHistoryStatus loading={false} error="offline" onRetry={onRetry} />);
 
-    expect(screen.getByText("Couldn’t load earlier messages.")).toBeVisible();
+    expect(screen.getByText("Loading failed.")).toBeVisible();
     expect(screen.getByRole("status").parentElement).toHaveClass("thread-message-row");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledTimes(1);

@@ -1831,7 +1831,7 @@ describe("ThreadViewport", () => {
     const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
       onLoadOlder={onLoadOlder} />);
     fireEvent.wheel(getScroller(container), { deltaY: -100 });
-    expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
+    expect(screen.getByText("hello")).toBeVisible();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(onLoadOlder).not.toHaveBeenCalled();
   });

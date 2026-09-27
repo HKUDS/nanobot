@@ -1617,7 +1617,7 @@
     "loadEarlier": "載入更早訊息",
     "history": {
       "loading": "正在載入更早的訊息…",
-      "error": "較早訊息載入失敗",
+      "error": "載入失敗",
       "retry": "重試"
     },
     "forkedFromHistory": "從歷史訊息建立分支",

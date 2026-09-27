@@ -1617,7 +1617,7 @@
     "loadEarlier": "Tải tin nhắn trước đó",
     "history": {
       "loading": "Đang tải tin nhắn trước đó…",
-      "error": "Không tải được tin nhắn trước đó.",
+      "error": "Tải thất bại.",
       "retry": "Thử lại"
     },
     "forkedFromHistory": "Tách nhánh từ lịch sử",

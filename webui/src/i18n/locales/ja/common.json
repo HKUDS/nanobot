@@ -1617,7 +1617,7 @@
     "loadEarlier": "以前のメッセージを読み込む",
     "history": {
       "loading": "以前のメッセージを読み込み中…",
-      "error": "以前のメッセージを読み込めませんでした。",
+      "error": "読み込みに失敗しました。",
       "retry": "再試行"
     },
     "forkedFromHistory": "履歴から分岐",

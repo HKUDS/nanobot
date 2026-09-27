@@ -1817,7 +1817,7 @@
     "loadEarlier": "Load earlier messages",
     "history": {
       "loading": "Loading earlier messages…",
-      "error": "Couldn’t load earlier messages.",
+      "error": "Loading failed.",
       "retry": "Retry"
     },
     "forkedFromHistory": "Forked from history",

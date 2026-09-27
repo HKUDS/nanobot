@@ -1617,7 +1617,7 @@
     "loadEarlier": "Muat pesan sebelumnya",
     "history": {
       "loading": "Memuat pesan sebelumnya…",
-      "error": "Pesan sebelumnya tidak dapat dimuat.",
+      "error": "Gagal memuat.",
       "retry": "Coba lagi"
     },
     "forkedFromHistory": "Cabang dari riwayat",

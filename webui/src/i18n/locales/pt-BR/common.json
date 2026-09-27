@@ -1631,7 +1631,7 @@
     "loadEarlier": "Carregar mensagens anteriores",
     "history": {
       "loading": "Carregando mensagens anteriores…",
-      "error": "Não foi possível carregar as mensagens anteriores.",
+      "error": "Falha ao carregar.",
       "retry": "Tentar novamente"
     },
     "forkedFromHistory": "Bifurcado a partir do histórico",
