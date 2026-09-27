@@ -531,7 +531,9 @@ async def test_chat_stream_success():
             yield e
 
     provider._client.responses = MagicMock()
-    provider._client.responses.create = AsyncMock(return_value=mock_stream())
+    stream = MagicMock()
+    stream.__aiter__.side_effect = mock_stream
+    provider._client.responses.create = AsyncMock(return_value=stream)
 
     deltas: list[str] = []
 
@@ -545,6 +547,7 @@ async def test_chat_stream_success():
     assert result.content == "Hello world"
     assert result.finish_reason == "stop"
     assert deltas == ["Hello", " world"]
+    stream.__aexit__.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -577,7 +580,9 @@ async def test_chat_stream_with_tool_calls():
             yield e
 
     provider._client.responses = MagicMock()
-    provider._client.responses.create = AsyncMock(return_value=mock_stream())
+    stream = MagicMock()
+    stream.__aiter__.side_effect = mock_stream
+    provider._client.responses.create = AsyncMock(return_value=stream)
 
     result = await provider.chat_stream(
         [{"role": "user", "content": "weather?"}],

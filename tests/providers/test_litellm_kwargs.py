@@ -872,7 +872,9 @@ async def test_openrouter_gpt5_stays_on_chat_completions() -> None:
 @pytest.mark.asyncio
 async def test_direct_openai_streaming_gpt5_uses_responses_api() -> None:
     mock_chat = AsyncMock(return_value=_StalledStream())
-    mock_responses = AsyncMock(return_value=_fake_responses_stream("hi"))
+    stream = MagicMock()
+    stream.__aiter__.side_effect = lambda: _fake_responses_stream("hi")
+    mock_responses = AsyncMock(return_value=stream)
     spec = find_by_name("openai")
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_class:
@@ -892,6 +894,7 @@ async def test_direct_openai_streaming_gpt5_uses_responses_api() -> None:
 
     assert result.content == "hi"
     assert result.finish_reason == "stop"
+    stream.__aexit__.assert_awaited_once()
     mock_responses.assert_awaited_once()
     mock_chat.assert_not_awaited()
 
