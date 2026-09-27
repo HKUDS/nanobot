@@ -1615,6 +1615,12 @@
     },
     "scrollToBottom": "Cuộn xuống cuối",
     "loadEarlier": "Tải tin nhắn trước đó",
+    "history": {
+      "loading": "Đang tải tin nhắn trước đó…",
+      "error": "Không tải được tin nhắn trước đó.",
+      "retry": "Thử lại",
+      "start": "Đầu cuộc trò chuyện"
+    },
     "forkedFromHistory": "Tách nhánh từ lịch sử",
     "promptNavigator": {
       "open": "Mở trình điều hướng lời nhắc",

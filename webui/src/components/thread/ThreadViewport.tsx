@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import { PromptRail } from "@/components/thread/PromptRail";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
+import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import {
@@ -54,6 +55,8 @@ interface ThreadViewportProps {
   forkBoundaryMessageCount?: number | null;
   hasMoreBefore?: boolean;
   loadingOlder?: boolean;
+  olderError?: string | null;
+  historyLoaded?: boolean;
   userMessageOffset?: number;
   onLoadOlder?: () => Promise<void> | void;
   traceDetailScope?: string | null;
@@ -245,6 +248,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   forkBoundaryMessageCount = null,
   hasMoreBefore = false,
   loadingOlder = false,
+  olderError = null,
+  historyLoaded = false,
   userMessageOffset = 0,
   onLoadOlder,
   traceDetailScope = null,
@@ -273,6 +278,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const composerInputScrollTopRef = useRef<number | null>(null);
   const composerDockHeightRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
+  const [nearHistoryTop, setNearHistoryTop] = useState(false);
   const [composerDockHeight, setComposerDockHeight] = useState(0);
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0);
   const [hasVerticalOverflow, setHasVerticalOverflow] = useState(false);
@@ -469,9 +475,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (!el || !hasMessages || pendingConversationScrollRef.current) return;
     if (!threadMotionRef.current?.isBrowsingHistory()) return;
     if (el.scrollTop > historyPrefetchDistance(el)) return;
-    if (hiddenMessageCount <= 0 && !hasMoreBefore) return;
+    if (hiddenMessageCount <= 0 && (!hasMoreBefore || olderError)) return;
     loadEarlierMessages();
-  }, [hasMessages, hasMoreBefore, hiddenMessageCount, loadEarlierMessages]);
+  }, [hasMessages, hasMoreBefore, hiddenMessageCount, loadEarlierMessages, olderError]);
 
   const navigateToVisiblePrompt = useCallback((promptId: string) => {
     const scrollEl = scrollRef.current;
@@ -738,6 +744,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (!el) return;
 
     const onScroll = (allowHistoryLoad = true) => {
+      setNearHistoryTop(el.scrollTop <= historyPrefetchDistance(el));
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       const near = distance < NEAR_BOTTOM_PX;
       const owner = threadMotionRef.current?.observeScroll(near) ?? "automatic";
@@ -877,13 +884,19 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               data-testid="thread-message-region"
               className={cn(
                 "thread-message-viewport thread-viewport-scrollbar row-start-1 flex min-h-0 min-w-0 flex-col",
-                "scroll-auto justify-start overflow-x-hidden pb-0 pt-[var(--thread-prompt-inset,3rem)]",
+                "scroll-auto justify-start overflow-x-hidden pb-0 pt-12",
                 "[overflow-anchor:none] [scrollbar-width:none]",
                 "[&::-webkit-scrollbar]:hidden",
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               )}
             >
-              <div ref={messageContentRef} className="w-full">
+              <div ref={messageContentRef} className="relative w-full">
+                {conversationReady && historyLoaded && !hasMoreBefore
+                  && hiddenMessageCount === 0 && !loadingOlder && !olderError ? (
+                  <div className="absolute inset-x-0 -top-12 flex h-12 items-center justify-center text-xs text-muted-foreground">
+                    {t("thread.history.start")}
+                  </div>
+                ) : null}
                 <ThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}
@@ -972,6 +985,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             />
           ) : null}
         </div>
+        {hasMessages && conversationReady && nearHistoryTop && hasMoreBefore ? (
+          <ThreadHistoryStatus
+            key={conversationKey}
+            loading={loadingOlder}
+            error={olderError}
+            onRetry={loadEarlierMessages}
+          />
+        ) : null}
         {!hasMessages ? <div ref={bottomRef} aria-hidden className="h-px" /> : null}
       </div>
 

@@ -1615,6 +1615,12 @@
     },
     "scrollToBottom": "Faire défiler vers le bas",
     "loadEarlier": "Charger les messages précédents",
+    "history": {
+      "loading": "Chargement des messages précédents…",
+      "error": "Impossible de charger les messages précédents.",
+      "retry": "Réessayer",
+      "start": "Début de la conversation"
+    },
     "forkedFromHistory": "Bifurqué depuis l'historique",
     "promptNavigator": {
       "open": "Ouvrir le navigateur d’instructions",

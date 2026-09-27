@@ -1615,6 +1615,12 @@
     },
     "scrollToBottom": "一番下へスクロール",
     "loadEarlier": "以前のメッセージを読み込む",
+    "history": {
+      "loading": "以前のメッセージを読み込み中…",
+      "error": "以前のメッセージを読み込めませんでした。",
+      "retry": "再試行",
+      "start": "会話の先頭です"
+    },
     "forkedFromHistory": "履歴から分岐",
     "promptNavigator": {
       "open": "プロンプトナビゲーターを開く",

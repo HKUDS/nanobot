@@ -1666,6 +1666,100 @@ describe("ThreadViewport", () => {
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
   });
 
+  it("pauses automatic history requests after a failure and exposes retry", () => {
+    const onLoadOlder = vi.fn();
+
+    const { container } = render(
+      <ThreadViewport
+        messages={makeLongMessages(20)}
+        isStreaming={false}
+        composer={<div />}
+        hasMoreBefore
+        olderError="offline"
+        onLoadOlder={onLoadOlder}
+      />,
+    );
+
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1800 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    act(() => {
+      dispatchUserScroll(scroller);
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides history feedback away from the top without fetching again", async () => {
+    const onLoadOlder = vi.fn();
+    const { container, rerender } = render(
+      <ThreadViewport messages={messages} isStreaming={false}
+        hasMoreBefore loadingOlder onLoadOlder={onLoadOlder} />,
+    );
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 1800 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+    act(() => dispatchUserScroll(scroller));
+    expect(await screen.findByText("Loading earlier messages…")).toBeVisible();
+    expect(scroller.scrollTop).toBe(200);
+    expect(onLoadOlder).not.toHaveBeenCalled();
+
+    act(() => {
+      scroller.scrollTop = 800;
+      dispatchUserScroll(scroller);
+    });
+    expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
+    rerender(<ThreadViewport messages={messages} isStreaming={false}
+      conversationKey="another" hasMoreBefore onLoadOlder={onLoadOlder} />);
+    expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
+  });
+
+  it("does not mark locally windowed or unconfirmed history as complete", () => {
+    const { rerender } = render(
+      <ThreadViewport messages={makeLongMessages(130)} isStreaming={false} historyLoaded />,
+    );
+    expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
+    rerender(<ThreadViewport messages={messages} isStreaming={false} />);
+    expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
+    rerender(<ThreadViewport messages={messages} isStreaming={false}
+      historyLoaded conversationReady={false} />);
+    expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
+  });
+
+  it("marks the start only after the complete history has loaded", () => {
+    const view = render(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        historyLoaded
+      />,
+    );
+
+    expect(screen.getByText("Start of conversation")).toBeVisible();
+
+    view.rerender(
+      <ThreadViewport
+        messages={messages}
+        isStreaming={false}
+        composer={<div />}
+        historyLoaded
+        hasMoreBefore
+      />,
+    );
+    expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
+  });
+
   it("renders a prompt rail that jumps to user messages", async () => {
     const navigateTo = vi.spyOn(ThreadCameraController.prototype, "navigateTo")
       .mockReturnValue("started");

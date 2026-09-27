@@ -1629,6 +1629,12 @@
     },
     "scrollToBottom": "Rolar para o final",
     "loadEarlier": "Carregar mensagens anteriores",
+    "history": {
+      "loading": "Carregando mensagens anteriores…",
+      "error": "Não foi possível carregar as mensagens anteriores.",
+      "retry": "Tentar novamente",
+      "start": "Início da conversa"
+    },
     "forkedFromHistory": "Bifurcado a partir do histórico",
     "promptNavigator": {
       "open": "Abrir navegador de instruções",
