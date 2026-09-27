@@ -63,7 +63,7 @@ def _add_turns(session: Session, turns: int, *, prefix: str = "msg") -> None:
         session.add_message("assistant", f"{prefix} assistant {i}")
 
 
-def test_default_ttl_disables_idle_compaction():
+async def test_default_ttl_disables_idle_compaction():
     sessions = MagicMock(spec=SessionManager)
     sessions.list_sessions.return_value = [
         {"key": "cli:idle", "updated_at": datetime.now() - timedelta(days=365)},
@@ -74,7 +74,7 @@ def test_default_ttl_disables_idle_compaction():
     ac = AutoCompact(sessions=sessions, consolidator=MagicMock())
     schedule = MagicMock(side_effect=lambda pending: pending.close())
 
-    ac.check_expired(schedule, _runtime)
+    await ac.check_expired(schedule, _resolve_runtime)
 
     assert schedule.call_count == 0
 

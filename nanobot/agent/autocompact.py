@@ -66,10 +66,6 @@ class AutoCompact:
             for message in session.messages[session.last_archived:]
         )
 
-    @classmethod
-    def _is_internal_session(cls, key: str) -> bool:
-        return is_dream_session(key)
-
     async def check_expired(
         self,
         schedule_background: Callable[[Coroutine[Any, Any, None]], None],
@@ -81,7 +77,7 @@ class AutoCompact:
         active_keys = set(active_session_keys)
         for info in await asyncio.to_thread(self.sessions.list_sessions):
             key = info.get("key", "")
-            if not key or self._is_internal_session(key) or key in self._archiving:
+            if not key or is_dream_session(key) or key in self._archiving:
                 continue
             if key in active_keys or not self._is_expired(info.get("updated_at"), now):
                 continue
@@ -126,7 +122,7 @@ class AutoCompact:
         key: str,
     ) -> tuple[Session, SessionSummary | None]:
         """Prepare a session without blocking on a reload."""
-        if self._is_internal_session(key):
+        if is_dream_session(key):
             self._archiving.discard(key)
             self._summaries.pop(key, None)
             return session, None
