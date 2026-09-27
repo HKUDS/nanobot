@@ -596,10 +596,10 @@ class TestToolEventProgress:
             calls += 1
             if calls == 1:
                 await on_content_delta("old partial")
-                loop._enqueue_session_message(InboundMessage(
+                (await loop._enqueue_session_message(InboundMessage(
                     channel="websocket", sender_id="u", chat_id="test", content="new question",
                     metadata={"_wants_stream": True},
-                ))
+                )))
                 return LLMResponse(content="old partial", finish_reason="length")
             has_followup = any(
                 "new question" in str(message.get("content", ""))

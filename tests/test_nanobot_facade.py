@@ -65,9 +65,9 @@ def _fake_provider(name: str, *, max_tokens: int = 8192) -> MagicMock:
 
 
 async def _admit_fake_runtime(bot, session_key, callback, runtime=None) -> None:
-    admitted = runtime or bot._loop.runtime_for_session(
+    admitted = runtime or (await bot._loop.runtime_for_session(
         bot._loop.sessions.get_or_create(session_key)
-    )
+    ))
     await callback(admitted)
 
 
@@ -337,7 +337,7 @@ async def test_run_exposes_attributes_to_context_provider_without_persisting_the
     assert result.content == "done"
     assert seen[0].attributes == {"tenant": "acme"}
     assert seen[0].metadata == {}
-    snapshot = bot.sessions.export("sdk:attributes")
+    snapshot = (await bot.sessions.export("sdk:attributes"))
     assert snapshot is not None
     assert all("attributes" not in message for message in snapshot.messages)
 
@@ -386,8 +386,8 @@ async def test_persisted_turn_callback_is_best_effort_and_reads_display_safe_ses
         failed_sync_attempts += 1
         raise RuntimeError("host sync failed")
 
-    def on_persisted(event: SessionTurnPersisted) -> None:
-        seen.append((event, bot.sessions.get(event.context.session_key)))
+    async def on_persisted(event: SessionTurnPersisted) -> None:
+        seen.append((event, (await bot.sessions.get(event.context.session_key))))
 
     remove_context = bot.runtime.add_context_provider(provide_context)
     remove_failure = bot.runtime.on_session_turn_persisted(fail_sync)
@@ -409,7 +409,7 @@ async def test_persisted_turn_callback_is_best_effort_and_reads_display_safe_ses
     assert snapshot.messages[-1]["content"] == "saved reply"
     assert result.content == "saved reply"
     assert failed_sync_attempts == 1
-    trusted_snapshot = bot.sessions.export("sdk:persisted")
+    trusted_snapshot = (await bot.sessions.export("sdk:persisted"))
     assert trusted_snapshot is not None
     assert "model-only context" in trusted_snapshot.messages[-2]["content"]
 
@@ -438,7 +438,7 @@ async def test_persisted_turn_callback_observes_saved_command_turn(tmp_path):
     await bot.run("/skill", session_key="sdk:command")
 
     assert len(seen) == 1
-    snapshot = bot.sessions.export("sdk:command")
+    snapshot = (await bot.sessions.export("sdk:command"))
     assert snapshot is not None
     assert [message["role"] for message in snapshot.messages[-2:]] == [
         "user",
@@ -1433,7 +1433,7 @@ async def test_sessions_ingest_imports_transcript_without_running_model(tmp_path
     assert snapshot.messages[1]["source"] == "longmemeval"
     bot._loop.process_direct.assert_not_called()
 
-    reloaded = bot.sessions.get("sdk:history")
+    reloaded = (await bot.sessions.get("sdk:history"))
     assert reloaded is not None
     assert reloaded.messages == snapshot.messages
 
@@ -1476,33 +1476,31 @@ async def test_session_helpers_get_list_export_clear_delete_flush(tmp_path):
 
     await bot.sessions.ingest("sdk:first", [{"role": "user", "content": "hello"}])
 
-    listed = bot.sessions.list()
+    listed = (await bot.sessions.list())
     assert listed
     assert isinstance(listed[0], SessionInfo)
     assert {row.key for row in listed} == {"sdk:first"}
 
-    exported = bot.sessions.export("sdk:first")
+    exported = (await bot.sessions.export("sdk:first"))
     assert exported is not None
     exported.messages[0]["content"] = "mutated copy"
-    assert bot.sessions.get("sdk:first").messages[0]["content"] == "hello"
+    assert (await bot.sessions.get("sdk:first")).messages[0]["content"] == "hello"
 
     state_before_clear = bot._loop._file_state_store.for_session("sdk:first")
-    cleared = bot.sessions.clear("sdk:first")
+    cleared = (await bot.sessions.clear("sdk:first"))
     assert cleared.messages == []
     state_after_clear = bot._loop._file_state_store.for_session("sdk:first")
     assert state_after_clear is not state_before_clear
-    assert bot.sessions.flush() >= 1
     state_before_delete = state_after_clear
-    assert bot.sessions.delete("sdk:first") is True
+    assert (await bot.sessions.delete("sdk:first")) is True
     assert bot._loop._file_state_store.for_session("sdk:first") is not state_before_delete
-    assert bot.sessions.get("sdk:first") is None
+    assert (await bot.sessions.get("sdk:first")) is None
 
 
-def test_session_helpers_read_live_session_outside_strong_cache(tmp_path):
+async def test_session_helpers_read_only_committed_state(tmp_path):
     config_path = _write_config(tmp_path)
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     sessions = bot._loop.sessions
-    sessions._max_cached_sessions = 1
     active = sessions.get_or_create("sdk:active")
     active.add_message("user", "persisted")
     sessions.save(active)
@@ -1510,13 +1508,12 @@ def test_session_helpers_read_live_session_outside_strong_cache(tmp_path):
     sessions.save(sessions.get_or_create("sdk:other"))
     active.add_message("assistant", "not saved yet")
 
-    visible = bot.sessions.get("sdk:active")
-    exported = bot.sessions.export("sdk:active")
+    visible = (await bot.sessions.get("sdk:active"))
+    exported = (await bot.sessions.export("sdk:active"))
     assert visible is not None
     assert exported is not None
     assert [message["content"] for message in visible.messages] == [
         "persisted",
-        "not saved yet",
     ]
     assert exported.messages == visible.messages
 
@@ -1536,14 +1533,14 @@ async def test_session_export_and_restore_preserve_runtime_context(tmp_path):
         **{RUNTIME_CONTEXT_HISTORY_META: marker},
     )
     bot._loop.sessions.save(source)
-    bot._loop.sessions._cache.pop("sdk:source")
+    bot._loop.sessions.invalidate("sdk:source")
 
-    public = bot.sessions.get("sdk:source")
+    public = (await bot.sessions.get("sdk:source"))
     assert public is not None
     assert public.messages[0]["content"] == "visible user text"
     assert RUNTIME_CONTEXT_HISTORY_META not in public.messages[0]
 
-    exported = bot.sessions.export("sdk:source")
+    exported = (await bot.sessions.export("sdk:source"))
     assert exported is not None
     assert exported.messages[0]["content"] == content
     assert exported.messages[0][RUNTIME_CONTEXT_HISTORY_META] == marker
@@ -1556,7 +1553,7 @@ async def test_session_export_and_restore_preserve_runtime_context(tmp_path):
     restored = bot._loop.sessions.get_or_create("sdk:restored")
     assert restored.get_history() == source.get_history()
 
-    with pytest.raises(ValueError, match="not empty"):
+    with pytest.raises(RuntimeError, match="not empty"):
         await bot.sessions.restore(exported, session_key="sdk:restored")
 
 
@@ -1622,7 +1619,7 @@ async def test_runtime_helpers_expose_model_workspace_and_compact(tmp_path):
     bot = Nanobot.from_config(config_path, workspace=tmp_path)
     await bot.sessions.ingest("sdk:history", [{"role": "user", "content": "hello"}])
     runtime = bot._loop.llm_runtime()
-    bot._loop.runtime_for_session = MagicMock(return_value=runtime)  # type: ignore[method-assign]
+    bot._loop.runtime_for_session = AsyncMock(return_value=runtime)  # type: ignore[method-assign]
 
     compact_session = AsyncMock()
     bot._loop.consolidator.compact_idle_session = compact_session

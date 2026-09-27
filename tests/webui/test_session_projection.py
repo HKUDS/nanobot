@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -11,6 +11,7 @@ from nanobot.webui.session_projection import WebUISessionProjection
 async def test_attach_fields_restore_session_runtime_metadata() -> None:
     usage = LLMUsage.reported(input_tokens=120, output_tokens=8, total_tokens=175)
     sessions = MagicMock()
+    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {
         "metadata": {
             SESSION_MODEL_PRESET_METADATA_KEY: "Deep Research",
@@ -39,6 +40,7 @@ async def test_attach_fields_restore_session_runtime_metadata() -> None:
 
 async def test_attach_fields_tolerate_missing_or_invalid_session_metadata() -> None:
     sessions = MagicMock()
+    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {
         "metadata": {SESSION_MODEL_PRESET_METADATA_KEY: 42}
     }
@@ -54,6 +56,7 @@ async def test_hydration_events_restore_goal_and_running_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sessions = MagicMock()
+    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {
         "metadata": {
             "goal_state": {
@@ -102,6 +105,7 @@ async def test_hydration_events_are_quiet_without_actionable_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sessions = MagicMock()
+    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {"metadata": {}}
     monkeypatch.setattr(
         "nanobot.webui.session_projection.websocket_turn_wall_started_at",
@@ -115,7 +119,7 @@ async def test_hydration_events_are_quiet_without_actionable_state(
 
 
 async def test_hydration_yields_during_metadata_read_and_reads_live_turn_on_loop(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import asyncio
     import threading
@@ -123,7 +127,8 @@ async def test_hydration_yields_during_metadata_read_and_reads_live_turn_on_loop
     loop_thread = threading.get_ident()
     entered = threading.Event()
     release = threading.Event()
-    sessions = MagicMock()
+    from nanobot.session.manager import SessionManager
+    sessions = SessionManager(tmp_path)
 
     def read_metadata(_key):
         assert threading.get_ident() != loop_thread
@@ -135,7 +140,7 @@ async def test_hydration_yields_during_metadata_read_and_reads_live_turn_on_loop
         assert threading.get_ident() == loop_thread
         return 42.5
 
-    sessions.read_session_metadata.side_effect = read_metadata
+    monkeypatch.setattr(sessions._store, "read_metadata", read_metadata)
     monkeypatch.setattr(
         "nanobot.webui.session_projection.websocket_turn_wall_started_at", active_turn,
     )

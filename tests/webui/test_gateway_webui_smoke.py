@@ -425,7 +425,7 @@ def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
         "completed_tool_results": [],
         "pending_tool_calls": [],
     }
-    sessions.save(session, fsync=True)
+    sessions.save(session)
 
     second = _start_gateway(config_path, second_log)
     try:

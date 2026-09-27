@@ -1,13 +1,13 @@
 """Manual context compaction command behavior."""
 
 import asyncio
+import sqlite3
 import threading
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from agent.session_helpers import run_session
-from filelock import FileLock
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
@@ -48,12 +48,13 @@ async def loop(tmp_path):
 async def test_compact_session_io_runs_outside_event_loop(loop, monkeypatch) -> None:
     key = "cli:test"
     session = loop.sessions.get_or_create(key)
+    session.add_message("user", "summarize this conversation")
     session.provider_state = ProviderConversationState(
         kind="openai_responses", provider="openai:test", model="test-model",
         version=1, payload={"items": []},
     )
     loop.sessions.save(session)
-    loop.consolidator.compact_idle_session = AsyncMock(return_value="summary")
+
     event_loop_thread = threading.get_ident()
     calls = []
 
@@ -64,26 +65,28 @@ async def test_compact_session_io_runs_outside_event_loop(loop, monkeypatch) -> 
             return operation(*args, **kwargs)
         return checked
 
-    for name in ("get_or_create", "save"):
-        monkeypatch.setattr(loop.sessions, name, observe(name, getattr(loop.sessions, name)))
+    for name in ("load", "save"):
+        monkeypatch.setattr(loop.sessions._store, name, observe(name, getattr(loop.sessions._store, name)))
 
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact")
     await loop.commands.dispatch(CommandContext(
         msg=msg, session=None, key=key, raw="/compact", loop=loop,
     ))
 
-    assert calls == ["get_or_create", "get_or_create", "save"]
-    assert session.provider_state is None
+    assert "load" in calls and "save" in calls
+    monkeypatch.undo()
+    assert loop.sessions.get_or_create(key).provider_state is None
 
 
 async def test_compact_lock_contention_keeps_heartbeat_running(loop) -> None:
     key = "cli:test"
     session = loop.sessions.get_or_create(key)
+    session.add_message("user", "summarize this conversation")
     loop.sessions.save(session)
-    loop.consolidator.compact_idle_session = AsyncMock(return_value="summary")
+
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact")
-    blocker = FileLock(loop.sessions._jsonl_store._session_files_lock.lock_file)
-    blocker.acquire()
+    blocker = sqlite3.connect(loop.sessions._store.path)
+    blocker.execute("BEGIN IMMEDIATE")
     task = asyncio.create_task(loop.commands.dispatch(CommandContext(
         msg=msg, session=session, key=key, raw="/compact", loop=loop,
     )))
@@ -92,7 +95,8 @@ async def test_compact_lock_contention_keeps_heartbeat_running(loop) -> None:
             await asyncio.sleep(0.01)
             assert not task.done(), "compaction must wait for storage without blocking the loop"
     finally:
-        blocker.release()
+        blocker.rollback()
+        blocker.close()
         await asyncio.wait_for(task, timeout=2)
 
 
@@ -237,7 +241,7 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
     loop.sessions.save(reloaded)
     loop.auto_compact._ttl = 1
     schedule = MagicMock()
-    await loop.auto_compact.check_expired(schedule, loop.runtime_for_session_async)
+    await loop.auto_compact.check_expired(schedule, loop.runtime_for_session)
     schedule.assert_not_called()
 
 
@@ -315,14 +319,14 @@ async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
     )))
     try:
         await asyncio.wait_for(started.wait(), timeout=5)
-        loop._enqueue_session_message(InboundMessage(
+        (await loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="before compaction",
-        ))
+        )))
         command = InboundMessage(channel="cli", sender_id="u", chat_id="test", content="/compact")
         await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
-        loop._enqueue_session_message(InboundMessage(
+        (await loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="after compaction",
-        ))
+        )))
         release.set()
         await asyncio.wait_for(task, timeout=5)
     finally:
@@ -354,9 +358,9 @@ async def test_stop_completes_compact_queued_behind_an_active_turn(loop) -> None
     loop.provider.chat_stream_with_retry = chat
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
-    loop._enqueue_session_message(InboundMessage(
+    (await loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="question",
-    ))
+    )))
     task = next(iter(loop._active_tasks[key]))
     await asyncio.wait_for(started.wait(), timeout=5)
     command = InboundMessage(
@@ -393,7 +397,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
         channel="websocket", sender_id="user", chat_id="test", content="/compact",
         metadata={"webui_turn_id": "compact-turn"},
     )
-    loop._enqueue_session_message(msg)
+    (await loop._enqueue_session_message(msg))
     task = next(iter(loop._active_tasks[key]))
     await asyncio.wait_for(entered.wait(), timeout=5)
 

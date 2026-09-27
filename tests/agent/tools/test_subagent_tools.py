@@ -768,7 +768,8 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
             content="result",
         )
 
-    fake_loop = SimpleNamespace(time=clock)
+    real_loop = asyncio.get_running_loop()
+    fake_loop = SimpleNamespace(time=clock, run_in_executor=real_loop.run_in_executor)
     with (
         patch("nanobot.agent.loop.asyncio.get_running_loop", return_value=fake_loop),
         patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_deliver),

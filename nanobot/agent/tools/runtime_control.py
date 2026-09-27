@@ -142,7 +142,7 @@ class _RuntimeControlTarget(Protocol):
 
     def set_model_preset(self, name: str | None) -> LLMRuntime: ...
 
-    async def set_session_model_preset_async(
+    async def set_session_model_preset(
         self,
         session_key: str,
         name: str,
@@ -188,7 +188,7 @@ class AgentRuntimeControl:
         session_key: str | None,
     ) -> LLMRuntime:
         if session_key is not None:
-            return await self.__target.set_session_model_preset_async(session_key, name)
+            return await self.__target.set_session_model_preset(session_key, name)
         return self.__target.set_model_preset(name)
 
     def set_max_iterations(self, value: int) -> None:

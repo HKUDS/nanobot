@@ -68,7 +68,7 @@ async def test_maybe_continue_turn_queues_internal_message():
         visible_run_started_at=1234.5,
     )
 
-    assert await maybe_continue_turn(ctx) is True
+    assert await maybe_continue_turn(ctx, session_metadata=ctx.session.metadata) is True
 
     queued = pending.get_nowait()
     assert queued.sender_id == "system:continuation"
@@ -117,7 +117,7 @@ async def test_internal_continuation_respects_round_limit():
         pending_queue_available=True,
         session_metadata=meta,
     )
-    assert await maybe_continue_turn(ctx) is False
+    assert await maybe_continue_turn(ctx, session_metadata=ctx.session.metadata) is False
 
 
 def test_internal_continuation_requires_budget_boundary_and_queue():

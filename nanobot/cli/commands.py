@@ -476,12 +476,12 @@ sessions_app = typer.Typer(help="Manage persisted session history")
 app.add_typer(sessions_app, name="sessions")
 
 
-@sessions_app.command("restore-workspace")
-def sessions_restore_workspace(
+@sessions_app.command("export-jsonl")
+def sessions_export_jsonl(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
 ) -> None:
-    """Copy sessions back into the workspace before downgrading nanobot."""
+    """Export portable JSONL copies of SQLite conversation history."""
     from nanobot.session.manager import SessionManager
 
     runtime_config = _load_runtime_config(config, workspace)
@@ -490,19 +490,8 @@ def sessions_restore_workspace(
         runtime_config.workspace_path,
         sessions_root=data_dir / "sessions" if data_dir is not None else None,
     )
-    result = manager.restore_sessions_to_workspace()
-    console.print(
-        f"Restored {result.restored} session file(s) to "
-        f"{escape(str(runtime_config.workspace_path / 'sessions'))}; "
-        f"{result.unchanged} already matched."
-    )
-    if result.conflicts:
-        console.print(
-            "[red]Rollback is incomplete: existing or invalid files require manual review.[/red]"
-        )
-        for path in result.conflicts:
-            console.print(Text(f"- {path}", style="red"))
-        raise typer.Exit(1)
+    count = manager.export_sessions_to_workspace()
+    console.print(f"Exported {count} session(s) to {escape(str(runtime_config.workspace_path / 'sessions'))}")
 
 
 # ============================================================================

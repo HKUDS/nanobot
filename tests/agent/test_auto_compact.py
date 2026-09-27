@@ -143,7 +143,7 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     loop.sessions.save(session)
     loop.consolidator.archive_session = AsyncMock(return_value="Heartbeat summary.")
 
-    await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session_async)
+    await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
     await _drain_background_tasks(loop)
 
     loop.consolidator.archive_session.assert_awaited_once()
@@ -275,7 +275,7 @@ class TestAutoCompact:
         loop.sessions.save(s2)
 
         loop.consolidator.compact_idle_session = _make_fake_compact(loop)
-        await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session_async)
+        await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
         await _drain_background_tasks(loop)
 
         active_after = loop.sessions.get_or_create("cli:active")
@@ -744,7 +744,7 @@ class TestProactiveAutoCompact:
         """Helper: run check_expired via callback and wait for background tasks."""
         await loop.auto_compact.check_expired(
             loop.schedule_background,
-            loop.runtime_for_session_async,
+            loop.runtime_for_session,
             active_session_keys=active_session_keys,
         )
         await _drain_background_tasks(loop)
@@ -763,15 +763,12 @@ class TestProactiveAutoCompact:
         healthy.add_message("user", "keep me")
         loop.sessions.save(healthy)
 
-        removed_path = loop.sessions._get_session_path(removed.key)
-        original_open = open
-
-        def remove_before_open(path, *args, **kwargs):
-            if Path(path) == removed_path:
-                removed_path.unlink()
-            return original_open(path, *args, **kwargs)
-
-        monkeypatch.setattr("builtins.open", remove_before_open)
+        original_list = loop.sessions.list_sessions
+        def delete_after_listing():
+            rows = original_list()
+            loop.sessions.delete_session(removed.key)
+            return rows
+        monkeypatch.setattr(loop.sessions.state, "list_sessions", AsyncMock(side_effect=delete_after_listing))
 
         async def idle_once():
             loop._running = False
@@ -881,12 +878,12 @@ class TestProactiveAutoCompact:
         loop.consolidator.compact_idle_session = _slow_compact
 
         # First call starts archiving via callback
-        await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session_async)
+        await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
         await started.wait()
         assert archive_count == 1
 
         # Second call should skip (key is in _archiving)
-        await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session_async)
+        await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
         assert archive_count == 1
 
         # Clean up
@@ -1215,7 +1212,8 @@ class TestSummaryPersistence:
         assert summary1["text"] == "First summary."
         assert "cli:test" not in loop.auto_compact._summaries  # popped by hot path
 
-        # Add new messages and archive again (simulating a later turn)
+        # Read the committed snapshot before starting the next edit.
+        session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 4, prefix="world")
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)

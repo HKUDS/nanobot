@@ -160,7 +160,7 @@ def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Pa
 
 async def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:auto")
+    session = await loop.sessions.state.get("websocket:auto")
     prompt_ref = {"id": "cron.agent_turn.reminder", "version": 1, "sha256": "abc"}
 
     persisted = await loop._persist_user_message_early(
@@ -202,7 +202,7 @@ async def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) ->
 
 async def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:chat")
+    session = await loop.sessions.state.get("websocket:chat")
     session.metadata[PENDING_FOLLOWUPS_KEY] = [
         {
             "id": "followup-1",
@@ -231,7 +231,7 @@ async def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path
 
 async def test_persist_local_trigger_turn_uses_hidden_automation_marker(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:auto")
+    session = await loop.sessions.state.get("websocket:auto")
 
     persisted = await loop._persist_user_message_early(
         InboundMessage(
@@ -381,6 +381,7 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     )
 
     assert generated is True
+    session = await loop.sessions.state.get(session.key)
     assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
     loop.provider.chat_stream_with_retry.assert_awaited_once()
     assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
@@ -507,6 +508,7 @@ async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Pa
     unified.add_message("assistant", "以下是临期 IP 列表。")
     chat = loop.sessions.get_or_create("websocket:chat-existing")
     chat.metadata[WEBUI_TITLE_METADATA_KEY] = "Existing title"
+    loop.sessions.save(chat)
     loop.sessions.save(unified)
 
     generated = await maybe_generate_webui_title_after_turn(
@@ -1061,7 +1063,7 @@ async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
     loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="done", provider_state=state)
     )
-    session = loop.sessions.get_or_create("cli:private-checkpoint")
+    session = await loop.sessions.state.get("cli:private-checkpoint")
 
     await loop._run_agent_loop(
         TranscriptInput(
@@ -1086,8 +1088,9 @@ async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
     public_payload = loop.sessions.read_session_file(session.key)
     assert public_payload is not None
     assert "private-checkpoint-blob" not in json.dumps(public_payload)
-    raw = loop.sessions._get_session_path(session.key).read_text(encoding="utf-8")
-    assert "private-checkpoint-blob" in raw
+    stored = loop.sessions.read_session_snapshot(session.key)
+    assert stored is not None and stored.provider_state is not None
+    assert stored.provider_state.payload == state.payload
 
 
 @pytest.mark.asyncio
@@ -1709,7 +1712,8 @@ async def test_process_message_uses_explicit_session_for_goal_context(
     assert result is not None
     assert result.content == "ok"
     kwargs = loop._run_agent_loop.call_args.kwargs
-    assert kwargs["session"] is system_session
+    assert kwargs["session"].key == system_session.key
+    assert kwargs["session"] is not system_session
     assert kwargs["request_context"].session_key == "system"
     assert GOAL_STATE_KEY not in kwargs["session"].metadata
 
@@ -1721,16 +1725,16 @@ async def test_run_agent_loop_continuation_reads_latest_goal_metadata(
     from nanobot.agent.runner import AgentRunResult
 
     loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:late-goal")
+    session = await loop.sessions.state.get("websocket:late-goal")
     seen: dict[str, str | None] = {}
 
     async def fake_run(spec):
         assert callable(spec.continuation_callback)
-        session.metadata[GOAL_STATE_KEY] = {
+        await loop.sessions.state.update_metadata(session.key, {GOAL_STATE_KEY: {
             "status": "active",
             "objective": "Goal created during this runner call.",
-        }
-        seen["goal_continue"] = spec.continuation_callback()
+        }})
+        seen["goal_continue"] = await spec.continuation_callback()
         return AgentRunResult(
             final_content="ok",
             messages=[{"role": "assistant", "content": "ok"}],

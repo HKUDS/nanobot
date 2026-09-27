@@ -7,7 +7,8 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
     default_workspace_scope,
 )
-from nanobot.session.manager import SessionManager, SessionStore
+from nanobot.session.manager import SessionManager
+from nanobot.session.sqlite_store import SqliteSessionStore
 from nanobot.webui.workspaces import (
     WebUIWorkspaceController,
     read_webui_default_access_mode,
@@ -252,7 +253,7 @@ def test_scope_for_session_key_always_reads_the_active_store(tmp_path, monkeypat
     residual.metadata[WORKSPACE_SCOPE_METADATA_KEY] = full_scope.metadata()
     residual_sessions.save(residual)
 
-    store = MagicMock(spec=SessionStore)
+    store = MagicMock(spec=SqliteSessionStore)
     store.read_metadata.side_effect = [
         {
             "key": "websocket:cached",
@@ -267,7 +268,8 @@ def test_scope_for_session_key_always_reads_the_active_store(tmp_path, monkeypat
             "metadata": {WORKSPACE_SCOPE_METADATA_KEY: restricted_scope.metadata()},
         },
     ]
-    sessions = SessionManager(workspace, store=store)
+    sessions = SessionManager(workspace)
+    monkeypatch.setattr(sessions._store, "read_metadata", store.read_metadata)
     controller = WebUIWorkspaceController(
         session_manager=sessions,
         default_workspace=default,

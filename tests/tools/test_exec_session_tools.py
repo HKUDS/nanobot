@@ -872,6 +872,7 @@ def test_agent_loop_shutdown_closes_exec_sessions(tmp_path):
         process = manager._sessions[sid].process
 
         loop = object.__new__(AgentLoop)
+        loop.sessions = SimpleNamespace(state=SimpleNamespace(aclose=AsyncMock()))
         loop._background_tasks = set()
         loop._exec_session_manager = manager
         loop.runtime_resolver = SimpleNamespace(aclose=AsyncMock())
@@ -890,6 +891,7 @@ def test_agent_loop_shutdown_closes_exec_sessions(tmp_path):
 def test_agent_loop_shutdown_attempts_all_cleanup_after_errors():
     async def run() -> None:
         loop = object.__new__(AgentLoop)
+        loop.sessions = SimpleNamespace(state=SimpleNamespace(aclose=AsyncMock()))
         loop._background_tasks = set()
         loop.runtime_resolver = SimpleNamespace(aclose=AsyncMock())
         loop.subagents = SimpleNamespace(
@@ -1040,6 +1042,7 @@ def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
 def test_agent_loop_shutdown_preserves_single_cleanup_error():
     async def run() -> None:
         loop = object.__new__(AgentLoop)
+        loop.sessions = SimpleNamespace(state=SimpleNamespace(aclose=AsyncMock()))
         loop._background_tasks = set()
         loop.runtime_resolver = SimpleNamespace(aclose=AsyncMock())
         loop.subagents = SimpleNamespace(

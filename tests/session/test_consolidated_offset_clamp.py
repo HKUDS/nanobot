@@ -30,8 +30,8 @@ def test_loaded_corrupt_offset_keeps_messages(tmp_path: Path):
     }
 
     for name, offset in offsets.items():
-        manager = SessionManager(tmp_path / name)
-        path = manager._get_session_path("chan:chat")
+        workspace = tmp_path / name
+        path = workspace / "sessions" / "old.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         message = {"role": "user", "content": f"survived {name}"}
         path.write_text(
@@ -47,7 +47,7 @@ def test_loaded_corrupt_offset_keeps_messages(tmp_path: Path):
             encoding="utf-8",
         )
 
-        session = manager.get_or_create("chan:chat")
+        session = SessionManager(workspace).get_or_create("chan:chat")
 
         assert session.messages == [message]
         assert session.last_consolidated == 0
@@ -64,8 +64,7 @@ def test_valid_offset_is_preserved():
 
 
 def test_last_archived_field_migrates_with_legacy_alias(tmp_path: Path):
-    manager = SessionManager(tmp_path)
-    path = manager._get_session_path("chan:chat")
+    path = tmp_path / "sessions" / "old.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     messages = [
         {"role": "user", "content": "first"},
@@ -84,20 +83,18 @@ def test_last_archived_field_migrates_with_legacy_alias(tmp_path: Path):
         encoding="utf-8",
     )
 
+    manager = SessionManager(tmp_path)
     session = manager.get_or_create("chan:chat")
 
     assert session.last_archived == 1
     assert session.last_consolidated == 1
     manager.save(session)
-    metadata = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
-    assert metadata["last_archived"] == 1
-    assert metadata["last_consolidated"] == 1
+    assert manager.read_session_snapshot("chan:chat").last_archived == 1
 
 
 def test_loaded_null_metadata_becomes_empty_dict(tmp_path: Path):
     """Session jsonl metadata:null must load as {} so agent .pop/.get work."""
-    manager = SessionManager(tmp_path)
-    path = manager._get_session_path("chan:chat")
+    path = tmp_path / "sessions" / "old.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({
@@ -110,6 +107,7 @@ def test_loaded_null_metadata_becomes_empty_dict(tmp_path: Path):
         }) + "\n",
         encoding="utf-8",
     )
+    manager = SessionManager(tmp_path)
     session = manager.get_or_create("chan:chat")
     assert session.metadata == {}
     session.metadata["title"] = "ok"

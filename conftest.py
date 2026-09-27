@@ -41,7 +41,6 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
     """
     data_root = tmp_path.parent / "session-data" / uuid4().hex
     runtime_root = data_root / "runtime"
-    legacy_root = data_root / "legacy-sessions"
 
     def runtime_subdir(name: str) -> Path:
         path = runtime_root / name
@@ -49,12 +48,8 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
         return path
 
     monkeypatch.setattr(
-        "nanobot.session.manager.get_runtime_subdir",
+        "nanobot.session.location.get_runtime_subdir",
         runtime_subdir,
-    )
-    monkeypatch.setattr(
-        "nanobot.session.manager.get_legacy_sessions_dir",
-        lambda: legacy_root,
     )
     yield
 

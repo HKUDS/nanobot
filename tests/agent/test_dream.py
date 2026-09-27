@@ -402,9 +402,7 @@ class TestEphemeralDirect:
         )
 
         with (
-            patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator"),
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
             loop = AgentLoop(
@@ -651,7 +649,7 @@ class TestEphemeralDirect:
         for marker in [*markers.values(), "DREAM_AGENTS_MARKER"]:
             assert marker in system_prompt
             assert request_text.count(marker) == 1
-        assert loop.sessions._get_session_path(session_key).exists()
+        assert loop.sessions.read_session_snapshot(session_key) is not None
 
 
 class TestEphemeralHooks:
@@ -681,13 +679,12 @@ class TestEphemeralHooks:
 
         spy = MagicMock(spec=AgentHook)
         spy.wants_streaming.return_value = False
-        spy.before_iteration = AsyncMock()
-        spy.after_iteration = AsyncMock()
+        spy.finalize_content.side_effect = lambda context, content: content
+        spy.before_iteration = AsyncMock(return_value=None)
+        spy.after_iteration = AsyncMock(return_value=None)
 
         with (
-            patch("nanobot.agent.loop.SessionManager"),
             patch("nanobot.agent.loop.SubagentManager") as mock_sub,
-            patch("nanobot.agent.loop.Consolidator"),
         ):
             mock_sub.return_value.cancel_by_session = AsyncMock(return_value=0)
             loop = AgentLoop(

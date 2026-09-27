@@ -37,7 +37,6 @@ def _make_loop(tmp_path, *, recovery_admission=None):
     provider.get_default_model.return_value = "test-model"
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         mock_sub_mgr.return_value.close = AsyncMock()
@@ -393,7 +392,7 @@ async def test_goal_continuation_precedes_terminal_wait():
     continuation_checks = 0
     terminal_waits = 0
 
-    def continue_goal() -> str | None:
+    async def continue_goal() -> str | None:
         nonlocal continuation_checks
         continuation_checks += 1
         return "Continue the active goal." if continuation_checks == 1 else None
@@ -749,7 +748,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         )
 
     loop.register_runtime_context_provider(provide_identity)
-    session = loop.sessions.get_or_create("telegram:group-1")
+    session = await loop.sessions.state.get("telegram:group-1")
     pending_queue = asyncio.Queue()
     await pending_queue.put(InboundMessage(
         channel="telegram",
@@ -1444,9 +1443,9 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
         calls += 1
         if calls == 1:
             for content in ["before", "bad", "after"]:
-                loop._enqueue_session_message(InboundMessage(
+                (await loop._enqueue_session_message(InboundMessage(
                     channel="cli", sender_id="u", chat_id="c", content=content,
-                ))
+                )))
         return LLMResponse(content="answer", finish_reason="stop")
 
     async def context_provider(request):
@@ -1562,7 +1561,8 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.sessions.get_or_create("cli:c").policy = SessionPolicy(log_content=log_content)
+    await loop.sessions.state.get("cli:c")
+    await loop.sessions.state.set_policy("cli:c", SessionPolicy(log_content=log_content))
     followups = [f"follow-up-{index:02}" for index in range(12)]
 
     run_task = asyncio.create_task(loop.run())

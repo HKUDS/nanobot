@@ -12,145 +12,86 @@ from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META, RuntimeContext
 from nanobot.sdk.types import (
     SessionInfo,
     SessionSnapshot,
-    snapshot_from_payload,
     snapshot_from_session,
 )
-from nanobot.session import io as session_io
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
 
 
 class SessionClient:
-    """Session management helpers exposed through ``bot.sessions``."""
+    """Asynchronous operations over committed session state."""
 
     _RESERVED_MESSAGE_KEYS = {"role", "content", RUNTIME_CONTEXT_HISTORY_META}
-    _VALID_ROLES = {"user", "assistant", "tool", "system"}
 
     def __init__(self, loop: AgentLoop) -> None:
         self._loop = loop
+        self._state = loop.sessions.state
 
     async def ingest(
-        self,
-        session_key: str,
-        messages: Iterable[Mapping[str, Any]],
-        *,
-        metadata: Mapping[str, Any] | None = None,
-        source: str | None = None,
-        save: bool = True,
+        self, session_key: str, messages: Iterable[Mapping[str, Any]], *,
+        metadata: Mapping[str, Any] | None = None, source: str | None = None,
     ) -> SessionSnapshot:
-        """Import an existing transcript without running the model."""
-        session = await session_io.call(self._loop.sessions.get_or_create, session_key)
-        if metadata:
-            session.metadata.update(deepcopy(dict(metadata)))
-
+        """Validate and durably import a transcript as one operation."""
+        prepared: list[dict[str, Any]] = []
         for raw in messages:
-            if "role" not in raw:
-                raise ValueError("ingested messages must include a role")
-            if "content" not in raw:
-                raise ValueError("ingested messages must include content")
-            role = str(raw["role"]).strip()
-            if role not in self._VALID_ROLES:
-                raise ValueError(f"unsupported message role: {role!r}")
-            extra = {
-                key: deepcopy(value)
-                for key, value in raw.items()
-                if key not in self._RESERVED_MESSAGE_KEYS
+            if "role" not in raw or "content" not in raw:
+                raise ValueError("ingested messages must include role and content")
+            message = {
+                key: deepcopy(value) for key, value in raw.items()
+                if key != RUNTIME_CONTEXT_HISTORY_META
             }
-            if source is not None and "source" not in extra:
-                extra["source"] = source
-            session.add_message(role, deepcopy(raw["content"]), **extra)
-
-        if save:
-            await session_io.call(self._loop.sessions.save, session)
+            message["role"] = str(raw["role"]).strip()
+            if source is not None:
+                message.setdefault("source", source)
+            prepared.append(message)
+        session = await self._state.import_messages(session_key, prepared, metadata=metadata)
         return snapshot_from_session(session)
 
-    def get(self, session_key: str) -> SessionSnapshot | None:
-        """Return a display-safe snapshot without creating a new session on disk."""
-        cached = self._loop.sessions.get_cached(session_key)
-        if cached is not None:
-            return snapshot_from_session(cached)
-        payload = self._loop.sessions.read_session_file(session_key)
-        if payload is None:
-            return None
-        return snapshot_from_payload(payload)
+    async def get(self, session_key: str) -> SessionSnapshot | None:
+        """Return a detached display-safe view of committed state."""
+        session = await self._state.read(session_key)
+        return snapshot_from_session(session) if session is not None else None
 
-    def list(self) -> list[SessionInfo]:
-        """List persisted sessions."""
+    async def list(self) -> list[SessionInfo]:
         return [
             SessionInfo(
                 key=str(row.get("key") or ""),
-                created_at=row.get("created_at"),
-                updated_at=row.get("updated_at"),
-                title=str(row.get("title") or ""),
-                preview=str(row.get("preview") or ""),
+                created_at=row.get("created_at"), updated_at=row.get("updated_at"),
+                title=str(row.get("title") or ""), preview=str(row.get("preview") or ""),
                 path=row.get("path"),
             )
-            for row in self._loop.sessions.list_sessions()
+            for row in await self._state.list_sessions()
         ]
 
-    def export(self, session_key: str) -> SessionSnapshot | None:
-        """Return a trusted full snapshot, including model-only runtime context."""
-        cached = self._loop.sessions.get_cached(session_key)
-        if cached is not None:
-            return snapshot_from_session(cached, include_runtime_context=True)
-        payload = self._loop.sessions.read_session_file(session_key)
-        if payload is None:
-            return None
-        return snapshot_from_payload(payload, include_runtime_context=True)
+    async def export(self, session_key: str) -> SessionSnapshot | None:
+        """Return a trusted detached snapshot including model-only context."""
+        session = await self._state.read(session_key)
+        return (
+            snapshot_from_session(session, include_runtime_context=True)
+            if session is not None else None
+        )
 
     async def restore(
-        self,
-        snapshot: SessionSnapshot,
-        *,
-        session_key: str | None = None,
-        save: bool = True,
+        self, snapshot: SessionSnapshot, *, session_key: str | None = None,
     ) -> SessionSnapshot:
-        """Restore a trusted snapshot into an empty session."""
+        """Atomically restore a trusted snapshot into an empty session."""
         key = session_key or snapshot.key
         if not key:
             raise ValueError("restored snapshots must include a session key")
-        session = await session_io.call(self._loop.sessions.get_or_create, key)
-        if session.messages:
-            raise ValueError(f"restore target session is not empty: {key}")
-
-        prepared: list[tuple[str, Any, dict[str, Any]]] = []
-        for raw in snapshot.messages:
-            if "role" not in raw or "content" not in raw:
-                raise ValueError("restored messages must include role and content")
-            role = str(raw["role"]).strip()
-            if role not in self._VALID_ROLES:
-                raise ValueError(f"unsupported message role: {role!r}")
-            extra = {
-                field: deepcopy(value)
-                for field, value in raw.items()
-                if field not in {"role", "content"}
-            }
-            prepared.append((role, deepcopy(raw["content"]), extra))
-
-        session.metadata.update(deepcopy(snapshot.metadata))
-        for role, content, extra in prepared:
-            session.add_message(role, content, **extra)
-
-        if save:
-            await session_io.call(self._loop.sessions.save, session)
+        session = await self._state.import_messages(
+            key, snapshot.messages, metadata=snapshot.metadata, require_empty=True,
+        )
         return snapshot_from_session(session)
 
-    def clear(self, session_key: str) -> SessionSnapshot:
-        """Clear one session and persist the empty session."""
+    async def clear(self, session_key: str) -> SessionSnapshot:
+        """Reset state and invalidate results from an older execution."""
+        await self._state.reset(session_key)
         self._loop.discard_session_file_state(session_key)
-        session = self._loop.sessions.get_or_create(session_key)
-        session.clear()
-        self._loop.sessions.save(session)
-        return snapshot_from_session(session)
+        return snapshot_from_session(await self._state.get(session_key))
 
-    def delete(self, session_key: str) -> bool:
-        """Delete one session from disk and cache."""
-        return self._loop.sessions.delete_session(session_key)
-
-    def flush(self) -> int:
-        """Flush cached sessions to durable storage."""
-        return self._loop.sessions.flush_all()
+    async def delete(self, session_key: str) -> bool:
+        return await self._state.delete(session_key)
 
 
 class MemoryClient:
@@ -211,20 +152,20 @@ class RuntimeClient:
 
     async def compact_session(self, session_key: str) -> SessionSnapshot:
         """Summarize one session and exclude its archived messages from replay."""
-        session = await session_io.call(self._loop.sessions.get_or_create, session_key)
-        runtime = await self._loop.runtime_for_session_async(session)
+        session = await self._loop.sessions.state.get(session_key)
+        runtime = await self._loop.runtime_for_session(session)
         await self._loop.consolidator.compact_idle_session(
             session_key,
             runtime=runtime,
         )
         return snapshot_from_session(
-            await session_io.call(self._loop.sessions.get_or_create, session_key)
+            await self._loop.sessions.state.get(session_key)
         )
 
     async def compact_idle_session(self, session_key: str, *, max_suffix: int = 0) -> str | None:
         """Return a replacement summary; legacy ``max_suffix`` no longer retains history."""
-        session = await session_io.call(self._loop.sessions.get_or_create, session_key)
-        runtime = await self._loop.runtime_for_session_async(session)
+        session = await self._loop.sessions.state.get(session_key)
+        runtime = await self._loop.runtime_for_session(session)
         return await self._loop.consolidator.compact_idle_session(
             session_key,
             runtime=runtime,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Collection
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
@@ -10,7 +9,6 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink
-from nanobot.session import io as session_io
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import (
@@ -75,13 +73,13 @@ class AutoCompact:
         """Schedule idle archival without blocking the event loop."""
         now = datetime.now()
         active_keys = set(active_session_keys)
-        for info in await asyncio.to_thread(self.sessions.list_sessions):
+        for info in await self.sessions.state.list_sessions():
             key = info.get("key", "")
             if not key or is_dream_session(key) or key in self._archiving:
                 continue
             if key in active_keys or not self._is_expired(info.get("updated_at"), now):
                 continue
-            session = await session_io.call(self.sessions.get_or_create, key)
+            session = await self.sessions.state.get(key)
             if not self._session_has_unarchived_messages(session):
                 continue
             try:
@@ -97,14 +95,14 @@ class AutoCompact:
             return
         try:
             # Keep the session live while the synchronous callback binds its route.
-            session = await session_io.call(self.sessions.get_or_create, key)
+            session = await self.sessions.state.get(key)
             summary = await self.consolidator.compact_idle_session(
                 key,
                 runtime=runtime,
                 events=self._bind_events(key) if self._bind_events else NO_EVENTS,
             )
             if summary:
-                session = await session_io.call(self.sessions.get_or_create, key)
+                session = await self.sessions.state.get(key)
                 stored = session_summary_from_metadata(
                     session.metadata,
                     fallback_last_active=session.updated_at,
@@ -128,7 +126,7 @@ class AutoCompact:
             return session, None
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
-            session = await session_io.call(self.sessions.get_or_create, key)
+            session = await self.sessions.state.get(key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
         entry = self._summaries.pop(key, None)
         if entry:

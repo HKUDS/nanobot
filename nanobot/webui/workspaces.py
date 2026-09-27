@@ -23,7 +23,6 @@ from nanobot.security.workspace_access import (
     default_workspace_scope,
     validate_workspace_scope_payload,
 )
-from nanobot.session import io as session_io
 from nanobot.webui.session_identity import webui_session_key
 
 if TYPE_CHECKING:
@@ -298,7 +297,7 @@ class WebUIWorkspaceController:
             return draft
         if self._sessions is None:
             return self.default_scope()
-        data = await session_io.call(self._sessions.read_session_metadata, session_key)
+        data = await self._sessions.state.read_metadata(session_key)
         return self._scope_from_snapshot(data)
 
     def _scope_from_snapshot(self, data: dict[str, Any] | None) -> WorkspaceScope:
@@ -467,10 +466,9 @@ class WebUIWorkspaceController:
     async def persist_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
         session_key = webui_session_key(chat_id)
         if self._sessions is not None:
-            session = await session_io.call(self._sessions.get_or_create, session_key)
-            session.metadata["webui"] = True
-            session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
-            await session_io.call(self._sessions.save, session)
+            await self._sessions.state.update_metadata(session_key, {
+                "webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
+            })
         self._draft_scopes.pop(session_key, None)
         remember_webui_project(scope.project_path)
 
@@ -479,7 +477,7 @@ class WebUIWorkspaceController:
         session_key = webui_session_key(chat_id)
         if (
             self._sessions is not None
-            and await session_io.call(self._sessions.read_session_metadata, session_key) is not None
+            and await self._sessions.state.read_metadata(session_key) is not None
         ):
             await self.persist_scope(chat_id, scope)
             return
