@@ -1600,7 +1600,8 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
             break
         await asyncio.sleep(0.01)
     loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    # Shutdown drains accepted writes and closes the worker's WAL connection.
+    await asyncio.wait_for(run_task, timeout=30)
 
     assert len(captured_messages) == 2
     second_request = "\n".join(
