@@ -1141,7 +1141,7 @@ class OpenAICompatProvider(LLMProvider):
             wants = True
         elif reasoning_effort and reasoning_effort.lower() != "none":
             wants = True
-        elif any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
+        elif any(token in model_name for token in ("gpt-5", "gpt-6", "o1", "o3", "o4")):
             wants = True
         if not wants:
             return False
