@@ -8,7 +8,7 @@ import json
 import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -181,13 +181,13 @@ class WebUICommandRouter:
         fork_id: str,
         fork_key: str,
     ) -> None:
-        scope = self._workspaces.scope_for_session_key(fork_key)
+        scope = await self._workspaces.async_scope_for_session_key(fork_key)
         self._transport.webui_attach(connection, fork_id)
         await self._transport.webui_send_event(
             connection,
             "attached",
             chat_id=fork_id,
-            **self._session_projection.attach_fields(fork_key),
+            **(await self._session_projection.attach_fields(fork_key)),
         )
         await self._transport.webui_send_event(
             connection,
@@ -274,13 +274,13 @@ class WebUICommandRouter:
     async def workspace_scope_or_error(
         self,
         connection: ServerConnection,
-        resolver: Callable[[], Any],
+        resolver: Callable[[], Awaitable[Any]],
         *,
         chat_id: str | None = None,
         turn_id: str | None = None,
     ) -> Any | None:
         try:
-            return resolver()
+            return await resolver()
         except WorkspaceScopeError as exc:
             await self._transport.webui_send_event(
                 connection,
@@ -315,13 +315,13 @@ class WebUICommandRouter:
             )
             if scope is None:
                 return
-            self._workspaces.stage_scope(new_id, scope)
+            await self._workspaces.stage_scope(new_id, scope)
             self._transport.webui_attach(connection, new_id)
             await self._transport.webui_send_event(
                 connection,
                 "attached",
                 chat_id=new_id,
-                **self._session_projection.attach_fields(webui_session_key(new_id)),
+                **(await self._session_projection.attach_fields(webui_session_key(new_id))),
             )
             await self._transport.webui_send_event(
                 connection,
@@ -395,7 +395,7 @@ class WebUICommandRouter:
                 connection,
                 "attached",
                 chat_id=chat_id,
-                **self._session_projection.attach_fields(webui_session_key(chat_id)),
+                **(await self._session_projection.attach_fields(webui_session_key(chat_id))),
             )
             await self._transport.webui_hydrate(chat_id)
             return
@@ -457,7 +457,7 @@ class WebUICommandRouter:
             )
             if scope is None:
                 return
-            self._workspaces.stage_scope(chat_id, scope)
+            await self._workspaces.stage_scope(chat_id, scope)
             await self._transport.send_session_updated(chat_id, scope="metadata")
             await self._transport.webui_send_event(
                 connection,
@@ -620,21 +620,19 @@ class WebUICommandRouter:
         if temporary_policy is None or temporary_policy.hydrate_transcript:
             await self._transport.webui_hydrate(chat_id)
 
-        scope = await self.workspace_scope_or_error(
-            connection,
-            lambda: (
-                temporary_policy.workspace_scope
-                if temporary_policy is not None
-                else self._workspaces.scope_for_message(
+        scope = temporary_policy.workspace_scope if temporary_policy is not None else (
+            await self.workspace_scope_or_error(
+                connection,
+                lambda: self._workspaces.scope_for_message(
                     envelope,
                     chat_id=chat_id,
                     chat_running=websocket_turn_wall_started_at(chat_id) is not None,
                     can_change_project=self.workspace_project_selection_available(connection),
                     can_use_full_access=self.workspace_full_access_available(connection),
-                )
-            ),
-            chat_id=chat_id,
-            turn_id=turn_id,
+                ),
+                chat_id=chat_id,
+                turn_id=turn_id,
+            )
         )
         if scope is None:
             return
@@ -752,7 +750,7 @@ class WebUICommandRouter:
                     else False
                 ),
             )
-            self._workspaces.persist_scope(chat_id, scope)
+            await self._workspaces.persist_scope(chat_id, scope)
             accepted = True
             if turn_id:
                 self._accepted_messages[(chat_id, turn_id)] = time.monotonic() + 600

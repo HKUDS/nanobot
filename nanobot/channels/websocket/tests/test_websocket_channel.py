@@ -2032,7 +2032,7 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
             },
         },
     )
-    channel.gateway.workspaces.persist_scope(
+    await channel.gateway.workspaces.persist_scope(
         "chat-running",
         channel.gateway.workspaces.scope_for_session_key("websocket:chat-running"),
     )
@@ -6652,3 +6652,48 @@ async def test_full_access_requires_local_handshake(bus, tmp_path, headers, allo
         assert result["event"] == "error"
         assert result["reason"] == "full workspace access is unavailable for this connection"
         assert sessions.read_session_file("websocket:handshake-scope") is None
+
+
+@pytest.mark.parametrize("command_type", ["new_chat", "attach", "set_workspace_scope", "message"])
+async def test_webui_commands_keep_session_io_off_event_loop(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command_type: str,
+) -> None:
+    import threading
+
+    sessions = SessionManager(tmp_path / "sessions")
+    sessions.save(sessions.get_or_create("websocket:io-chat"))
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+    loop_thread = threading.get_ident()
+    calls: list[str] = []
+
+    def require_worker(name):
+        operation = getattr(sessions, name)
+
+        def checked(*args, **kwargs):
+            assert threading.get_ident() != loop_thread, name
+            calls.append(name)
+            return operation(*args, **kwargs)
+
+        return checked
+
+    for name in ("read_session_metadata", "get_or_create", "save"):
+        monkeypatch.setattr(sessions, name, require_worker(name))
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": command_type, "chat_id": "io-chat", "content": "/help", "webui": True},
+    )
+
+    assert "read_session_metadata" in calls
+    if command_type in {"set_workspace_scope", "message"}:
+        assert "get_or_create" in calls
+        assert "save" in calls
+    assert all(json.loads(call.args[0])["event"] != "error" for call in conn.send.await_args_list)
+    await channel._cleanup_connection(conn)

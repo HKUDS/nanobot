@@ -122,7 +122,7 @@ class WebUIOutboundProjector:
 
     async def hydrate(self, chat_id: str) -> None:
         """Replay reconnect state through the existing stable wire operations."""
-        for event in self._session_projection.hydration_events(
+        for event in await self._session_projection.hydration_events(
             webui_session_key(chat_id),
             chat_id,
         ):
