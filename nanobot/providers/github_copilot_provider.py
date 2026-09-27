@@ -449,7 +449,7 @@ def _copilot_transport_supported(wire_id: str, endpoints: object) -> bool:
         return True
     model = wire_id.lower()
     return "/responses" in supported and any(
-        token in model for token in ("gpt-5", "o1", "o3", "o4")
+        token in model for token in ("gpt-5", "gpt-6", "o1", "o3", "o4")
     )
 
 
