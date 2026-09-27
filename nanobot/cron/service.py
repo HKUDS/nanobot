@@ -309,8 +309,9 @@ class CronService:
                         continue
             self._store.jobs = list(jobs_map.values())  # pyright: ignore[reportOptionalMemberAccess]
             if self._should_persist_store() and changed:
-                self._action_path.write_text("", encoding="utf-8")
+                # Keep accepted actions recoverable until the merged snapshot is durable.
                 self._save_store()
+                self._action_path.write_text("", encoding="utf-8")
         return
 
     def _load_store(self, *, reload_during_execution: bool = False) -> CronStore | None:
