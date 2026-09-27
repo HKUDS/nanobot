@@ -354,8 +354,8 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 async def cmd_compact(ctx: CommandContext) -> None:
     """Compact the current session without resetting the conversation."""
     loop = ctx.loop
-    session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    runtime = ctx.runtime or loop.runtime_for_session(session)
+    session = ctx.session or await session_io.call(loop.sessions.get_or_create, ctx.key)
+    runtime = ctx.runtime or await loop.runtime_for_session_async(session)
     delivery = loop.turn_delivery_factory.create(ctx.msg, ctx.key)
 
     try:
@@ -370,9 +370,9 @@ async def cmd_compact(ctx: CommandContext) -> None:
         return
 
     if summary:
-        refreshed = loop.sessions.get_or_create(ctx.key)
+        refreshed = await session_io.call(loop.sessions.get_or_create, ctx.key)
         refreshed.provider_state = None
-        loop.sessions.save(refreshed)
+        await session_io.call(loop.sessions.save, refreshed)
 
 
 def _format_preset_names(names: list[str]) -> str:
