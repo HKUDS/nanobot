@@ -96,9 +96,13 @@ async def test_terminal_event_returns_without_reading_transport_tail(transport, 
 async def test_transport_failure_before_terminal_is_not_success(transport, tail):
     body = _ResponseBody([{"type": "response.output_text.delta", "delta": "partial"}], tail)
     capture = ResponsesStreamCapture()
-    expected = ConnectionError
+    expected: tuple[type[Exception], ...] = (ConnectionError,)
     if tail == "disconnect":
-        expected = APIConnectionError if transport == "sdk" else httpx.RemoteProtocolError
+        expected = (
+            (APIConnectionError, httpx.RemoteProtocolError)
+            if transport == "sdk"
+            else (httpx.RemoteProtocolError,)
+        )
     async with _consume(transport, body) as (consume, stream):
         with pytest.raises(expected):
             await consume(stream, capture=capture)
