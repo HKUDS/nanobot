@@ -195,13 +195,14 @@ def _wait_for_bootstrap(base_url: str, process: subprocess.Popen[bytes], log_pat
 
 
 async def _recv_until(ws: websockets.WebSocketClientProtocol, event: str) -> dict:
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        raw = await asyncio.wait_for(ws.recv(), timeout=5)
-        payload = json.loads(raw)
-        if payload.get("event") == event:
-            return payload
-    raise AssertionError(f"websocket event {event!r} was not received")
+    try:
+        async with asyncio.timeout(20):
+            while True:
+                payload = json.loads(await ws.recv())
+                if payload.get("event") == event:
+                    return payload
+    except TimeoutError as exc:
+        raise AssertionError(f"websocket event {event!r} was not received within 20s") from exc
 
 
 @pytest.mark.asyncio
