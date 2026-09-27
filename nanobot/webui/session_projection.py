@@ -8,10 +8,10 @@ from loguru import logger as default_logger
 
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.providers.base import LLMUsage
-from nanobot.session import io as session_io
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
+from nanobot.session.state import SessionState
 from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
 
 if TYPE_CHECKING:
@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 class SessionMetadataReader(Protocol):
     """Narrow persisted-session dependency used by WebUI projections."""
 
-    def read_session_metadata(self, key: str) -> dict[str, Any] | None: ...
+    @property
+    def state(self) -> SessionState: ...
 
 
 class WebUISessionProjection:
@@ -51,7 +52,7 @@ class WebUISessionProjection:
         """Return the session runtime facts sent with an attach handshake."""
         if self._sessions is None:
             return {}
-        snapshot = await session_io.call(self._sessions.read_session_metadata, session_key)
+        snapshot = await self._sessions.state.read_metadata(session_key)
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
 
@@ -102,7 +103,7 @@ class WebUISessionProjection:
         """Return an actionable persisted goal state for reconnect hydration."""
         if self._sessions is None:
             return None
-        snapshot = await session_io.call(self._sessions.read_session_metadata, session_key)
+        snapshot = await self._sessions.state.read_metadata(session_key)
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
         goal_state = goal_state_ws_blob(metadata)

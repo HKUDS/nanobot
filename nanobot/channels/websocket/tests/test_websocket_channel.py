@@ -3913,7 +3913,8 @@ async def test_hydrate_noop_without_session_manager() -> None:
 async def test_hydrate_skips_when_no_goal_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_metadata.return_value = None
+    sm.state.read_metadata = AsyncMock()
+    sm.state.read_metadata.return_value = None
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
@@ -3929,7 +3930,8 @@ async def test_hydrate_skips_when_no_goal_on_disk() -> None:
 async def test_hydrate_notifies_when_goal_active_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_metadata.return_value = {
+    sm.state.read_metadata = AsyncMock()
+    sm.state.read_metadata.return_value = {
         "metadata": {
             "goal_state": {
                 "status": "active",
@@ -3960,7 +3962,8 @@ async def test_hydrate_notifies_when_goal_active_on_disk() -> None:
 async def test_hydrate_restores_blocked_attention_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_metadata.return_value = {
+    sm.state.read_metadata = AsyncMock()
+    sm.state.read_metadata.return_value = {
         "metadata": {
             "goal_state": {
                 "status": "blocked",
@@ -6694,7 +6697,7 @@ async def test_webui_commands_keep_session_io_off_event_loop(
     calls: list[str] = []
 
     def require_worker(name):
-        operation = getattr(sessions, name)
+        operation = getattr(sessions._store, name)
 
         def checked(*args, **kwargs):
             assert threading.get_ident() != loop_thread, name
@@ -6703,8 +6706,8 @@ async def test_webui_commands_keep_session_io_off_event_loop(
 
         return checked
 
-    for name in ("read_session_metadata", "get_or_create", "save"):
-        monkeypatch.setattr(sessions, name, require_worker(name))
+    for name in ("read_metadata", "load", "save", "replace_metadata"):
+        monkeypatch.setattr(sessions._store, name, require_worker(name))
 
     await channel._dispatch_envelope(
         conn,
@@ -6712,9 +6715,9 @@ async def test_webui_commands_keep_session_io_off_event_loop(
         {"type": command_type, "chat_id": "io-chat", "content": "/help", "webui": True},
     )
 
-    assert "read_session_metadata" in calls
+    assert "read_metadata" in calls
     if command_type in {"set_workspace_scope", "message"}:
-        assert "get_or_create" in calls
-        assert "save" in calls
+        assert "load" in calls
+        assert "save" in calls or "replace_metadata" in calls
     assert all(json.loads(call.args[0])["event"] != "error" for call in conn.send.await_args_list)
     await channel._cleanup_connection(conn)

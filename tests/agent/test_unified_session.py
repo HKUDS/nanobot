@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.session_helpers import run_session
+from agent.session_helpers import mock_session_manager, run_session
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.file_state import FileStateStore
 from nanobot.bus.events import InboundMessage
@@ -42,7 +42,7 @@ def _make_loop(tmp_path: Path, unified_session: bool = False) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    with patch("nanobot.agent.loop.SessionManager"), \
+    with patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
@@ -317,7 +317,7 @@ class TestCmdNewUnifiedSession:
             consolidator=SimpleNamespace(archive_session=AsyncMock(return_value=True)),
             _cancel_active_tasks=AsyncMock(return_value=0),
             discard_session_file_state=MagicMock(),
-            runtime_for_session_async=AsyncMock(return_value=MagicMock()),
+            runtime_for_session=AsyncMock(return_value=MagicMock()),
             schedule_background=lambda coro: asyncio.ensure_future(coro),
         )
 
@@ -351,7 +351,7 @@ class TestStopCommandWithUnifiedSession:
         msg = _make_msg(channel="telegram", chat_id="123456")
 
         loop._process_message = AsyncMock(return_value=None)
-        loop._enqueue_session_message(msg)
+        (await loop._enqueue_session_message(msg))
         assert set(loop._active_tasks) == {UNIFIED_SESSION_KEY}
         await asyncio.gather(*loop._active_tasks[UNIFIED_SESSION_KEY])
 

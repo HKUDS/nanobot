@@ -1002,6 +1002,7 @@ class TestCompactIdleSession:
             current = sessions.get_or_create("cli:concurrent")
             current.add_message("user", "late user")
             current.add_message("assistant", "late assistant")
+            sessions.save(current)
             return LLMResponse(content="Summary.", finish_reason="stop")
 
         mock_provider.chat_stream_with_retry.side_effect = append_during_archive

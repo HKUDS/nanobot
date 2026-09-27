@@ -150,7 +150,7 @@ class SessionHandleResolver:
         self._sessions = sessions
 
     def _ensure_all(self) -> dict[str, SessionHandle]:
-        with self._sessions.locked_session_files():
+        with self._sessions.transaction():
             rows = sorted(
                 self._sessions.list_sessions(),
                 key=lambda row: (
@@ -190,7 +190,6 @@ class SessionHandleResolver:
                 if not self._sessions.update_session_metadata(
                     key,
                     {SESSION_HANDLE_METADATA_KEY: name},
-                    fsync=True,
                 ):
                     continue
                 names[key] = name

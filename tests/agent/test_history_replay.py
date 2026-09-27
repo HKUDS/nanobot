@@ -73,8 +73,7 @@ async def test_process_message_hands_complete_replay_to_runner(tmp_path: Path) -
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
 
-    session = loop.sessions.get_or_create("cli:test")
-    session.messages = _populated_session(30).messages
+    session = await loop.sessions.state.import_messages("cli:test", _populated_session(30).messages)
     expected_history = session.get_history()
     loop.provider.aclose = AsyncMock()
     result = await loop.process_direct("hello", session_key="cli:test")

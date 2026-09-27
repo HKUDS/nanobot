@@ -14,6 +14,8 @@ import pytest
 from nanobot.agent.context import TranscriptInput
 from nanobot.bus.events import InboundMessage
 from nanobot.providers.base import LLMResponse, LLMUsage
+from nanobot.session.manager import Session
+from nanobot.session.state import SessionState
 
 
 def _make_loop():
@@ -28,8 +30,11 @@ def _make_loop():
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager") as mock_sessions, \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sessions.return_value.state = MagicMock(spec=SessionState)
+        mock_sessions.return_value.state.get = AsyncMock(side_effect=lambda key: Session(key))
+        mock_sessions.return_value.state.peek.return_value = None
         mock_sub_mgr.return_value.close = AsyncMock()
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
@@ -240,7 +245,7 @@ class TestRestartCommand:
         session.metadata = {
             "_last_usage": LLMUsage.reported(input_tokens=0, output_tokens=0).to_dict()
         }
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
         loop._start_time = time.time() - 125
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(20500, "tiktoken")
@@ -277,7 +282,7 @@ class TestRestartCommand:
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = [{"role": "user"}]
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(1000, "tiktoken")
         )
@@ -332,7 +337,7 @@ class TestRestartCommand:
         session.metadata = {
             "_last_usage": LLMUsage.reported(input_tokens=1200, output_tokens=34).to_dict()
         }
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(0, "none")
         )
@@ -358,7 +363,7 @@ class TestRestartCommand:
             {"role": "user", "content": "How are you?"},
             {"role": "assistant", "content": "I am doing well."},
         ]
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history")
         response = await loop._process_message(msg)
@@ -376,7 +381,7 @@ class TestRestartCommand:
         session.get_history.return_value = [
             {"role": "user", "content": f"message {i}"} for i in range(20)
         ]
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history 3")
         response = await loop._process_message(msg)
@@ -400,7 +405,7 @@ class TestRestartCommand:
             },
             *({"role": "assistant", "content": f"reply {i}"} for i in range(60)),
         ]
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history 999")
         response = await loop._process_message(msg)
@@ -426,7 +431,7 @@ class TestRestartCommand:
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = []
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history")
         response = await loop._process_message(msg)
@@ -439,7 +444,7 @@ class TestRestartCommand:
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = []
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
         loop.subagents.get_running_count.return_value = 0
         loop.subagents.get_running_count_by_session.return_value = 0
 

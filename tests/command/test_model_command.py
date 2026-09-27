@@ -163,6 +163,7 @@ async def test_model_command_reports_provider_configuration_errors(tmp_path) -> 
     switched = await cmd_model(_ctx(loop, "/model fast", args="fast"))
     session = loop.sessions.get_or_create("cli:direct")
     session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
+    loop.sessions.save(session)
     status = await cmd_model(_ctx(loop, "/model"))
 
     assert "Could not switch model preset" in switched.content

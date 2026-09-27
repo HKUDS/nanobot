@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import mock_session_manager
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.tools.context import RequestContext
@@ -46,7 +47,7 @@ def _make_loop(tmp_path):
     provider.generation = GenerationSettings()
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
@@ -159,6 +160,7 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
     session = loop.sessions.get_or_create("cli:direct")
     session.add_message("user", "Let's agree on the migration implementation.")
     session.add_message("assistant", "Use the staged migration plan and run integration tests.")
+    loop.sessions.save(session)
 
     result = await loop._process_message(
         InboundMessage(
@@ -172,6 +174,7 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
     assert result is not None
     assert result.content == "done"
     assert goal_mutation_allowed() is False
+    session = await loop.sessions.state.get(session.key)
     assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
     first_request = provider.chat_stream_with_retry.await_args_list[0].kwargs["messages"]
     assert "staged migration plan" in str(first_request)
@@ -243,6 +246,7 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
     assert second_wire[3]["content"].startswith("second turn")
     assert len(provider_calls) == 2
 
+    session = await loop.sessions.state.get(session.key)
     persisted_first_user = session.messages[0]
     assert persisted_first_user["content"] == first_wire[1]["content"]
     assert public_history_message(persisted_first_user)["content"] == "first turn $review"
@@ -276,6 +280,7 @@ async def test_webui_quote_reaches_model_without_leaking_into_public_history(tmp
     request = provider.chat_stream_with_retry.await_args.kwargs["messages"]
     assert "What does this mean?" in str(request)
     assert "the selected answer excerpt" in str(request)
+    session = await loop.sessions.state.get(session.key)
     assert "the selected answer excerpt" in str(session.messages[0]["content"])
     assert public_history_message(session.messages[0])["content"] == "What does this mean?"
 

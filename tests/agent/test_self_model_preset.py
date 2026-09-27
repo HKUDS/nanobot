@@ -312,7 +312,7 @@ async def test_self_tool_sets_model_preset_for_current_session(tmp_path) -> None
 
 async def test_self_tool_reports_session_preset_provider_configuration_error(tmp_path) -> None:
     loop = _make_loop(tmp_path)
-    loop.set_session_model_preset_async = AsyncMock(
+    loop.set_session_model_preset = AsyncMock(
         side_effect=ValueError("No API key configured for provider 'openai'.")
     )
     tool = _my_tool(loop)
@@ -347,11 +347,11 @@ async def test_self_tool_rejects_instance_runtime_changes_in_session(
         channel="cli",
         chat_id="one",
         session_key=session.key,
-        runtime=loop.runtime_for_session(session),
+        runtime=(await loop.runtime_for_session(session)),
     )):
         result = await tool._modify(key, value)
 
-    other_runtime = loop.runtime_for_session(loop.sessions.get_or_create("cli:two"))
+    other_runtime = (await loop.runtime_for_session(loop.sessions.get_or_create("cli:two")))
     assert "instance-wide and disabled" in result
     assert "model_preset" in result
     assert other_runtime.model == "base-model"
