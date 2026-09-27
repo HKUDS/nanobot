@@ -36,6 +36,7 @@ STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 RETRY_AFTER_BUFFER = 1
+CONTEXT_SAFETY_BUFFER = 1024
 
 RetryEventCallback = Callable[[str], Awaitable[None]]
 LLMCallObserver = Callable[["LLMCallRecord"], None]
@@ -273,6 +274,8 @@ class ProviderCallContext:
     # None opts out (auxiliary calls); an empty name denotes an unnamed preset.
     response_preset: str | None = None
     response_is_fallback: bool = False
+    # A pre-request compactor must fit this budget before sending the pending input.
+    compaction_input_budget: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -818,6 +821,10 @@ class LLMProvider(ABC):
 
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Whether requests may include provider-native context compaction."""
+        return False
+
+    def supports_pre_request_compaction(self, model: str | None = None) -> bool:
+        """Whether the provider enforces compaction_input_budget before generation."""
         return False
 
     @staticmethod

@@ -24,6 +24,7 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
+from nanobot.utils.helpers import atomic_write_lines
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 from nanobot.webui.session_identity import webui_chat_id, webui_session_key
 
@@ -443,20 +444,13 @@ def _records_with_replay_identity(
 
 def _write_records_to_path(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            for row in rows:
-                raw = _record_json_line(row)
-                if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
-                    raise ValueError("webui transcript line too large")
-                f.write(raw + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    lines: list[str] = []
+    for row in rows:
+        raw = _record_json_line(row)
+        if len(raw.encode("utf-8")) > _MAX_TRANSCRIPT_FILE_BYTES:
+            raise ValueError("webui transcript line too large")
+        lines.append(raw)
+    atomic_write_lines(path, lines)
 
 
 def _segment_file_path(session_key: str, segment_id: str) -> Path:

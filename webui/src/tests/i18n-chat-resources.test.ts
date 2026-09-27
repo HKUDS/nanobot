@@ -23,4 +23,19 @@ describe("chat translation resources", () => {
       expect(i18n.t(key), key).not.toBe(key);
     }
   });
+
+  it("uses one Chinese work-status vocabulary with and without duration", async () => {
+    const i18n = createInstance();
+    await i18n.init({
+      lng: "zh-CN",
+      fallbackLng: false,
+      resources: { "zh-CN": { translation: zhCN } },
+    });
+
+    expect(i18n.t("message.activityWorkingFor", { duration: "15s" })).toBe("处理中 15s");
+    expect(i18n.t("message.activityWorked")).toBe("已处理");
+    expect(i18n.t("message.activityWorkedFor", { duration: "15s" })).toBe("已处理 15s");
+    expect(i18n.t("message.activityShowFor", { duration: "15s" })).toBe("查看过程 15s");
+    expect(i18n.t("message.activityHide")).toBe("收起过程");
+  });
 });

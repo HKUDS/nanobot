@@ -56,6 +56,7 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.session_identity import is_webui_session_key
+from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import append_session_message_input
 
 WEBUI_SESSION_METADATA_KEY = "webui"
@@ -390,26 +391,13 @@ def clear_websocket_turn_if_current(
     if not owner:
         return False
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
-    if turns is not None:
-        if owner not in turns:
-            return False
-        if preserve_persistence_failure and turns[owner].transcript_persistence_failed:
-            return False
-        turns.pop(owner)
-        _sync_websocket_turn_projection(chat_id)
-        return True
-
-    # Compatibility for callers/tests that populated the legacy projection
-    # directly before the multi-owner registry existed.
-    if (
-        chat_id in _WEBSOCKET_TURN_WALL_STARTED_AT
-        and _WEBSOCKET_TURN_OWNERS.get(chat_id) == owner
-    ):
-        _WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
-        _WEBSOCKET_TURN_IDS.pop(chat_id, None)
-        _WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
-        return True
-    return False
+    if turns is None or owner not in turns:
+        return False
+    if preserve_persistence_failure and turns[owner].transcript_persistence_failed:
+        return False
+    turns.pop(owner)
+    _sync_websocket_turn_projection(chat_id)
+    return True
 
 
 def clear_websocket_turns(chat_id: str) -> None:
@@ -718,6 +706,13 @@ class WebuiTurnCoordinator:
         )
         if self.recovery is not None:
             await self.recovery.turn_completed(event.context.session_key)
+        if event.outcome == "completed" and is_webui_session_key(event.context.session_key):
+            turn_id = event.context.metadata.get(WEBUI_TURN_METADATA_KEY)
+            if isinstance(turn_id, str) and turn_id:
+                try:
+                    update_star_prompt("completed", turn_id=turn_id)
+                except (OSError, ValueError, TimeoutError):
+                    logger.warning("Could not persist Star invitation usage")
         self._schedule_title_update_from_event(event)
 
     async def _handle_goal_state_changed(self, event: GoalStateChanged) -> None:

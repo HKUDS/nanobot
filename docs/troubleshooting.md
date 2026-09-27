@@ -32,6 +32,26 @@ If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram,
 `nanobot status` does not call the model. If provider/model setup is incomplete, it points to
 WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
 
+## Session storage overlaps the workspace
+
+Sessions live at `<config-dir>/sessions/<workspace-id>/`, outside the agent workspace.
+If startup reports a conflict, compare the printed paths. A valid layout is
+`bot/config.json`, `bot/sessions/`, and `bot/workspace/`.
+
+`--workspace` overrides `agents.defaults.workspace` without moving sessions. The override
+is temporary for `agent` and `gateway`; `webui --workspace` saves it to the config.
+
+To fix an existing instance:
+
+1. Stop the instance and back up its config directory and workspace.
+2. Keep the workspace and `.nanobot/workspace-id` in place. Move the config file **and its
+   runtime data, including sessions**, to a directory outside the workspace.
+3. Update `--config` in your launch command or service, check relative paths, and restart.
+
+Moving only the config leaves history behind. Choosing a new workspace without moving
+its contents (including memory, skills, and `.nanobot/workspace-id`) can start an empty
+workspace with a different session identity.
+
 ## How to Read `nanobot status`
 
 `nanobot status` does not call a model. It checks the selected config and workspace,

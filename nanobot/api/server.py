@@ -52,7 +52,6 @@ _REQUEST_TIMEOUT_KEY = web.AppKey[float]("request_timeout")
 _SESSION_LOCKS_KEY = web.AppKey[dict[str, asyncio.Lock]]("session_locks")
 _PREPARE_AGENT_KEY = web.AppKey[Callable[[], Awaitable[None]] | None]("prepare_agent")
 _REQUEST_ID_KEY = web.RequestKey[str]("request_id")
-_MISSING = object()
 
 
 class _UsageCaptureHook(AgentHook):
@@ -66,28 +65,8 @@ class _UsageCaptureHook(AgentHook):
         self.usage = context.usage
 
 
-def _app_value(
-    app: Any,
-    key: web.AppKey[Any],
-    legacy_key: str,
-    default: Any = _MISSING,
-) -> Any:
-    """Read typed aiohttp state while accepting lightweight dict test doubles."""
-    try:
-        return app[key]
-    except KeyError:
-        if default is _MISSING:
-            return app[legacy_key]
-        return app.get(legacy_key, default)
-
-
-async def _prepare_agent(app: Any) -> None:
-    prepare: Callable[[], Awaitable[None]] | None = _app_value(
-        app,
-        _PREPARE_AGENT_KEY,
-        "prepare_agent",
-        None,
-    )
+async def _prepare_agent(app: web.Application) -> None:
+    prepare = app[_PREPARE_AGENT_KEY]
     if prepare is not None:
         await prepare()
 
@@ -295,14 +274,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
     """POST /v1/chat/completions — supports JSON and multipart/form-data."""
     content_type = _as_str(cast(object, request.content_type or ""))
 
-    agent_loop = _app_value(request.app, _AGENT_LOOP_KEY, "agent_loop")
-    timeout_s: float = _app_value(
-        request.app,
-        _REQUEST_TIMEOUT_KEY,
-        "request_timeout",
-        120.0,
-    )
-    model_name: str = _app_value(request.app, _MODEL_NAME_KEY, "model_name", "nanobot")
+    agent_loop = request.app[_AGENT_LOOP_KEY]
+    timeout_s: float = request.app[_REQUEST_TIMEOUT_KEY]
+    model_name: str = request.app[_MODEL_NAME_KEY]
 
     stream = False
     try:
@@ -335,11 +309,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
-    session_locks: dict[str, asyncio.Lock] = _app_value(
-        request.app,
-        _SESSION_LOCKS_KEY,
-        "session_locks",
-    )
+    session_locks: dict[str, asyncio.Lock] = request.app[_SESSION_LOCKS_KEY]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
     logger.info(
@@ -450,7 +420,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
 
 async def handle_models(request: web.Request) -> web.Response:
     """GET /v1/models"""
-    model_name = _app_value(request.app, _MODEL_NAME_KEY, "model_name", "nanobot")
+    model_name = request.app[_MODEL_NAME_KEY]
     return web.json_response(
         {
             "object": "list",

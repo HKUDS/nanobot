@@ -552,6 +552,14 @@ class _RetryOAuthWithDiscoveredMetadata(BaseException):
     """Restart the SDK flow after discovery without logging a false OAuth failure."""
 
 
+class _OAuthAuthorizationInterrupted(BaseException):
+    """Carry expected authorization state past the SDK's generic error logger."""
+
+    def __init__(self, error: MCPAuthorizationRequiredError) -> None:
+        self.error = error
+        super().__init__(str(error))
+
+
 class _RetryOAuthWithStoredCredentials(BaseException):
     """Restart the SDK flow with credentials refreshed by another provider."""
 
@@ -759,7 +767,10 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
             self.context.client_info = None
             self._token_issuer = None
             raise _RetryOAuthWithStoredCredentials
-        return await super()._perform_authorization()
+        try:
+            return await super()._perform_authorization()
+        except MCPAuthorizationRequiredError as exc:
+            raise _OAuthAuthorizationInterrupted(exc) from exc
 
     async def async_auth_flow(
         self,
@@ -790,6 +801,12 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
                                 outgoing = await flow.asend(response)
                             except StopAsyncIteration:
                                 return
+                except _OAuthAuthorizationInterrupted as exc:
+                    logger.info(
+                        "MCP server '{}': OAuth request stopped at browser authorization",
+                        self._nanobot_storage.server_name,
+                    )
+                    raise exc.error from None
                 except _RetryOAuthWithDiscoveredMetadata:
                     # The SDK has now validated discovery metadata. Mark the token
                     # expired so its normal pre-request branch refreshes against the

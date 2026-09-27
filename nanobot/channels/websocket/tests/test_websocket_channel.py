@@ -21,6 +21,7 @@ from nanobot.bus.events import (
     INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     RUNTIME_CONTROL_SESSION_DISCARD,
+    InboundMessage,
     OutboundMessage,
 )
 from nanobot.bus.outbound_events import (
@@ -91,6 +92,20 @@ from .ws_test_client import http_get as _http_get
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
 _PORT = 29876
+
+
+async def _register_running_turn(
+    chat_id: str, started_at: float, *, owner: str | None = None,
+) -> None:
+    metadata = {}
+    if owner:
+        metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
+    await wth.publish_turn_run_status(
+        MessageBus(),
+        InboundMessage(channel="websocket", sender_id="user", chat_id=chat_id,
+                       content="hello", metadata=metadata),
+        "running", started_at=started_at,
+    )
 
 
 def _thread_conversation_events(body: dict[str, Any]) -> list[dict[str, Any]]:
@@ -302,6 +317,59 @@ async def _new_temporary_chat(
     assert payload["temporary"] is True
     connection.send.reset_mock()
     return payload["chat_id"]
+
+
+@pytest.mark.asyncio
+async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("synthetic preview")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    sessions = SessionManager(workspace)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(
+            bus, session_manager=sessions, workspace_path=workspace,
+            default_restrict_to_workspace=False,
+        ),
+    )
+    owner, other = AsyncMock(), AsyncMock()
+    chat_id = await _new_temporary_chat(channel, owner)
+    channel._webui_connections.add(other)
+    disk_before = {path for path in tmp_path.rglob("*") if path.is_file()}
+
+    async def preview(connection, path="notes.txt", probe=False, metadata=False):
+        await channel._dispatch_envelope(connection, "webui-client", {
+            "type": "webui_request", "request_id": "private-preview",
+            "action": "temporary_chat.file_preview",
+            "payload": {"chat_id": chat_id, "path": path, "probe": probe, "metadata": metadata},
+        })
+        return json.loads(connection.send.await_args.args[0])
+
+    result = await preview(owner)
+    assert result["ok"] is True
+    assert result["result"]["content"] == "synthetic preview"
+    assert (await preview(owner, probe=True))["result"] == {"available": True}
+    assert (await preview(owner, metadata=True))["result"] == {
+        "path": str((workspace / "notes.txt").resolve()), "relative_path": "notes.txt",
+    }
+    assert (await preview(other, metadata=True))["error"]["status"] == 404
+    assert (await preview(owner, str(outside), metadata=True))["error"]["status"] == 403
+    assert (await preview(other))["error"]["status"] == 404
+    assert (await preview(owner, str(outside)))["error"]["status"] == 403
+    assert (await preview(owner, str(outside), probe=True))["result"] == {"available": False}
+    assert (await preview(AsyncMock()))["error"]["status"] == 403
+    assert not channel._webui_request_operations
+    assert {path for path in tmp_path.rglob("*") if path.is_file()} == disk_before
+    assert sessions.list_sessions() == []
+
+    await channel._dispatch_envelope(owner, "webui-client", {
+        "type": "discard_temporary_chat", "chat_id": chat_id,
+    })
+    assert (await preview(owner))["error"]["status"] == 404
+    assert (await preview(owner, metadata=True))["error"]["status"] == 404
+    assert not channel._webui_request_operations
 
 
 @pytest.mark.asyncio
@@ -1623,6 +1691,7 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
     )
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
 
     await channel._dispatch_envelope(
         conn,
@@ -1744,6 +1813,7 @@ async def test_workspace_scope_change_invalidates_other_attached_clients(
     )
     origin = AsyncMock()
     origin.remote_address = ("127.0.0.1", 50123)
+    origin.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
     peer = AsyncMock()
     peer.remote_address = ("127.0.0.1", 50124)
     channel._attach(origin, "shared")
@@ -1866,6 +1936,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
     )
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
 
     await channel._dispatch_envelope(
         conn,
@@ -1879,7 +1950,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
             },
         },
     )
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
+    await _register_running_turn("chat-running", 123.0)
     try:
         await channel._dispatch_envelope(
             conn,
@@ -1897,7 +1968,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
             },
         )
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-running")
 
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
@@ -1943,7 +2014,7 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
     )
     conn.send.reset_mock()
 
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
+    await _register_running_turn("chat-running", 123.0)
     try:
         await channel._dispatch_envelope(
             conn,
@@ -1958,7 +2029,7 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
             },
         )
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-running")
 
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
@@ -3231,8 +3302,7 @@ async def test_turn_end_persists_and_conditionally_clears_when_delivery_fails(
     mock_ws.send.side_effect = RuntimeError("fanout failed")
     chat_id = f"turn-end-failure-{expected_cleared}"
     channel._attach(mock_ws, chat_id)
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT[chat_id] = 1234.5
-    wth._WEBSOCKET_TURN_OWNERS[chat_id] = active_owner
+    await _register_running_turn(chat_id, 1234.5, owner=active_owner)
 
     try:
         await channel.send(OutboundMessage(
@@ -3249,9 +3319,7 @@ async def test_turn_end_persists_and_conditionally_clears_when_delivery_fails(
         if not expected_cleared:
             assert wth._WEBSOCKET_TURN_OWNERS[chat_id] == active_owner
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
-        wth._WEBSOCKET_TURN_IDS.pop(chat_id, None)
-        wth._WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
+        wth.clear_websocket_turns(chat_id)
 
 
 @pytest.mark.asyncio
@@ -3626,8 +3694,7 @@ async def test_idle_clears_matching_owner_when_delivery_fails() -> None:
     chat_id = "idle-failure"
     owner = "owner-idle"
     channel._attach(mock_ws, chat_id)
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT[chat_id] = 1234.5
-    wth._WEBSOCKET_TURN_OWNERS[chat_id] = owner
+    await _register_running_turn(chat_id, 1234.5, owner=owner)
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -3916,10 +3983,10 @@ async def test_hydrate_replays_running_turn() -> None:
 
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     try:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        await _register_running_turn("chat-1", 1_700_000_000.0)
         await channel._outbound.hydrate("chat-1")
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop("chat-1", None)
+        wth.clear_websocket_turns("chat-1")
 
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
@@ -5586,13 +5653,13 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     )
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
 
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth.clear_websocket_turns("chat-1")
     try:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        asyncio.run(_register_running_turn("chat-1", 1_700_000_000.0))
         req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
         resp = asyncio.run(channel.gateway.http._handle_sessions_list(req))
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-1")
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
@@ -6128,6 +6195,31 @@ def test_handle_webui_thread_get_returns_canonical_events_by_default(
         assert answer["response_sources"] == sources
 
 
+@pytest.mark.parametrize("authorized", [True, False])
+def test_handle_file_reference_metadata_is_authenticated_and_no_store(tmp_path, authorized) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    source = tmp_path / "notes.bin"
+    source.write_bytes(b"\0binary")
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote("websocket:file-actions", safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path=notes.bin&metadata=1",
+        Headers([("Authorization", "Bearer tok")]) if authorized else Headers(),
+    )
+    resp = gateway.http._handle_file_preview(req, enc)
+    assert resp.status_code == (200 if authorized else 401)
+    if authorized:
+        assert json.loads(resp.body.decode()) == {
+            "path": str(source.resolve()), "relative_path": "notes.bin",
+        }
+        assert resp.headers["Cache-Control"] == "no-store"
+
+
 def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     from urllib.parse import quote
 
@@ -6157,6 +6249,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     assert body["language"] == "python"
     assert body["content"].splitlines() == ["print('hello')"]
     assert body["truncated"] is False
+    assert resp.headers["Cache-Control"] == "no-store"
 
 
 def test_handle_file_preview_probe_checks_availability_without_content(tmp_path) -> None:
@@ -6184,6 +6277,7 @@ def test_handle_file_preview_probe_checks_availability_without_content(tmp_path)
 
     assert resp.status_code == 200
     assert json.loads(resp.body.decode()) == {"available": True}
+    assert resp.headers["Cache-Control"] == "no-store"
 
 
 def test_handle_file_preview_probe_reports_missing_file_as_unavailable(tmp_path) -> None:
@@ -6493,3 +6587,37 @@ def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
     assert [message["content"] for message in _thread_conversation_events(body)] == [
         "subagent summary",
     ]
+
+
+@pytest.mark.parametrize("headers,allowed", [
+    (None, False),
+    ([], False),
+    ({}, False),
+    ({"Host": "localhost:8765"}, True),
+    ({"Host": "remote.example"}, False),
+    ({"Host": "localhost:8765", "X-Forwarded-For": "203.0.113.8"}, False),
+])
+async def test_full_access_requires_local_handshake(bus, tmp_path, headers, allowed):
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path,
+                               default_restrict_to_workspace=True),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=headers) if headers is not None else None
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "set_workspace_scope",
+        "chat_id": "handshake-scope",
+        "workspace_scope": {"project_path": str(tmp_path), "access_mode": "full"},
+    })
+    result = json.loads(conn.send.await_args.args[0])
+    if allowed:
+        assert result["event"] == "session_updated"
+        assert result["workspace_scope"]["access_mode"] == "full"
+    else:
+        assert result["event"] == "error"
+        assert result["reason"] == "full workspace access is unavailable for this connection"
+        assert sessions.read_session_file("websocket:handshake-scope") is None

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionTitle, useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
+import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
 import { canonicalThreadPayload } from "./thread-test-payload";
 
@@ -72,6 +73,27 @@ function wrap(
 }
 
 describe("useSessions", () => {
+  it("shows tab-cached sessions while revalidating and removes server-deleted rows", async () => {
+    activateReloadCache("ws://localhost:8765/");
+    writeReloadCache("sessions", [{
+      key: "websocket:cached", channel: "websocket", chatId: "cached", preview: "Saved answer",
+      createdAt: null, updatedAt: null,
+    }]);
+    let finish!: (rows: Awaited<ReturnType<typeof api.listSessions>>) => void;
+    vi.mocked(api.listSessions).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result, unmount } = renderHook(() => useSessions(), { wrapper: wrap(fakeClient()) });
+    try {
+      expect(result.current.sessions[0]?.key).toBe("websocket:cached");
+      expect(result.current.loading).toBe(true);
+      await act(async () => finish([]));
+      expect(result.current.sessions).toEqual([]);
+      expect(result.current.loading).toBe(false);
+    } finally {
+      unmount();
+      clearReloadCache();
+    }
+  });
+
   it("coalesces a burst across tasks and preserves unchanged session identities", async () => {
     const row = { key: "websocket:burst", channel: "websocket", chatId: "burst",
       createdAt: "2026-09-08", updatedAt: "2026-09-08", preview: "Stable" };

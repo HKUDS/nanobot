@@ -45,34 +45,20 @@ def test_format_timing_cron_without_tz(tmp_path) -> None:
     assert tool._format_timing(s) == "cron: */5 * * * *"
 
 
-def test_format_timing_every_hours(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "expected, every_ms",
+    [
+        pytest.param("every 2h", 7200000, id="hours"),
+        pytest.param("every 30m", 1800000, id="minutes"),
+        pytest.param("every 30s", 30000, id="seconds"),
+        pytest.param("every 90s", 90000, id="non_minute_seconds"),
+        pytest.param("every 200ms", 200, id="milliseconds"),
+    ],
+)
+def test_format_timing_every_interval(tmp_path, expected, every_ms) -> None:
     tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=7_200_000)
-    assert tool._format_timing(s) == "every 2h"
-
-
-def test_format_timing_every_minutes(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=1_800_000)
-    assert tool._format_timing(s) == "every 30m"
-
-
-def test_format_timing_every_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=30_000)
-    assert tool._format_timing(s) == "every 30s"
-
-
-def test_format_timing_every_non_minute_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=90_000)
-    assert tool._format_timing(s) == "every 90s"
-
-
-def test_format_timing_every_milliseconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=200)
-    assert tool._format_timing(s) == "every 200ms"
+    s = CronSchedule(kind="every", every_ms=every_ms)
+    assert tool._format_timing(s) == expected
 
 
 def test_format_timing_at(tmp_path) -> None:
@@ -162,64 +148,26 @@ def test_list_cron_job_shows_expression_and_timezone(tmp_path) -> None:
     assert "cron: 0 9 * * 1-5 (America/Denver)" in result
 
 
-def test_list_every_job_shows_human_interval(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("every_ms", "expected"),
+    [
+        pytest.param(1_800_000, "every 30m", id="minutes"),
+        pytest.param(7_200_000, "every 2h", id="hours"),
+        pytest.param(30_000, "every 30s", id="seconds"),
+        pytest.param(90_000, "every 90s", id="non-minute-seconds"),
+        pytest.param(200, "every 200ms", id="milliseconds"),
+    ],
+)
+def test_list_every_job_shows_human_interval(tmp_path, every_ms, expected) -> None:
     tool = _make_tool(tmp_path)
     tool._cron.add_job(
         name="Frequent check",
-        schedule=CronSchedule(kind="every", every_ms=1_800_000),
+        schedule=CronSchedule(kind="every", every_ms=every_ms),
         message="check",
         **_bound_chat(),
     )
     result = tool._list_jobs()
-    assert "every 30m" in result
-
-
-def test_list_every_job_hours(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.add_job(
-        name="Hourly check",
-        schedule=CronSchedule(kind="every", every_ms=7_200_000),
-        message="check",
-        **_bound_chat(),
-    )
-    result = tool._list_jobs()
-    assert "every 2h" in result
-
-
-def test_list_every_job_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.add_job(
-        name="Fast check",
-        schedule=CronSchedule(kind="every", every_ms=30_000),
-        message="check",
-        **_bound_chat(),
-    )
-    result = tool._list_jobs()
-    assert "every 30s" in result
-
-
-def test_list_every_job_non_minute_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.add_job(
-        name="Ninety-second check",
-        schedule=CronSchedule(kind="every", every_ms=90_000),
-        message="check",
-        **_bound_chat(),
-    )
-    result = tool._list_jobs()
-    assert "every 90s" in result
-
-
-def test_list_every_job_milliseconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.add_job(
-        name="Sub-second check",
-        schedule=CronSchedule(kind="every", every_ms=200),
-        message="check",
-        **_bound_chat(),
-    )
-    result = tool._list_jobs()
-    assert "every 200ms" in result
+    assert expected in result
 
 
 def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:

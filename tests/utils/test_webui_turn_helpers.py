@@ -102,10 +102,13 @@ async def test_publish_turn_run_status_idle_retains_registry_until_delivery() ->
     assert wth.websocket_turn_id("chat-b") == "turn-b"
 
 
-def test_clear_websocket_turn_only_clears_matching_owner() -> None:
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-b"] = 1234.5
-    wth._WEBSOCKET_TURN_IDS["chat-b"] = "turn-new"
-    wth._WEBSOCKET_TURN_OWNERS["chat-b"] = "owner-new"
+async def test_clear_websocket_turn_only_clears_matching_owner() -> None:
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="websocket", sender_id="u", chat_id="chat-b", content="hi",
+        metadata={"webui_turn_id": "turn-new", WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-new"},
+    )
+    await wth.publish_turn_run_status(bus, msg, "running", started_at=1234.5)
 
     assert wth.clear_websocket_turn_if_current("chat-b", "owner-old") is False
     assert wth.websocket_turn_wall_started_at("chat-b") == 1234.5

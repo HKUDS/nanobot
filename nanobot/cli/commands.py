@@ -347,6 +347,7 @@ def serve(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the OpenAI-compatible API server (/v1/chat/completions)."""
+    runtime_config = _load_runtime_config(config, workspace)
     try:
         from aiohttp import web  # noqa: F401
     except ImportError:
@@ -360,7 +361,6 @@ def serve(
 
     _set_nanobot_logs(verbose)
 
-    runtime_config = _load_runtime_config(config, workspace)
     api_cfg = runtime_config.api
     host = host if host is not None else api_cfg.host
     port = port if port is not None else api_cfg.port

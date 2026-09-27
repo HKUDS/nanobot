@@ -303,6 +303,21 @@ class TestSpawnWindows:
         assert f"\n& {command}\n" in powershell_command
 
     @pytest.mark.asyncio
+    async def test_powershell_invokes_quoted_windows_executable_without_arguments(self):
+        """A quoted executable path is still a command when it has no arguments."""
+        env = {"PATH": ""}
+        command = r'"D:\Program Files\Git\cmd\git.exe"'
+        with (
+            patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+        ):
+            mock_exec.return_value = AsyncMock()
+            await ExecTool._spawn(command, r"C:\work", env)
+
+        powershell_command = mock_exec.call_args[0][-1]
+        assert f"\n& {command}\n" in powershell_command
+
+    @pytest.mark.asyncio
     async def test_prefers_pwsh_when_available(self):
         env = {"PATH": ""}
 

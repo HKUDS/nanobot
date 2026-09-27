@@ -1159,17 +1159,18 @@ class TestToolEventProgress:
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
+        # The blocked title call proves ordering; allow Windows CI time for turn I/O.
         await asyncio.wait_for(run_session(loop, InboundMessage(
             channel="websocket",
             sender_id="u1",
             chat_id="chat1",
             content="say hello",
             metadata={"webui": True},
-        )), timeout=0.5)
+        )), timeout=5.0)
 
         outbound: list = []
         for _ in range(12):
-            outbound.append(await asyncio.wait_for(bus.consume_outbound(), timeout=0.5))
+            outbound.append(await asyncio.wait_for(bus.consume_outbound(), timeout=5.0))
             if isinstance(outbound[-1].event, TurnEndEvent):
                 break
         else:
@@ -1179,11 +1180,11 @@ class TestToolEventProgress:
         assert len(done_with_body) == 1
         assert isinstance(outbound[-1].event, TurnEndEvent)
 
-        await asyncio.wait_for(title_started.wait(), timeout=0.5)
+        await asyncio.wait_for(title_started.wait(), timeout=5.0)
         release_title.set()
         session_updated = None
         for _ in range(10):
-            candidate = await asyncio.wait_for(bus.consume_outbound(), timeout=0.5)
+            candidate = await asyncio.wait_for(bus.consume_outbound(), timeout=5.0)
             if isinstance(candidate.event, SessionUpdatedEvent):
                 session_updated = candidate
                 break

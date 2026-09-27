@@ -444,7 +444,7 @@ interface RenderedRetryStatus extends RetryStatus {
   nextRetryAtMs?: number
 }
 
-export function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now()): string {
+function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now()): string {
   const label = retryFailureLabel(status.error_kind)
   if (status.state === "exhausted") return `${label} · ending turn`
   if (status.state === "recovered") return "Connection restored"

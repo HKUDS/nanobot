@@ -8,6 +8,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ActivityStep } from "@/components/thread/activity/ActivityStep";
 import {
@@ -16,6 +17,7 @@ import {
   type GenericToolStatus,
   type ToolFamily,
 } from "@/components/thread/activity/generic-tool-model";
+import { formatActivityTarget } from "@/components/thread/activity/activity-text";
 
 interface GenericToolRunModel {
   status: GenericToolStatus;
@@ -26,8 +28,9 @@ interface GenericToolRunModel {
 }
 
 export function GenericToolRun({ items }: { items: GenericToolRunItem[] }) {
-  const model = useMemo(() => buildModel(items), [items]);
-  const action = [model.label, model.detail].filter(Boolean).join(" ");
+  const { t } = useTranslation();
+  const model = useMemo(() => buildModel(items, t), [items, t]);
+  const action = formatActivityTarget(t, model.label, model.detail);
   const label = model.aside ? `${action} · ${model.aside}` : action;
 
   return (
@@ -40,9 +43,9 @@ export function GenericToolRun({ items }: { items: GenericToolRunItem[] }) {
   );
 }
 
-function buildModel(items: GenericToolRunItem[]): GenericToolRunModel {
+function buildModel(items: GenericToolRunItem[], t: ReturnType<typeof useTranslation>["t"]): GenericToolRunModel {
   const family = items[0]?.trace.family ?? "generic";
-  const presentation = describeGenericToolRun(items);
+  const presentation = describeGenericToolRun(items, t);
   return {
     ...presentation,
     icon: activityIcon(family),

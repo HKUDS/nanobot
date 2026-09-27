@@ -343,18 +343,18 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
     assert "hard policy boundary" in error
 
 
-def test_exec_guard_blocks_bare_tilde_cwd_escape(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("cd ~ && cat secret.txt", id="bare_tilde_cwd_escape"),
+        pytest.param("cat ~root/.bashrc", id="named_user_home_path"),
+        pytest.param("cat --config=~/.nanobot/config.json", id="equals_home_path_outside_workspace"),
+        pytest.param("cat --config=~root/.bashrc", id="equals_named_user_home_path"),
+    ],
+)
+def test_exec_guard_blocks_home_paths_outside_workspace(tmp_path, command) -> None:
     tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cd ~ && cat secret.txt", str(tmp_path))
-    assert error is not None
-    assert error.startswith(
-        "Error: Command blocked by safety guard (path outside working dir)"
-    )
-
-
-def test_exec_guard_blocks_named_user_home_path(tmp_path) -> None:
-    tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cat ~root/.bashrc", str(tmp_path))
+    error = tool._guard_command(command, str(tmp_path))
     assert error is not None
     assert error.startswith(
         "Error: Command blocked by safety guard (path outside working dir)"
@@ -383,24 +383,6 @@ def test_exec_guard_blocks_home_paths_with_special_shell_contexts(
 def test_exec_guard_allows_current_directory_tilde(tmp_path) -> None:
     tool = ExecTool(restrict_to_workspace=True)
     assert tool._guard_command("cat ~+/file.txt", str(tmp_path)) is None
-
-
-def test_exec_guard_blocks_equals_home_path_outside_workspace(tmp_path) -> None:
-    tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cat --config=~/.nanobot/config.json", str(tmp_path))
-    assert error is not None
-    assert error.startswith(
-        "Error: Command blocked by safety guard (path outside working dir)"
-    )
-
-
-def test_exec_guard_blocks_equals_named_user_home_path(tmp_path) -> None:
-    tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cat --config=~root/.bashrc", str(tmp_path))
-    assert error is not None
-    assert error.startswith(
-        "Error: Command blocked by safety guard (path outside working dir)"
-    )
 
 
 def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:

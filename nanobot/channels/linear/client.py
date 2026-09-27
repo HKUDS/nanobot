@@ -3,17 +3,35 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 import time
-from typing import Any, cast
+from pathlib import Path
+from typing import Any, NotRequired, TypedDict, cast
 
 import httpx
 
 from nanobot.channels.linear.config import LinearConfig
 from nanobot.channels.linear.oauth import LINEAR_SCOPES
 from nanobot.channels.linear.state import LinearInstallation, LinearStateStore
+from nanobot.security.network import validate_url_target
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token"
+LINEAR_REVOKE_URL = "https://api.linear.app/oauth/revoke"
+MAX_UPLOAD_BYTES = 40 * 1024 * 1024
+MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
+
+
+class LinearMember(TypedDict):
+    id: str
+    name: str
+    teams: list[str]
+    avatar_url: NotRequired[str | None]
+
+
+class LinearWorkspaceProfile(TypedDict):
+    organization_id: str
+    logo_url: str | None
 
 
 class LinearApiError(RuntimeError):
@@ -84,7 +102,7 @@ class LinearClient:
             expires_at=time.time() + _expires_in(token),
             scope=scopes,
         )
-        self.state.save_installation(installation)
+        self.state.save_installation(installation, reauthorize=True)
         return installation
 
     async def graphql(
@@ -102,6 +120,104 @@ class LinearClient:
         installation = await self._refresh(organization_id, force=True)
         return await self._graphql_with_token(installation.access_token, query, variables)
 
+    async def workspace_profile(self, organization_id: str) -> LinearWorkspaceProfile:
+        """Optional display metadata must not race token rotation for real agent work."""
+        installation = self.state.installation(organization_id)
+        if (installation is None or installation.oauth_client_id != self.config.client_id
+                or installation.expires_at <= time.time()):
+            raise LinearApiError("No current Linear authorization for workspace profile")
+        # Cosmetic prefetch never refreshes credentials. A failed/expired read uses
+        # the UI fallback and can be retried after normal channel work refreshes OAuth.
+        data = await self._graphql_with_token(
+            installation.access_token,
+            "query NanobotWorkspaceProfile { organization { id logoUrl } }",
+            {},
+        )
+        organization = _required_mapping(data, "organization")
+        if _required_string(organization, "id") != organization_id:
+            raise LinearApiError("Linear returned an unexpected workspace identity")
+        logo = organization.get("logoUrl")
+        return {"organization_id": organization_id, "logo_url": logo if isinstance(logo, str) else None}
+
+    async def list_members(
+        self, organization_id: str, *, user_id: str | None = None,
+    ) -> list[LinearMember]:
+        """Read active humans in teams visible to this app, never workspace-wide users.
+
+        A filtered lookup is also used at request admission: departed members and
+        revoked team access must not keep working through old local approvals.
+        No stale directory cache is used to authorize a request.
+        """
+        teams = await self._connection_nodes(
+            organization_id,
+            """query NanobotMemberTeams($after: String) {
+              teams(first: 50, after: $after) {
+                nodes { id name } pageInfo { hasNextPage endCursor }
+              }
+            }""",
+            {}, ("teams",),
+        )
+        members: dict[str, LinearMember] = {}
+        for team in teams:
+            team_id = _required_string(team, "id")
+            team_name = _required_string(team, "name")
+            nodes = await self._connection_nodes(
+                organization_id,
+                """query NanobotTeamMembers($team: String!, $after: String, $filter: UserFilter) {
+                  team(id: $team) {
+                    members(first: 50, after: $after, filter: $filter) {
+                      nodes { id name active app avatarUrl }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }""",
+                {"team": team_id, "filter": {"id": {"eq": user_id}} if user_id else None},
+                ("team", "members"),
+            )
+            for node in nodes:
+                if not isinstance(node.get("active"), bool) or not isinstance(node.get("app"), bool):
+                    raise LinearApiError("Linear returned an incomplete member identity")
+                if node["active"] is not True or node["app"] is True:
+                    continue
+                member_id = _required_string(node, "id")
+                name = _required_string(node, "name")
+                if user_id is not None and member_id != user_id:
+                    raise LinearApiError("Linear returned an unexpected member identity")
+                member = members.setdefault(member_id, {"id": member_id, "name": name, "teams": []})
+                avatar_url = node.get("avatarUrl")
+                member["avatar_url"] = avatar_url if isinstance(avatar_url, str) else None
+                if team_name not in member["teams"]:
+                    member["teams"].append(team_name)
+        return sorted(members.values(), key=lambda member: (member["name"].casefold(), member["id"]))
+
+    async def _connection_nodes(
+        self, organization_id: str, query: str, variables: dict[str, Any], path: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        nodes: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        for _ in range(200):
+            connection = await self.graphql(organization_id, query, {**variables, "after": cursor})
+            for key in path:
+                connection = _required_mapping(connection, key)
+            raw_nodes = connection.get("nodes")
+            if not isinstance(raw_nodes, list):
+                raise LinearApiError("Linear returned an invalid member directory")
+            for raw_node in cast(list[object], raw_nodes):
+                if not isinstance(raw_node, dict):
+                    raise LinearApiError("Linear returned an invalid member directory")
+                nodes.append(cast(dict[str, Any], raw_node))
+            page = _required_mapping(connection, "pageInfo")
+            if page.get("hasNextPage") is False:
+                return nodes
+            if page.get("hasNextPage") is not True:
+                raise LinearApiError("Linear returned incomplete pagination information")
+            cursor = _required_string(page, "endCursor")
+            if cursor in seen:
+                raise LinearApiError("Linear returned a repeated member directory cursor")
+            seen.add(cursor)
+        raise LinearApiError("Linear member directory is too large; no partial result was saved")
+
     async def create_activity(
         self,
         organization_id: str,
@@ -110,7 +226,19 @@ class LinearClient:
         *,
         activity_id: str,
         ephemeral: bool = False,
+        signal: str | None = None,
+        signal_metadata: dict[str, Any] | None = None,
     ) -> None:
+        activity_input: dict[str, Any] = {
+            "id": activity_id,
+            "agentSessionId": agent_session_id,
+            "content": content,
+            "ephemeral": ephemeral,
+        }
+        if signal:
+            activity_input["signal"] = signal
+        if signal_metadata:
+            activity_input["signalMetadata"] = signal_metadata
         data = await self.graphql(
             organization_id,
             """
@@ -118,18 +246,173 @@ class LinearClient:
               agentActivityCreate(input: $input) { success agentActivity { id } }
             }
             """,
-            {
-                "input": {
-                    "id": activity_id,
-                    "agentSessionId": agent_session_id,
-                    "content": content,
-                    "ephemeral": ephemeral,
-                }
-            },
+            {"input": activity_input},
         )
         result = _required_mapping(data, "agentActivityCreate")
         if result.get("success") is not True:
             raise LinearApiError("Linear did not accept the agent activity")
+
+    async def revoke_installation(self, installation: LinearInstallation) -> None:
+        """Revoke both tokens for an installation before removing local state."""
+        tokens = (
+            (installation.access_token, "access_token"),
+            (installation.refresh_token, "refresh_token"),
+        )
+        revoked: set[str] = set()
+        for token, token_type in tokens:
+            if not token or token in revoked:
+                continue
+            revoked.add(token)
+            try:
+                response = await self._http.post(
+                    LINEAR_REVOKE_URL,
+                    data={"token": token, "token_type_hint": token_type},
+                )
+            except httpx.HTTPError as exc:
+                raise LinearApiError(
+                    f"Linear authorization revocation failed: {exc}", retryable=True
+                ) from exc
+            # Linear returns 400/401 for tokens that are already unusable. In
+            # either case there is no remaining credential for nanobot to keep.
+            if response.status_code not in {200, 400, 401}:
+                raise LinearApiError(
+                    f"Linear authorization revocation failed with HTTP {response.status_code}",
+                    retryable=response.status_code == 429 or response.status_code >= 500,
+                    retry_after=_retry_after_seconds(response),
+                )
+
+    async def upload_file(self, organization_id: str, file_path: Path) -> str:
+        """Upload a local outbound attachment and return its Linear asset URL."""
+        try:
+            size = file_path.stat().st_size
+        except OSError as exc:
+            raise LinearApiError(f"Unable to read attachment {file_path.name}: {exc}") from exc
+        if not file_path.is_file():
+            raise LinearApiError(f"Attachment is not a file: {file_path.name}")
+        if size > MAX_UPLOAD_BYTES:
+            raise LinearApiError(
+                f"Attachment {file_path.name} is larger than the 40 MB Linear upload limit"
+            )
+        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        data = await self.graphql(
+            organization_id,
+            """
+            mutation NanobotFileUpload($filename: String!, $contentType: String!, $size: Int!) {
+              fileUpload(filename: $filename, contentType: $contentType, size: $size) {
+                success
+                uploadFile { uploadUrl assetUrl headers { key value } }
+              }
+            }
+            """,
+            {"filename": file_path.name, "contentType": content_type, "size": size},
+        )
+        result = _required_mapping(data, "fileUpload")
+        if result.get("success") is not True:
+            raise LinearApiError("Linear did not create an attachment upload")
+        upload = _required_mapping(result, "uploadFile")
+        upload_url = _required_string(upload, "uploadUrl")
+        asset_url = _required_string(upload, "assetUrl")
+        safe, error = await asyncio.to_thread(validate_url_target, upload_url)
+        if not safe:
+            raise LinearApiError(f"Linear returned an unsafe upload URL: {error}")
+        raw_headers = upload.get("headers")
+        headers: dict[str, str] = {}
+        if isinstance(raw_headers, list):
+            for item in cast(list[object], raw_headers):
+                if not isinstance(item, dict):
+                    continue
+                header = cast(dict[str, object], item)
+                key = header.get("key")
+                value = header.get("value")
+                if isinstance(key, str) and isinstance(value, str):
+                    headers[key] = value
+        if not any(key.lower() == "content-type" for key in headers):
+            headers["Content-Type"] = content_type
+        if not any(key.lower() == "cache-control" for key in headers):
+            headers["Cache-Control"] = "public, max-age=31536000"
+        try:
+            content = await asyncio.to_thread(file_path.read_bytes)
+            response = await self._http.put(upload_url, headers=headers, content=content)
+        except (OSError, httpx.HTTPError) as exc:
+            raise LinearApiError(
+                f"Linear attachment upload failed: {exc}",
+                retryable=isinstance(exc, httpx.HTTPError),
+            ) from exc
+        if response.is_error:
+            raise LinearApiError(
+                f"Linear attachment upload failed with HTTP {response.status_code}",
+                retryable=response.status_code == 429 or response.status_code >= 500,
+                retry_after=_retry_after_seconds(response),
+            )
+        return asset_url
+
+    async def download_file(
+        self,
+        organization_id: str,
+        url: str,
+        *,
+        max_bytes: int = MAX_DOWNLOAD_BYTES,
+    ) -> tuple[bytes, str]:
+        """Download one authenticated Linear storage object with a bounded size."""
+        if max_bytes <= 0 or max_bytes > MAX_DOWNLOAD_BYTES:
+            raise LinearApiError("Invalid Linear attachment download limit")
+        parsed = httpx.URL(url)
+        if parsed.scheme != "https" or parsed.host != "uploads.linear.app":
+            raise LinearApiError("Linear attachment URL must use https://uploads.linear.app")
+        installation = await self._fresh_installation(organization_id)
+        try:
+            return await self._download_file_with_token(
+                url, installation.access_token, max_bytes=max_bytes
+            )
+        except LinearApiError as exc:
+            if "authentication" not in str(exc).lower():
+                raise
+        installation = await self._refresh(organization_id, force=True)
+        return await self._download_file_with_token(
+            url, installation.access_token, max_bytes=max_bytes
+        )
+
+    async def _download_file_with_token(
+        self,
+        url: str,
+        access_token: str,
+        *,
+        max_bytes: int,
+    ) -> tuple[bytes, str]:
+        try:
+            async with self._http.stream(
+                "GET",
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+            ) as response:
+                if response.status_code in {401, 403}:
+                    raise LinearApiError("Linear attachment authentication failed")
+                if response.is_error:
+                    raise LinearApiError(
+                        f"Linear attachment download failed with HTTP {response.status_code}",
+                        retryable=response.status_code == 429 or response.status_code >= 500,
+                        retry_after=_retry_after_seconds(response),
+                    )
+                raw_length = response.headers.get("Content-Length", "")
+                try:
+                    content_length = int(raw_length)
+                except ValueError:
+                    content_length = -1
+                if content_length > max_bytes:
+                    raise LinearApiError("Linear attachment exceeds the download budget")
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise LinearApiError("Linear attachment exceeds the download budget")
+                    chunks.append(chunk)
+                content_type = response.headers.get("Content-Type", "application/octet-stream")
+                return b"".join(chunks), content_type.split(";", 1)[0].strip()
+        except httpx.HTTPError as exc:
+            raise LinearApiError(
+                f"Linear attachment download failed: {exc}", retryable=True
+            ) from exc
 
     async def _fresh_installation(self, organization_id: str) -> LinearInstallation:
         installation = self.state.installation(organization_id)
@@ -153,6 +436,8 @@ class LinearClient:
                 raise LinearApiError(
                     f"No Linear OAuth installation for organization {organization_id}"
                 )
+            if installation.oauth_client_id != self.config.client_id:
+                raise LinearApiError("Linear authorization changed; reconnect the workspace")
             if not force and installation.expires_at > time.time() + 60:
                 return installation
             token = await self._token_request(
@@ -172,6 +457,7 @@ class LinearClient:
                 refresh_token=_required_string(token, "refresh_token"),
                 expires_at=time.time() + _expires_in(token),
                 scope=_scopes(token.get("scope")) or installation.scope,
+                authorized_at=installation.authorized_at,
             )
             missing_scopes = set(LINEAR_SCOPES) - set(refreshed.scope)
             if missing_scopes:
@@ -179,7 +465,13 @@ class LinearClient:
                     "Refreshed Linear authorization is missing required scope(s): "
                     + ", ".join(sorted(missing_scopes))
                 )
-            self.state.save_installation(refreshed)
+            # Other clients/processes can remove, reauthorize or rotate this grant
+            # while the HTTP request is in flight. Never persist or use a stale result.
+            if not self.state.refresh_installation(installation, refreshed):
+                raise LinearApiError(
+                    "Linear authorization changed during token refresh; retry the request",
+                    retryable=True,
+                )
             return refreshed
 
     async def _token_request(self, form: dict[str, str]) -> dict[str, Any]:

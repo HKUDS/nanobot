@@ -57,45 +57,21 @@
         color: #fafafa;
       }
 
-      .boot-splash {
-        display: flex;
-        height: 100%;
-        align-items: center;
-        justify-content: center;
+      .startup-shell { position: relative; height: 100%; }
+      .startup-header { display: flex; justify-content: space-between; padding: 5px 13px; }
+      .startup-control-shadow {
+        width: 28px; height: 28px; border-radius: 8px; background: rgba(0,0,0,0.025);
       }
-
-      .boot-splash-inner {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        color: rgba(255, 255, 255, 0.74);
-        font-size: 14px;
+      .startup-composer {
+        position: absolute; inset-inline: 16px; bottom: max(24px, env(safe-area-inset-bottom));
+        box-sizing: border-box; max-width: 768px; margin-inline: auto;
+        height: 96px; border-radius: 24px; background: rgba(0,0,0,0.025);
       }
-
-      html:not(.dark) .boot-splash-inner {
-        color: rgba(10, 10, 10, 0.64);
+      .startup-status {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
       }
-
-      .boot-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 9999px;
-        background: currentColor;
-        opacity: 0.75;
-        animation: boot-pulse 1s ease-in-out infinite;
-      }
-
-      @keyframes boot-pulse {
-        0%,
-        100% {
-          transform: scale(0.9);
-          opacity: 0.45;
-        }
-        50% {
-          transform: scale(1);
-          opacity: 0.85;
-        }
-      }
+      html.dark :is(.startup-control-shadow, .startup-composer) { background: rgba(255,255,255,0.035); }
     </style>
     <script>
       (function () {
@@ -124,12 +100,16 @@
   </head>
   <body class="bg-background text-foreground antialiased">
     <div id="root">
-      <div class="boot-splash">
-        <div class="boot-splash-inner">
-          <span class="boot-dot" aria-hidden="true"></span>
+      <main class="startup-shell" aria-busy="true">
+        <div class="startup-header" aria-hidden="true">
+          <span class="startup-control-shadow"></span>
+          <span class="startup-control-shadow"></span>
+        </div>
+        <div class="startup-composer" aria-hidden="true"></div>
+        <div class="startup-status" role="status">
           <span data-boot-copy>Loading nanobot…</span>
         </div>
-      </div>
+      </main>
     </div>
     <script>
       (function () {

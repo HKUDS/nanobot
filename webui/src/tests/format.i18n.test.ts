@@ -4,6 +4,7 @@ import { setAppLanguage } from "@/i18n";
 import {
   fmtDateTime,
   formatMessageEndTime,
+  formatMessageHoverTime,
   formatTurnLatency,
   relativeTime,
 } from "@/lib/format";
@@ -111,5 +112,32 @@ describe("localized format helpers", () => {
     const minutePlus = formatTurnLatency(90_000, "en");
     expect(minutePlus).toContain("m");
     expect(minutePlus).toContain("s");
+  });
+
+  it("uses a short 24-hour clock today and localized month/day for every other date", () => {
+    const now = new Date(2026, 8, 24, 16, 0);
+    expect(formatMessageHoverTime(new Date(2026, 8, 24, 14, 32).getTime(), "zh-CN", now)).toBe("14:32");
+    expect(formatMessageHoverTime(new Date(2026, 8, 24, 0, 5).getTime(), "en", now)).toBe("00:05");
+    expect(formatMessageHoverTime(new Date(2026, 8, 23, 14, 32).getTime(), "zh-CN", now)).toBe("9/23");
+    expect(formatMessageHoverTime(new Date(2026, 8, 23).getTime(), "fr", now)).toBe(
+      new Intl.DateTimeFormat("fr", { month: "numeric", day: "numeric" }).format(new Date(2026, 8, 23)),
+    );
+    expect(formatMessageHoverTime(new Date(2025, 8, 22).getTime(), "zh-CN", now)).toBe("9/22");
+    expect(formatMessageHoverTime(new Date(2026, 8, 25).getTime(), "zh-CN", now)).toBe("9/25");
+  });
+
+  it.each([
+    [new Date(2026, 0, 1, 0, 30), new Date(2025, 11, 31, 23, 55)],
+    [new Date(2026, 2, 1, 0, 30), new Date(2026, 1, 28, 23, 55)],
+    [new Date(2026, 2, 9, 0, 30), new Date(2026, 2, 8, 0, 15)],
+    [new Date(2026, 10, 2, 0, 30), new Date(2026, 10, 1, 23, 55)],
+  ])("compares local calendar days across month/year and DST boundaries (%s)", (now, previousDay) => {
+    expect(formatMessageHoverTime(previousDay.getTime(), "en", now)).toBe(
+      new Intl.DateTimeFormat("en", { month: "numeric", day: "numeric" }).format(previousDay),
+    );
+  });
+
+  it.each([null, undefined, NaN, Infinity, 9e15])("omits invalid hover time %s", (value) => {
+    expect(formatMessageHoverTime(value)).toBe("");
   });
 });

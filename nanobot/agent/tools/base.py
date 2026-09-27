@@ -48,15 +48,20 @@ class Schema(ABC):
         return f"{path}.{key}" if path else key
 
     @staticmethod
-    def validate_json_schema_value(val: Any, schema: dict[str, Any], path: str = "") -> list[str]:
+    def validate_json_schema_value(
+        val: Any, schema: dict[str, Any] | bool, path: str = "",
+    ) -> list[str]:
         """Validate ``val`` against a JSON Schema fragment; returns error messages (empty means valid).
 
         Used by :class:`Tool` and each concrete Schema's :meth:`validate_value`.
         """
+        label = path or "parameter"
+        if isinstance(schema, bool):
+            return [] if schema else [f"{label} is not allowed by schema"]
+
         raw_type = schema.get("type")
         nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get("nullable", False)
         t = Schema.resolve_json_schema_type(raw_type)
-        label = path or "parameter"
 
         if nullable and val is None:
             return []
@@ -255,7 +260,9 @@ class Tool(ABC):
             return params
         return self._cast_object(params, schema)
 
-    def _cast_value(self, val: Any, schema: dict[str, Any]) -> Any:
+    def _cast_value(self, val: Any, schema: dict[str, Any] | bool) -> Any:
+        if isinstance(schema, bool):
+            return val
         t = self._resolve_type(schema.get("type"))
 
         if t == "boolean" and isinstance(val, bool):

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { preloadMarkdownText } from "@/components/MarkdownText";
+import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
@@ -76,49 +77,6 @@ function activityMessages(extraReasoning = "", extraTool?: UIMessage): UIMessage
   return rows;
 }
 
-function installAnimationFrameQueue() {
-  const originalRequest = window.requestAnimationFrame;
-  const originalCancel = window.cancelAnimationFrame;
-  const callbacks = new Map<number, FrameRequestCallback>();
-  let nextId = 1;
-
-  window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-    const id = nextId;
-    nextId += 1;
-    callbacks.set(id, callback);
-    return id;
-  }) as typeof window.requestAnimationFrame;
-  window.cancelAnimationFrame = ((id: number) => {
-    callbacks.delete(id);
-  }) as typeof window.cancelAnimationFrame;
-
-  return {
-    flush() {
-      const pending = Array.from(callbacks.entries());
-      callbacks.clear();
-      for (const [, callback] of pending) callback(0);
-    },
-    restore() {
-      window.requestAnimationFrame = originalRequest;
-      window.cancelAnimationFrame = originalCancel;
-    },
-  };
-}
-
-function setScrollGeometry(
-  element: HTMLElement,
-  geometry: { scrollHeight: number; clientHeight: number; scrollTop?: number },
-) {
-  Object.defineProperties(element, {
-    scrollHeight: { configurable: true, value: geometry.scrollHeight },
-    clientHeight: { configurable: true, value: geometry.clientHeight },
-    scrollTop: {
-      configurable: true,
-      value: geometry.scrollTop ?? element.scrollTop,
-      writable: true,
-    },
-  });
-}
 
 function installReducedMotion() {
   const original = window.matchMedia;
@@ -140,6 +98,77 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  it("updates existing activity when the language changes without altering raw values", async () => {
+    const query = "release notes";
+    const path = "src/app.tsx";
+    const cliLine = 'run_cli_app({"name":"blender","args":["--background","scene.blend"],"json":true})';
+    render(
+      <AgentActivityCluster
+        messages={[
+          {
+            id: "localized-activity",
+            role: "tool",
+            kind: "trace",
+            content: cliLine,
+            traces: [
+              `grep(${JSON.stringify({ pattern: query })})`,
+              `read_file(${JSON.stringify({ path })})`,
+              cliLine,
+              'mcp_browserbase_browser_navigate({"url":"https://example.com"})',
+              "edit_file()",
+            ],
+            toolEvents: [{
+              phase: "start",
+              call_id: "localized-browserbase",
+              name: "mcp_browserbase_browser_navigate",
+              arguments: { url: "https://example.com" },
+            }],
+            fileEdits: [{
+              call_id: "localized-file-edit",
+              tool: "edit_file",
+              path,
+              phase: "end",
+              added: 1,
+              deleted: 0,
+              approximate: false,
+              status: "done",
+            }],
+            createdAt: 1,
+          },
+        ]}
+        isTurnStreaming
+        hasBodyBelow={false}
+        cliApps={[BLENDER_CLI_APP]}
+        mcpPresets={[BROWSERBASE_MCP]}
+      />,
+    );
+
+    expect(screen.getByText(`Searched files “${query}”`)).toBeInTheDocument();
+    expect(screen.getByText(`Reading file ${path}`)).toBeInTheDocument();
+    expect(screen.getByText("Using Blender · --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByText("Opening example.com · Browserbase")).toBeInTheDocument();
+    expect(screen.getByText("Edited")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
+
+    await act(async () => setAppLanguage("zh-CN"));
+
+    expect(screen.getByText(`已搜索文件 “${query}”`)).toBeInTheDocument();
+    expect(screen.getByText(`正在读取文件 ${path}`)).toBeInTheDocument();
+    expect(screen.getByText("正在使用 Blender · --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByText("正在打开 example.com · Browserbase")).toBeInTheDocument();
+    expect(screen.getByText("已编辑")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
+
+    await act(async () => setAppLanguage("ja"));
+
+    expect(screen.getByText(`“${query}” · ファイルを検索しました`)).toBeInTheDocument();
+    expect(screen.getByText(`${path} · ファイルを読み取り中`)).toBeInTheDocument();
+    expect(screen.getByText("Blender を使用中 · --json --background scene.blend")).toBeInTheDocument();
+    expect(screen.getByText("example.com · 開いています · Browserbase")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-file-reference").closest('[data-testid="activity-step"]'))
+      .toHaveTextContent(`${path} · 編集しました`);
+  });
+
   it("loads deferred trace details only after completed activity is expanded", async () => {
     const onLoadTraceDetails = vi.fn();
     render(
@@ -219,186 +248,39 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByTestId("activity-step")).not.toBeInTheDocument();
   });
 
-  it("jumps to the latest activity when opened", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
+  it.each([false, true])("uses one activity layout without nested scrolling (streaming: %s)", (isTurnStreaming) => {
+    const onExpandedChange = vi.fn();
+    const props = {
+      messages: activityMessages(),
+      isTurnStreaming,
+      hasBodyBelow: false,
+      ...(isTurnStreaming ? {} : { expanded: true, hideHeader: true }),
+      onExpandedChange,
+    };
+    const view = render(<AgentActivityCluster {...props} />);
+    const header = screen.getByRole("button", { name: /^(Working|Worked)/ });
+    const content = screen.getByTestId("agent-activity-content");
 
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
+    expect(header).toHaveClass("h-7", "gap-1.5", "px-1.5");
+    expect(header.querySelector("svg")).toHaveClass("lucide-activity");
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(view.container.querySelector("[data-contextual-activity-guide]")).toBeInTheDocument();
+    expect(content).toHaveClass("ps-6");
+    expect(content).not.toHaveClass("max-h-[180px]");
+    expect(content).not.toHaveClass("overflow-y-auto");
+    expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
 
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(880);
-    } finally {
-      raf.restore();
-    }
-  });
-
-  it("follows new reasoning and tool activity while the user is at the bottom", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      act(() => {
-        raf.flush();
-      });
-
-      rerender(
-        <AgentActivityCluster
-          messages={activityMessages(" with more detail", {
-            id: "t2",
-            role: "tool",
-            kind: "trace",
-            content: "open_browser()",
-            traces: ["open_browser()"],
-            createdAt: 3,
-          })}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1500,
-        clientHeight: 120,
-        scrollTop: scrollport.scrollTop,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(1380);
-    } finally {
-      raf.restore();
-    }
-  });
-
-  it("does not pull the user down after they scroll up inside the activity pane", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      act(() => {
-        raf.flush();
-      });
-
-      scrollport.scrollTop = 100;
-      fireEvent.scroll(scrollport);
-
-      rerender(
-        <AgentActivityCluster
-          messages={activityMessages(" still streaming")}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1500,
-        clientHeight: 120,
-        scrollTop: scrollport.scrollTop,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-
-      expect(scrollport.scrollTop).toBe(100);
-    } finally {
-      raf.restore();
-    }
-  });
-
-  it("feathers only the activity edges with clipped content", () => {
-    const raf = installAnimationFrameQueue();
-    try {
-      render(
-        <AgentActivityCluster
-          messages={activityMessages()}
-          isTurnStreaming
-          hasBodyBelow={false}
-        />,
-      );
-
-      const scrollport = screen.getByTestId("agent-activity-scroll");
-      setScrollGeometry(scrollport, {
-        scrollHeight: 1000,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-
-      act(() => {
-        raf.flush();
-      });
-      expect(scrollport).toHaveAttribute("data-fade-top", "true");
-      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
-      const topFade = screen.getByTestId("activity-scroll-fade-top");
-      expect(scrollport).not.toContainElement(topFade);
-      expect(scrollport).not.toHaveClass("activity-scroll-fade");
-      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
-
-      scrollport.scrollTop = 440;
-      fireEvent.scroll(scrollport);
-      expect(scrollport).toHaveAttribute("data-fade-top", "true");
-      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
-      expect(screen.getByTestId("activity-scroll-fade-top")).toBeInTheDocument();
-      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
-
-      scrollport.scrollTop = 0;
-      fireEvent.scroll(scrollport);
-      expect(scrollport).toHaveAttribute("data-fade-top", "false");
-      expect(scrollport).toHaveAttribute("data-fade-bottom", "true");
-      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
-      expect(screen.getByTestId("activity-scroll-fade-bottom")).toBeInTheDocument();
-
-      setScrollGeometry(scrollport, {
-        scrollHeight: 100,
-        clientHeight: 120,
-        scrollTop: 0,
-      });
-      fireEvent.scroll(scrollport);
-      expect(scrollport).toHaveAttribute("data-fade-top", "false");
-      expect(scrollport).toHaveAttribute("data-fade-bottom", "false");
-      expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
-    } finally {
-      raf.restore();
+    view.rerender(<AgentActivityCluster {...props} messages={activityMessages(" updated", {
+      id: "next-tool", role: "tool", kind: "trace", content: "open_browser()", createdAt: 3,
+    })} />);
+    expect(screen.getByTestId("agent-activity-content")).toBe(content);
+    expect(content).toHaveTextContent("thinking updated");
+    fireEvent.click(header);
+    if (isTurnStreaming) {
+      expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
+    } else {
+      expect(onExpandedChange).toHaveBeenCalledWith(false);
     }
   });
 
@@ -459,7 +341,7 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow
         />,
       );
-      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+      expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
 
       rerender(
         <AgentActivityCluster
@@ -473,11 +355,11 @@ describe("AgentActivityCluster", () => {
         />,
       );
 
-      expect(screen.getByTestId("agent-activity-scroll")).toBeInTheDocument();
+      expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
       act(() => {
         vi.advanceTimersByTime(301);
       });
-      expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Worked" })).toHaveAttribute(
         "aria-expanded",
         "false",
@@ -487,31 +369,6 @@ describe("AgentActivityCluster", () => {
     }
   });
 
-  it("keeps chevron color feedback faster than the drawer rotation", () => {
-    render(
-      <AgentActivityCluster
-        messages={[{
-          id: "r-motion",
-          role: "assistant",
-          content: "",
-          reasoning: "checking motion",
-          createdAt: 1,
-        }]}
-        isTurnStreaming={false}
-        hasBodyBelow
-      />,
-    );
-
-    const button = screen.getByRole("button", { name: "Worked" });
-    expect(button).toHaveAttribute("data-thread-disclosure");
-    const chevron = button.querySelector("svg");
-    expect(chevron).toBeInTheDocument();
-    expect(chevron).toHaveClass("transition-colors", "duration-200");
-    expect(chevron?.parentElement).toHaveClass(
-      "transition-transform",
-      "[transition-duration:220ms]",
-    );
-  });
 
   it("uses persisted turn latency for completed history instead of replay timestamps", () => {
     render(
@@ -711,7 +568,7 @@ describe("AgentActivityCluster", () => {
         const assertIndependentDiff = () => {
           const diff = screen.getByTestId("file-edit-diff");
           expect(diff).toBeVisible();
-          expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-scroll"]'))
+          expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
             .toBeNull();
           expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(1);
         };
@@ -1140,7 +997,7 @@ describe("AgentActivityCluster", () => {
     );
 
     expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("agent-activity-scroll")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
     expect(screen.getByText("Edited")).toBeInTheDocument();
     expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");

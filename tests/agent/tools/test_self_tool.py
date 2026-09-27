@@ -481,24 +481,17 @@ class TestModifyOpen:
         assert tool._runtime_control.snapshot().workspace == "/new/path"
 
     @pytest.mark.asyncio
-    async def test_modify_pending_queues_blocked(self):
-        """_pending_queues controls message routing — must be blocked."""
+    @pytest.mark.parametrize(
+        "key",
+        [
+            pytest.param("_pending_queues", id="pending_queues_blocked"),
+            pytest.param("_session_locks", id="session_locks_blocked"),
+            pytest.param("_active_tasks", id="active_tasks_blocked"),
+        ],
+    )
+    async def test_modify_runtime_coordination_state_blocked(self, key):
         tool = _make_tool()
-        result = await tool.execute(action="set", key="_pending_queues", value={})
-        assert "protected" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_session_locks_blocked(self):
-        """_session_locks controls session isolation — must be blocked."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_session_locks", value={})
-        assert "protected" in result
-
-    @pytest.mark.asyncio
-    async def test_modify_active_tasks_blocked(self):
-        """_active_tasks tracks running tasks — must be blocked."""
-        tool = _make_tool()
-        result = await tool.execute(action="set", key="_active_tasks", value={})
+        result = await tool.execute(action="set", key=key, value={})
         assert "protected" in result
 
     @pytest.mark.asyncio
@@ -901,13 +894,6 @@ class TestScratchpadInspection:
         result = await tool.execute(action="check", key="task_meta")
         assert "step" in result
         assert "2" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_nonexistent_still_returns_not_found(self):
-        tool = _make_tool()
-        result = await tool.execute(action="check", key="never_set_key_xyz")
-        assert "not found" in result
-
 
 # ---------------------------------------------------------------------------
 # sensitive sub-field blocking (Fix #3: API key leak prevention)

@@ -12,16 +12,7 @@ import os
 
 import pytest
 
-from nanobot.agent.tools import file_state
 from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
-
-
-@pytest.fixture(autouse=True)
-def _clear_file_state():
-    file_state.clear()
-    yield
-    file_state.clear()
-
 
 # ---------------------------------------------------------------------------
 # Delete-line newline cleanup

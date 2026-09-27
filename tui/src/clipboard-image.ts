@@ -11,7 +11,7 @@ const IMAGE_MIME_TYPES = [
 ] as const
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024
 
-export interface ClipboardImage {
+interface ClipboardImage {
   dataUrl: string
   mimeType: typeof IMAGE_MIME_TYPES[number]
 }

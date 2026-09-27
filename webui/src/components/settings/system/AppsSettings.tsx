@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useEffect,
   useId,
   useMemo,
   useState,
@@ -94,6 +95,8 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
 };
 
 export function AppsCatalogSettings({
+  setupName,
+  onSetupOpened,
   cliApps,
   mcpPresets,
   cliAppsLoading,
@@ -137,6 +140,8 @@ export function AppsCatalogSettings({
   onRestart,
   isRestarting,
 }: {
+  setupName?: string | null;
+  onSetupOpened?: () => void;
   cliApps: CliAppsPayload | null;
   mcpPresets: McpPresetsPayload | null;
   cliAppsLoading: boolean;
@@ -321,6 +326,8 @@ export function AppsCatalogSettings({
                 <McpAppsCatalogRow
                   key={item.id}
                   preset={item.preset}
+                  openConnection={setupName === item.preset.name}
+                  onConnectionOpened={onSetupOpened}
                   values={mcpFieldValues[item.preset.name] ?? {}}
                   actionKey={mcpActionKey}
                   oauthFlow={mcpOAuthFlow?.name === item.preset.name ? mcpOAuthFlow : null}
@@ -484,6 +491,8 @@ function CliAppsCatalogRow({
 }
 
 function McpAppsCatalogRow({
+  openConnection = false,
+  onConnectionOpened,
   preset,
   values,
   actionKey,
@@ -503,6 +512,8 @@ function McpAppsCatalogRow({
   onOAuthComplete,
   onToolsChange,
 }: {
+  openConnection?: boolean;
+  onConnectionOpened?: () => void;
   preset: McpPresetInfo;
   values: Record<string, string>;
   actionKey: string | null;
@@ -526,6 +537,12 @@ function McpAppsCatalogRow({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [managementOpen, setManagementOpen] = useState(false);
   const [managementTab, setManagementTab] = useState<McpManagementTab>("overview");
+  useEffect(() => {
+    if (!openConnection) return;
+    setManagementTab("connection");
+    setManagementOpen(true);
+    onConnectionOpened?.();
+  }, [openConnection, onConnectionOpened]);
   const enableBusy = actionKey === `enable:${preset.name}`;
   const disableBusy = actionKey === `disable:${preset.name}`;
   const removeBusy = actionKey === `remove:${preset.name}`;
@@ -893,7 +910,7 @@ type AppsActionButtonProps = Omit<
   children?: ReactNode;
 };
 
-export const AppsActionButton = forwardRef<HTMLButtonElement, AppsActionButtonProps>(
+const AppsActionButton = forwardRef<HTMLButtonElement, AppsActionButtonProps>(
   function AppsActionButton({
     ariaLabel,
     visibleLabel,

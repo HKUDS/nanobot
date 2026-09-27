@@ -8,6 +8,7 @@ import type {
   ChatSummary,
   CliAppsPayload,
   FilePreviewPayload,
+  FileReferenceMetadata,
   ImageGenerationSettingsUpdate,
   McpPresetsPayload,
   McpOAuthFlowPayload,
@@ -368,7 +369,7 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
   throw new Error(`Invalid WebUI thread projection event: ${value.event}`);
 }
 
-function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPayload {
+export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPayload {
   if (!isRecord(value) || typeof value.schemaVersion !== "number") {
     throw new Error("Invalid WebUI thread response");
   }
@@ -455,7 +456,21 @@ export async function fetchFilePreview(
   return request<FilePreviewPayload>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
-    undefined,
+    { cache: "no-store" },
+    API_READ_TIMEOUT_MS,
+  );
+}
+
+export async function fetchFileReferenceMetadata(
+  token: string,
+  key: string,
+  path: string,
+): Promise<FileReferenceMetadata> {
+  const query = new URLSearchParams({ path, metadata: "1" });
+  return request<FileReferenceMetadata>(
+    `/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
+    token,
+    { cache: "no-store" },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -472,7 +487,7 @@ export async function fetchFilePreviewAvailability(
   const payload = await request<{ available?: boolean }>(
     `${base}/api/sessions/${encodeURIComponent(key)}/file-preview?${query}`,
     token,
-    undefined,
+    { cache: "no-store" },
     API_READ_TIMEOUT_MS,
   );
   return payload.available !== false;
@@ -815,12 +830,12 @@ export async function runPairingAction(
   return mutation<PairingPayload>(transport, `settings.pairing.${action}`, { code });
 }
 
-export async function startChannelConnect(
+export async function startChannelConnect<T = ChannelConnectPayload>(
   transport: WebUIMutationTransport,
   channel: string,
   params: Readonly<Record<string, string | boolean>> = {},
-): Promise<ChannelConnectPayload> {
-  return mutation<ChannelConnectPayload>(
+): Promise<T> {
+  return mutation<T>(
     transport,
     "settings.channel.connect.start",
     {
@@ -1295,4 +1310,11 @@ export async function updateRuntimeConfigSettings(
   values: Record<string, import("@/lib/types").RuntimeConfigValue>,
 ): Promise<SettingsPayload> {
   return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
+}
+
+export function starPromptAction(
+  transport: WebUIMutationTransport,
+  action: "claim" | "dismiss",
+): Promise<{ show: boolean }> {
+  return mutation<{ show: boolean }>(transport, `star_prompt.${action}`);
 }

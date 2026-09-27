@@ -266,6 +266,27 @@ describe("ThreadViewport", () => {
     expect(takeUserControl).toHaveBeenCalledTimes(1);
   });
 
+  it("yields scroll control before expanding activity from a portaled message menu", () => {
+    const takeUserControl = vi.spyOn(ThreadMotionCoordinator.prototype, "takeUserControl");
+    render(
+      <ThreadViewport
+        messages={[
+          { id: "reasoning", role: "assistant", content: "", reasoning: "A completed thought", createdAt: 1 },
+          { id: "answer", role: "assistant", content: "Finished answer", createdAt: 2 },
+        ]}
+        isStreaming={false}
+        composer={<div>composer</div>}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    const disclosure = screen.getByRole("button", { name: "Worked" });
+    expect(screen.getByTestId("thread-message-region")).not.toContainElement(disclosure);
+    takeUserControl.mockClear();
+    fireEvent.click(disclosure);
+    expect(takeUserControl).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Collapse activity details/ })).toBeInTheDocument();
+  });
+
   it("top-aligns short threads in the message rendering area", () => {
     render(
       <ThreadViewport
@@ -305,12 +326,16 @@ describe("ThreadViewport", () => {
     expect(screen.getByTestId("thread-message-region")).toHaveClass("min-w-0");
   });
 
-  it("uses the shared content-column width for conversation messages", () => {
+  it("keeps message hit rows full width and constrains content inside each row", () => {
     render(<ThreadViewport messages={messages} isStreaming={false} composer={<div>composer</div>} />);
 
-    expect(screen.getByTestId("thread-message-region").firstElementChild).toHaveClass(
-      "mx-auto", "w-full", "max-w-[var(--content-column-width)]",
-    );
+    const region = screen.getByTestId("thread-message-region");
+    expect(region.firstElementChild).toHaveClass("w-full");
+    expect(region.firstElementChild).not.toHaveClass("max-w-[var(--content-column-width)]");
+    expect(region.parentElement).not.toHaveClass("max-w-[64rem]");
+    const rows = region.querySelectorAll("[data-thread-display-unit]");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row).toHaveClass("thread-message-row");
   });
 
   it("top-aligns a short active turn while the agent is responding", () => {

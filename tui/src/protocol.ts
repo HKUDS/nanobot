@@ -1,6 +1,6 @@
 import { decodeNotification, isCompactionPhase, isRecoveryState } from "../../packages/client-events/notifications"
 import type { ContextCompaction, NotificationEvent, RecoveryState } from "../../packages/client-events/notifications"
-export type { ContextCompaction, RecoveryState, RecoveryStatus, RetryStatus } from "../../packages/client-events/notifications"
+export type { ContextCompaction, RecoveryState, RetryStatus } from "../../packages/client-events/notifications"
 
 export type ConnectionStatus =
   | "starting"

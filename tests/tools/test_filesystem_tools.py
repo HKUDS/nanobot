@@ -2,6 +2,7 @@
 
 import pytest
 
+from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -97,6 +98,68 @@ class TestReadFileTool:
         result = await tool.execute(path=str(f))
         assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
         assert "Use offset=" in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("following", ["", "\nsecond line"])
+    async def test_oversized_first_line_is_explicitly_truncated(self, tool, tmp_path, following):
+        f = tmp_path / "minified.txt"
+        original = "界" * (ReadFileTool._MAX_CHARS + 100) + "OMITTED" + following
+        f.write_text(original, encoding="utf-8")
+
+        with file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f), limit=1)
+
+        assert first.startswith("1| 界")
+        assert "OMITTED" not in first
+        assert len(first) <= ReadFileTool._MAX_CHARS + 500
+        assert "Line 1 truncated; its remaining characters are not shown" in first
+        assert "Use exec" in first
+        assert "column" not in tool.parameters["properties"]
+        assert f.read_text(encoding="utf-8") == original
+
+        with file_read_context("read-2", lambda: {"read-1": first}):
+            repeated = await tool.execute(path=str(f), limit=1)
+        assert "File unchanged" in repeated
+
+        if following:
+            assert "Use offset=2 to continue" in first
+            with file_read_context("read-3", lambda: {"read-1": first}):
+                second = await tool.execute(path=str(f), offset=2, limit=1)
+            assert "2| second line" in second
+            assert "End of file" in second
+        else:
+            assert "End of file" in first
+            assert "Use offset=" not in first
+
+    @pytest.mark.asyncio
+    async def test_long_middle_line_advances_to_following_content(self, tool, tmp_path):
+        f = tmp_path / "bundle.txt"
+        f.write_text("first\n" + "z" * (ReadFileTool._MAX_CHARS * 2) + "\nlast\n")
+
+        first = await tool.execute(path=str(f))
+        assert "Use offset=2 to continue" in first
+        assert "truncated" not in first
+
+        second = await tool.execute(path=str(f), offset=2)
+        assert second.startswith("2| z")
+        assert len(second) <= ReadFileTool._MAX_CHARS + 500
+        assert "Line 2 truncated" in second
+        assert "Use offset=3 to continue" in second
+
+        third = await tool.execute(path=str(f), offset=3)
+        assert "3| last" in third
+        assert "End of file" in third
+
+    @pytest.mark.asyncio
+    async def test_line_exactly_fitting_budget_is_not_truncated(self, tool, tmp_path):
+        f = tmp_path / "exact.txt"
+        line = "x" * (ReadFileTool._MAX_CHARS - len("1| "))
+        f.write_text(line + "\nlast")
+
+        first = await tool.execute(path=str(f))
+        assert first.split("\n\n")[0] == "1| " + line
+        assert "truncated" not in first
+        assert "Use offset=2 to continue" in first
 
     @pytest.mark.asyncio
     async def test_oversized_file_is_rejected_before_read(self, tool, tmp_path, monkeypatch):
