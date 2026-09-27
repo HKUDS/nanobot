@@ -40,6 +40,23 @@ function dispatchUserScroll(scroller: HTMLElement): void {
   scroller.dispatchEvent(new Event("scroll"));
 }
 
+function dispatchHistoryInput(scroller: HTMLElement, input: "wheel" | "touch" | "keyboard") {
+  if (input === "wheel") fireEvent.wheel(scroller, { deltaY: -100 });
+  if (input === "keyboard") fireEvent.keyDown(scroller, { key: "PageUp" });
+  if (input === "touch") {
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
+  }
+}
+
+function mockScrollGeometry(scroller: HTMLElement, height: number, viewport: number, top = 0) {
+  Object.defineProperties(scroller, {
+    scrollHeight: { configurable: true, value: height },
+    clientHeight: { configurable: true, value: viewport },
+    scrollTop: { configurable: true, writable: true, value: top },
+  });
+}
+
 interface ResizeObserverInstance {
   elements: Element[];
   callback: ResizeObserverCallback;
@@ -1639,7 +1656,7 @@ describe("ThreadViewport", () => {
     }
   });
 
-  it.each(["wheel", "touch", "keyboard"])(
+  it.each(["wheel", "touch", "keyboard"] as const)(
     "requests older history on %s intent when the initial page does not overflow",
     (input) => {
       const onLoadOlder = vi.fn();
@@ -1648,35 +1665,28 @@ describe("ThreadViewport", () => {
           hasMoreBefore onLoadOlder={onLoadOlder} />,
       );
       const scroller = getScroller(container);
-      Object.defineProperties(scroller, {
-        scrollHeight: { configurable: true, value: 746 },
-        clientHeight: { configurable: true, value: 746 },
-        scrollTop: { configurable: true, writable: true, value: 0 },
-      });
+      mockScrollGeometry(scroller, 746, 746);
       expect(onLoadOlder).not.toHaveBeenCalled();
-      if (input === "wheel") fireEvent.wheel(scroller, { deltaY: -100 });
-      if (input === "touch") {
-        fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
-        fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
-      }
-      if (input === "keyboard") fireEvent.keyDown(scroller, { key: "PageUp" });
+      dispatchHistoryInput(scroller, input);
       expect(onLoadOlder).toHaveBeenCalledTimes(1);
     },
   );
 
-  it.each([
-    { loadingOlder: true },
-    { olderError: "offline" },
-    { conversationReady: false },
-    { hasMoreBefore: false },
-  ])("does not retry boundary history while blocked: %o", (blocked) => {
-    const onLoadOlder = vi.fn();
-    const { container } = render(
-      <ThreadViewport messages={messages} isStreaming={false}
-        hasMoreBefore onLoadOlder={onLoadOlder} {...blocked} />,
-    );
-    fireEvent.wheel(getScroller(container), { deltaY: -100 });
-    expect(onLoadOlder).not.toHaveBeenCalled();
+  describe.each(["wheel", "touch"] as const)("%s history boundary", (input) => {
+    it.each([
+      { loadingOlder: true },
+      { olderError: "offline" },
+      { conversationReady: false },
+      { hasMoreBefore: false },
+    ])("keeps history blocked: %o", (blocked) => {
+      const onLoadOlder = vi.fn();
+      const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
+        hasMoreBefore onLoadOlder={onLoadOlder} {...blocked} />);
+      const scroller = getScroller(container);
+      dispatchHistoryInput(scroller, input);
+      expect(onLoadOlder).not.toHaveBeenCalled();
+      expect(scroller.style.transform).toBe("");
+    });
   });
 
   it("automatically requests older transcript pages near the top", () => {
@@ -1693,11 +1703,7 @@ describe("ThreadViewport", () => {
     );
 
     const scroller = getScroller(container);
-    Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1800 },
-      clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, writable: true, value: 0 },
-    });
+    mockScrollGeometry(scroller, 1800, 600);
 
     act(() => {
       dispatchUserScroll(scroller);
@@ -1721,11 +1727,7 @@ describe("ThreadViewport", () => {
     );
 
     const scroller = getScroller(container);
-    Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1800 },
-      clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, writable: true, value: 0 },
-    });
+    mockScrollGeometry(scroller, 1800, 600);
 
     act(() => {
       dispatchUserScroll(scroller);
@@ -1744,11 +1746,7 @@ describe("ThreadViewport", () => {
         hasMoreBefore loadingOlder onLoadOlder={onLoadOlder} />,
     );
     const scroller = getScroller(container);
-    Object.defineProperties(scroller, {
-      scrollHeight: { configurable: true, value: 1800 },
-      clientHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, writable: true, value: 200 },
-    });
+    mockScrollGeometry(scroller, 1800, 600, 200);
     act(() => dispatchUserScroll(scroller));
     expect(await screen.findByText("Loading earlier messages…")).toBeVisible();
     expect(scroller.scrollTop).toBe(200);
@@ -1789,22 +1787,6 @@ describe("ThreadViewport", () => {
     fireEvent.touchEnd(scroller);
     expect(scroller).toHaveStyle({ transform: "translateY(48px)" });
     rerender(<ThreadViewport {...props} />);
-    expect(scroller.style.transform).toBe("");
-  });
-
-  it.each([
-    { loadingOlder: true },
-    { olderError: "offline" },
-    { conversationReady: false },
-    { hasMoreBefore: false },
-  ])("does not pull or fetch blocked history: %o", (blocked) => {
-    const onLoadOlder = vi.fn();
-    const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
-      hasMoreBefore onLoadOlder={onLoadOlder} {...blocked} />);
-    const scroller = getScroller(container);
-    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
-    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 350 }] });
-    expect(onLoadOlder).not.toHaveBeenCalled();
     expect(scroller.style.transform).toBe("");
   });
 

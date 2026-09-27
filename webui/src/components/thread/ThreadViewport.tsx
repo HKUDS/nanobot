@@ -778,18 +778,16 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
     onScroll(false);
     const handleScroll = () => onScroll(true);
+    const canLoadAtTop = () => el.scrollTop <= 0 && hasMessages && conversationReady
+      && !pendingConversationScrollRef.current && !loadingOlder
+      && (hiddenMessageCount > 0 || (hasMoreBefore && !olderError));
     const handleDirectionalInput = (
       direction: ThreadScrollDirection | null,
     ) => {
       if (!direction) return;
       // At the top (including a page too short to scroll), backward intent
       // produces no scroll event. It must still be able to reveal history.
-      if (
-        direction === "backward" && el.scrollTop <= 0
-        && hasMessages && conversationReady && !pendingConversationScrollRef.current
-        && !loadingOlder
-        && (hiddenMessageCount > 0 || (hasMoreBefore && !olderError))
-      ) {
+      if (direction === "backward" && canLoadAtTop()) {
         loadEarlierMessages();
         return;
       }
@@ -818,6 +816,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         yieldCameraToUser();
       }
     };
+    const handleTouchCancel = () => {
+      historyTouchRef.current = null;
+      setHistoryPull(0);
+    };
     const handleTouchStart = (event: TouchEvent) => {
       historyInputRef.current = "touch";
       const touch = event.touches[0];
@@ -834,8 +836,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       const gesture = historyTouchRef.current;
       const touch = event.touches[0];
       if (event.touches.length !== 1) {
-        historyTouchRef.current = null;
-        setHistoryPull(0);
+        handleTouchCancel();
         return;
       }
       if (!gesture || !touch || event.defaultPrevented) return;
@@ -846,10 +847,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         return;
       }
       if (el.scrollTop > 0) gesture.startY = null;
-      const canPull = el.scrollTop <= 0 && hasMessages && conversationReady
-        && !pendingConversationScrollRef.current && !loadingOlder && !olderError
-        && hiddenMessageCount === 0 && hasMoreBefore;
-      if (canPull) {
+      if (canLoadAtTop() && hiddenMessageCount === 0) {
         gesture.startY ??= touch.clientY;
         const distance = touch.clientY - gesture.startY;
         if (distance > 0 && distance > Math.abs(touch.clientX - gesture.startX)) {
@@ -876,10 +874,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const handleTouchEnd = () => {
       historyTouchRef.current = null;
       if (!loadingOlder) setHistoryPull(0);
-    };
-    const handleTouchCancel = () => {
-      historyTouchRef.current = null;
-      setHistoryPull(0);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -975,7 +969,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 hasVerticalOverflow ? "overflow-y-auto" : "overflow-hidden",
               )}
             >
-              <div ref={messageContentRef} className="relative w-full">
+              <div ref={messageContentRef} className="w-full">
                 <ThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}
