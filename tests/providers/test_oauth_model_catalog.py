@@ -259,9 +259,14 @@ def test_xai_inference_classifies_typed_reauth() -> None:
     assert "synthetic-secret" not in str(response)
 
 
+@pytest.mark.parametrize(
+    "responses_model",
+    ["gpt-5.4-mini", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"],
+)
 def test_github_copilot_catalog_only_lists_compatible_chat_models(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    responses_model: str,
 ) -> None:
     original_client = httpx.Client
     captured: list[httpx.Request] = []
@@ -293,8 +298,7 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
                         },
                     },
                     {
-                        "id": "gpt-5.4-mini",
-                        "name": "GPT-5.4 Mini",
+                        "id": responses_model,
                         "model_picker_enabled": True,
                         "supported_endpoints": ["/responses"],
                     },
@@ -340,7 +344,7 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
     assert catalog.source == "remote"
     assert [model.id for model in catalog.models] == [
         "github-copilot/claude-sonnet",
-        "github-copilot/gpt-5.4-mini",
+        f"github-copilot/{responses_model}",
     ]
     assert catalog.models[0].context_window == 200_000
     assert catalog.models[0].reasoning_efforts == ("low", "high")
