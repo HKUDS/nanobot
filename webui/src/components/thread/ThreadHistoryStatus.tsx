@@ -24,7 +24,7 @@ export function ThreadHistoryStatus({ loading, error, onRetry }: ThreadHistorySt
   }, [loading]);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex min-h-12 items-center justify-center px-3">
+    <div className="thread-message-row pointer-events-none absolute inset-x-0 top-0 z-10 flex min-h-12 items-center justify-center">
       <div role="status" aria-live="polite" aria-atomic="true">
         {loading && showLoading ? (
           <div className="flex items-center gap-2 rounded-control bg-background/95 px-3 py-2 text-xs text-muted-foreground">

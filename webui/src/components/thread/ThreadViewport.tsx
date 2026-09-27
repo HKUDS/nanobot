@@ -766,6 +766,17 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       direction: ThreadScrollDirection | null,
     ) => {
       if (!direction) return;
+      // At the top (including a page too short to scroll), backward intent
+      // produces no scroll event. It must still be able to reveal history.
+      if (
+        direction === "backward" && el.scrollTop <= 0
+        && hasMessages && conversationReady && !pendingConversationScrollRef.current
+        && !loadingOlder
+        && (hiddenMessageCount > 0 || (hasMoreBefore && !olderError))
+      ) {
+        loadEarlierMessages();
+        return;
+      }
       threadMotionRef.current?.handleUserScrollIntent(
         canScrollInDirection(el, direction),
         direction === "forward",
@@ -845,8 +856,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     };
   }, [
     captureHistoryScrollAnchor,
+    conversationReady,
     hasMessages,
+    hasMoreBefore,
+    hiddenMessageCount,
+    loadingOlder,
+    loadEarlierMessages,
     maybeLoadEarlierFromScroll,
+    olderError,
     yieldCameraToUser,
   ]);
 
@@ -893,7 +910,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               <div ref={messageContentRef} className="relative w-full">
                 {conversationReady && historyLoaded && !hasMoreBefore
                   && hiddenMessageCount === 0 && !loadingOlder && !olderError ? (
-                  <div className="absolute inset-x-0 -top-12 flex h-12 items-center justify-center text-xs text-muted-foreground">
+                  <div className="thread-message-row absolute inset-x-0 -top-12 flex h-12 items-center justify-center text-xs text-muted-foreground">
                     {t("thread.history.start")}
                   </div>
                 ) : null}

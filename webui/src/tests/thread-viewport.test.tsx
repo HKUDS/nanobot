@@ -1639,6 +1639,46 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it.each(["wheel", "touch", "keyboard"])(
+    "requests older history on %s intent when the initial page does not overflow",
+    (input) => {
+      const onLoadOlder = vi.fn();
+      const { container } = render(
+        <ThreadViewport messages={messages} isStreaming={false}
+          hasMoreBefore onLoadOlder={onLoadOlder} />,
+      );
+      const scroller = getScroller(container);
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 746 },
+        clientHeight: { configurable: true, value: 746 },
+        scrollTop: { configurable: true, writable: true, value: 0 },
+      });
+      expect(onLoadOlder).not.toHaveBeenCalled();
+      if (input === "wheel") fireEvent.wheel(scroller, { deltaY: -100 });
+      if (input === "touch") {
+        fireEvent.touchStart(scroller, { touches: [{ clientY: 200 }] });
+        fireEvent.touchMove(scroller, { touches: [{ clientY: 300 }] });
+      }
+      if (input === "keyboard") fireEvent.keyDown(scroller, { key: "PageUp" });
+      expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { loadingOlder: true },
+    { olderError: "offline" },
+    { conversationReady: false },
+    { hasMoreBefore: false },
+  ])("does not retry boundary history while blocked: %o", (blocked) => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(
+      <ThreadViewport messages={messages} isStreaming={false}
+        hasMoreBefore onLoadOlder={onLoadOlder} {...blocked} />,
+    );
+    fireEvent.wheel(getScroller(container), { deltaY: -100 });
+    expect(onLoadOlder).not.toHaveBeenCalled();
+  });
+
   it("automatically requests older transcript pages near the top", () => {
     const onLoadOlder = vi.fn();
 
@@ -1747,6 +1787,7 @@ describe("ThreadViewport", () => {
     );
 
     expect(screen.getByText("Start of conversation")).toBeVisible();
+    expect(screen.getByText("Start of conversation")).toHaveClass("thread-message-row");
 
     view.rerender(
       <ThreadViewport
