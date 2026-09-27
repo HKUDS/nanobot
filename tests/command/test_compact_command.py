@@ -1,11 +1,13 @@
 """Manual context compaction command behavior."""
 
 import asyncio
+import threading
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from agent.session_helpers import run_session
+from filelock import FileLock
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
@@ -41,6 +43,57 @@ async def loop(tmp_path):
         yield loop
     finally:
         await loop.aclose()
+
+
+async def test_compact_session_io_runs_outside_event_loop(loop, monkeypatch) -> None:
+    key = "cli:test"
+    session = loop.sessions.get_or_create(key)
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses", provider="openai:test", model="test-model",
+        version=1, payload={"items": []},
+    )
+    loop.sessions.save(session)
+    loop.consolidator.compact_idle_session = AsyncMock(return_value="summary")
+    event_loop_thread = threading.get_ident()
+    calls = []
+
+    def observe(name, operation):
+        def checked(*args, **kwargs):
+            assert threading.get_ident() != event_loop_thread
+            calls.append(name)
+            return operation(*args, **kwargs)
+        return checked
+
+    for name in ("get_or_create", "save"):
+        monkeypatch.setattr(loop.sessions, name, observe(name, getattr(loop.sessions, name)))
+
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact")
+    await loop.commands.dispatch(CommandContext(
+        msg=msg, session=None, key=key, raw="/compact", loop=loop,
+    ))
+
+    assert calls == ["get_or_create", "get_or_create", "save"]
+    assert session.provider_state is None
+
+
+async def test_compact_lock_contention_keeps_heartbeat_running(loop) -> None:
+    key = "cli:test"
+    session = loop.sessions.get_or_create(key)
+    loop.sessions.save(session)
+    loop.consolidator.compact_idle_session = AsyncMock(return_value="summary")
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact")
+    blocker = FileLock(loop.sessions._jsonl_store._session_files_lock.lock_file)
+    blocker.acquire()
+    task = asyncio.create_task(loop.commands.dispatch(CommandContext(
+        msg=msg, session=session, key=key, raw="/compact", loop=loop,
+    )))
+    try:
+        for _ in range(5):
+            await asyncio.sleep(0.01)
+            assert not task.done(), "compaction must wait for storage without blocking the loop"
+    finally:
+        blocker.release()
+        await asyncio.wait_for(task, timeout=2)
 
 
 @pytest.mark.asyncio
