@@ -139,7 +139,8 @@ class Session:
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
 
-    baseline: Session | None = field(default=None, repr=False, compare=False)
+    # Owner-private committed snapshot. Never mutate or expose its records as draft data.
+    _baseline: Session | None = field(default=None, repr=False, compare=False)
     persisted: bool = field(default=False, repr=False, compare=False)
     revision: int = field(default=0, repr=False, compare=False)
     generation: str = field(default_factory=lambda: uuid4().hex, repr=False, compare=False)

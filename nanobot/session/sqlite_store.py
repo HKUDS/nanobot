@@ -46,13 +46,23 @@ class SessionConflictError(RuntimeError):
 class SqliteSessionStore:
     """Synchronous repository; runtime callers use the session state's worker.
 
-    Each outer transaction owns its connection. Nested repository operations share
-    that transaction, so a failed command rolls back its entire state transition.
+    Nested repository operations share a transaction. The owner worker keeps its
+    connection until shutdown; synchronous administrative calls close after use.
     """
 
     def __init__(self, sessions_dir: Path) -> None:
         self.path = sessions_dir / "sessions.sqlite3"
         self._local = threading.local()
+
+    def retain_worker_connection(self) -> None:
+        """Opt the calling owner thread into connection reuse between transactions."""
+        self._local.retain = True
+
+    def close_worker_connection(self) -> None:
+        connection: sqlite3.Connection | None = getattr(self._local, "idle", None)
+        self._local.idle = None
+        if connection is not None:
+            connection.close()
 
     @contextmanager
     def transaction(self, *, write: bool = True) -> Generator[sqlite3.Connection, None, None]:
@@ -62,12 +72,18 @@ class SqliteSessionStore:
             return
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
-        connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
-        connection.row_factory = sqlite3.Row
+        connection: sqlite3.Connection | None = getattr(self._local, "idle", None)
+        if connection is None:
+            connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA foreign_keys = ON")
+                connection.execute("PRAGMA synchronous = FULL")
+            except BaseException:
+                connection.close()
+                raise
         self._local.connection = connection
         try:
-            connection.execute("PRAGMA foreign_keys = ON")
-            connection.execute("PRAGMA synchronous = FULL")
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield connection
             connection.commit()
@@ -76,7 +92,10 @@ class SqliteSessionStore:
             raise
         finally:
             self._local.connection = None
-            connection.close()
+            if getattr(self._local, "retain", False):
+                self._local.idle = connection
+            else:
+                connection.close()
 
     def initialize(self, workspace: Path) -> None:
         """Create the schema and import legacy sessions in one atomic transaction."""
@@ -142,16 +161,16 @@ class SqliteSessionStore:
                 metadata[kind] = values
         return metadata
 
-    def load(self, key: str) -> Session | None:
+    def load(self, key: str, *, history: bool = True) -> Session | None:
         with self.transaction(write=False) as db:
             row = db.execute("SELECT * FROM sessions WHERE key=?", (key,)).fetchone()
             if row is None:
                 return None
-            return Session(
+            session = Session(
                 key=key,
                 messages=[_object(item[0]) for item in db.execute(
                     "SELECT record FROM messages WHERE session_key=? ORDER BY position", (key,),
-                )],
+                )] if history else [],
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
                 metadata=self._metadata(db, key, row["metadata"]),
@@ -161,6 +180,10 @@ class SqliteSessionStore:
                 ) if row["provider_state"] is not None else None,
                 revision=row["revision"], generation=row["generation"], persisted=True,
             )
+            if not history:
+                # A header carries the real offset even though history was not requested.
+                session.last_archived = row["last_archived"]
+            return session
 
     @staticmethod
     def _write_metadata(db: sqlite3.Connection, key: str, values: dict[str, Any], *, bump_revision: bool = True) -> None:
@@ -186,12 +209,12 @@ class SqliteSessionStore:
             _encode(metadata), metadata_title(metadata), int(bump_revision), key,
         ))
 
-    def save(self, session: Session) -> None:
-        """Commit a captured history; reject stale writers instead of overwriting them."""
-        records = [_encode(message) for message in session.messages]
+    def save(self, session: Session, *, message_start: int = 0) -> None:
+        """Commit history, optionally skipping a prefix verified at this revision."""
+        if not 0 <= message_start <= len(session.messages):
+            raise ValueError("invalid message suffix boundary")
+        records = [_encode(message) for message in session.messages[message_start:]]
         provider = _encode(session.provider_state.to_private_record()) if session.provider_state else None
-        visible = [m for m in session.messages if not is_hidden_history_message(m)
-                   and m.get("role") in {"user", "assistant"}]
         preview = ""
         fallback = ""
         scanned_chars = 0
@@ -208,12 +231,16 @@ class SqliteSessionStore:
             if message.get("role") == "assistant" and not fallback:
                 fallback = text
         preview = preview or fallback
-        last_visible = next((m.get("timestamp") for m in reversed(visible) if m.get("timestamp")), None)
+        last_visible = next((m["timestamp"] for m in reversed(session.messages)
+                             if m.get("timestamp") and not is_hidden_history_message(m)
+                             and m.get("role") in {"user", "assistant"}), None)
         with self.transaction() as db:
             row = db.execute("SELECT revision, generation FROM sessions WHERE key=?", (session.key,)).fetchone()
             if row is None:
                 if session.persisted:
                     raise SessionConflictError("session was deleted")
+                if message_start:
+                    raise ValueError("a new session must include its full history")
                 db.execute("INSERT INTO sessions VALUES (?, ?, ?, '{}', NULL, 0, 0, ?, '', '', NULL)", (
                     session.key, session.created_at.isoformat(), session.updated_at.isoformat(), session.generation,
                 ))
@@ -227,9 +254,10 @@ class SqliteSessionStore:
             db.executemany("""INSERT INTO messages VALUES (?, ?, ?)
                 ON CONFLICT(session_key, position) DO UPDATE SET record=excluded.record
                 WHERE messages.record != excluded.record""", [
-                    (session.key, position, record) for position, record in enumerate(records)
+                    (session.key, position, record)
+                    for position, record in enumerate(records, message_start)
                 ])
-            db.execute("DELETE FROM messages WHERE session_key=? AND position>=?", (session.key, len(records)))
+            db.execute("DELETE FROM messages WHERE session_key=? AND position>=?", (session.key, len(session.messages)))
             self._write_metadata(db, session.key, session.metadata, bump_revision=False)
         session.revision += 1
         session.persisted = True
@@ -261,9 +289,13 @@ class SqliteSessionStore:
             self._write_metadata(db, key, {**payload["metadata"], **updates})
             return True
 
-    def replace_metadata(self, key: str, metadata: dict[str, Any]) -> None:
+    def replace_metadata(
+        self, key: str, metadata: dict[str, Any], *, updated_at: datetime | None = None,
+    ) -> None:
         with self.transaction() as db:
             self._write_metadata(db, key, metadata)
+            if updated_at is not None:
+                db.execute("UPDATE sessions SET updated_at=? WHERE key=?", (updated_at.isoformat(), key))
 
     def read_metadata(self, key: str) -> SessionMetadataPayload | None:
         with self.transaction(write=False) as db:
