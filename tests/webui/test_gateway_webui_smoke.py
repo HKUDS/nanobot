@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import signal
 import socket
 import subprocess
 import sys
@@ -144,6 +145,7 @@ def _start_gateway(config_path: Path, log_path: Path) -> subprocess.Popen[bytes]
             cwd=Path(__file__).resolve().parents[2],
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
         )
     finally:
         log_file.close()
@@ -153,12 +155,19 @@ def _start_gateway(config_path: Path, log_path: Path) -> subprocess.Popen[bytes]
 def _stop_gateway(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
+    if sys.platform == "win32":
+        # Target only this gateway's console group and let it close its SQLite worker.
+        # TerminateProcess also races the child behind a venv's Python launcher.
+        process.send_signal(signal.CTRL_BREAK_EVENT)
+    else:
+        process.terminate()
     try:
-        process.wait(timeout=10)
+        returncode = process.wait(timeout=30)
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=10)
+        pytest.fail("gateway did not shut down gracefully within 30s")
+    assert returncode == 0, f"gateway shutdown failed with exit code {returncode}"
 
 
 def _get_json(url: str, *, token: str | None = None) -> dict:
