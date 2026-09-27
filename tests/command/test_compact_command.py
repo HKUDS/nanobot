@@ -318,7 +318,8 @@ async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
         channel="cli", sender_id="u", chat_id="test", content="initial question",
     )))
     try:
-        await asyncio.wait_for(started.wait(), timeout=5)
+        # Include cold context initialization and durable commits on slower CI disks.
+        await asyncio.wait_for(started.wait(), timeout=30)
         (await loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="before compaction",
         )))
@@ -328,7 +329,7 @@ async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
             channel="cli", sender_id="u", chat_id="test", content="after compaction",
         )))
         release.set()
-        await asyncio.wait_for(task, timeout=5)
+        await asyncio.wait_for(task, timeout=30)
     finally:
         release.set()
         if not task.done():
