@@ -261,7 +261,7 @@ async def test_large_draft_copy_and_publication_run_on_owner_worker(tmp_path, mo
     copied = threading.Event()
 
     def checked_copy(value):
-        if isinstance(value, Session):
+        if isinstance(value, Session) or (isinstance(value, dict) and "role" in value):
             assert threading.get_ident() != loop_thread
             copied.set()
         return original_copy(value)

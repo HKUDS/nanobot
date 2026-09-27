@@ -15,6 +15,14 @@ of committed state. Editing a returned snapshot does not save it. Import,
 restore, reset, and deletion commit before returning. There is no `save=False`
 mode or shutdown flush of mutable cached sessions.
 
+The owner worker retains its SQLite connection until shutdown. Before reusing
+cached history, it checks the session's revision and generation inside the
+transaction. Committed message records remain private to the owner; each new
+draft receives a detached history, while a commit copies only changed records
+and writes the affected suffix. Metadata, follow-up, and checkpoint commands do
+not read the message table. Conflicting history replacements still fail, and
+failed transactions never publish a new cached view.
+
 ## JSONL migration window
 
 | Milestone | Version |

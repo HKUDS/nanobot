@@ -46,6 +46,7 @@ class SessionState:
         self._pending: set[asyncio.Task[Any]] = set()
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="session-store")
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def _bind_loop(self) -> None:
@@ -65,8 +66,11 @@ class SessionState:
             raise RuntimeError("session state is closed")
 
         async def run() -> _T:
+            def work() -> _T:
+                self._store.retain_worker_connection()
+                return operation()
             try:
-                return await asyncio.get_running_loop().run_in_executor(self._worker, operation)
+                return await asyncio.get_running_loop().run_in_executor(self._worker, work)
             finally:
                 self._slots.release()
 
@@ -81,48 +85,111 @@ class SessionState:
         """Reject new operations and wait for all accepted operations to settle."""
         self._bind_loop()
         self._closed = True
-        if self._pending:
-            await shield_and_drain(asyncio.gather(*self._pending, return_exceptions=True))
-        self._worker.shutdown(wait=False)
 
-    def _change(self, key: str, change: Callable[[Session], _T]) -> _T:
+        async def close() -> None:
+            try:
+                if self._pending:
+                    await asyncio.gather(*self._pending, return_exceptions=True)
+                await asyncio.get_running_loop().run_in_executor(
+                    self._worker, self._store.close_worker_connection,
+                )
+            finally:
+                self._worker.shutdown(wait=False)
+
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(close())
+        await shield_and_drain(self._close_task)
+
+    def _change(
+        self, key: str, change: Callable[[Session], _T], *, history: bool = True,
+    ) -> _T:
         # Hold the cross-process lock across read/modify/write, not just the write.
         # No live cache can expose uncommitted changes if validation or I/O fails.
         with self._transaction():
-            session = self._load(key) or Session(key=key)
+            session = self._load(key, history=history) or Session(key=key)
+            before = list(session.messages)
             result = change(session)
-            self._commit(session)
-        self._publish(session)
+            if not history and session.persisted and session.policy.persist:
+                self._store.replace_metadata(key, session.metadata, updated_at=session.updated_at)
+                session.revision += 1
+            else:
+                self._commit(session, message_start=self._changed_start(before, session.messages))
+                history = True
+        self._publish(session, history=history)
+        if isinstance(result, Session):
+            # Only import returns a session; it must not expose the committed records.
+            return cast(_T, self._draft(result))
         return result
 
-    def _load(self, key: str) -> Session | None:
+    @staticmethod
+    def _working(session: Session) -> Session:
+        """Copy mutable headers and the list, sharing only owner-private message records."""
+        return replace(session, _baseline=None, messages=list(session.messages),
+                       metadata=deepcopy(session.metadata), provider_state=deepcopy(session.provider_state))
+
+    def _load(self, key: str, *, history: bool = True) -> Session | None:
         transient = self._transients.get(key)
-        session = deepcopy(transient) if transient is not None else self._store.load(key)
+        if transient is not None:
+            return self._working(transient)
+        with self._transaction(write=False):
+            session = self._store.load(key, history=False)
+            if session is not None and history:
+                cached = self._snapshots.get(key)
+                if cached is not None and (cached.revision, cached.generation) == (session.revision, session.generation):
+                    session = replace(session, messages=list(cached.messages))
+                else:
+                    session = self._store.load(key)
         if session is not None and key in self._policies:
             session.policy = self._policies[key]
         return session
 
-    def _commit(self, session: Session) -> None:
-        raw = replace(session, baseline=None)
+    @staticmethod
+    def _changed_start(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> int:
+        return next((i for i, (old, new) in enumerate(zip(before, after)) if old != new),
+                    min(len(before), len(after)))
+
+    @staticmethod
+    def _copy_changed_messages(
+        source: list[dict[str, Any]], owned: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Reuse this owner's unchanged records and detach replacements from the source."""
+        return [owned[i] if i < len(owned) and message == owned[i] else deepcopy(message)
+                for i, message in enumerate(source)]
+
+    def _commit(self, session: Session, *, message_start: int = 0) -> None:
+        raw = replace(session, _baseline=None)
         if session.policy.persist:
-            self._store.save(raw)
+            self._store.save(raw, message_start=message_start)
             session.revision = raw.revision
             session.persisted = raw.persisted
         else:
-            self._transients[session.key] = deepcopy(raw)
+            self._transients[session.key] = self._working(raw)
 
-    def _publish(self, session: Session) -> None:
-        """Publish a detached view only after the enclosing transaction committed."""
-        raw = replace(session, baseline=None)
-        self._snapshots[session.key] = deepcopy(raw)
+    def _publish(self, session: Session, *, history: bool = True) -> None:
+        """Publish owner-private records only after the enclosing transaction committed."""
+        if not history:
+            cached = self._snapshots.get(session.key)
+            if cached is None or (cached.revision + 1, cached.generation) != (session.revision, session.generation):
+                self._snapshots.pop(session.key, None)
+                return
+            session = replace(session, messages=cached.messages)
+        self._snapshots[session.key] = self._working(session)
         if len(self._snapshots) > 128:
             self._snapshots.pop(next(iter(self._snapshots)))
 
     @staticmethod
-    def _draft(session: Session, *, present: bool = True) -> Session:
-        raw = replace(session, baseline=None)
-        draft = deepcopy(raw)
-        draft.baseline = deepcopy(raw)
+    def _draft(
+        session: Session, *, present: bool = True, previous: Session | None = None,
+    ) -> Session:
+        raw = replace(session, _baseline=None)
+        if previous is None:
+            draft = deepcopy(raw)
+        else:
+            # Retain records already owned by this caller; copy only merged changes.
+            messages = SessionState._copy_changed_messages(raw.messages, previous.messages)
+            draft = replace(raw, messages=messages, metadata=deepcopy(raw.metadata),
+                            provider_state=deepcopy(raw.provider_state))
+        draft._baseline = raw  # pyright: ignore[reportPrivateUsage]
         draft.persisted = present
         return draft
 
@@ -182,14 +249,15 @@ class SessionState:
         for item in fields(Session):
             setattr(draft, item.name, getattr(fresh, item.name))
 
-    def _apply_turn(self, draft: Session) -> Session:
-        baseline = draft.baseline
+    def _apply_turn(self, draft: Session) -> tuple[Session, int]:
+        baseline = draft._baseline  # pyright: ignore[reportPrivateUsage]
         if baseline is None:
             raise ValueError("session changes require an owner-issued draft")
         loaded = self._load(draft.key)
         if (draft.persisted or not draft.policy.persist) and loaded is None:
             raise SessionConflictError("session was deleted")
         current = loaded or Session(key=draft.key, created_at=baseline.created_at, generation=baseline.generation)
+        before_messages = current.messages
         if loaded is not None and (
             current.generation != baseline.generation
         ):
@@ -217,12 +285,12 @@ class SessionState:
                 current.metadata[key] = deepcopy(after)
         if draft.messages != baseline.messages:
             if current.messages == baseline.messages:
-                current.messages = deepcopy(draft.messages)
+                current.messages = self._copy_changed_messages(draft.messages, before_messages)
             elif (
                 draft.messages[:len(baseline.messages)] == baseline.messages
                 and current.messages[:len(baseline.messages)] == baseline.messages
             ):
-                current.messages.extend(deepcopy(draft.messages[len(baseline.messages):]))
+                current.messages = current.messages + deepcopy(draft.messages[len(baseline.messages):])
             else:
                 raise SessionConflictError("session history changed")
         for name in ("last_consolidated", "provider_state"):
@@ -234,18 +302,16 @@ class SessionState:
                 setattr(current, name, deepcopy(after))
         current.policy = draft.policy
         current.updated_at = max(current.updated_at, draft.updated_at)
-        return current
+        return current, self._changed_start(before_messages, current.messages)
 
     async def _submit_draft(self, draft: Session) -> None:
         def commit() -> Session:
             # The caller owns this draft and awaits settlement before using it again.
-            # Copying and publishing large transcripts also belong on the worker.
-            payload = deepcopy(draft)
             with self._transaction():
-                current = self._apply_turn(payload)
-                self._commit(current)
+                current, message_start = self._apply_turn(draft)
+                self._commit(current, message_start=message_start)
             self._publish(current)
-            return self._draft(current)
+            return self._draft(current, previous=draft)
         fresh = await self._execute(draft.key, commit)
         self._refresh(draft, fresh)
 
@@ -256,17 +322,18 @@ class SessionState:
         """Run a synchronous metadata command inside one short transaction."""
         def commit() -> tuple[_T, dict[str, Any]]:
             with self._transaction():
-                session = self._load(key) or Session(key=key)
+                session = self._load(key, history=False) or Session(key=key)
                 if expected_generation is not None and session.generation != expected_generation:
                     raise SessionConflictError("metadata command belongs to a replaced session")
                 result = change(session.metadata)
-                if session.policy.persist and session.persisted:
+                header_only = session.policy.persist and session.persisted
+                if header_only:
                     self._store.replace_metadata(key, session.metadata)
                     session.revision += 1
                 else:
                     self._commit(session)
-            self._publish(session)
-            return result, deepcopy(session.metadata)
+            self._publish(session, history=not header_only)
+            return deepcopy(result), deepcopy(session.metadata)
         return await self._execute(key, commit)
 
     async def prepare_input(self, session: Session) -> None:
@@ -285,12 +352,13 @@ class SessionState:
 
     async def checkpoint_view(self, draft: Session, payload: Mapping[str, Any]) -> None:
         """Store a turn's recovery boundary without publishing unrelated draft edits."""
-        generation = draft.baseline.generation if draft.baseline is not None else None
+        baseline = draft._baseline  # pyright: ignore[reportPrivateUsage]
+        generation = baseline.generation if baseline is not None else None
         def commit() -> Session:
             request = deepcopy(dict(payload))
             provider = deepcopy(draft.provider_state)
             with self._transaction():
-                current = self._load(draft.key)
+                current = self._load(draft.key, history=False)
                 if current is None:
                     raise SessionConflictError("checkpoint requires accepted input")
                 if current.generation != generation:
@@ -301,14 +369,14 @@ class SessionState:
                     self._commit(current)
                 else:
                     self._store.save_runtime_checkpoint(current)
-            self._publish(current)
+            self._publish(current, history=not current.policy.persist)
             return current
         committed = await self._execute(draft.key, commit)
         # Only the checkpoint fields have committed; preserve other local changes.
         draft.metadata[_CHECKPOINT_KEY] = dict(payload)
-        if draft.baseline is not None:
-            draft.baseline.metadata[_CHECKPOINT_KEY] = committed.metadata[_CHECKPOINT_KEY]
-            draft.baseline.provider_state = committed.provider_state
+        if baseline is not None:
+            metadata = {**baseline.metadata, _CHECKPOINT_KEY: committed.metadata[_CHECKPOINT_KEY]}
+            draft._baseline = replace(baseline, metadata=metadata, provider_state=committed.provider_state)  # pyright: ignore[reportPrivateUsage]
 
     async def record_delivery(self, key: str, content: str, extra: Mapping[str, Any]) -> None:
         values = deepcopy(dict(extra))
@@ -324,7 +392,7 @@ class SessionState:
 
         payload = deepcopy(message)
         return await self._execute(key, lambda: self._change(
-            key, lambda session: record_pending_followup(session, payload),
+            key, lambda session: record_pending_followup(session, payload), history=False,
         ))
 
     async def acknowledge_followups(self, key: str, identifiers: Sequence[str]) -> None:
@@ -332,7 +400,7 @@ class SessionState:
 
         values = tuple(identifiers)
         await self._execute(key, lambda: self._change(
-            key, lambda session: acknowledge_pending_followups(session, values),
+            key, lambda session: acknowledge_pending_followups(session, values), history=False,
         ))
 
     async def commit_summary(
@@ -401,7 +469,7 @@ class SessionState:
                     target.metadata["title"] = title
                 self._commit(target)
             self._publish(target)
-            return target
+            return self._draft(target)
         return await self._execute(source_key, commit)
 
     async def delete(self, key: str) -> bool:
@@ -467,7 +535,7 @@ class SessionState:
         """Clear the transcript and revoke any old turn in one commit."""
         def reset() -> None:
             with self._transaction():
-                old = self._load(key)
+                old = self._load(key, history=False)
                 session = Session(key=key)
                 if old is not None:
                     session.policy = old.policy
