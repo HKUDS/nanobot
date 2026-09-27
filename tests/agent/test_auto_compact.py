@@ -144,7 +144,7 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     loop.sessions.save(session)
     loop.consolidator.archive_session = AsyncMock(return_value="Heartbeat summary.")
 
-    loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
+    await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session_async)
     await _drain_background_tasks(loop)
 
     loop.consolidator.archive_session.assert_awaited_once()
