@@ -1137,7 +1137,7 @@ class OpenAICompatProvider(LLMProvider):
 
         wants_auto_route = capabilities.auto_route and (
             (reasoning_effort is not None and reasoning_effort.lower() != "none")
-            or any(token in model_name for token in ("gpt-5", "o1", "o3", "o4"))
+            or any(token in model_name for token in ("gpt-5", "gpt-6", "o1", "o3", "o4"))
         )
         if not explicitly_supported and not wants_auto_route:
             return False

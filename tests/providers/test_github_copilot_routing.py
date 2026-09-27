@@ -31,6 +31,7 @@ def test_should_use_responses_api_allows_github_copilot_non_openai_base():
     """github_copilot bypasses the direct-OpenAI base check and still opts in for GPT-5."""
     provider = _make_copilot_provider()
     assert provider._should_use_responses_api("github_copilot/gpt-5.4-mini", None) is True
+    assert provider._should_use_responses_api("github_copilot/gpt-6-astra", None) is True
     assert provider._should_use_responses_api("github_copilot/o3", None) is True
 
 
