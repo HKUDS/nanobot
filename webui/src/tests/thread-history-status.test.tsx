@@ -16,7 +16,8 @@ describe("ThreadHistoryStatus", () => {
     act(() => vi.advanceTimersByTime(179));
     expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
     act(() => vi.advanceTimersByTime(1));
-    expect(screen.getByText("Loading earlier messages…")).toBeVisible();
+    expect(screen.getByText("Loading earlier messages…")).toHaveClass("sr-only");
+    expect(screen.getByRole("status").querySelector("svg")).toHaveClass("animate-spin");
   });
 
   it("cancels the delay on completion and starts a fresh delay for the next request", () => {
@@ -30,7 +31,8 @@ describe("ThreadHistoryStatus", () => {
 
     rerender(<ThreadHistoryStatus {...props} loading />);
     act(() => vi.advanceTimersByTime(180));
-    expect(screen.getByText("Loading earlier messages…")).toBeVisible();
+    expect(screen.getByText("Loading earlier messages…")).toHaveClass("sr-only");
+    expect(screen.getByRole("status").querySelector("svg")).toHaveClass("animate-spin");
     rerender(<ThreadHistoryStatus {...props} loading={false} />);
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
     rerender(<ThreadHistoryStatus {...props} loading />);

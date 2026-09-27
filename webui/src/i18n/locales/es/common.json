@@ -1619,8 +1619,7 @@
     "history": {
       "loading": "Cargando mensajes anteriores…",
       "error": "No se pudieron cargar los mensajes anteriores.",
-      "retry": "Reintentar",
-      "start": "Inicio de la conversación"
+      "retry": "Reintentar"
     },
     "forkedFromHistory": "Bifurcado desde el historial",
     "promptNavigator": {

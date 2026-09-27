@@ -1618,8 +1618,7 @@
     "history": {
       "loading": "Memuat pesan sebelumnya…",
       "error": "Pesan sebelumnya tidak dapat dimuat.",
-      "retry": "Coba lagi",
-      "start": "Awal percakapan"
+      "retry": "Coba lagi"
     },
     "forkedFromHistory": "Cabang dari riwayat",
     "promptNavigator": {

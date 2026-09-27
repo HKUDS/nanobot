@@ -1818,8 +1818,7 @@
     "history": {
       "loading": "Loading earlier messages…",
       "error": "Couldn’t load earlier messages.",
-      "retry": "Retry",
-      "start": "Start of conversation"
+      "retry": "Retry"
     },
     "forkedFromHistory": "Forked from history",
     "promptNavigator": {

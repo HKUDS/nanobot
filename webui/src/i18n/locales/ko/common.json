@@ -1618,8 +1618,7 @@
     "history": {
       "loading": "이전 메시지를 불러오는 중…",
       "error": "이전 메시지를 불러오지 못했습니다.",
-      "retry": "다시 시도",
-      "start": "대화의 시작입니다"
+      "retry": "다시 시도"
     },
     "forkedFromHistory": "기록에서 분기됨",
     "promptNavigator": {

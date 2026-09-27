@@ -920,7 +920,7 @@ describe("ThreadViewport", () => {
 
     followTo.mockClear();
     act(() => {
-      fireEvent.touchStart(scroller, { touches: [{ clientY: 300 }] });
+      fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
       fireEvent.touchMove(scroller, { touches: [{ clientY: 324 }] });
       scroller.scrollTop = 1_380;
       scroller.dispatchEvent(new Event("scroll"));
@@ -931,7 +931,7 @@ describe("ThreadViewport", () => {
     expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
 
     act(() => {
-      fireEvent.touchMove(scroller, { touches: [{ clientY: 300 }] });
+      fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
       scroller.scrollTop = 1_404;
       scroller.dispatchEvent(new Event("scroll"));
       fireEvent.touchEnd(scroller);
@@ -1656,8 +1656,8 @@ describe("ThreadViewport", () => {
       expect(onLoadOlder).not.toHaveBeenCalled();
       if (input === "wheel") fireEvent.wheel(scroller, { deltaY: -100 });
       if (input === "touch") {
-        fireEvent.touchStart(scroller, { touches: [{ clientY: 200 }] });
-        fireEvent.touchMove(scroller, { touches: [{ clientY: 300 }] });
+        fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+        fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
       }
       if (input === "keyboard") fireEvent.keyDown(scroller, { key: "PageUp" });
       expect(onLoadOlder).toHaveBeenCalledTimes(1);
@@ -1764,41 +1764,76 @@ describe("ThreadViewport", () => {
     expect(screen.queryByText("Loading earlier messages…")).not.toBeInTheDocument();
   });
 
-  it("does not mark locally windowed or unconfirmed history as complete", () => {
-    const { rerender } = render(
-      <ThreadViewport messages={makeLongMessages(130)} isStreaming={false} historyLoaded />,
-    );
-    expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
-    rerender(<ThreadViewport messages={messages} isStreaming={false} />);
-    expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
-    rerender(<ThreadViewport messages={messages} isStreaming={false}
-      historyLoaded conversationReady={false} />);
-    expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
+  it("reveals touch feedback before fetching, cancels short pulls, and fetches once per gesture", () => {
+    const onLoadOlder = vi.fn();
+    const props = { messages, isStreaming: false, hasMoreBefore: true, onLoadOlder };
+    const { container, rerender } = render(<ThreadViewport {...props} />);
+    const scroller = getScroller(container);
+    const touch = (y: number) => ({ touches: [{ clientX: 100, clientY: y }] });
+    fireEvent.touchStart(scroller, touch(200));
+    fireEvent.touchMove(scroller, touch(240));
+    expect(scroller).toHaveStyle({ transform: "translateY(20px)" });
+    expect(screen.getByRole("status").querySelector("svg")).not.toBeNull();
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    fireEvent.touchEnd(scroller);
+    expect(scroller.style.transform).toBe("");
+
+    fireEvent.touchStart(scroller, touch(200));
+    fireEvent.touchMove(scroller, touch(300));
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    rerender(<ThreadViewport {...props} loadingOlder />);
+    fireEvent.touchMove(scroller, touch(350));
+    fireEvent.scroll(scroller);
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status").querySelector("svg")).toHaveClass("animate-spin");
+    fireEvent.touchEnd(scroller);
+    expect(scroller).toHaveStyle({ transform: "translateY(48px)" });
+    rerender(<ThreadViewport {...props} />);
+    expect(scroller.style.transform).toBe("");
   });
 
-  it("marks the start only after the complete history has loaded", () => {
-    const view = render(
-      <ThreadViewport
-        messages={messages}
-        isStreaming={false}
-        composer={<div />}
-        historyLoaded
-      />,
-    );
+  it.each([
+    { loadingOlder: true },
+    { olderError: "offline" },
+    { conversationReady: false },
+    { hasMoreBefore: false },
+  ])("does not pull or fetch blocked history: %o", (blocked) => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
+      hasMoreBefore onLoadOlder={onLoadOlder} {...blocked} />);
+    const scroller = getScroller(container);
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 350 }] });
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    expect(scroller.style.transform).toBe("");
+  });
 
-    expect(screen.getByText("Start of conversation")).toBeVisible();
-    expect(screen.getByText("Start of conversation")).toHaveClass("thread-message-row");
+  it("does not fetch on touch scroll alone or horizontal gestures and clears pull on session change", () => {
+    const onLoadOlder = vi.fn();
+    const props = { messages, isStreaming: false, hasMoreBefore: true, onLoadOlder };
+    const { container, rerender } = render(<ThreadViewport {...props} conversationKey="a" />);
+    const scroller = getScroller(container);
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 300, clientY: 220 }] });
+    fireEvent.scroll(scroller);
+    expect(scroller.style.transform).toBe("");
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    fireEvent.touchEnd(scroller);
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 240 }] });
+    rerender(<ThreadViewport {...props} conversationKey="b" />);
+    expect(scroller.style.transform).toBe("");
+    expect(onLoadOlder).not.toHaveBeenCalled();
+  });
 
-    view.rerender(
-      <ThreadViewport
-        messages={messages}
-        isStreaming={false}
-        composer={<div />}
-        historyLoaded
-        hasMoreBefore
-      />,
-    );
+  it("leaves completed history quiet", () => {
+    const onLoadOlder = vi.fn();
+    const { container } = render(<ThreadViewport messages={messages} isStreaming={false}
+      onLoadOlder={onLoadOlder} />);
+    fireEvent.wheel(getScroller(container), { deltaY: -100 });
     expect(screen.queryByText("Start of conversation")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(onLoadOlder).not.toHaveBeenCalled();
   });
 
   it("renders a prompt rail that jumps to user messages", async () => {
@@ -1888,8 +1923,8 @@ describe("ThreadViewport", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
 
     restartNavigation();
-    fireEvent.touchStart(scroller, { touches: [{ clientY: 300 }] });
-    fireEvent.touchMove(scroller, { touches: [{ clientY: 200 }] });
+    fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
     expect(cancel).toHaveBeenCalledTimes(1);
 
     restartNavigation();

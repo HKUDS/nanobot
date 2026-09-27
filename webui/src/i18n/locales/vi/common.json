@@ -1618,8 +1618,7 @@
     "history": {
       "loading": "Đang tải tin nhắn trước đó…",
       "error": "Không tải được tin nhắn trước đó.",
-      "retry": "Thử lại",
-      "start": "Đầu cuộc trò chuyện"
+      "retry": "Thử lại"
     },
     "forkedFromHistory": "Tách nhánh từ lịch sử",
     "promptNavigator": {

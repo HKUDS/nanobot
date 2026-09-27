@@ -1818,8 +1818,7 @@
     "history": {
       "loading": "正在加载更早的消息…",
       "error": "较早消息加载失败",
-      "retry": "重试",
-      "start": "已到对话开头"
+      "retry": "重试"
     },
     "forkedFromHistory": "从历史消息分叉",
     "promptNavigator": {
