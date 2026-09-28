@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from functools import cache
 from typing import Any, cast
@@ -64,6 +64,7 @@ async def execute_tool_calls(
     context: AgentHookContext,
     model_messages: list[dict[str, Any]] | None = None,
     compacted_tool_results: set[str] | None = None,
+    checkpoint_callback: Callable[[list[tuple[ToolCallRequest, Any]]], Awaitable[None]] | None = None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
     """Execute one model response's tool calls in stable result order."""
     @cache
@@ -78,6 +79,7 @@ async def execute_tool_calls(
             and message["tool_call_id"] not in (compacted_tool_results or ())
         }
     tool_results: list[tuple[Any, dict[str, str]]] = []
+    completed_pairs: list[tuple[ToolCallRequest, Any]] = []
     for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
         if concurrent and len(batch) > 1:
             batch_results = await asyncio.gather(*(
@@ -93,9 +95,13 @@ async def execute_tool_calls(
                 for tool_call in batch
             ))
             tool_results.extend(batch_results)
+            completed_pairs.extend(
+                (tool_call, result)
+                for tool_call, (result, _event) in zip(batch, batch_results)
+            )
         else:
             for tool_call in batch:
-                result = await _execute_tool_call(
+                result, event = await _execute_tool_call(
                     tools,
                     tool_call,
                     external_lookup_counts,
@@ -104,7 +110,10 @@ async def execute_tool_calls(
                     context,
                     read_results,
                 )
-                tool_results.append(result)
+                tool_results.append((result, event))
+                completed_pairs.append((tool_call, result))
+        if checkpoint_callback is not None:
+            await checkpoint_callback(list(completed_pairs))
 
     results = [result for result, _event in tool_results]
     events = [event for _result, event in tool_results]

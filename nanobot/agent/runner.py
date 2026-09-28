@@ -37,6 +37,7 @@ from nanobot.providers.base import (
     LLMResponse,
     LLMUsage,
     ProviderConversationState,
+    ToolCallRequest,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.summary import SessionSummaryCheckpoint
@@ -501,6 +502,56 @@ class AgentRunner:
                 )
 
                 await hook.before_execute_tools(context)
+
+                async def _on_tool_batch_completed(
+                        completed_pairs: list[tuple[ToolCallRequest, Any]],
+                ) -> None:
+                    result_by_id = {
+                        tool_call.id: result
+                        for tool_call, result in completed_pairs
+                    }
+                    partial_completed: list[dict[str, Any]] = []
+                    partial_pending: list[dict[str, Any]] = []
+                    # 按 response.tool_calls 原始顺序稳定输出
+                    for tool_call in response.tool_calls:
+                        if tool_call.id in result_by_id:
+                            partial_completed.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "name": tool_call.name,
+                                "content": self.context_governor.normalize_tool_result(
+                                    governance_config,
+                                    tool_call.id,
+                                    tool_call.name,
+                                    result_by_id[tool_call.id],
+                                ),
+                            })
+                        else:
+                            partial_pending.append(tool_call.to_openai_tool_call())
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "awaiting_tools",
+                            "iteration": iteration,
+                            "model": spec.runtime.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": partial_completed,
+                            "pending_tool_calls": partial_pending,
+                        },
+                    )
+
+                results, new_events = await execute_tool_calls(
+                    spec.tools,
+                    response.tool_calls,
+                    concurrent=spec.concurrent_tools,
+                    external_lookup_counts=external_lookup_counts,
+                    workspace_violation_counts=workspace_violation_counts,
+                    hook=hook,
+                    context=context,
+                    model_messages=messages_for_model,
+                    compacted_tool_results=request_state.compacted_tool_results,
+                    checkpoint_callback=_on_tool_batch_completed,
+                )
 
                 results, new_events = await execute_tool_calls(
                     spec.tools,
