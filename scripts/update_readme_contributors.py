@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import TypedDict, cast
 from urllib.request import Request, urlopen
@@ -55,7 +56,7 @@ def fetch_contributors() -> list[Contributor]:
     ]
 
 
-def render_wall(contributors: list[Contributor]) -> str:
+def render_wall(contributors: list[Contributor], previous_wall: str = "") -> str:
     avatars = [
         (
             f'<a href="{contributor["html_url"]}">'
@@ -64,23 +65,31 @@ def render_wall(contributors: list[Contributor]) -> str:
         )
         for contributor in contributors
     ]
+    # GitHub only links the first 500 author emails to accounts. Keep existing
+    # credits when the contributors endpoint starts returning them as anonymous.
+    # https://docs.github.com/en/rest/repos/repos#list-repository-contributors
+    logins = {contributor["login"].lower() for contributor in contributors}
+    for avatar, login in re.findall(r'(<a href="[^"]+"><img [^\n]+alt="([^"]+)"></a>)', previous_wall):
+        if login.lower() not in logins | MAINTAINERS and not login.lower().endswith("[bot]"):
+            avatars.append(avatar)
+            logins.add(login.lower())
     wall = "\n".join(avatars)
     return f"{START}\n<p>\n{wall}\n</p>\n{END}"
 
 
 def update_readme(*, check: bool) -> bool:
-    current = README.read_text()
+    current = README.read_text(encoding="utf-8")
     before, separator, tail = current.partition(START)
     if not separator or END not in tail:
         raise SystemExit("README contributor markers are missing")
 
-    _, _, after = tail.partition(END)
-    updated = f"{before}{render_wall(fetch_contributors())}{after}"
+    previous_wall, _, after = tail.partition(END)
+    updated = f"{before}{render_wall(fetch_contributors(), previous_wall)}{after}"
     if updated == current:
         return False
     if check:
         raise SystemExit("README contributor wall is out of date")
-    README.write_text(updated)
+    README.write_text(updated, encoding="utf-8")
     return True
 
 
