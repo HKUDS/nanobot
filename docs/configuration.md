@@ -42,6 +42,7 @@ the focused guides first and come back here for exact fields and defaults.
 | Add fallback chains | [Model Fallbacks](#model-fallbacks) |
 | Configure voice transcription | [Transcription Settings](#transcription-settings) |
 | Tune channel defaults | [Channel Settings](#channel-settings) |
+| Configure local file search | [File Search](#file-search) |
 | Configure web search and fetch | [Web Tools](#web-tools) |
 | Enable image generation | [Image Generation](#image-generation) |
 | Add MCP servers | [MCP](#mcp-model-context-protocol) |
@@ -1687,6 +1688,28 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 > Some channels may still apply small API-specific retries internally. For example, Telegram separately retries timeout and flood-control errors before surfacing a final failure to the manager.
 >
 > If a channel is completely unreachable, nanobot cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
+
+## File Search
+
+With `tools.file.enable` and `tools.exec.enable` enabled (both default to `true`),
+nanobot detects `rg` on the exec `PATH`, including `tools.exec.pathPrepend` and
+`tools.exec.pathAppend`, when loading tools. An installed ripgrep replaces the
+built-in `grep` and `find_files` tools with `rg` for content search and file discovery.
+The built-in `grep` and `find_files` tools provide search when ripgrep is unavailable
+or exec is disabled. `tools.file.enable` controls both search backends along with
+the other file tools.
+
+The `rg` tool accepts native arguments in `args`, for example
+`{"args": "-n -g '*.py' AgentLoop nanobot"}` or
+`{"args": "--files -g '*.py'"}`. Arguments and shell syntax run through exec,
+sharing its shell selection, timeout, workspace guards, sandbox, and process
+sessions. Quote arguments for the selected shell. On Windows, the default shell
+is PowerShell; `shell: "cmd"` selects cmd.exe. Each call starts an exec shell, so
+shell startup can dominate the time spent on small searches.
+
+Search follows ripgrep's native ignore rules and output format. Use `--hidden` to
+include hidden files and `--no-ignore` to search ignored files. For extracted text
+from PDF, DOCX, XLSX, and PPTX documents, use `read_file`.
 
 ## Web Tools
 

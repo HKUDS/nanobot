@@ -758,19 +758,24 @@ async def test_search_tools_reject_paths_outside_workspace(tmp_path: Path) -> No
     assert grep_result.startswith("Error:")
 
 
-def test_agent_loop_registers_grep(tmp_path: Path) -> None:
+@pytest.mark.parametrize("use_rg", [True, False])
+def test_agent_loop_registers_search_backend(tmp_path: Path, monkeypatch, use_rg) -> None:
+    monkeypatch.setattr("nanobot.agent.tools.rg.RgTool.enabled", lambda ctx: use_rg)
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
-    assert "find_files" in loop.tools.tool_names
-    assert "grep" in loop.tools.tool_names
+    assert ("rg" in loop.tools.tool_names) == use_rg
+    assert ("find_files" in loop.tools.tool_names) == (not use_rg)
+    assert ("grep" in loop.tools.tool_names) == (not use_rg)
 
 
 @pytest.mark.asyncio
-async def test_subagent_registers_grep(tmp_path: Path) -> None:
+@pytest.mark.parametrize("use_rg", [True, False])
+async def test_subagent_registers_search_backend(tmp_path: Path, monkeypatch, use_rg) -> None:
+    monkeypatch.setattr("nanobot.agent.tools.rg.RgTool.enabled", lambda ctx: use_rg)
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -804,8 +809,9 @@ async def test_subagent_registers_grep(tmp_path: Path) -> None:
         LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
     )
 
-    assert "find_files" in captured["tool_names"]
-    assert "grep" in captured["tool_names"]
+    assert ("rg" in captured["tool_names"]) == use_rg
+    assert ("find_files" in captured["tool_names"]) == (not use_rg)
+    assert ("grep" in captured["tool_names"]) == (not use_rg)
 
 
 def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
