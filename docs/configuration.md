@@ -1691,27 +1691,8 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 
 ## File Search
 
-With `tools.file.enable` and `tools.exec.enable` enabled (both default to `true`),
-nanobot detects `rg` on the exec `PATH`, including `tools.exec.pathPrepend` and
-`tools.exec.pathAppend`, when loading tools. An installed ripgrep replaces the
-built-in `grep` and `find_files` tools with `rg` for content search and file discovery.
-The built-in `grep` and `find_files` tools provide search when ripgrep is unavailable
-or exec is disabled. `tools.file.enable` controls both search backends along with
-the other file tools.
-
-The `rg` tool accepts native arguments as an array in `args`, for example
-`{"args": ["-n", "-g", "*.py", "AgentLoop", "nanobot"]}` or
-`{"args": ["--files", "-g", "*.py"]}`. Each array element is passed as one argument,
-including search terms or paths containing spaces. Ripgrep handles glob patterns
-and regular expressions itself.
-
-The tool starts the rg process directly and shares exec's PATH configuration,
-timeout, workspace guards, output limits, and process sessions. A configured exec
-sandbox wraps the process using the selected backend.
-
-Search follows ripgrep's native ignore rules and output format. Use `--hidden` to
-include hidden files and `--no-ignore` to search ignored files. For extracted text
-from PDF, DOCX, XLSX, and PPTX documents, use `read_file`.
+When ripgrep (`rg`) is installed, nanobot automatically uses it in place of the
+built-in `grep` and `find_files` tools.
 
 ## Web Tools
 
