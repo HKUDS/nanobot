@@ -1972,11 +1972,26 @@ If you want to always use the local conversion, you can force it using:
 }
 ```
 
+To read JavaScript-rendered pages through [Unbrowse](https://unbrowse.ai), a hosted scrape API, set an Unbrowse API key (from [unbrowse.ai/app](https://unbrowse.ai/app)). `web_fetch` then tries Unbrowse first and falls back to Jina Reader or the local conversion if it fails. The same URL-disclosure note above applies, and credential-bearing URLs are still fetched locally.
+
+```json
+{
+  "tools": {
+    "web": {
+      "fetch": {
+        "unbrowseApiKey": "${UNBROWSE_API_KEY}"
+      }
+    }
+  }
+}
+```
+
 #### `tools.web.fetch`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `useJinaReader` | boolean | `true` | If true, Jina Reader will be preferred over the local conversion |
+| `unbrowseApiKey` | string | `""` | If set, Unbrowse is tried before Jina Reader and the local conversion |
 
 ## Image Generation
 
