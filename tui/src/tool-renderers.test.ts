@@ -3,6 +3,15 @@ import { describe, expect, test } from "bun:test"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 
 describe("tool renderers", () => {
+  test("shows rg search phases and argument boundaries", () => {
+    const start = { name: "rg", phase: "start", arguments: { args: ["-n", "hello world", "src"] } }
+    expect(renderToolEvent(start)).toBe('  › Searching files  "-n" "hello world" "src"')
+    expect(renderToolEvent(mergeToolEvent(start, { name: "rg", phase: "end", result: "src/a:1:hello world" })))
+      .toBe('  ✓ Searched files  "-n" "hello world" "src"')
+    expect(renderToolEvent({ name: "rg", phase: "error", error: "invalid regex" }))
+      .toBe("  × Search failed  invalid regex")
+  })
+
   test("retains start arguments when an end frame only carries output", () => {
     const event = mergeToolEvent(
       { call_id: "exec-1", phase: "start", name: "exec", arguments: { cmd: "git status" } },

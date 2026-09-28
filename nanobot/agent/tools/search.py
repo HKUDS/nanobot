@@ -19,9 +19,7 @@ from typing import Any, Iterable, Iterator, TypeVar
 
 from nanobot.agent.tools._search_content import ContentPage, MatchTooLargeError
 from nanobot.agent.tools.base import ToolResult
-from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
-from nanobot.agent.tools.rg import RgTool as _RgTool
 from nanobot.utils.document import (
     DocumentLineSource,
     LocatedDocumentLine,
@@ -206,10 +204,6 @@ def _matches_query(rel_path: str, query: str | None) -> bool:
 
 
 class _SearchTool(_FsTool):
-    @classmethod
-    def enabled(cls, ctx: ToolContext) -> bool:
-        return super().enabled(ctx) and not _RgTool.enabled(ctx)
-
     _IGNORE_DIRS = ListDirTool._IGNORE_DIRS | {".worktrees", ".worktree", ".nanobot"}
     _MAX_SCAN_PATHS = 500_000
     _MAX_SCAN_SECONDS = 30.0

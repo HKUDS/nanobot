@@ -54,6 +54,7 @@ function toolLabel(
     return phase === "end" ? "Delegated" : phase === "error" ? "Delegation failed" : "Delegating"
   }
   if (name === "web_search") return "Search web"
+  if (name === "rg") return phase === "end" ? "Searched files" : phase === "error" ? "Search failed" : "Searching files"
   if (name === "web_fetch") return "Fetch"
   return name
 }
@@ -72,6 +73,9 @@ function toolDetail(
   }
   if (/^(?:spawn|spawn_agent)$/u.test(name)) return compact(args.label ?? args.task, 56)
   if (name === "web_search") return compact(args.query ?? args.q)
+  if (name === "rg" && Array.isArray(args.args)) {
+    return compact(args.args.map((arg) => JSON.stringify(arg)).join(" "))
+  }
   if (name === "web_fetch") return compact(args.url)
   if (/session/u.test(name)) return compact(args.session_key ?? args.chat_id ?? args.query)
   if (Object.keys(args).length) return compact(args)

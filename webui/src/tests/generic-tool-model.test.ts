@@ -15,6 +15,18 @@ function describeRun(line: string, status: GenericToolStatus = "done") {
 }
 
 describe("generic tool activity semantics", () => {
+  it.each(["running", "done", "error"] as const)("shows rg arguments during %s", (status) => {
+    const presentation = describeRun('rg({"args":["-n","hello world","src"]})', status);
+    expect(presentation.detail).toBe('"-n" "hello world" "src"');
+    expect(presentation.status).toBe(status);
+  });
+
+  it("bounds and redacts rg argument previews", () => {
+    const presentation = describeRun(`rg(${JSON.stringify({ args: ["sk-proj-abcdefghijklmno", "x".repeat(120)] })})`);
+    expect(presentation.detail).toContain("<redacted>");
+    expect(presentation.detail.length).toBeLessThanOrEqual(88);
+  });
+
   it.each([
     ['find_files({"glob":"*.tsx"})', "Found files", "*.tsx"],
     ['grep({"pattern":"dream_cursor"})', "Searched files", "“dream_cursor”"],

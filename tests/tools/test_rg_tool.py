@@ -24,16 +24,55 @@ from nanobot.config.schema import ToolsConfig
 @pytest.mark.parametrize("exec_enabled", [True, False])
 @pytest.mark.parametrize("file_enabled", [True, False])
 @pytest.mark.parametrize("scope", ["core", "subagent"])
-def test_loader_selects_one_search_backend(tmp_path, monkeypatch, installed, exec_enabled, file_enabled, scope):
+@pytest.mark.parametrize("classes", [
+    [RgTool, GrepTool, FindFilesTool], [GrepTool, FindFilesTool, RgTool],
+])
+def test_loader_selects_one_search_backend(tmp_path, monkeypatch, installed, exec_enabled, file_enabled, scope, classes):
     monkeypatch.setattr("nanobot.agent.tools.rg.shutil.which", lambda *a, **kw: "rg" if installed else None)
     config = ToolsConfig()
     config.exec.enable = exec_enabled
     config.file.enable = file_enabled
     ctx = ToolContext(config=config, workspace=str(tmp_path))
     registry = ToolRegistry()
-    ToolLoader(test_classes=[RgTool, GrepTool, FindFilesTool]).load(ctx, registry, scope=scope)
+    registered = ToolLoader(test_classes=classes).load(ctx, registry, scope=scope)
     expected = {"rg"} if installed and exec_enabled else {"grep", "find_files"}
     assert set(registry.tool_names) == (expected if file_enabled else set())
+    assert set(registered) == set(registry.tool_names)
+
+
+def test_loader_keeps_builtin_search_when_rg_creation_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(RgTool, "enabled", classmethod(lambda cls, ctx: True))
+
+    def fail_create(cls, ctx):
+        raise RuntimeError("rg initialization failed")
+
+    monkeypatch.setattr(RgTool, "create", classmethod(fail_create))
+    registry = ToolRegistry()
+    registered = ToolLoader(test_classes=[RgTool, GrepTool, FindFilesTool]).load(
+        ToolContext(config=ToolsConfig(), workspace=str(tmp_path)), registry,
+    )
+    assert set(registered) == {"grep", "find_files"}
+    assert set(registry.tool_names) == {"grep", "find_files"}
+
+
+def test_loader_can_load_builtin_search_independently(tmp_path, monkeypatch):
+    monkeypatch.setattr(RgTool, "enabled", classmethod(lambda cls, ctx: True))
+    registry = ToolRegistry()
+    registered = ToolLoader(test_classes=[GrepTool, FindFilesTool]).load(
+        ToolContext(config=ToolsConfig(), workspace=str(tmp_path)), registry,
+    )
+    assert set(registered) == {"grep", "find_files"}
+    assert set(registry.tool_names) == {"grep", "find_files"}
+
+
+def test_loader_preserves_plugin_search_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr(RgTool, "enabled", classmethod(lambda cls, ctx: True))
+    loader = ToolLoader(test_classes=[RgTool, GrepTool, FindFilesTool])
+    monkeypatch.setattr(loader, "_discover_plugins", lambda: {"external_grep": GrepTool})
+    registry = ToolRegistry()
+    registered = loader.load(ToolContext(config=ToolsConfig(), workspace=str(tmp_path)), registry)
+    assert registered == ["rg", "grep"]
+    assert set(registry.tool_names) == {"rg", "grep"}
 
 
 def test_detection_uses_exec_path_configuration(tmp_path, monkeypatch):
