@@ -71,6 +71,10 @@ async def test_isolated_sessions_compact_without_writing_memory(tmp_path, monkey
             "Inspect note.txt and finish", runtime=loop.llm_runtime(), session_key=parent.key,
         )
         assert result == "finished"
+        for index in (0, 2):
+            assert requests[index][0]["role"] == "system"
+            assert "reported back to the main agent" in requests[index][0]["content"]
+        assert requests[0][1] == {"role": "user", "content": "Inspect note.txt and finish"}
     else:
         key = "websocket:temporary"
         temporary = loop.sessions.get_or_create_transient(key)
@@ -93,10 +97,17 @@ async def test_isolated_sessions_compact_without_writing_memory(tmp_path, monkey
         assert saved.metadata["subagent"]["parent_session_key"] == parent.key
         assert saved.metadata["subagent"]["status"] == "completed"
         assert saved.messages[-1]["content"] == "finished"
+        assert saved.messages[0]["content"] == "Inspect note.txt and finish"
         assert checkpoint in str(saved.metadata)
         assert loop.sessions.read_session_file(saved.key) is not None
     else:
         assert loop.sessions.list_sessions() == before
+        assert requests[0][0] == {
+            "role": "system",
+            "content": loop.context.build_system_prompt(
+                channel="cli", workspace=tmp_path, include_memory=False,
+            ),
+        }
     assert not loop.context.memory.history_file.exists()
     assert loop.context.memory.read_memory() == "PARENT MEMORY MUST NOT BE INJECTED"
     await loop.aclose()
@@ -218,7 +229,8 @@ async def test_child_inherits_workspace_and_uses_shared_prompt(tmp_path):
     assert "PROJECT INSTRUCTION" in captured[0][0]["content"]
     assert "global-custom" in captured[0][0]["content"]
     assert "project-custom" not in captured[0][0]["content"]
-    assert "reported back to the main agent" in captured[0][1]["content"]
+    assert "reported back to the main agent" in captured[0][0]["content"]
+    assert captured[0][1] == {"role": "user", "content": "inspect"}
     await loop.aclose()
 
 

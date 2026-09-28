@@ -92,7 +92,7 @@ class ChildSessionService:
                 "created_at": datetime.now().isoformat(),
             },
         })
-        session.add_message("user", render_template("agent/subagent_system.md", task=task))
+        session.add_message("user", task)
         self.sessions.save(session)
         return session
 
@@ -152,7 +152,11 @@ class ChildSessionService:
             try:
                 result = await self.executor.run(AgentRunSpec(
                     initial_messages=None,
-                    transcript_input=TranscriptInput(history=[], current_message=session.messages[0]["content"]),
+                    transcript_input=TranscriptInput(
+                        history=[],
+                        current_message=session.messages[0]["content"],
+                        system_instructions=render_template("agent/subagent_system.md"),
+                    ),
                     runtime=request.runtime,
                     tools=self.build_tools(request, scope),
                     session_key=session.key,

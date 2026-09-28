@@ -79,6 +79,8 @@ class TranscriptInput:
     current_role: str = "user"
     session_summary: SessionSummary | None = None
     runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None
+    # Trusted instructions for this execution, retained when compaction rebuilds the prompt.
+    system_instructions: str | None = None
 
     @property
     def message_count(self) -> int:
@@ -283,16 +285,16 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
+        system_prompt = self.build_system_prompt(
+            channel=channel,
+            session_summary=transcript.session_summary,
+            workspace=root,
+            include_memory=include_memory,
+        )
+        if transcript.system_instructions:
+            system_prompt += "\n\n---\n\n" + transcript.system_instructions
         messages: list[dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": self.build_system_prompt(
-                    channel=channel,
-                    session_summary=transcript.session_summary,
-                    workspace=root,
-                    include_memory=include_memory,
-                ),
-            },
+            {"role": "system", "content": system_prompt},
             *transcript.history,
         ]
         if transcript.current_message is None:

@@ -43,7 +43,10 @@ loading the record does not automatically rerun tools or resume the task.
 ## Context and retention
 
 Child tasks receive project instructions and agent skills, but do not inherit the
-parent transcript or long-term memory. Saving their session does not append their
+parent transcript or long-term memory. `agent/subagent_system.md` adds the delegated
+role and result-delivery instructions to the system prompt, including after
+compaction. The assigned task is a separate user message in both the model input
+and saved transcript. Saving their session does not append their
 summaries or raw fallbacks to the agent's memory archive. Like Dream's per-run
 sessions, they are excluded from idle memory archival. Dream's session rotation
 does not delete subagent records.
