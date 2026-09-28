@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import shlex
 import time
 import uuid
 from collections import deque
@@ -280,7 +281,7 @@ class ExecSessionManager:
     async def start(
         self,
         *,
-        command: str,
+        command: str | list[str],
         cwd: str,
         env: dict[str, str],
         timeout: int | None,
@@ -301,7 +302,7 @@ class ExecSessionManager:
             session = _ExecSession(
                 session_id=session_id,
                 process=process,
-                command=command,
+                command=shlex.join(command) if isinstance(command, list) else command,
                 cwd=cwd,
                 timeout=timeout,
                 owner_session_key=owner_session_key,
@@ -445,7 +446,7 @@ class ExecSessionManager:
 
     async def _spawn(
         self,
-        command: str,
+        command: str | list[str],
         cwd: str,
         env: dict[str, str],
         shell_program: str | None,

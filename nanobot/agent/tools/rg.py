@@ -1,4 +1,4 @@
-"""Installed ripgrep exposed through the shared exec implementation."""
+"""Installed ripgrep with native arguments and shared process controls."""
 
 # pyright: reportIncompatibleMethodOverride=false
 
@@ -33,25 +33,25 @@ class RgTool(ExecTool):
     def description(self) -> str:
         return (
             "Search file contents and discover files with ripgrep. "
-            "Supports native rg arguments and shell syntax through exec."
+            "Accepts native rg arguments as an array of strings."
         )
 
     @property
     def parameters(self) -> dict[str, Any]:
         schema = deepcopy(super().parameters)
         properties = schema["properties"]
-        properties.pop("command", None)
-        properties.pop("cmd", None)
+        for name in ("command", "cmd", "shell", "login"):
+            properties.pop(name, None)
         properties["args"] = {
-            "type": "string", "minLength": 1,
-            "description": "Native arguments and shell syntax after rg; quote for the selected exec shell",
+            "type": "array", "items": {"type": "string"}, "minItems": 1,
+            "description": "Native rg arguments, with each argument as one array element",
         }
         schema["required"] = ["args"]
         return schema
 
-    async def execute(self, args: str, **kwargs: Any) -> str:
-        if not args.strip():
+    async def execute(self, args: list[str], **kwargs: Any) -> str:
+        if not args:
             return ToolResult.error("Error: Provide rg arguments, such as --help or --files.")
-        kwargs.pop("command", None)
-        kwargs.pop("cmd", None)
-        return await super().execute(command=f"rg {args}", **kwargs)
+        for name in ("command", "cmd", "shell", "login"):
+            kwargs.pop(name, None)
+        return await super().execute(command=["rg", *args], **kwargs)
