@@ -472,6 +472,43 @@ class TestAnnounceResult:
 
         assert published[0].metadata["origin_message_id"] == "msg-123"
 
+    @pytest.mark.asyncio
+    async def test_aggregates_results_until_session_tasks_finish(self, tmp_path):
+        sm = _manager(tmp_path, notification_mode="aggregated")
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+        sm.runner.run = AsyncMock(side_effect=[
+            AgentRunResult(final_content="first result", messages=[], stop_reason="completed"),
+            AgentRunResult(final_content="second result", messages=[], stop_reason="completed"),
+        ])
+
+        runtime = _runtime()
+        await sm.spawn("first task", label="first", runtime=runtime, session_key="s1")
+        await sm.spawn("second task", label="second", runtime=runtime, session_key="s1")
+        await _drain_subagent_tasks(sm)
+
+        assert len(published) == 1
+        assert "first result" in published[0].content
+        assert "second result" in published[0].content
+        assert published[0].metadata["subagent_task_id"].startswith("aggregate:")
+
+    @pytest.mark.asyncio
+    async def test_realtime_mode_keeps_individual_results(self, tmp_path):
+        sm = _manager(tmp_path)
+        published = []
+        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
+        sm.runner.run = AsyncMock(side_effect=[
+            AgentRunResult(final_content="first result", messages=[], stop_reason="completed"),
+            AgentRunResult(final_content="second result", messages=[], stop_reason="completed"),
+        ])
+
+        runtime = _runtime()
+        await sm.spawn("first task", runtime=runtime, session_key="s1")
+        await sm.spawn("second task", runtime=runtime, session_key="s1")
+        await _drain_subagent_tasks(sm)
+
+        assert len(published) == 2
+
 
 # ---------------------------------------------------------------------------
 # cancel_by_session

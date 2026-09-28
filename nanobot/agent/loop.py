@@ -16,7 +16,7 @@ from datetime import datetime
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, TypeVar, cast
 
 from loguru import logger
 
@@ -263,6 +263,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
+        subagent_notification_mode: Literal["realtime", "aggregated"] = "realtime",
         context_window_tokens: int | None = None,
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
@@ -397,6 +398,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
+            notification_mode=subagent_notification_mode,
             consolidator=self.consolidator,
         )
         self._unified_session = unified_session
@@ -491,6 +493,7 @@ class AgentLoop:
             model=model,
             max_iterations=defaults.max_tool_iterations,
             max_concurrent_subagents=defaults.max_concurrent_subagents,
+            subagent_notification_mode=defaults.subagent_notification_mode,
             context_window_tokens=context_window_tokens,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,

@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from loguru import logger
 
@@ -70,6 +70,14 @@ class SubagentStatus:
     error: str | None = None
 
 
+@dataclass(slots=True)
+class _PendingAnnouncement:
+    task_id: str
+    content: str
+    origin: _SubagentOrigin
+    origin_message_id: str | None
+
+
 class _SubagentHook(AgentHook):
     """Hook for subagent execution — logs tool calls and updates status."""
 
@@ -111,6 +119,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
+        notification_mode: Literal["realtime", "aggregated"] = "realtime",
         consolidator: Consolidator | None = None,
     ):
         if workspace is None:
@@ -154,6 +163,7 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
+        self.notification_mode = notification_mode
         self.consolidator = consolidator
         self._run_slots = asyncio.Semaphore(self.max_concurrent_subagents)
         self.runner = AgentRunner()
@@ -161,6 +171,9 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._pending_announcements: dict[str, list[_PendingAnnouncement]] = {}
+        self._announcement_tasks: set[asyncio.Task[None]] = set()
+        self._announcement_lock = asyncio.Lock()
 
     def runtime_statuses(self) -> Mapping[str, SubagentStatus]:
         """Return the observable task statuses used by runtime-control snapshots."""
@@ -290,6 +303,12 @@ class SubagentManager:
                 ids.discard(task_id)
                 if not ids:
                     del self._session_tasks[session_key]
+                    if self.notification_mode == "aggregated":
+                        flush_task = asyncio.create_task(
+                            self._flush_aggregated_results(session_key)
+                        )
+                        self._announcement_tasks.add(flush_task)
+                        flush_task.add_done_callback(self._announcement_finished)
 
         bg_task.add_done_callback(_cleanup)
 
@@ -539,6 +558,59 @@ class SubagentManager:
             result=result,
         )
 
+        session_key = origin.get("session_key")
+        if self.notification_mode == "aggregated" and session_key:
+            async with self._announcement_lock:
+                self._pending_announcements.setdefault(session_key, []).append(
+                    _PendingAnnouncement(
+                        task_id=task_id,
+                        content=announce_content,
+                        origin=origin,
+                        origin_message_id=origin_message_id,
+                    )
+                )
+            return
+
+        await self._publish_announcement(
+            task_id,
+            announce_content,
+            origin,
+            origin_message_id,
+        )
+
+    async def _flush_aggregated_results(self, session_key: str) -> None:
+        async with self._announcement_lock:
+            if self._session_tasks.get(session_key):
+                return
+            pending = self._pending_announcements.pop(session_key, [])
+        if not pending:
+            return
+        task_ids = ",".join(item.task_id for item in pending)
+        origin_message_ids = {item.origin_message_id for item in pending}
+        origin_message_id = origin_message_ids.pop() if len(origin_message_ids) == 1 else None
+        await self._publish_announcement(
+            f"aggregate:{task_ids}",
+            "\n\n".join(item.content for item in pending),
+            pending[0].origin,
+            origin_message_id,
+        )
+
+    def _announcement_finished(self, task: asyncio.Task[None]) -> None:
+        self._announcement_tasks.discard(task)
+        if task.cancelled():
+            return
+        if error := task.exception():
+            logger.error("Failed to publish aggregated subagent results: {}", error)
+
+    async def _publish_announcement(
+        self,
+        task_id: str,
+        announce_content: str,
+        origin: _SubagentOrigin,
+        origin_message_id: str | None,
+    ) -> None:
+        """Publish one realtime or aggregated result message."""
+
         # Inject as system message to trigger main agent.
         # Use session_key_override to align with the main agent's effective
         # session key (which accounts for unified sessions) so the result is
@@ -604,6 +676,9 @@ class SubagentManager:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.sleep(0)
+        if self._announcement_tasks:
+            await asyncio.gather(*self._announcement_tasks, return_exceptions=True)
         await self._exec_session_manager.close_all()
 
     def get_running_count(self) -> int:
