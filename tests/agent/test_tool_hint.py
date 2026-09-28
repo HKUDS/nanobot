@@ -17,7 +17,10 @@ class TestToolHintKnownTools:
     """Test registered tool types produce correct formatted output."""
 
     def test_rg_shows_argument_boundaries(self):
-        assert _hint([_tc("rg", {"args": ["-n", "hello world", "src"]})]) == 'rg "-n" "hello world" "src"'
+        assert _hint([_tc("rg", {"args": ["-n", "hello world", "src"]})]) == 'rg -n "hello world" src'
+
+    def test_rg_shows_regex_and_empty_argument(self):
+        assert _hint([_tc("rg", {"args": [r"resolve\(", ""]})]) == 'rg resolve\\( ""'
 
     def test_rg_truncates_long_arguments(self):
         result = _hint([_tc("rg", {"args": ["x" * 100]})])

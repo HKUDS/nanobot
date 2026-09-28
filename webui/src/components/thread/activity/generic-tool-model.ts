@@ -92,7 +92,9 @@ export function parseGenericToolTrace(line: string): GenericToolTrace | null {
   if (call.name === "rg" && call.args && typeof call.args === "object") {
     const argv = (call.args as Record<string, unknown>).args;
     if (Array.isArray(argv) && argv.every((arg) => typeof arg === "string")) {
-      fields.push({ key: "args", value: argv.map((arg) => JSON.stringify(arg)).join(" ") });
+      fields.push({ key: "args", value: argv.map((arg) =>
+        arg && !/[\s"']/u.test(arg) ? arg : JSON.stringify(arg),
+      ).join(" ") });
     }
   }
   const collectedSource = fields.some((field) => isCollectedSourcePath(field.value));

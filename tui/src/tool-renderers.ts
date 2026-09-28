@@ -74,7 +74,9 @@ function toolDetail(
   if (/^(?:spawn|spawn_agent)$/u.test(name)) return compact(args.label ?? args.task, 56)
   if (name === "web_search") return compact(args.query ?? args.q)
   if (name === "rg" && Array.isArray(args.args)) {
-    return compact(args.args.map((arg) => JSON.stringify(arg)).join(" "))
+    return compact(args.args.map((arg) =>
+      typeof arg === "string" && arg && !/[\s"']/u.test(arg) ? arg : JSON.stringify(arg),
+    ).join(" "))
   }
   if (name === "web_fetch") return compact(args.url)
   if (/session/u.test(name)) return compact(args.session_key ?? args.chat_id ?? args.query)

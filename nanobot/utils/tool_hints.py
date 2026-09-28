@@ -90,7 +90,11 @@ def _extract_arg(tc: ToolCallRequest, key_args: list[str]) -> str | None:
         if isinstance(val, str) and val:
             return val
         if key == "args" and isinstance(val, list) and val:
-            return " ".join(json.dumps(arg, ensure_ascii=False) for arg in cast(list[object], val))
+            return " ".join(
+                arg if isinstance(arg, str) and arg and not re.search(r"[\s\"']", arg)
+                else json.dumps(arg, ensure_ascii=False)
+                for arg in cast(list[object], val)
+            )
     for val in args.values():
         if isinstance(val, str) and val:
             return val

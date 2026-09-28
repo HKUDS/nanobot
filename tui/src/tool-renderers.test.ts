@@ -5,11 +5,16 @@ import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 describe("tool renderers", () => {
   test("shows rg search phases and argument boundaries", () => {
     const start = { name: "rg", phase: "start", arguments: { args: ["-n", "hello world", "src"] } }
-    expect(renderToolEvent(start)).toBe('  › Searching files  "-n" "hello world" "src"')
+    expect(renderToolEvent(start)).toBe('  › Searching files  -n "hello world" src')
     expect(renderToolEvent(mergeToolEvent(start, { name: "rg", phase: "end", result: "src/a:1:hello world" })))
-      .toBe('  ✓ Searched files  "-n" "hello world" "src"')
+      .toBe('  ✓ Searched files  -n "hello world" src')
     expect(renderToolEvent({ name: "rg", phase: "error", error: "invalid regex" }))
       .toBe("  × Search failed  invalid regex")
+  })
+
+  test("shows rg regex characters and empty arguments", () => {
+    expect(renderToolEvent({ name: "rg", phase: "end", arguments: { args: [String.raw`resolve\(`, ""] } }))
+      .toBe('  ✓ Searched files  resolve\\( ""')
   })
 
   test("retains start arguments when an end frame only carries output", () => {

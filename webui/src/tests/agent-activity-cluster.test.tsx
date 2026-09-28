@@ -152,7 +152,7 @@ describe("AgentActivityCluster", () => {
 
     await act(async () => setAppLanguage("zh-CN"));
 
-    expect(screen.getByText(`已搜索文件 “${query}”`)).toBeInTheDocument();
+    expect(screen.getByText(`文件搜索完成 “${query}”`)).toBeInTheDocument();
     expect(screen.getByText(`正在读取文件 ${path}`)).toBeInTheDocument();
     expect(screen.getByText("正在使用 Blender · --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByText("正在打开 example.com · Browserbase")).toBeInTheDocument();
@@ -161,7 +161,7 @@ describe("AgentActivityCluster", () => {
 
     await act(async () => setAppLanguage("ja"));
 
-    expect(screen.getByText(`“${query}” · ファイルを検索しました`)).toBeInTheDocument();
+    expect(screen.getByText(`“${query}” · ファイル検索完了`)).toBeInTheDocument();
     expect(screen.getByText(`${path} · ファイルを読み取り中`)).toBeInTheDocument();
     expect(screen.getByText("Blender を使用中 · --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByText("example.com · 開いています · Browserbase")).toBeInTheDocument();
@@ -1523,7 +1523,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Found files *.tsx")).toBeInTheDocument();
+    expect(screen.getByText("File search complete *.tsx")).toBeInTheDocument();
     expect(screen.getByText("Listed files memory")).toBeInTheDocument();
     expect(screen.getByText("Searching files “dream_cursor”")).toBeInTheDocument();
     expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
