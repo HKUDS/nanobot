@@ -141,6 +141,36 @@ def test_codex_error_details_do_not_retain_arbitrary_messages(raw: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_codex_title_omits_effort_even_with_high_chat_reasoning(monkeypatch, tmp_path) -> None:
+    from nanobot.session.manager import SessionManager
+    from nanobot.session.webui_turns import maybe_generate_webui_title
+
+    _mock_codex_token(monkeypatch)
+    requests: list[dict[str, Any]] = []
+
+    async def fake_request(url, headers, body, **kwargs):
+        requests.append(body)
+        return provider_base.LLMResponse(content="Context Compaction")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    provider = OpenAICodexProvider()
+    provider.generation = provider_base.GenerationSettings(reasoning_effort="high")
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:default-effort-title")
+    session.metadata["webui"] = True
+    session.add_message("user", "Explain context compaction.")
+
+    assert await maybe_generate_webui_title(
+        sessions=sessions, session_key=session.key,
+        provider=provider, model="openai-codex/gpt-6-astra",
+    )
+    assert len(requests) == 1
+    assert "effort" not in requests[0].get("reasoning", {})
+    assert session.metadata["title"] == "Context Compaction"
+    assert provider.generation.reasoning_effort == "high"
+
+
+@pytest.mark.asyncio
 async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_details(
     monkeypatch, tmp_path,
 ) -> None:

@@ -64,7 +64,8 @@ WEBUI_TITLE_METADATA_KEY = "title"
 WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
 TITLE_MAX_CHARS = 60
 TITLE_GENERATION_MAX_TOKENS = 96
-TITLE_GENERATION_REASONING_EFFORT = "low"
+# Explicit None uses model defaults instead of inheriting the chat's reasoning effort.
+TITLE_GENERATION_REASONING_EFFORT: str | None = None
 
 # Latest active turn projection per ``chat_id`` (websocket only). It survives browser refresh
 # while the gateway process stays up and is implicitly dropped on restart.
