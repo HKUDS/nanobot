@@ -16,9 +16,10 @@ from nanobot.session.recovery import (
     RUNTIME_CHECKPOINT_KEY,
     RecoveryActionError,
     RecoveryCoordinator,
+    _runtime_checkpoint_is_well_formed,
     acknowledge_pending_followups,
     pending_followups,
-    record_pending_followup, _runtime_checkpoint_is_well_formed,
+    record_pending_followup,
     restore_runtime_checkpoint,
 )
 from nanobot.webui import session_list_index, transcript
