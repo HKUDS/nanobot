@@ -1,11 +1,16 @@
 import errno
 import os
+import stat
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from nanobot.utils import helpers, token_encoding
 from nanobot.utils.helpers import (
+    _write_bytes_atomic,
     _write_text_atomic,
     atomic_write_lines,
     content_with_media_breadcrumbs,
@@ -188,6 +193,101 @@ def test_write_text_atomic_keeps_file_when_directory_fsync_is_unsupported(
 
     assert target.read_text(encoding="utf-8") == '{"pending": {}}'
     assert len(fsync_calls) == 1
+
+
+def test_write_text_atomic_newline_empty_disables_translation(tmp_path: Path) -> None:
+    """``newline=""`` must publish bytes verbatim; losing it corrupts CRLF files on Windows."""
+    target = tmp_path / "verbatim.txt"
+
+    _write_text_atomic(target, "a\nb\n", newline="")
+
+    assert target.read_bytes() == b"a\nb\n"
+
+
+def test_write_bytes_atomic_round_trip(tmp_path: Path) -> None:
+    target = tmp_path / "blob.bin"
+
+    _write_bytes_atomic(target, b"\x00\x01\r\n\xff")
+
+    assert target.read_bytes() == b"\x00\x01\r\n\xff"
+
+
+def test_write_bytes_atomic_keeps_previous_content_when_fsync_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    target = tmp_path / "pairing.json"
+    target.write_text('{"old": true}', encoding="utf-8")
+
+    def failing_fsync(fd: int) -> None:
+        raise OSError("disk on fire")
+
+    monkeypatch.setattr(helpers.os, "fsync", failing_fsync)
+
+    with pytest.raises(OSError, match="disk on fire"):
+        _write_bytes_atomic(target, b'{"new": true}')
+
+    assert target.read_text(encoding="utf-8") == '{"old": true}'
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows chmod cannot represent POSIX modes")
+def test_atomic_writes_preserve_existing_file_mode(tmp_path: Path) -> None:
+    target = tmp_path / "secret.json"
+    target.write_text("{}", encoding="utf-8")
+    target.chmod(0o640)
+
+    _write_text_atomic(target, '{"rotated": true}')
+    _write_bytes_atomic(target, b'{"rotated": true}')
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+def test_atomic_writes_follow_symlinks(tmp_path: Path) -> None:
+    """``os.replace`` swaps the link itself; resolving first keeps write-through semantics."""
+    real = tmp_path / "real.json"
+    real.write_text('{"old": true}', encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+
+    _write_text_atomic(link, '{"new": true}')
+    _write_bytes_atomic(link, b'{"newer": true}')
+
+    assert link.is_symlink()
+    assert real.read_text(encoding="utf-8") == '{"newer": true}'
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows rejects os.replace while a reader holds the target; tearing is a POSIX failure mode",
+)
+def test_concurrent_atomic_writes_never_expose_torn_content(tmp_path: Path) -> None:
+    """Concurrent writers must publish whole payloads only — the #4798 failure mode."""
+    target = tmp_path / "shared.json"
+    target.write_text("seed", encoding="utf-8")
+    payloads = [f'{{"writer": {i}, "filler": "{"x" * 50_000}"}}' for i in range(6)]
+    barrier = threading.Barrier(len(payloads))
+    torn: list[str] = []
+
+    def write(payload: str) -> None:
+        barrier.wait()
+        for _ in range(10):
+            _write_text_atomic(target, payload)
+
+    def read() -> None:
+        for _ in range(400):
+            observed = target.read_text(encoding="utf-8")
+            if observed != "seed" and observed not in payloads:
+                torn.append(observed[:50])
+
+    with ThreadPoolExecutor(max_workers=len(payloads) + 1) as pool:
+        reader = pool.submit(read)
+        writers = [pool.submit(write, payload) for payload in payloads]
+        for future in writers:
+            future.result()
+        reader.result()
+
+    assert not torn
 
 
 def test_atomic_write_lines_round_trip_replaces_target(tmp_path: Path) -> None:

@@ -15,6 +15,10 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
+from nanobot.utils.helpers import (  # pyright: ignore[reportPrivateUsage]
+    _write_bytes_atomic,
+    _write_text_atomic,
+)
 
 
 class _PatchError(ValueError):
@@ -232,7 +236,7 @@ class ApplyPatchTool(_FsTool):
             try:
                 for path, content in writes.items():
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(content, encoding="utf-8", newline="")
+                    _write_text_atomic(path, content, newline="")
             except Exception:
                 for path, data in backups.items():
                     if data is None:
@@ -240,7 +244,7 @@ class ApplyPatchTool(_FsTool):
                             path.unlink()
                     else:
                         path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(data)
+                        _write_bytes_atomic(path, data)
                 raise
 
             for path in writes:

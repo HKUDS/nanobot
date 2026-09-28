@@ -597,16 +597,55 @@ def _fsync_directory_after_replace(directory: Path) -> None:
             os.close(fd)
 
 
-def _write_text_atomic(path: Path, content: str) -> None:
+def _write_text_atomic(path: Path, content: str, *, newline: str | None = None) -> None:
+    """Atomically replace *path* with *content*, optionally disabling newline translation.
+
+    ``newline`` is forwarded to :func:`open`; ``None`` (the default) keeps the
+    platform translation ``write_text`` would apply, while ``""`` writes the
+    bytes verbatim. Symlinks are resolved up front because ``os.replace``
+    swaps the link itself instead of its target, whereas ``write_text``
+    follows the link — resolving preserves that write-through behavior.
+    """
+    path = Path(os.path.realpath(path))
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     existing_mode: int | None = None
     with suppress(OSError):
         existing_mode = stat.S_IMODE(path.stat().st_mode)
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8", newline=newline) as f:
             if existing_mode is not None:
                 os.chmod(tmp, existing_mode)
             f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(path)
+        with suppress(OSError, NotImplementedError):
+            dfd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def _write_bytes_atomic(path: Path, data: bytes) -> None:
+    """Atomically replace *path* with *data* — binary twin of ``_write_text_atomic``.
+
+    Same temp-file + ``os.replace`` protocol, with mode preservation and
+    symlink resolution, for callers holding already-encoded bytes.
+    """
+    path = Path(os.path.realpath(path))
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    existing_mode: int | None = None
+    with suppress(OSError):
+        existing_mode = stat.S_IMODE(path.stat().st_mode)
+    try:
+        with open(tmp, "wb") as f:
+            if existing_mode is not None:
+                os.chmod(tmp, existing_mode)
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         tmp.replace(path)
