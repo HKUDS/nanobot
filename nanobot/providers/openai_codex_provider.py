@@ -144,7 +144,6 @@ class OpenAICodexProvider(LLMProvider):
             # Apply explicit provider overrides last, matching other provider backends.
             body.update(self._extra_body)
         effective_cache_key = body.get("prompt_cache_key")
-        purpose = provider_context.request_purpose if provider_context else "chat"
         request_model = _diagnostic_token(body.get("model"))
         effective_reasoning = body.get("reasoning")
         request_effort = _diagnostic_token(
@@ -273,13 +272,12 @@ class OpenAICodexProvider(LLMProvider):
                         raise
                     logger.warning(
                         "Codex native compaction unavailable; continuing without it "
-                        "(type={} status={} disabled={} model={} purpose={} "
+                        "(type={} status={} disabled={} model={} "
                         "error_code={} error_param={} error_message={} request_id={})",
                         type(compact_error).__name__,
                         getattr(compact_error, "status_code", None),
                         not self._native_compaction_available,
                         request_model,
-                        purpose,
                         getattr(compact_error, "error_code", None),
                         getattr(compact_error, "error_param", None),
                         getattr(compact_error, "error_message", None),
@@ -317,7 +315,7 @@ class OpenAICodexProvider(LLMProvider):
             logger.warning(
                 "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
                 "error_type={} error_code={} retry_after={} summary={} "
-                "model={} purpose={} reasoning_effort={} replayed={} compaction_applied={} "
+                "model={} reasoning_effort={} replayed={} compaction_applied={} "
                 "error_param={} error_message={} request_id={}",
                 stage,
                 exc_type,
@@ -329,7 +327,6 @@ class OpenAICodexProvider(LLMProvider):
                 response.retry_after,
                 _codex_log_summary(exc_type, response),
                 request_model,
-                purpose,
                 request_effort,
                 replayed,
                 native_compaction_applied,

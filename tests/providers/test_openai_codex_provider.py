@@ -146,9 +146,9 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
 ) -> None:
     from nanobot.session.manager import SessionManager
     from nanobot.session.webui_turns import maybe_generate_webui_title
+    from nanobot.utils.log_config import add_console_log_sink
 
     _mock_codex_token(monkeypatch)
-    capture = _capture_codex_warnings(monkeypatch)
     monkeypatch.setattr("nanobot.session.webui_turns.TITLE_GENERATION_REASONING_EFFORT", "none")
     original_client = httpx.AsyncClient
     message = (
@@ -178,21 +178,29 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
     session = sessions.get_or_create("websocket:diagnostic-title")
     session.metadata["webui"] = True
     session.add_message("user", "PRIVATE PROMPT MUST NOT APPEAR")
-    generated = await maybe_generate_webui_title(
-        sessions=sessions, session_key=session.key,
-        provider=OpenAICodexProvider(), model="openai-codex/gpt-6-astra",
-    )
+    sink = io.StringIO()
+    logger.enable("nanobot")
+    handler_id = add_console_log_sink(sink)
+    try:
+        generated = await maybe_generate_webui_title(
+            sessions=sessions, session_key=session.key,
+            provider=OpenAICodexProvider(), model="openai-codex/gpt-6-astra",
+        )
+        logger.warning("Outside title generation")
+    finally:
+        logger.remove(handler_id)
 
     assert generated is False
     assert "title" not in session.metadata
-    assert len(capture.calls) == 1
-    template, args = capture.calls[0]
-    log = template.format(*args)
+    log, outside_log = sink.getvalue().splitlines()
+    assert "purpose=webui_title" not in outside_log
+    assert f"session={session.key}" not in outside_log
     for field in (
         "stage=codex_request", "model=gpt-6-astra", "purpose=webui_title",
         "reasoning_effort=none", "replayed=False", "compaction_applied=False",
         "error_param=reasoning.effort", f"error_message={message}",
         "request_id=req-title-test",
+        f"session={session.key}",
     ):
         assert field in log
     assert "PRIVATE" not in log
@@ -594,7 +602,7 @@ async def test_codex_timeout_error_writes_diagnostic_log(monkeypatch) -> None:
         (
             "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
             "error_type={} error_code={} retry_after={} summary={} "
-            "model={} purpose={} reasoning_effort={} replayed={} compaction_applied={} "
+            "model={} reasoning_effort={} replayed={} compaction_applied={} "
             "error_param={} error_message={} request_id={}",
             (
                 "codex_request",
@@ -607,7 +615,6 @@ async def test_codex_timeout_error_writes_diagnostic_log(monkeypatch) -> None:
                 None,
                 "ReadTimeout timeout",
                 "gpt-5.6-sol",
-                "chat",
                 None,
                 False,
                 False,
@@ -726,7 +733,7 @@ async def test_codex_http_diagnostic_log_omits_raw_body(monkeypatch) -> None:
         (
             "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
             "error_type={} error_code={} retry_after={} summary={} "
-            "model={} purpose={} reasoning_effort={} replayed={} compaction_applied={} "
+            "model={} reasoning_effort={} replayed={} compaction_applied={} "
             "error_param={} error_message={} request_id={}",
             (
                 "codex_request",
@@ -739,7 +746,6 @@ async def test_codex_http_diagnostic_log_omits_raw_body(monkeypatch) -> None:
                 None,
                 "HTTP 500 type=server_error code=overloaded",
                 "gpt-5.6-sol",
-                "chat",
                 None,
                 False,
                 False,

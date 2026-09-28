@@ -37,7 +37,7 @@ from nanobot.bus.runtime_events import (
     UserInputAccepted,
 )
 from nanobot.llm_usage.context import llm_usage_source
-from nanobot.providers.base import LLMProvider, LLMUsage, ProviderCallContext
+from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackModelSelection
 from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
@@ -256,7 +256,10 @@ async def maybe_generate_webui_title(
         prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
 
     try:
-        with llm_usage_source("system"):
+        with (
+            llm_usage_source("system"),
+            logger.contextualize(purpose="webui_title", session_key=target_session.key),
+        ):
             response = await provider.chat_stream_with_retry(
                 [
                     {
@@ -273,7 +276,6 @@ async def maybe_generate_webui_title(
                 max_tokens=TITLE_GENERATION_MAX_TOKENS,
                 temperature=0.2,
                 reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
-                provider_context=ProviderCallContext(request_purpose="webui_title"),
                 retry_mode="standard",
             )
     except Exception:
