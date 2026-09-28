@@ -399,9 +399,6 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 
 ## Community Contributors
 
-Thank you to everyone who contributes to nanobot. Browse the
-[contribution history](https://github.com/HKUDS/nanobot/graphs/contributors) on GitHub.
-
 <!-- contributors:start -->
 <p>
 <a href="https://github.com/Athemis"><img src="https://avatars.githubusercontent.com/u/552653?v=4&s=48" width="48" height="48" alt="Athemis"></a>
