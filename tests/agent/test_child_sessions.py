@@ -3,6 +3,7 @@
 import asyncio
 import os
 import sys
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,6 +18,7 @@ from nanobot.config.schema import ToolsConfig
 from nanobot.llm_usage.context import current_llm_usage_source, llm_usage_source
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.security.workspace_access import build_workspace_scope, current_workspace_scope
+from nanobot.session.manager import SessionManager
 
 
 def _loop(tmp_path, **kwargs):
@@ -32,7 +34,7 @@ def _loop(tmp_path, **kwargs):
 
 
 @pytest.mark.parametrize("mode", ["child", "temporary"])
-async def test_private_sessions_compact_without_writing_memory(tmp_path, monkeypatch, mode):
+async def test_isolated_sessions_compact_without_writing_memory(tmp_path, monkeypatch, mode):
     loop = _loop(tmp_path)
     (tmp_path / "note.txt").write_text("private tool evidence", encoding="utf-8")
     loop.context.memory.write_memory("PARENT MEMORY MUST NOT BE INJECTED")
@@ -84,7 +86,17 @@ async def test_private_sessions_compact_without_writing_memory(tmp_path, monkeyp
     assert "private tool evidence" in str(requests[2])
     assert "PARENT MEMORY MUST NOT BE INJECTED" not in str(requests)
     assert "PARENT TRANSCRIPT MUST NOT BE INHERITED" not in str(requests)
-    assert loop.sessions.list_sessions() == before
+    if mode == "child":
+        children = [item for item in loop.sessions.list_sessions() if item["key"].startswith("subagent:")]
+        assert len(children) == 1
+        saved = loop.sessions.get_or_create(children[0]["key"])
+        assert saved.metadata["subagent"]["parent_session_key"] == parent.key
+        assert saved.metadata["subagent"]["status"] == "completed"
+        assert saved.messages[-1]["content"] == "finished"
+        assert checkpoint in str(saved.metadata)
+        assert loop.sessions.read_session_file(saved.key) is not None
+    else:
+        assert loop.sessions.list_sessions() == before
     assert not loop.context.memory.history_file.exists()
     assert loop.context.memory.read_memory() == "PARENT MEMORY MUST NOT BE INJECTED"
     await loop.aclose()
@@ -103,8 +115,8 @@ async def test_child_cleanup_is_scoped_to_its_own_session(tmp_path, outcome):
         ctx = current_request_context()
         owners.append(ctx.session_key)
         original_states.append(loop._file_state_store.for_session(ctx.session_key))
-        assert ctx.session_key.startswith("internal:")
-        assert loop.sessions.get_cached(ctx.session_key) is None
+        assert ctx.session_key.startswith("subagent:")
+        assert loop.sessions.get_cached(ctx.session_key) is not None
         assert ctx.runtime is runtime
         assert current_llm_usage_source() == "cron"
         names = {tool["function"]["name"] for tool in kwargs["tools"]}
@@ -137,7 +149,11 @@ async def test_child_cleanup_is_scoped_to_its_own_session(tmp_path, outcome):
     terminate.assert_awaited_once_with(owners[0])
     assert loop._file_state_store.for_session(owners[0]) is not original_states[0]
     assert loop.subagents.get_running_count() == 0
-    assert loop.sessions.list_sessions() == []
+    assert len(loop.sessions.list_sessions()) == 1
+    saved = loop.sessions.get_or_create(owners[0])
+    assert saved.metadata["subagent"]["status"] == {
+        "done": "completed", "error": "failed", "cancel": "cancelled",
+    }[outcome]
     await loop.aclose()
 
 
@@ -150,7 +166,7 @@ async def test_inline_spawn_finishes_with_one_global_request_slot(tmp_path, monk
         nonlocal calls
         calls += 1
         ctx = current_request_context()
-        if ctx.session_key.startswith("internal:"):
+        if ctx.session_key.startswith("subagent:"):
             return LLMResponse(content="child answer")
         if calls == 1:
             return LLMResponse(content=None, tool_calls=[ToolCallRequest(
@@ -302,3 +318,140 @@ async def test_child_reaps_its_process_without_terminating_parent_process(tmp_pa
         assert parent_sessions[0].returncode is None
     finally:
         await loop.aclose()
+
+
+@pytest.mark.parametrize("outcome", ["done", "error", "cancel"])
+async def test_child_transcript_and_status_survive_restart(tmp_path, outcome):
+    loop = _loop(tmp_path)
+    (tmp_path / "evidence.txt").write_text("observable evidence", encoding="utf-8")
+    waiting = asyncio.Event()
+    release = asyncio.Event()
+    keys = []
+
+    async def respond(**kwargs):
+        if kwargs["messages"][-1]["role"] != "tool":
+            keys.append(current_request_context().session_key)
+            return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                id="read-evidence", name="read_file", arguments={"path": "evidence.txt"},
+            )])
+        waiting.set()
+        await release.wait()
+        if outcome == "error":
+            raise RuntimeError("scripted provider failure")
+        return LLMResponse(content="evidence reviewed")
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    task = asyncio.create_task(loop.subagents.run_inline(
+        "Inspect evidence", runtime=loop.llm_runtime(), session_key="websocket:parent",
+    ))
+    try:
+        await asyncio.wait_for(waiting.wait(), 5)
+        # A fresh reader must see completed tool work while the model is still running.
+        running = SessionManager(tmp_path).get_or_create(keys[0])
+        assert running.metadata["subagent"]["status"] == "running"
+        assert running.metadata["subagent"]["parent_session_key"] == "websocket:parent"
+        assert "observable evidence" in str(running.messages)
+        if outcome == "cancel":
+            await loop.subagents.cancel_by_session("websocket:parent")
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            release.set()
+            await task
+        saved = SessionManager(tmp_path).get_or_create(keys[0])
+        state = saved.metadata["subagent"]
+        assert state["status"] == {"done": "completed", "error": "failed", "cancel": "cancelled"}[outcome]
+        assert state["finished_at"]
+        assert "observable evidence" in str(saved.messages)
+        assert sum(message.get("tool_call_id") == "read-evidence" for message in saved.messages) == 1
+        assert not saved.policy.include_memory
+        assert not saved.policy.archive_memory
+        assert "runtime_checkpoint" not in saved.metadata
+        assert not loop.context.memory.history_file.exists()
+    finally:
+        release.set()
+        await loop.aclose()
+
+
+async def test_queued_child_cancellation_is_persisted(tmp_path):
+    loop = _loop(tmp_path, max_concurrent_subagents=1)
+    entered = asyncio.Event()
+
+    async def respond(**kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    try:
+        await loop.subagents.spawn("active", runtime=loop.llm_runtime(), session_key="cli:active")
+        await asyncio.wait_for(entered.wait(), 5)
+        await loop.subagents.spawn("queued", runtime=loop.llm_runtime(), session_key="cli:queued")
+        await asyncio.sleep(0)
+        records = SessionManager(tmp_path)
+        queued_key = next(item["key"] for item in records.list_sessions() if item["title"] == "queued")
+        assert records.get_or_create(queued_key).metadata["subagent"]["status"] == "queued"
+        assert await loop.subagents.cancel_by_session("cli:queued") == 1
+        saved = SessionManager(tmp_path).get_or_create(queued_key)
+        assert saved.metadata["subagent"]["status"] == "cancelled"
+        assert "started_at" not in saved.metadata["subagent"]
+        assert loop.provider.chat_stream_with_retry.await_count == 1
+    finally:
+        await loop.aclose()
+
+
+async def test_child_cancelled_before_first_scheduling_still_has_a_record(tmp_path):
+    loop = _loop(tmp_path)
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unused"))
+    try:
+        await loop.subagents.spawn("never entered", runtime=loop.llm_runtime(), session_key="cli:p")
+        assert await loop.subagents.cancel_by_session("cli:p") == 1
+        records = SessionManager(tmp_path)
+        saved = records.get_or_create(records.list_sessions()[0]["key"])
+        assert saved.metadata["subagent"]["status"] == "cancelled"
+        assert "started_at" not in saved.metadata["subagent"]
+        loop.provider.chat_stream_with_retry.assert_not_awaited()
+    finally:
+        await loop.aclose()
+
+
+async def test_completed_children_are_excluded_from_idle_memory_archival(tmp_path):
+    from nanobot.agent.autocompact import AutoCompact
+
+    loop = _loop(tmp_path)
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    await loop.subagents.run_inline("task", runtime=loop.llm_runtime())
+    key = loop.sessions.list_sessions()[0]["key"]
+    saved = loop.sessions.get_or_create(key)
+    saved.updated_at = datetime.now() - timedelta(days=1)
+    loop.sessions.save(saved)
+
+    # The same rule as Dream must hold after losing the original runtime policy.
+    scanner = AutoCompact(SessionManager(tmp_path), loop.consolidator, session_ttl_minutes=1)
+    schedule = MagicMock()
+    scanner.check_expired(schedule, lambda session: loop.llm_runtime())
+    schedule.assert_not_called()
+    await loop.aclose()
+
+
+async def test_standalone_sdk_persists_without_constructing_an_agent_loop(tmp_path, monkeypatch):
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.utils.llm_runtime import LLMRuntime
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.generation = GenerationSettings(max_tokens=4096)
+    provider.can_resume_conversation_state.return_value = False
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="sdk result"))
+    monkeypatch.setattr(AgentLoop, "__init__", MagicMock(side_effect=AssertionError("unexpected loop")))
+    manager = SubagentManager(workspace=tmp_path, bus=MessageBus(), max_tool_result_chars=16000)
+    try:
+        result = await manager.run_inline(
+            "SDK task", runtime=LLMRuntime.capture(provider, "test", context_window_tokens=128000),
+            session_key="cli:sdk-parent",
+        )
+        assert result == "sdk result"
+        records = SessionManager(tmp_path)
+        saved = records.get_or_create(records.list_sessions()[0]["key"])
+        assert saved.metadata["subagent"]["parent_session_key"] == "cli:sdk-parent"
+        assert saved.messages[-1]["content"] == "sdk result"
+    finally:
+        await manager.close()

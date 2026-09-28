@@ -7,14 +7,14 @@ import json
 import time
 import uuid
 import warnings
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 from loguru import logger
 
-from nanobot.agent.child_sessions import ChildSessionRequest, run_child_session
+from nanobot.agent.child_sessions import ChildSessionRequest, ChildSessionService
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.base import ToolResult
@@ -98,7 +98,7 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         consolidator: Consolidator | None = None,
         *,
-        run_session: Callable[[ChildSessionRequest], Awaitable[AgentRunResult]] | None = None,
+        child_sessions: ChildSessionService | None = None,
     ):
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
@@ -143,7 +143,8 @@ class SubagentManager:
         )
         self.consolidator = consolidator
         self._run_slots = asyncio.Semaphore(self.max_concurrent_subagents)
-        self._session_executor = run_session
+        self._child_sessions = child_sessions
+        self._owns_child_sessions = child_sessions is None
         self._running_tasks: dict[str, asyncio.Task[str]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -196,30 +197,19 @@ class SubagentManager:
             restrict_to_workspace=self.restrict_to_workspace,
         )
 
+    @property
+    def child_sessions(self) -> ChildSessionService:
+        if self._child_sessions is None:
+            self._child_sessions = ChildSessionService.standalone(
+                self.workspace, restrict_to_workspace=self.restrict_to_workspace,
+                disabled_skills=list(self.disabled_skills),
+                max_tool_result_chars=self.max_tool_result_chars,
+                consolidator=self.consolidator,
+            )
+        return self._child_sessions
+
     async def _execute_session(self, request: ChildSessionRequest) -> AgentRunResult:
-        if self._session_executor is not None:
-            return await self._session_executor(request)
-
-        # Standalone SDK callers use the same session path as the gateway.
-        from nanobot.agent.loop import AgentLoop
-
-        loop = AgentLoop(
-            bus=MessageBus(),
-            provider=request.runtime.provider,
-            model=request.runtime.model,
-            workspace=self.workspace,
-            tools_config=self.tools_config,
-            restrict_to_workspace=self.restrict_to_workspace,
-            disabled_skills=list(self.disabled_skills),
-            max_iterations=self.max_iterations,
-            max_tool_result_chars=self.max_tool_result_chars,
-        )
-        if self.consolidator is not None:
-            loop.consolidator = self.consolidator
-        try:
-            return await run_child_session(loop, request)
-        finally:
-            await loop.aclose()
+        return await self.child_sessions.run(request)
 
     async def spawn(
         self,
@@ -239,7 +229,7 @@ class SubagentManager:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
-        task_id = str(uuid.uuid4())[:8]
+        task_id = uuid.uuid4().hex
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
             "channel": origin_channel,
@@ -253,6 +243,9 @@ class SubagentManager:
             label=display_label,
             task_description=task,
             started_at=time.monotonic(),
+        )
+        self.child_sessions.create(
+            task_id, task, display_label, session_key, runtime, workspace_scope,
         )
         self._task_statuses[task_id] = status
 
@@ -272,7 +265,9 @@ class SubagentManager:
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
 
-        def _cleanup(_: asyncio.Task[str]) -> None:
+        def _cleanup(completed: asyncio.Task[str]) -> None:
+            if completed.cancelled():
+                self.child_sessions.cancel(task_id)
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
@@ -303,7 +298,7 @@ class SubagentManager:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
-        task_id = str(uuid.uuid4())[:8]
+        task_id = uuid.uuid4().hex
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
             "channel": origin_channel,
@@ -316,6 +311,9 @@ class SubagentManager:
             label=display_label,
             task_description=task,
             started_at=time.monotonic(),
+        )
+        self.child_sessions.create(
+            task_id, task, display_label, session_key, runtime, workspace_scope,
         )
         self._task_statuses[task_id] = status
         logger.info("Running inline subagent [{}]: {}", task_id, display_label)
@@ -341,6 +339,8 @@ class SubagentManager:
                 return ToolResult.error(result)
             return result
         finally:
+            if inline_task.cancelled():
+                self.child_sessions.cancel(task_id)
             self._running_tasks.pop(task_id, None)
             self._task_statuses.pop(task_id, None)
             if session_key and (ids := self._session_tasks.get(session_key)):
@@ -363,19 +363,20 @@ class SubagentManager:
     ) -> str:
         """Wait for capacity, then execute one subagent task."""
         status.phase = "queued"
-        async with self._run_slots:
-            status.phase = "initializing"
-            return await self._run_admitted_subagent(
-                task_id,
-                task,
-                label,
-                origin,
-                status,
-                runtime,
-                origin_message_id,
-                workspace_scope,
-                announce=announce,
-            )
+        session = self.child_sessions.create(
+            task_id, task, label, origin.get("session_key"), runtime, workspace_scope,
+        )
+        try:
+            async with self._run_slots:
+                status.phase = "initializing"
+                return await self._run_admitted_subagent(
+                    task_id, task, label, origin, status, runtime,
+                    origin_message_id, workspace_scope, announce=announce,
+                )
+        except asyncio.CancelledError:
+            if session.metadata["subagent"]["status"] == "queued":
+                self.child_sessions.finish(session, "cancelled")
+            raise
 
     async def _run_admitted_subagent(
         self,
@@ -402,6 +403,7 @@ class SubagentManager:
             if workspace_scope is not None:
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
             result = await self._execute_session(ChildSessionRequest(
+                task_id=task_id,
                 task=task,
                 runtime=runtime,
                 tools_config=cfg,
@@ -484,6 +486,7 @@ class SubagentManager:
         metadata: dict[str, Any] = {
             "injected_event": "subagent_result",
             "subagent_task_id": task_id,
+            "subagent_session_key": f"subagent:{task_id}",
         }
         if origin_message_id:
             metadata["origin_message_id"] = origin_message_id
@@ -516,6 +519,9 @@ class SubagentManager:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+        if self._owns_child_sessions and self._child_sessions is not None:
+            await self._child_sessions.exec_sessions.close_all()
 
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""

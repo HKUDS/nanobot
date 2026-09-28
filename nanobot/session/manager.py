@@ -28,6 +28,7 @@ from nanobot.runtime_context import (
     public_history_message,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
+from nanobot.session.keys import is_subagent_session
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.utils.helpers import (
@@ -167,7 +168,7 @@ class SessionPolicy:
     log_content: bool = True
     disabled_tools: frozenset[str] = frozenset()
     include_memory: bool = True
-    enable_compaction: bool = True
+    archive_memory: bool = True
 
 
 @dataclass
@@ -185,6 +186,8 @@ class Session:
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if is_subagent_session(self.key):
+            self.policy = SessionPolicy(include_memory=False, archive_memory=False)
         if not isinstance(cast(object, self.metadata), dict):
             self.metadata = {}
         if not isinstance(cast(object, self.provider_state), ProviderConversationState):

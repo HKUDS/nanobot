@@ -15,9 +15,19 @@ def is_dream_session(key: str) -> bool:
     return key.startswith("dream:")
 
 
+def is_subagent_session(key: str) -> bool:
+    """Identify durable delegated-task sessions."""
+    return key.startswith("subagent:")
+
+
+def is_run_session(key: str) -> bool:
+    """Identify one-shot runs that must not feed idle memory archival."""
+    return is_dream_session(key) or is_subagent_session(key)
+
+
 def is_internal_session(key: str) -> bool:
-    """Identify maintenance sessions whose context is not a user conversation."""
-    return key == HEARTBEAT_SESSION_KEY or is_dream_session(key)
+    """Identify internal runs whose context is not a user conversation."""
+    return key == HEARTBEAT_SESSION_KEY or is_run_session(key)
 
 
 def session_key_for_channel(channel: str, chat_id: str, *, unified_session: bool = False) -> str:
