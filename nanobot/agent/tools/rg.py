@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 import shutil
-from copy import deepcopy
 from typing import Any
 
 from nanobot.agent.tools.base import ToolResult
@@ -38,7 +37,7 @@ class RgTool(ExecTool):
 
     @property
     def parameters(self) -> dict[str, Any]:
-        schema = deepcopy(super().parameters)
+        schema = super().parameters
         properties = schema["properties"]
         for name in ("command", "cmd", "shell", "login"):
             properties.pop(name, None)
