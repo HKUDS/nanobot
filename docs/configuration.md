@@ -1691,8 +1691,7 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 
 ## File Search
 
-When ripgrep (`rg`) is installed, nanobot automatically uses it in place of the
-built-in `grep` and `find_files` tools.
+When ripgrep (`rg`) is installed, nanobot automatically uses it in place of the built-in `grep` and `find_files` tools.
 
 ## Web Tools
 
