@@ -16,6 +16,7 @@ from nanobot.providers.factory import make_provider
 from nanobot.providers.openai_codex_provider import (
     OpenAICodexProvider,
     _build_reasoning_options,
+    _codex_error_details,
     _codex_error_response,
     _CodexHTTPError,
     _friendly_error,
@@ -123,6 +124,124 @@ def test_codex_http_friendly_error_omits_raw_body() -> None:
 
     assert message == "HTTP 500: Codex API request failed"
     assert "PRIVATE PROMPT MUST NOT APPEAR" not in message
+
+
+@pytest.mark.parametrize("raw", [
+    "PRIVATE PROMPT MUST NOT APPEAR",
+    '[]',
+    '{"error": "PRIVATE PROMPT MUST NOT APPEAR"}',
+    '{"error": {"param": "input[0].content", "message": "PRIVATE PROMPT MUST NOT APPEAR"}}',
+    '{"error": {"param": "reasoning.effort", "message": "PRIVATE PROMPT MUST NOT APPEAR"}}',
+    '{"error": {"param": "injected\\nlog", "message": "PRIVATE PROMPT MUST NOT APPEAR"}}',
+])
+def test_codex_error_details_do_not_retain_arbitrary_messages(raw: str) -> None:
+    param, message = _codex_error_details(raw)
+    assert message is None
+    assert param in {None, "input[0].content", "reasoning.effort"}
+
+
+@pytest.mark.asyncio
+async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_details(
+    monkeypatch, tmp_path,
+) -> None:
+    from nanobot.session.manager import SessionManager
+    from nanobot.session.webui_turns import maybe_generate_webui_title
+
+    _mock_codex_token(monkeypatch)
+    capture = _capture_codex_warnings(monkeypatch)
+    monkeypatch.setattr("nanobot.session.webui_turns.TITLE_GENERATION_REASONING_EFFORT", "none")
+    original_client = httpx.AsyncClient
+    message = (
+        "Unsupported value: 'none' is not supported with the 'gpt-6-astra' model. "
+        "Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'."
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        body = json.loads(request.content)
+        assert body["model"] == "gpt-6-astra"
+        assert body["reasoning"] == {"effort": "none"}
+        return httpx.Response(400, headers={"x-request-id": "req-title-test"}, json={
+            "error": {
+                "type": "invalid_request_error", "code": "unsupported_value",
+                "param": "reasoning.effort", "message": message,
+            },
+            "private": "PRIVATE UPSTREAM BODY",
+        })
+
+    def fake_client(**kwargs):
+        return original_client(transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider.httpx.AsyncClient", fake_client)
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:diagnostic-title")
+    session.metadata["webui"] = True
+    session.add_message("user", "PRIVATE PROMPT MUST NOT APPEAR")
+    generated = await maybe_generate_webui_title(
+        sessions=sessions, session_key=session.key,
+        provider=OpenAICodexProvider(), model="openai-codex/gpt-6-astra",
+    )
+
+    assert generated is False
+    assert "title" not in session.metadata
+    assert len(capture.calls) == 1
+    template, args = capture.calls[0]
+    log = template.format(*args)
+    for field in (
+        "stage=codex_request", "model=gpt-6-astra", "purpose=webui_title",
+        "reasoning_effort=none", "replayed=False", "compaction_applied=False",
+        "error_param=reasoning.effort", f"error_message={message}",
+        "request_id=req-title-test",
+    ):
+        assert field in log
+    assert "PRIVATE" not in log
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_stage", ["codex_compaction", "codex_request"])
+async def test_codex_diagnostics_distinguish_compaction_from_following_request(
+    monkeypatch, failed_stage,
+) -> None:
+    _mock_codex_token(monkeypatch)
+    capture = _capture_codex_warnings(monkeypatch)
+    state_provider = "openai_codex:https://chatgpt.com/backend-api/codex/responses"
+    state = build_responses_state(
+        provider=state_provider, model="gpt-5.6-sol",
+        input_items=[{"role": "user", "content": "old question"}], output_items=[],
+    ).with_pending_messages([{"role": "user", "content": "new question"}])
+
+    async def fake_request(url, headers, body, **kwargs):
+        compacting = body["input"][-1].get("type") == "compaction_trigger"
+        if compacting and failed_stage != "codex_compaction":
+            return provider_base.LLMResponse(content=None, provider_state=build_responses_state(
+                provider=state_provider, model="gpt-5.6-sol", input_items=body["input"],
+                output_items=[{"type": "compaction", "encrypted_content": "PRIVATE STATE"}],
+            ))
+        raise _CodexHTTPError(
+            "HTTP 400: Codex API request failed", status_code=400,
+            error_type="invalid_request_error", error_code="unsupported_value",
+            error_param="input[1].type", request_id="req-compaction-test",
+        )
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    response = await OpenAICodexProvider(
+        extra_body={"reasoning": {"effort": "low"}},
+    ).chat(
+        [{"role": "user", "content": "new question"}], reasoning_effort="high",
+        provider_context=provider_base.ProviderCallContext(
+            conversation_state=state, compaction_input_budget=10000,
+        ),
+    )
+    assert response.finish_reason == "error"
+    template, args = capture.calls[-1]
+    log = template.format(*args)
+    assert f"stage={failed_stage}" in log
+    assert f"compaction_applied={failed_stage == 'codex_request'}" in log
+    assert "replayed=True" in log
+    assert "reasoning_effort=low" in log
+    assert "error_param=input[1].type" in log
+    assert "PRIVATE STATE" not in log
 
 
 @pytest.mark.asyncio
@@ -474,7 +593,9 @@ async def test_codex_timeout_error_writes_diagnostic_log(monkeypatch) -> None:
     assert log_capture.calls == [
         (
             "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
-            "error_type={} error_code={} retry_after={} summary={}",
+            "error_type={} error_code={} retry_after={} summary={} "
+            "model={} purpose={} reasoning_effort={} replayed={} compaction_applied={} "
+            "error_param={} error_message={} request_id={}",
             (
                 "codex_request",
                 "ReadTimeout",
@@ -485,6 +606,14 @@ async def test_codex_timeout_error_writes_diagnostic_log(monkeypatch) -> None:
                 None,
                 None,
                 "ReadTimeout timeout",
+                "gpt-5.6-sol",
+                "chat",
+                None,
+                False,
+                False,
+                None,
+                None,
+                None,
             ),
         )
     ]
@@ -596,7 +725,9 @@ async def test_codex_http_diagnostic_log_omits_raw_body(monkeypatch) -> None:
     assert log_capture.calls == [
         (
             "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
-            "error_type={} error_code={} retry_after={} summary={}",
+            "error_type={} error_code={} retry_after={} summary={} "
+            "model={} purpose={} reasoning_effort={} replayed={} compaction_applied={} "
+            "error_param={} error_message={} request_id={}",
             (
                 "codex_request",
                 "CodexHTTPError",
@@ -607,6 +738,14 @@ async def test_codex_http_diagnostic_log_omits_raw_body(monkeypatch) -> None:
                 "overloaded",
                 None,
                 "HTTP 500 type=server_error code=overloaded",
+                "gpt-5.6-sol",
+                "chat",
+                None,
+                False,
+                False,
+                None,
+                None,
+                None,
             ),
         )
     ]

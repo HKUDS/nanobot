@@ -37,7 +37,7 @@ from nanobot.bus.runtime_events import (
     UserInputAccepted,
 )
 from nanobot.llm_usage.context import llm_usage_source
-from nanobot.providers.base import LLMProvider, LLMUsage
+from nanobot.providers.base import LLMProvider, LLMUsage, ProviderCallContext
 from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackModelSelection
 from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
@@ -64,7 +64,7 @@ WEBUI_TITLE_METADATA_KEY = "title"
 WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
 TITLE_MAX_CHARS = 60
 TITLE_GENERATION_MAX_TOKENS = 96
-TITLE_GENERATION_REASONING_EFFORT = "none"
+TITLE_GENERATION_REASONING_EFFORT = "low"
 
 # Latest active turn projection per ``chat_id`` (websocket only). It survives browser refresh
 # while the gateway process stays up and is implicitly dropped on restart.
@@ -273,6 +273,7 @@ async def maybe_generate_webui_title(
                 max_tokens=TITLE_GENERATION_MAX_TOKENS,
                 temperature=0.2,
                 reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
+                provider_context=ProviderCallContext(request_purpose="webui_title"),
                 retry_mode="standard",
             )
     except Exception:

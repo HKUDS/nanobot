@@ -276,6 +276,7 @@ class ProviderCallContext:
     response_is_fallback: bool = False
     # A pre-request compactor must fit this budget before sending the pending input.
     compaction_input_budget: int | None = None
+    request_purpose: str = "chat"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1883,6 +1884,7 @@ class LLMProvider(ABC):
                             events=provider_context.events,
                             response_preset=provider_context.response_preset,
                             response_is_fallback=provider_context.response_is_fallback,
+                            request_purpose=provider_context.request_purpose,
                         )
                 if stripped is not None or stripped_context is not None:
                     logger.warning(

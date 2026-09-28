@@ -358,7 +358,11 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
     assert (
         loop.provider.chat_stream_with_retry.await_args.kwargs["reasoning_effort"]
-        == TITLE_GENERATION_REASONING_EFFORT
+        == TITLE_GENERATION_REASONING_EFFORT == "low"
+    )
+    assert (
+        loop.provider.chat_stream_with_retry.await_args.kwargs["provider_context"].request_purpose
+        == "webui_title"
     )
 
 
