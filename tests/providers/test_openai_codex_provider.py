@@ -179,7 +179,6 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
     from nanobot.utils.log_config import add_console_log_sink
 
     _mock_codex_token(monkeypatch)
-    monkeypatch.setattr("nanobot.session.webui_turns.TITLE_GENERATION_REASONING_EFFORT", "none")
     original_client = httpx.AsyncClient
     message = (
         "Unsupported value: 'none' is not supported with the 'gpt-6-astra' model. "
@@ -214,7 +213,8 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
     try:
         generated = await maybe_generate_webui_title(
             sessions=sessions, session_key=session.key,
-            provider=OpenAICodexProvider(), model="openai-codex/gpt-6-astra",
+            provider=OpenAICodexProvider(extra_body={"reasoning": {"effort": "none"}}),
+            model="openai-codex/gpt-6-astra",
         )
         logger.warning("Outside title generation")
     finally:

@@ -64,8 +64,6 @@ WEBUI_TITLE_METADATA_KEY = "title"
 WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
 TITLE_MAX_CHARS = 60
 TITLE_GENERATION_MAX_TOKENS = 96
-# Explicit None uses model defaults instead of inheriting the chat's reasoning effort.
-TITLE_GENERATION_REASONING_EFFORT: str | None = None
 
 # Latest active turn projection per ``chat_id`` (websocket only). It survives browser refresh
 # while the gateway process stays up and is implicitly dropped on restart.
@@ -276,7 +274,7 @@ async def maybe_generate_webui_title(
                 model=model,
                 max_tokens=TITLE_GENERATION_MAX_TOKENS,
                 temperature=0.2,
-                reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
+                reasoning_effort=None,
                 retry_mode="standard",
             )
     except Exception:
