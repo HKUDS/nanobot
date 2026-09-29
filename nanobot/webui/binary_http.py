@@ -15,6 +15,8 @@ from aiohttp import web
 from aiohttp.web_protocol import RequestHandler
 from websockets.asyncio.server import ServerConnection
 
+_HTTP_CONNECTION_TIMEOUT_S = 75.0
+
 
 class BinaryHTTPBridge:
     """Own HTTP connections alongside a websockets ``serve`` instance.
@@ -74,6 +76,11 @@ class _BridgeConnection(ServerConnection):
             if data.startswith(b"GET "):
                 super().connection_made(self.transport)
             else:
+                # Bound incomplete HTTP headers as well as slow request bodies.
+                # The store's tighter 60s body timeout starts only after headers.
+                self._prefix_timeout = asyncio.get_running_loop().call_later(
+                    _HTTP_CONNECTION_TIMEOUT_S, self.transport.close,
+                )
                 self._http_protocol = self._bridge.http_server()
                 self._http_protocol.connection_made(self.transport)
         if self._http_protocol is not None:

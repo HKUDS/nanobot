@@ -215,3 +215,15 @@ async def test_disconnect_releases_staged_capacity_but_preserves_commits(tmp_pat
     assert not remove.exists()
     assert keep.exists()
     assert await upload(store)
+
+
+async def test_filename_collision_preserves_another_uploads_crash_marker(tmp_path, monkeypatch):
+    store = AttachmentStore(tmp_path)
+    ref = await upload(store)
+    path = Path(store.resolve([ref], owner="owner")[0])
+    monkeypatch.setattr("nanobot.webui.attachment_store.media_destination", lambda *args, **kwargs: path)
+    with pytest.raises(FileExistsError):
+        await upload(store)
+    assert (tmp_path / ".pending-attachments" / path.name).exists()
+    assert path.read_bytes() == b"attachment"
+    store.clear()

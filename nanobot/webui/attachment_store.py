@@ -103,6 +103,7 @@ class AttachmentStore:
         path: Path | None = None
         stored = False
         created = False
+        marker_created = False
         try:
             self.media_dir.mkdir(parents=True, exist_ok=True)
             path = media_destination(
@@ -111,6 +112,7 @@ class AttachmentStore:
             )
             self._journal.mkdir(parents=True, exist_ok=True)
             (self._journal / path.name).touch(exist_ok=False)
+            marker_created = True
             received = 0
             # Exclusive creation prevents accidental overwrite or symlink following.
             with path.open("xb") as output:
@@ -136,7 +138,8 @@ class AttachmentStore:
                 if path is not None:
                     if created:
                         path.unlink(missing_ok=True)
-                    (self._journal / path.name).unlink(missing_ok=True)
+                    if marker_created:
+                        (self._journal / path.name).unlink(missing_ok=True)
 
     def resolve(self, references: list[str], *, owner: str) -> list[str]:
         """Validate a complete batch without consuming it, allowing send retries."""
