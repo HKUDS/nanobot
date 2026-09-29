@@ -18,6 +18,8 @@ from nanobot.agent.tools.runtime_control import (
 from nanobot.agent.tools.self import MyTool, MyToolConfig
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
+from nanobot.providers.base import GenerationSettings
+from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def _make_loop(tmp_path: Path, *, allow_set: bool = False) -> AgentLoop:
@@ -240,14 +242,15 @@ async def test_workspace_display_command_cannot_change_path_enforcement(tmp_path
     assert loop.workspace_scopes.default_workspace == tmp_path
 
 
-@pytest.mark.parametrize("key", [None, "subagents", "subagents._task_statuses"])
-async def test_my_subagent_snapshot_is_session_scoped(tmp_path, key):
-    from nanobot.providers.base import GenerationSettings
-    from nanobot.utils.llm_runtime import LLMRuntime
+@pytest.fixture
+def runtime() -> LLMRuntime:
+    return LLMRuntime(MagicMock(), "test", GenerationSettings(), 128_000)
 
+
+@pytest.mark.parametrize("key", [None, "subagents", "subagents._task_statuses"])
+async def test_my_subagent_snapshot_is_session_scoped(tmp_path, key, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
-    runtime = LLMRuntime(MagicMock(), "test", GenerationSettings(), 128_000)
     # Spawn without yielding to the child runner: queued tasks must be scoped too.
     await manager.spawn("ALPHA_PRIVATE_TASK", label="ALPHA_LABEL", session_key="owner:a", runtime=runtime)
     await manager.spawn("BETA_PRIVATE_TASK", label="BETA_LABEL", session_key="owner:b", runtime=runtime)
@@ -269,13 +272,9 @@ async def test_my_subagent_snapshot_is_session_scoped(tmp_path, key):
 
 
 @pytest.mark.parametrize("field", ["", ".task_description", ".tool_events", ".usage"])
-async def test_my_rejects_other_sessions_task_paths(tmp_path, field):
-    from nanobot.providers.base import GenerationSettings
-    from nanobot.utils.llm_runtime import LLMRuntime
-
+async def test_my_rejects_other_sessions_task_paths(tmp_path, field, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
-    runtime = LLMRuntime(MagicMock(), "test", GenerationSettings(), 128_000)
     await manager.spawn("PRIVATE_TASK", session_key="owner:a", runtime=runtime)
     try:
         task_id = next(iter(manager.statuses_for_session("owner:a")))
@@ -294,13 +293,9 @@ async def test_my_rejects_other_sessions_task_paths(tmp_path, field):
 
 
 @pytest.mark.parametrize("session_key", [None, ""])
-async def test_my_without_session_cannot_enumerate_tasks(tmp_path, session_key):
-    from nanobot.providers.base import GenerationSettings
-    from nanobot.utils.llm_runtime import LLMRuntime
-
+async def test_my_without_session_cannot_enumerate_tasks(tmp_path, session_key, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
-    runtime = LLMRuntime(MagicMock(), "test", GenerationSettings(), 128_000)
     await manager.spawn("PRIVATE_TASK", session_key="owner:a", runtime=runtime)
     try:
         tool = _my_tool(loop)
