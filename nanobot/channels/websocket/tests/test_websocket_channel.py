@@ -33,6 +33,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     RetryWaitEvent,
     RuntimeModelUpdatedEvent,
+    SessionTitleEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
     TurnModelUpdatedEvent,
@@ -4034,6 +4035,29 @@ async def test_send_session_updated_includes_scope_when_present() -> None:
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
     assert body == {"event": "session_updated", "chat_id": "chat-1", "scope": "metadata"}
+
+
+@pytest.mark.asyncio
+async def test_send_session_title_emits_session_title_event() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        event=SessionTitleEvent(title="Generated title"),
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {
+        "event": "session_title",
+        "chat_id": "chat-1",
+        "title": "Generated title",
+    }
 
 
 @pytest.mark.asyncio

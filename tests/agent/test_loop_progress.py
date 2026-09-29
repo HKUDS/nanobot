@@ -16,6 +16,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import (
     GoalStatusEvent,
     ProgressEvent,
+    SessionTitleEvent,
     SessionUpdatedEvent,
     StreamDeltaEvent,
     StreamedResponseEvent,
@@ -1183,12 +1184,18 @@ class TestToolEventProgress:
         await asyncio.wait_for(title_started.wait(), timeout=5.0)
         release_title.set()
         session_updated = None
+        title_event = None
         for _ in range(10):
             candidate = await asyncio.wait_for(bus.consume_outbound(), timeout=5.0)
-            if isinstance(candidate.event, SessionUpdatedEvent):
+            if isinstance(candidate.event, SessionTitleEvent):
+                title_event = candidate
+            elif isinstance(candidate.event, SessionUpdatedEvent):
                 session_updated = candidate
                 break
         assert session_updated is not None
+        assert title_event is not None
+        assert title_event.chat_id == "chat1"
+        assert title_event.event.title == "Generated title"
 
         assert isinstance(session_updated.event, SessionUpdatedEvent)
         assert session_updated.event.scope == "metadata"
@@ -1210,12 +1217,12 @@ class TestToolEventProgress:
 
         captured: dict[str, object] = {}
 
-        async def fake_title_after_turn(**kwargs: object) -> bool:
+        async def fake_title_after_turn(**kwargs: object) -> str | None:
             captured.update(kwargs)
-            return False
+            return None
 
         monkeypatch.setattr(
-            "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
+            "nanobot.session.webui_turns.maybe_generate_title_after_turn",
             fake_title_after_turn,
         )
         scheduled_title: list[object] = []
@@ -1260,7 +1267,7 @@ class TestToolEventProgress:
         metadata: dict[str, object],
     ) -> None:
         from nanobot.session.manager import SessionManager
-        from nanobot.session.webui_turns import maybe_generate_webui_title_after_turn
+        from nanobot.session.titles import maybe_generate_title_after_turn
 
         sessions = SessionManager(tmp_path)
         session = sessions.get_or_create("websocket:chat1")
@@ -1271,7 +1278,7 @@ class TestToolEventProgress:
         provider = MagicMock()
         provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Greeting"))
 
-        generated = await maybe_generate_webui_title_after_turn(
+        generated = await maybe_generate_title_after_turn(
             channel="websocket",
             chat_id="chat1",
             metadata=metadata,
@@ -1281,7 +1288,7 @@ class TestToolEventProgress:
             model="test-model",
         )
 
-        assert generated is False
+        assert generated is None
         provider.chat_stream_with_retry.assert_not_awaited()
         assert "title" not in session.metadata
 
@@ -1340,7 +1347,7 @@ class TestToolEventProgress:
             raise AssertionError("command-only turns should not generate titles")
 
         monkeypatch.setattr(
-            "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
+            "nanobot.session.webui_turns.maybe_generate_title_after_turn",
             fake_title_after_turn,
         )
         scheduled: list[object] = []
@@ -1379,3 +1386,261 @@ class TestToolEventProgress:
         assert len(outbound) == 1
         assert outbound[0].content == "Done"
         assert not isinstance(outbound[0].event, TurnEndEvent)
+
+    @pytest.mark.asyncio
+    async def test_telegram_topic_title_generation_publishes_title_event(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(content="Done", tool_calls=[]),
+            LLMResponse(content="Generated title", tool_calls=[]),
+        ])
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        await run_session(loop, InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="100200300",
+            content="say hello",
+            metadata={"message_thread_id": 42, "is_forum": True, "chat_type": "private"},
+            session_key_override="telegram:100200300:topic:42",
+        ))
+
+        title_event = None
+        for _ in range(10):
+            candidate = await asyncio.wait_for(bus.consume_outbound(), timeout=0.5)
+            if isinstance(candidate.event, SessionTitleEvent):
+                title_event = candidate
+                break
+        assert title_event is not None
+        assert title_event.channel == "telegram"
+        assert title_event.chat_id == "100200300"
+        assert title_event.event.title == "Generated title"
+        assert title_event.content == ""
+        assert title_event.metadata["message_thread_id"] == 42
+        assert provider.chat_stream_with_retry.await_count == 2
+        session = loop.sessions.get_or_create("telegram:100200300:topic:42")
+        assert session.metadata["title"] == "Generated title"
+
+    @pytest.mark.asyncio
+    async def test_non_title_channel_turn_does_not_schedule_title(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        scheduled: list[object] = []
+
+        def schedule_background(coro: object) -> None:
+            scheduled.append(coro)
+            if hasattr(coro, "close"):
+                coro.close()
+
+        loop.schedule_background = schedule_background  # type: ignore[method-assign]
+
+        await run_session(loop, InboundMessage(
+            channel="slack",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+        ))
+
+        assert scheduled == []
+        provider.chat_stream_with_retry.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_manual_topic_rename_marks_title_user_edited(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nanobot.bus.runtime_events import RuntimeEventContext, SessionTitleOverridden
+        from nanobot.session.titles import maybe_generate_title_after_turn
+
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="AI title"))
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+
+        session = loop.sessions.get_or_create("telegram:100200300:topic:42")
+        session.add_message("user", "hello")
+        session.add_message("assistant", "world")
+        loop.sessions.save(session)
+
+        await bus.publish(SessionTitleOverridden(
+            context=RuntimeEventContext(
+                channel="telegram",
+                chat_id="100200300",
+                session_key="telegram:100200300:topic:42",
+                metadata={"message_thread_id": 42},
+            ),
+            title="Ручное название",
+        ))
+
+        persisted = loop.sessions.read_session_metadata("telegram:100200300:topic:42")
+        assert persisted is not None
+        assert persisted["metadata"]["title"] == "Ручное название"
+        assert persisted["metadata"]["title_user_edited"] is True
+
+        generated = await maybe_generate_title_after_turn(
+            channel="telegram",
+            chat_id="100200300",
+            metadata={"message_thread_id": 42, "is_forum": True},
+            sessions=loop.sessions,
+            session_key="telegram:100200300:topic:42",
+            provider=provider,
+            model="test-model",
+        )
+
+        assert generated is None
+        provider.chat_stream_with_retry.assert_not_awaited()
+        persisted = loop.sessions.read_session_metadata("telegram:100200300:topic:42")
+        assert persisted is not None
+        assert persisted["metadata"]["title"] == "Ручное название"
+
+    @pytest.mark.asyncio
+    async def test_manual_topic_rename_from_other_channel_is_ignored(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nanobot.bus.runtime_events import RuntimeEventContext, SessionTitleOverridden
+
+        bus = MessageBus()
+        loop = AgentLoop(
+            bus=bus, provider=MagicMock(), workspace=tmp_path, model="test-model",
+        )
+        _attach_webui_runtime_events(loop, bus)
+
+        await bus.publish(SessionTitleOverridden(
+            context=RuntimeEventContext(
+                channel="slack",
+                chat_id="100200300",
+                session_key="slack:100200300",
+                metadata={"message_thread_id": 42},
+            ),
+            title="Slack rename",
+        ))
+        await bus.publish(SessionTitleOverridden(
+            context=RuntimeEventContext(
+                channel="telegram",
+                chat_id="100200300",
+                session_key="telegram:100200300:topic:42",
+                metadata={"message_thread_id": 42},
+            ),
+            title="Ручное название",
+        ))
+
+        persisted = loop.sessions.read_session_metadata("slack:100200300")
+        assert persisted is None
+        persisted = loop.sessions.read_session_metadata("telegram:100200300:topic:42")
+        assert persisted is not None
+        assert persisted["metadata"]["title"] == "Ручное название"
+
+    @pytest.mark.asyncio
+    async def test_manual_topic_rename_with_mismatched_session_key_is_ignored(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nanobot.bus.runtime_events import RuntimeEventContext, SessionTitleOverridden
+
+        bus = MessageBus()
+        loop = AgentLoop(
+            bus=bus, provider=MagicMock(), workspace=tmp_path, model="test-model",
+        )
+        _attach_webui_runtime_events(loop, bus)
+
+        await bus.publish(SessionTitleOverridden(
+            context=RuntimeEventContext(
+                channel="telegram",
+                chat_id="100200300",
+                session_key="slack:100200300",
+                metadata={"message_thread_id": 42},
+            ),
+            title="Ручное название",
+        ))
+        await bus.publish(SessionTitleOverridden(
+            context=RuntimeEventContext(
+                channel="telegram",
+                chat_id="100200300",
+                session_key="telegram:100200300:topic:42",
+                metadata={},
+            ),
+            title="Без потока",
+        ))
+
+        assert loop.sessions.read_session_metadata("slack:100200300") is None
+        assert loop.sessions.read_session_metadata("telegram:100200300:topic:42") is None
+
+    @pytest.mark.asyncio
+    async def test_manual_topic_rename_title_is_truncated_to_sixty_chars(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nanobot.bus.runtime_events import RuntimeEventContext, SessionTitleOverridden
+        from nanobot.session.titles import TITLE_MAX_CHARS
+
+        bus = MessageBus()
+        loop = AgentLoop(
+            bus=bus, provider=MagicMock(), workspace=tmp_path, model="test-model",
+        )
+        _attach_webui_runtime_events(loop, bus)
+
+        long_title = "н" * 120
+        await bus.publish(SessionTitleOverridden(
+            context=RuntimeEventContext(
+                channel="telegram",
+                chat_id="100200300",
+                session_key="telegram:100200300:topic:42",
+                metadata={"message_thread_id": 42},
+            ),
+            title=long_title,
+        ))
+
+        persisted = loop.sessions.read_session_metadata("telegram:100200300:topic:42")
+        assert persisted is not None
+        assert persisted["metadata"]["title"] == "н" * TITLE_MAX_CHARS
+
+    @pytest.mark.asyncio
+    async def test_telegram_group_turn_does_not_schedule_title(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        scheduled: list[object] = []
+
+        def schedule_background(coro: object) -> None:
+            scheduled.append(coro)
+            if hasattr(coro, "close"):
+                coro.close()
+
+        loop.schedule_background = schedule_background  # type: ignore[method-assign]
+
+        await run_session(loop, InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="-100123",
+            content="say hello",
+            metadata={"message_thread_id": 42, "is_forum": True, "chat_type": "supergroup"},
+            session_key_override="telegram:-100123:topic:42",
+        ))
+
+        assert scheduled == []
+        provider.chat_stream_with_retry.assert_awaited_once()

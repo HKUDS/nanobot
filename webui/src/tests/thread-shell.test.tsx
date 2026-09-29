@@ -38,6 +38,7 @@ function makeClient() {
     (modelName: string | null, modelPreset?: string | null) => void
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+  const sessionTitleHandlers = new Set<(chatId: string, title: string) => void>();
   const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const runStartedAtByChatId = new Map<string, number>();
   const runGenerationByChatId = new Map<string, number>();
@@ -163,6 +164,12 @@ function makeClient() {
       sessionUpdateHandlers.add(handler);
       return () => {
         sessionUpdateHandlers.delete(handler);
+      };
+    },
+    onSessionTitle: (handler: (chatId: string, title: string) => void) => {
+      sessionTitleHandlers.add(handler);
+      return () => {
+        sessionTitleHandlers.delete(handler);
       };
     },
     _emitError(err: StreamError) {
