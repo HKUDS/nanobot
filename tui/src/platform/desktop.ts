@@ -1,4 +1,4 @@
-import type { GatewayConnection } from "../client/api"
+import type { GatewayConnection } from "../client"
 
 type Environment = Record<string, string | undefined>
 

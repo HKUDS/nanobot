@@ -10,7 +10,7 @@ import {
 } from "@opentui/core"
 
 import { formatTokenCount } from "./context-panel"
-import type { SessionUsageSnapshot } from "../client/api"
+import type { SessionUsageSnapshot } from "../client"
 
 export interface UsagePanelTheme {
   text: ColorInput

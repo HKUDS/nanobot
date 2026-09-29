@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 
 import { CommandMenu, resolveSlashCommandLifecycle } from "./command-menu"
-import type { SlashCommand } from "../client/api"
+import type { SlashCommand } from "../client"
 
 const commands: SlashCommand[] = [
   {

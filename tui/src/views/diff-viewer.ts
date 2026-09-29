@@ -12,7 +12,7 @@ import {
   type TreeSitterClient,
 } from "@opentui/core"
 
-import type { FileEditEvent, HistoryMessage } from "../client/api"
+import type { FileEditEvent, HistoryMessage } from "../client"
 import { hideScrollbars } from "../rendering/scrollbox"
 
 export interface DiffViewerTheme {

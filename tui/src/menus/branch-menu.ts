@@ -1,7 +1,7 @@
 import { type BoxRenderable, type CliRenderer } from "@opentui/core"
 
 import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
-import type { HistoryMessage } from "../client/api"
+import type { HistoryMessage } from "../client"
 
 export interface BranchPoint {
   beforeUserIndex: number

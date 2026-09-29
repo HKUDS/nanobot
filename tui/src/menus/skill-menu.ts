@@ -1,7 +1,7 @@
 import { type BoxRenderable, type CliRenderer } from "@opentui/core"
 
 import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
-import type { SkillCandidate } from "../client/api"
+import type { SkillCandidate } from "../client"
 
 export interface SkillQuery {
   query: string

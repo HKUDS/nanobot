@@ -1,7 +1,7 @@
 import { type BoxRenderable, type CliRenderer } from "@opentui/core"
 
 import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
-import type { MentionCandidate, MessageOptions } from "../client/api"
+import type { MentionCandidate, MessageOptions } from "../client"
 
 export interface MentionQuery {
   query: string

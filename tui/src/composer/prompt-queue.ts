@@ -1,4 +1,4 @@
-import type { MessageOptions } from "../client/api"
+import type { MessageOptions } from "../client"
 
 export interface QueuedPrompt {
   content: string

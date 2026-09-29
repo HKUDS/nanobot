@@ -10,7 +10,7 @@ import {
   type TextChunk,
 } from "@opentui/core"
 
-import type { RecoveryState } from "../client/api"
+import type { RecoveryState } from "../client"
 
 export interface RecoveryNoticeTheme {
   text: ColorInput

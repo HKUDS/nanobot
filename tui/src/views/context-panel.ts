@@ -5,7 +5,7 @@ import {
   type ColorInput,
 } from "@opentui/core"
 
-import type { SessionContextSnapshot } from "../client/api"
+import type { SessionContextSnapshot } from "../client"
 
 export interface ContextPanelTheme {
   text: ColorInput

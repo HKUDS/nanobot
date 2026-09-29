@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { insertMention, mentionOptions, mentionQuery } from "./mention-menu"
-import type { MentionCandidate } from "../client/api"
+import type { MentionCandidate } from "../client"
 
 const candidates: MentionCandidate[] = [
   { kind: "cli", name: "github", displayName: "GitHub", description: "CLI" },

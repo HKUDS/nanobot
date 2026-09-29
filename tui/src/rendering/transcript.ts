@@ -22,7 +22,7 @@ import type {
   HistoryMessage,
   MediaAttachment,
   ToolProgressEvent,
-} from "../client/api"
+} from "../client"
 import { renderLatexAsUnicode } from "./latex"
 import { hideScrollbars } from "./scrollbox"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"

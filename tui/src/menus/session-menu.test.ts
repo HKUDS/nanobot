@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 
 import { SessionMenu, sessionLabel } from "./session-menu"
-import type { SessionSummary } from "../client/api"
+import type { SessionSummary } from "../client"
 
 const sessions: SessionSummary[] = [
   {

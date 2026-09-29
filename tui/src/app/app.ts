@@ -2,10 +2,8 @@ import {
   BoxRenderable,
   CliRenderEvents,
   RGBA,
-  StyledText,
   SyntaxStyle,
   TextareaRenderable,
-  TextAttributes,
   TextRenderable,
   createCliRenderer,
   decodePasteBytes,
@@ -13,10 +11,8 @@ import {
   parseColor,
   stripAnsiSequences,
   type CliRenderer,
-  type ColorInput,
   type KeyEvent,
   type PasteEvent,
-  type TextChunk,
   type ThemeMode,
   type TreeSitterClient,
 } from "@opentui/core"
@@ -44,34 +40,26 @@ import {
   type MentionCandidate,
   type MessageOptions,
   type RecoveryState,
-  type RetryStatus,
   type SkillCandidate,
   type SlashCommand,
   type SessionSummary,
   type TokenUsage,
   type WorkspaceScopePayload,
-} from "../client/api"
+} from "../client"
 import {
   CommandMenu,
   resolveSlashCommandLifecycle,
-  type CommandMenuTheme,
   type ResolvedSlashCommandLifecycle,
-  type TuiCommand,
 } from "../menus/command-menu"
 import { SessionMenu, sessionLabel } from "../menus/session-menu"
-import { ContextPanel, formatTokenCount, type ContextPanelTheme } from "../views/context-panel"
-import { UsagePanel, type UsagePanelTheme } from "../views/usage-panel"
+import { ContextPanel, formatTokenCount } from "../views/context-panel"
+import { UsagePanel } from "../views/usage-panel"
 import {
   DiffViewer,
   latestTurnFileEdits,
   mergeFileEdits,
-  type DiffViewerTheme,
 } from "../views/diff-viewer"
-import {
-  Transcript,
-  type TranscriptNavigation,
-  type TranscriptTheme,
-} from "../rendering/transcript"
+import { Transcript, type TranscriptNavigation } from "../rendering/transcript"
 import { ComposerDraft, MAX_DRAFT_IMAGES } from "../composer/composer-draft"
 import {
   createClipboardImageReader,
@@ -92,438 +80,53 @@ import {
   type SkillQuery,
 } from "../menus/skill-menu"
 import { PromptQueue, type QueuedPrompt } from "../composer/prompt-queue"
-import { QueuePreview, type QueuePreviewTheme } from "../composer/queue-preview"
-import { RecoveryNotice, type RecoveryNoticeTheme } from "../views/recovery-notice"
+import { QueuePreview } from "../composer/queue-preview"
+import { RecoveryNotice } from "../views/recovery-notice"
 import { RuntimeControls } from "../views/runtime-controls"
 import {
   contextualFooterHints,
   footerTelemetry,
   type FooterMode,
-  type FooterHintTheme,
 } from "../views/footer-hints"
+import { copyWithSystemClipboard } from "../platform/clipboard"
 import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "../platform/host"
+import { LOCAL_COMMANDS } from "./commands"
+import { CooperativeEventQueue } from "./event-queue"
+import {
+  ACTIVE_COMPOSER_PLACEHOLDER,
+  COMPACT_ACTIVE_COMPOSER_PLACEHOLDER,
+  COMPOSER_PLACEHOLDER,
+  createAppLayout,
+} from "./layout"
+import {
+  connectionStatusText,
+  formatElapsed,
+  retryStatusLine,
+  terminalModelFailureLine,
+  type RenderedRetryStatus,
+} from "./status"
+import {
+  DARK,
+  IMAGE_PLACEHOLDER_STYLE,
+  LIGHT,
+  SHIMMER_INTERVAL_MS,
+  TERMINAL,
+  commandMenuTheme,
+  composerSyntaxStyle,
+  contextPanelTheme,
+  diffViewerTheme,
+  footerHintTheme,
+  queuePreviewTheme,
+  recoveryNoticeTheme,
+  runtimeControlsTheme,
+  shimmerStatus,
+  transcriptTheme,
+  usagePanelTheme,
+  type Palette,
+} from "./theme"
+import type { AppOptions, ChatClient } from "./types"
 
-interface AppOptions {
-  resolveConnection?: () => Promise<GatewayConnection>
-  desktopGatewayId?: string
-  wsUrl?: string
-  bootstrapUrl?: string
-  bootstrapSecret?: string
-  healthUrl?: string
-  apiUrl: string
-  apiToken: string
-  chatId?: string
-  model: string
-  modelPreset: string
-  workspace: string
-  version: string
-  access: string
-  theme: "auto" | ThemeMode
-  onDetach?: (chatId?: string) => void
-  onExit?: (chatId: string) => void
-}
-
-interface ChatClient {
-  readonly activeChatId: string
-  connect(): void
-  close(): void
-  send(content: string, options?: MessageOptions): string
-  attach(chatId: string): void
-  newChat(scope?: WorkspaceScopePayload): void
-  forkChat?(sourceChatId: string, beforeUserIndex: number, title?: string): void
-  setWorkspaceScope(scope: WorkspaceScopePayload): void
-  updateRecovery(
-    action: "continue" | "dismiss",
-    chatId: string,
-    recoveryId: string,
-  ): Promise<RecoveryState>
-}
-
-interface Palette {
-  referenceBackground: string
-  text: ColorInput
-  muted: ColorInput
-  faint: ColorInput
-  border: ColorInput
-  accent: ColorInput
-  link: ColorInput
-  success: ColorInput
-  warning: ColorInput
-  error: ColorInput
-  user: ColorInput
-  userBackground: ColorInput
-  warm: ColorInput
-  cool: ColorInput
-}
-
-const DARK: Palette = {
-  referenceBackground: "#0E0F11",
-  text: "#ECEDEE",
-  muted: "#A1A1AA",
-  faint: "#71717A",
-  border: "#3F3F46",
-  accent: "#EF8E30",
-  link: "#60A5FA",
-  success: "#5CC489",
-  warning: "#F5C451",
-  error: "#F87171",
-  user: "#EF8E30",
-  // Codex-style turn anchor: 12% white over the reference dark background.
-  userBackground: "#2B2C2E",
-  warm: "#C26A25",
-  cool: "#1795A2",
-}
-
-const LIGHT: Palette = {
-  referenceBackground: "#FAFAFA",
-  text: "#18181B",
-  muted: "#6F6F78",
-  faint: "#8A8A94",
-  border: "#D4D4D8",
-  accent: "#B94D0B",
-  link: "#1D4ED8",
-  success: "#166534",
-  warning: "#A16207",
-  error: "#B91C1C",
-  user: "#B94D0B",
-  // Codex-style turn anchor: 4% black over the reference light background.
-  userBackground: "#F0F0F0",
-  warm: "#C2410C",
-  cool: "#0F766E",
-}
-
-// Until the terminal answers OSC 10/11, its default foreground is the only
-// text color known to match its default background.
-const TERMINAL: Palette = {
-  ...DARK,
-  text: RGBA.defaultForeground(),
-  muted: RGBA.defaultForeground(),
-  faint: RGBA.defaultForeground(),
-  border: RGBA.defaultForeground(),
-  accent: RGBA.defaultForeground(),
-  link: RGBA.defaultForeground(),
-  success: RGBA.defaultForeground(),
-  warning: RGBA.defaultForeground(),
-  error: RGBA.defaultForeground(),
-  user: RGBA.defaultForeground(),
-  userBackground: RGBA.defaultBackground(),
-  warm: RGBA.defaultForeground(),
-  cool: RGBA.defaultForeground(),
-}
-
-const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
-const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now · Tab send next"
-const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
-// Transcript rows start one cell inside the shell; text follows their two-cell role marker.
-const TRANSCRIPT_EDGE_INSET = 1
-const TRANSCRIPT_TEXT_INSET = TRANSCRIPT_EDGE_INSET + 2
-const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
-const SHIMMER_PAUSE = 16
-const SHIMMER_BAND = 4
-const TERMINAL_SHIMMER_BAND = 1
-const SHIMMER_INTERVAL_MS = 80
-const EVENT_BATCH_SIZE = 64
-const EVENT_BATCH_BUDGET_MS = 4
 const SESSION_REFRESH_INTERVAL_MS = 1_000
-const LOCAL_COMMANDS: TuiCommand[] = [
-  {
-    command: "/sessions",
-    title: "Sessions",
-    description: "Find and switch conversations",
-    action: "sessions",
-  },
-  {
-    command: "/new-chat",
-    title: "New saved chat",
-    description: "Keep this conversation and start another",
-    action: "new-chat",
-  },
-  {
-    command: "/context",
-    title: "Agent context",
-    description: "Explain what this session contributes to the next prompt",
-    action: "context",
-  },
-  {
-    command: "/usage",
-    title: "Token usage",
-    description: "Show context occupancy and recent model-call input tokens",
-    action: "usage",
-  },
-  {
-    command: "/diff",
-    title: "Last turn diff",
-    description: "Inspect file changes from the latest turn",
-    action: "diff",
-  },
-  {
-    command: "/branch",
-    title: "Branch from reply",
-    description: "Continue from an earlier completed reply",
-    action: "branch",
-  },
-  {
-    command: "/detach",
-    title: "Detach",
-    description: "Close this terminal UI and keep the agent running",
-    action: "detach",
-  },
-  {
-    command: "/exit",
-    title: "Exit",
-    description: "Close this terminal UI",
-    action: "exit",
-  },
-]
-
-function syntaxStyle(palette: Palette): SyntaxStyle {
-  const color = (value: ColorInput) => {
-    const parsed = parseColor(value)
-    return { fg: parsed }
-  }
-  return SyntaxStyle.fromStyles({
-    default: color(palette.text),
-    keyword: { ...color(palette.accent), bold: true },
-    string: color(palette.success),
-    comment: { ...color(palette.muted), italic: true },
-    number: color(palette.link),
-    function: color(palette.warm),
-    type: color(palette.cool),
-    variable: color(palette.text),
-    property: color(palette.link),
-    "markup.heading": { ...color(palette.accent), bold: true },
-    "markup.strong": { ...color(palette.text), bold: true },
-    "markup.italic": { ...color(palette.muted), italic: true },
-    "markup.link": { ...color(palette.link), underline: true },
-    "markup.link.label": { ...color(palette.link), underline: true },
-    "markup.link.url": { ...color(palette.link), underline: true },
-    "markup.raw": color(palette.warm),
-    conceal: color(palette.faint),
-  })
-}
-
-function composerSyntaxStyle(palette: Palette): SyntaxStyle {
-  return SyntaxStyle.fromStyles({
-    [IMAGE_PLACEHOLDER_STYLE]: { fg: parseColor(palette.accent), bold: true },
-  })
-}
-
-function transcriptTheme(palette: Palette, backgroundKnown: boolean): TranscriptTheme {
-  return {
-    text: palette.text,
-    muted: palette.muted,
-    error: palette.error,
-    user: palette.user,
-    userBackground: backgroundKnown ? palette.userBackground : null,
-    border: palette.border,
-    syntax: syntaxStyle(palette),
-  }
-}
-
-function commandMenuTheme(palette: Palette): CommandMenuTheme {
-  return {
-    text: palette.text,
-    muted: palette.muted,
-    border: palette.border,
-    accent: palette.accent,
-    warning: palette.warning,
-    selectedBackground: palette.userBackground,
-  }
-}
-
-function runtimeControlsTheme(palette: Palette) {
-  return {
-    ...commandMenuTheme(palette),
-    accent: palette.accent,
-    faint: palette.faint,
-  }
-}
-
-function contextPanelTheme(palette: Palette): ContextPanelTheme {
-  return {
-    text: palette.text,
-    border: palette.border,
-    accent: palette.accent,
-  }
-}
-
-function usagePanelTheme(palette: Palette): UsagePanelTheme {
-  return { ...palette, cached: palette.cool }
-}
-
-function diffViewerTheme(palette: Palette, backgroundKnown: boolean): DiffViewerTheme {
-  const light = palette === LIGHT
-  return {
-    text: palette.text,
-    muted: palette.muted,
-    border: palette.border,
-    accent: palette.accent,
-    success: palette.success,
-    error: palette.error,
-    addedBackground: backgroundKnown ? light ? "#E7F6EC" : "#142D22" : null,
-    removedBackground: backgroundKnown ? light ? "#FCE8EA" : "#352024" : null,
-    syntax: syntaxStyle(palette),
-  }
-}
-
-function queuePreviewTheme(palette: Palette): QueuePreviewTheme {
-  return {
-    accent: palette.accent,
-    muted: palette.muted,
-    faint: palette.faint,
-  }
-}
-
-function recoveryNoticeTheme(palette: Palette): RecoveryNoticeTheme {
-  return {
-    text: palette.text,
-    muted: palette.muted,
-    border: palette.border,
-    accent: palette.accent,
-    warning: palette.warning,
-    error: palette.error,
-  }
-}
-
-function footerHintTheme(palette: Palette): FooterHintTheme {
-  return {
-    accent: palette.accent,
-    danger: palette.error,
-    muted: palette.muted,
-    separator: palette.faint,
-  }
-}
-
-function shimmerStatus(
-  label: string,
-  suffix: string,
-  frame: number,
-  palette: Palette,
-): StyledText {
-  const chars = Array.from(label)
-  // Sweep immediately, then leave a quiet pause before repeating. The text
-  // keeps a constant width throughout, so the footer never jitters.
-  const position = frame % (chars.length + SHIMMER_PAUSE)
-  if (palette === TERMINAL) {
-    // Terminal-default colors cannot be interpolated without guessing the
-    // terminal theme, so move a bold band while preserving native color intent.
-    const foreground = parseColor(palette.text)
-    const chunks: TextChunk[] = chars.map((text, index) => ({
-      __isChunk: true,
-      text,
-      fg: foreground,
-      attributes: Math.abs(index - position) <= TERMINAL_SHIMMER_BAND
-        ? TextAttributes.BOLD
-        : 0,
-    }))
-    chunks.push({ __isChunk: true, text: suffix, fg: foreground })
-    return new StyledText(chunks)
-  }
-  const base = parseColor(palette.muted).toInts()
-  const highlight = parseColor(palette.accent).toInts()
-  const chunks: TextChunk[] = chars.map((text, index) => {
-    const distance = Math.abs(index - position)
-    const intensity = distance > SHIMMER_BAND
-      ? 0
-      : (1 + Math.cos(Math.PI * distance / SHIMMER_BAND)) / 2
-    return {
-      __isChunk: true,
-      text,
-      fg: RGBA.fromInts(
-        Math.round(base[0] + (highlight[0] - base[0]) * intensity),
-        Math.round(base[1] + (highlight[1] - base[1]) * intensity),
-        Math.round(base[2] + (highlight[2] - base[2]) * intensity),
-      ),
-    }
-  })
-  chunks.push({ __isChunk: true, text: suffix, fg: parseColor(palette.muted) })
-  return new StyledText(chunks)
-}
-
-function formatElapsed(milliseconds: number): string {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1000))
-  if (seconds < 60) return `${seconds}s`
-  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`
-}
-
-function connectionStatusText(
-  status: ConnectionStatus,
-  info?: ConnectionStatusInfo,
-): string {
-  if (["starting", "connecting", "connected"].includes(status)) return "Getting ready…"
-  if (status === "reconnecting") return "Resuming…"
-  if (status === "unavailable") {
-    return info?.health === "degraded"
-      ? "Still getting ready…"
-      : "Nanobot is taking longer to respond…"
-  }
-  if (status === "error") return "Nanobot unavailable · restart nanobot"
-  return "Session ended"
-}
-
-function retryFailureLabel(errorKind: string): string {
-  if (errorKind === "billing") return "Model provider quota is unavailable"
-  if (errorKind === "connection") return "Could not connect to the model provider"
-  if (errorKind === "timeout") return "Model provider request timed out"
-  if (errorKind === "rate_limit") return "Model provider rate limit reached"
-  if (errorKind === "server") return "Model provider service error"
-  return "Model provider request failed"
-}
-
-export function terminalModelFailureLine(errorKind?: string, attempts?: number): string {
-  const reason = retryFailureLabel(errorKind || "unknown")
-  if (errorKind === "billing") {
-    return `${reason}. Add credit or check billing for the provider account, then try again.`
-  }
-  const retryResult = typeof attempts === "number" && Number.isInteger(attempts) && attempts > 0
-    ? ` The request still failed on attempt ${attempts}, so retries stopped.`
-    : ""
-  return `${reason}.${retryResult} Check the provider configuration or service status, then try again.`
-}
-
-interface RenderedRetryStatus extends RetryStatus {
-  nextRetryAtMs?: number
-}
-
-function retryStatusLine(status: RenderedRetryStatus, nowMs = Date.now()): string {
-  const label = retryFailureLabel(status.error_kind)
-  if (status.state === "exhausted") return `${label} · ending turn`
-  if (status.state === "recovered") return "Connection restored"
-  if (status.state === "cleared") return "Retry status cleared"
-  const remaining = Math.max(
-    0,
-    Math.ceil(((status.nextRetryAtMs ?? nowMs) - nowMs) / 1000),
-  )
-  const attempt = status.max_attempts
-    ? `${status.attempt}/${status.max_attempts}`
-    : String(status.attempt)
-  return `${label} · retrying in ${remaining}s · attempt ${attempt}`
-}
-
-export function sessionExitMessage(chatId: string): string {
-  const sessionId = `websocket:${chatId}`
-  return `Resume with: nanobot agent --session ${sessionId}\n`
-}
-
-async function copyWithSystemClipboard(text: string): Promise<void> {
-  const commands = process.platform === "darwin"
-    ? [["pbcopy"]]
-    : process.platform === "win32"
-      ? [["clip.exe"]]
-      : [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
-  for (const command of commands) {
-    try {
-      const child = Bun.spawn(command, { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
-      child.stdin.write(text)
-      child.stdin.end()
-      if (await child.exited === 0) return
-    } catch {
-      // Try the next platform clipboard provider.
-    }
-  }
-  throw new Error("no clipboard provider available")
-}
-
 export class NanobotTui {
   private readonly renderer: CliRenderer
   private readonly transcript: Transcript
@@ -568,9 +171,7 @@ export class NanobotTui {
   private historyLoadingOlder = false
   private attachedOnce = false
   private pendingEvents: InboundEvent[] | null = null
-  private eventQueue: Array<InboundEvent | (() => void)> = []
-  private eventDrain: ReturnType<typeof setImmediate> | null = null
-  private followUpPending = false
+  private readonly eventQueue: CooperativeEventQueue<InboundEvent>
   private hydrationId = 0
   private ready = false
   private shimmerFrame = 0
@@ -647,6 +248,10 @@ export class NanobotTui {
       : this.activeThemeMode === "light" ? LIGHT : DARK
     this.composerSyntax = composerSyntaxStyle(this.palette)
     this.host = host
+    this.eventQueue = new CooperativeEventQueue({
+      dispatch: (event) => this.accept(event),
+      paused: () => this.quitting || this.submitPending || Boolean(this.pendingEvents),
+    })
     this.transcript = new Transcript(
       renderer,
       transcriptTheme(this.palette, this.backgroundKnown),
@@ -716,52 +321,6 @@ export class NanobotTui {
       onStatus: (status, detail, info) => this.handleStatus(status, detail, info),
     })
 
-    // The terminal owns its canvas. Keeping the default-background intent is
-    // essential in embedded terminals, where painting our own near-black RGB
-    // only colors occupied cells and turns long output into dark strips.
-    this.renderer.setBackgroundColor(RGBA.defaultBackground())
-    this.shell = new BoxRenderable(renderer, {
-      id: "nanobot-tui-footer",
-      width: "100%",
-      height: "100%",
-      paddingLeft: 1,
-      paddingRight: 1,
-      flexDirection: "column",
-      backgroundColor: RGBA.defaultBackground(),
-      onMouseDown: (event) => {
-        if (event.button !== 0) return
-        if (!this.diffViewer.visible) {
-          // OpenTUI applies automatic focus after mouse handlers run. Prevent
-          // a focusable transcript ancestor from stealing text focus back
-          // after the composer has been restored here.
-          event.preventDefault()
-          this.composer.focus()
-        }
-        // Runtime pickers are transient popovers. A primary click anywhere
-        // outside their trigger or body dismisses them; hide() restores the
-        // composer focus through the shared visibility callback.
-        this.dismissRuntimeControls()
-        if (this.sessionLoading || this.sessionMenu.visible) {
-          this.closeSessions()
-        }
-        // Selection belongs to transcript/input content, never to empty chrome.
-        // Clearing it here prevents default-background cells from lingering as
-        // opaque blocks in terminals with differential repainting.
-        if (event.target && !event.target.selectable) {
-          this.renderer.clearSelection()
-        }
-      },
-    })
-    this.title = new BoxRenderable(renderer, {
-      id: "nanobot-tui-title",
-      width: "100%",
-      height: 1,
-      flexShrink: 0,
-      flexDirection: "row",
-      alignItems: "center",
-      paddingLeft: TRANSCRIPT_TEXT_INSET,
-      backgroundColor: RGBA.defaultBackground(),
-    })
     this.runtimeControls = new RuntimeControls(
       renderer,
       runtimeControlsTheme(this.palette),
@@ -794,113 +353,55 @@ export class NanobotTui {
         },
       },
     )
-    this.title.add(this.runtimeControls.modelText)
-    this.title.add(this.runtimeControls.accessText)
-    this.title.add(this.runtimeControls.contextText)
-    const composerSurface = this.composerSurface()
-    this.composerFrame = new BoxRenderable(renderer, {
-      id: "nanobot-tui-composer-frame",
-      minHeight: 1,
-      flexShrink: 0,
-      marginLeft: TRANSCRIPT_EDGE_INSET,
-      border: ["left"],
-      borderColor: this.palette.accent,
-      paddingLeft: 1,
-      paddingRight: 1,
-      backgroundColor: composerSurface,
-    })
-    this.composer = new TextareaRenderable(renderer, {
-      id: "nanobot-tui-composer",
-      width: "100%",
-      minHeight: 1,
-      maxHeight: 8,
-      wrapMode: "word",
-      placeholder: COMPOSER_PLACEHOLDER,
-      placeholderColor: this.palette.muted,
-      textColor: this.palette.text,
-      focusedTextColor: this.palette.text,
-      backgroundColor: composerSurface,
-      focusedBackgroundColor: composerSurface,
-      cursorColor: this.palette.accent,
-      syntaxStyle: this.composerSyntax,
-      // A steady line cursor avoids the block-cell trails produced by some
-      // terminals when a retained full-screen UI redraws around the composer.
-      cursorStyle: { style: "line", blinking: false },
-      showCursor: true,
-      keyBindings: [
-        { name: "return", shift: true, action: "newline" },
-        { name: "return", meta: true, action: "newline" },
-        { name: "return", ctrl: true, action: "newline" },
-        { name: "j", ctrl: true, action: "newline" },
-        { name: "linefeed", action: "newline" },
-        { name: "return", action: "submit" },
-      ],
-      onCursorChange: () => {
-        this.keepComposerCursorOutsideImages()
-        if (!this.sessionMenu.visible && !this.branchMenu.visible) this.syncComposerMenus()
+    const layout = createAppLayout(
+      renderer,
+      this.palette,
+      this.composerSyntax,
+      this.composerSurface(),
+      {
+        transcript: this.transcript,
+        commandMenu: this.commandMenu,
+        sessionMenu: this.sessionMenu,
+        mentionMenu: this.mentionMenu,
+        skillMenu: this.skillMenu,
+        branchMenu: this.branchMenu,
+        contextPanel: this.contextPanel,
+        usagePanel: this.usagePanel,
+        runtimeControls: this.runtimeControls,
+        queuePreview: this.queuePreview,
+        recoveryNotice: this.recoveryNotice,
+        diffViewer: this.diffViewer,
       },
-      onContentChange: () => this.handleComposerContentChange(),
-      onMouseDown: () => queueMicrotask(() => this.keepComposerCursorOutsideImages()),
-      onMouseUp: () => queueMicrotask(() => this.keepComposerCursorOutsideImages()),
-      onMouseDrag: () => queueMicrotask(() => this.keepComposerCursorOutsideImages()),
-      onMouseDragEnd: () => queueMicrotask(() => this.keepComposerCursorOutsideImages()),
-      // IMEs may commit their final composed glyph after Enter. Matching the
-      // OpenCode/OpenTUI integration, defer twice before reading plainText.
-      onSubmit: () => this.deferSubmit(),
-      onPaste: (event) => {
-        this.flushSubmit()
-        if (!this.composer.isDestroyed) this.handlePaste(event)
+      {
+        onPrimaryMouseDown: () => {
+          const restoreComposerFocus = !this.diffViewer.visible
+          if (restoreComposerFocus) this.composer.focus()
+          // Runtime pickers are transient popovers. A primary click anywhere
+          // outside their trigger or body dismisses them; hide() restores the
+          // composer focus through the shared visibility callback.
+          this.dismissRuntimeControls()
+          if (this.sessionLoading || this.sessionMenu.visible) this.closeSessions()
+          return restoreComposerFocus
+        },
+        onComposerCursorChange: () => {
+          this.keepComposerCursorOutsideImages()
+          if (!this.sessionMenu.visible && !this.branchMenu.visible) this.syncComposerMenus()
+        },
+        onComposerContentChange: () => this.handleComposerContentChange(),
+        onComposerPointer: () => this.keepComposerCursorOutsideImages(),
+        onSubmit: () => this.deferSubmit(),
+        onPaste: (event) => {
+          this.flushSubmit()
+          if (!this.composer.isDestroyed) this.handlePaste(event)
+        },
       },
-    })
-    this.status = new TextRenderable(renderer, {
-      id: "nanobot-tui-status",
-      content: "Getting ready…",
-      fg: this.palette.muted,
-      height: 1,
-      width: "auto",
-      minWidth: 0,
-      flexGrow: 1,
-      flexShrink: 1,
-      selectable: false,
-    })
-    this.meta = new TextRenderable(renderer, {
-      id: "nanobot-tui-meta",
-      content: "",
-      fg: this.palette.faint,
-      height: 1,
-      width: "auto",
-      flexShrink: 1,
-      selectable: false,
-    })
-
-    const statusRow = new BoxRenderable(renderer, {
-      id: "nanobot-tui-status-row",
-      width: "100%",
-      height: 1,
-      flexShrink: 0,
-      flexDirection: "row",
-      justifyContent: "space-between",
-      gap: 2,
-      paddingLeft: TRANSCRIPT_TEXT_INSET,
-    })
-    this.composerFrame.add(this.composer)
-    statusRow.add(this.status)
-    statusRow.add(this.meta)
-    this.shell.add(this.transcript.root)
-    this.shell.add(this.commandMenu.root)
-    this.shell.add(this.sessionMenu.root)
-    this.shell.add(this.mentionMenu.root)
-    this.shell.add(this.skillMenu.root)
-    this.shell.add(this.branchMenu.root)
-    this.shell.add(this.contextPanel.root)
-    this.shell.add(this.usagePanel.root)
-    this.shell.add(this.runtimeControls.menuRoot)
-    this.shell.add(this.title)
-    this.shell.add(this.queuePreview.root)
-    this.shell.add(this.recoveryNotice.root)
-    this.shell.add(this.composerFrame)
-    this.shell.add(statusRow)
-    this.shell.add(this.diffViewer.root)
+    )
+    this.shell = layout.shell
+    this.title = layout.title
+    this.composerFrame = layout.composerFrame
+    this.composer = layout.composer
+    this.status = layout.status
+    this.meta = layout.meta
     this.renderer.root.add(this.shell)
 
     this.renderer.keyInput.on("keypress", this.handleKey)
@@ -984,7 +485,7 @@ export class NanobotTui {
     try {
       if (!this.composer.isDestroyed) this.submit()
     } finally {
-      this.scheduleEventDrain()
+      this.eventQueue.resume()
     }
   }
 
@@ -1143,45 +644,11 @@ export class NanobotTui {
   private enqueueEvent(event: InboundEvent): void {
     if (this.quitting) return
     if (event.event === "attached") {
-      this.clearEventQueue()
+      this.eventQueue.clear()
       this.accept(event)
       return
     }
-    this.eventQueue.push(event)
-    this.scheduleEventDrain()
-  }
-
-  private scheduleEventDrain(): void {
-    if (
-      this.eventDrain || this.quitting || this.submitPending
-      || this.pendingEvents || !this.eventQueue.length
-    ) return
-    this.eventDrain = setImmediate(() => {
-      this.eventDrain = null
-      const started = performance.now()
-      let processed = 0
-      // Yield between output batches so terminal input can run. Keep queued
-      // output paused until an IME-delayed submit has read the composer.
-      while (!this.submitPending && !this.quitting && processed < this.eventQueue.length) {
-        const event = this.eventQueue[processed++]!
-        if (typeof event === "function") event()
-        else this.accept(event)
-        if (processed >= EVENT_BATCH_SIZE || performance.now() - started >= EVENT_BATCH_BUDGET_MS) break
-      }
-      this.eventQueue.splice(0, processed)
-      this.scheduleEventDrain()
-      if (!this.eventQueue.length && this.followUpPending) {
-        this.followUpPending = false
-        this.sendNextFollowUp()
-      }
-    })
-  }
-
-  private clearEventQueue(): void {
-    if (this.eventDrain) clearImmediate(this.eventDrain)
-    this.eventDrain = null
-    this.eventQueue = []
-    this.followUpPending = false
+    this.eventQueue.enqueue(event)
   }
 
   accept(event: InboundEvent): void {
@@ -1474,8 +941,8 @@ export class NanobotTui {
   private flushPendingEvents(): void {
     const events = this.pendingEvents
     this.pendingEvents = null
-    if (events?.length) this.eventQueue = [...events, ...this.eventQueue]
-    this.scheduleEventDrain()
+    if (events?.length) this.eventQueue.prepend(events)
+    else this.eventQueue.resume()
   }
 
   private clearRecoveryState(): void {
@@ -1596,8 +1063,7 @@ export class NanobotTui {
     // Render already-received output before the disconnect notice, but block
     // submissions immediately when the transport becomes unavailable.
     if (this.eventQueue.length) {
-      this.eventQueue.push(() => this.applyStatus(status, info))
-      this.scheduleEventDrain()
+      this.eventQueue.enqueueTask(() => this.applyStatus(status, info))
       return
     }
     this.applyStatus(status, info)
@@ -1705,7 +1171,7 @@ export class NanobotTui {
     if (!this.ready || this.activeTurn || this.quitting) return
     // Hydration may have queued an active-turn snapshot for this session.
     if (this.eventQueue.length) {
-      this.followUpPending = true
+      this.eventQueue.whenIdle(() => this.sendNextFollowUp())
       return
     }
     const prompt = this.promptQueue.takeFollowUp()
@@ -3089,7 +2555,7 @@ export class NanobotTui {
 
   private handleDestroy = (): void => {
     this.quitting = true
-    this.clearEventQueue()
+    this.eventQueue.clear()
     this.usageRequest?.abort()
     this.clipboardPasteGeneration += 1
     if (this.shimmerTimer) clearInterval(this.shimmerTimer)
@@ -3103,4 +2569,5 @@ export class NanobotTui {
   }
 }
 
-export type { AppOptions }
+export { sessionExitMessage, terminalModelFailureLine } from "./status"
+export type { AppOptions } from "./types"

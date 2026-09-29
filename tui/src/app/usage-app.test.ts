@@ -4,7 +4,7 @@ import { MockTreeSitterClient, createTestRenderer, type TestRendererSetup } from
 
 import { NanobotTui } from "./app"
 import type { UsagePanel } from "../views/usage-panel"
-import type { RecoveryState } from "../client/api"
+import type { RecoveryState } from "../client"
 
 const originalFetch = globalThis.fetch
 const page = (input = 9000) => ({

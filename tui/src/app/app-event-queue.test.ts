@@ -4,7 +4,7 @@ import type { TextareaRenderable } from "@opentui/core"
 import { createTestRenderer, MockTreeSitterClient } from "@opentui/core/testing"
 
 import { NanobotTui } from "./app"
-import type { InboundEvent, NanobotClient } from "../client/api"
+import type { InboundEvent, NanobotClient } from "../client"
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
   const deadline = Date.now() + 2_000

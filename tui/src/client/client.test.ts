@@ -17,7 +17,7 @@ import {
   type ConnectionStatus,
   type ConnectionStatusInfo,
   type InboundEvent,
-} from "./api"
+} from "."
 
 class FakeSocket {
   static readonly OPEN = 1

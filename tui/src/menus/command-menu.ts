@@ -1,6 +1,6 @@
 import { type BoxRenderable, type CliRenderer } from "@opentui/core"
 
-import type { SlashCommand, SlashCommandLifecycle } from "../client/api"
+import type { SlashCommand, SlashCommandLifecycle } from "../client"
 import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
 
 export type CommandMenuTheme = PickerMenuTheme

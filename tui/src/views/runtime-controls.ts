@@ -10,7 +10,7 @@ import {
   fetchRuntimeControls,
   type ApiReauthenticator,
   type WorkspaceScopePayload,
-} from "../client/api"
+} from "../client"
 import { PickerMenu, type PickerMenuTheme } from "../menus/picker-menu"
 
 interface RuntimeControlsTheme extends PickerMenuTheme {

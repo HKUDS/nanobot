@@ -3,7 +3,7 @@ import { RGBA, type TextRenderable } from "@opentui/core"
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 
 import { UsagePanel, type UsagePanelTheme } from "./usage-panel"
-import type { SessionUsageSnapshot } from "../client/api"
+import type { SessionUsageSnapshot } from "../client"
 
 const theme = {
   text: "#ECEDEE", muted: "#A1A1AA", border: "#3F3F46", accent: "#EF8E30",

@@ -1,4 +1,4 @@
-import type { OutboundMedia } from "../client/api"
+import type { OutboundMedia } from "../client"
 
 const LARGE_PASTE_CHARS = 1_000
 const LARGE_PASTE_LINES = 10

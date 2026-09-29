@@ -9,6 +9,16 @@ bun run --cwd tui test
 bun run --cwd tui build
 ```
 
+## Source layout
+
+Code under `src/` is grouped by responsibility: `app/` coordinates the retained UI, `client/`
+owns gateway transport and API projections, `composer/` owns draft and queue state, `menus/` and
+`views/` own interactive surfaces, `rendering/` owns transcript presentation, and `platform/`
+contains host-specific integration. Unit and component tests stay beside the feature they cover;
+cross-module behavior tests live with the owning `app/` or `client/` boundary. The production
+build still starts from `src/index.ts`, so colocated `*.test.ts` files are not part of the compiled
+executable.
+
 `nanobot` (or the explicit `nanobot agent` form) launches this client, leases the shared local gateway or starts it on demand, and passes the local bootstrap endpoint through environment variables. The client paints before gateway readiness, retries bootstrap in the background, and obtains fresh WebSocket and REST credentials for each connection. Other terminals and the WebUI keep that gateway alive; the final interactive launcher to exit releases the on-demand process. `/detach` closes the TUI after promoting the gateway to persistent background mode, keeping any active agent turn running without clients; the restored terminal prints the exact stop command for that config and explicit workspace. `nanobot gateway --background` can start or promote it persistently before opening a client. Source checkouts automatically align dependencies with `bun.lock` before launch; released installs use a version-matched, checksum-verified archive that keeps the executable together with its licenses, notices, corresponding application source, source offer, and relinking instructions. Startup fails explicitly if the native client is unavailable. The legacy Python prompt is selected with `nanobot --classic` or `nanobot agent --classic`.
 
 The TUI uses OpenTUI's retained full-screen layout: the transcript reflows with the terminal while the composer stays fixed at the bottom. Mouse and keyboard scrolling operate inside the transcript, and leaving the TUI restores the previous terminal screen.

@@ -1,7 +1,7 @@
 import { parseColor, type ColorInput, type BoxRenderable, type CliRenderer, type TextChunk } from "@opentui/core"
 
 import { PickerMenu, type PickerMenuTheme } from "./picker-menu"
-import type { SessionSummary } from "../client/api"
+import type { SessionSummary } from "../client"
 
 type SessionMenuRow = SessionSummary & { active: boolean; unread: boolean }
 

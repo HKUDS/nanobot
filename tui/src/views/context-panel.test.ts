@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 
 import { ContextPanel } from "./context-panel"
-import type { SessionContextSnapshot } from "../client/api"
+import type { SessionContextSnapshot } from "../client"
 
 const context: SessionContextSnapshot = {
   totalMessages: 8,

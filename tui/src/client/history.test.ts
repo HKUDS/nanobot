@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { fetchHistory, fetchSessionUsage } from "./api"
+import { fetchHistory, fetchSessionUsage } from "."
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })

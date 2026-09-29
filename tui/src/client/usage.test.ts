@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
 
-import { fetchSessionUsage } from "./api"
+import { fetchSessionUsage } from "."
 
 const apiUrl = "http://nanobot.test"
 const apiToken = "usage-token"

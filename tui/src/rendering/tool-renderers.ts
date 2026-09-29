@@ -1,4 +1,4 @@
-import type { ToolProgressEvent } from "../client/api"
+import type { ToolProgressEvent } from "../client"
 
 export interface ToolRenderOptions {
   workspace?: string

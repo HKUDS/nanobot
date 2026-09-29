@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 
 import { insertSkill, SkillMenu, skillQuery } from "./skill-menu"
-import type { SkillCandidate } from "../client/api"
+import type { SkillCandidate } from "../client"
 
 const skills: SkillCandidate[] = [
   { name: "simplify", description: "Simplify code", source: "workspace" },
