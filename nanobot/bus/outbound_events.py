@@ -87,6 +87,13 @@ class SessionUpdatedEvent(AgentEvent):
 
 
 @dataclass(frozen=True)
+class SessionTitleEvent(AgentEvent):
+    """A generated session title delivered to the originating chat."""
+
+    title: str = ""
+
+
+@dataclass(frozen=True)
 class UserInputEvent(AgentEvent):
     """A user-input row projected by an edge adapter."""
 

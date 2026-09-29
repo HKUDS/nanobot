@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from loguru import logger
 
 from nanobot.session.manager import SessionManager
-from nanobot.session.webui_turns import clean_generated_title
+from nanobot.session.titles import clean_generated_title
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
 from nanobot.webui.transcript import (
     append_fork_marker,
