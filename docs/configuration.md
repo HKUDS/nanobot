@@ -2263,7 +2263,8 @@ By default, nanobot allows four subagents to run at the same time. Additional su
 {
   "agents": {
     "defaults": {
-      "maxConcurrentSubagents": 2
+      "maxConcurrentSubagents": 2,
+      "subagentNotificationMode": "aggregated"
     }
   }
 }
@@ -2274,6 +2275,7 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `4` | Maximum number of subagents that may run at the same time. Additional tasks wait for capacity. |
+| `agents.defaults.subagentNotificationMode` | `realtime` | Use `aggregated` to report concurrent results together after all subagents in the session finish. |
 
 
 ## Auto Compact
