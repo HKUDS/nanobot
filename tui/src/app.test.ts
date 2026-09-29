@@ -240,6 +240,32 @@ describe("NanobotTui layout", () => {
     expect(frame).toContain("Ready · 1.2s")
   })
 
+  test("uses the available transcript width before wrapping the workspace", async () => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
+    const workspace = String.raw`D:\Documents\GitHub\nanobot\.worktrees\responsive-header-fixture`
+    NanobotTui.mount(
+      setup.renderer,
+      { ...options, workspace },
+      client(),
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    await setup.renderOnce()
+
+    const frame = setup.captureCharFrame()
+    const headerWidth = () => {
+      const border = setup?.captureCharFrame().split("\n").find((line) => line.includes("╭"))
+      if (!border) throw new Error("header border was not rendered")
+      return border.trim().length
+    }
+
+    expect(frame).toContain(workspace)
+    expect(headerWidth()).toBe(setup.renderer.width - 4)
+
+    setup.resize(120, 24)
+    await setup.renderOnce()
+    expect(headerWidth()).toBe(setup.renderer.width - 4)
+  })
+
   test("waits for an IME commit before reading the submitted text", async () => {
     const sent: string[] = []
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
@@ -2349,7 +2375,7 @@ describe("NanobotTui layout", () => {
     expect(userLine).not.toContain("│")
     expect(agentLine).not.toContain("│")
     expect(headerLine).toContain("│")
-    expect(headerBorder.trim().length).toBeLessThanOrEqual(62)
+    expect(headerBorder.trim().length).toBe(setup.renderer.width - 4)
 
     const transcript = (app as unknown as {
       transcript: {

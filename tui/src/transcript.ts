@@ -207,7 +207,6 @@ export class Transcript {
     const row = new BoxRenderable(this.renderer, {
       id: this.id("header-row"),
       width: "100%",
-      maxWidth: 62,
       flexDirection: "column",
       border: true,
       borderStyle: "rounded",
