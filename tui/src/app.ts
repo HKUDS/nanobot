@@ -5,6 +5,7 @@ import {
   StyledText,
   SyntaxStyle,
   TextareaRenderable,
+  TextAttributes,
   TextRenderable,
   createCliRenderer,
   decodePasteBytes,
@@ -216,6 +217,7 @@ const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
 const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
+const TERMINAL_SHIMMER_BAND = 1
 const SHIMMER_INTERVAL_MS = 80
 const EVENT_BATCH_SIZE = 64
 const EVENT_BATCH_BUDGET_MS = 4
@@ -395,15 +397,27 @@ function shimmerStatus(
   frame: number,
   palette: Palette,
 ): StyledText {
-  if (palette === TERMINAL) {
-    return new StyledText([{ __isChunk: true, text: label + suffix, fg: parseColor(palette.text) }])
-  }
   const chars = Array.from(label)
-  const base = parseColor(palette.muted).toInts()
-  const highlight = parseColor(palette.accent).toInts()
   // Sweep immediately, then leave a quiet pause before repeating. The text
   // keeps a constant width throughout, so the footer never jitters.
   const position = frame % (chars.length + SHIMMER_PAUSE)
+  if (palette === TERMINAL) {
+    // Terminal-default colors cannot be interpolated without guessing the
+    // terminal theme, so move a bold band while preserving native color intent.
+    const foreground = parseColor(palette.text)
+    const chunks: TextChunk[] = chars.map((text, index) => ({
+      __isChunk: true,
+      text,
+      fg: foreground,
+      attributes: Math.abs(index - position) <= TERMINAL_SHIMMER_BAND
+        ? TextAttributes.BOLD
+        : 0,
+    }))
+    chunks.push({ __isChunk: true, text: suffix, fg: foreground })
+    return new StyledText(chunks)
+  }
+  const base = parseColor(palette.muted).toInts()
+  const highlight = parseColor(palette.accent).toInts()
   const chunks: TextChunk[] = chars.map((text, index) => {
     const distance = Math.abs(index - position)
     const intensity = distance > SHIMMER_BAND

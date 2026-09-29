@@ -2464,7 +2464,12 @@ describe("NanobotTui layout", () => {
     transcript.user("Unknown terminal background")
 
     expect(connected).toBe(true)
-    const ui = app as unknown as { composer: TextareaRenderable; status: TextRenderable }
+    const ui = app as unknown as {
+      composer: TextareaRenderable
+      status: TextRenderable
+      shimmerFrame: number
+      renderActiveStatus(): void
+    }
     expect(ui.composer.textColor.intent).toBe("default")
     expect(ui.composer.backgroundColor.intent).toBe("default")
     expect([...transcript.userRows][0]?.backgroundColor.intent).toBe("default")
@@ -2477,14 +2482,31 @@ describe("NanobotTui layout", () => {
         if (span.text.trim()) expect(span.fg.intent).toBe("default")
       }
     }
-    // Active status must not turn the default color into guessed RGB shimmer colors.
+    // Keep the fallback readable without guessed RGB colors, but do not freeze
+    // the active-status animation while waiting for a terminal theme response.
     app.accept({ event: "reasoning_delta", chat_id: "chat", text: "thinking" })
     await setup.flush()
+    const terminalFrame = () => (ui.status.content as StyledText).chunks
+      .slice(0, "Thinking".length)
+      .map((chunk) => chunk.attributes ?? 0)
+    const firstFrame = terminalFrame()
+    ui.shimmerFrame += 1
+    ui.renderActiveStatus()
+    const secondFrame = terminalFrame()
+    expect(firstFrame).toContain(TextAttributes.BOLD)
+    expect(secondFrame).not.toEqual(firstFrame)
     for (const chunk of (ui.status.content as StyledText).chunks) {
       expect(chunk.fg?.intent).toBe("default")
     }
+
     setup.renderer.emit(CliRenderEvents.THEME_MODE, mode)
     await setup.flush()
+    const shimmerColors = new Set(
+      (ui.status.content as StyledText).chunks
+        .slice(0, "Thinking".length)
+        .map((chunk) => chunk.fg?.toInts().slice(0, 3).join(",")),
+    )
+    expect(shimmerColors.size).toBeGreaterThan(1)
     expect(ui.composer.textColor.intent).toBe("rgb")
     expect(ui.composer.textColor.toInts().slice(0, 3)).toEqual(
       mode === "light" ? [24, 24, 27] : [236, 237, 238],
