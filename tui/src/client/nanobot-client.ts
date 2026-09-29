@@ -1,3 +1,5 @@
+import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments"
+import { DeliveryReceipts } from "../../../packages/client-events/delivery"
 import { isRecoveryState } from "../../../packages/client-events/notifications"
 
 import {
@@ -17,6 +19,9 @@ import type {
 import { decodeInboundEvent, decodeWebUIResponse, isRecord } from "./validation"
 
 export class NanobotClient {
+  private upload: UploadCapability | null = null
+  private uploadBase = ""
+  private receipts = new DeliveryReceipts()
   private identityVerified = false
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null
   private socket: WebSocket | null = null
@@ -94,6 +99,8 @@ export class NanobotClient {
     }
     let socket: WebSocket
     try {
+      this.uploadBase = url
+      this.upload = null
       socket = new WebSocket(url)
     } catch (error) {
       this.lastFailure = sanitizeConnectionFailure(error)
@@ -127,9 +134,14 @@ export class NanobotClient {
       this.lastFailure = "connection failed"
       this.reportRetryState()
     })
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (this.socket !== socket) return
       this.socket = null
+      this.upload = null
+      this.receipts.close()
+      this.lastFailure = event.code
+        ? `connection closed (${event.code}${event.reason ? `: ${event.reason}` : ""})`
+        : "connection closed"
       this.rejectPendingMutations("gateway connection closed")
       if (this.closedByClient) {
         this.options.onStatus("closed")
@@ -148,6 +160,8 @@ export class NanobotClient {
   }
 
   close(): void {
+    this.upload = null
+    this.receipts.close()
     if (this.handshakeTimer) clearTimeout(this.handshakeTimer)
     this.handshakeTimer = null
     this.closedByClient = true
@@ -160,9 +174,20 @@ export class NanobotClient {
     this.rejectPendingMutations("gateway connection closed")
   }
 
-  send(content: string, options: MessageOptions = {}): string {
-    if (!this.chatId) throw new Error("chat is not ready")
+  async sendAttachments(content: string, options: MessageOptions): Promise<string> {
+    const socket = this.socket
+    const chatId = this.chatId
+    const upload = this.upload
+    const references = await uploadAttachments(options.media ?? [], upload, this.uploadBase,
+      () => this.socket === socket && socket?.readyState === WebSocket.OPEN && this.upload === upload && this.chatId === chatId)
     const turnId = crypto.randomUUID()
+    await this.receipts.wait(turnId, () => this.send(content, options, references, turnId))
+    return turnId
+  }
+
+  send(content: string, options: MessageOptions = {}, references?: AttachmentReference[], turnId = crypto.randomUUID()): string {
+    if (!this.chatId) throw new Error("chat is not ready")
+    if (options.media?.length && !references) throw new Error("Attachments require HTTP upload")
     this.write({
       type: "message",
       chat_id: this.chatId,
@@ -171,7 +196,7 @@ export class NanobotClient {
       webui: true,
       ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
       ...(options.userShell ? { user_shell: true } : {}),
-      ...(options.media?.length ? { media: options.media } : {}),
+      ...(references?.length ? { media: references } : {}),
       ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
       ...(options.sessionMentions?.length
@@ -309,7 +334,9 @@ export class NanobotClient {
       return
     }
 
+    this.receipts.event(event)
     if (event.event === "ready") {
+      this.upload = uploadCapability(isRecord(value) ? value.upload : null)
       const requestedChatId = this.chatId || this.options.chatId
       if (requestedChatId) {
         this.chatId = requestedChatId

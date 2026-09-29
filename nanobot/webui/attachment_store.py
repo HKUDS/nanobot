@@ -69,6 +69,7 @@ class AttachmentStore:
         self._entries: dict[str, _Attachment] = {}
         self._reserved_bytes = 0
         self._active = 0
+        self._journal = media_dir / ".pending-attachments"
 
     async def upload(
         self,
@@ -108,6 +109,8 @@ class AttachmentStore:
                 self.media_dir, mime,
                 filename=filename if mime in DOCUMENT_MIME_ALLOWED else None,
             )
+            self._journal.mkdir(parents=True, exist_ok=True)
+            (self._journal / path.name).touch(exist_ok=False)
             received = 0
             # Exclusive creation prevents accidental overwrite or symlink following.
             with path.open("xb") as output:
@@ -130,8 +133,10 @@ class AttachmentStore:
             self._active -= 1
             if not stored:
                 self._reserved_bytes -= size
-                if created and path is not None:
-                    path.unlink(missing_ok=True)
+                if path is not None:
+                    if created:
+                        path.unlink(missing_ok=True)
+                    (self._journal / path.name).unlink(missing_ok=True)
 
     def resolve(self, references: list[str], *, owner: str) -> list[str]:
         """Validate a complete batch without consuming it, allowing send retries."""
@@ -164,15 +169,36 @@ class AttachmentStore:
         """
         paths = self.resolve(references, owner=owner)
         for reference in references:
+            entry = self._entries[reference]
+            (self._journal / entry.path.name).unlink(missing_ok=True)
             self._reserved_bytes -= self._entries.pop(reference).size
         return paths
+
+    def discard_owner(self, owner: str) -> None:
+        self.discard([ref for ref, entry in self._entries.items() if entry.owner == owner], owner=owner)
+
+    def discard(self, references: list[str], *, owner: str) -> None:
+        for reference in references:
+            entry = self._entries.get(reference)
+            if entry is not None and entry.owner == owner:
+                entry.path.unlink(missing_ok=True)
+                (self._journal / entry.path.name).unlink(missing_ok=True)
+                self._reserved_bytes -= entry.size
+                del self._entries[reference]
 
     def prune(self) -> None:
         """Remove abandoned uploads; never delete committed session media."""
         now = time.monotonic()
+        # Crash remnants retain a marker; committed historical files never do.
+        cutoff = time.time() - self.ttl_seconds - self.upload_timeout
+        for marker in self._journal.glob("*"):
+            if marker.is_file() and marker.stat().st_mtime < cutoff:
+                (self.media_dir / marker.name).unlink(missing_ok=True)
+                marker.unlink(missing_ok=True)
         for reference, entry in list(self._entries.items()):
             if entry.expires <= now:
                 entry.path.unlink(missing_ok=True)
+                (self._journal / entry.path.name).unlink(missing_ok=True)
                 self._reserved_bytes -= entry.size
                 del self._entries[reference]
 
@@ -182,5 +208,6 @@ class AttachmentStore:
             raise RuntimeError("Stop active uploads before clearing attachment storage")
         for reference, entry in list(self._entries.items()):
             entry.path.unlink(missing_ok=True)
+            (self._journal / entry.path.name).unlink(missing_ok=True)
             self._reserved_bytes -= entry.size
             del self._entries[reference]

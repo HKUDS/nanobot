@@ -1965,6 +1965,16 @@ export function ThreadComposer({
     });
   }, []);
 
+  const observeQueuedSend = useCallback((prompt: QueuedPrompt, result: void | boolean | Promise<void | boolean>) => {
+    const restore = (error?: unknown) => {
+      skipNextQueuedFlushRef.current = true;
+      setQueuedPrompts((items) => items.some((item) => item.id === prompt.id) ? items : [prompt, ...items]);
+      setInlineError(error instanceof Error ? error.message : "Message not sent; queued draft retained");
+    };
+    if (result instanceof Promise) void result.then((accepted) => { if (accepted === false) restore(); }).catch(restore);
+    else if (result === false) restore();
+  }, []);
+
   const sendQueuedPrompt = useCallback(
     (prompt: QueuedPrompt) => {
       secondEnterPromptIdRef.current = null;
@@ -1985,11 +1995,11 @@ export function ThreadComposer({
               ...(isStreaming ? { continueActiveTurn: true } : {}),
             }
           : undefined;
-        onSend(text, queuedImages, options);
+        observeQueuedSend(prompt, onSend(text, queuedImages, options));
       }
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
-    [isStreaming, onSend],
+    [isStreaming, onSend, observeQueuedSend],
   );
 
   const sendNextQueuedPrompt = useCallback(() => {
@@ -2011,12 +2021,13 @@ export function ThreadComposer({
             : {}),
         }
       : undefined;
-    if (queuedImages?.length && options) onSend(nextPrompt.text.trim(), queuedImages, options);
-    else if (queuedImages?.length) onSend(nextPrompt.text.trim(), queuedImages);
-    else if (options) onSend(nextPrompt.text.trim(), undefined, options);
-    else onSend(nextPrompt.text.trim());
+    const result = queuedImages?.length && options ? onSend(nextPrompt.text.trim(), queuedImages, options)
+      : queuedImages?.length ? onSend(nextPrompt.text.trim(), queuedImages)
+      : options ? onSend(nextPrompt.text.trim(), undefined, options)
+      : onSend(nextPrompt.text.trim());
+    observeQueuedSend(nextPrompt, result);
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [onSend, queuedPrompts]);
+  }, [onSend, queuedPrompts, observeQueuedSend]);
 
   useEffect(() => {
     const previous = previousQueueRunRef.current;
@@ -2057,10 +2068,8 @@ export function ThreadComposer({
       setInlineError(textTooLargeMessage());
       return;
     }
-    // Share the same ``data:`` URL with both the wire payload and the
-    // optimistic bubble preview: data URLs are self-contained (no blob
-    // lifetime, safe under React StrictMode double-mount) and keep the bubble
-    // in sync with whatever the backend actually sees.
+    // Keep self-contained local previews across drafts and optimistic bubbles.
+    // The client decodes these to HTTP binary; WS messages contain only refs.
     const payload: SendAttachment[] | undefined =
       readyImages.length > 0
         ? readyImages.map((img) => ({
@@ -2142,7 +2151,7 @@ export function ThreadComposer({
           if (accepted !== false) finishSend();
         })
         .catch((error: unknown) => {
-          console.error("Failed to send message", error);
+          setInlineError(error instanceof Error ? error.message : "Failed to send message");
         })
         .finally(() => setSendPending(false));
       return;

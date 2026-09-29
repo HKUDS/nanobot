@@ -71,7 +71,7 @@ async def test_body_length_failure_cleans_file_and_capacity(tmp_path, size, raw)
     store = AttachmentStore(tmp_path, max_pending=1, max_pending_bytes=6)
     with pytest.raises(AttachmentUploadError):
         await store.upload(chunks(raw), owner="owner", mime="image/png", size=size)
-    assert not list(tmp_path.iterdir())
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
     assert await upload(store, b"123456")
 
 
@@ -87,7 +87,7 @@ async def test_reject_metadata_before_reading_body(tmp_path):
                               ("owner", "image/png", 0)]:
         with pytest.raises(AttachmentUploadError):
             await store.upload(unread(), owner=owner, mime=mime, size=size)
-    assert not list(tmp_path.iterdir())
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
 
 
 async def test_inflight_capacity_and_cancellation(tmp_path):
@@ -106,7 +106,7 @@ async def test_inflight_capacity_and_cancellation(tmp_path):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert not list(tmp_path.iterdir())
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
     assert await upload(store, b"1234567890")
 
 
@@ -119,7 +119,7 @@ async def test_timeout_cleans_partial_upload(tmp_path):
 
     with pytest.raises(TimeoutError):
         await store.upload(slow(), owner="owner", mime="image/png", size=2)
-    assert not list(tmp_path.iterdir())
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
 
 
 async def test_expiry_cleans_only_staged_files(tmp_path, monkeypatch):
@@ -151,7 +151,7 @@ async def test_batch_limits_leave_all_references_retryable(tmp_path):
     with pytest.raises(AttachmentUploadError, match="Too many"):
         store.resolve(videos, owner="owner")
     store.clear()
-    assert not list(tmp_path.iterdir())
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
 
 
 async def test_filename_collision_never_unlinks_existing_file(tmp_path, monkeypatch):
@@ -184,3 +184,34 @@ async def test_committed_paths_persist_and_replay_without_reference_format(tmp_p
     }
     store.clear()
     assert Path(paths[0]).exists()
+
+
+async def test_restart_prunes_crash_remnants_but_not_committed_media(tmp_path, monkeypatch):
+    import os
+    import time
+
+    first = AttachmentStore(tmp_path)
+    committed = await upload(first)
+    keep = Path(first.commit([committed], owner="owner")[0])
+    abandoned = await upload(first)
+    remove = Path(first.resolve([abandoned], owner="owner")[0])
+    marker = tmp_path / ".pending-attachments" / remove.name
+    old = time.time() - first.ttl_seconds - first.upload_timeout - 1
+    os.utime(marker, (old, old))
+    restarted = AttachmentStore(tmp_path)
+    restarted.prune()
+    assert not remove.exists()
+    assert not marker.exists()
+    assert keep.read_bytes() == b"attachment"
+
+
+async def test_disconnect_releases_staged_capacity_but_preserves_commits(tmp_path):
+    store = AttachmentStore(tmp_path, max_pending=1)
+    ref = await upload(store)
+    keep = Path(store.commit([ref], owner="owner")[0])
+    ref = await upload(store)
+    remove = Path(store.resolve([ref], owner="owner")[0])
+    store.discard_owner("owner")
+    assert not remove.exists()
+    assert keep.exists()
+    assert await upload(store)

@@ -29,8 +29,13 @@ class BinaryHTTPBridge:
         self.http_server = web.Server(handler, auto_decompress=False, keepalive_timeout=5)
         self.pending_connections: set[_BridgeConnection] = set()
 
-    def connection_factory(self, *args: Any, **kwargs: Any) -> ServerConnection:
-        return _BridgeConnection(*args, bridge=self, **kwargs)
+        bridge = self
+
+        class Connection(_BridgeConnection):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, bridge=bridge, **kwargs)
+
+        self.connection_factory: type[ServerConnection] = Connection
 
     async def shutdown(self) -> None:
         for connection in tuple(self.pending_connections):
