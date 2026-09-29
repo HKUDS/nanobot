@@ -7,6 +7,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -107,6 +108,7 @@ class AgentRunSpec:
     consolidate_history: HistoryConsolidator | None = None
     consolidate_provider_compaction: ProviderCompactionConsolidator | None = None
     injection_callback: InjectionCallback | None = None
+    finalization_injection_callback: Callable[[bool], Awaitable[Iterable[Any] | None]] | None = None
     terminal_injection_callback: InjectionCallback | None = None
     continuation_callback: ContinuationCallback | None = None
     finalize_on_max_iterations: bool = True
@@ -165,9 +167,13 @@ class AgentRunner:
         allow_continuation: bool = False,
         wait_at_terminal: bool = False,
         drain_callback: bool = True,
+        tools_available: bool = True,
     ) -> tuple[bool, int]:
         """Append one pending-input snapshot and return whether execution continues."""
-        injections = await self._drain_injections(spec) if drain_callback else []
+        injections = (
+            await self._drain_injections(spec, tools_available=tools_available)
+            if drain_callback else []
+        )
         real_injection = bool(injections)
         if not injections and allow_continuation and assistant_message is not None:
             continuation = self._build_continuation_message(spec)
@@ -178,7 +184,9 @@ class AgentRunner:
             and wait_at_terminal
             and drain_callback
         ):
-            injections = await self._drain_injections(spec, terminal=True)
+            injections = await self._drain_injections(
+                spec, terminal=True, tools_available=tools_available,
+            )
             real_injection = bool(injections)
         if not injections:
             return False, injection_cycles
@@ -240,6 +248,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         *,
         terminal: bool = False,
+        tools_available: bool = True,
     ) -> list[dict[str, Any]]:
         """Drain one pending-input snapshot via the injection callback."""
         callback = (
@@ -247,6 +256,9 @@ class AgentRunner:
             if terminal
             else spec.injection_callback
         )
+        finalization_callback = spec.finalization_injection_callback
+        if not tools_available and finalization_callback is not None:
+            callback = partial(finalization_callback, terminal)
         if callback is None:
             return []
         try:
@@ -702,6 +714,7 @@ class AgentRunner:
                     not in {"error", "length", "refusal", "content_filter"}
                 ),
                 drain_callback=can_make_followup_request,
+                tools_available=iteration + 1 < spec.max_iterations,
             )
             if should_continue:
                 had_injections = True
@@ -730,6 +743,7 @@ class AgentRunner:
                     spec, messages, None, injection_cycles,
                     phase="after LLM error",
                     drain_callback=can_make_followup_request,
+                    tools_available=iteration + 1 < spec.max_iterations,
                 )
                 if should_continue:
                     had_injections = True
@@ -750,6 +764,7 @@ class AgentRunner:
                     spec, messages, None, injection_cycles,
                     phase="after empty response",
                     drain_callback=can_make_followup_request,
+                    tools_available=iteration + 1 < spec.max_iterations,
                 )
                 if should_continue:
                     had_injections = True
@@ -805,6 +820,7 @@ class AgentRunner:
                         None,
                         injection_cycles,
                         phase="before max-iterations finalization",
+                        tools_available=False,
                     )
                 )
                 if drained_after_max_iterations:

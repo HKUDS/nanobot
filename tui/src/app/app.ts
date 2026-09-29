@@ -2228,7 +2228,11 @@ export class NanobotTui {
       return
     }
     if (this.activeTurn && lifecycle === "agent_turn") {
-      this.status.content = "A turn is already running · Ctrl+C to stop"
+      if (content.split(/\s+/u, 1)[0]?.toLowerCase() === "/goal") {
+        this.sendPrompt({ content, options }, true)
+      } else {
+        this.status.content = "A turn is already running · Ctrl+C to stop"
+      }
       return
     }
     let turnId: string

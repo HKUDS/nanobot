@@ -914,14 +914,27 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
+    @staticmethod
+    def _is_goal_input(msg: InboundMessage) -> bool:
+        command, _, args = normalize_command_text(msg.content).partition(" ")
+        _, automation_metadata = automation_history_overrides(msg.metadata)
+        return (
+            command.lower() == "/goal" and bool(args.strip())
+            and msg.is_user_input and msg.channel != "system"
+            and msg.sender_id != "subagent" and not automation_metadata
+            and not turn_continuation.internal_continuation_inbound(msg.metadata)
+        )
+
     def _can_inject_message(self, msg: InboundMessage) -> bool:
         """Keep independent turns and controls out of user-input batches."""
         if turn_continuation.internal_continuation_inbound(msg.metadata) or any(
             coordinator.owns_turn(msg) for coordinator in self._automation_turn_coordinators
         ):
             return False
-        return msg.channel == "system" or not self.commands.is_dispatchable_command(
-            msg.content.strip()
+        return (
+            self._is_goal_input(msg)
+            or msg.channel == "system"
+            or not self.commands.is_dispatchable_command(msg.content.strip())
         )
 
     def _idle_events(
@@ -1006,6 +1019,7 @@ class AgentLoop:
         async def _drain_pending(
             *,
             first_msg: InboundMessage | None = None,
+            tools_available: bool = True,
         ) -> list[dict[str, Any]]:
             """Drain one atomic snapshot of messages already available."""
             if pending_queue is None:
@@ -1024,7 +1038,20 @@ class AgentLoop:
                 except asyncio.QueueEmpty:
                     break
 
+            goal_scopes: list[AbstractContextManager[Any]] = []
+
             async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
+                if session is not None and self._is_goal_input(pending_msg):
+                    await self.commands.dispatch(CommandContext(
+                        msg=pending_msg,
+                        session=session,
+                        key=session.key,
+                        raw=pending_msg.content.strip(),
+                        loop=self,
+                        runtime=runtime,
+                        is_user_turn=True,
+                        turn_scopes=goal_scopes,
+                    ))
                 content = pending_msg.content
                 image_paths = pending_msg.media if pending_msg.media else None
                 if image_paths:
@@ -1100,7 +1127,12 @@ class AgentLoop:
                     # owns completion, command dispatch, and control metadata.
                     if not self._can_inject_message(pending_msg):
                         break
+                    # Goal commands need a tool-capable request to record their objective.
+                    if self._is_goal_input(pending_msg) and not tools_available:
+                        break
                     converted.append(await _to_user_message(pending_msg))
+                for scope in goal_scopes:
+                    turn_scope_stack.enter_context(scope)
                 consumed = len(converted)
                 return converted
             finally:
@@ -1114,11 +1146,11 @@ class AgentLoop:
 
         terminal_wait_deadline: float | None = None
 
-        async def _wait_for_pending() -> list[dict[str, Any]]:
+        async def _wait_for_pending(*, tools_available: bool = True) -> list[dict[str, Any]]:
             """Wait for a pending result only when the runner is ready to exit."""
             nonlocal terminal_wait_deadline
 
-            items = await _drain_pending()
+            items = await _drain_pending(tools_available=tools_available)
             if (
                 items
                 or pending_queue is None
@@ -1143,7 +1175,12 @@ class AgentLoop:
                 )
                 return []
 
-            return await _drain_pending(first_msg=msg)
+            return await _drain_pending(first_msg=msg, tools_available=tools_available)
+
+        async def _drain_finalization(terminal: bool) -> list[dict[str, Any]]:
+            if terminal:
+                return await _wait_for_pending(tools_available=False)
+            return await _drain_pending(tools_available=False)
 
         request_ctx = request_context or RequestContext(
             channel="cli",
@@ -1248,6 +1285,7 @@ class AgentLoop:
                     persist=session is not None and not ephemeral,
                 ),
                 injection_callback=_drain_pending,
+                finalization_injection_callback=_drain_finalization,
                 terminal_injection_callback=_wait_for_pending,
                 continuation_callback=_goal_continue,
                 finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(
@@ -1370,9 +1408,13 @@ class AgentLoop:
                 # is processing this session), route the message there for mid-turn
                 # injection instead of creating a competing task.
                 if effective_key in self._pending_queues:
-                    # Non-priority commands must not be queued for injection;
-                    # dispatch them directly (same pattern as priority commands).
-                    if msg.channel != "system" and self.commands.is_dispatchable_command(raw):
+                    # Goal requests enter the running conversation with user input.
+                    # Other commands are handled outside the runner.
+                    if (
+                        msg.channel != "system"
+                        and self.commands.is_dispatchable_command(raw)
+                        and not self._is_goal_input(msg)
+                    ):
                         await self._dispatch_command_inline(
                             msg, effective_key, raw,
                             self.commands.dispatch,

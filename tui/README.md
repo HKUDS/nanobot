@@ -59,7 +59,8 @@ Type `@` to complete installed CLI apps, configured MCP servers, or saved sessio
 same gateway metadata used by the WebUI. While nanobot is working, `Enter` sends immediately,
 `Tab` waits until the current response is finished, and `Option+Up` on macOS (`Alt+Up` on
 Windows/Linux) returns the latest waiting message to the composer for editing. Waiting messages
-stay visible above the composer.
+stay visible above the composer. `/goal <task>` follows the same keys: `Enter` sends the goal
+into the running conversation, while `Tab` waits for the current response to finish.
 Use `Shift+Enter` for a newline; `Ctrl+J` is the universal fallback when a terminal cannot
 distinguish modified Enter keys. `Alt+Enter` and `Ctrl+Enter` are also accepted when distinguishable.
 Unsent prompts return to the composer if the turn stops or fails.
