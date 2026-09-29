@@ -3146,7 +3146,8 @@ async def test_failed_turn_end_exposes_safe_terminal_outcome() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_compaction_started_is_live_only() -> None:
+@pytest.mark.parametrize("notify", [False, True])
+async def test_context_compaction_started_is_live_only(notify) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -3163,6 +3164,7 @@ async def test_context_compaction_started_is_live_only() -> None:
         event=ContextCompactionEvent(
             compaction_id="compact-started",
             phase="started",
+            notify=notify,
         ),
     ))
 
@@ -3176,7 +3178,9 @@ async def test_context_compaction_started_is_live_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_compaction_is_structured_persisted_and_summary_free() -> None:
+@pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("phase", ["succeeded", "failed", "cancelled"])
+async def test_context_compaction_is_structured_persisted_and_summary_free(notify, phase) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -3192,7 +3196,8 @@ async def test_context_compaction_is_structured_persisted_and_summary_free() -> 
         content="Context compacted · LLM summary",
         event=ContextCompactionEvent(
             compaction_id="compact-1",
-            phase="succeeded",
+            phase=phase,
+            notify=notify,
         ),
     ))
 
@@ -3200,7 +3205,7 @@ async def test_context_compaction_is_structured_persisted_and_summary_free() -> 
         "event": "context_compaction",
         "chat_id": "chat-compaction",
         "compaction_id": "compact-1",
-        "phase": "succeeded",
+        "phase": phase,
     }
     assert _sent_ws_payloads(mock_ws) == [expected]
     [persisted] = read_transcript_lines("websocket:chat-compaction")

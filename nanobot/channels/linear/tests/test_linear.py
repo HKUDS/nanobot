@@ -798,10 +798,12 @@ async def test_followups_only_repeat_issue_context_when_it_changes(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("notify", [False, True])
 @pytest.mark.parametrize("idle", [True, False])
 @pytest.mark.parametrize("phase", ["succeeded", "failed", "cancelled"])
 async def test_compaction_restores_issue_context_on_next_message(
     tmp_path: Path, idle: bool, phase: Literal["succeeded", "failed", "cancelled"],
+    notify: bool,
 ) -> None:
     channel, _ = _runtime(tmp_path)
     payload = _agent_webhook()
@@ -815,7 +817,7 @@ async def test_compaction_restores_issue_context_on_next_message(
     await channel.send(outbound_message_for_event(
         channel="linear", chat_id=inbound.chat_id,
         metadata={} if idle else inbound.metadata,
-        event=ContextCompactionEvent(compaction_id="compact", phase=phase, notify=True),
+        event=ContextCompactionEvent(compaction_id="compact", phase=phase, notify=notify),
     ))
     for delivery, include_context in (("after", phase == "succeeded"), ("again", False)):
         await channel._process_webhook(delivery, followup)  # pyright: ignore[reportPrivateUsage]

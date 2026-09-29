@@ -37,6 +37,8 @@ class ResponseSourceEvent(AgentEvent):
 class ContextCompactionEvent(AgentEvent):
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
+    # Request a chat notice (e.g. /compact), not event delivery or persistence.
+    # Interactive clients still consume every phase when this is false.
     notify: bool = False
 
 

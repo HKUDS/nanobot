@@ -20,7 +20,11 @@ if not WECOM_AVAILABLE:
 from wecom_aibot_sdk import UploadResult, WSClient
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
+    ProgressEvent,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.wecom.runtime import (
     WECOM_WEBSOCKET_HOST,
@@ -169,6 +173,29 @@ async def test_download_and_save_failure() -> None:
 
 
 # ── send() ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_frame", [False, True])
+@pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("phase", ["started", "succeeded", "failed", "cancelled"])
+async def test_compaction_notice_policy(has_frame, notify, phase) -> None:
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
+    client = _FakeWeComClient()
+    channel._client = client
+    channel._generate_req_id = lambda x: f"req_{x}"
+    if has_frame:
+        channel._chat_frames["chat1"] = _FakeFrame()
+
+    await channel.send(outbound_message_for_event(
+        channel="wecom", chat_id="chat1",
+        event=ContextCompactionEvent("compact", phase, notify=notify),
+    ))
+
+    assert client.reply_stream.await_count == int(notify and has_frame)
+    assert client.send_message.await_count == int(notify and not has_frame)
+    # A quiet event must not consume the response route for the actual answer.
+    assert ("chat1" in channel._chat_frames) is has_frame
 
 
 @pytest.mark.asyncio

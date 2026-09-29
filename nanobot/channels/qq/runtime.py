@@ -193,7 +193,7 @@ class QQConfig(Base):
     download_chunk_size: int = 1024 * 256  # 256KB
     download_max_bytes: int = 1024 * 1024 * 200  # 200MB safety limit
 
-    # QQ's C2C/group message API has no edit or recall endpoint, so compaction
+    # QQ's C2C/group message API has no edit or recall endpoint, so automatic
     # notices would land as separate permanent messages (#5784). Off by default;
     # set showCompactionNotices: true to post them anyway.
     show_compaction_notices: bool = False
@@ -307,11 +307,11 @@ class QQChannel(BaseChannel):
         # Compaction notices assume the channel can update one message in place
         # (Telegram/Discord edit their notice; WebSocket projects it as status).
         # QQ's C2C/group API has no edit or recall endpoint, so by default the
-        # lifecycle is dropped here instead of posting two permanent messages
-        # (#5784); showCompactionNotices: true restores them.
+        # automatic lifecycle is quiet by default (#5784). Explicit opt-in
+        # restores it; manual /compact always retains its requested feedback.
         if (
             isinstance(msg.event, ContextCompactionEvent)
-            and (not msg.event.notify or not self.config.show_compaction_notices)
+            and not (msg.event.notify or self.config.show_compaction_notices)
         ):
             return
 

@@ -37,8 +37,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
-from nanobot.utils.logging_bridge import redirect_lib_logging
 from nanobot.events import ContextCompactionEvent
+from nanobot.utils.logging_bridge import redirect_lib_logging
 
 # ---------------------------------------------------------------------------
 # Protocol constants (from openclaw-weixin types.ts)

@@ -33,6 +33,8 @@ When a conversation grows large, nanobot summarizes the conversation covered by 
 
 Compaction also runs after a configured period of inactivity, or when you send `/compact`. See [Auto Compact](./configuration.md#auto-compact) for idle timing and how to disable automatic idle compaction.
 
+Automatic compaction does not post lifecycle notices to built-in chat channels by default. This only silences chat messages: compaction still runs, and WebUI/TUI retain structured status and history. Manual `/compact` keeps its start and outcome feedback. QQ users can opt back into automatic notices with `channels.qq.showCompactionNotices: true`.
+
 This file is:
 
 - append-only

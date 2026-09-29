@@ -1058,6 +1058,8 @@ class TelegramChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         app = await self._wait_for_app()
         if app is None:
             self.logger.warning("bot not running")
@@ -1096,8 +1098,6 @@ class TelegramChannel(BaseChannel):
         # Compaction notices collapse into one message: the started phase sends
         # it, a terminal phase edits it in place instead of posting a new one.
         if isinstance(msg.event, ContextCompactionEvent):
-            if not msg.event.notify:
-                return
             await self._send_compaction_notice(
                 chat_id, msg, msg.event, reply_params, thread_kwargs,
             )

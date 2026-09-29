@@ -33,10 +33,9 @@ NOTIFICATION_AUDIENCES: dict[type[AgentEvent], NotificationAudience] = {
 
 
 def notification_is_deliverable(
-    event: AgentEvent | type[AgentEvent], *, channel: str, publish_lifecycle: bool,
+    event_type: type[AgentEvent], *, channel: str, publish_lifecycle: bool,
 ) -> bool:
     """Admit operation notifications to a channel only by explicit policy."""
-    event_type = event if isinstance(event, type) else type(event)
     audience = NOTIFICATION_AUDIENCES.get(event_type)
     if audience is None:
         return False

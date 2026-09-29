@@ -1655,7 +1655,9 @@ Normal tool workspace and media access rules still apply to attachment paths.
 }
 ```
 
-QQ `showCompactionNotices` defaults to `false`. It controls the context-compaction lifecycle notices ("Compressing context…" / "Context compacted."). Telegram, Discord and WebSocket present that lifecycle as one in-place-updated message or status, but QQ's C2C/group message API has no edit or recall endpoint, so each phase would land as a separate permanent message; the QQ channel therefore drops the notices by default (#5784). Set `channels.qq.showCompactionNotices: true` to post them anyway:
+Automatic context-compaction notices are quiet by default in the built-in chat channels, including WeCom, Telegram and Discord. Compaction still runs, and WebUI/TUI structured status and history remain available. Manual `/compact` keeps its start and outcome feedback, including failure or cancellation. `sendProgress` remains independent of this policy.
+
+QQ `showCompactionNotices` defaults to `false`. Set `channels.qq.showCompactionNotices: true` to also post automatic compaction notices ("Compressing context…" / "Context compacted."). QQ's C2C/group message API has no edit or recall endpoint, so each phase lands as a separate permanent message. Manual `/compact` feedback is shown regardless of this setting:
 
 ```json
 {
