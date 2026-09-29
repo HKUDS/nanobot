@@ -223,3 +223,36 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
         assert goal_mutation_allowed() is False
     finally:
         await loop.aclose()
+
+
+@pytest.mark.parametrize("overrides", [
+    {"metadata": {"_cron_trigger": {"job_id": "job"}}},
+    {"metadata": {"_local_trigger": {"trigger_id": "trigger"}}},
+    {"metadata": {"_internal_continuation": True}},
+    {"sender_id": "subagent"},
+    {"channel": "system"},
+    {"channel": "system", "input_role": "user"},
+])
+async def test_background_input_cannot_inherit_goal_permission(tmp_path, overrides):
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    fields = dict(channel="cli", sender_id="automation", chat_id="test", content="Run scheduled work")
+    fields.update(overrides)
+    fields["metadata"] = {"goal_requested": True, **fields.get("metadata", {})}
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="create", name="create_goal", arguments={"objective": "An unauthorized goal."},
+        )]),
+        LLMResponse(content="done"),
+    ])
+    try:
+        await loop._process_message(InboundMessage(**fields), session_key="cli:test")
+        assert GOAL_STATE_KEY not in loop.sessions.get_or_create("cli:test").metadata
+        final_request = provider.chat_stream_with_retry.await_args.kwargs["messages"]
+        assert "create_goal is unavailable for this turn" in str(final_request)
+        assert goal_mutation_allowed() is False
+    finally:
+        await loop.aclose()

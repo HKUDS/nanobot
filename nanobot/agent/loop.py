@@ -1117,7 +1117,9 @@ class AgentLoop:
                         break
                     converted.append(await _to_user_message(pending_msg))
                 if any(
-                    msg.metadata.get("goal_requested") is True
+                    msg.is_user_input and msg.channel != "system"
+                    and msg.sender_id != "subagent"
+                    and msg.metadata.get("goal_requested") is True
                     for msg in pending_messages[:len(converted)]
                 ):
                     turn_scope_stack.enter_context(goal_mutation_permission(True))
@@ -1216,9 +1218,7 @@ class AgentLoop:
 
         session_metadata = session.metadata if session is not None else None
         try:
-            turn_scope_stack.enter_context(
-                goal_mutation_permission(request_metadata.get("goal_requested") is True),
-            )
+            turn_scope_stack.enter_context(goal_mutation_permission(False))
             for scope in turn_scopes or ():
                 turn_scope_stack.enter_context(scope)
             hook = build_agent_turn_hook(AgentTurnHookSpec(
@@ -2018,7 +2018,9 @@ class AgentLoop:
         result = await self.commands.dispatch(cmd_ctx)
         if isinstance(result, InboundMessage):
             ctx.msg = result
-            return False
+            result = None
+        if is_user_turn and ctx.msg.metadata.get("goal_requested") is True:
+            ctx.turn_scopes.append(goal_mutation_permission(True))
         if cmd_ctx.raw.lower() == "/compact":
             # Compaction reports through events, not an archiveable command reply.
             return True
