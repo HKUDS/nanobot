@@ -256,17 +256,16 @@ async def test_goal_command_shows_usage_without_args(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_command_rejects_mid_turn_without_session(tmp_path) -> None:
+async def test_goal_command_prepares_user_input_without_session(tmp_path) -> None:
     loop = _make_loop(tmp_path)
-    out = await cmd_goal(_ctx(loop, "/goal do work", args="do work"))
-    assert out is not None
-    assert out.channel == "cli"
-    assert out.chat_id == "direct"
-    assert out.metadata == {"render_as": "text"}
-    assert out.content == (
-        "A task is already running for this chat. "
-        "Use `/stop` first, then send `/goal <long-running task description>` again."
-    )
+    ctx = _ctx(loop, "/goal do work", args="do work")
+    ctx.is_user_turn = True
+    out = await cmd_goal(ctx)
+    assert out is None
+    assert ctx.msg.metadata["goal_requested"] is True
+    with ctx.turn_scopes[0]:
+        assert goal_mutation_allowed() is True
+    assert goal_mutation_allowed() is False
 
 
 @pytest.mark.asyncio

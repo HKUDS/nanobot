@@ -1019,7 +1019,6 @@ class AgentLoop:
         async def _drain_pending(
             *,
             first_msg: InboundMessage | None = None,
-            tools_available: bool = True,
         ) -> list[dict[str, Any]]:
             """Drain one atomic snapshot of messages already available."""
             if pending_queue is None:
@@ -1127,9 +1126,6 @@ class AgentLoop:
                     # owns completion, command dispatch, and control metadata.
                     if not self._can_inject_message(pending_msg):
                         break
-                    # Goal commands need a tool-capable request to record their objective.
-                    if self._is_goal_input(pending_msg) and not tools_available:
-                        break
                     converted.append(await _to_user_message(pending_msg))
                 for scope in goal_scopes:
                     turn_scope_stack.enter_context(scope)
@@ -1146,11 +1142,11 @@ class AgentLoop:
 
         terminal_wait_deadline: float | None = None
 
-        async def _wait_for_pending(*, tools_available: bool = True) -> list[dict[str, Any]]:
+        async def _wait_for_pending() -> list[dict[str, Any]]:
             """Wait for a pending result only when the runner is ready to exit."""
             nonlocal terminal_wait_deadline
 
-            items = await _drain_pending(tools_available=tools_available)
+            items = await _drain_pending()
             if (
                 items
                 or pending_queue is None
@@ -1175,12 +1171,7 @@ class AgentLoop:
                 )
                 return []
 
-            return await _drain_pending(first_msg=msg, tools_available=tools_available)
-
-        async def _drain_finalization(terminal: bool) -> list[dict[str, Any]]:
-            if terminal:
-                return await _wait_for_pending(tools_available=False)
-            return await _drain_pending(tools_available=False)
+            return await _drain_pending(first_msg=msg)
 
         request_ctx = request_context or RequestContext(
             channel="cli",
@@ -1285,7 +1276,6 @@ class AgentLoop:
                     persist=session is not None and not ephemeral,
                 ),
                 injection_callback=_drain_pending,
-                finalization_injection_callback=_drain_finalization,
                 terminal_injection_callback=_wait_for_pending,
                 continuation_callback=_goal_continue,
                 finalize_on_max_iterations=turn_continuation.should_finalize_on_max_iterations(

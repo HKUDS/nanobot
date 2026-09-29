@@ -2227,12 +2227,8 @@ export class NanobotTui {
       this.markSubmitUnsent()
       return
     }
-    if (this.activeTurn && lifecycle === "agent_turn") {
-      if (content.split(/\s+/u, 1)[0]?.toLowerCase() === "/goal") {
-        this.sendPrompt({ content, options }, true)
-      } else {
-        this.status.content = "A turn is already running · Ctrl+C to stop"
-      }
+    if (lifecycle === "agent_turn") {
+      this.sendPrompt({ content, options }, this.activeTurn)
       return
     }
     let turnId: string
@@ -2251,15 +2247,7 @@ export class NanobotTui {
     if (!silent && lifecycle !== "stop_active_turn") this.transcript.user(content)
     if (!silent) this.recordPrompt(content)
 
-    if (lifecycle === "agent_turn") {
-      this.host.reportTitle(content)
-      this.activeTurnId = turnId
-      this.finalMessage = ""
-      this.turnHadAnswer = false
-      this.activeLabel = "Thinking"
-      this.currentFileEdits = []
-      this.setActive(true)
-    } else if (lifecycle === "finalize_active_turn") {
+    if (lifecycle === "finalize_active_turn") {
       this.activeTurnId = null
       this.transcript.finishStream(this.turnHadAnswer ? "" : this.finalMessage)
       this.transcript.finishActivity()

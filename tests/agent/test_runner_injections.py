@@ -532,7 +532,7 @@ async def test_injected_followup_starts_new_length_recovery_chain():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("max_iterations", [1, 3])
-async def test_followup_interrupts_truncated_answer_before_next_request(max_iterations):
+async def test_truncated_answer_followup_requires_remaining_iteration(max_iterations):
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunner
 
@@ -571,12 +571,20 @@ async def test_followup_interrupts_truncated_answer_before_next_request(max_iter
         injection_callback=_make_injection_callback(queue),
     ))
 
-    assert result.final_content == "4"
     assert len(requests) == 2
-    assert endings[0] == (True, False)
     second_request = "\n".join(str(message.get("content", "")) for message in requests[1])
-    assert "Never mind. What is 2+2?" in second_request
-    assert "Continue the same response from its exact endpoint" not in second_request
+    if max_iterations == 1:
+        assert "Never mind. What is 2+2?" not in second_request
+        assert queue.get_nowait()["content"] == "Never mind. What is 2+2?"
+        assert result.had_injections is False
+        assert result.final_content == "Unfinished old answer:\n\n4"
+        assert "Continue the same response from its exact endpoint" in second_request
+    else:
+        assert result.final_content == "4"
+        assert endings[0] == (True, False)
+        assert "Never mind. What is 2+2?" in second_request
+        assert queue.empty()
+        assert "Continue the same response from its exact endpoint" not in second_request
 
 
 @pytest.mark.asyncio
@@ -1880,8 +1888,8 @@ async def test_max_iterations_without_finalization_keeps_late_injection_queued()
 
 
 @pytest.mark.asyncio
-async def test_max_iterations_finalization_consumes_late_injection():
-    """The finalization model request receives the snapshot after the last iteration."""
+async def test_max_iterations_finalization_keeps_late_injection_queued():
+    """New input waits for a turn with tools instead of entering no-tools finalization."""
     from nanobot.agent.hook import AgentHook
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
@@ -1935,18 +1943,18 @@ async def test_max_iterations_finalization_consumes_late_injection():
     ))
 
     assert result.stop_reason == "max_iterations"
-    assert result.had_injections is True
-    assert injection_queue.empty()
+    assert result.had_injections is False
+    assert injection_queue.get_nowait().content == "late follow-up after max iters"
     assert call_count["n"] == 3
     finalization_request = "\n".join(
         str(message.get("content", "")) for message in captured_messages[-1]
     )
-    assert "late follow-up after max iters" in finalization_request
+    assert "late follow-up after max iters" not in finalization_request
     injected = [
         m for m in result.messages
         if m.get("role") == "user" and m.get("content") == "late follow-up after max iters"
     ]
-    assert len(injected) == 1
+    assert injected == []
 
 
 @pytest.mark.asyncio
