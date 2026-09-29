@@ -220,22 +220,22 @@ def test_equivalent_workspace_paths_share_one_store(tmp_path: Path) -> None:
     assert via_link.messages[-1]["content"] == "via-real"
 
 
-def test_migration_rejects_symlinked_session_file(tmp_path):
+def test_migration_rejects_symlinked_session_file(tmp_path, create_symlink):
     workspace = tmp_path / "workspace"
     path = _write_legacy_session(workspace / "sessions", "cli:test", "original")
     target = tmp_path / "outside.jsonl"
     path.rename(target)
-    path.symlink_to(target)
+    create_symlink(path, target)
     with pytest.raises(RuntimeError, match="migration failed"):
         SessionManager(workspace)
     assert "original" in target.read_text()
 
 
-def test_migration_rejects_symlinked_source_directory(tmp_path):
+def test_migration_rejects_symlinked_source_directory(tmp_path, create_symlink):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    (workspace / "sessions").symlink_to(outside, target_is_directory=True)
+    create_symlink(workspace / "sessions", outside, target_is_directory=True)
     with pytest.raises(ValueError, match="symlink"):
         SessionManager(workspace)
