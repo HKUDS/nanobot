@@ -411,7 +411,9 @@ class WecomChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WeCom."""
-        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
         if not self._client:
             raise RuntimeError("WeCom client not initialized")

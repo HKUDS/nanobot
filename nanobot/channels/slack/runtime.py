@@ -202,7 +202,9 @@ class SlackChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
-        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
         if not self._web_client:
             self.logger.warning("client not running")

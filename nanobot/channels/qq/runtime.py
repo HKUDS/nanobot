@@ -194,9 +194,9 @@ class QQConfig(Base):
     download_max_bytes: int = 1024 * 1024 * 200  # 200MB safety limit
 
     # QQ's C2C/group message API has no edit or recall endpoint, so automatic
-    # notices would land as separate permanent messages (#5784). Off by default;
-    # set showCompactionNotices: true to post them anyway.
-    show_compaction_notices: bool = False
+    # notices would land as separate permanent messages (#5784). Unset inherits
+    # the global policy (off by default); explicit legacy true/false still override it.
+    show_compaction_notices: bool | None = None
 
 
 class QQChannel(BaseChannel):
@@ -207,13 +207,16 @@ class QQChannel(BaseChannel):
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
-        return QQConfig().model_dump(by_alias=True)
+        return QQConfig().model_dump(by_alias=True, exclude_none=True)
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
             config = QQConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: QQConfig = config
+        # Preserve explicitly configured notices for standalone channel callers.
+        # ChannelManager resolves global inheritance from the original section.
+        self.show_compaction_notices = bool(config.show_compaction_notices)
 
         self._client: Any | None = None
         self._http: aiohttp.ClientSession | None = None
@@ -311,7 +314,7 @@ class QQChannel(BaseChannel):
         # restores it; manual /compact always retains its requested feedback.
         if (
             isinstance(msg.event, ContextCompactionEvent)
-            and not (msg.event.notify or self.config.show_compaction_notices)
+            and not (msg.event.notify or self.show_compaction_notices)
         ):
             return
 

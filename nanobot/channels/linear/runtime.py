@@ -130,7 +130,7 @@ class LinearChannel(BaseChannel):
         if isinstance(event, ContextCompactionEvent):
             if event.phase == "succeeded":
                 self._issue_contexts.pop(msg.chat_id, None)
-            if not event.notify:
+            if not (event.notify or self.show_compaction_notices):
                 return
             # Idle notifications have no originating Linear turn. Sending a thought
             # through the cached route would reactivate an already completed session.

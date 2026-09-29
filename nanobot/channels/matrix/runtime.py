@@ -616,7 +616,9 @@ class MatrixChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send outbound content; clear typing for non-progress messages."""
-        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
         if not self.client:
             raise RuntimeError("Matrix client not initialized")

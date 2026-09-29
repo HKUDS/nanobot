@@ -251,7 +251,9 @@ class MSTeamsChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a plain text reply into an existing Teams conversation."""
-        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
         if not self._http:
             raise RuntimeError("MSTeams HTTP client not initialized")

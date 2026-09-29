@@ -240,7 +240,9 @@ class EmailChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send email via SMTP."""
-        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
         if not self.config.consent_granted:
             self.logger.warning("Skip email send: consent_granted is false")

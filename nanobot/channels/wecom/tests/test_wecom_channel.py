@@ -178,9 +178,11 @@ async def test_download_and_save_failure() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("has_frame", [False, True])
 @pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("show_notices", [False, True])
 @pytest.mark.parametrize("phase", ["started", "succeeded", "failed", "cancelled"])
-async def test_compaction_notice_policy(has_frame, notify, phase) -> None:
+async def test_compaction_notice_policy(has_frame, notify, show_notices, phase) -> None:
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
+    channel.show_compaction_notices = show_notices
     client = _FakeWeComClient()
     channel._client = client
     channel._generate_req_id = lambda x: f"req_{x}"
@@ -192,8 +194,8 @@ async def test_compaction_notice_policy(has_frame, notify, phase) -> None:
         event=ContextCompactionEvent("compact", phase, notify=notify),
     ))
 
-    assert client.reply_stream.await_count == int(notify and has_frame)
-    assert client.send_message.await_count == int(notify and not has_frame)
+    assert client.reply_stream.await_count == int((notify or show_notices) and has_frame)
+    assert client.send_message.await_count == int((notify or show_notices) and not has_frame)
     # A quiet event must not consume the response route for the actual answer.
     assert ("chat1" in channel._chat_frames) is has_frame
 

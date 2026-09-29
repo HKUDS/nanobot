@@ -3147,7 +3147,8 @@ async def test_failed_turn_end_exposes_safe_terminal_outcome() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("notify", [False, True])
-async def test_context_compaction_started_is_live_only(notify) -> None:
+@pytest.mark.parametrize("show_notices", [False, True])
+async def test_context_compaction_started_is_live_only(notify, show_notices) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -3156,6 +3157,7 @@ async def test_context_compaction_started_is_live_only(notify) -> None:
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-compaction-started")
+    channel.show_compaction_notices = show_notices
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -3179,8 +3181,9 @@ async def test_context_compaction_started_is_live_only(notify) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("show_notices", [False, True])
 @pytest.mark.parametrize("phase", ["succeeded", "failed", "cancelled"])
-async def test_context_compaction_is_structured_persisted_and_summary_free(notify, phase) -> None:
+async def test_context_compaction_is_structured_persisted_and_summary_free(notify, show_notices, phase) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -3189,6 +3192,7 @@ async def test_context_compaction_is_structured_persisted_and_summary_free(notif
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-compaction")
+    channel.show_compaction_notices = show_notices
 
     await channel.send(OutboundMessage(
         channel="websocket",

@@ -33,7 +33,9 @@ class _MockChannel(BaseChannel):
         pass
 
     async def send(self, msg):
-        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
         return await self._send_mock(msg)
 
@@ -88,3 +90,37 @@ async def test_channel_receives_automatic_compaction_but_does_not_render_it(
     contents = _sent_contents(manager)
     assert "ordinary progress" not in contents
     assert contents == ["Compressing context…", "Context compacted."]
+
+
+@pytest.mark.parametrize("global_value", [False, True])
+@pytest.mark.parametrize("override", [None, False, True])
+@pytest.mark.parametrize("key", ["show_compaction_notices", "showCompactionNotices"])
+async def test_global_notice_policy_and_channel_override(manager, global_value, override, key):
+    manager.config.channels.show_compaction_notices = global_value
+    section = {} if override is None else {key: override}
+    channel = manager._build_channel("mock", _MockChannel, section)
+    assert channel.show_compaction_notices is (global_value if override is None else override)
+    channel.send_progress = False  # Ordinary progress and compaction are independent policies.
+    manager.channels["mock"] = channel
+
+    for phase in ("started", "succeeded", "failed", "cancelled"):
+        for notify in (False, True):
+            await channel.send(outbound_message_for_event(
+                channel="mock", chat_id="chat",
+                event=ContextCompactionEvent("compact", phase, notify=notify),
+            ))
+
+    assert channel._send_mock.await_count == (8 if channel.show_compaction_notices else 4)
+
+
+def test_global_notice_config_round_trip_and_rebuild(manager):
+    assert Config().channels.show_compaction_notices is False
+    manager.config = Config.model_validate({"channels": {"showCompactionNotices": True}})
+    manager.config = Config.model_validate_json(manager.config.model_dump_json(by_alias=True))
+    assert manager._build_channel("mock", _MockChannel, {}).show_compaction_notices is True
+    # Rebuilding an adapter after a config change must resolve the new default.
+    manager.config.channels.show_compaction_notices = False
+    assert manager._build_channel("mock", _MockChannel, {}).show_compaction_notices is False
+    assert manager._build_channel(
+        "mock", _MockChannel, {"showCompactionNotices": True},
+    ).show_compaction_notices

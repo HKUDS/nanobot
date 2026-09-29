@@ -68,6 +68,7 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "send_progress": "sendProgress",
     "send_tool_hints": "sendToolHints",
     "show_reasoning": "showReasoning",
+    "show_compaction_notices": "showCompactionNotices",
 }
 
 def _default_channel_config(name: str) -> dict[str, Any] | None:
@@ -228,6 +229,13 @@ class ChannelManager:
         )
         channel.show_reasoning = self._resolve_bool_override(
             section, "show_reasoning", self.config.channels.show_reasoning,
+        )
+        # Retain adapter-validated legacy values (QQ already owned this option).
+        notice_default = self._resolve_bool_override(
+            channel.config, "show_compaction_notices", self.config.channels.show_compaction_notices,
+        )
+        channel.show_compaction_notices = self._resolve_bool_override(
+            section, "show_compaction_notices", notice_default,
         )
         return channel
 

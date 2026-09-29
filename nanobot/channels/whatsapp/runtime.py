@@ -460,7 +460,9 @@ class WhatsAppChannel(BaseChannel):
         connect_task.add_done_callback(_on_done)
 
     async def send(self, msg: OutboundMessage) -> None:
-        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
         client = self._client
         if client is None or not self._connected:

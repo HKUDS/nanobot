@@ -17,7 +17,9 @@ pytest.importorskip("botpy")
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.qq.runtime import QQChannel, QQConfig
+from nanobot.config.schema import Config
 
 
 def _make_channel(tmp_path, **config_kwargs) -> QQChannel:
@@ -90,3 +92,23 @@ async def test_ordinary_messages_unaffected(monkeypatch, tmp_path) -> None:
 def test_config_accepts_camel_case_override() -> None:
     config = QQConfig.model_validate({"appId": "a", "secret": "s", "showCompactionNotices": True})
     assert config.show_compaction_notices is True
+
+
+@pytest.mark.parametrize("global_value", [False, True])
+@pytest.mark.parametrize("override", [None, False, True])
+@pytest.mark.parametrize("typed", [False, True])
+@pytest.mark.parametrize("legacy_string", [False, True])
+def test_qq_inherits_global_unless_legacy_override_is_explicit(
+    tmp_path, global_value, override, typed, legacy_string,
+):
+    manager = ChannelManager.__new__(ChannelManager)
+    manager.config = Config()
+    manager.config.channels.show_compaction_notices = global_value
+    manager.bus = MessageBus()
+    section = {"appId": "a", "secret": "s", "mediaDir": str(tmp_path)}
+    if override is not None:
+        section["showCompactionNotices"] = str(override).lower() if legacy_string else override
+    if typed:
+        section = QQConfig.model_validate(section)
+    channel = manager._build_channel("qq", QQChannel, section)
+    assert channel.show_compaction_notices is (global_value if override is None else override)

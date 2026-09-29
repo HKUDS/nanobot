@@ -493,7 +493,9 @@ class MattermostChannel(BaseChannel):
     # Send ---------------------------------------------------------------------
 
     async def send(self, msg: OutboundMessage) -> None:
-        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
         if not self._http_client:
             self.logger.warning("client not initialized")

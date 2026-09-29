@@ -1885,7 +1885,9 @@ class WeixinChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         event = getattr(msg, "event", None)
-        if isinstance(event, ContextCompactionEvent) and not event.notify:
+        if isinstance(event, ContextCompactionEvent) and not (
+            event.notify or self.show_compaction_notices
+        ):
             return
         if not self._client or not self._token:
             raise RuntimeError("WeChat client not initialized or not authenticated")
