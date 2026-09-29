@@ -50,7 +50,7 @@ async def test_compaction_notices_sent_when_enabled(monkeypatch) -> None:
 
     await channel.send(outbound_message_for_event(
         channel="qq", chat_id="chat",
-        event=ContextCompactionEvent(compaction_id="c1", phase="started"),
+        event=ContextCompactionEvent(compaction_id="c1", phase="started", notify=True),
     ))
 
     send_text.assert_awaited_once()

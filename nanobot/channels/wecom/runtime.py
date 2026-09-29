@@ -18,6 +18,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
 WECOM_WEBSOCKET_HOST = "openws.work.weixin.qq.com"
@@ -410,6 +411,8 @@ class WecomChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WeCom."""
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         if not self._client:
             raise RuntimeError("WeCom client not initialized")
 

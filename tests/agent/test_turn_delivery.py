@@ -59,11 +59,14 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
      {"message_id": "reply", "thread_id": "root", "chat_type": "group"}),
     ("dingtalk:group:conversation:user", "dingtalk", "group:conversation", {}),
 ])
-async def test_idle_compaction_uses_the_session_delivery_route(
+async def test_session_route_delivers_automatic_and_manual_compaction(
     key, channel, chat_id, metadata, unified,
 ) -> None:
     factory = TurnDeliveryFactory(MessageBus())
-    event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
+    automatic = ContextCompactionEvent(compaction_id="auto-1", phase="started")
+    notified = ContextCompactionEvent(
+        compaction_id="notified-1", phase="started", notify=True,
+    )
     key = "unified:default" if unified else key
     msg = InboundMessage(
         channel=channel, sender_id="user", chat_id=chat_id, content="hello",
@@ -78,11 +81,14 @@ async def test_idle_compaction_uses_the_session_delivery_route(
 
     sink = factory.session_events(key, session_metadata)
     assert sink.publish is not None
-    await sink.emit(event)
+    await sink.emit(automatic)
+    await sink.emit(notified)
 
-    outbound = factory.bus.outbound.get_nowait()
-    assert (outbound.channel, outbound.chat_id, outbound.metadata) == (channel, chat_id, metadata)
-    assert outbound.event is event
+    outbounds = [factory.bus.outbound.get_nowait() for _ in range(2)]
+    assert [(outbound.channel, outbound.chat_id, outbound.metadata) for outbound in outbounds] == [
+        (channel, chat_id, metadata),
+    ] * 2
+    assert [outbound.event for outbound in outbounds] == [automatic, notified]
 
 
 async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() -> None:
@@ -96,13 +102,13 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
     factory.create(original, key).remember_session_route(session_metadata)
     sink = factory.session_events(key, session_metadata)
     assert sink.publish is not None
-    await sink.emit(ContextCompactionEvent("compact-1", "started"))
+    await sink.emit(ContextCompactionEvent("compact-1", "started", notify=True))
 
     latest = InboundMessage(
         channel="telegram", sender_id="user", chat_id="42", content="next question",
     )
     factory.create(latest, key).remember_session_route(session_metadata)
-    await sink.emit(ContextCompactionEvent("compact-1", "succeeded"))
+    await sink.emit(ContextCompactionEvent("compact-1", "succeeded", notify=True))
 
     events = [factory.bus.outbound.get_nowait() for _ in range(2)]
     assert [(msg.channel, msg.chat_id, msg.metadata) for msg in events] == [
@@ -110,14 +116,13 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
     ] * 2
 
 
-async def test_idle_compaction_can_deliver_to_a_legacy_websocket_session() -> None:
+async def test_automatic_compaction_reaches_legacy_websocket_session() -> None:
     factory = TurnDeliveryFactory(MessageBus())
     event = ContextCompactionEvent(compaction_id="compact-1", phase="succeeded")
     sink = factory.session_events("websocket:chat", {})
     assert sink.publish is not None
     await sink.emit(event)
-    outbound = factory.bus.outbound.get_nowait()
-    assert (outbound.channel, outbound.chat_id, outbound.event) == ("websocket", "chat", event)
+    assert factory.bus.outbound.get_nowait().event is event
 
 
 @pytest.mark.asyncio

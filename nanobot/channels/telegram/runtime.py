@@ -1096,6 +1096,8 @@ class TelegramChannel(BaseChannel):
         # Compaction notices collapse into one message: the started phase sends
         # it, a terminal phase edits it in place instead of posting a new one.
         if isinstance(msg.event, ContextCompactionEvent):
+            if not msg.event.notify:
+                return
             await self._send_compaction_notice(
                 chat_id, msg, msg.event, reply_params, thread_kwargs,
             )

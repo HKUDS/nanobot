@@ -21,6 +21,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.security.network import validate_resolved_url, validate_url_target
 
 DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
@@ -735,6 +736,8 @@ class DingTalkChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk."""
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         token = await self._get_access_token()
         if not token:
             raise RuntimeError("DingTalk access token unavailable")

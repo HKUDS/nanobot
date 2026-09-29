@@ -23,6 +23,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.security.network import PinnedDNSAsyncTransport
 
 
@@ -459,6 +460,8 @@ class WhatsAppChannel(BaseChannel):
         connect_task.add_done_callback(_on_done)
 
     async def send(self, msg: OutboundMessage) -> None:
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         client = self._client
         if client is None or not self._connected:
             raise RuntimeError("WhatsApp channel is not connected")

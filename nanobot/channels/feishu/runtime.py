@@ -42,6 +42,7 @@ from nanobot.channels.feishu.instances import (
 from nanobot.channels.feishu.websocket import get_feishu_ws_runner
 from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
+from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import clear_channel
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
@@ -2440,6 +2441,8 @@ class FeishuChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         if not self._client:
             self.logger.warning("client not initialized")
             return

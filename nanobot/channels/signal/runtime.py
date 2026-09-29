@@ -23,6 +23,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import is_approved
 from nanobot.utils.helpers import safe_filename, split_message
 
@@ -564,6 +565,8 @@ class SignalChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Signal."""
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         is_progress_message = isinstance(msg.event, ProgressEvent)
         try:
             plain_text, text_styles = _markdown_to_signal(msg.content)

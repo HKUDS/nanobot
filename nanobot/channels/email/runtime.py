@@ -29,6 +29,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.utils.helpers import safe_filename
 
 
@@ -239,6 +240,8 @@ class EmailChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send email via SMTP."""
+        if isinstance(msg.event, ContextCompactionEvent) and not msg.event.notify:
+            return
         if not self.config.consent_granted:
             self.logger.warning("Skip email send: consent_granted is false")
             return

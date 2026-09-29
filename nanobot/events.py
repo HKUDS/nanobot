@@ -37,6 +37,7 @@ class ResponseSourceEvent(AgentEvent):
 class ContextCompactionEvent(AgentEvent):
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
+    notify: bool = False
 
 
 @dataclass(frozen=True)
