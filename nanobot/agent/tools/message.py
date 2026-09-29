@@ -233,6 +233,8 @@ class MessageTool(Tool):
             metadata["message_id"] = message_id
         if media:
             metadata["_record_channel_delivery"] = True
+        if same_target and request_ctx is not None and request_ctx.session_generation is not None:
+            metadata["_session_generation"] = request_ctx.session_generation
 
         msg = OutboundMessage(
             channel=channel,

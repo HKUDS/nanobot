@@ -26,8 +26,17 @@ LAST_SUPPORTED_RELEASE_LINE = "0.4.x"
 SUNSET_VERSION = "0.5.0"
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key: {key!r}")
+        value[key] = item
+    return value
+
+
 def _record(line: str) -> dict[str, Any]:
-    value: object = json.loads(line)
+    value: object = json.loads(line, object_pairs_hook=_unique_object)
     if not isinstance(value, dict):
         raise ValueError("JSONL records must be objects")
     return cast(dict[str, Any], value)
@@ -40,6 +49,7 @@ def read_jsonl(path: Path) -> Session:
     header: dict[str, Any] | None = None
     messages: list[dict[str, Any]] = []
     provider: ProviderConversationState | None = None
+    provider_seen = False
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -49,6 +59,9 @@ def read_jsonl(path: Path) -> Session:
                 raise ValueError(f"multiple session headers: {path}")
             header = item
         elif item.get("_type") == "provider_state":
+            if provider_seen:
+                raise ValueError(f"multiple provider state records: {path}")
+            provider_seen = True
             provider = ProviderConversationState.from_private_record(item.get("state"))
             if provider is None:
                 raise ValueError(f"invalid private provider state: {path}")
@@ -111,12 +124,8 @@ def migrate_jsonl(store: SqliteSessionStore, workspace: Path) -> int:
                 session = read_jsonl(path)
                 prior = imported.get(session.key)
                 if prior is not None:
-                    old, old_path = prior
-                    if (old.messages, old.metadata, old.last_archived, old.provider_state) != (
-                        session.messages, session.metadata, session.last_archived, session.provider_state,
-                    ):
-                        raise ValueError(f"conflicting JSONL sources: {old_path} and {path}")
-                    continue
+                    _, old_path = prior
+                    raise ValueError(f"duplicate JSONL session key: {old_path} and {path}")
                 if store.load(session.key) is not None:
                     raise ValueError(f"session already exists in SQLite: {session.key}")
                 store.save(session)

@@ -88,7 +88,7 @@ class ListSessionsTool(Tool):
         request = current_request_context()
         if request is None or not request.session_key:
             return ToolResult.error("Error: session context is unavailable")
-        handles = await asyncio.to_thread(self._handles.list_all)
+        handles = await self._handles.alist_all()
         return json.dumps(
             [
                 f"@{handle.name}"
@@ -219,14 +219,11 @@ class SendSessionMessageTool(Tool):
             target_name = normalize_session_handle(target_handle)
         except ValueError as exc:
             raise SessionMessageError(str(exc)) from exc
-        target = await asyncio.to_thread(self._handles.resolve, target_name)
+        target = await self._handles.aresolve(target_name)
         if target is None:
             raise SessionMessageError(f"session @{target_name} was not found")
 
-        source = await asyncio.to_thread(
-            self._handles.handle_for_session,
-            source_session_key,
-        )
+        source = await self._handles.ahandle_for_session(source_session_key)
         if source is None:
             raise SessionMessageError("source session was not found")
         envelope: SessionMessageEnvelope = {

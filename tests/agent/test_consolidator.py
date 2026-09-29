@@ -880,10 +880,10 @@ class TestCompactIdleSession:
             "cli:incremental",
             runtime=runtime,
         )
-        current = sessions.get_or_create("cli:incremental")
+        current = await sessions.state.get("cli:incremental")
         current.add_message("user", "second user")
         current.add_message("assistant", "second assistant")
-        sessions.save(current)
+        await sessions.state.finish_turn(current)
         second = await real_consolidator.compact_idle_session(
             "cli:incremental",
             runtime=runtime,
@@ -928,10 +928,10 @@ class TestCompactIdleSession:
             "cli:cumulative-fallback",
             runtime=runtime,
         )
-        current = sessions.get_or_create("cli:cumulative-fallback")
+        current = await sessions.state.get("cli:cumulative-fallback")
         current.add_message("user", "second user")
         current.add_message("assistant", "newest working state")
-        sessions.save(current)
+        await sessions.state.finish_turn(current)
 
         fallback = await real_consolidator.compact_idle_session(
             "cli:cumulative-fallback",
@@ -971,10 +971,10 @@ class TestCompactIdleSession:
             runtime=runtime,
         )
 
-        current = sessions.get_or_create("cli:nothing-after-summary")
+        current = await sessions.state.get("cli:nothing-after-summary")
         current.add_message("user", "thanks")
         current.add_message("assistant", "you're welcome")
-        sessions.save(current)
+        await sessions.state.finish_turn(current)
         result = await real_consolidator.compact_idle_session(
             "cli:nothing-after-summary",
             runtime=runtime,
@@ -999,10 +999,10 @@ class TestCompactIdleSession:
         sessions.save(session)
 
         async def append_during_archive(**_kwargs):
-            current = sessions.get_or_create("cli:concurrent")
+            current = await sessions.state.get("cli:concurrent")
             current.add_message("user", "late user")
             current.add_message("assistant", "late assistant")
-            sessions.save(current)
+            await sessions.state.finish_turn(current)
             return LLMResponse(content="Summary.", finish_reason="stop")
 
         mock_provider.chat_stream_with_retry.side_effect = append_during_archive

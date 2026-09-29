@@ -9,6 +9,7 @@ from nanobot.session.sqlite_store import SessionConflictError
 async def test_committed_view_cache_is_bounded(tmp_path):
     state = SessionManager(tmp_path).state
     for i in range(140):
+        await state.get(str(i))
         await state.update_metadata(str(i), {"title": str(i)})
     assert len(state._snapshots) <= 128
     assert state.peek("0") is None
@@ -18,6 +19,7 @@ async def test_committed_view_cache_is_bounded(tmp_path):
 
 async def test_cached_views_are_detached(tmp_path):
     state = SessionManager(tmp_path).state
+    await state.get("chat:a")
     await state.update_metadata("chat:a", {"title": "saved"})
     cached = state.peek("chat:a")
     cached.metadata["title"] = "unsaved"
@@ -28,7 +30,9 @@ async def test_cached_views_are_detached(tmp_path):
 async def test_transient_session_never_reaches_storage(tmp_path):
     manager = SessionManager(tmp_path)
     state = manager.state
-    draft = state.register_transient("temporary:a", disabled_tools=frozenset({"create_goal"}))
+    draft = await state.register_transient(
+        "temporary:a", disabled_tools=frozenset({"create_goal"})
+    )
     draft.add_message("user", "private")
     await state.prepare_input(draft)
     draft.add_message("assistant", "answer")

@@ -71,6 +71,7 @@ async def _execute(tool, ctx: RequestContext, *, allowed: bool = True, **kwargs)
 async def test_create_goal_records_goal_metadata(tmp_path):
     sm = SessionManager(tmp_path)
     create, _update, ctx = _tools(sm)
+    await sm.state.get("websocket:c1")
     await sm.state.update_metadata("websocket:c1", {"_sustained_goal_continuation_rounds": 12})
 
     out = await _execute(
@@ -145,9 +146,10 @@ async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path
     create, update, ctx = _tools(sm)
 
     await _execute(create, ctx, objective="Old")
-    sess = sm.get_or_create("websocket:c1")
-    sess.metadata["_sustained_goal_continuation_rounds"] = 12
-    sm.save(sess)
+    await sm.state.update_metadata(
+        "websocket:c1",
+        {"_sustained_goal_continuation_rounds": 12},
+    )
     out = await _execute(
         update,
         _request_context(),
@@ -199,9 +201,11 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
 
     monkeypatch.setattr(sm._store, "replace_metadata", original_save)
     assert "Goal recorded" in await _execute(create, create_context, objective="Old")
+    await sm.state.update_metadata(
+        "websocket:c1",
+        {"_sustained_goal_continuation_rounds": 12},
+    )
     sess = sm.get_or_create("websocket:c1")
-    sess.metadata["_sustained_goal_continuation_rounds"] = 12
-    sm.save(sess)
     replace_context = _request_context()
 
     monkeypatch.setattr(sm._store, "replace_metadata", fail_save)

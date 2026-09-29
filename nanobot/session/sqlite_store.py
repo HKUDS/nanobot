@@ -6,11 +6,11 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -26,6 +26,7 @@ from nanobot.session.manager import (
 _SCHEMA_VERSION = 1
 _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
+_T = TypeVar("_T")
 
 
 def _encode(value: object) -> str:
@@ -46,23 +47,23 @@ class SessionConflictError(RuntimeError):
 class SqliteSessionStore:
     """Synchronous repository; runtime callers use the session state's worker.
 
-    Nested repository operations share a transaction. The owner worker keeps its
-    connection until shutdown; synchronous administrative calls close after use.
+    Nested repository operations share a transaction. Every outer repository
+    command closes its connection before returning to its caller.
     """
 
     def __init__(self, sessions_dir: Path) -> None:
         self.path = sessions_dir / "sessions.sqlite3"
         self._local = threading.local()
 
-    def retain_worker_connection(self) -> None:
-        """Opt the calling owner thread into connection reuse between transactions."""
-        self._local.retain = True
+    def run_write(self, operation: Callable[[], _T]) -> _T:
+        """Run one repository command inside a write transaction."""
+        with self.transaction():
+            return operation()
 
-    def close_worker_connection(self) -> None:
-        connection: sqlite3.Connection | None = getattr(self._local, "idle", None)
-        self._local.idle = None
-        if connection is not None:
-            connection.close()
+    def run_read(self, operation: Callable[[], _T]) -> _T:
+        """Run one repository command against a consistent read snapshot."""
+        with self.transaction(write=False):
+            return operation()
 
     @contextmanager
     def transaction(self, *, write: bool = True) -> Generator[sqlite3.Connection, None, None]:
@@ -72,16 +73,14 @@ class SqliteSessionStore:
             return
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
-        connection: sqlite3.Connection | None = getattr(self._local, "idle", None)
-        if connection is None:
-            connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
-            connection.row_factory = sqlite3.Row
-            try:
-                connection.execute("PRAGMA foreign_keys = ON")
-                connection.execute("PRAGMA synchronous = FULL")
-            except BaseException:
-                connection.close()
-                raise
+        connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA synchronous = FULL")
+        except BaseException:
+            connection.close()
+            raise
         self._local.connection = connection
         try:
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
@@ -92,10 +91,7 @@ class SqliteSessionStore:
             raise
         finally:
             self._local.connection = None
-            if getattr(self._local, "retain", False):
-                self._local.idle = connection
-            else:
-                connection.close()
+            connection.close()
 
     def initialize(self, workspace: Path) -> None:
         """Create the schema and import legacy sessions in one atomic transaction."""
@@ -138,11 +134,19 @@ class SqliteSessionStore:
                 "CREATE INDEX IF NOT EXISTS sessions_updated ON sessions(updated_at DESC)",
             ):
                 db.execute(statement)
-            if db.execute("SELECT 1 FROM storage_meta WHERE key='jsonl_import'").fetchone() is None:
+            marker = db.execute(
+                "SELECT value FROM storage_meta WHERE key='jsonl_import'"
+            ).fetchone()
+            if marker is None:
                 from nanobot.session.jsonl_migration import migrate_jsonl
 
                 migrate_jsonl(self, workspace)
                 db.execute("INSERT INTO storage_meta VALUES ('jsonl_import', 'complete')")
+            elif marker[0] != "complete":
+                raise RuntimeError(
+                    f"invalid JSONL migration marker in {self.path}: {marker[0]!r}; "
+                    "restore a valid database backup or repair the marker explicitly"
+                )
             db.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def _metadata(self, db: sqlite3.Connection, key: str, raw: str) -> dict[str, Any]:
@@ -330,3 +334,13 @@ class SqliteSessionStore:
                      "preview": row["preview"], "visible_updated_at": row["visible_updated_at"],
                      "path": str(self.path), "metadata": _object(row["metadata"])}
                     for row in db.execute("SELECT key, created_at, updated_at, title, preview, visible_updated_at, metadata FROM sessions ORDER BY updated_at DESC")]
+
+    def snapshot_sessions(self) -> list[Session]:
+        """Return one consistent, detached snapshot for explicit export."""
+        with self.transaction(write=False):
+            sessions: list[Session] = []
+            for row in self.list_sessions():
+                session = self.load(row["key"])
+                assert session is not None
+                sessions.append(session)
+            return sessions

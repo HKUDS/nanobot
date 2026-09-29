@@ -237,6 +237,11 @@ class TurnDelivery:
     def streaming(self) -> bool:
         return self._stream_base_id is not None
 
+    def bind_session_generation(self, generation: str) -> None:
+        """Attach the admitted session identity to all later lifecycle events."""
+        self.delivery_message.session_generation = generation
+        self.lifecycle_message.session_generation = generation
+
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
         if is_internal_session(self.session_key):

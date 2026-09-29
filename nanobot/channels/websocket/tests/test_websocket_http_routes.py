@@ -2250,7 +2250,7 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         rows = {row["key"]: row for row in sessions}
         handles = {
             handle.session_key: handle
-            for handle in SessionHandleResolver(sm).list_all()
+            for handle in await SessionHandleResolver(sm).alist_all()
         }
         assert rows["websocket:alpha"]["handle"] == handles[
             "websocket:alpha"
@@ -4203,3 +4203,42 @@ async def test_project_favorites_mutation_persists_without_selecting_project(
     response = await _webui_mutate(channel, "workspace.favorite", {"path": str(project), "pinned": False}, connection=connection)
     assert response.status_code == 200
     assert response.json() == {"favorite_projects": []}
+
+
+@pytest.mark.asyncio
+async def test_session_delete_waiting_on_sqlite_does_not_block_event_loop(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    sm = _seed_session(tmp_path, key="websocket:locked-delete")
+    channel = _ch(bus, session_manager=sm, port=_free_port())
+    blocker = sqlite3.connect(sm._store.path, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        deletion = asyncio.create_task(
+            _webui_mutate(
+                channel,
+                "session.delete",
+                {"key": "websocket:locked-delete"},
+            )
+        )
+        ticked = False
+
+        async def tick() -> None:
+            nonlocal ticked
+            await asyncio.sleep(0.05)
+            ticked = True
+
+        await asyncio.wait_for(tick(), timeout=0.25)
+        assert ticked
+        assert not deletion.done()
+        blocker.rollback()
+        response = await asyncio.wait_for(deletion, timeout=2)
+        assert response.status_code == 200
+        assert sm.read_session_snapshot("websocket:locked-delete") is None
+    finally:
+        if blocker.in_transaction:
+            blocker.rollback()
+        blocker.close()

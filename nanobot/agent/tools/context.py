@@ -33,6 +33,7 @@ class RequestContext:
     chat_id: str
     message_id: str | None = None
     session_key: str | None = None
+    session_generation: str | None = None
     original_user_text: str | None = None
     runtime: LLMRuntime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

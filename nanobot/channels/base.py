@@ -264,6 +264,7 @@ class BaseChannel(ABC):
         is_dm: bool = False,
         authorization_id: str | None = None,
         require_existing_session: bool = False,
+        session_generation: str | None = None,
     ) -> None:
         """Handle a message after checking its authorization subject.
 
@@ -316,6 +317,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
+            session_generation=session_generation,
             require_existing_session=require_existing_session,
         )
 

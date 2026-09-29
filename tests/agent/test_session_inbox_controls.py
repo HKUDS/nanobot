@@ -23,7 +23,6 @@ from nanobot.session.recovery import (
     PENDING_FOLLOWUPS_KEY,
     RecoveryCoordinator,
     pending_followups,
-    record_pending_followup,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
@@ -296,16 +295,15 @@ async def test_stopped_followups_are_not_recovered_but_shutdown_preserves_them(
 
 async def test_cancel_preserves_followups_accepted_after_cancellation_started(loop):
     key = "websocket:test"
-    session = loop.sessions.get_or_create(key)
+    session = await loop.sessions.state.get(key)
 
-    def journal(content):
-        record_pending_followup(session, InboundMessage(
+    async def journal(content):
+        await loop.sessions.state.queue_followup(key, InboundMessage(
             channel="websocket", sender_id="u", chat_id="test", content=content,
-            metadata={"webui": True},
+            metadata={"webui": True}, session_generation=session.generation,
         ))
-        loop.sessions.save(session)
 
-    journal("old followup")
+    await journal("old followup")
     started = asyncio.Event()
     cancelling = asyncio.Event()
     release = asyncio.Event()
@@ -324,7 +322,7 @@ async def test_cancel_preserves_followups_accepted_after_cancellation_started(lo
     stop = asyncio.create_task(loop._cancel_active_tasks(key))
     try:
         await asyncio.wait_for(cancelling.wait(), timeout=3)
-        journal("new followup")
+        await journal("new followup")
     finally:
         release.set()
         await stop

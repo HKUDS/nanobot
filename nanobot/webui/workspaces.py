@@ -463,14 +463,41 @@ class WebUIWorkspaceController:
             raise WorkspaceScopeError("chat_running", status=409)
         return scope
 
-    async def persist_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
-        session_key = webui_session_key(chat_id)
+    async def persist_scope(
+        self,
+        chat_id: str,
+        scope: WorkspaceScope,
+        *,
+        session_key: str | None = None,
+        expected_generation: str | None = None,
+    ) -> tuple[str | None, bool]:
+        session_key = session_key or webui_session_key(chat_id)
+        generation = expected_generation
+        created = False
         if self._sessions is not None:
-            await self._sessions.state.update_metadata(session_key, {
-                "webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
-            })
+            generation, created = await self._sessions.state.open_with_metadata(
+                session_key,
+                {"webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata()},
+                expected_generation=generation,
+            )
         self._draft_scopes.pop(session_key, None)
         remember_webui_project(scope.project_path)
+        return generation, created
+
+    async def rollback_scope_admission(
+        self,
+        session_key: str,
+        generation: str | None,
+        *,
+        created: bool,
+    ) -> None:
+        """Remove a newly opened session when transport admission fails."""
+        if not created or generation is None or self._sessions is None:
+            return
+        await self._sessions.state.delete(
+            session_key,
+            expected_generation=generation,
+        )
 
     async def stage_scope(self, chat_id: str, scope: WorkspaceScope) -> None:
         """Keep a new chat's scope transient until its first accepted message."""

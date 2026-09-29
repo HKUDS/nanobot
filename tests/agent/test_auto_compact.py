@@ -95,16 +95,14 @@ def _make_fake_compact(
         events=NO_EVENTS,
     ) -> str:
         state["count"] += 1
-        session = loop.sessions.get_or_create(key)
+        session = await loop.sessions.state.get(key)
 
         tail = list(session.messages[session.last_archived:])
         if not tail:
-            loop.sessions.save(session)
             return ""
         archive_end = session.last_archived + len(tail)
         archive_msgs = tail
 
-        last_active = session.updated_at
         s = summary
         if on_archive:
             result = on_archive(archive_msgs)
@@ -112,14 +110,7 @@ def _make_fake_compact(
         if track_archived is not None:
             track_archived.extend(archive_msgs)
 
-        if s and s != "(nothing)":
-            session.metadata["_last_summary"] = {
-                "text": s,
-                "last_active": last_active.isoformat(),
-            }
-
-        session.commit_summary_checkpoint(s, insert_at=archive_end, last_active=last_active)
-        loop.sessions.save(session)
+        await loop.sessions.state.commit_summary(session, s, archive_end=archive_end)
         return s
 
     # Attach state for count access
@@ -1065,12 +1056,7 @@ class TestProactiveAutoCompact:
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="second topic")
         await loop._process_message(msg)
 
-        # Simulate idle again
-        loop.sessions.invalidate("cli:test")
-        session2 = loop.sessions.get_or_create("cli:test")
-        session2.updated_at = datetime.now() - timedelta(minutes=20)
-        loop.sessions.save(session2)
-
+        # Explicit archival does not require another TTL scan.
         # Second compact cycle should succeed
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
         assert _fake_compact.state["count"] == 2
@@ -1213,10 +1199,9 @@ class TestSummaryPersistence:
         assert "cli:test" not in loop.auto_compact._summaries  # popped by hot path
 
         # Read the committed snapshot before starting the next edit.
-        session = loop.sessions.get_or_create("cli:test")
+        session = await loop.sessions.state.get("cli:test")
         _add_turns(session, 4, prefix="world")
-        session.updated_at = datetime.now() - timedelta(minutes=20)
-        loop.sessions.save(session)
+        await loop.sessions.state.finish_turn(session)
 
         loop.consolidator.compact_idle_session = _make_fake_compact(
             loop, summary="Second summary.",
@@ -1252,9 +1237,7 @@ class TestSummaryPersistence:
         assert "_last_summary" in reloaded.metadata
 
         # Simulate /new command
-        reloaded.clear()
-        loop.sessions.save(reloaded)
-        loop.sessions.invalidate(reloaded.key)
+        await loop.sessions.state.reset(reloaded.key)
 
         # After /new, metadata should no longer contain _last_summary
         fresh = loop.sessions.get_or_create("cli:test")

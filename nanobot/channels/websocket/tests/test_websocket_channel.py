@@ -5677,7 +5677,9 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
         ws_http_module,
         "SessionHandleResolver",
         lambda _session_manager: SimpleNamespace(
-            list_all_by_key=lambda: {handle.session_key: handle}
+            alist_all_by_key=AsyncMock(
+                return_value={handle.session_key: handle}
+            )
         ),
     )
     channel = WebSocketChannel(

@@ -568,7 +568,10 @@ class AgentLoop:
         if runtime is not None:
             return runtime
         await self.sessions.state.update_metadata(
-            session.key, {}, remove=(SESSION_MODEL_PRESET_METADATA_KEY,),
+            session.key,
+            {},
+            remove=(SESSION_MODEL_PRESET_METADATA_KEY,),
+            expected_generation=session.generation,
         )
         return self.llm_runtime()
 
@@ -580,7 +583,9 @@ class AgentLoop:
         """Validate and persist one session's preset selection without blocking."""
         runtime = self.runtime_resolver.resolve_preset(name)
         await self.sessions.state.update_metadata(
-            session_key, {SESSION_MODEL_PRESET_METADATA_KEY: runtime.model_preset},
+            session_key,
+            {SESSION_MODEL_PRESET_METADATA_KEY: runtime.model_preset},
+            create_if_missing=True,
         )
         return runtime
 
@@ -744,6 +749,7 @@ class AgentLoop:
             chat_id=ctx.delivery.route.chat_id,
             message_id=ctx.msg.metadata.get("message_id"),
             session_key=ctx.session_key,
+            session_generation=ctx.session.generation,
             original_user_text=ctx.original_user_text,
             runtime=ctx.runtime,
             metadata=dict(ctx.msg.metadata or {}),
@@ -840,6 +846,7 @@ class AgentLoop:
                 chat_id=ctx.msg.chat_id,
                 message_id=metadata.get("message_id"),
                 session_key=ctx.key,
+                session_generation=session.generation,
                 original_user_text=f"!{ctx.args.strip()}",
                 runtime=ctx.runtime,
                 metadata=metadata,
@@ -1088,6 +1095,7 @@ class AgentLoop:
                         chat_id=pending_msg.chat_id,
                         message_id=metadata.get("message_id"),
                         session_key=active_session_key,
+                        session_generation=session.generation if session is not None else None,
                         original_user_text=pending_msg.content,
                         runtime=runtime,
                         metadata=dict(metadata),
@@ -1207,6 +1215,9 @@ class AgentLoop:
             )
         request_ctx = dataclasses.replace(
             request_ctx,
+            session_generation=(
+                session.generation if session is not None else request_ctx.session_generation
+            ),
             log_content=(
                 request_ctx.log_content and not ephemeral
                 and (session is None or session.policy.log_content)
@@ -1971,13 +1982,19 @@ class AgentLoop:
             msg = ctx.msg
 
         if ctx.session is None:
-            if msg.require_existing_session:
-                ctx.session = self.sessions.state.peek(ctx.session_key)
+            if msg.require_existing_session or msg.session_generation is not None:
+                ctx.session = await self.sessions.state.read(ctx.session_key)
                 if ctx.session is None:
                     raise RuntimeError("required session is not active")
+                if (
+                    msg.session_generation is not None
+                    and ctx.session.generation != msg.session_generation
+                ):
+                    raise RuntimeError("required session generation was replaced")
             else:
                 ctx.session = await self.sessions.state.get(ctx.session_key)
         session = ctx.session
+        ctx.delivery.bind_session_generation(session.generation)
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:

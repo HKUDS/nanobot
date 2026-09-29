@@ -179,8 +179,12 @@ Export portable conversation copies with:
 nanobot sessions export-jsonl --config ./bot-a/config.json --workspace ./bot-a/workspace
 ```
 
-SQLite remains authoritative after export. Exported files are not loaded again
-by an already migrated installation.
+SQLite remains authoritative after export. Each successful export synchronizes
+the destination to the current session set and removes stale session JSONL files.
+The files contain unredacted messages, metadata, pending/checkpoint state, and
+provider continuation data; protect them as sensitive data. They are not loaded
+again by an already migrated database, but a fresh database or older release can
+import them.
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. `/detach` promotes the shared gateway to persistent background mode before closing the TUI, so active agent work continues without a connected client. An explicit `nanobot gateway --background` starts or promotes the gateway the same way before opening a client. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 

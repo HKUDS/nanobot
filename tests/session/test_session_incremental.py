@@ -65,7 +65,11 @@ async def test_metadata_checkpoint_and_followups_do_not_read_history(tmp_path):
 async def test_nested_draft_edits_and_failed_commits_remain_private(tmp_path, transient):
     manager = SessionManager(tmp_path)
     state = manager.state
-    draft = state.register_transient("chat:a") if transient else await state.get("chat:a")
+    draft = (
+        await state.register_transient("chat:a")
+        if transient
+        else await state.get("chat:a")
+    )
     draft.messages.append({"role": "user", "content": [{"type": "text", "text": "original"}]})
     await state.prepare_input(draft)
     peer = await state.get(draft.key)
@@ -159,7 +163,9 @@ async def test_truncation_and_summary_keep_storage_and_cache_in_sync(tmp_path):
 async def test_metadata_callback_result_is_detached(tmp_path, transient):
     state = SessionManager(tmp_path).state
     if transient:
-        state.register_transient("chat:a")
+        await state.register_transient("chat:a")
+    else:
+        await state.get("chat:a")
     shared = {"nested": ["saved"]}
 
     def change(metadata):
@@ -175,7 +181,7 @@ async def test_metadata_callback_result_is_detached(tmp_path, transient):
     await state.aclose()
 
 
-async def test_owner_reuses_and_closes_connection_on_its_thread(tmp_path, monkeypatch):
+async def test_owner_closes_each_connection_on_its_worker_thread(tmp_path, monkeypatch):
     manager = SessionManager(tmp_path)
     connections = []
     closed = []
@@ -196,8 +202,8 @@ async def test_owner_reuses_and_closes_connection_on_its_thread(tmp_path, monkey
     await state.get("chat:a")
     await state.update_metadata("chat:a", {"title": "new"})
     await state.get("chat:a")
-    assert len(connections) == 1
-    assert connections[0] != threading.get_ident()
-    assert closed == []
+    assert len(connections) == 3
+    assert all(thread_id != threading.get_ident() for thread_id in connections)
+    assert closed == connections
     await asyncio.gather(state.aclose(), state.aclose())
     assert closed == connections

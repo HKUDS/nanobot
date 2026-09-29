@@ -155,9 +155,11 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
         task = asyncio.create_task(never.wait())
         output: list[str] = []
 
+        tasks: list[asyncio.Task[object]] = []
         restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
-            loop, shutdown_event, [task], output.append,
+            loop, shutdown_event, tasks, output.append,
         )
+        tasks.extend([task])
         try:
             callback, args = loop.handlers[int(signal.SIGINT)]
             assert callable(callback)
@@ -196,9 +198,11 @@ async def test_gateway_sigbreak_fallback_drains_before_forcing_and_restores(monk
     task = asyncio.create_task(asyncio.Event().wait())
     await asyncio.sleep(0)
 
+    tasks: list[asyncio.Task[object]] = []
     restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
-        loop, shutdown_event, [task], lambda _status: None,
+        loop, shutdown_event, tasks, lambda _status: None,
     )
+    tasks.extend([task])
     try:
         handlers[sigbreak](sigbreak, None)
         assert shutdown_event.is_set()

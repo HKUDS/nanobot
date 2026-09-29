@@ -481,7 +481,7 @@ def sessions_export_jsonl(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
 ) -> None:
-    """Export portable JSONL copies of SQLite conversation history."""
+    """Synchronize a sensitive, unredacted JSONL snapshot into the workspace."""
     from nanobot.session.manager import SessionManager
 
     runtime_config = _load_runtime_config(config, workspace)
