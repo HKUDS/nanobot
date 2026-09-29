@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from loguru import logger
 
 from nanobot import __version__
-from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.providers.base import LLMUsage
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.utils.helpers import build_status_content
+from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
 
@@ -901,10 +903,8 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
-    """Mark this turn as an explicit sustained-goal request."""
-    from nanobot.agent.goal_permission import goal_mutation_permission
-
+async def cmd_goal(ctx: CommandContext) -> InboundMessage | OutboundMessage:
+    """Expand an explicit goal command into model-only input."""
     goal = ctx.args.strip()
     if not goal:
         return OutboundMessage(
@@ -921,16 +921,21 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
 
-    ctx.turn_scopes.append(goal_mutation_permission(True))
-    ctx.msg.metadata = {
-        **dict(ctx.msg.metadata or {}),
-        "original_command": "/goal",
-        "original_content": ctx.raw,
-        "goal_requested": True,
-        "goal_started_at": time.time(),
-    }
-    ctx.msg.content = ctx.raw
-    return None
+    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    session.add_message("user", ctx.msg.content, _command=True, media=list(ctx.msg.media))
+    ctx.loop.sessions.save(session)
+    return replace(
+        ctx.msg,
+        content=render_template("agent/goal_request.md", task=goal, strip=True),
+        metadata={
+            **ctx.msg.metadata,
+            "original_command": "/goal",
+            "original_content": ctx.msg.content,
+            "goal_requested": True,
+            "goal_started_at": time.time(),
+            HIDDEN_HISTORY_META: {"kind": "goal_request"},
+        },
+    )
 
 
 async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:

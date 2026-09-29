@@ -12,6 +12,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
 from nanobot.runtime_context import public_history_messages
 from nanobot.session.goal_state import GOAL_STATE_KEY
+from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.manager import SessionManager
 
 
 @pytest.mark.parametrize("command", ["/goal execute the agreed plan", "/GOAL@nanobot execute the agreed plan"])
@@ -72,14 +74,21 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
         assert process.await_count == 1
         assert permissions[:3] == [False, True, True]
         assert "Discuss the migration" in calls[1]
-        assert "/GOAL execute" in calls[1] or "/goal execute" in calls[1]
+        assert "execute the agreed plan" in calls[1]
         assert "Goal Runtime Guidance" in calls[1]
         assert "create_goal is unavailable for this turn" in calls[-1]
         assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
         assert "Verify the migration" in session.metadata[GOAL_STATE_KEY]["objective"]
         assert goal_mutation_allowed() is False
-        visible = public_history_messages(session.messages)
-        assert any("execute the agreed plan" in str(row.get("content")) for row in visible)
+        persisted = SessionManager(tmp_path).get_or_create("cli:test").messages
+        visible = public_history_messages([
+            row for row in persisted if not is_hidden_history_message(row)
+        ])
+        assert sum(row.get("content") == command for row in visible) == 1
+        hidden = [row for row in persisted if is_hidden_history_message(row)]
+        assert len(hidden) == 1
+        assert "execute the agreed plan" in hidden[0]["content"]
+        assert "preceding conversation" in hidden[0]["content"]
     finally:
         release.set()
         loop.stop()
@@ -95,10 +104,18 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
     {"metadata": {"_internal_continuation": True}},
     {"metadata": {"_cron_trigger": {"job_id": "job"}}},
 ])
-def test_only_explicit_user_goal_can_enable_mid_turn_permission(overrides):
+async def test_only_explicit_user_goal_can_generate_internal_input(tmp_path, overrides):
     fields = dict(channel="cli", sender_id="user", chat_id="test", content="/goal execute")
     fields.update(overrides)
-    assert AgentLoop._is_goal_input(InboundMessage(**fields)) is False
+    msg = InboundMessage(**fields)
+    loop = AgentLoop(bus=MessageBus(), provider=MagicMock(), workspace=tmp_path, model="test-model")
+    try:
+        await loop._dispatch_command_inline(msg, msg.session_key, msg.content, loop.commands.dispatch)
+        assert loop._pending_queues == {}
+        assert goal_mutation_allowed() is False
+        assert loop.sessions.get_or_create(msg.session_key).messages == []
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.parametrize("boundary", ["text", "tool", "error", "empty"])
@@ -121,7 +138,9 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
     async def respond(**kwargs):
         calls.append(str(kwargs["messages"]))
         if len(calls) == 1:
-            loop._enqueue_session_message(goal)
+            await loop._dispatch_command_inline(
+                goal, goal.session_key, goal.content, loop.commands.dispatch,
+            )
             if boundary == "tool":
                 return LLMResponse(content=None, tool_calls=[ToolCallRequest(
                     id="list", name="list_dir", arguments={"path": "."},
@@ -154,7 +173,53 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
         goal_calls = [call for call in calls if "Goal Runtime Guidance" in call]
         assert goal_calls
         assert "Discuss the migration" in goal_calls[0]
-        assert "/goal verify the migration" in goal_calls[0]
+        assert "verify the migration" in goal_calls[0]
+        assert goal_mutation_allowed() is False
+    finally:
+        await loop.aclose()
+
+
+async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path):
+    from agent.session_helpers import run_session
+    from nanobot.command.router import CommandContext
+    from nanobot.session.recovery import pending_followups, record_pending_followup
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    message = InboundMessage(
+        channel="websocket", sender_id="user", chat_id="test", content="/goal verify the migration",
+    )
+    try:
+        generated = await loop.commands.dispatch(CommandContext(
+            msg=message, session=None, key=message.session_key,
+            raw=message.content, loop=loop, is_user_turn=True,
+        ))
+        assert isinstance(generated, InboundMessage)
+        session = loop.sessions.get_or_create(message.session_key)
+        assert record_pending_followup(session, generated)
+        loop.sessions.save(session)
+        reloaded = SessionManager(tmp_path).get_or_create(message.session_key)
+        recovered, = pending_followups(reloaded)
+        assert recovered.content == generated.content
+        assert recovered.metadata["goal_requested"] is True
+        assert goal_mutation_allowed() is False
+        provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                id="create", name="create_goal", arguments={"objective": "Verify the migration."},
+            )]),
+            LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                id="complete", name="update_goal", arguments={"action": "complete", "recap": "Verified."},
+            )]),
+            LLMResponse(content="done"),
+        ])
+        await run_session(loop, recovered)
+        assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
+        assert pending_followups(session) == []
+        assert sum(row.get("content") == message.content for row in session.messages) == 1
+        assert sum(is_hidden_history_message(row) for row in session.messages) == 1
         assert goal_mutation_allowed() is False
     finally:
         await loop.aclose()

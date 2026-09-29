@@ -5,7 +5,7 @@ import pytest
 
 from nanobot.agent.goal_permission import goal_mutation_allowed
 from nanobot.agent.loop import AgentLoop
-from nanobot.bus.events import InboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import (
     build_help_text,
@@ -16,6 +16,7 @@ from nanobot.command.builtin import (
 )
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import ModelPresetConfig
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
@@ -64,7 +65,8 @@ def _ctx(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
 def _ctx_session(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content=raw)
     return CommandContext(
-        msg=msg, session=MagicMock(), key=msg.session_key, raw=raw, args=args, loop=loop,
+        msg=msg, session=loop.sessions.get_or_create(msg.session_key),
+        key=msg.session_key, raw=raw, args=args, loop=loop,
         is_user_turn=True,
     )
 
@@ -261,10 +263,10 @@ async def test_goal_command_prepares_user_input_without_session(tmp_path) -> Non
     ctx = _ctx(loop, "/goal do work", args="do work")
     ctx.is_user_turn = True
     out = await cmd_goal(ctx)
-    assert out is None
-    assert ctx.msg.metadata["goal_requested"] is True
-    with ctx.turn_scopes[0]:
-        assert goal_mutation_allowed() is True
+    assert isinstance(out, InboundMessage)
+    assert out.metadata["goal_requested"] is True
+    assert out.metadata[HIDDEN_HISTORY_META] == {"kind": "goal_request"}
+    assert "do work" in out.content
     assert goal_mutation_allowed() is False
 
 
@@ -273,16 +275,19 @@ async def test_goal_command_marks_turn_and_preserves_explicit_request(tmp_path) 
     loop = _make_loop(tmp_path)
     ctx = _ctx_session(loop, "/goal audit the repo", args="audit the repo")
     out = await cmd_goal(ctx)
-    assert out is None
+    assert isinstance(out, InboundMessage)
     assert ctx.msg.content == "/goal audit the repo"
-    assert ctx.msg.metadata.get("original_command") == "/goal"
-    assert ctx.msg.metadata.get("original_content") == "/goal audit the repo"
-    assert ctx.msg.metadata.get("goal_requested") is True
-    assert isinstance(ctx.msg.metadata.get("goal_started_at"), int | float)
-    assert len(ctx.turn_scopes) == 1
-    with ctx.turn_scopes[0]:
-        assert goal_mutation_allowed() is True
+    assert out.metadata["original_content"] == ctx.msg.content
+    assert out.metadata["goal_requested"] is True
+    assert out.metadata[HIDDEN_HISTORY_META] == {"kind": "goal_request"}
+    assert isinstance(out.metadata["goal_started_at"], int | float)
+    assert "audit the repo" in out.content
     assert goal_mutation_allowed() is False
+    session = loop.sessions.get_or_create(ctx.key)
+    assert [(row["role"], row["content"]) for row in session.messages] == [
+        ("user", "/goal audit the repo"),
+    ]
+
 
 
 @pytest.mark.asyncio
@@ -292,12 +297,11 @@ async def test_goal_command_registered_on_router(tmp_path) -> None:
     loop = _make_loop(tmp_path)
     ctx = _ctx_session(loop, "/goal ship it", args="ship it")
     out = await router.dispatch(ctx)
-    assert out is None
-    assert "ship it" in ctx.msg.content
-    assert len(ctx.turn_scopes) == 1
-    with ctx.turn_scopes[0]:
-        assert goal_mutation_allowed() is True
+    assert isinstance(out, InboundMessage)
+    assert "ship it" in out.content
+    assert out.metadata["goal_requested"] is True
     assert goal_mutation_allowed() is False
+
 
 
 @pytest.mark.asyncio
@@ -320,7 +324,7 @@ async def test_goal_command_does_not_allow_internal_turn(tmp_path) -> None:
 
     out = await cmd_goal(ctx)
 
-    assert out is not None
+    assert isinstance(out, OutboundMessage)
     assert "only be started by a user" in out.content
     assert ctx.turn_scopes == []
 
