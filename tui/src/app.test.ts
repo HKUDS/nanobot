@@ -2381,15 +2381,19 @@ describe("NanobotTui layout", () => {
     await setup.renderOnce()
 
     const lines = setup.captureCharFrame().split("\n")
-    const column = (needle: string): number => {
+    const lineContaining = (needle: string): string => {
       const line = lines.find((candidate) => candidate.includes(needle))
       if (!line) throw new Error(`${needle} was not rendered`)
-      return line.indexOf(needle)
+      return line
     }
-    const contentColumn = column("Aligned message")
+    const messageLine = lineContaining("Aligned message")
+    const composerLine = lineContaining("Ask nanobot anything")
+    const contentColumn = messageLine.indexOf("Aligned message")
 
-    expect(column("default ▾")).toBe(contentColumn)
-    expect(column("Ready")).toBe(contentColumn)
+    expect(lineContaining("default ▾").indexOf("default ▾")).toBe(contentColumn)
+    expect(lineContaining("Ready").indexOf("Ready")).toBe(contentColumn)
+    expect(composerLine.indexOf("│")).toBe(messageLine.indexOf("›"))
+    expect(composerLine.indexOf("Ask nanobot anything")).toBe(contentColumn)
   })
 
   test("shows context usage in the idle footer", async () => {

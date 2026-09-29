@@ -214,8 +214,9 @@ const TERMINAL: Palette = {
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
 const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now · Tab send next"
 const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
-// Transcript text starts after one content-padding cell and a two-cell role marker.
-const TRANSCRIPT_TEXT_INSET = 3
+// Transcript rows start one cell inside the shell; text follows their two-cell role marker.
+const TRANSCRIPT_EDGE_INSET = 1
+const TRANSCRIPT_TEXT_INSET = TRANSCRIPT_EDGE_INSET + 2
 const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
@@ -799,9 +800,9 @@ export class NanobotTui {
     const composerSurface = this.composerSurface()
     this.composerFrame = new BoxRenderable(renderer, {
       id: "nanobot-tui-composer-frame",
-      width: "100%",
       minHeight: 1,
       flexShrink: 0,
+      marginLeft: TRANSCRIPT_EDGE_INSET,
       border: ["left"],
       borderColor: this.palette.accent,
       paddingLeft: 1,
