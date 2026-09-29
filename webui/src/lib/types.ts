@@ -1352,7 +1352,7 @@ interface InboundTurnMetadata {
 }
 
 export type InboundEvent =
-  | { event: "ready"; chat_id: string; client_id: string }
+  | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
   | {
       event: "attached";
       chat_id: string;
@@ -1543,7 +1543,7 @@ export type ThreadProjectionEvent = Extract<
   created_at_ms?: number;
 };
 
-/** Base64-encoded file attached to an outbound ``message`` envelope.
+/** Local draft/preview data, converted to HTTP binary before sending a message.
  *
  * ``data_url`` must use a server-whitelisted image, video, or document MIME
  * type. SVG remains rejected on ingress to avoid an embedded-script XSS
@@ -1643,7 +1643,7 @@ export type Outbound =
       type: "message";
       chat_id: string;
       content: string;
-      media?: OutboundMedia[];
+      media?: import("../../../packages/client-events/attachments").AttachmentReference[];
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];
       session_mentions?: SessionMention[];

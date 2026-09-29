@@ -1,117 +1,181 @@
-from __future__ import annotations
-
-import base64
+"""Production listener regressions for HTTP upload + small WS references."""
+import asyncio
+import json
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock
 
+import aiohttp
 import pytest
+from websockets.asyncio.client import connect
 
-from nanobot.webui.attachment_ingress import (
-    extract_data_url_mime,
-    store_inbound_attachments,
-)
-from nanobot.webui.ingress_policy import AttachmentIngressLimits
-
-
-def _data_url(mime: str, payload: bytes) -> str:
-    encoded = base64.b64encode(payload).decode()
-    return f"data:{mime};base64,{encoded}"
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
+from nanobot.session.manager import SessionManager
+from nanobot.webui.gateway_services import build_gateway_services
 
 
-@pytest.mark.parametrize(
-    ("url", "expected"),
-    [
-        ("data:image/png;base64,AAAA", "image/png"),
-        ("data:IMAGE/JPEG;charset=utf-8;base64,AAAA", "image/jpeg"),
-        ("data:video/webm;codecs=vp9;base64,AAAA", "video/webm"),
-        ("data:text/plain;base64,AAAA", "text/plain"),
-        ("data:image/svg+xml;base64,AAAA", "image/svg+xml"),
-        ("data:image/png,AAAA", None),
-        ("data:;base64,AAAA", None),
-        ("https://example.invalid/image.png", None),
-        ("", None),
-        (None, None),
-    ],
-)
-def test_extract_data_url_mime_normalizes_only_base64_data_urls(
-    url: Any,
-    expected: str | None,
-) -> None:
-    assert extract_data_url_mime(url) == expected
-
-
-def test_store_inbound_document_preserves_safe_name(tmp_path: Path) -> None:
-    paths, rejection = store_inbound_attachments(
-        [
-            {
-                "data_url": _data_url("text/csv", b"name,value\nnanobot,1"),
-                "name": "report.csv",
-            },
-        ],
-        media_dir=tmp_path,
-        logger=MagicMock(),
+@pytest.fixture
+async def gateway(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", lambda _: tmp_path / "media")
+    bus = MessageBus()
+    config = WebSocketConfig(port=0, path="/ws", token="test-secret", max_message_bytes=1048576)
+    services = build_gateway_services(
+        config=config, bus=bus, session_manager=SessionManager(tmp_path),
+        static_dist_path=None, workspace_path=tmp_path,
+        default_restrict_to_workspace=True, runtime_model_name=None,
+        runtime_surface="browser", runtime_capabilities_overrides=None,
+        config_path=tmp_path / "config.json",
     )
-
-    assert rejection is None
-    assert len(paths) == 1
-    saved = Path(paths[0])
-    assert saved.parent == tmp_path
-    assert saved.name.endswith("_report.csv")
-    assert saved.read_bytes() == b"name,value\nnanobot,1"
-
-
-def test_invalid_batch_removes_files_already_persisted(tmp_path: Path) -> None:
-    paths, rejection = store_inbound_attachments(
-        [
-            {"data_url": _data_url("image/png", b"valid-first-item")},
-            {"data_url": _data_url("image/svg+xml", b"<svg/>")},
-        ],
-        media_dir=tmp_path,
-        logger=MagicMock(),
-    )
-
-    assert paths == []
-    assert rejection == "mime"
-    assert list(tmp_path.iterdir()) == []
+    channel = WebSocketChannel(config, bus, gateway=services)
+    task = asyncio.create_task(channel.start())
+    try:
+        async with asyncio.timeout(10):
+            while channel._server is None:
+                if task.done():
+                    await task
+                await asyncio.sleep(.01)
+        port = channel._server.sockets[0].getsockname()[1]
+        yield channel, bus, f"http://127.0.0.1:{port}", f"ws://127.0.0.1:{port}/ws?token=test-secret"
+    finally:
+        await channel.stop()
+        await task
 
 
-def test_invalid_base64_cannot_create_an_empty_attachment(tmp_path: Path) -> None:
-    paths, rejection = store_inbound_attachments(
-        [{"data_url": "data:text/plain;base64,@@@@", "name": "empty.txt"}],
-        media_dir=tmp_path,
-        logger=MagicMock(),
-    )
-
-    assert paths == []
-    assert rejection == "decode"
-    assert list(tmp_path.iterdir()) == []
+async def event(ws, name):
+    async with asyncio.timeout(5):
+        while True:
+            payload = json.loads(await ws.recv())
+            if payload["event"] == name:
+                return payload
 
 
-def test_single_file_limit_is_attachment_policy_not_transport(tmp_path: Path) -> None:
-    paths, rejection = store_inbound_attachments(
-        [{"data_url": _data_url("text/plain", b"12345"), "name": "large.txt"}],
-        media_dir=tmp_path,
-        logger=MagicMock(),
-        limits=AttachmentIngressLimits(max_file_bytes=4, max_total_bytes=20),
-    )
+@pytest.mark.parametrize("mime,name", [
+    ("image/png", "image.png"), ("text/csv", "report.csv"), ("video/webm", "clip.webm"),
+])
+async def test_real_listener_large_binary_and_reference_delivery(gateway, mime, name):
+    channel, bus, http_url, ws_url = gateway
+    raw = b"x" * 1_453_245
+    async with connect(ws_url) as ws, aiohttp.ClientSession() as http:
+        ready = await event(ws, "ready")
+        capability = ready["upload"]
+        headers = {"Authorization": f"Bearer {capability['token']}", "Content-Type": mime,
+                   "X-Attachment-Name": name}
+        async with http.post(http_url + capability["path"], data=raw, headers=headers, expect100=True) as response:
+            assert response.status == 201, await response.text()
+            reference = (await response.json())["reference"]
+        frame = {"type": "message", "chat_id": ready["chat_id"], "content": "look",
+                 "webui": True, "turn_id": "binary-turn",
+                 "media": [{"reference": reference, "name": name}]}
+        assert len(json.dumps(frame)) < 1024
+        await ws.send(json.dumps(frame))
+        assert (await event(ws, "message_accepted"))["turn_id"] == "binary-turn"
+        inbound = await asyncio.wait_for(bus.consume_inbound(), 2)
+        path = Path(inbound.media[0])
+        assert path.read_bytes() == raw
+        assert path.parent == channel.gateway.media.attachments.media_dir
+        # Lost ACK retry must not resolve a consumed reference or dispatch twice.
+        await ws.send(json.dumps(frame))
+        await event(ws, "message_accepted")
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(bus.consume_inbound(), .03)
+        channel.gateway.media.attachments.clear()
+        assert path.exists()
 
-    assert paths == []
-    assert rejection == "size"
-    assert list(tmp_path.iterdir()) == []
+
+async def test_capability_is_required_owner_scoped_and_revoked(gateway):
+    channel, _, http_url, ws_url = gateway
+    async with aiohttp.ClientSession() as http:
+        for token in ("", "test-secret", "client-selected-id"):
+            async with http.post(http_url + "/api/attachments", data=b"secret",
+                                 headers={"Authorization": f"Bearer {token}", "Content-Type": "text/plain"}) as response:
+                assert response.status == 401
+        async with connect(ws_url) as owner, connect(ws_url) as other:
+            capability = (await event(owner, "ready"))["upload"]
+            other_ready = await event(other, "ready")
+            headers = {"Authorization": f"Bearer {capability['token']}", "Content-Type": "image/png"}
+            async with http.post(http_url + capability["path"], data=b"image", headers=headers) as response:
+                reference = (await response.json())["reference"]
+            await other.send(json.dumps({"type": "message", "chat_id": other_ready["chat_id"],
+                "content": "steal", "media": [{"reference": reference}], "turn_id": "foreign"}))
+            assert (await event(other, "error"))["detail"] == "attachment_rejected"
+        async with asyncio.timeout(5):
+            while capability["token"] in channel.gateway.media.uploads._tokens:
+                await asyncio.sleep(.01)
+        async with http.post(http_url + capability["path"], data=b"image", headers=headers) as response:
+            assert response.status == 401
 
 
-def test_total_attachment_policy_rolls_back_the_batch(tmp_path: Path) -> None:
-    paths, rejection = store_inbound_attachments(
-        [
-            {"data_url": _data_url("text/plain", b"1234"), "name": "one.txt"},
-            {"data_url": _data_url("text/plain", b"5678"), "name": "two.txt"},
-        ],
-        media_dir=tmp_path,
-        logger=MagicMock(),
-        limits=AttachmentIngressLimits(max_file_bytes=4, max_total_bytes=6),
-    )
+async def test_inline_payload_rejected_and_failed_validation_keeps_upload(gateway):
+    channel, bus, http_url, ws_url = gateway
+    async with connect(ws_url) as ws, aiohttp.ClientSession() as http:
+        ready = await event(ws, "ready")
+        capability = ready["upload"]
+        frame = {"type": "message", "chat_id": ready["chat_id"], "content": "look",
+                 "webui": True, "turn_id": "retry-turn", "media": [{"data_url": "data:image/png;base64,eA=="}]}
+        await ws.send(json.dumps(frame))
+        assert (await event(ws, "error"))["detail"] == "attachment_rejected"
+        headers = {"Authorization": f"Bearer {capability['token']}", "Content-Type": "image/png"}
+        async with http.post(http_url + capability["path"], data=b"image", headers=headers) as response:
+            reference = (await response.json())["reference"]
+        frame["media"] = [{"reference": reference}, {"reference": "invalid"}]
+        await ws.send(json.dumps(frame))
+        await event(ws, "error")
+        frame["media"] = [{"reference": reference}]
+        await ws.send(json.dumps(frame))
+        await event(ws, "message_accepted")
+        assert (await bus.consume_inbound()).media
 
-    assert paths == []
-    assert rejection == "total_size"
-    assert list(tmp_path.iterdir()) == []
+
+def test_removed_websocket_options_are_ignored_with_temporary_warning(monkeypatch):
+    from unittest.mock import MagicMock
+
+    warning = MagicMock()
+    monkeypatch.setattr("nanobot.channels.websocket.runtime.logger.warning", warning)
+    # Only option names are logged; obsolete values are not validated or leaked.
+    config = WebSocketConfig.model_validate({
+        "host": "127.0.0.1", "port": 12345, "token": "configured-secret",
+        "maxMessageBytes": 1048576,
+        "legacyAttachmentLimit": {"obsolete": "not a number"},
+        "legacy_attachment_limit": -1,
+    })
+    assert warning.call_count == 2
+    assert all("0.5.0" in call.args[0] for call in warning.call_args_list)
+    assert "configured-secret" not in str(warning.call_args_list)
+    assert "not a number" not in str(warning.call_args_list)
+    assert config.port == 12345
+    assert config.token == "configured-secret"
+    assert config.max_message_bytes == 1048576
+    assert "legacyAttachmentLimit" not in config.model_dump(by_alias=True)
+    assert "legacy_attachment_limit" not in config.model_dump()
+    with pytest.raises(ValueError):
+        WebSocketConfig.model_validate({"host": "0.0.0.0"})
+
+
+@pytest.mark.parametrize("mime,body", [
+    ("image/svg+xml", b"<svg/>"), ("text/javascript", b"alert(1)"),
+    ("image/png", b""), ("image/png", b"x" * (6 * 1024 * 1024 + 1)),
+], ids=["svg", "javascript", "empty", "oversized"])
+async def test_http_policy_rejection_does_not_leave_files(gateway, mime, body):
+    channel, _, http_url, ws_url = gateway
+    async with connect(ws_url) as ws, aiohttp.ClientSession() as http:
+        capability = (await event(ws, "ready"))["upload"]
+        async with http.post(http_url + capability["path"], data=body,
+            headers={"Authorization": f"Bearer {capability['token']}", "Content-Type": mime},
+            expect100=True,
+        ) as response:
+            assert response.status == 400
+        assert not [p for p in channel.gateway.media.attachments.media_dir.rglob("*") if p.is_file()]
+
+
+async def test_one_shot_handshake_token_is_not_an_upload_credential(gateway):
+    channel, _, http_url, _ = gateway
+    # Use the same one-shot token registry as the bootstrap endpoint.
+    issued = channel.gateway.tokens.issue_token(60, audience="webui")
+    ws_url = http_url.replace("http://", "ws://") + "/ws?token=" + issued
+    async with connect(ws_url) as ws, aiohttp.ClientSession() as http:
+        capability = (await event(ws, "ready"))["upload"]
+        assert issued not in channel.gateway.tokens.issued_tokens
+        for token, expected in [(issued, 401), (capability["token"], 201)]:
+            async with http.post(http_url + capability["path"], data=b"binary",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "image/png"},
+            ) as response:
+                assert response.status == expected

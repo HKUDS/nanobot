@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, Any, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
 from weakref import WeakSet
 
-from pydantic import Field, PrivateAttr, field_validator, model_validator
+from loguru import logger
+from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import Server, ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
@@ -33,6 +34,7 @@ from nanobot.session.webui_turns import (
     mark_websocket_turn_transcript_persistence_failed,
     websocket_turn_transcript_persistence_failed,
 )
+from nanobot.webui.binary_http import BinaryHTTPBridge
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -193,6 +195,28 @@ class WebSocketConfig(Base):
       shared filesystem or an HTTP file server to access these files.
     """
 
+    # Removed channel options may remain in existing user configuration. They
+    # aren't runtime settings and must not validate or be re-emitted.
+    model_config = ConfigDict(extra="ignore")
+
+    # TODO(0.5.0): remove this compatibility warning/validator; keep extra="ignore".
+    @model_validator(mode="before")
+    @classmethod
+    def warn_ignored_options(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            known = set(cls.model_fields)
+            known.update(field.alias for field in cls.model_fields.values() if field.alias)
+            options = cast(dict[str, Any], value)
+            for key in options:
+                if key not in known:
+                    logger.warning(
+                        "WebSocket configuration option {!r} is deprecated and ignored; "
+                        "this compatibility warning will also be removed in 0.5.0.",
+                        key,
+                    )
+            return options
+        return value
+
     enabled: bool = True
     host: str = "127.0.0.1"
     port: int = 8765
@@ -207,10 +231,8 @@ class WebSocketConfig(Base):
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
-    # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
-    # client-side Worker normalization (see webui Composer). 4 × 6 MB × 1.37
-    # (base64 overhead) + envelope framing stays under 36 MB; the 40 MB ceiling
-    # leaves a small margin for sender slop without opening a DoS avenue.
+    # Keep the existing configurable guard (also used for non-attachment
+    # frames). Binary attachments now upload over HTTP, not inside this limit.
     max_message_bytes: int = Field(default=37_748_736, ge=1024, le=41_943_040)
     ping_interval_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
@@ -696,6 +718,18 @@ class WebSocketChannel(BaseChannel):
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
+        bridge = BinaryHTTPBridge(self._media.uploads.handle)
+
+        async def prune_uploads() -> None:
+            while not stop_event.is_set():
+                self._media.attachments.prune()
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=30)
+                except TimeoutError:
+                    pass
+
+        prune_task = asyncio.create_task(prune_uploads())
+
         async def runner() -> None:
             socket_path = self.config.unix_socket_path
             failures = 0
@@ -713,6 +747,7 @@ class WebSocketChannel(BaseChannel):
                             handler,
                             socket_path,
                             process_request=process_request,
+                            create_connection=bridge.connection_factory,
                             open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                             max_size=self.config.max_message_bytes,
                             ping_interval=self.config.ping_interval_s,
@@ -727,6 +762,7 @@ class WebSocketChannel(BaseChannel):
                             self.config.host,
                             self.config.port,
                             process_request=process_request,
+                            create_connection=bridge.connection_factory,
                             open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                             max_size=self.config.max_message_bytes,
                             ping_interval=self.config.ping_interval_s,
@@ -787,6 +823,10 @@ class WebSocketChannel(BaseChannel):
         try:
             await task
         finally:
+            prune_task.cancel()
+            await asyncio.gather(prune_task, return_exceptions=True)
+            await bridge.shutdown()
+            self._media.attachments.clear()
             self._running = False
             if self._server_task is task:
                 self._server_task = None
@@ -813,6 +853,8 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        **({"upload": self._media.uploads.issue(connection)}
+                           if self.is_allowed(client_id) else {}),
                         **({"terminal": {
                             "protocolVersion": 1, "gatewayId": self.gateway.tokens.instance_id,
                         }} if _query_first(query, "terminal_protocol") == "1" else {}),
