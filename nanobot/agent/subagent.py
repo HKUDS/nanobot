@@ -169,6 +169,17 @@ class SubagentManager:
         """Return the observable task statuses used by runtime-control snapshots."""
         return self._task_statuses
 
+    def statuses_for_session(self, session_key: str | None) -> Mapping[str, SubagentStatus]:
+        """Return only tasks owned by the given session, never a global fallback."""
+        if not session_key:
+            return {}
+        task_ids = self._session_tasks.get(session_key, set())
+        return {
+            task_id: status
+            for task_id, status in self._task_statuses.items()
+            if task_id in task_ids
+        }
+
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         """Update the deprecated runtime source used by legacy ``spawn`` calls."""
         warnings.warn(

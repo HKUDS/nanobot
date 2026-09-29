@@ -393,6 +393,10 @@ class MyTool(Tool):
     def _inspect(self, key: str | None) -> str:
         if not key:
             return self._inspect_all()
+        if key == "subagents" or key.startswith("subagents."):
+            request_ctx = current_request_context()
+            if request_ctx is None or not request_ctx.session_key:
+                return ToolResult.error("Error: current session context is unavailable")
         if key == "request" or key.startswith("request."):
             request_ctx = current_request_context()
             if request_ctx is None:

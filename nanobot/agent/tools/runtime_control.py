@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
+from nanobot.agent.tools.context import current_request_session_key
+
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager, SubagentStatus
     from nanobot.agent.tools.shell import ExecToolConfig
@@ -268,7 +270,7 @@ def _snapshot_subagent_statuses(
 ) -> dict[str, dict[str, object]]:
     return {
         task_id: _snapshot_subagent_status(status)
-        for task_id, status in manager.runtime_statuses().items()
+        for task_id, status in manager.statuses_for_session(current_request_session_key()).items()
     }
 
 

@@ -61,7 +61,9 @@ def _make_mock_loop(**overrides):
     loop.subagents = MagicMock()
     loop.subagents._running_tasks = {"abc123": MagicMock(done=MagicMock(return_value=False))}
     loop.subagents._task_statuses = {}
-    loop.subagents.runtime_statuses.side_effect = lambda: loop.subagents._task_statuses
+    loop.subagents.statuses_for_session.side_effect = (
+        lambda key: loop.subagents._task_statuses if key == "test:owner" else {}
+    )
     loop.subagents.get_running_count = MagicMock(return_value=1)
 
     for k, v in overrides.items():
@@ -780,8 +782,7 @@ class TestCheckpointCallback:
 
 # ---------------------------------------------------------------------------
 # check subagents._task_statuses via dot-path
-# NOTE: subagents is now BLOCKED for security, so these tests verify
-# that access is properly rejected.
+# Task status inspection requires the owning session context.
 # ---------------------------------------------------------------------------
 
 class TestInspectTaskStatuses:
@@ -805,7 +806,8 @@ class TestInspectTaskStatuses:
             ),
         }
         tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="subagents._task_statuses")
+        with request_context(RequestContext("test", "owner", session_key="test:owner")):
+            result = await tool.execute(action="check", key="subagents._task_statuses")
         assert "abc12345" in result
         assert "read logs" in result
 
@@ -826,7 +828,8 @@ class TestInspectTaskStatuses:
         )
         loop.subagents._task_statuses = {"xyz": status}
         tool = _make_tool(loop=loop)
-        result = await tool.execute(action="check", key="subagents._task_statuses.xyz")
+        with request_context(RequestContext("test", "owner", session_key="test:owner")):
+            result = await tool.execute(action="check", key="subagents._task_statuses.xyz")
         assert "search code" in result
         assert "completed" in result
 
