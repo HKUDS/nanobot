@@ -24,23 +24,23 @@ AttachmentRejection = Literal[
 ]
 AttachmentIngressResult = tuple[list[str], AttachmentRejection | None]
 
-_MAX_VIDEOS_PER_MESSAGE = 1
-_MAX_VIDEO_BYTES = 20 * 1024 * 1024
+MAX_VIDEOS_PER_MESSAGE = 1
+MAX_VIDEO_BYTES = 20 * 1024 * 1024
 
-_IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
+IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
     "image/png",
     "image/jpeg",
     "image/webp",
     "image/gif",
 })
 
-_VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
+VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
     "video/mp4",
     "video/webm",
     "video/quicktime",
 })
 
-_DOCUMENT_MIME_ALLOWED: frozenset[str] = frozenset({
+DOCUMENT_MIME_ALLOWED: frozenset[str] = frozenset({
     "application/json",
     "application/pdf",
     "application/toml",
@@ -59,8 +59,8 @@ _DOCUMENT_MIME_ALLOWED: frozenset[str] = frozenset({
     "text/yaml",
 })
 
-_UPLOAD_MIME_ALLOWED: frozenset[str] = (
-    _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED | _DOCUMENT_MIME_ALLOWED
+UPLOAD_MIME_ALLOWED: frozenset[str] = (
+    IMAGE_MIME_ALLOWED | VIDEO_MIME_ALLOWED | DOCUMENT_MIME_ALLOWED
 )
 
 _DATA_URL_MIME_RE = re.compile(r"^data:([^;,]+)(?:;[^,]*)*;base64,", re.DOTALL)
@@ -99,15 +99,15 @@ def store_inbound_attachments(
             if attachment is not None
             else None
         )
-        if mime in _VIDEO_MIME_ALLOWED:
+        if mime in VIDEO_MIME_ALLOWED:
             video_count += 1
-        elif mime in _IMAGE_MIME_ALLOWED:
+        elif mime in IMAGE_MIME_ALLOWED:
             image_count += 1
-        elif mime in _DOCUMENT_MIME_ALLOWED:
+        elif mime in DOCUMENT_MIME_ALLOWED:
             document_count += 1
     if image_count > limits.max_count:
         return [], "too_many_images"
-    if video_count > _MAX_VIDEOS_PER_MESSAGE:
+    if video_count > MAX_VIDEOS_PER_MESSAGE:
         return [], "too_many_videos"
     if image_count + document_count > limits.max_count:
         return [], "too_many_attachments"
@@ -133,12 +133,12 @@ def store_inbound_attachments(
         mime = extract_data_url_mime(data_url)
         if mime is None:
             return abort("decode")
-        if mime not in _UPLOAD_MIME_ALLOWED:
+        if mime not in UPLOAD_MIME_ALLOWED:
             return abort("mime")
-        is_video = mime in _VIDEO_MIME_ALLOWED
-        is_document = mime in _DOCUMENT_MIME_ALLOWED
+        is_video = mime in VIDEO_MIME_ALLOWED
+        is_document = mime in DOCUMENT_MIME_ALLOWED
         max_bytes = (
-            _MAX_VIDEO_BYTES if is_video
+            MAX_VIDEO_BYTES if is_video
             else limits.max_file_bytes
         )
         name = (
