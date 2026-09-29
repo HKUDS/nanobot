@@ -2371,6 +2371,27 @@ describe("NanobotTui layout", () => {
     expect(assistantMarker?.renderable.fg.toInts().slice(0, 3)).toEqual([161, 161, 170])
   })
 
+  test("aligns footer labels with transcript content", async () => {
+    setup = await createRenderer({ width: 72, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    ;(app as unknown as { transcript: { user(content: string): void } })
+      .transcript.user("Aligned message")
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    await setup.renderOnce()
+
+    const lines = setup.captureCharFrame().split("\n")
+    const column = (needle: string): number => {
+      const line = lines.find((candidate) => candidate.includes(needle))
+      if (!line) throw new Error(`${needle} was not rendered`)
+      return line.indexOf(needle)
+    }
+    const contentColumn = column("Aligned message")
+
+    expect(column("default ▾")).toBe(contentColumn)
+    expect(column("Ready")).toBe(contentColumn)
+  })
+
   test("shows context usage in the idle footer", async () => {
     setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
     const app = mount(setup)

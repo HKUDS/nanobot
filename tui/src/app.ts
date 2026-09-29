@@ -214,6 +214,8 @@ const TERMINAL: Palette = {
 const COMPOSER_PLACEHOLDER = "Ask nanobot anything"
 const ACTIVE_COMPOSER_PLACEHOLDER = "Enter send now · Tab send next"
 const COMPACT_ACTIVE_COMPOSER_PLACEHOLDER = "Enter now · Tab next"
+// Transcript text starts after one content-padding cell and a two-cell role marker.
+const TRANSCRIPT_TEXT_INSET = 3
 const IMAGE_PLACEHOLDER_STYLE = "image.placeholder"
 const SHIMMER_PAUSE = 16
 const SHIMMER_BAND = 4
@@ -756,6 +758,7 @@ export class NanobotTui {
       flexShrink: 0,
       flexDirection: "row",
       alignItems: "center",
+      paddingLeft: TRANSCRIPT_TEXT_INSET,
       backgroundColor: RGBA.defaultBackground(),
     })
     this.runtimeControls = new RuntimeControls(
@@ -877,6 +880,7 @@ export class NanobotTui {
       flexDirection: "row",
       justifyContent: "space-between",
       gap: 2,
+      paddingLeft: TRANSCRIPT_TEXT_INSET,
     })
     this.composerFrame.add(this.composer)
     statusRow.add(this.status)
