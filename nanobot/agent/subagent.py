@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, cast
 
 from loguru import logger
 
@@ -111,8 +111,11 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
-        consolidator: Consolidator | None = None,
+        *,
+        consolidator: Consolidator,
     ):
+        if cast(object, consolidator) is None:
+            raise TypeError("SubagentManager requires a consolidator")
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
         if bus is None:
@@ -433,27 +436,19 @@ class SubagentManager:
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
                 tool_definitions = tools.get_definitions()
-                consolidate_history = (
-                    partial(
-                        self.consolidator.summarize_transcript,
-                        runtime=runtime,
-                        session_key=f"subagent:{task_id}",
-                        tools=tool_definitions,
-                        persist=False,
-                    )
-                    if self.consolidator is not None
-                    else None
+                consolidate_history = partial(
+                    self.consolidator.summarize_transcript,
+                    runtime=runtime,
+                    session_key=f"subagent:{task_id}",
+                    tools=tool_definitions,
+                    persist=False,
                 )
-                consolidate_provider_compaction = (
-                    partial(
-                        self.consolidator.summarize_provider_compaction,
-                        runtime=runtime,
-                        session_key=f"subagent:{task_id}",
-                        tools=tool_definitions,
-                        persist=False,
-                    )
-                    if self.consolidator is not None
-                    else None
+                consolidate_provider_compaction = partial(
+                    self.consolidator.summarize_provider_compaction,
+                    runtime=runtime,
+                    session_key=f"subagent:{task_id}",
+                    tools=tool_definitions,
+                    persist=False,
                 )
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,

@@ -9,6 +9,7 @@ import pytest
 
 from nanobot.agent import SubagentManager
 from nanobot.agent.hook import AgentHookContext
+from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import (
     SubagentStatus,
@@ -28,6 +29,7 @@ def _manager(tmp_path: Path, **kw) -> SubagentManager:
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
     defaults.update(kw)
     return SubagentManager(**defaults)
@@ -114,6 +116,7 @@ class TestLegacyCompatibility:
                 MessageBus(),
                 16_000,
                 "legacy-model",
+                consolidator=MagicMock(spec=Consolidator),
             )
 
         assert sm.workspace == tmp_path
@@ -130,6 +133,7 @@ class TestLegacyCompatibility:
                 bus=MessageBus(),
                 max_tool_result_chars=16_000,
                 model="legacy-model",
+                consolidator=MagicMock(spec=Consolidator),
             )
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",

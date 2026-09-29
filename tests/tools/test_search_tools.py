@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.memory import Consolidator
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.search import FindFilesTool, GrepTool
@@ -781,6 +782,7 @@ async def test_subagent_registers_search_backend(tmp_path: Path, monkeypatch, us
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=4096,
@@ -823,6 +825,7 @@ def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
     (skills_dir / "beta" / "SKILL.md").write_text("# Beta\n\nshown\n", encoding="utf-8")
 
     mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=4096,
