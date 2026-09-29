@@ -10,7 +10,7 @@ My tool fills this gap. With it, the agent can:
 
 - **Know who it is**: What model am I using? Where is my workspace? What is my per-turn iteration limit?
 - **Adapt on the fly**: Complex task? Expand the context window. Simple chat? Switch to a faster model.
-- **Remember across turns**: Store notes in your scratchpad that persist into the next conversation turn.
+- **Remember across turns**: Set a durable session focus for the current task, or store notes in your scratchpad for the next conversation turn.
 
 ## Configuration
 
@@ -27,8 +27,9 @@ To allow the agent to set its configuration (e.g. switch models, adjust paramete
 
 Legacy `tools.myEnabled` / `tools.mySet` keys are auto-migrated on load, and rewritten in-place the next time `nanobot onboard` refreshes the config.
 
-Most modifications are held in memory only. `model_preset` is the exception: it is
-stored in the current session so the selection survives a restart.
+Most modifications are held in memory only. `model_preset` and `focus` are stored in
+the current session so the selection or continuity cue survives a restart. Focus is
+automatically added to the next turn as metadata-only runtime context.
 
 ---
 
@@ -59,6 +60,9 @@ my(action="check", key="model")
 
 my(action="check", key="web_config.enable")
 # → Whether web search is enabled
+
+my(action="check", key="focus")
+# → The durable continuity cue for the current session, if one is set
 ```
 
 ### What you can do with it
@@ -72,6 +76,7 @@ my(action="check", key="web_config.enable")
 | "Where is your working directory?" | `check("workspace")` |
 | "Show me your full config" | `check()` |
 | "Are there any subagents running?" | `check("subagents")` — shows phase, iteration, elapsed time, tool events |
+| "What should you keep in mind for this task?" | `check("focus")` |
 
 ---
 
@@ -89,6 +94,12 @@ my(action="set", key="max_iterations", value=80)
 
 my(action="set", key="model_preset", value="fast")
 # → Use a configured model preset for this session's next turn
+
+my(action="set", key="focus", value="Finish the migration review before optimizing it.")
+# → Persist a short continuity cue for this session's future turns
+
+my(action="set", key="focus", value="")
+# → Clear the current session focus
 ```
 
 You can also store custom state in your scratchpad:
