@@ -51,7 +51,7 @@ class WebuiSessionAccess:
             return None
         return payload
 
-    def normalize_mentions(
+    async def normalize_mentions(
         self,
         raw: object,
         *,
@@ -60,13 +60,18 @@ class WebuiSessionAccess:
         normalized: list[SessionMention] = []
         seen_keys: set[str] = set()
         seen_names: set[str] = set()
+        handles = await self._handles.alist_all_by_key()
         for raw_mention in normalize_session_mentions_metadata(raw):
             mention = raw_mention
             key = mention["session_key"]
-            payload = self._metadata(key, exclude_session_key=exclude_session_key)
+            payload = (
+                None
+                if key == exclude_session_key
+                else await self._sessions.state.read_metadata(key)
+            )
             if payload is None or key in seen_keys:
                 continue
-            handle = self._handles.handle_for_session(key)
+            handle = handles.get(key)
             if handle is None:
                 continue
             folded_name = handle.name.casefold()

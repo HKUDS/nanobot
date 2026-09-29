@@ -167,10 +167,12 @@ def test_webui_session_list_sees_committed_snapshot_during_write(tmp_path):
     manager.save(session)
     session.messages[0]["content"] = "after"
     with ThreadPoolExecutor(max_workers=1) as executor:
-        with manager.transaction():
+        def write() -> None:
             manager.save(session)
             rows = executor.submit(list_webui_sessions, manager).result(timeout=3)
             assert rows[0]["preview"] == "before"
+
+        manager._store.run_write(write)
         assert list_webui_sessions(manager)[0]["preview"] == "after"
 
 

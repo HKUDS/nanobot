@@ -682,7 +682,10 @@ class WebuiTurnCoordinator:
         if (self._is_websocket_event(event.context)
                 and event.context.metadata.get(WEBUI_SESSION_METADATA_KEY) is True):
             await self.sessions.state.update_metadata(
-                event.context.session_key, {WEBUI_SESSION_METADATA_KEY: True},
+                event.context.session_key,
+                {WEBUI_SESSION_METADATA_KEY: True},
+                expected_generation=event.context.session_generation,
+                create_if_missing=False,
             )
 
     async def _handle_run_status_changed(self, event: TurnRunStatusChanged) -> None:

@@ -1822,7 +1822,11 @@ class ModelSettingsHandler:
     ) -> SettingsRouteResult:
         try:
             if action == "agent-update":
-                payload = self.settings.mutate(operations.update_agent, request.query)
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
+                    operations.update_agent,
+                    request.query,
+                )
                 self._refresh_runtime_config()
                 return SettingsRouteResult.success(
                     payload,
@@ -1831,7 +1835,8 @@ class ModelSettingsHandler:
                 )
 
             if action == "model-update":
-                payload = self.settings.mutate(
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
                     operations.update_model,
                     request.query,
                     rename_model_preset=self.settings.rename_model_preset,
@@ -1847,12 +1852,17 @@ class ModelSettingsHandler:
                 "provider-create": operations.create_provider,
             }.get(action)
             if mutation is not None:
-                payload = self.settings.mutate(mutation, request.query)
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
+                    mutation,
+                    request.query,
+                )
                 self._refresh_runtime_config()
                 return SettingsRouteResult.success(payload, decorate_restart=True)
 
             if action == "provider-update":
-                payload = self.settings.mutate(
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
                     operations.update_provider,
                     request.query,
                 )

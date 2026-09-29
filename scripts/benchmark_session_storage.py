@@ -4,19 +4,28 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import gc
 import hashlib
 import json
 import math
 import os
 import platform
-import resource
+import shutil
+import sqlite3
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import UTC, datetime
+from importlib.metadata import distributions
 from pathlib import Path
+
+try:
+    import resource
+except ModuleNotFoundError:  # Windows
+    resource = None  # type: ignore[assignment]
 
 
 def stats(samples):
@@ -31,14 +40,142 @@ def stats(samples):
 def sync_file(path):
     with path.open("rb") as handle:
         os.fsync(handle.fileno())
-    fd = os.open(path.parent, os.O_RDONLY)
     try:
-        os.fsync(fd)
+        fd = os.open(path.parent, os.O_RDONLY)
+    except PermissionError:
+        return
+    try:
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            if exc.errno != errno.EINVAL:
+                raise
     finally:
         os.close(fd)
 
 
+def _sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def _git(repo, *args):
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+
+
+def git_identity(repo):
+    status = _git(repo, "status", "--porcelain=v1", "--untracked-files=all")
+    diff = _git(repo, "diff", "--binary", "HEAD")
+    return {
+        "commit": _git(repo, "rev-parse", "HEAD"),
+        "branch": _git(repo, "rev-parse", "--abbrev-ref", "HEAD"),
+        "dirty": bool(status),
+        "status_sha256": hashlib.sha256(status.encode()).hexdigest(),
+        "tracked_diff_sha256": hashlib.sha256(diff.encode()).hexdigest(),
+    }
+
+
+def dependency_identity(repo):
+    installed = sorted(
+        f"{(dist.metadata.get('Name') or '').casefold()}=={dist.version}"
+        for dist in distributions()
+        if dist.metadata.get("Name")
+    )
+    encoded = "\n".join(installed).encode()
+    return {
+        "installed_count": len(installed),
+        "installed_sha256": hashlib.sha256(encoded).hexdigest(),
+        "uv_lock_sha256": _sha256(repo / "uv.lock"),
+    }
+
+
+def filesystem_identity(path):
+    resolved = path.resolve()
+    usage = shutil.disk_usage(resolved)
+    filesystem_type = None
+    mount_point = resolved.anchor
+    collector = "platform-fallback"
+    if os.name == "nt":
+        import ctypes
+
+        fs_name = ctypes.create_unicode_buffer(256)
+        root = resolved.anchor or str(resolved)
+        ok = ctypes.windll.kernel32.GetVolumeInformationW(
+            root, None, 0, None, None, None, fs_name, len(fs_name)
+        )
+        filesystem_type = fs_name.value if ok else None
+        collector = "GetVolumeInformationW"
+    else:
+        try:
+            best = ("", None)
+            for line in Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines():
+                left, right = line.split(" - ", 1)
+                fields = left.split()
+                candidate = fields[4].replace("\\040", " ")
+                if str(resolved).startswith(candidate.rstrip("/") + "/") or str(resolved) == candidate:
+                    if len(candidate) > len(best[0]):
+                        best = (candidate, right.split()[0])
+            if best[0]:
+                mount_point, filesystem_type = best
+                collector = "/proc/self/mountinfo"
+        except (OSError, ValueError, IndexError):
+            pass
+    return {
+        "path": str(resolved),
+        "device": os.stat(resolved).st_dev,
+        "mount_point": mount_point,
+        "filesystem_type": filesystem_type,
+        "collector": collector,
+        "total_bytes": usage.total,
+        "free_bytes": usage.free,
+    }
+
+
+def peak_rss_bytes():
+    if resource is not None:
+        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return value if sys.platform == "darwin" else value * 1024
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        class ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        process = ctypes.windll.kernel32.GetCurrentProcess()
+        if ctypes.windll.psapi.GetProcessMemoryInfo(
+            process, ctypes.byref(counters), counters.cb
+        ):
+            return counters.PeakWorkingSetSize
+    return None
+
+
+def allocated_bytes(path):
+    blocks = getattr(path.stat(), "st_blocks", None)
+    return blocks * 512 if isinstance(blocks, int) else None
+
+
 async def main(args):
+    started_at_utc = datetime.now(UTC).isoformat()
     sys.path.insert(0, str(args.repo.resolve()))
     import nanobot.session.manager as session_module
     from nanobot.config.loader import set_config_path
@@ -210,14 +347,20 @@ async def main(args):
 
         measure_sync("list_sessions", 100, list_sessions, iterations=args.iterations)
         paths = [p for p in listing.sessions_dir.rglob("*") if p.is_file()]
+        allocated = [allocated_bytes(path) for path in paths]
         disk = {"sessions": args.list_count, "messages_per_session": 100,
                 "files": len(paths), "logical_bytes": sum(p.stat().st_size for p in paths),
-                "allocated_bytes": sum(p.stat().st_blocks * 512 for p in paths)}
+                "allocated_bytes": (
+                    sum(value for value in allocated if value is not None)
+                    if all(value is not None for value in allocated) else None
+                ),
+                "allocated_bytes_collector": "st_blocks" if allocated and allocated[0] is not None else None}
 
         concurrent = new_manager(root, "concurrent")
         keys = [f"websocket:producer-{i}" for i in range(args.concurrency)]
         for key in keys:
             seed(concurrent, key, 1000)
+        for key in keys:
             await get(concurrent, key)
         running = True
         lag_samples = []
@@ -258,14 +401,39 @@ async def main(args):
             for manager in managers:
                 await manager.state.aclose()
 
+        harness = Path(__file__).resolve()
         result = {
-            "variant": args.variant, "trial": args.trial, "repo": str(args.repo.resolve()),
-            "python": sys.version, "platform": platform.platform(), "pid": os.getpid(),
-            "load_average": os.getloadavg(), "logical_cpus": os.cpu_count(),
-            "max_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
-            "iterations": args.iterations, "sizes": args.sizes, "disk": disk,
-            "content_bytes": len(content.encode()), "correctness": "PASS",
-            "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "schema_version": 1,
+            "started_at_utc": started_at_utc,
+            "variant": args.variant,
+            "trial": args.trial,
+            "repo": str(args.repo.resolve()),
+            "target_module": str(Path(session_module.__file__).resolve()),
+            "git": git_identity(args.repo.resolve()),
+            "dependencies": dependency_identity(args.repo.resolve()),
+            "python": {
+                "executable": sys.executable,
+                "implementation": platform.python_implementation(),
+                "version": sys.version,
+            },
+            "platform": platform.platform(),
+            "pid": os.getpid(),
+            "load_average": list(os.getloadavg()) if hasattr(os, "getloadavg") else None,
+            "logical_cpus": os.cpu_count(),
+            "peak_rss_bytes": peak_rss_bytes(),
+            "sqlite_version": sqlite3.sqlite_version,
+            "parameters": {
+                "iterations": args.iterations,
+                "sizes": args.sizes,
+                "list_count": args.list_count,
+                "concurrency": args.concurrency,
+                "turns": args.turns,
+                "content_bytes": len(content.encode()),
+            },
+            "data_filesystem": filesystem_identity(args.output.parent),
+            "disk": disk,
+            "correctness": "PASS",
+            "harness": {"path": str(harness), "sha256": _sha256(harness)},
             "operations": records,
         }
         args.output.write_text(json.dumps(result, indent=2) + "\n")

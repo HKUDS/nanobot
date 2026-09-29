@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
-from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Generator, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Callable, TypedDict, cast
 from uuid import uuid4
 
 from nanobot.providers.base import ProviderConversationState
@@ -471,11 +471,11 @@ class SessionManager:
         """Decode a session key only from a canonical collision-resistant filename."""
         return SessionLocation.session_key_from_path(path)
 
-    @contextmanager
-    def transaction(self) -> Generator[None, None, None]:
-        """Group synchronous administrative operations in one SQLite transaction."""
-        with self._store.transaction():
-            yield
+    def _require_offline_mutation(self) -> None:
+        if self._state is not None and self._state.is_bound:
+            raise RuntimeError(
+                "synchronous session mutation is unavailable after the async owner starts"
+            )
 
     def get_or_create(self, key: str) -> Session:
         """Load a detached snapshot for synchronous administrative callers."""
@@ -491,20 +491,45 @@ class SessionManager:
                 if row["metadata"].get(PARENT_SESSION_KEY) == parent_key]
 
     def save(self, session: Session) -> None:
-        """Commit an administrative snapshot, rejecting obsolete history."""
+        """Commit an offline administrative snapshot, rejecting obsolete history."""
+        self._require_offline_mutation()
         if session.policy.persist:
             self._store.save(session)
 
     def rename_model_preset(self, old_name: str, new_name: str) -> int:
+        """Rename references offline or bridge a settings worker to the async owner."""
+        if self._state is not None and self._state.is_bound:
+            loop = self._state.bound_loop
+            assert loop is not None
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
+            if running_loop is loop:
+                raise RuntimeError(
+                    "rename_model_preset must be awaited through SessionState on the owner loop"
+                )
+            future = asyncio.run_coroutine_threadsafe(
+                self._state.rename_model_preset(old_name, new_name),
+                loop,
+            )
+            return future.result(timeout=30)
         if old_name == new_name:
             return 0
-        changed = 0
-        with self.transaction():
+        self._require_offline_mutation()
+
+        def rename() -> int:
+            changed = 0
             for row in self._store.list_metadata():
                 if row["metadata"].get(SESSION_MODEL_PRESET_METADATA_KEY) == old_name:
-                    self._store.update_metadata(row["key"], {SESSION_MODEL_PRESET_METADATA_KEY: new_name})
+                    self._store.update_metadata(
+                        row["key"],
+                        {SESSION_MODEL_PRESET_METADATA_KEY: new_name},
+                    )
                     changed += 1
-        return changed
+            return changed
+
+        return self._store.run_write(rename)
 
     def invalidate(self, key: str) -> None:
         if self._state is not None:
@@ -512,6 +537,7 @@ class SessionManager:
 
     def delete_session(self, key: str) -> bool:
         """Delete a session and its persisted descendants in one transaction."""
+        self._require_offline_mutation()
         with self.transaction():
             pending = [key]
             collected: set[str] = set()
@@ -537,7 +563,9 @@ class SessionManager:
     def fork_session_before_user_index(
         self, source_key: str, target_key: str, before_user_index: int,
     ) -> Session | None:
-        with self.transaction():
+        self._require_offline_mutation()
+
+        def fork() -> Session | None:
             source = self._store.load(source_key)
             if source is None:
                 return None
@@ -545,6 +573,8 @@ class SessionManager:
             if target is not None:
                 self._store.save(target)
             return target
+
+        return self._store.run_write(fork)
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:
         """Read a session without populating the cache."""
@@ -558,12 +588,30 @@ class SessionManager:
         """Read session metadata without loading the transcript."""
         return cast(dict[str, Any] | None, self._store.read_metadata(key))
 
+    def ensure_session_handles_offline(self) -> dict[str, str]:
+        """Allocate missing handles during offline administration."""
+        from nanobot.session.session_handles import (
+            SESSION_HANDLE_METADATA_KEY,
+            allocate_session_handles,
+        )
+
+        self._require_offline_mutation()
+
+        def ensure() -> dict[str, str]:
+            names, updates = allocate_session_handles(self._store.list_metadata())
+            for key, name in updates.items():
+                self._store.update_metadata(key, {SESSION_HANDLE_METADATA_KEY: name})
+            return names
+
+        return self._store.run_write(ensure)
+
     def update_session_metadata(
         self,
         key: str,
         updates: dict[str, Any],
     ) -> bool:
-        """Atomically update metadata without replacing session history."""
+        """Atomically update metadata while the async owner is not running."""
+        self._require_offline_mutation()
         return self._store.update_metadata(key, updates)
 
     def list_session_metadata(self) -> list[dict[str, Any]]:

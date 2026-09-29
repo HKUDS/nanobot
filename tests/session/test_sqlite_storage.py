@@ -90,12 +90,14 @@ def test_stale_administrative_save_is_rejected(tmp_path):
 
 def test_transaction_rolls_back_all_rows(tmp_path):
     manager = SessionManager(tmp_path)
+    def write_then_fail() -> None:
+        session = Session(key="chat:a", metadata={"runtime_checkpoint": {"step": 1}, "pending_user_followups": [{"id": "x"}]})
+        session.add_message("user", "hello")
+        manager.save(session)
+        raise RuntimeError("injected failure")
+
     with pytest.raises(RuntimeError):
-        with manager.transaction():
-            session = Session(key="chat:a", metadata={"runtime_checkpoint": {"step": 1}, "pending_user_followups": [{"id": "x"}]})
-            session.add_message("user", "hello")
-            manager.save(session)
-            raise RuntimeError("injected failure")
+        manager._store.run_write(write_then_fail)
     assert manager.list_sessions() == []
     with sqlite3.connect(manager.sessions_dir / "sessions.sqlite3") as db:
         for table in ("sessions", "messages", "checkpoints", "pending_inputs"):
@@ -163,6 +165,7 @@ async def test_checkpoint_does_not_rewrite_messages(tmp_path):
 async def test_database_lock_does_not_block_event_loop(tmp_path):
     manager = SessionManager(tmp_path)
     state = manager.state
+    await state.get("chat:a")
     await state.update_metadata("chat:a", {"title": "old"})
     ready = threading.Event()
     release = threading.Event()
@@ -272,4 +275,259 @@ async def test_large_draft_copy_and_publication_run_on_owner_worker(tmp_path, mo
     await state.finish_turn(draft)
     assert copied.is_set()
     assert (await state.read(draft.key)).messages == draft.messages
+    await state.aclose()
+
+
+def test_duplicate_json_keys_abort_entire_migration(tmp_path):
+    workspace = tmp_path / "workspace"
+    path = legacy(workspace)
+    path.write_text(
+        '{"_type":"metadata","key":"chat:a","key":"chat:b",'
+        '"metadata":{},"created_at":"2026-01-01T00:00:00",'
+        '"updated_at":"2026-01-01T00:00:00"}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="migration failed"):
+        SessionManager(workspace, sessions_root=tmp_path / "root")
+
+    database = next((tmp_path / "root").glob("*/sessions.sqlite3"))
+    with sqlite3.connect(database) as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "sessions" not in tables
+        assert "storage_meta" not in tables
+
+
+def test_nested_duplicate_json_keys_abort_migration(tmp_path):
+    workspace = tmp_path / "workspace"
+    path = legacy(workspace)
+    path.write_text(
+        '{"_type":"metadata","key":"chat:a","metadata":{"title":"a","title":"b"},'
+        '"created_at":"2026-01-01T00:00:00",'
+        '"updated_at":"2026-01-01T00:00:00"}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="migration failed"):
+        SessionManager(workspace, sessions_root=tmp_path / "root")
+
+
+def test_second_provider_state_aborts_migration(tmp_path):
+    workspace = tmp_path / "workspace"
+    path = legacy(workspace)
+    state = {
+        "kind": "responses",
+        "provider": "openai",
+        "model": "gpt-test",
+        "version": 1,
+        "payload": {"secret": "opaque"},
+        "pending_messages": [],
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        record = json.dumps({"_type": "provider_state", "state": state})
+        handle.write(record + "\n" + record + "\n")
+
+    with pytest.raises(RuntimeError, match="migration failed"):
+        SessionManager(workspace, sessions_root=tmp_path / "root")
+
+
+def test_duplicate_sources_with_different_timestamps_abort_migration(tmp_path):
+    workspace = tmp_path / "workspace"
+    root = tmp_path / "root"
+    source = legacy(workspace, key="chat:a")
+    location = SessionLocation(workspace, sessions_root=root)
+    duplicate = location.sessions_dir / source.name
+    duplicate.write_text(
+        source.read_text(encoding="utf-8").replace(
+            '"updated_at": "2026-01-01T00:00:00"',
+            '"updated_at": "2026-01-02T00:00:00"',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="migration failed"):
+        SessionManager(workspace, sessions_root=root)
+    duplicate.unlink()
+    manager = SessionManager(workspace, sessions_root=root)
+    assert manager.read_session_snapshot("chat:a") is not None
+
+
+def test_invalid_migration_marker_fails_closed(tmp_path):
+    workspace = tmp_path / "workspace"
+    root = tmp_path / "root"
+    manager = SessionManager(workspace, sessions_root=root)
+    with sqlite3.connect(manager._store.path) as db:
+        db.execute(
+            "UPDATE storage_meta SET value='corrupt' WHERE key='jsonl_import'"
+        )
+    legacy(workspace, key="chat:must-not-import")
+
+    with pytest.raises(RuntimeError, match="invalid JSONL migration marker"):
+        SessionManager(workspace, sessions_root=root)
+    with sqlite3.connect(manager._store.path) as db:
+        assert db.execute(
+            "SELECT count(*) FROM sessions WHERE key='chat:must-not-import'"
+        ).fetchone()[0] == 0
+
+
+def test_reexport_prunes_deleted_session_and_fresh_store_cannot_resurrect_it(tmp_path):
+    workspace = tmp_path / "workspace"
+    manager = SessionManager(workspace, sessions_root=tmp_path / "root-a")
+    deleted = manager.get_or_create("chat:deleted")
+    deleted.add_message("user", "deleted-secret")
+    manager.save(deleted)
+    kept = manager.get_or_create("chat:kept")
+    kept.add_message("user", "keep")
+    manager.save(kept)
+    assert manager.export_sessions_to_workspace() == 2
+    deleted_export = workspace / "sessions" / (
+        SessionLocation.storage_key("chat:deleted") + ".jsonl"
+    )
+    deleted_export.with_suffix(".checkpoint.json").write_text("{}", encoding="utf-8")
+
+    assert manager.delete_session("chat:deleted")
+    assert manager.export_sessions_to_workspace() == 1
+    assert not deleted_export.exists()
+    assert not deleted_export.with_suffix(".checkpoint.json").exists()
+    assert "deleted-secret" not in "".join(
+        path.read_text(encoding="utf-8")
+        for path in (workspace / "sessions").glob("*.jsonl")
+    )
+
+    restored = SessionManager(workspace, sessions_root=tmp_path / "root-b")
+    assert restored.read_session_snapshot("chat:kept") is not None
+    assert restored.read_session_snapshot("chat:deleted") is None
+
+
+async def test_missing_update_commands_do_not_create_sessions(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    with pytest.raises(SessionConflictError, match="does not exist"):
+        await state.update_metadata("chat:missing", {"title": "late"})
+    with pytest.raises(SessionConflictError, match="does not exist"):
+        await state.record_delivery(
+            "chat:missing", "late", {}, expected_generation="deleted-generation",
+        )
+    assert manager.read_session_snapshot("chat:missing") is None
+    await state.aclose()
+
+
+async def test_delete_rejects_late_delivery_and_metadata(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    session = await state.get("chat:a")
+    assert await state.delete(session.key, expected_generation=session.generation)
+
+    with pytest.raises(SessionConflictError):
+        await state.record_delivery(
+            session.key,
+            "deleted-secret",
+            {},
+            expected_generation=session.generation,
+        )
+    with pytest.raises(SessionConflictError):
+        await state.update_metadata(
+            session.key,
+            {"secret": "deleted-secret"},
+            expected_generation=session.generation,
+        )
+    assert manager.read_session_snapshot(session.key) is None
+    await state.aclose()
+
+
+async def test_old_generation_cannot_write_into_recreated_key(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    old = await state.get("chat:a")
+    assert await state.delete(old.key, expected_generation=old.generation)
+    current = await state.get(old.key)
+    assert current.generation != old.generation
+
+    with pytest.raises(SessionConflictError, match="replaced session"):
+        await state.record_delivery(
+            old.key,
+            "old result",
+            {},
+            expected_generation=old.generation,
+        )
+    loaded = await state.read(old.key)
+    assert loaded is not None and loaded.messages == []
+    await state.aclose()
+
+
+async def test_discarded_transient_late_delivery_never_becomes_durable(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    transient = await state.register_transient("temporary:a")
+    await state.discard(transient.key)
+
+    with pytest.raises(SessionConflictError):
+        await state.record_delivery(
+            transient.key,
+            "private late result",
+            {},
+            expected_generation=transient.generation,
+        )
+    assert manager.read_session_snapshot(transient.key) is None
+    await state.aclose()
+
+
+async def test_read_and_delete_are_serialized_without_cache_ghost(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    await state.get("chat:a")
+    loaded, release = threading.Event(), threading.Event()
+    original = state._load
+    first = True
+
+    def paused_load(key, *, history=True):
+        nonlocal first
+        session = original(key, history=history)
+        if first and key == "chat:a":
+            first = False
+            loaded.set()
+            release.wait(5)
+        return session
+
+    monkeypatch.setattr(state, "_load", paused_load)
+    read = asyncio.create_task(state.read("chat:a"))
+    assert await asyncio.to_thread(loaded.wait, 2)
+    deletion = asyncio.create_task(state.delete("chat:a"))
+    await asyncio.sleep(0.05)
+    assert not deletion.done()
+    release.set()
+    assert await read is not None
+    assert await deletion
+    assert state.peek("chat:a") is None
+    assert manager.read_session_snapshot("chat:a") is None
+    await state.aclose()
+
+
+async def test_synchronous_mutation_is_rejected_after_owner_binds(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    await state.get("chat:a")
+    with pytest.raises(RuntimeError, match="async owner"):
+        manager.delete_session("chat:a")
+    with pytest.raises(RuntimeError, match="async owner"):
+        manager.update_session_metadata("chat:a", {"title": "bypass"})
+    await state.aclose()
+
+
+async def test_delivery_requires_explicit_nonempty_generation(tmp_path):
+    state = SessionManager(tmp_path).state
+    session = await state.get("chat:a")
+    with pytest.raises(ValueError, match="requires a session generation"):
+        await state.record_delivery(session.key, "unguarded", {}, expected_generation="")
+    await state.record_delivery(
+        session.key, "current", {}, expected_generation=session.generation,
+    )
+    assert [message["content"] for message in (await state.get(session.key)).messages] == [
+        "current",
+    ]
     await state.aclose()

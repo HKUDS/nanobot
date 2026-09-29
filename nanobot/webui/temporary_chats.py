@@ -41,6 +41,7 @@ class TemporaryChatMessagePolicy:
     """Server-owned message rules for one active Temporary Chat."""
 
     session_key: str
+    session_generation: str
     workspace_scope: WorkspaceScope
     require_existing_session: bool = True
     hydrate_transcript: bool = False
@@ -82,7 +83,7 @@ class WebUITemporaryChats:
         session = self._sessions.state.peek(self._session_key(chat_id))
         return session is not None and not session.policy.persist
 
-    def create(self, owner: object, *, trusted_webui: bool) -> str:
+    async def create(self, owner: object, *, trusted_webui: bool) -> str:
         """Create a server-identified chat owned by one authenticated WebUI connection."""
         if not trusted_webui:
             raise TemporaryChatError("access_denied")
@@ -90,7 +91,7 @@ class WebUITemporaryChats:
             raise TemporaryChatError("temporary_chat_unavailable")
 
         chat_id = str(uuid.uuid4())
-        session = self._sessions.state.register_transient(
+        session = await self._sessions.state.register_transient(
             self._session_key(chat_id),
             disabled_tools=_TEMPORARY_CHAT_DISABLED_TOOLS,
         )
@@ -125,6 +126,7 @@ class WebUITemporaryChats:
 
         return TemporaryChatMessagePolicy(
             session_key=self._session_key(chat_id),
+            session_generation=session.generation,
             workspace_scope=self._workspaces.restricted_default_scope(),
         )
 
@@ -191,7 +193,7 @@ class WebUITemporaryChats:
         self._forget_owner(owner, chat_id)
         self._discard_media(chat_id)
         if self._sessions is not None:
-            self._sessions.state.forget_transient(session_key)
+            await self._sessions.state.discard(session_key)
         await self._bus.publish_inbound(
             InboundMessage(
                 channel=self._channel_name,
