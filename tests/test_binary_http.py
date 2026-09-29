@@ -167,3 +167,29 @@ async def test_request_body_is_not_automatically_decompressed():
         server.close()
         await server.wait_closed()
         await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_http_headers_have_a_deadline(monkeypatch):
+    monkeypatch.setattr("nanobot.webui.binary_http._HTTP_CONNECTION_TIMEOUT_S", .05)
+
+    async def upload(request):
+        pytest.fail("Incomplete headers must not invoke the upload handler")
+
+    async def echo(connection):
+        await connection.wait_closed()
+
+    bridge = BinaryHTTPBridge(upload)
+    server = await serve(echo, "127.0.0.1", 0, create_connection=bridge.connection_factory)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(b"POST /api/attachments HTTP/1.1\r\nHost: localhost\r\n")
+        await writer.drain()
+        assert await asyncio.wait_for(reader.read(), 2) == b""
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        server.close()
+        await server.wait_closed()
+        await bridge.shutdown()
