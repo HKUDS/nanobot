@@ -3,6 +3,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -493,11 +494,11 @@ async def test_cli_app_scope_controls_working_dir(
 
     seen: dict[str, str] = {}
 
-    async def fake_run(argv, cwd, env, *, timeout):
-        seen["cwd"] = cwd
-        return b"ok", b"", 0
+    def fake_run(argv, **kwargs):
+        seen["cwd"] = kwargs["cwd"]
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("nanobot.agent.tools.cli_apps.ExecTool.run_process", fake_run)
+    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
     tool = CliAppsTool(
         workspace=tmp_path,
         restrict_to_workspace=True,

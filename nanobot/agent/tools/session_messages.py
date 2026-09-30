@@ -37,7 +37,6 @@ from nanobot.session.session_messages import (
     SessionMessageEnvelope,
     session_message_envelope,
 )
-from nanobot.utils.cancellation import current_cancellation_scope
 
 _RATE_LIMIT_WINDOW_SECONDS = 60.0
 MIN_REPLY_TIMEOUT_SECONDS = 5
@@ -58,7 +57,6 @@ class _PendingReply:
     target_handle: str
     request: SessionMessageEnvelope
     timer: _CancelHandle | None = None
-    release_scope: Callable[[], None] | None = None
 
 
 @tool_parameters(tool_parameters_schema())
@@ -311,8 +309,6 @@ class SendSessionMessageTool(Tool):
         pending = self._pending_replies.pop(key, None)
         if pending is not None and pending.timer is not None:
             pending.timer.cancel()
-        if pending is not None and pending.release_scope is not None:
-            pending.release_scope()
 
     def _schedule_pending_reply(
         self,
@@ -327,21 +323,14 @@ class SendSessionMessageTool(Tool):
             request=request,
         )
         self._pending_replies[key] = pending
-        scope = current_cancellation_scope()
 
         def expire() -> None:
-            if scope is not None and scope.cancelled:
-                return
             task = asyncio.create_task(self._expire_pending_reply(key, pending))
-            if scope is not None:
-                scope.track_task(task, counted=False)
             self._expiry_tasks.add(task)
             task.add_done_callback(self._on_expiry_task_done)
 
         schedule = self._schedule_later or asyncio.get_running_loop().call_later
         pending.timer = schedule(float(timeout_seconds), expire)
-        if scope is not None:
-            pending.release_scope = scope.register(lambda: self._cancel_pending_reply(key))
 
     def _on_expiry_task_done(self, task: asyncio.Task[None]) -> None:
         self._expiry_tasks.discard(task)
@@ -361,8 +350,6 @@ class SendSessionMessageTool(Tool):
             if self._pending_replies.get(key) is not expected:
                 return
             self._pending_replies.pop(key, None)
-            if expected.release_scope is not None:
-                expected.release_scope()
             source_session_key = expected.request["source_session_key"]
             await self._bus.publish_inbound(InboundMessage(
                 channel="system",

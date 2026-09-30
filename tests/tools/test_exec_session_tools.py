@@ -818,12 +818,10 @@ def test_exec_session_manager_retains_and_aggregates_failed_cleanup():
     async def run() -> None:
         manager = ExecSessionManager()
         first = SimpleNamespace(
-            release_scope=None,
             session_id="first",
             kill=AsyncMock(side_effect=OSError("first failed")),
         )
         second = SimpleNamespace(
-            release_scope=None,
             session_id="second",
             kill=AsyncMock(side_effect=RuntimeError("second failed")),
         )
@@ -849,7 +847,6 @@ def test_exec_session_manager_preserves_single_cleanup_error():
     async def run() -> None:
         manager = ExecSessionManager()
         session = SimpleNamespace(
-            release_scope=None,
             session_id="failed",
             kill=AsyncMock(side_effect=OSError("cleanup failed")),
         )
@@ -875,7 +872,6 @@ def test_agent_loop_shutdown_closes_exec_sessions(tmp_path):
         process = manager._sessions[sid].process
 
         loop = object.__new__(AgentLoop)
-        loop._session_scopes = {}
         loop._background_tasks = set()
         loop._exec_session_manager = manager
         loop.subagents = SimpleNamespace(close=AsyncMock())
@@ -893,7 +889,6 @@ def test_agent_loop_shutdown_closes_exec_sessions(tmp_path):
 def test_agent_loop_shutdown_attempts_all_cleanup_after_errors():
     async def run() -> None:
         loop = object.__new__(AgentLoop)
-        loop._session_scopes = {}
         loop._background_tasks = set()
         loop.subagents = SimpleNamespace(
             close=AsyncMock(side_effect=RuntimeError("subagent cleanup failed")),
@@ -972,7 +967,6 @@ def test_terminate_by_owner_retains_failed_sessions():
     async def run() -> None:
         manager = ExecSessionManager()
         session = SimpleNamespace(
-            release_scope=None,
             session_id="failed",
             owner_session_key="cli:a",
             kill=AsyncMock(side_effect=OSError("termination failed")),
@@ -996,7 +990,6 @@ def test_stale_cleanup_retains_session_when_kill_fails():
     async def run() -> None:
         manager = ExecSessionManager(idle_timeout=1)
         session = SimpleNamespace(
-            release_scope=None,
             session_id="stale-failed",
             owner_session_key="cli:a",
             last_access=time.monotonic() - 10,
@@ -1045,7 +1038,6 @@ def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
 def test_agent_loop_shutdown_preserves_single_cleanup_error():
     async def run() -> None:
         loop = object.__new__(AgentLoop)
-        loop._session_scopes = {}
         loop._background_tasks = set()
         loop.subagents = SimpleNamespace(
             close=AsyncMock(side_effect=RuntimeError("subagent cleanup failed")),
