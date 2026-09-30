@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
+from nanobot.utils.cancellation import cancellation_boundary, raise_if_cancelling
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -186,6 +187,7 @@ class ToolRegistry:
 
     async def execute(self, name: str, params: Any) -> Any:
         """Execute a tool by name with given parameters."""
+        raise_if_cancelling()
         hint = "\n\n[Analyze the error above and try a different approach.]"
         tool, params, error = self.prepare_call(name, params)
         if error:
@@ -193,7 +195,8 @@ class ToolRegistry:
 
         try:
             assert tool is not None  # guarded by prepare_call()
-            result = await tool.execute(**params)
+            with cancellation_boundary():
+                result = await tool.execute(**params)
             if is_tool_error_result(result):
                 return ToolResult.error(str(result) + hint)
             return result
