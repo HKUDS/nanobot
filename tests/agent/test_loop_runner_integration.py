@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -655,7 +655,7 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
 
 @pytest.mark.asyncio
 async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, monkeypatch):
-    from nanobot.agent.subagent import SubagentManager, SubagentStatus
+    from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -679,15 +679,14 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
 
     monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
-    status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
-    await mgr._run_subagent(
-        "sub-1",
-        "do task",
-        "label",
-        {"channel": "test", "chat_id": "c1"},
-        status,
-        LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
+    await mgr.spawn(
+        task="do task",
+        label="label",
+        origin_channel="test",
+        origin_chat_id="c1",
+        runtime=LLMRuntime.capture(provider, "test-model", context_window_tokens=128_000),
     )
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
     mgr._announce_result.assert_awaited_once()
     args = mgr._announce_result.await_args.args

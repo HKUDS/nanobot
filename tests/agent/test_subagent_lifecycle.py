@@ -237,8 +237,7 @@ class TestSpawn:
         sm.runner.run = _slow_run
 
         await sm.spawn("task", runtime=_runtime(), session_key="s1")
-        assert "s1" in sm._session_tasks
-        assert len(sm._session_tasks["s1"]) == 1
+        assert len(sm.statuses_for_session("s1")) == 1
 
         block.set()
         await _drain_subagent_tasks(sm)
@@ -270,7 +269,7 @@ class TestSpawn:
 
         long_label_source = "A" * 50
         await sm.spawn(long_label_source, runtime=_runtime(), session_key="s1")
-        status = next(iter(sm._task_statuses.values()))
+        status = next(iter(sm.runtime_statuses().values()))
         assert status.label == long_label_source[:30] + "..."
 
         block.set()
@@ -288,7 +287,7 @@ class TestSpawn:
         await sm.spawn(
             "task", runtime=_runtime(), label="Custom Label", session_key="s1"
         )
-        status = next(iter(sm._task_statuses.values()))
+        status = next(iter(sm.runtime_statuses().values()))
         assert status.label == "Custom Label"
 
         block.set()
@@ -354,12 +353,14 @@ class TestRunSubagent:
             final_content="Task done!", messages=[], stop_reason="completed",
         ))
         with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
-            await sm._run_subagent(
-                "t1", "do task", "label",
-                {"channel": "cli", "chat_id": "direct"},
-                SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic()),
-                _runtime(),
+            await sm.spawn(
+                task="do task",
+                label="label",
+                origin_channel="cli",
+                origin_chat_id="direct",
+                runtime=_runtime(),
             )
+            await asyncio.gather(*sm._running_tasks.values(), return_exceptions=True)
             mock_announce.assert_called_once()
             assert mock_announce.call_args.args[-2] == "ok"
 
@@ -367,12 +368,16 @@ class TestRunSubagent:
     async def test_exception_run(self, tmp_path):
         sm = _manager(tmp_path)
         sm.runner.run = AsyncMock(side_effect=RuntimeError("LLM down"))
-        status = SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic())
         with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
-            await sm._run_subagent(
-                "t1", "do task", "label",
-                {"channel": "cli", "chat_id": "direct"}, status, _runtime(),
+            await sm.spawn(
+                task="do task",
+                label="label",
+                origin_channel="cli",
+                origin_chat_id="direct",
+                runtime=_runtime(),
             )
+            await asyncio.gather(*sm._running_tasks.values(), return_exceptions=True)
+            status = next(iter(sm.runtime_statuses().values()))
             assert status.phase == "error"
             assert "LLM down" in status.error
             assert mock_announce.call_args.args[-2] == "error"
@@ -383,12 +388,16 @@ class TestRunSubagent:
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="ok", messages=[], stop_reason="completed",
         ))
-        status = SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic())
         with patch.object(sm, "_announce_result", new_callable=AsyncMock):
-            await sm._run_subagent(
-                "t1", "do task", "label",
-                {"channel": "cli", "chat_id": "direct"}, status, _runtime(),
+            await sm.spawn(
+                task="do task",
+                label="label",
+                origin_channel="cli",
+                origin_chat_id="direct",
+                runtime=_runtime(),
             )
+            await asyncio.gather(*sm._running_tasks.values(), return_exceptions=True)
+            status = next(iter(sm.runtime_statuses().values()))
             assert status.phase == "done"
             assert status.stop_reason == "completed"
 
@@ -502,7 +511,7 @@ class TestCancelBySession:
         runtime = _runtime()
         await sm.spawn("task1", runtime=runtime, session_key="s1")
         await sm.spawn("task2", runtime=runtime, session_key="s1")
-        assert len(sm._session_tasks.get("s1", set())) == 2
+        assert len(sm.statuses_for_session("s1")) == 2
 
         count = await sm.cancel_by_session("s1")
         assert count == 2

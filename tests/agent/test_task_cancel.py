@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -561,16 +560,14 @@ class TestSubagentCancellation:
 
         monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
-        from nanobot.agent.subagent import SubagentStatus
-        status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
-        await mgr._run_subagent(
-            "sub-1",
-            "do task",
-            "label",
-            {"channel": "test", "chat_id": "c1"},
-            status,
-            _runtime(provider),
+        await mgr.spawn(
+            task="do task",
+            label="label",
+            origin_channel="test",
+            origin_chat_id="c1",
+            runtime=_runtime(provider),
         )
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
         assistant_messages = [
             msg for msg in captured_second_call
@@ -610,16 +607,14 @@ class TestSubagentCancellation:
 
         mgr.runner.run = AsyncMock(side_effect=fake_run)
 
-        from nanobot.agent.subagent import SubagentStatus
-        status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
-        await mgr._run_subagent(
-            "sub-1",
-            "do task",
-            "label",
-            {"channel": "test", "chat_id": "c1"},
-            status,
-            _runtime(provider),
+        await mgr.spawn(
+            task="do task",
+            label="label",
+            origin_channel="test",
+            origin_chat_id="c1",
+            runtime=_runtime(provider),
         )
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
         mgr.runner.run.assert_awaited_once()
         mgr._announce_result.assert_awaited_once()
@@ -668,16 +663,14 @@ class TestSubagentCancellation:
 
         monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
-        from nanobot.agent.subagent import SubagentStatus
-        status = SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic())
-        await mgr._run_subagent(
-            "sub-1",
-            "do task",
-            "label",
-            {"channel": "test", "chat_id": "c1"},
-            status,
-            _runtime(provider),
+        await mgr.spawn(
+            task="do task",
+            label="label",
+            origin_channel="test",
+            origin_chat_id="c1",
+            runtime=_runtime(provider),
         )
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
         mgr._announce_result.assert_awaited_once()
         args = mgr._announce_result.await_args.args
@@ -789,9 +782,8 @@ class TestSubagentAnnounceSessionKey:
         assert msg.chat_id == "discord:333"
 
     @pytest.mark.asyncio
-    async def test_session_key_flows_through_run_subagent(self):
-        """Verify session_key in origin propagates from _run_subagent to _announce_result."""
-        from nanobot.agent.subagent import SubagentStatus
+    async def test_spawn_routes_result_to_parent_session(self):
+        """Background results return to the parent's canonical session."""
 
         mgr, bus = self._make_mgr()
 
@@ -805,16 +797,15 @@ class TestSubagentAnnounceSessionKey:
 
         mgr.runner.run = AsyncMock(side_effect=fake_run)
 
-        status = SubagentStatus(
-            task_id="sub-4", label="label", task_description="task",
-            started_at=time.monotonic(),
+        await mgr.spawn(
+            task="task",
+            label="label",
+            origin_channel="telegram",
+            origin_chat_id="444",
+            runtime=_runtime(),
+            session_key=UNIFIED_SESSION_KEY,
         )
-        await mgr._run_subagent(
-            "sub-4", "task", "label",
-            {"channel": "telegram", "chat_id": "444", "session_key": UNIFIED_SESSION_KEY},
-            status,
-            _runtime(),
-        )
+        await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
         msg = await bus.consume_inbound()
         assert msg.session_key_override == UNIFIED_SESSION_KEY

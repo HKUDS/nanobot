@@ -1,7 +1,6 @@
 """Tests for subagent tool registration and wiring."""
 
 import asyncio
-import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -91,7 +90,7 @@ async def test_run_inline_returns_structured_error(tmp_path):
 @pytest.mark.asyncio
 async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     """allowed_env_keys from ExecToolConfig must be forwarded to the subagent's ExecTool."""
-    from nanobot.agent.subagent import SubagentManager, SubagentStatus
+    from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.bus.queue import MessageBus
     from nanobot.config.schema import ToolsConfig
@@ -121,17 +120,14 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
 
-    status = SubagentStatus(
-        task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
+    await mgr.spawn(
+        task="do task",
+        label="label",
+        origin_channel="test",
+        origin_chat_id="c1",
+        runtime=_runtime(provider),
     )
-    await mgr._run_subagent(
-        "sub-1",
-        "do task",
-        "label",
-        {"channel": "test", "chat_id": "c1"},
-        status,
-        _runtime(provider),
-    )
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
     mgr.runner.run.assert_awaited_once()
 
@@ -139,7 +135,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
 @pytest.mark.asyncio
 async def test_subagent_uses_configured_max_iterations(tmp_path):
     """Subagents should honor the configured tool-iteration limit."""
-    from nanobot.agent.subagent import SubagentManager, SubagentStatus
+    from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -165,17 +161,14 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
 
-    status = SubagentStatus(
-        task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
+    await mgr.spawn(
+        task="do task",
+        label="label",
+        origin_channel="test",
+        origin_chat_id="c1",
+        runtime=_runtime(provider),
     )
-    await mgr._run_subagent(
-        "sub-1",
-        "do task",
-        "label",
-        {"channel": "test", "chat_id": "c1"},
-        status,
-        _runtime(provider),
-    )
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
     mgr.runner.run.assert_awaited_once()
 
@@ -276,7 +269,7 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
         tasks = list(mgr._running_tasks.values())
         await asyncio.sleep(0)
         assert not second_entered.is_set()
-        phases = {status.task_description: status.phase for status in mgr._task_statuses.values()}
+        phases = {status.task_description: status.phase for status in mgr.runtime_statuses().values()}
         assert phases == {"first task": "initializing", "second task": "queued"}
 
     release_first.set()
@@ -672,13 +665,11 @@ async def test_terminal_drain_timeout(tmp_path):
 
     loop.runner.run = AsyncMock(side_effect=fake_runner_run)
 
-    # Register a "running" sub-agent that will never complete
-    async def _hang_forever():
+    async def _hang_forever(spec):
         await asyncio.Event().wait()
 
-    hang_task = asyncio.create_task(_hang_forever())
-    loop.subagents._session_tasks.setdefault(session.key, set()).add("sub-timeout-1")
-    loop.subagents._running_tasks["sub-timeout-1"] = hang_task
+    loop.subagents.runner.run = _hang_forever
+    await loop.subagents.spawn("pending", runtime=loop.llm_runtime(), session_key=session.key)
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
@@ -705,12 +696,7 @@ async def test_terminal_drain_timeout(tmp_path):
         results = await terminal_injection_callback()
         assert results == []
 
-    # Cleanup
-    hang_task.cancel()
-    try:
-        await hang_task
-    except asyncio.CancelledError:
-        pass
+    await loop.subagents.close()
 
 
 @pytest.mark.asyncio
@@ -748,12 +734,11 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
 
     loop.runner.run = AsyncMock(side_effect=fake_runner_run)
 
-    async def _hang_forever():
+    async def _hang_forever(spec):
         await asyncio.Event().wait()
 
-    hang_task = asyncio.create_task(_hang_forever())
-    loop.subagents._session_tasks.setdefault(session.key, set()).add("sub-deadline-1")
-    loop.subagents._running_tasks["sub-deadline-1"] = hang_task
+    loop.subagents.runner.run = _hang_forever
+    await loop.subagents.spawn("pending", runtime=loop.llm_runtime(), session_key=session.key)
 
     await loop._run_agent_loop(
         TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
@@ -786,6 +771,4 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
 
     assert timeouts == [300.0, 200.0]
 
-    hang_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await hang_task
+    await loop.subagents.close()
