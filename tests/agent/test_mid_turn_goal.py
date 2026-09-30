@@ -198,7 +198,6 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     session = loop.sessions.get_or_create(message.session_key)
     recovered, = pending_followups(session)
-    started = asyncio.Event()
     responses = iter([
         LLMResponse(content=None, tool_calls=[ToolCallRequest(
             id="create", name="create_goal", arguments={"objective": "Verify the migration."},
@@ -210,7 +209,6 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
     ])
 
     async def respond(**kwargs):
-        started.set()
         assert any(
             row.get("role") == "user" and row.get("content", "").startswith("/stop")
             for row in kwargs["messages"]
@@ -224,8 +222,9 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
         assert recovered.metadata["goal_requested"] is True
         assert goal_mutation_allowed() is False
         await loop.bus.publish_inbound(recovered)
-        await asyncio.wait_for(started.wait(), 3)
-        await asyncio.wait_for(asyncio.gather(*loop._active_tasks[message.session_key]), 5)
+        async with asyncio.timeout(5):
+            while (await loop.bus.consume_outbound()).content != "done":
+                pass
         assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
         assert pending_followups(session) == []
         assert sum(row.get("content") == message.content for row in session.messages) == 1
