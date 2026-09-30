@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.subagent import SubagentControlError
+from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 
@@ -54,4 +56,16 @@ class SubagentTool(Tool):
 
     async def execute(self, action: str, task_id: str, message: str | None = None,
                       **kwargs: Any) -> str:
-        return await self._manager.control(task_id, current_request_session_key(), action, message)
+        owner = current_request_session_key()
+        try:
+            if action == "send":
+                return json.dumps(self._manager.send(task_id, owner, message))
+            if action == "cancel":
+                status = await self._manager.cancel(task_id, owner)
+                return json.dumps({
+                    "task_id": task_id, "state": status.state,
+                    "receipts": status.receipts, "result": status.result, "error": status.error,
+                }, ensure_ascii=False)
+            return ToolResult.error("Error: unknown subagent action")
+        except SubagentControlError as exc:
+            return ToolResult.error(f"Error: {exc}")
