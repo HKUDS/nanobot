@@ -908,6 +908,39 @@ describe("Settings providers", () => {
     });
   });
 
+  it.each(["cancel", "back"])("discards the API restore cache when leaving an add-provider draft via %s", async (exit) => {
+    const payload = openAiSettingsPayload();
+    payload.providers[0].configured = false;
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    await chooseProviderToConfigure("OpenAI");
+    fireEvent.click(screen.getByRole("switch", { name: "OpenAI web search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "API type" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Responses" }));
+    fireEvent.click(screen.getByRole("button", {
+      name: exit === "cancel" ? "Cancel" : "Back to providers",
+      exact: true,
+    }));
+
+    if (exit === "cancel") {
+      await chooseProviderToConfigure("OpenAI");
+    } else {
+      fireEvent.click(await screen.findByRole("option", { name: "OpenAI" }));
+    }
+    fireEvent.change(screen.getByPlaceholderText("Enter API key"), { target: { value: "test-key" } });
+    const searchSwitch = screen.getByRole("switch", { name: "OpenAI web search" });
+    fireEvent.click(searchSwitch);
+    fireEvent.click(searchSwitch);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+    await waitFor(() => {
+      const update = requestMutationMock.mock.calls.find(([action]) => action === "settings.provider.update");
+      expect(update?.[1]).toMatchObject({ apiType: "chat_completions", extraBody: "" });
+    });
+  });
+
   it("keeps an explicit API type change when disabling web search", async () => {
     const payload = openAiSettingsPayload();
     requestMutationMock.mockResolvedValue(payload);

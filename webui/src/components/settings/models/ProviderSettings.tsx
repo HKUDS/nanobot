@@ -768,9 +768,6 @@ export function ProvidersSettings({
   };
   const toggleProvider = (providerName: string) => {
     setCreatingCustomProvider(false);
-    if (expandedProvider) {
-      delete providerApiTypesBeforeResponsesRef.current[expandedProvider];
-    }
     onToggleProvider(providerName);
   };
   const handleProviderFormChange = (providerName: string, value: Partial<ProviderForm>) => {

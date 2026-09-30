@@ -99,6 +99,7 @@ export function useModelSettingsActions({
     modelPresetCreating,
     modelPresetEditingName,
     modelPresetPendingDelete,
+    providerApiTypesBeforeResponsesRef,
     providerForms,
     providerOAuthCompleting,
     providerOAuthFlowRef,
@@ -557,6 +558,7 @@ export function useModelSettingsActions({
   };
 
   const resetProviderDraft = useCallback((providerName: string) => {
+    delete providerApiTypesBeforeResponsesRef.current[providerName];
     const provider = settings?.providers.find((item) => item.name === providerName);
     if (!provider) return;
     setProviderForms((prev) => ({
@@ -565,7 +567,7 @@ export function useModelSettingsActions({
     }));
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
     setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-  }, [settings]);
+  }, [settings, providerApiTypesBeforeResponsesRef]);
 
   const handleToggleProvider = useCallback((providerName: string) => {
     if (expandedProvider) resetProviderDraft(expandedProvider);
