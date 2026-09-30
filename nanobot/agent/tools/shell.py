@@ -10,7 +10,6 @@ import shutil
 import signal
 import subprocess
 import sys
-from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -43,7 +42,6 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
-from nanobot.utils.cancellation import current_cancellation_scope
 
 _IS_WINDOWS = sys.platform == "win32"
 _PROCESS_TREE_OWNER_ATTR = "_nanobot_process_tree_owner"
@@ -296,21 +294,48 @@ class ExecTool(Tool):
         if yield_time_ms is not None:
             return await self._execute_session(prepared, yield_time_ms, max_output_chars)
 
+        process: asyncio.subprocess.Process | None = None
         try:
-            stdout, stderr, returncode = await self.run_process(
-                prepared.command, prepared.cwd, prepared.env,
-                shell_program=prepared.shell_program, login=prepared.login,
-                timeout=prepared.timeout,
+            process = await self._spawn(
+                prepared.command,
+                prepared.cwd,
+                prepared.env,
+                prepared.shell_program,
+                prepared.login,
+                process_tree=True,
             )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=prepared.timeout,
+                )
+            except asyncio.TimeoutError:
+                await self._kill_process_tree(process)
+                return ToolResult.error(f"Error: Command timed out after {prepared.timeout} seconds")
+            except asyncio.CancelledError:
+                await self._kill_process_tree(process)
+                raise
+
+            # Safety-net reap: asyncio *should* have reaped the child via
+            # communicate(), but in containers the child-watcher sometimes
+            # misses it, leaving a zombie.
+            _reap_pid(process.pid)
+
             output_parts: list[str] = []
+
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
+
             if stderr:
                 stderr_text = stderr.decode("utf-8", errors="replace")
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
-            output_parts.append(f"\nExit code: {returncode}")
-            result = "\n".join(output_parts)
+
+            output_parts.append(f"\nExit code: {process.returncode}")
+
+            result = "\n".join(output_parts) if output_parts else "(no output)"
+
             max_len = clamp_session_int(max_output_chars, self._MAX_OUTPUT, 1000, MAX_OUTPUT_CHARS)
             if len(result) > max_len:
                 half = max_len // 2
@@ -319,54 +344,16 @@ class ExecTool(Tool):
                     + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
                     + result[-half:]
                 )
+
+            self._release_process_tree(process)
             return result
-        except asyncio.TimeoutError:
-            return ToolResult.error(f"Error: Command timed out after {prepared.timeout} seconds")
-        except Exception as exc:
-            return ToolResult.error(f"Error executing command: {exc}")
 
-    @staticmethod
-    async def run_process(
-        command: str | list[str], cwd: str, env: dict[str, str], *,
-        shell_program: str | None = None, login: bool = False,
-        timeout: int | None = None,
-    ) -> tuple[bytes, bytes, int]:
-        """Run a process tree with cancellation ownership and durable cleanup."""
-        scope = current_cancellation_scope()
-        if scope is not None:
-            scope.check()
-        process: asyncio.subprocess.Process | None = None
-        release_scope: Callable[[], None] | None = None
-        cleanup_task: asyncio.Task[None] | None = None
-
-        def stop() -> asyncio.Task[None]:
-            nonlocal cleanup_task
-            assert process is not None
-            if cleanup_task is None:
-                cleanup_task = asyncio.create_task(ExecTool._kill_process_tree(process))
-            return cleanup_task
-
-        try:
-            process = await ExecTool._spawn(
-                command, cwd, env, shell_program, login, process_tree=True,
-            )
-            if scope is not None:
-                release_scope = scope.register(stop)
-                scope.check()
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-            if scope is not None:
-                scope.check()
-            _reap_pid(process.pid)
-            assert process.returncode is not None
-            ExecTool._release_process_tree(process)
-            return stdout, stderr, process.returncode
-        except BaseException:
+        except Exception as e:
+            # Kill and reap the child if it was spawned but an unexpected
+            # error prevented communicate() from completing.
             if process is not None:
-                await asyncio.shield(stop())
-            raise
-        finally:
-            if release_scope is not None:
-                release_scope()
+                await self._kill_process_tree(process)
+            return ToolResult.error(f"Error executing command: {str(e)}")
 
     async def _execute_session(
         self,

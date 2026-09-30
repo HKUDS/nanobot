@@ -8,7 +8,6 @@ import shlex
 import time
 import uuid
 from collections import deque
-from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
@@ -27,7 +26,6 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.utils.cancellation import current_cancellation_scope
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -149,7 +147,6 @@ class _ExecSession:
         self._stderr = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
         self._lock = asyncio.Lock()
         self._timed_out = False
-        self.release_scope: Callable[[], None] | None = None
         self._kill_task: asyncio.Task[None] | None = None
         self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, self._stdout))
         self._stderr_task = asyncio.create_task(self._read_stream(process.stderr, self._stderr))
@@ -339,17 +336,12 @@ class ExecSessionManager:
         max_output_chars: int,
         owner_session_key: str | None = None,
     ) -> tuple[str, _SessionPoll]:
-        scope = current_cancellation_scope()
-        if scope is not None:
-            scope.check()
         async with self._lock:
             if self._closed:
                 raise RuntimeError("exec session manager is closed")
             await self._cleanup_locked()
             if len(self._sessions) >= self.max_sessions:
                 raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
-            if scope is not None:
-                scope.check()
             process = await self._spawn(command, cwd, env, shell_program, login)
             session_id = uuid.uuid4().hex[:12]
             session = _ExecSession(
@@ -362,33 +354,12 @@ class ExecSessionManager:
                 process_tree=True,
             )
             self._sessions[session_id] = session
-            if scope is not None:
-                session.release_scope = scope.register(
-                    lambda: asyncio.create_task(self._terminate_session(session)),
-                )
 
-        if scope is not None:
-            scope.check()
         poll = await session.poll(yield_time_ms, max_output_chars)
         if poll.done:
             async with self._lock:
-                self._remove_session(session)
-        if scope is not None:
-            scope.check()
+                self._sessions.pop(session_id, None)
         return session_id, poll
-
-    def _remove_session(self, session: _ExecSession) -> None:
-        """Release a resource registration only after successful cleanup or exit."""
-        if self._sessions.get(session.session_id) is session:
-            self._sessions.pop(session.session_id)
-        if session.release_scope is not None:
-            session.release_scope()
-            session.release_scope = None
-
-    async def _terminate_session(self, session: _ExecSession) -> None:
-        await session.kill()
-        async with self._lock:
-            self._remove_session(session)
 
     async def write(
         self,
@@ -429,7 +400,7 @@ class ExecSessionManager:
         )
         if poll.done:
             async with self._lock:
-                self._remove_session(session)
+                self._sessions.pop(session_id, None)
         return poll
 
     async def list(self, *, owner_session_key: str | None = None) -> list[ExecSessionInfo]:
@@ -466,9 +437,6 @@ class ExecSessionManager:
             for session, result in zip(sessions, results, strict=True)
             if isinstance(result, BaseException)
         ]
-        for session, result in zip(sessions, results, strict=True):
-            if not isinstance(result, BaseException):
-                self._remove_session(session)
         if failures:
             async with self._lock:
                 for session, _ in failures:
@@ -497,9 +465,6 @@ class ExecSessionManager:
             for session, result in zip(victims, results, strict=True)
             if isinstance(result, BaseException)
         ]
-        for session, result in zip(victims, results, strict=True):
-            if not isinstance(result, BaseException):
-                self._remove_session(session)
         if failures:
             async with self._lock:
                 for session, _ in failures:
@@ -522,7 +487,7 @@ class ExecSessionManager:
         for session_id in stale:
             session = self._sessions[session_id]
             await session.kill()
-            self._remove_session(session)
+            self._sessions.pop(session_id, None)
 
     async def _spawn(
         self,

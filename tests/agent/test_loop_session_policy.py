@@ -312,6 +312,12 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
 
     loop.provider.chat_stream_with_retry = AsyncMock(side_effect=block_provider)
     monkeypatch.setattr(loop, "aclose", AsyncMock())
+    terminate_exec_sessions = AsyncMock(return_value=1)
+    monkeypatch.setattr(
+        loop._exec_session_manager,
+        "terminate_by_owner",
+        terminate_exec_sessions,
+    )
     key = "websocket:transient-cancelled"
     previous_file_state = loop._file_state_store.for_session(key)
     loop.sessions.get_or_create_transient(
@@ -341,8 +347,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
     await asyncio.wait_for(wait_for_discard(key), timeout=2)
     assert loop.sessions.get_cached(key) is None
     assert loop._file_state_store.for_session(key) is not previous_file_state
-    assert key not in loop._pending_queues
-    assert key not in loop._active_tasks
+    terminate_exec_sessions.assert_awaited_once_with(key)
 
     loop.stop()
     await loop.bus.publish_inbound(_message(key, "wake"))
