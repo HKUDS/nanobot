@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 import time
 from pathlib import Path
 
@@ -52,16 +51,12 @@ def test_run_cli_app_uses_installed_registry_app(
         lambda entry: resolved if entry == "cli-anything-gimp" else None,
     )
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert "shell" not in kwargs or kwargs["shell"] is False
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout="tool:" + " ".join(argv[1:]),
-            stderr="",
-        )
+    async def fake_run(argv, cwd, env, *, timeout):
+        assert cwd == str(workspace)
+        assert timeout == 5
+        return ("tool:" + " ".join(argv[1:])).encode(), b"", 0
 
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
+    monkeypatch.setattr("nanobot.agent.tools.cli_apps.ExecTool.run_process", fake_run)
     monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda _name: data_dir)
 
     tool = CliAppsTool(
