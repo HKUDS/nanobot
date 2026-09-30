@@ -430,6 +430,9 @@ class AgentRunner:
                 await hook.on_stream_end(segment_context, resuming=True)
 
         for iteration in range(spec.max_iterations):
+            # A resumed iteration must not inherit a previous iteration's failure.
+            stop_reason = "completed"
+            error = None
             # The session inbox cuts a finite snapshot before every model call.
             # This includes follow-ups that arrived before the first request and
             # messages received while the previous request or tools were running.
