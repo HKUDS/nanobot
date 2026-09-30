@@ -318,7 +318,9 @@ def resolve_sandbox_launcher(sandbox: str) -> str:
         raise ValueError(
             f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}"
         )
-    executable = shutil.which(sandbox)
+    # Seatbelt is the backend name; its launcher is a fixed system binary,
+    # never a same-named executable supplied by a tool's PATH.
+    executable = shutil.which("/usr/bin/sandbox-exec" if sandbox == "seatbelt" else sandbox)
     if executable is None:
         raise FileNotFoundError(f"Sandbox backend {sandbox!r} is not installed")
     return str(Path(executable).resolve(strict=True))

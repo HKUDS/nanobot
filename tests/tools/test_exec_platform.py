@@ -7,6 +7,7 @@ platform-specific binaries (all subprocess calls are mocked).
 
 import asyncio
 import os
+import shlex
 import shutil
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -33,6 +34,26 @@ class _FakeWindowsJob:
 
     def terminate(self) -> None:
         pass
+
+
+@pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
+def test_restricted_argument_vector_keeps_arguments_inside_pinned_sandbox(tmp_path, backend):
+    launcher = tmp_path / "trusted-launcher"
+    command = ["printf", "%s", "value with spaces", 'literal;double"quote']
+    tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=True, sandbox=backend)
+    with (
+        patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
+        patch("nanobot.agent.tools.sandbox.resolve_sandbox_launcher", return_value=str(launcher)),
+    ):
+        prepared = tool._prepare_command(command)
+
+    assert not isinstance(prepared, str)
+    assert isinstance(prepared.command, list)
+    assert prepared.command[0] == str(launcher)
+    submitted = prepared.command[-1]
+    if backend == "seatbelt":
+        submitted = submitted.split("\n", 1)[1]
+    assert shlex.split(submitted) == command
 
 
 # ---------------------------------------------------------------------------

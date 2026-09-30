@@ -5,12 +5,47 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.tools.sandbox import _sbpl_quote, _seatbelt_is_within, wrap_command
+from nanobot.agent.tools.sandbox import (
+    _sbpl_quote,
+    _seatbelt_is_within,
+    resolve_sandbox_launcher,
+    wrap_command,
+)
 
 
 def _parse(cmd: str) -> list[str]:
     """Split a wrapped command back into tokens for assertion."""
     return shlex.split(cmd)
+
+
+def test_seatbelt_resolves_system_sandbox_exec_not_backend_name(tmp_path, monkeypatch):
+    launcher = tmp_path / "sandbox-exec"
+    launcher.touch()
+    looked_up = []
+
+    def which(name):
+        looked_up.append(name)
+        return str(launcher) if name == "/usr/bin/sandbox-exec" else None
+
+    monkeypatch.setattr("nanobot.agent.tools.sandbox.shutil.which", which)
+    wrapped = wrap_command(
+        "seatbelt", "echo hi", str(tmp_path), str(tmp_path), resolve_launcher=True,
+    )
+
+    assert _parse(wrapped)[0] == str(launcher.resolve())
+    assert looked_up == ["/usr/bin/sandbox-exec"]
+
+
+def test_seatbelt_missing_system_launcher_rejects_path_substitute(tmp_path, monkeypatch):
+    substitute = tmp_path / "seatbelt"
+    substitute.touch()
+    monkeypatch.setattr(
+        "nanobot.agent.tools.sandbox.shutil.which",
+        lambda name: None if name == "/usr/bin/sandbox-exec" else str(substitute),
+    )
+
+    with pytest.raises(FileNotFoundError, match="not installed"):
+        resolve_sandbox_launcher("seatbelt")
 
 
 class TestBwrapBackend:

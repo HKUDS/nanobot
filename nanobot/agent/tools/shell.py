@@ -483,8 +483,7 @@ class ExecTool(Tool):
         if self.sandbox:
             if _IS_WINDOWS:
                 logger.warning(
-                    "Sandbox '{}' is not supported on Windows; using the externally "
-                    "enforced sandbox boundary",
+                    "Sandbox '{}' is not supported on Windows",
                     self.sandbox,
                 )
             else:
