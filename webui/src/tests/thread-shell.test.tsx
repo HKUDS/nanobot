@@ -141,6 +141,11 @@ function makeClient() {
     getRunGeneration: (chatId: string) => runGenerationByChatId.get(chatId) ?? 0,
     canReconcileCanonicalCompletion,
     reconcileCanonicalCompletion,
+    fenceCanonicalCompletedTurns: (chatId: string, turnIds: readonly string[]) => {
+      const fences = completedTurnIdsByChatId.get(chatId) ?? new Set<string>();
+      for (const turnId of turnIds) fences.add(turnId);
+      completedTurnIdsByChatId.set(chatId, fences);
+    },
     getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
@@ -3171,6 +3176,40 @@ describe("ThreadShell", () => {
 
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("remembers explicit completed turns on initial history load", async () => {
+    const client = makeClient();
+    const turnId = "turn-completed-before-load";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("websocket%3Ainitial-completion/webui-thread")) {
+        return httpJson({
+          ...transcriptFromSimpleMessages([
+            { role: "user", content: "previous question", turnId },
+          ]),
+          has_pending_tool_calls: false,
+          completed_turn_ids: [turnId],
+        });
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    render(wrap(client, <ThreadShell
+      session={session("initial-completion")}
+      title="Initial completion"
+      onToggleSidebar={() => {}}
+      onNewChat={() => {}}
+    />));
+    await screen.findByText("previous question");
+    act(() => client._emitChat("initial-completion", {
+      event: "goal_status", chat_id: "initial-completion", turn_id: turnId,
+      status: "running", started_at: 4_000,
+    }));
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    act(() => client._emitChat("initial-completion", {
+      event: "goal_status", chat_id: "initial-completion", turn_id: "new-turn",
+      status: "running", started_at: 5_000,
+    }));
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
   });
 
   it("fences websocket frames that arrive after canonical completion", async () => {
