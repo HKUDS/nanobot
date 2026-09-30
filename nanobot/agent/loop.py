@@ -745,7 +745,7 @@ class AgentLoop:
         assert ctx.request_context is not None
         return await self._resolve_runtime_context_for_request(
             ctx.request_context,
-            ctx.tools or self.tools,
+            ctx.tools if ctx.tools is not None else self.tools,
         )
 
     async def _resolve_runtime_context_for_request(
@@ -1193,7 +1193,7 @@ class AgentLoop:
                 and (session is None or session.policy.log_content)
             ),
         )
-        effective_tools = tools or self.tools
+        effective_tools = tools if tools is not None else self.tools
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         request_token = bind_request_context(request_ctx)
         workspace_token = bind_workspace_scope(effective_scope)
@@ -1943,7 +1943,7 @@ class AgentLoop:
                 ctx.session = self.sessions.get_or_create(ctx.session_key)
         session = ctx.session
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
-        tools = ctx.tools or self.tools
+        tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
             restricted = ToolRegistry()
             for name in tools.tool_names:

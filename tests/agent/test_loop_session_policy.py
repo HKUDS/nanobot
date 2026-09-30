@@ -8,6 +8,7 @@ from agent.session_helpers import run_session
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import (
     INBOUND_META_RUNTIME_CONTROL,
     RUNTIME_CONTROL_SESSION_DISCARD,
@@ -15,6 +16,7 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.runtime_context import RuntimeContextBlock
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionPolicy
 
@@ -75,6 +77,61 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
         "assistant",
     ]
     assert loop.sessions.read_session_file(key) is None
+
+
+@pytest.mark.parametrize("selection", ["explicit_empty", "disable_all", "default"])
+async def test_turn_tool_selection_preserves_empty_registries(tmp_path, monkeypatch, selection) -> None:
+    monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", lambda **kwargs: [])
+    loop = _loop(tmp_path, [], max_iterations=2)
+    key = "cli:tool-selection"
+    write_tool = loop.tools.get("write_file")
+    assert write_tool is not None
+    tool_context = RuntimeContextBlock(source="write_file", content="Write tool runtime context")
+    provide_context = AsyncMock(return_value=tool_context)
+    monkeypatch.setattr(write_tool, "runtime_context_provider", lambda: provide_context)
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[
+            ToolCallRequest(
+                id="write-1", name="write_file",
+                arguments={"path": "result.txt", "content": "tool executed"},
+            ),
+        ]),
+        LLMResponse(content="done"),
+    ])
+    kwargs = {}
+    if selection == "explicit_empty":
+        kwargs["tools"] = ToolRegistry()
+    elif selection == "disable_all":
+        session = loop.sessions.get_or_create(key)
+        session.policy = SessionPolicy(disabled_tools=frozenset(loop.tools.tool_names))
+
+    try:
+        response = await loop.process_direct("Handle this request", session_key=key, **kwargs)
+
+        assert response is not None and response.content == "done"
+        requests = loop.provider.chat_stream_with_retry.await_args_list
+        assert len(requests) == 2
+        allowed = selection == "default"
+        expected_names = set(loop.tools.tool_names) if allowed else set()
+        for request in requests:
+            assert {item["function"]["name"] for item in request.kwargs["tools"]} == expected_names
+            assert (tool_context.content in str(request.kwargs["messages"])) is allowed
+        tool_result = next(
+            message for message in requests[1].kwargs["messages"]
+            if message.get("role") == "tool"
+        )
+        assert tool_result["tool_call_id"] == "write-1"
+        output_file = tmp_path / "result.txt"
+        if allowed:
+            provide_context.assert_awaited_once()
+            assert output_file.read_text(encoding="utf-8") == "tool executed"
+            assert "Successfully wrote" in tool_result["content"]
+        else:
+            provide_context.assert_not_awaited()
+            assert not output_file.exists()
+            assert "Tool 'write_file' not found" in tool_result["content"]
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.parametrize("privacy", ["temporary", "quiet", "ordinary"])
