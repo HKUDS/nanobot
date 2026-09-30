@@ -1,6 +1,8 @@
 """Manual context compaction command behavior."""
 
 import asyncio
+import sqlite3
+import threading
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -41,6 +43,61 @@ async def loop(tmp_path):
         yield loop
     finally:
         await loop.aclose()
+
+
+async def test_compact_session_io_runs_outside_event_loop(loop, monkeypatch) -> None:
+    key = "cli:test"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "summarize this conversation")
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses", provider="openai:test", model="test-model",
+        version=1, payload={"items": []},
+    )
+    loop.sessions.save(session)
+
+    event_loop_thread = threading.get_ident()
+    calls = []
+
+    def observe(name, operation):
+        def checked(*args, **kwargs):
+            assert threading.get_ident() != event_loop_thread
+            calls.append(name)
+            return operation(*args, **kwargs)
+        return checked
+
+    for name in ("load", "save"):
+        monkeypatch.setattr(loop.sessions._store, name, observe(name, getattr(loop.sessions._store, name)))
+
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact")
+    await loop.commands.dispatch(CommandContext(
+        msg=msg, session=None, key=key, raw="/compact", loop=loop,
+    ))
+
+    assert "load" in calls and "save" in calls
+    monkeypatch.undo()
+    assert loop.sessions.get_or_create(key).provider_state is None
+
+
+async def test_compact_lock_contention_keeps_heartbeat_running(loop) -> None:
+    key = "cli:test"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "summarize this conversation")
+    loop.sessions.save(session)
+
+    msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact")
+    blocker = sqlite3.connect(loop.sessions._store.path)
+    blocker.execute("BEGIN IMMEDIATE")
+    task = asyncio.create_task(loop.commands.dispatch(CommandContext(
+        msg=msg, session=session, key=key, raw="/compact", loop=loop,
+    )))
+    try:
+        for _ in range(5):
+            await asyncio.sleep(0.01)
+            assert not task.done(), "compaction must wait for storage without blocking the loop"
+    finally:
+        blocker.rollback()
+        blocker.close()
+        await asyncio.wait_for(task, timeout=2)
 
 
 @pytest.mark.asyncio
@@ -160,6 +217,7 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
     if legacy_commands:
         session.add_message("user", "/compact", _command=True)
         session.add_message("assistant", "Nothing to compact.", _command=True)
+    session.updated_at = datetime.now() - timedelta(minutes=30)
     loop.sessions.save(session)
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
@@ -178,11 +236,10 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
     assert reloaded.last_archived == 2
     assert loop.consolidator.store.read_unprocessed_history(0) == []
 
-    reloaded.updated_at = datetime.now() - timedelta(minutes=30)
-    loop.sessions.save(reloaded)
     loop.auto_compact._ttl = 1
+    assert loop.auto_compact._is_expired(reloaded.updated_at)
     schedule = MagicMock()
-    loop.auto_compact.check_expired(schedule, loop.runtime_for_session)
+    await loop.auto_compact.check_expired(schedule, loop.runtime_for_session)
     schedule.assert_not_called()
 
 
@@ -259,17 +316,18 @@ async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
         channel="cli", sender_id="u", chat_id="test", content="initial question",
     )))
     try:
-        await asyncio.wait_for(started.wait(), timeout=5)
-        loop._enqueue_session_message(InboundMessage(
+        # Include cold context initialization and durable commits on slower CI disks.
+        await asyncio.wait_for(started.wait(), timeout=30)
+        (await loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="before compaction",
-        ))
+        )))
         command = InboundMessage(channel="cli", sender_id="u", chat_id="test", content="/compact")
         await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
-        loop._enqueue_session_message(InboundMessage(
+        (await loop._enqueue_session_message(InboundMessage(
             channel="cli", sender_id="u", chat_id="test", content="after compaction",
-        ))
+        )))
         release.set()
-        await asyncio.wait_for(task, timeout=5)
+        await asyncio.wait_for(task, timeout=30)
     finally:
         release.set()
         if not task.done():
@@ -299,9 +357,9 @@ async def test_stop_completes_compact_queued_behind_an_active_turn(loop) -> None
     loop.provider.chat_stream_with_retry = chat
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
-    loop._enqueue_session_message(InboundMessage(
+    (await loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="question",
-    ))
+    )))
     task = next(iter(loop._active_tasks[key]))
     await asyncio.wait_for(started.wait(), timeout=5)
     command = InboundMessage(
@@ -338,7 +396,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
         channel="websocket", sender_id="user", chat_id="test", content="/compact",
         metadata={"webui_turn_id": "compact-turn"},
     )
-    loop._enqueue_session_message(msg)
+    (await loop._enqueue_session_message(msg))
     task = next(iter(loop._active_tasks[key]))
     await asyncio.wait_for(entered.wait(), timeout=5)
 
@@ -392,9 +450,10 @@ async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
     assert reloaded.get_history() == []
     assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
 
+    reloaded = await loop.sessions.state.get(key)
     reloaded.add_message("user", "next question")
     reloaded.add_message("assistant", "next answer")
-    loop.sessions.save(reloaded)
+    await loop.sessions.state.finish_turn(reloaded)
     await loop.consolidator.compact_idle_session(key, runtime=runtime)
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)

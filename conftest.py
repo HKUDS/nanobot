@@ -39,7 +39,6 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
     per ADR-0001), so without redirection tests would write into the real home.
     """
     runtime_root = tmp_path.parent / f"{tmp_path.name}-runtime-root"
-    legacy_root = tmp_path.parent / f"{tmp_path.name}-legacy-sessions-root"
 
     def runtime_subdir(name: str) -> Path:
         path = runtime_root / name
@@ -47,12 +46,8 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
         return path
 
     monkeypatch.setattr(
-        "nanobot.session.manager.get_runtime_subdir",
+        "nanobot.session.location.get_runtime_subdir",
         runtime_subdir,
-    )
-    monkeypatch.setattr(
-        "nanobot.session.manager.get_legacy_sessions_dir",
-        lambda: legacy_root,
     )
     yield
 
@@ -105,3 +100,17 @@ def _use_windows_system_ca_for_default_http_clients() -> Iterator[None]:
         yield
     finally:
         ssl.create_default_context = original
+
+
+@pytest.fixture
+def create_symlink():
+    """Create real symlinks, skipping only Windows' missing-privilege error."""
+    def create(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+        try:
+            link.symlink_to(target, target_is_directory=target_is_directory)
+        except OSError as exc:
+            if sys.platform == "win32" and getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows symlink creation requires Developer Mode or privilege")
+            raise
+
+    return create

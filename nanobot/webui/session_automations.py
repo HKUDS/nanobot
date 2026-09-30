@@ -8,8 +8,8 @@ from typing import Any, Protocol, cast
 from nanobot.cron.types import CronJob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
-    _message_preview_text,  # pyright: ignore[reportPrivateUsage]
-    _metadata_title,  # pyright: ignore[reportPrivateUsage]
+    message_preview_text,  # pyright: ignore[reportPrivateUsage]
+    metadata_title,  # pyright: ignore[reportPrivateUsage]
 )
 from nanobot.triggers.local_types import LocalTrigger
 
@@ -312,7 +312,7 @@ def _websocket_origin_payload(
     if session_manager is not None:
         data = session_manager.read_session_file(session_key)
         if isinstance(data, dict):
-            title = _metadata_title(data.get("metadata"))
+            title = metadata_title(data.get("metadata"))
             preview = _session_preview(data.get("messages"))
 
     return {
@@ -334,7 +334,7 @@ def _session_preview(messages: Any) -> str:
         message = cast(dict[str, Any], message_value)
         if is_hidden_history_message(message):
             continue
-        text = _message_preview_text(message)
+        text = message_preview_text(message)
         if not text:
             continue
         if message.get("role") == "user":

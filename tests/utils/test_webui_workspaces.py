@@ -7,7 +7,8 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
     default_workspace_scope,
 )
-from nanobot.session.manager import SessionManager, SessionStore
+from nanobot.session.manager import SessionManager
+from nanobot.session.sqlite_store import SqliteSessionStore
 from nanobot.webui.workspaces import (
     WebUIWorkspaceController,
     read_webui_default_access_mode,
@@ -129,7 +130,7 @@ def test_legacy_restricted_webui_default_access_mode_maps_to_default(tmp_path, m
     assert read_webui_default_access_mode() == "default"
 
 
-def test_webui_default_access_applies_to_unscoped_old_sessions(tmp_path, monkeypatch) -> None:
+async def test_webui_default_access_applies_to_unscoped_old_sessions(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"
     default.mkdir()
@@ -143,7 +144,7 @@ def test_webui_default_access_applies_to_unscoped_old_sessions(tmp_path, monkeyp
     )
 
     scope = controller.scope_for_session_key("websocket:old-chat")
-    new_scope = controller.scope_for_new_chat(
+    new_scope = await controller.scope_for_new_chat(
         {},
         can_change_project=True,
         can_use_full_access=True,
@@ -181,7 +182,7 @@ def test_indexed_scope_preserves_missing_and_explicit_null_semantics(tmp_path, m
     assert explicit_null.access_mode == "restricted"
 
 
-def test_webui_default_access_does_not_override_explicit_session_scope(tmp_path, monkeypatch) -> None:
+async def test_webui_default_access_does_not_override_explicit_session_scope(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"
     project = tmp_path / "project"
@@ -194,7 +195,7 @@ def test_webui_default_access_does_not_override_explicit_session_scope(tmp_path,
         default_restrict_to_workspace=True,
     )
     explicit = default_workspace_scope(project, restrict_to_workspace=False)
-    controller.persist_scope("explicit-chat", explicit)
+    await controller.persist_scope("explicit-chat", explicit)
 
     scope = controller.scope_for_session_key("websocket:explicit-chat")
 
@@ -202,7 +203,7 @@ def test_webui_default_access_does_not_override_explicit_session_scope(tmp_path,
     assert scope.access_mode == "full"
 
 
-def test_scope_for_session_key_reads_metadata_without_full_history(
+async def test_scope_for_session_key_reads_metadata_without_full_history(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -218,7 +219,7 @@ def test_scope_for_session_key_reads_metadata_without_full_history(
         default_restrict_to_workspace=True,
     )
     explicit = default_workspace_scope(project, restrict_to_workspace=False)
-    controller.persist_scope("metadata-only", explicit)
+    await controller.persist_scope("metadata-only", explicit)
 
     def fail_full_read(_key: str) -> None:
         raise AssertionError("scope lookup should not read full session history")
@@ -231,7 +232,7 @@ def test_scope_for_session_key_reads_metadata_without_full_history(
     assert scope.access_mode == "full"
 
 
-def test_new_chat_scope_is_persisted_only_after_first_message(tmp_path, monkeypatch) -> None:
+async def test_new_chat_scope_is_persisted_only_after_first_message(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"
     project = tmp_path / "project"
@@ -245,12 +246,12 @@ def test_new_chat_scope_is_persisted_only_after_first_message(tmp_path, monkeypa
     )
     scope = default_workspace_scope(project, restrict_to_workspace=False)
 
-    controller.stage_scope("draft-chat", scope)
+    await controller.stage_scope("draft-chat", scope)
 
     assert sessions.list_sessions() == []
     assert controller.scope_for_session_key("websocket:draft-chat") == scope
 
-    controller.persist_scope("draft-chat", scope)
+    await controller.persist_scope("draft-chat", scope)
 
     assert [item["key"] for item in sessions.list_sessions()] == ["websocket:draft-chat"]
 
@@ -270,7 +271,7 @@ def test_scope_for_session_key_always_reads_the_active_store(tmp_path, monkeypat
     residual.metadata[WORKSPACE_SCOPE_METADATA_KEY] = full_scope.metadata()
     residual_sessions.save(residual)
 
-    store = MagicMock(spec=SessionStore)
+    store = MagicMock(spec=SqliteSessionStore)
     store.read_metadata.side_effect = [
         {
             "key": "websocket:cached",
@@ -285,7 +286,8 @@ def test_scope_for_session_key_always_reads_the_active_store(tmp_path, monkeypat
             "metadata": {WORKSPACE_SCOPE_METADATA_KEY: restricted_scope.metadata()},
         },
     ]
-    sessions = SessionManager(workspace, store=store)
+    sessions = SessionManager(workspace)
+    monkeypatch.setattr(sessions._store, "read_metadata", store.read_metadata)
     controller = WebUIWorkspaceController(
         session_manager=sessions,
         default_workspace=default,
@@ -302,7 +304,7 @@ def test_scope_for_session_key_always_reads_the_active_store(tmp_path, monkeypat
     assert store.read_metadata.call_count == 2
 
 
-def test_remote_existing_chat_can_reduce_its_workspace_access(tmp_path, monkeypatch) -> None:
+async def test_remote_existing_chat_can_reduce_its_workspace_access(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
     default = tmp_path / "default"
     project = tmp_path / "project"
@@ -314,12 +316,12 @@ def test_remote_existing_chat_can_reduce_its_workspace_access(tmp_path, monkeypa
         default_workspace=default,
         default_restrict_to_workspace=True,
     )
-    controller.persist_scope(
+    await controller.persist_scope(
         "remote-chat",
         default_workspace_scope(project, restrict_to_workspace=False),
     )
 
-    scope = controller.scope_for_set_request(
+    scope = await controller.scope_for_set_request(
         {
             "workspace_scope": {
                 "project_path": str(project),
@@ -345,7 +347,7 @@ def test_remote_existing_chat_can_reduce_its_workspace_access(tmp_path, monkeypa
         (False, "other", "full", False),
     ],
 )
-def test_remote_new_chat_allows_project_selection_only_in_restricted_mode(
+async def test_remote_new_chat_allows_project_selection_only_in_restricted_mode(
     tmp_path,
     monkeypatch,
     default_restricted: bool,
@@ -365,8 +367,8 @@ def test_remote_new_chat_allows_project_selection_only_in_restricted_mode(
     )
     requested_path = tmp_path / project_name
 
-    def resolve():
-        return controller.scope_for_new_chat(
+    async def resolve():
+        return await controller.scope_for_new_chat(
             {
                 "workspace_scope": {
                     "project_path": str(requested_path),
@@ -378,7 +380,7 @@ def test_remote_new_chat_allows_project_selection_only_in_restricted_mode(
         )
 
     if allowed:
-        scope = resolve()
+        scope = await resolve()
         assert scope.project_path == requested_path.resolve()
         assert scope.access_mode == access_mode
     else:
@@ -386,10 +388,10 @@ def test_remote_new_chat_allows_project_selection_only_in_restricted_mode(
             WorkspaceScopeError,
             match="full workspace access is unavailable for this connection",
         ):
-            resolve()
+            await resolve()
 
 
-def test_project_selection_can_remain_disabled_for_untrusted_connections(
+async def test_project_selection_can_remain_disabled_for_untrusted_connections(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -408,7 +410,7 @@ def test_project_selection_can_remain_disabled_for_untrusted_connections(
         WorkspaceScopeError,
         match="project selection is unavailable for this connection",
     ):
-        controller.scope_for_new_chat(
+        await controller.scope_for_new_chat(
             {
                 "workspace_scope": {
                     "project_path": str(other),

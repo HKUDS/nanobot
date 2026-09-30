@@ -113,14 +113,16 @@ def should_finalize_on_max_iterations(
     )
 
 
-async def maybe_continue_turn(ctx: TurnContext) -> bool:
+async def maybe_continue_turn(
+    ctx: TurnContext, *, session_metadata: Mapping[str, Any],
+) -> bool:
     """Queue an internal continuation for *ctx* when policy allows it."""
     if ctx.session is None or ctx.pending_queue is None:
         return False
     if not _continuation_available(
         stop_reason=ctx.stop_reason,
         pending_queue_available=True,
-        session_metadata=ctx.session.metadata,
+        session_metadata=session_metadata,
         message_metadata=ctx.msg.metadata,
     ):
         return False
@@ -129,7 +131,7 @@ async def maybe_continue_turn(ctx: TurnContext) -> bool:
         ctx.msg.metadata,
         run_started_at=ctx.visible_run_started_at,
     )
-    content = _goal_continuation_prompt(ctx.session.metadata)
+    content = _goal_continuation_prompt(session_metadata)
     messages = _strip_terminal_assistant(ctx.all_messages, ctx.final_content)
     _increment_goal_continuation_round(ctx.session.metadata)
 

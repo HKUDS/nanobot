@@ -33,6 +33,7 @@ from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import RecoveryActionError
 from nanobot.session.session_handles import (
+    SessionHandle,
     SessionHandleResolver,
 )
 from nanobot.triggers.local_types import LocalTrigger
@@ -789,7 +790,7 @@ class GatewayHTTPHandler:
 
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
-            return self._handle_session_delete(request, m.group(1))
+            return await self._handle_session_delete(request, m.group(1))
 
         return None
 
@@ -837,18 +838,23 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
-        payload = await asyncio.to_thread(self._sessions_list_payload)
+        handles = await SessionHandleResolver(
+            self.session_manager
+        ).alist_all_by_key()
+        payload = await asyncio.to_thread(self._sessions_list_payload, handles)
         return _http_json_response(
             payload,
             accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
         )
 
-    def _sessions_list_payload(self) -> dict[str, Any]:
+    def _sessions_list_payload(
+        self,
+        handles: dict[str, SessionHandle],
+    ) -> dict[str, Any]:
         assert self.session_manager is not None
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
         sessions = list_webui_sessions(self.session_manager)
-        handles = SessionHandleResolver(self.session_manager).list_all_by_key()
         cleaned: list[dict[str, Any]] = []
         default_scope: WorkspaceScope | None = None
         for s in sessions:
@@ -1156,7 +1162,7 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
+    async def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
@@ -1185,12 +1191,12 @@ class GatewayHTTPHandler:
             for job in automation_jobs:
                 if isinstance(job, LocalTrigger):
                     if self.local_trigger_store is not None:
-                        self.local_trigger_store.delete(job.id)
+                        await asyncio.to_thread(self.local_trigger_store.delete, job.id)
                 elif self.cron_service is not None:
-                    self.cron_service.remove_job(job.id)
+                    await asyncio.to_thread(self.cron_service.remove_job, job.id)
         draft_deleted = self.workspaces.discard_draft_scope(decoded_key)
-        session_deleted = self.session_manager.delete_session(decoded_key)
-        transcript_deleted = delete_webui_thread(decoded_key)
+        session_deleted = await self.session_manager.state.delete(decoded_key)
+        transcript_deleted = await asyncio.to_thread(delete_webui_thread, decoded_key)
         return _http_json_response(
             {"deleted": bool(draft_deleted or session_deleted or transcript_deleted)}
         )

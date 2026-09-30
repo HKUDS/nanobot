@@ -599,14 +599,17 @@ async with Nanobot.from_config() as bot:
 
 | Method | Description |
 |--------|-------------|
-| `await ingest(session_key, messages, metadata=None, source=None, save=True)` | Import existing transcript messages without running the model. |
-| `get(session_key)` | Return a `SessionSnapshot`, or `None` if missing. |
-| `list()` | Return compact `SessionInfo` rows. |
-| `export(session_key)` | Return a trusted full `SessionSnapshot`, including model-only runtime context, suitable for JSON serialization. |
-| `await restore(snapshot, session_key=None, save=True)` | Restore a trusted exported snapshot into an empty session; the returned snapshot is display-safe. |
-| `clear(session_key)` | Clear and persist one session. |
-| `delete(session_key)` | Delete one session from disk and cache. |
-| `flush()` | Flush cached sessions to durable storage. |
+| `await ingest(session_key, messages, metadata=None, source=None)` | Import existing transcript messages without running the model. |
+| `await get(session_key)` | Return a `SessionSnapshot`, or `None` if missing. |
+| `await list()` | Return compact `SessionInfo` rows. |
+| `await export(session_key)` | Return a trusted full `SessionSnapshot`, including model-only runtime context, suitable for JSON serialization. |
+| `await restore(snapshot, session_key=None)` | Restore a trusted exported snapshot into an empty session; the returned snapshot is display-safe. |
+| `await clear(session_key)` | Clear and persist one session. |
+| `await delete(session_key)` | Delete one session from disk and cache. |
+
+Session operations read committed SQLite state and acknowledge durable commits. Returned
+snapshots are detached; there is no deferred save or cache flush. See
+[Session storage](session-storage.md) for migration and backup rules.
 
 Ingested messages must include `role` and `content`. Roles may be `user`,
 `assistant`, `tool`, or `system`. Other fields, such as `timestamp`,
@@ -694,7 +697,7 @@ async def run_with_external_memory(external_memory, enqueue_retry) -> None:
             return external_context_block(text)
 
         async def sync_saved_turn(event: SessionTurnPersisted):
-            snapshot = bot.sessions.get(event.context.session_key)
+            snapshot = await bot.sessions.get(event.context.session_key)
             if snapshot is not None:
                 try:
                     await external_memory.sync(

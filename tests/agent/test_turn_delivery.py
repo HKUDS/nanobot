@@ -320,13 +320,14 @@ def test_websocket_lifecycle_reuses_registered_ingress_owner(tmp_path: Path) -> 
         wth.clear_websocket_turn_if_current("chat-queued", owner)
 
 
-def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path) -> None:
+async def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path) -> None:
     from nanobot.session import webui_turns as wth
 
     sessions = SessionManager(tmp_path / "sessions")
     target = sessions.get_or_create("websocket:target")
     target.metadata["webui"] = True
     sessions.save(target)
+    await sessions.state.read(target.key)
     factory = TurnDeliveryFactory(
         MessageBus(),
         route_policy=WebuiTurnRoutePolicy(sessions),
@@ -413,7 +414,7 @@ async def test_same_chat_different_sessions_restore_previous_active_projection(
         wth._WEBSOCKET_TURN_OWNERS.pop("shared-chat", None)
 
 
-def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> None:
+async def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> None:
     sessions = SessionManager(tmp_path)
     factory = TurnDeliveryFactory(
         MessageBus(),
@@ -441,6 +442,8 @@ def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> Non
 
     session = sessions.get_or_create(session_key)
     session.metadata["webui"] = True
+    sessions.save(session)
+    await sessions.state.read(session_key)
     first_visible_route = factory.create(msg, session_key).route
     second_visible_route = factory.create(msg, session_key).route
 

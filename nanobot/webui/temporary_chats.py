@@ -14,7 +14,7 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.security.workspace_access import WorkspaceScope
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import SessionManager
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _TEMPORARY_CHAT_DISABLED_TOOLS = frozenset({
@@ -39,6 +39,7 @@ class TemporaryChatMessagePolicy:
     """Server-owned message rules for one active Temporary Chat."""
 
     session_key: str
+    session_generation: str
     workspace_scope: WorkspaceScope
     require_existing_session: bool = True
     hydrate_transcript: bool = False
@@ -64,9 +65,6 @@ class WebUITemporaryChats:
         self._channel_name = channel_name
         self._owners: dict[str, object] = {}
         self._owner_chat_ids: dict[object, set[str]] = {}
-        # Keep active sessions alive if the bounded manager cache evicts them
-        # between WebUI turns. SessionPolicy remains the authority below.
-        self._active_sessions: dict[str, Session] = {}
         # Retain policy-derived tombstones until shutdown so late outbound
         # events cannot create a durable transcript after a chat is discarded.
         self._known_transient_chat_ids: set[str] = set()
@@ -78,10 +76,10 @@ class WebUITemporaryChats:
     def _cached_session_is_transient(self, chat_id: str) -> bool:
         if self._sessions is None:
             return False
-        session = self._sessions.get_cached(self._session_key(chat_id))
+        session = self._sessions.state.peek(self._session_key(chat_id))
         return session is not None and not session.policy.persist
 
-    def create(self, owner: object, *, trusted_webui: bool) -> str:
+    async def create(self, owner: object, *, trusted_webui: bool) -> str:
         """Create a server-identified chat owned by one authenticated WebUI connection."""
         if not trusted_webui:
             raise TemporaryChatError("access_denied")
@@ -89,7 +87,7 @@ class WebUITemporaryChats:
             raise TemporaryChatError("temporary_chat_unavailable")
 
         chat_id = str(uuid.uuid4())
-        session = self._sessions.get_or_create_transient(
+        session = await self._sessions.state.register_transient(
             self._session_key(chat_id),
             disabled_tools=_TEMPORARY_CHAT_DISABLED_TOOLS,
         )
@@ -97,7 +95,6 @@ class WebUITemporaryChats:
             raise RuntimeError("Temporary Chat must use a non-persistent session policy")
         self._owners[chat_id] = owner
         self._owner_chat_ids.setdefault(owner, set()).add(chat_id)
-        self._active_sessions[chat_id] = session
         self._known_transient_chat_ids.add(chat_id)
         return chat_id
 
@@ -115,7 +112,7 @@ class WebUITemporaryChats:
         if self._owners.get(chat_id) is not owner or self._sessions is None:
             raise TemporaryChatError("temporary_chat_unavailable")
 
-        session = self._sessions.get_cached(self._session_key(chat_id))
+        session = self._sessions.state.peek(self._session_key(chat_id))
         if session is None:
             raise TemporaryChatError("temporary_chat_unavailable")
 
@@ -125,6 +122,7 @@ class WebUITemporaryChats:
 
         return TemporaryChatMessagePolicy(
             session_key=self._session_key(chat_id),
+            session_generation=session.generation,
             workspace_scope=self._workspaces.restricted_default_scope(),
         )
 
@@ -189,10 +187,9 @@ class WebUITemporaryChats:
 
         session_key = self._session_key(chat_id)
         self._forget_owner(owner, chat_id)
-        self._active_sessions.pop(chat_id, None)
         self._discard_media(chat_id)
         if self._sessions is not None:
-            self._sessions.invalidate(session_key)
+            await self._sessions.state.discard(session_key)
         await self._bus.publish_inbound(
             InboundMessage(
                 channel=self._channel_name,
@@ -211,8 +208,7 @@ class WebUITemporaryChats:
         for chat_id in tuple(self._owners):
             self._discard_media(chat_id)
             if self._sessions is not None:
-                self._sessions.invalidate(self._session_key(chat_id))
+                self._sessions.state.forget_transient(self._session_key(chat_id))
         self._owners.clear()
         self._owner_chat_ids.clear()
-        self._active_sessions.clear()
         self._known_transient_chat_ids.clear()

@@ -35,6 +35,7 @@ class InboundMessage:
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
     require_existing_session: bool = False
     input_role: Literal["user", "system"] | None = None
+    session_generation: str | None = None  # Trusted identity assigned at session admission
 
     @property
     def session_key(self) -> str:

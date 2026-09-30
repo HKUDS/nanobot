@@ -77,6 +77,10 @@ async def test_list_sessions_includes_all_persisted_channels_except_current(
     sessions = SessionManager(tmp_path)
     _persist(sessions, "websocket:current", "telegram:other", "slack:team")
     tool = ListSessionsTool(sessions)
+    expected = {
+        f"@{_handle(sessions, 'telegram:other').name}",
+        f"@{_handle(sessions, 'slack:team').name}",
+    }
 
     with request_context(RequestContext(
         channel="websocket",
@@ -85,10 +89,7 @@ async def test_list_sessions_includes_all_persisted_channels_except_current(
     )):
         result = json.loads(await tool.execute())
 
-    assert set(result) == {
-        f"@{_handle(sessions, 'telegram:other').name}",
-        f"@{_handle(sessions, 'slack:team').name}",
-    }
+    assert set(result) == expected
 
 
 @pytest.mark.asyncio
@@ -366,9 +367,12 @@ async def test_reply_follows_a_recycled_handle(tmp_path: Path) -> None:
         expect_reply=False,
     )
     received = await bus.consume_inbound()
-    assert sessions.delete_session(source.session_key)
-    _persist(sessions, "websocket:replacement")
-    replacement = _handle(sessions, "websocket:replacement")
+    assert await sessions.state.delete(source.session_key)
+    await sessions.state.get("websocket:replacement")
+    replacement = await SessionHandleResolver(sessions).ahandle_for_session(
+        "websocket:replacement"
+    )
+    assert replacement is not None
     assert replacement.name == source.name
 
     with request_context(RequestContext(

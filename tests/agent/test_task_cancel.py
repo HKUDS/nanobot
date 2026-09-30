@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.session_helpers import run_session
+from agent.session_helpers import mock_session_manager, run_session
 from nanobot.agent.memory import Consolidator
 from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 from nanobot.config.schema import AgentDefaults
@@ -38,7 +38,7 @@ def _make_loop(*, tools_config=None):
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, tools_config=tools_config)
@@ -341,7 +341,7 @@ class TestDispatch:
     async def test_run_logs_and_continues_after_leaked_cancelled_error(self, monkeypatch):
         loop, bus = _make_loop()
         loop.aclose = AsyncMock()
-        loop.auto_compact.check_expired = MagicMock()
+        loop.auto_compact.check_expired = AsyncMock()
         warnings: list[str] = []
         calls = 0
 

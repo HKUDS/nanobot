@@ -431,6 +431,7 @@ class SignalChannel(BaseChannel):
         is_dm: bool = False,
         authorization_id: str | None = None,
         require_existing_session: bool = False,
+        session_generation: str | None = None,
     ) -> None:
         """Handle an inbound message whose policy has already been checked.
 
@@ -453,6 +454,7 @@ class SignalChannel(BaseChannel):
                 media=media or [],
                 metadata=meta,
                 session_key_override=session_key,
+                session_generation=session_generation,
                 require_existing_session=require_existing_session,
             )
         )

@@ -18,6 +18,7 @@ from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, Outbound
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.providers.base import LLMUsage
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -267,8 +268,8 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
 async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
-    session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    runtime = ctx.runtime or loop.runtime_for_session(session)
+    session = ctx.session or await loop.sessions.state.get(ctx.key)
+    runtime = ctx.runtime or await loop.runtime_for_session(session)
     ctx_est = 0
     with suppress(Exception):
         ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(
@@ -316,29 +317,30 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
     loop.discard_session_file_state(ctx.key)
-    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    session = ctx.session or await loop.sessions.state.get(ctx.key)
     snapshot = list(session.messages)
     archive_snapshot = None
     runtime = None
     if session.last_archived < len(snapshot):
-        runtime = ctx.runtime or loop.runtime_for_session(session)
+        runtime = ctx.runtime or await loop.runtime_for_session(session)
         archive_snapshot = replace(
             session,
             messages=snapshot,
             metadata=dict(session.metadata),
             provider_state=None,
         )
-    session.clear()
-    loop.sessions.save(session)
-    loop.sessions.invalidate(session.key)
-    if archive_snapshot is not None and runtime is not None:
-        loop.schedule_background(
-            loop.consolidator.archive_session(  # pyright: ignore[reportUnknownMemberType]
-                archive_snapshot,
-                archive_end=len(snapshot),
-                runtime=runtime,
+    async def reset_and_schedule_archive() -> None:
+        await loop.sessions.state.reset(session.key)
+        if archive_snapshot is not None and runtime is not None:
+            loop.schedule_background(
+                loop.consolidator.archive_session(  # pyright: ignore[reportUnknownMemberType]
+                    archive_snapshot,
+                    archive_end=len(snapshot),
+                    runtime=runtime,
+                )
             )
-        )
+
+    await shield_and_drain(reset_and_schedule_archive())
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
@@ -349,12 +351,12 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 async def cmd_compact(ctx: CommandContext) -> None:
     """Compact the current session without resetting the conversation."""
     loop = ctx.loop
-    session = ctx.session or loop.sessions.get_or_create(ctx.key)
-    runtime = ctx.runtime or loop.runtime_for_session(session)
+    session = ctx.session or await loop.sessions.state.get(ctx.key)
+    runtime = ctx.runtime or await loop.runtime_for_session(session)
     delivery = loop.turn_delivery_factory.create(ctx.msg, ctx.key)
 
     try:
-        summary = await loop.consolidator.compact_idle_session(
+        await loop.consolidator.compact_idle_session(
             ctx.key,
             runtime=runtime,
             events=delivery.events,
@@ -363,10 +365,6 @@ async def cmd_compact(ctx: CommandContext) -> None:
         logger.exception("Manual context compaction failed for {}", ctx.key)
         return
 
-    if summary:
-        refreshed = loop.sessions.get_or_create(ctx.key)
-        refreshed.provider_state = None
-        loop.sessions.save(refreshed)
 
 
 def _format_preset_names(names: list[str]) -> str:
@@ -383,10 +381,10 @@ def _command_error_message(exc: Exception) -> str:
     return str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
 
 
-def _model_command_status(loop: AgentLoop, session: Session) -> str:
+async def _model_command_status(loop: AgentLoop, session: Session) -> str:
     names = _model_preset_names(loop)
     try:
-        runtime = loop.runtime_for_session(session, recover_removed=False)
+        runtime = await loop.runtime_for_session(session, recover_removed=False)
     except (KeyError, ValueError) as exc:
         return "\n".join([
             "## Model",
@@ -410,17 +408,17 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
 
     if not args:
-        session = ctx.session or loop.sessions.get_or_create(ctx.key)
+        session = ctx.session or await loop.sessions.state.get(ctx.key)
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
-            content=_model_command_status(loop, session),
+            content=await _model_command_status(loop, session),
             metadata=metadata,
         )
 
     name = args
     try:
-        runtime = loop.set_session_model_preset(ctx.key, name)
+        runtime = await loop.set_session_model_preset(ctx.key, name)
     except (KeyError, ValueError) as exc:
         names = _model_preset_names(loop)
         return OutboundMessage(
@@ -464,7 +462,6 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
 
         dream_session_key = MemoryStore.dream_session_key
         build_dream_commit_message = MemoryStore.build_dream_commit_message
-        prune_dream_sessions = MemoryStore.prune_dream_sessions
 
         store = loop.context.memory
         content = ""
@@ -518,7 +515,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
                 if sha:
                     content += f" (commit {sha})"
             store.compact_history()
-            prune_dream_sessions(loop.sessions)
+            await loop.sessions.state.prune_dream_sessions()
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
@@ -881,7 +878,7 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
                 metadata=dict(ctx.msg.metadata or {}),
             )
 
-    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    session = ctx.session or await ctx.loop.sessions.state.get(ctx.key)
     history = session.get_history(max_messages=0, include_runtime_context=False)
     visible = [_format_history_message(m) for m in history]
     visible = [m for m in visible if m is not None]
@@ -920,9 +917,9 @@ async def cmd_goal(ctx: CommandContext) -> InboundMessage | OutboundMessage:
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
 
-    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    session = ctx.session or await ctx.loop.sessions.state.get(ctx.key)
     session.add_message("user", ctx.msg.content, _command=True, media=list(ctx.msg.media))
-    ctx.loop.sessions.save(session)
+    await ctx.loop.sessions.state.prepare_input(session)
     return replace(
         ctx.msg,
         content=goal,

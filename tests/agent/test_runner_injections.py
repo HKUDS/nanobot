@@ -37,7 +37,6 @@ def _make_loop(tmp_path, *, recovery_admission=None):
     provider.get_default_model.return_value = "test-model"
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         mock_sub_mgr.return_value.close = AsyncMock()
@@ -393,7 +392,7 @@ async def test_goal_continuation_precedes_terminal_wait():
     continuation_checks = 0
     terminal_waits = 0
 
-    def continue_goal() -> str | None:
+    async def continue_goal() -> str | None:
         nonlocal continuation_checks
         continuation_checks += 1
         return "Continue the active goal." if continuation_checks == 1 else None
@@ -749,7 +748,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         )
 
     loop.register_runtime_context_provider(provide_identity)
-    session = loop.sessions.get_or_create("telegram:group-1")
+    session = await loop.sessions.state.get("telegram:group-1")
     pending_queue = asyncio.Queue()
     await pending_queue.put(InboundMessage(
         channel="telegram",
@@ -1444,9 +1443,9 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
         calls += 1
         if calls == 1:
             for content in ["before", "bad", "after"]:
-                loop._enqueue_session_message(InboundMessage(
+                (await loop._enqueue_session_message(InboundMessage(
                     channel="cli", sender_id="u", chat_id="c", content=content,
-                ))
+                )))
         return LLMResponse(content="answer", finish_reason="stop")
 
     async def context_provider(request):
@@ -1472,16 +1471,25 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
 
 
 @pytest.mark.asyncio
-async def test_session_inbox_is_installed_before_worker_start(tmp_path):
+async def test_session_inbox_is_installed_before_worker_start(tmp_path, monkeypatch):
     """A preloaded burst has one FIFO path before the worker can be scheduled."""
     from nanobot.bus.events import InboundMessage, OutboundMessage
 
     loop = _make_loop(tmp_path)
     first_started = asyncio.Event()
+    all_enqueued = asyncio.Event()
     release_first = asyncio.Event()
     all_processed = asyncio.Event()
     processed: list[str] = []
     followups = [f"follow-up-{index}" for index in range(40)]
+    enqueue = loop._enqueue_session_message
+
+    async def capture_enqueue(msg):
+        await enqueue(msg)
+        if msg.content == followups[-1]:
+            all_enqueued.set()
+
+    monkeypatch.setattr(loop, "_enqueue_session_message", capture_enqueue)
 
     async def _process_message(msg, **_kwargs):
         processed.append(msg.content)
@@ -1502,14 +1510,11 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path):
         )
 
     run_task = asyncio.create_task(loop.run())
-    await asyncio.wait_for(first_started.wait(), timeout=2)
+    await asyncio.wait_for(
+        asyncio.gather(first_started.wait(), all_enqueued.wait()), timeout=30,
+    )
 
     session_key = "cli:c"
-    for _ in range(200):
-        pending = loop._pending_queues.get(session_key)
-        if pending is not None and pending.qsize() == len(followups):
-            break
-        await asyncio.sleep(0.01)
     assert len(loop._active_tasks[session_key]) == 1
     assert loop._pending_queues[session_key].qsize() == len(followups)
 
@@ -1562,7 +1567,8 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.sessions.get_or_create("cli:c").policy = SessionPolicy(log_content=log_content)
+    await loop.sessions.state.get("cli:c")
+    await loop.sessions.state.set_policy("cli:c", SessionPolicy(log_content=log_content))
     followups = [f"follow-up-{index:02}" for index in range(12)]
 
     run_task = asyncio.create_task(loop.run())
@@ -1594,7 +1600,8 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
             break
         await asyncio.sleep(0.01)
     loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    # Shutdown drains accepted writes and closes the worker's WAL connection.
+    await asyncio.wait_for(run_task, timeout=30)
 
     assert len(captured_messages) == 2
     second_request = "\n".join(

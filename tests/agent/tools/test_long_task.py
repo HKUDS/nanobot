@@ -71,7 +71,8 @@ async def _execute(tool, ctx: RequestContext, *, allowed: bool = True, **kwargs)
 async def test_create_goal_records_goal_metadata(tmp_path):
     sm = SessionManager(tmp_path)
     create, _update, ctx = _tools(sm)
-    sm.get_or_create("websocket:c1").metadata["_sustained_goal_continuation_rounds"] = 12
+    await sm.state.get("websocket:c1")
+    await sm.state.update_metadata("websocket:c1", {"_sustained_goal_continuation_rounds": 12})
 
     out = await _execute(
         create,
@@ -87,6 +88,7 @@ async def test_create_goal_records_goal_metadata(tmp_path):
     assert blob["status"] == "active"
     assert blob["objective"] == "Do the thing"
     assert blob["ui_summary"] == "thing"
+    sess = sm.get_or_create("websocket:c1")
     assert "_sustained_goal_continuation_rounds" not in sess.metadata
     assert "_sustained_goal_continuation_rounds" not in (
         SessionManager(tmp_path).get_or_create("websocket:c1").metadata
@@ -144,9 +146,10 @@ async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path
     create, update, ctx = _tools(sm)
 
     await _execute(create, ctx, objective="Old")
-    sess = sm.get_or_create("websocket:c1")
-    sess.metadata["_sustained_goal_continuation_rounds"] = 12
-    sm.save(sess)
+    await sm.state.update_metadata(
+        "websocket:c1",
+        {"_sustained_goal_continuation_rounds": 12},
+    )
     out = await _execute(
         update,
         _request_context(),
@@ -161,6 +164,7 @@ async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path
     assert blob["objective"] == "New"
     assert blob["previous_objective"] == "Old"
     assert blob["ui_summary"] == "new"
+    sess = sm.get_or_create("websocket:c1")
     assert "_sustained_goal_continuation_rounds" not in sess.metadata
     assert "_sustained_goal_continuation_rounds" not in (
         SessionManager(tmp_path).get_or_create("websocket:c1").metadata
@@ -178,13 +182,14 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     sess = sm.get_or_create("websocket:c1")
     sess.metadata["marker"] = {"keep": True}
     sess.metadata["_sustained_goal_continuation_rounds"] = 12
-    original_save = sm.save
+    sm.save(sess)
+    original_save = sm._store.replace_metadata
     create_context = _request_context()
 
-    def fail_save(_session, **_kwargs):
+    def fail_save(*_args, **_kwargs):
         raise OSError("disk unavailable")
 
-    monkeypatch.setattr(sm, "save", fail_save)
+    monkeypatch.setattr(sm._store, "replace_metadata", fail_save)
     with pytest.raises(OSError, match="disk unavailable"):
         await _execute(create, create_context, objective="Old")
 
@@ -194,13 +199,16 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     }
     assert GOAL_STATE_KEY not in SessionManager(tmp_path).get_or_create("websocket:c1").metadata
 
-    monkeypatch.setattr(sm, "save", original_save)
+    monkeypatch.setattr(sm._store, "replace_metadata", original_save)
     assert "Goal recorded" in await _execute(create, create_context, objective="Old")
-    sess.metadata["_sustained_goal_continuation_rounds"] = 12
-    sm.save(sess)
+    await sm.state.update_metadata(
+        "websocket:c1",
+        {"_sustained_goal_continuation_rounds": 12},
+    )
+    sess = sm.get_or_create("websocket:c1")
     replace_context = _request_context()
 
-    monkeypatch.setattr(sm, "save", fail_save)
+    monkeypatch.setattr(sm._store, "replace_metadata", fail_save)
     with pytest.raises(OSError, match="disk unavailable"):
         await _execute(update, replace_context, action="replace", objective="New")
 
@@ -210,13 +218,14 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     assert persisted[GOAL_STATE_KEY]["objective"] == "Old"
     assert persisted["_sustained_goal_continuation_rounds"] == 12
 
-    monkeypatch.setattr(sm, "save", original_save)
+    monkeypatch.setattr(sm._store, "replace_metadata", original_save)
     assert "Goal replaced" in await _execute(
         update,
         replace_context,
         action="replace",
         objective="New",
     )
+    sess = sm.get_or_create("websocket:c1")
     assert "_sustained_goal_continuation_rounds" not in sess.metadata
     assert (
         SessionManager(tmp_path).get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"]
@@ -372,7 +381,7 @@ async def test_registry_does_not_reuse_goal_context_after_request_scope(tmp_path
     leaked_out = await registry.execute("create_goal", {"objective": "Leaked"})
 
     assert "missing routing context" in str(leaked_out)
-    assert sess.metadata[GOAL_STATE_KEY]["status"] == "completed"
+    assert sm.get_or_create(sess.key).metadata[GOAL_STATE_KEY]["status"] == "completed"
 
 
 @pytest.mark.asyncio

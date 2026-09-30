@@ -258,7 +258,7 @@ async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> Non
 
     channel._handle_message.assert_awaited_once()
     metadata = channel._handle_message.call_args.kwargs["metadata"]
-    handle = SessionHandleResolver(manager).handle_for_session("websocket:pricing")
+    handle = await SessionHandleResolver(manager).ahandle_for_session("websocket:pricing")
     assert handle is not None
     assert metadata["session_mentions"] == [{
         **handle.public_payload(),

@@ -23,7 +23,6 @@ from nanobot.session.recovery import (
     PENDING_FOLLOWUPS_KEY,
     RecoveryCoordinator,
     pending_followups,
-    record_pending_followup,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
@@ -82,9 +81,6 @@ async def test_automation_turn_is_deferred_while_session_active(loop, kind):
         async with asyncio.timeout(3):
             while not coordinator.deferred_queues.get(key):
                 await asyncio.sleep(0)
-        loop.stop()
-        await asyncio.wait_for(run_task, timeout=3)
-
         assert pending.empty()
         assert loop._active_tasks == {}
         assert coordinator.deferred_queues[key] == [msg]
@@ -105,7 +101,7 @@ async def test_automation_turn_is_deferred_while_session_active(loop, kind):
 @pytest.mark.parametrize("kind", ["cron", "local_trigger"])
 async def test_submitted_automation_reports_pending_until_completed(loop, kind):
     coordinator = loop._cron_turns if kind == "cron" else loop._local_trigger_turns
-    coordinator._enqueue = MagicMock()
+    coordinator._enqueue = AsyncMock()
     submit = loop.submit_cron_turn if kind == "cron" else loop.submit_local_trigger_turn
     pending_ids = (
         loop.pending_cron_job_ids_for_session
@@ -255,15 +251,15 @@ async def test_stopped_followups_are_not_recovered_but_shutdown_preserves_them(
 
     loop.provider.chat_stream_with_retry = chat
     key = "websocket:test"
-    loop._enqueue_session_message(InboundMessage(
+    (await loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="first",
         metadata={"webui": True},
-    ))
+    )))
     await asyncio.wait_for(started.wait(), timeout=3)
-    loop._enqueue_session_message(InboundMessage(
+    (await loop._enqueue_session_message(InboundMessage(
         channel="websocket", sender_id="u", chat_id="test", content="cancel me",
         metadata={"webui": True},
-    ))
+    )))
 
     if not followup_still_queued:
         consumed = loop._pending_queues[key].get_nowait()
@@ -299,16 +295,15 @@ async def test_stopped_followups_are_not_recovered_but_shutdown_preserves_them(
 
 async def test_cancel_preserves_followups_accepted_after_cancellation_started(loop):
     key = "websocket:test"
-    session = loop.sessions.get_or_create(key)
+    session = await loop.sessions.state.get(key)
 
-    def journal(content):
-        record_pending_followup(session, InboundMessage(
+    async def journal(content):
+        await loop.sessions.state.queue_followup(key, InboundMessage(
             channel="websocket", sender_id="u", chat_id="test", content=content,
-            metadata={"webui": True},
+            metadata={"webui": True}, session_generation=session.generation,
         ))
-        loop.sessions.save(session)
 
-    journal("old followup")
+    await journal("old followup")
     started = asyncio.Event()
     cancelling = asyncio.Event()
     release = asyncio.Event()
@@ -327,7 +322,7 @@ async def test_cancel_preserves_followups_accepted_after_cancellation_started(lo
     stop = asyncio.create_task(loop._cancel_active_tasks(key))
     try:
         await asyncio.wait_for(cancelling.wait(), timeout=3)
-        journal("new followup")
+        await journal("new followup")
     finally:
         release.set()
         await stop
@@ -421,7 +416,7 @@ async def test_ingress_sources_share_one_session_worker(loop, bus_running):
         if bus_running:
             await loop.bus.publish_inbound(first)
         else:
-            loop._enqueue_session_message(first)
+            (await loop._enqueue_session_message(first))
         await asyncio.wait_for(started.wait(), timeout=3)
         cron = asyncio.create_task(loop.submit_cron_turn(_automation_message("cron", "cron")))
         trigger = asyncio.create_task(loop.submit_local_trigger_turn(
@@ -436,7 +431,7 @@ async def test_ingress_sources_share_one_session_worker(loop, bus_running):
                 while loop._pending_queues[key].empty():
                     await asyncio.sleep(0)
         else:
-            loop._enqueue_session_message(second)
+            (await loop._enqueue_session_message(second))
         compact = InboundMessage(channel="websocket", sender_id="u", chat_id="test", content="/compact")
         await loop._dispatch_command_inline(compact, key, compact.content, loop.commands.dispatch)
         assert len(loop._active_tasks[key]) == 1
@@ -527,7 +522,9 @@ async def test_goal_continuation_after_followup_keeps_control_identity(loop, com
                 while loop._pending_queues["cli:test"].empty():
                     await asyncio.sleep(0)
         elif complete_on_followup or len(requests) == 3:
-            session.metadata[GOAL_STATE_KEY]["status"] = "complete"
+            await loop.sessions.state.update_metadata(session.key, {
+                GOAL_STATE_KEY: {"status": "complete", "objective": "Finish the long goal"},
+            })
             return LLMResponse(content="done")
         return LLMResponse(
             content="working", finish_reason="tool_calls",

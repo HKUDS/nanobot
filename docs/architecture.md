@@ -149,7 +149,7 @@ Defaults:
 |---|---|
 | Config | `~/.nanobot/config.json` |
 | Workspace | `~/.nanobot/workspace/` |
-| Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` (default: `~/.nanobot/sessions/...`) |
+| Sessions | `<config-dir>/sessions/<workspace-id>/sessions.sqlite3` (default: `~/.nanobot/sessions/...`) |
 | Memory | `<workspace>/memory/` |
 | Cron store | `<workspace>/cron/jobs.json` |
 | WebUI/media/log runtime data | config directory subdirectories such as `webui/`, `media/`, and `logs/` |
@@ -180,7 +180,7 @@ Session history is the near-term conversation replay. Memory is the longer-term 
 
 | Store | File area |
 |---|---|
-| Session JSONL files | `<config-dir>/sessions/<workspace-id>/` |
+| SQLite conversation state | `<config-dir>/sessions/<workspace-id>/sessions.sqlite3` |
 | Long-term memory | `<workspace>/memory/MEMORY.md` |
 | Consolidation source history | `<workspace>/memory/history.jsonl` |
 | Bootstrap identity files | `<workspace>/SOUL.md`, `<workspace>/USER.md`, templates under `nanobot/templates/` |

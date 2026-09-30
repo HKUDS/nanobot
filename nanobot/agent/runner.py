@@ -60,7 +60,7 @@ from nanobot.utils.runtime import (
     is_blank_text,
 )
 
-ContinuationCallback = Callable[[], str | None]
+ContinuationCallback = Callable[[], Awaitable[str | None]]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[[], Awaitable[Iterable[Any] | None]]
 
@@ -170,7 +170,7 @@ class AgentRunner:
         injections = await self._drain_injections(spec) if drain_callback else []
         real_injection = bool(injections)
         if not injections and allow_continuation and assistant_message is not None:
-            continuation = self._build_continuation_message(spec)
+            continuation = await self._build_continuation_message(spec)
             if continuation is not None:
                 injections = [continuation]
         if (
@@ -222,12 +222,12 @@ class AgentRunner:
         return True, injection_cycles
 
     @staticmethod
-    def _build_continuation_message(spec: AgentRunSpec) -> dict[str, str] | None:
+    async def _build_continuation_message(spec: AgentRunSpec) -> dict[str, str] | None:
         callback = spec.continuation_callback
         if callback is None:
             return None
         try:
-            content = callback()
+            content = await callback()
         except Exception:
             logger.opt(exception=tool_log_content_allowed()).error("continuation_callback failed")
             return None

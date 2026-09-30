@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useRef } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { WebLink, WebPreviewContext } from "@/components/WebLink";
 import { useMessageWebLinks } from "@/components/MessageLinksMenu";
@@ -22,6 +23,8 @@ async function openLinks() {
 }
 
 describe("message link actions", () => {
+  beforeAll(preloadMarkdownText);
+
   function mobileViewport() {
     const listeners = new Set<() => void>();
     let narrow = true;
