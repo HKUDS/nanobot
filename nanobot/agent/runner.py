@@ -60,6 +60,14 @@ from nanobot.utils.runtime import (
     is_blank_text,
 )
 
+
+def _raise_if_cancelling() -> None:
+    """Do not resume model work when a dependency suppresses cancellation."""
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        raise asyncio.CancelledError
+
+
 ContinuationCallback = Callable[[], str | None]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
 InjectionCallback = Callable[[], Awaitable[Iterable[Any] | None]]
@@ -879,6 +887,7 @@ class AgentRunner:
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
     ) -> tuple[LLMResponse, LLMUsage]:
+        _raise_if_cancelling()
         tool_definitions = spec.tools.get_definitions()
         messages, provider_context = await self.context_governor.prepare_request(
             request_state,
@@ -892,6 +901,7 @@ class AgentRunner:
             messages,
             tools=tool_definitions,
         )
+        _raise_if_cancelling()
         wants_streaming = hook.wants_streaming()
         provider_context = replace(
             provider_context or ProviderCallContext(),
@@ -1009,6 +1019,7 @@ class AgentRunner:
         request_started_at = time.perf_counter()
         try:
             response = await coro
+            _raise_if_cancelling()
         except asyncio.CancelledError:
             _pause_generation()
             await _close_native_reasoning()
@@ -1230,6 +1241,7 @@ class AgentRunner:
         request_state: ModelRequestState,
         transcript: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
+        _raise_if_cancelling()
         messages, provider_context = await self.context_governor.prepare_request(
             request_state,
             messages,
@@ -1241,6 +1253,7 @@ class AgentRunner:
             messages,
             tools=None,
         )
+        _raise_if_cancelling()
         response = await spec.runtime.provider.chat_stream_with_retry(
             **kwargs,
             provider_context=replace(
@@ -1248,11 +1261,13 @@ class AgentRunner:
                 response_preset=spec.runtime.model_preset or "",
             ),
         )
+        _raise_if_cancelling()
         await self.context_governor.summarize_provider_compaction(
             request_state,
             response,
             current_request_boundary=(len(transcript) if transcript is not None else None),
         )
+        _raise_if_cancelling()
         request_state.provider_compaction_applied |= response.provider_compaction_applied
         return response
 

@@ -2257,7 +2257,7 @@ The notification gate runs on a built-in system prompt. Advanced users can overr
 
 ## Subagent Concurrency
 
-By default, nanobot allows four subagents to run at the same time. Additional subagents wait for capacity instead of being rejected. Lower the limit if a local model server cannot hold multiple KV caches, or raise it when the provider can handle more parallel work:
+By default, nanobot allows four subagents to run at the same time. Additional subagents wait for capacity, up to 128 active tasks (queued and running) per manager; further spawn requests are rejected. Lower the limit if a local model server cannot hold multiple KV caches, or raise it when the provider can handle more parallel work:
 
 ```json
 {
@@ -2275,6 +2275,22 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 |--------|---------|-------------|
 | `agents.defaults.maxConcurrentSubagents` | `4` | Maximum number of subagents that may run at the same time. Additional tasks wait for capacity. |
 
+
+### Private task control
+
+`spawn` returns a full task ID for background work. `subagent` controls tasks owned by the current session:
+
+- `subagent(action="send", task_id="...", message="...")` queues a follow-up message.
+- `subagent(action="cancel", task_id="...")` stops a queued or running task. Repeated cancellation is safe and does not restart the task.
+- `my(action="check", key="subagents._task_statuses.<task_id>")` reads the task state, retained result, error, and message receipts.
+
+Inspection and control require the canonical session key from the current request context; the model cannot supply an owner. Missing session context, unknown task IDs, and tasks owned by other sessions cannot be used to access a task. Child shell processes use a separate task owner, so finishing or cancelling one task does not terminate its siblings' or parent's processes. Cleanup does not remove files the task created.
+
+Cancellation starts task-owned process cleanup immediately and waits at most five seconds for the task to exit. A dependency that does not acknowledge cancellation leaves the task in `stopping`, still tracked and holding its execution slot; repeated cancellation does not interrupt cleanup. Parent-session stop uses the same bounded wait; shutdown allows a further five seconds for pending process cleanup. Failed process cleanup is reported as an error and its resources remain tracked for a shutdown retry, even after the terminal status is evicted. Late model results cannot start further tools or publish a successful task result. Task-owned exec managers close admission during cleanup so delayed work cannot create new exec sessions after closure.
+
+Each task accepts up to 16 pending messages, 8192 UTF-8 bytes per message, and 128 messages over its lifetime. Messages are drained in FIFO snapshots at Runner injection boundaries. A send response includes a message ID and an `accepted` receipt; acceptance does not mean delivery. `delivered` means handed into the task transcript, not that the model acted on it. Pending messages become `undelivered` at completion, failure, or cancellation. Full, stopping, and terminal tasks reject new messages rather than silently dropping them.
+
+Tasks and receipts are in memory only: there are no durable child sessions or task handles that survive a restart. The manager retains at most 128 terminal task statuses, with result, error, and task description truncated to the configured tool-result character limit. Once evicted, a task ID is unavailable. Background completion notices include message receipts; `wait=true` still returns the result directly without a background notice. Parent-session stop and manager shutdown cancel children without broadcasting their cancelled results. The parent turn's terminal-result wait uses a 300-second window; reaching it does not cancel children.
 
 ## Auto Compact
 

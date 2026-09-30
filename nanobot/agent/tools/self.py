@@ -254,21 +254,30 @@ class MyTool(Tool):
     ) -> str:
         if isinstance(st, Mapping):
             started_at = st.get("started_at", time.monotonic())
+            finished_at = st.get("finished_at")
             raw_events = st.get("tool_events", [])
             phase = st.get("phase", "unknown")
             iteration = st.get("iteration", 0)
             usage = st.get("usage", {})
             error = st.get("error")
             stop_reason = st.get("stop_reason")
+            state = st.get("state", phase)
+            receipts = st.get("receipts")
+            result = st.get("result")
         else:
             started_at = st.started_at
+            finished_at = st.finished_at
             raw_events = st.tool_events
             phase = st.phase
             iteration = st.iteration
             usage = st.usage
             error = st.error
             stop_reason = st.stop_reason
-        elapsed = time.monotonic() - (
+            state = st.state
+            receipts = st.receipts
+            result = st.result
+        end = float(finished_at) if isinstance(finished_at, (int, float)) else time.monotonic()
+        elapsed = end - (
             float(started_at) if isinstance(started_at, (int, float)) else time.monotonic()
         )
         tool_events = cast(list[object], raw_events) if isinstance(raw_events, list) else []
@@ -286,6 +295,11 @@ class MyTool(Tool):
             f"{indent}tools: {tool_summary}",
             f"{indent}usage: {usage or 'n/a'}",
         ]
+        lines.append(f"{indent}state: {state}")
+        if receipts:
+            lines.append(f"{indent}receipts: {receipts}")
+        if result is not None:
+            lines.append(f"{indent}result: {result}")
         if error:
             lines.append(f"{indent}error: {error}")
         if stop_reason:
