@@ -38,7 +38,7 @@ def test_background_input_cannot_authorize_initial_or_injected_work(overrides):
         assert goal_mutation_allowed() is True
 
 
-def test_completion_requires_a_new_explicit_request_to_reauthorize():
+def test_revoked_permission_requires_a_new_explicit_request_to_reauthorize():
     with GoalInputScope(goal_message()) as scope:
         assert goal_mutation_allowed() is True
         revoke_goal_mutation_permission()

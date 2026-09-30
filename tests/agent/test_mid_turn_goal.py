@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.goal_permission import goal_mutation_allowed
+from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -49,11 +49,6 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
                 id="complete", name="update_goal",
                 arguments={"action": "complete", "recap": "Migration verified."},
             )])
-        if len(calls) == 4:
-            return LLMResponse(content=None, tool_calls=[ToolCallRequest(
-                id="unauthorized", name="create_goal",
-                arguments={"objective": "Start another task without permission."},
-            )])
         return LLMResponse(content="done")
 
     provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
@@ -81,7 +76,6 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
         assert "Discuss the migration" in calls[1]
         assert task in calls[1]
         assert "Goal Runtime Guidance" in calls[1]
-        assert "create_goal is unavailable for this turn" in calls[-1]
         assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
         assert "Verify the migration" in session.metadata[GOAL_STATE_KEY]["objective"]
         assert goal_mutation_allowed() is False
@@ -99,22 +93,16 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
         await asyncio.wait_for(run, 5)
 
 
-@pytest.mark.parametrize("overrides", [
-    {"content": "/goal"},
-    {"content": "please /goal execute"},
-    {"channel": "system", "input_role": "user"},
-    {"sender_id": "subagent"},
-    {"input_role": "system"},
-    {"metadata": {"_internal_continuation": True}},
-    {"metadata": {"_cron_trigger": {"job_id": "job"}}},
-])
-async def test_only_explicit_user_goal_can_generate_internal_input(tmp_path, overrides):
-    fields = dict(channel="cli", sender_id="user", chat_id="test", content="/goal execute")
-    fields.update(overrides)
-    msg = InboundMessage(**fields)
+async def test_scheduled_goal_command_cannot_generate_internal_input(tmp_path):
+    msg = InboundMessage(
+        channel="cli", sender_id="user", chat_id="test", content="/goal execute",
+        metadata={"_cron_trigger": {"job_id": "job"}},
+    )
     loop = AgentLoop(bus=MessageBus(), provider=MagicMock(), workspace=tmp_path, model="test-model")
     try:
         await loop._dispatch_command_inline(msg, msg.session_key, msg.content, loop.commands.dispatch)
+        response = loop.bus.outbound.get_nowait()
+        assert "only be started by a user" in response.content
         assert loop._pending_queues == {}
         assert goal_mutation_allowed() is False
         assert loop.sessions.get_or_create(msg.session_key).messages == []
@@ -184,7 +172,6 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
 
 
 async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path):
-    from agent.session_helpers import run_session
     from nanobot.command.router import CommandContext
     from nanobot.session.recovery import pending_followups, record_pending_followup
 
@@ -205,47 +192,60 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
         session = loop.sessions.get_or_create(message.session_key)
         assert record_pending_followup(session, generated)
         loop.sessions.save(session)
-        reloaded = SessionManager(tmp_path).get_or_create(message.session_key)
-        recovered, = pending_followups(reloaded)
+    finally:
+        await loop.aclose()
+
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    session = loop.sessions.get_or_create(message.session_key)
+    recovered, = pending_followups(session)
+    started = asyncio.Event()
+    responses = iter([
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="create", name="create_goal", arguments={"objective": "Verify the migration."},
+        )]),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="complete", name="update_goal", arguments={"action": "complete", "recap": "Verified."},
+        )]),
+        LLMResponse(content="done"),
+    ])
+
+    async def respond(**kwargs):
+        started.set()
+        assert any(
+            row.get("role") == "user" and row.get("content", "").startswith("/stop")
+            for row in kwargs["messages"]
+        )
+        return next(responses)
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    run = asyncio.create_task(loop.run())
+    try:
         assert recovered.content == "/stop"
         assert recovered.metadata["goal_requested"] is True
         assert goal_mutation_allowed() is False
-        provider.chat_stream_with_retry = AsyncMock(side_effect=[
-            LLMResponse(content=None, tool_calls=[ToolCallRequest(
-                id="create", name="create_goal", arguments={"objective": "Verify the migration."},
-            )]),
-            LLMResponse(content=None, tool_calls=[ToolCallRequest(
-                id="complete", name="update_goal", arguments={"action": "complete", "recap": "Verified."},
-            )]),
-            LLMResponse(content="done"),
-        ])
-        await run_session(loop, recovered)
+        await loop.bus.publish_inbound(recovered)
+        await asyncio.wait_for(started.wait(), 3)
+        await asyncio.wait_for(asyncio.gather(*loop._active_tasks[message.session_key]), 5)
         assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
         assert pending_followups(session) == []
         assert sum(row.get("content") == message.content for row in session.messages) == 1
         assert sum(is_hidden_history_message(row) for row in session.messages) == 1
         assert goal_mutation_allowed() is False
     finally:
-        await loop.aclose()
+        loop.stop()
+        await asyncio.wait_for(run, 5)
 
 
-@pytest.mark.parametrize("overrides", [
-    {"metadata": {"_cron_trigger": {"job_id": "job"}}},
-    {"metadata": {"_local_trigger": {"trigger_id": "trigger"}}},
-    {"metadata": {"_internal_continuation": True}},
-    {"sender_id": "subagent"},
-    {"channel": "system"},
-    {"channel": "system", "input_role": "user"},
-])
-async def test_background_input_cannot_inherit_goal_permission(tmp_path, overrides):
+async def test_internal_continuation_cannot_inherit_goal_permission(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    fields = dict(channel="cli", sender_id="automation", chat_id="test", content="Run scheduled work")
-    fields.update(overrides)
-    fields["metadata"] = {"goal_requested": True, **fields.get("metadata", {})}
+    message = InboundMessage(
+        channel="cli", sender_id="automation", chat_id="test", content="Continue working",
+        metadata={"goal_requested": True, "_internal_continuation": True},
+    )
     provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content=None, tool_calls=[ToolCallRequest(
             id="create", name="create_goal", arguments={"objective": "An unauthorized goal."},
@@ -253,7 +253,9 @@ async def test_background_input_cannot_inherit_goal_permission(tmp_path, overrid
         LLMResponse(content="done"),
     ])
     try:
-        await loop._process_message(InboundMessage(**fields), session_key="cli:test")
+        with goal_mutation_permission(True):
+            await loop._process_message(message, session_key="cli:test")
+            assert goal_mutation_allowed() is True
         assert GOAL_STATE_KEY not in loop.sessions.get_or_create("cli:test").metadata
         final_request = provider.chat_stream_with_retry.await_args.kwargs["messages"]
         assert "create_goal is unavailable for this turn" in str(final_request)

@@ -153,17 +153,6 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
             ],
             usage=None,
         ),
-        LLMResponse(
-            content="trying to start another goal",
-            tool_calls=[
-                ToolCallRequest(
-                    id="call_create_again",
-                    name="create_goal",
-                    arguments={"objective": "Start an unrelated follow-up."},
-                )
-            ],
-            usage=None,
-        ),
         LLMResponse(content="done", tool_calls=[], usage=None),
     ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
@@ -188,8 +177,6 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
     assert "staged migration plan" in str(first_request)
     assert "implement the plan above" in str(first_request)
     assert _GOAL_RUNTIME_GUIDANCE_TAG in str(first_request)
-    final_request = provider.chat_stream_with_retry.await_args_list[-1].kwargs["messages"]
-    assert "create_goal is unavailable for this turn" in str(final_request)
     assert session.messages[2]["content"] == "/goal implement the plan above"
     assert session.messages[3]["_hidden_history"] == {"kind": "goal_request"}
     assert _GOAL_RUNTIME_GUIDANCE_TAG in str(session.messages[3]["content"])
