@@ -96,6 +96,7 @@ def test_discover_finds_concrete_tools():
     assert "MessageTool" in class_names
     assert "MyTool" in class_names
     assert "SpawnTool" in class_names
+    assert "SubagentTool" in class_names
     assert "ExecSessionTool" in class_names
 
 
@@ -222,7 +223,7 @@ async def test_message_tool_create():
 
 
 def test_spawn_tool_create():
-    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.agent.tools.subagent import SpawnTool
     mock_mgr = MagicMock()
     mock_config = MagicMock()
     ctx = ToolContext(config=mock_config, workspace="/tmp", subagent_manager=mock_mgr)

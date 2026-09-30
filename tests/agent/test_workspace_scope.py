@@ -16,7 +16,7 @@ from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGene
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.subagent import SpawnTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
 from nanobot.security.workspace_access import (
