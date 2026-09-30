@@ -5220,6 +5220,72 @@ async def test_rejected_message_rolls_back_side_effects_when_dispatch_fails(
     assert conn not in channel._subs.get("chat-dispatch-rollback", set())
     assert "chat-dispatch-rollback" not in channel._conn_chats.get(conn, set())
     assert list((media_root / "websocket").iterdir()) == []
+    assert read_transcript_lines("websocket:chat-dispatch-rollback") == []
+
+
+@pytest.mark.asyncio
+async def test_published_message_keeps_resources_and_owner_when_scope_persistence_fails(
+    bus: MagicMock, tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50125)
+    monkeypatch.setattr(
+        channel.gateway.workspaces, "persist_scope",
+        MagicMock(side_effect=OSError("scope persistence failed")),
+    )
+
+    with pytest.raises(OSError, match="scope persistence failed"):
+        await channel._dispatch_envelope(conn, "webui-client", {
+            "type": "message", "chat_id": "chat-published-scope-failure",
+            "content": "hello", "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+            "webui": True, "turn_id": "turn-published-scope-failure",
+        })
+
+    bus.publish_inbound.assert_awaited_once()
+    inbound = bus.publish_inbound.await_args.args[0]
+    assert all(Path(path).is_file() for path in inbound.media)
+    assert conn in channel._subs.get(inbound.chat_id, set())
+    assert wth.websocket_turn_owner_is_registered(
+        inbound.chat_id, inbound.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY],
+        "turn-published-scope-failure",
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_transcript_is_ready_when_bus_consumer_receives_message() -> None:
+    bus = MessageBus()
+    channel = _ch(bus)
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50125)
+
+    async def consume():
+        inbound = await bus.consume_inbound()
+        return read_transcript_lines(inbound.session_key)
+
+    consumer = asyncio.create_task(consume())
+    try:
+        await channel._dispatch_envelope(conn, "webui-client", {
+            "type": "message", "chat_id": "chat-transcript-before-consumer",
+            "content": "hello", "webui": True, "turn_id": "turn-before-consumer",
+        })
+        records = await asyncio.wait_for(consumer, timeout=2)
+    finally:
+        if not consumer.done():
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+
+    assert records[0]["event"] == "user"
+    assert records[0]["text"] == "hello"
+    assert records[0]["turn_id"] == "turn-before-consumer"
 
 
 @pytest.mark.asyncio

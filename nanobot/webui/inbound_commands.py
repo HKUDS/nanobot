@@ -612,7 +612,7 @@ class WebUICommandRouter:
             )
 
         queued_owner = None
-        accepted = False
+        user_transcript_record: dict[str, Any] | None = None
         dispatched = False
         rolled_back = False
         try:
@@ -697,7 +697,7 @@ class WebUICommandRouter:
             if is_webui and (
                 temporary_policy is None or temporary_policy.persist_transcript
             ):
-                self._transcripts.append_user_message(
+                user_transcript_record = self._transcripts.append_user_message(
                     chat_id,
                     content,
                     metadata=metadata,
@@ -741,12 +741,13 @@ class WebUICommandRouter:
             )
             dispatched = True
             self._workspaces.persist_scope(chat_id, scope)
-            accepted = True
         finally:
             if not dispatched:
                 rollback_side_effects()
-            if not accepted and queued_owner is not None:
-                clear_websocket_turn_if_current(chat_id, queued_owner)
+                if user_transcript_record is not None:
+                    self._transcripts.discard_user_message(chat_id, user_transcript_record)
+                if queued_owner is not None:
+                    clear_websocket_turn_if_current(chat_id, queued_owner)
 
         if is_webui:
             await self.broadcast_user_message(
