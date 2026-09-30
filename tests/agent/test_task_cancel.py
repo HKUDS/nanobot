@@ -57,6 +57,7 @@ class TestActiveTaskTracking:
         await asyncio.sleep(0)
 
         assert "test:c1" not in loop._active_tasks
+        assert "test:c1" not in loop._session_scopes
 
     @pytest.mark.asyncio
     async def test_session_group_remains_until_last_task_completes(self):
@@ -238,7 +239,7 @@ class TestHandleStop:
 
         task = asyncio.create_task(active_turn())
         await asyncio.sleep(0)
-        loop._active_tasks["test:c1"] = {task}
+        loop._track_active_task("test:c1", task)
 
         async def close_subagents():
             events.append("resources_closed")
@@ -296,9 +297,7 @@ class TestHandleStop:
 
         task = asyncio.create_task(slow_task())
         await asyncio.sleep(0)
-        active_tasks = {task}
-        loop._active_tasks["test:c1"] = active_tasks
-        task.add_done_callback(active_tasks.discard)
+        loop._track_active_task("test:c1", task)
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)
@@ -325,7 +324,8 @@ class TestHandleStop:
 
         tasks = [asyncio.create_task(slow(i)) for i in range(2)]
         await asyncio.sleep(0)
-        loop._active_tasks["test:c1"] = set(tasks)
+        for task in tasks:
+            loop._track_active_task("test:c1", task)
 
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/stop", loop=loop)

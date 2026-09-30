@@ -2288,7 +2288,7 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 
 In the conversation that started a subagent, you can ask nanobot to check its progress, send it follow-up instructions, or cancel it. Cancelling one subagent leaves other tasks running.
 
-Use `/stop` to stop the current session and its subagent tasks; other sessions are unaffected. Cancellation does not remove files already created, and some operations may take time to stop.
+Use `/stop` to stop the current session's work, including its subagents and running tool operations; other sessions are unaffected. Cancellation does not remove files already created, and some operations may take time to stop.
 
 Subagent tasks cannot resume after nanobot restarts. Start a new task if you need to continue the work.
 

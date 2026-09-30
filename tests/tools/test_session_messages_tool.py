@@ -20,6 +20,7 @@ from nanobot.session.session_messages import (
     SESSION_MESSAGE_METADATA_KEY,
     session_message_envelope,
 )
+from nanobot.utils.cancellation import CancellationScope
 
 
 def _persist(manager: SessionManager, *keys: str) -> None:
@@ -318,8 +319,10 @@ async def test_reply_timeout_observes_background_delivery_failure(
 
 
 @pytest.mark.asyncio
-async def test_reverse_message_cancels_the_pending_reply_timeout(
+@pytest.mark.parametrize("stop_reason", ["reply", "session_cancel"])
+async def test_reply_wait_ends_after_a_reply_or_session_cancel(
     tmp_path: Path,
+    stop_reason: str,
 ) -> None:
     sessions = SessionManager(tmp_path)
     _persist(sessions, "websocket:source", "websocket:target")
@@ -333,21 +336,32 @@ async def test_reverse_message_cancels_the_pending_reply_timeout(
     source = _handle(sessions, "websocket:source")
     target = _handle(sessions, "websocket:target")
 
-    await tool.enqueue(
-        source_session_key=source.session_key,
-        target_handle=target.name,
-        content="Question",
-        expect_reply=True,
-        reply_timeout_seconds=5,
-    )
-    await tool.enqueue(
-        source_session_key=target.session_key,
-        target_handle=source.name,
-        content="Answer",
-        expect_reply=False,
-    )
+    scope = CancellationScope()
+    with scope.activate():
+        await tool.enqueue(
+            source_session_key=source.session_key,
+            target_handle=target.name,
+            content="Question",
+            expect_reply=True,
+            reply_timeout_seconds=5,
+        )
+    await bus.consume_inbound()
+    if stop_reason == "reply":
+        await tool.enqueue(
+            source_session_key=target.session_key,
+            target_handle=source.name,
+            content="Answer",
+            expect_reply=False,
+        )
+        await bus.consume_inbound()
+    else:
+        scope.cancel()
+        await scope.wait()
 
     assert scheduler.calls[0][1].cancelled
+    scheduler.calls[0][1].fire()
+    await asyncio.sleep(0)
+    assert bus.inbound_size == 0
 
 
 @pytest.mark.asyncio
