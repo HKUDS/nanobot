@@ -154,6 +154,14 @@ class AgentDefaults(Base):
         default=60,
         ge=0,
     )  # Minimum interval in seconds between scans for idle sessions
+    idle_compact_replace_after_tokens: int = Field(
+        default=200_000,
+        ge=0,
+        validation_alias=AliasChoices("idleCompactReplaceAfterTokens"),
+        serialization_alias="idleCompactReplaceAfterTokens",
+    )  # Idle compaction always journals the transcript to history for Dream, but
+      # only replaces the replayable transcript with a summary once it exceeds
+      # this many tokens (0 = always replace, preserving pre-threshold behavior).
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
     @model_validator(mode="before")

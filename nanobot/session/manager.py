@@ -46,6 +46,7 @@ SESSION_CACHE_MAX_SIZE = 128
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
+_HISTORY_ARCHIVED_META = "_history_archived"
 _SESSION_PREVIEW_MAX_CHARS = 120
 _SESSION_LIST_PREVIEW_MAX_RECORDS = 200
 _SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
@@ -204,6 +205,30 @@ class Session:
     @last_archived.setter
     def last_archived(self, value: int) -> None:
         self.last_consolidated = value
+
+    @property
+    def history_archived(self) -> int:
+        """End of the transcript already journaled to memory for Dream.
+
+        Distinct from :attr:`last_archived` (the replay/checkpoint boundary):
+        idle compaction may journal messages to ``history.jsonl`` without
+        replacing the replayable transcript. Defaults to ``last_archived`` when
+        unset so sessions compacted before this field existed are not re-journaled.
+        """
+        raw = self.metadata.get(_HISTORY_ARCHIVED_META)
+        if raw is None:
+            return self.last_archived
+        if (
+            isinstance(raw, bool)
+            or not isinstance(raw, int)
+            or not 0 <= raw <= len(self.messages)
+        ):
+            return 0
+        return raw
+
+    @history_archived.setter
+    def history_archived(self, value: int) -> None:
+        self.metadata[_HISTORY_ARCHIVED_META] = value
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -378,6 +403,7 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        self.metadata.pop(_HISTORY_ARCHIVED_META, None)
 
 class SessionPayload(TypedDict):
     key: str

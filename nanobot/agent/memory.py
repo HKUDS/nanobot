@@ -1015,10 +1015,20 @@ class MemoryArchiver:
         archive_end: int,
         runtime: LLMRuntime,
         input_token_budget: int,
+        archive_start: int | None = None,
+        persist: bool = True,
     ) -> str | None:
-        """Archive a captured session prefix without mutating the session."""
+        """Archive a captured session range without mutating the session.
+
+        ``archive_start`` defaults to the session's replay boundary
+        (:attr:`Session.last_archived`). Callers may pass an explicit start to
+        journal a range that is not being replaced (e.g. idle compaction below
+        the replacement token threshold). ``persist`` controls whether the
+        generated checkpoint is appended to ``history.jsonl``.
+        """
+        start = session.last_archived if archive_start is None else archive_start
         messages = [
-            message for message in session.messages[session.last_archived:archive_end]
+            message for message in session.messages[start:archive_end]
             if not message.get("_command") and not is_summary_checkpoint(message)
         ]
         if not messages:
@@ -1039,11 +1049,12 @@ class MemoryArchiver:
                 session_key=session.key,
                 previous_summary=previous_summary,
                 max_tokens=runtime.generation.max_tokens,
+                persist=persist,
             )
         prefix = Session(
             key=session.key,
             messages=list(session.messages[:archive_end]),
-            last_consolidated=session.last_archived,
+            last_consolidated=start,
         )
         history = prefix.get_history(max_tokens=input_token_budget)
         archive_history = Session(
@@ -1060,6 +1071,7 @@ class MemoryArchiver:
                 session_key=session.key,
                 previous_summary=previous_summary,
                 max_tokens=runtime.generation.max_tokens,
+                persist=persist,
             )
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
         workspace: Path | None = None
@@ -1081,6 +1093,7 @@ class MemoryArchiver:
             request_tools=tools,
             previous_summary=previous_summary,
             input_token_budget=input_token_budget,
+            persist=persist,
         )
 
 
@@ -1229,6 +1242,8 @@ class Consolidator:
         *,
         archive_end: int,
         runtime: LLMRuntime,
+        archive_start: int | None = None,
+        persist: bool = True,
     ) -> str | None:
         """Archive one captured session range through the shared Memory path."""
         return await self.archiver.archive_session(
@@ -1236,6 +1251,8 @@ class Consolidator:
             archive_end=archive_end,
             runtime=runtime,
             input_token_budget=self._input_token_budget(runtime),
+            archive_start=archive_start,
+            persist=persist,
         )
 
     async def compact_idle_session(
@@ -1245,11 +1262,17 @@ class Consolidator:
         runtime: LLMRuntime,
         max_suffix: int = 0,
         events: EventSink = NO_EVENTS,
+        replace_after_tokens: int = 0,
     ) -> str | None:
-        """Replace archived history with a summary checkpoint.
+        """Compact an idle session while preserving Dream coverage.
 
-        ``max_suffix`` is accepted for SDK compatibility and no longer retains
-        archived messages. All compaction triggers share checkpoint replay.
+        The new transcript is always journaled to ``history.jsonl`` for Dream.
+        The replayable transcript is replaced by a summary checkpoint only when
+        its prompt exceeds ``replace_after_tokens`` tokens; ``0`` always
+        replaces. Below the threshold the raw transcript is retained for replay,
+        so a returning user resumes with full fidelity instead of a lossy
+        summary. ``max_suffix`` is accepted for SDK compatibility and no longer
+        retains archived messages.
         """
         lock = self.get_lock(session_key)
         async with lock:
@@ -1257,11 +1280,41 @@ class Consolidator:
             session = self.sessions.get_or_create(session_key)
 
             archive_start = session.last_archived
-            messages_to_archive = list(session.messages[archive_start:])
+            journal_start = session.history_archived
+            archive_end = len(session.messages)
+            messages_to_archive = list(session.messages[archive_start:archive_end])
+            messages_to_journal = list(session.messages[journal_start:archive_end])
             has_new_messages = any(
                 not message.get("_command") and not is_summary_checkpoint(message)
                 for message in messages_to_archive
             )
+            has_unarchived = any(
+                not message.get("_command") and not is_summary_checkpoint(message)
+                for message in messages_to_journal
+            )
+
+            replace = replace_after_tokens <= 0
+            if not replace and has_new_messages:
+                tokens, _source = self.estimate_session_prompt_tokens(
+                    session, runtime=runtime,
+                )
+                replace = tokens >= replace_after_tokens
+
+            if not replace:
+                # Below the threshold: feed Dream but keep the raw transcript so
+                # the next resume is lossless. Advance only the journal cursor.
+                if not has_unarchived:
+                    return ""
+                await self.archive_session(
+                    session,
+                    archive_start=journal_start,
+                    archive_end=archive_end,
+                    runtime=runtime,
+                )
+                session.history_archived = archive_end
+                self.sessions.save(session)
+                return ""
+
             if not has_new_messages:
                 return ""
 
@@ -1270,16 +1323,37 @@ class Consolidator:
                 ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
             )
             last_active = session.updated_at
-            archive_end = archive_start + len(messages_to_archive)
             try:
-                summary = await self.archive_session(
-                    session, archive_end=archive_end, runtime=runtime,
-                )
+                if journal_start <= archive_start:
+                    # Nothing journaled yet: one pass feeds Dream and yields the
+                    # checkpoint summary over the full replay range.
+                    summary = await self.archive_session(
+                        session,
+                        archive_end=archive_end,
+                        runtime=runtime,
+                    )
+                else:
+                    # Journal the tail appended since the last Dream feed, then
+                    # build the replay checkpoint separately so the range already
+                    # journaled is not appended to history a second time.
+                    await self.archive_session(
+                        session,
+                        archive_start=journal_start,
+                        archive_end=archive_end,
+                        runtime=runtime,
+                    )
+                    summary = await self.archive_session(
+                        session,
+                        archive_end=archive_end,
+                        runtime=runtime,
+                        persist=False,
+                    )
                 if summary:
                     # Concurrent appends remain after the captured boundary.
                     session.commit_summary_checkpoint(
                         summary, insert_at=archive_end, last_active=last_active,
                     )
+                    session.history_archived = archive_end
                     # Resume from the summary and retained transcript, not the old provider history.
                     session.provider_state = None
                     self.sessions.save(session)
