@@ -20,8 +20,56 @@ from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.openai_responses.parsing import parse_response_output
+from nanobot.utils.cancellation import CancellationScope
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["registry", "runner"])
+async def test_tool_cancellation_rejects_swallowed_cancel_and_preserves_other_scope(entry):
+    started, release = asyncio.Event(), asyncio.Event()
+    tool = _DelayTool("plugin", delay=0, read_only=True, shared_events=[])
+    calls = []
+
+    async def execute(**kwargs):
+        calls.append("started")
+        started.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            asyncio.current_task().uncancel()
+            await release.wait()
+        return "late result"
+
+    tool.execute = execute
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    async def invoke():
+        if entry == "registry":
+            return await registry.execute("plugin", {})
+        return await execute_tool_calls(
+            registry, [ToolCallRequest(id="1", name="plugin", arguments={})],
+            concurrent=False, external_lookup_counts={}, workspace_violation_counts={},
+            hook=AgentHook(), context=AgentHookContext(iteration=0, messages=[]),
+        )
+
+    stopped, other = CancellationScope(), CancellationScope()
+    with stopped.activate():
+        task = asyncio.create_task(invoke())
+    await started.wait()
+    stopped.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await stopped.wait()
+    with stopped.activate(), pytest.raises(asyncio.CancelledError):
+        await invoke()
+    assert calls == ["started"]
+    with other.activate():
+        await invoke()
+    assert calls == ["started", "started"]
 
 
 class _DelayTool(Tool):

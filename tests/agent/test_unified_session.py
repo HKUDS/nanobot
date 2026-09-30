@@ -367,7 +367,7 @@ class TestStopCommandWithUnifiedSession:
             await asyncio.sleep(10)  # Will be cancelled
 
         task = asyncio.create_task(long_running())
-        loop._active_tasks[UNIFIED_SESSION_KEY] = {task}
+        loop._track_active_task(UNIFIED_SESSION_KEY, task)
 
         # Create a message that would have session_key=UNIFIED_SESSION_KEY after dispatch
         msg = InboundMessage(
@@ -398,7 +398,7 @@ class TestStopCommandWithUnifiedSession:
             await asyncio.sleep(10)
 
         task = asyncio.create_task(long_running())
-        loop._active_tasks[UNIFIED_SESSION_KEY] = {task}
+        loop._track_active_task(UNIFIED_SESSION_KEY, task)
         msg = InboundMessage(
             channel="telegram",
             chat_id="123456",
@@ -425,7 +425,8 @@ class TestStopCommandWithUnifiedSession:
 
         task1 = asyncio.create_task(long_running())
         task2 = asyncio.create_task(long_running())
-        loop._active_tasks[UNIFIED_SESSION_KEY] = {task1, task2}
+        loop._track_active_task(UNIFIED_SESSION_KEY, task1)
+        loop._track_active_task(UNIFIED_SESSION_KEY, task2)
 
         # /stop from discord should cancel tasks started from telegram
         msg = InboundMessage(

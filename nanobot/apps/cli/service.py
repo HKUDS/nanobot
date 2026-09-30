@@ -88,6 +88,19 @@ class CliAppError(ValueError):
         self.status = status
 
 
+@dataclass(frozen=True, slots=True)
+class CliAppRun:
+    """Validated invocation shared by synchronous and asynchronous process runners."""
+
+    name: str
+    entry: str
+    argv: list[str]
+    cwd: Path
+    timeout: int
+    env: dict[str, str]
+    artifact_snapshot: dict[Path, tuple[int, int]]
+
+
 @dataclass(slots=True)
 class CliAppsRuntimeConfig:
     """Runtime knobs for CLI Apps."""
@@ -1442,6 +1455,30 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         timeout: int | None = None,
         restrict_to_workspace: bool = False,
     ) -> str:
+        prepared = self.prepare_run(
+            name, args, json_output=json_output, working_dir=working_dir,
+            timeout=timeout, restrict_to_workspace=restrict_to_workspace,
+        )
+        try:
+            result = subprocess.run(
+                prepared.argv, cwd=str(prepared.cwd), capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+                timeout=prepared.timeout, env=prepared.env,
+            )
+        except subprocess.TimeoutExpired:
+            return f"CLI app '{name}' timed out after {prepared.timeout}s"
+        return self.format_run_result(prepared, result)
+
+    def prepare_run(
+        self,
+        name: str,
+        args: list[str] | None = None,
+        *,
+        json_output: bool = False,
+        working_dir: str | None = None,
+        timeout: int | None = None,
+        restrict_to_workspace: bool = False,
+    ) -> CliAppRun:
         app = self.get_app(name)
         installed = self._load_installed()
         if str(app["name"]) not in installed:
@@ -1456,19 +1493,17 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
             clean_args = ["--json", *clean_args]
         effective_timeout = max(1, min(timeout or self.runtime.run_timeout, 600))
         artifact_snapshot = self._artifact_snapshot(cwd)
-        try:
-            result = subprocess.run(
-                [resolved, *clean_args],
-                cwd=str(cwd),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=effective_timeout,
-                env=self._subprocess_env(),
-            )
-        except subprocess.TimeoutExpired:
-            return f"CLI app '{name}' timed out after {effective_timeout}s"
+        return CliAppRun(
+            name=name, entry=entry, argv=[resolved, *clean_args], cwd=cwd,
+            timeout=effective_timeout, env=self._subprocess_env(),
+            artifact_snapshot=artifact_snapshot,
+        )
+
+    def format_run_result(self, prepared: CliAppRun, result: subprocess.CompletedProcess[str]) -> str:
+        """Render command output and artifacts consistently for sync and async callers."""
+        name, entry, cwd = prepared.name, prepared.entry, prepared.cwd
+        clean_args = prepared.argv[1:]
+        artifact_snapshot = prepared.artifact_snapshot
         output = [
             f"CLI app '{name}' exited {result.returncode}.",
             f"Command: {entry} {' '.join(shlex.quote(arg) for arg in clean_args)}".rstrip(),
