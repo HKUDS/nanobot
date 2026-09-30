@@ -815,7 +815,7 @@ class AgentLoop:
             )
             result = await dispatch_fn(ctx)
             if isinstance(result, InboundMessage):
-                self._enqueue_session_message(result)
+                await self._enqueue_session_message(result)
             elif result:
                 await self.bus.publish_outbound(result)
             else:

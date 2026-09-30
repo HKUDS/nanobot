@@ -918,9 +918,9 @@ async def cmd_goal(ctx: CommandContext) -> InboundMessage | OutboundMessage:
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
 
-    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    session = ctx.session or await ctx.loop.sessions.state.get(ctx.key)
     session.add_message("user", ctx.msg.content, _command=True, media=list(ctx.msg.media))
-    ctx.loop.sessions.save(session)
+    await ctx.loop.sessions.state.prepare_input(session)
     return replace(
         ctx.msg,
         content=goal,

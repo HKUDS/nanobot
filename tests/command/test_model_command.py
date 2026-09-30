@@ -265,8 +265,7 @@ async def test_goal_command_preserves_task_and_visible_command(tmp_path, with_se
     task = "检查 /tmp/project\n保留现有文件。"
     command = f"/goal {task}"
     ctx = _ctx_session(loop, command, args=task)
-    if not with_session:
-        ctx.session = None
+    ctx.session = await loop.sessions.state.get(ctx.key) if with_session else None
     out = await cmd_goal(ctx)
     assert isinstance(out, InboundMessage)
     assert ctx.msg.content == command
@@ -288,6 +287,7 @@ async def test_goal_command_registered_on_router(tmp_path) -> None:
     register_builtin_commands(router)
     loop = _make_loop(tmp_path)
     ctx = _ctx_session(loop, "/goal ship it", args="ship it")
+    ctx.session = await loop.sessions.state.get(ctx.key)
     out = await router.dispatch(ctx)
     assert isinstance(out, InboundMessage)
     assert out.content == "ship it"
