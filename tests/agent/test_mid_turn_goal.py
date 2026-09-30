@@ -16,8 +16,13 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionManager
 
 
-@pytest.mark.parametrize("command", ["/goal execute the agreed plan", "/GOAL@nanobot execute the agreed plan"])
+@pytest.mark.parametrize("command", [
+    "/goal execute the agreed plan",
+    "/GOAL@nanobot execute the agreed plan",
+    "/goal /tmp/project: execute the agreed plan",
+])
 async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, command):
+    task = command.split(" ", 1)[1]
     first_call = asyncio.Event()
     release = asyncio.Event()
     calls = []
@@ -74,7 +79,7 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
         assert process.await_count == 1
         assert permissions[:3] == [False, True, True]
         assert "Discuss the migration" in calls[1]
-        assert "execute the agreed plan" in calls[1]
+        assert task in calls[1]
         assert "Goal Runtime Guidance" in calls[1]
         assert "create_goal is unavailable for this turn" in calls[-1]
         assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
@@ -87,8 +92,7 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
         assert sum(row.get("content") == command for row in visible) == 1
         hidden = [row for row in persisted if is_hidden_history_message(row)]
         assert len(hidden) == 1
-        assert "execute the agreed plan" in hidden[0]["content"]
-        assert "preceding conversation" in hidden[0]["content"]
+        assert public_history_messages(hidden)[0]["content"] == task
     finally:
         release.set()
         loop.stop()
@@ -190,7 +194,7 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
     provider.estimate_prompt_tokens.return_value = (100, "test")
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     message = InboundMessage(
-        channel="websocket", sender_id="user", chat_id="test", content="/goal verify the migration",
+        channel="websocket", sender_id="user", chat_id="test", content="/goal /stop",
     )
     try:
         generated = await loop.commands.dispatch(CommandContext(
@@ -203,7 +207,7 @@ async def test_generated_goal_input_survives_pending_followup_recovery(tmp_path)
         loop.sessions.save(session)
         reloaded = SessionManager(tmp_path).get_or_create(message.session_key)
         recovered, = pending_followups(reloaded)
-        assert recovered.content == generated.content
+        assert recovered.content == "/stop"
         assert recovered.metadata["goal_requested"] is True
         assert goal_mutation_allowed() is False
         provider.chat_stream_with_retry = AsyncMock(side_effect=[

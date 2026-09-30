@@ -258,34 +258,25 @@ async def test_goal_command_shows_usage_without_args(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_command_prepares_user_input_without_session(tmp_path) -> None:
+@pytest.mark.parametrize("with_session", [False, True])
+async def test_goal_command_preserves_task_and_visible_command(tmp_path, with_session) -> None:
     loop = _make_loop(tmp_path)
-    ctx = _ctx(loop, "/goal do work", args="do work")
-    ctx.is_user_turn = True
+    task = "检查 /tmp/project\n保留现有文件。"
+    command = f"/goal {task}"
+    ctx = _ctx_session(loop, command, args=task)
+    if not with_session:
+        ctx.session = None
     out = await cmd_goal(ctx)
     assert isinstance(out, InboundMessage)
+    assert ctx.msg.content == command
+    assert out.content == task
+    assert out.metadata["original_content"] == command
     assert out.metadata["goal_requested"] is True
     assert out.metadata[HIDDEN_HISTORY_META] == {"kind": "goal_request"}
-    assert "do work" in out.content
-    assert goal_mutation_allowed() is False
-
-
-@pytest.mark.asyncio
-async def test_goal_command_marks_turn_and_preserves_explicit_request(tmp_path) -> None:
-    loop = _make_loop(tmp_path)
-    ctx = _ctx_session(loop, "/goal audit the repo", args="audit the repo")
-    out = await cmd_goal(ctx)
-    assert isinstance(out, InboundMessage)
-    assert ctx.msg.content == "/goal audit the repo"
-    assert out.metadata["original_content"] == ctx.msg.content
-    assert out.metadata["goal_requested"] is True
-    assert out.metadata[HIDDEN_HISTORY_META] == {"kind": "goal_request"}
-    assert isinstance(out.metadata["goal_started_at"], int | float)
-    assert "audit the repo" in out.content
     assert goal_mutation_allowed() is False
     session = loop.sessions.get_or_create(ctx.key)
     assert [(row["role"], row["content"]) for row in session.messages] == [
-        ("user", "/goal audit the repo"),
+        ("user", command),
     ]
 
 
@@ -298,7 +289,7 @@ async def test_goal_command_registered_on_router(tmp_path) -> None:
     ctx = _ctx_session(loop, "/goal ship it", args="ship it")
     out = await router.dispatch(ctx)
     assert isinstance(out, InboundMessage)
-    assert "ship it" in out.content
+    assert out.content == "ship it"
     assert out.metadata["goal_requested"] is True
     assert goal_mutation_allowed() is False
 

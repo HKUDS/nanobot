@@ -51,7 +51,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.command.router import normalize_command_text
+from nanobot.command.router import command_text, normalize_command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
@@ -934,7 +934,7 @@ class AgentLoop:
         ):
             return False
         return msg.channel == "system" or not self.commands.is_dispatchable_command(
-            msg.content.strip()
+            command_text(msg)
         )
 
     def _idle_events(
@@ -1349,7 +1349,7 @@ class AgentLoop:
                     logger.warning("Error consuming inbound message: {}, continuing...", e)
                     continue
 
-                raw = msg.content.strip()
+                raw = command_text(msg)
                 effective_key = self._effective_session_key(msg)
                 if await agent_context.handle_runtime_control(self, msg, self.tools):
                     continue
@@ -1991,7 +1991,7 @@ class AgentLoop:
         if ctx.kind is TurnKind.SYSTEM or ctx.msg.channel == "system":
             return False
         session = ctx.require_session()
-        raw = ctx.msg.content.strip()
+        raw = command_text(ctx.msg)
         _, automation_metadata = automation_history_overrides(ctx.msg.metadata)
         is_user_turn = (
             ctx.original_user_text is not None

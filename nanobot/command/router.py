@@ -19,6 +19,11 @@ Handler = Callable[["CommandContext"], Awaitable["InboundMessage | OutboundMessa
 _BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
+def command_text(message: InboundMessage) -> str:
+    """Return routable text; command-generated agent input must not be dispatched again."""
+    return "" if message.metadata.get("original_command") else message.content.strip()
+
+
 def normalize_command_text(text: str) -> str:
     """Normalize slash-command transport variants before routing.
 
@@ -108,6 +113,8 @@ class CommandRouter:
 
     async def dispatch(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
         """Try exact and prefix handlers, then reject invalid slash commands."""
+        if ctx.msg.metadata.get("original_command"):
+            return None
         ctx.raw = normalize_command_text(ctx.raw)
         cmd = ctx.raw.lower()
 

@@ -19,7 +19,6 @@ from nanobot.command.router import CommandContext, CommandRouter, normalize_comm
 from nanobot.providers.base import LLMUsage
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.utils.helpers import build_status_content
-from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
 
@@ -926,7 +925,7 @@ async def cmd_goal(ctx: CommandContext) -> InboundMessage | OutboundMessage:
     ctx.loop.sessions.save(session)
     return replace(
         ctx.msg,
-        content=render_template("agent/goal_request.md", task=goal, strip=True),
+        content=goal,
         metadata={
             **ctx.msg.metadata,
             "original_command": "/goal",
