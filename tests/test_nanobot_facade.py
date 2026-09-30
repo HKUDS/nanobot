@@ -280,7 +280,8 @@ async def test_run_custom_session_key(tmp_path):
     )
 
 
-def test_request_context_preserves_legacy_positional_arguments(tmp_path):
+@pytest.mark.parametrize("generation_kwargs", [{}, {"session_generation": "generation-1"}])
+def test_request_context_preserves_legacy_positional_arguments(tmp_path, generation_kwargs):
     from nanobot.agent.tools.context import RequestContext
 
     context = RequestContext(
@@ -294,13 +295,20 @@ def test_request_context_preserves_legacy_positional_arguments(tmp_path):
         "alice",
         "turn-1",
         tmp_path,
+        {"source": "sdk"},
+        False,
+        **generation_kwargs,
     )
 
+    assert context.original_user_text == "hello"
+    assert context.runtime is None
+    assert context.session_generation == generation_kwargs.get("session_generation")
     assert context.metadata == {"trusted": True}
     assert context.sender_id == "alice"
     assert context.turn_id == "turn-1"
     assert context.workspace == tmp_path
-    assert context.attributes == {}
+    assert context.attributes == {"source": "sdk"}
+    assert context.log_content is False
 
 
 @pytest.mark.asyncio

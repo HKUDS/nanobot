@@ -219,6 +219,7 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
     if legacy_commands:
         session.add_message("user", "/compact", _command=True)
         session.add_message("assistant", "Nothing to compact.", _command=True)
+    session.updated_at = datetime.now() - timedelta(minutes=30)
     loop.sessions.save(session)
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
@@ -237,9 +238,8 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
     assert reloaded.last_archived == 2
     assert loop.consolidator.store.read_unprocessed_history(0) == []
 
-    reloaded.updated_at = datetime.now() - timedelta(minutes=30)
-    loop.sessions.save(reloaded)
     loop.auto_compact._ttl = 1
+    assert loop.auto_compact._is_expired(reloaded.updated_at)
     schedule = MagicMock()
     await loop.auto_compact.check_expired(schedule, loop.runtime_for_session)
     schedule.assert_not_called()
@@ -452,9 +452,10 @@ async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
     assert reloaded.get_history() == []
     assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
 
+    reloaded = await loop.sessions.state.get(key)
     reloaded.add_message("user", "next question")
     reloaded.add_message("assistant", "next answer")
-    loop.sessions.save(reloaded)
+    await loop.sessions.state.finish_turn(reloaded)
     await loop.consolidator.compact_idle_session(key, runtime=runtime)
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)
