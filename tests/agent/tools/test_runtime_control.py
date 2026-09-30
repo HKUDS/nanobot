@@ -308,3 +308,48 @@ async def test_my_without_session_cannot_enumerate_tasks(tmp_path, session_key, 
             assert "unavailable" in await tool.execute(action="check", key="subagents._task_statuses")
     finally:
         await manager.close()
+
+
+async def test_my_retained_results_and_receipts_are_scoped_and_detached(tmp_path, runtime):
+    import asyncio
+    import json
+
+    from nanobot.agent.runner import AgentRunResult
+
+    loop = _make_loop(tmp_path)
+    manager = loop.subagents
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def run(spec):
+        entered.set()
+        await release.wait()
+        return AgentRunResult(messages=[], final_content="PRIVATE_RESULT")
+
+    manager.runner.run = run
+    owner = RequestContext("test", "route", session_key="owner:a", runtime=runtime)
+    try:
+        with request_context(owner):
+            await loop.tools.execute("spawn", {"task": "private"})
+            await entered.wait()
+            task_id = next(iter(manager.statuses_for_session("owner:a")))
+            sent = json.loads(await loop.tools.execute("subagent", {
+                "action": "send", "task_id": task_id, "message": "pending",
+            }))
+            release.set()
+            await asyncio.gather(*manager._running_tasks.values())
+            tool = _my_tool(loop)
+            key = f"subagents._task_statuses.{task_id}"
+            result = await tool.execute(action="check", key=key)
+            assert "state: done" in result
+            assert "PRIVATE_RESULT" in result
+            assert sent["message_id"] in result and "undelivered" in result
+            snapshot = tool._runtime_control.snapshot().subagent_statuses[task_id]
+            snapshot["receipts"].clear()
+            assert "undelivered" in await tool.execute(action="check", key=key + ".receipts")
+            for field in ["", ".result", ".receipts", ".state"]:
+                with request_context(RequestContext("test", "route", session_key="owner:b")):
+                    denied = await tool.execute(action="check", key=key + field)
+                    assert denied.startswith("Error:") and "PRIVATE_RESULT" not in denied
+    finally:
+        release.set()
+        await manager.close()

@@ -39,6 +39,7 @@ async def test_subagent_uses_tool_loader():
     assert tools.has("write_file")
     assert not tools.has("message")
     assert not tools.has("spawn")
+    assert not tools.has("subagent")
 
 
 @pytest.mark.asyncio

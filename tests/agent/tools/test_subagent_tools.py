@@ -10,6 +10,7 @@ import pytest
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.tools.context import RequestContext
+from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -52,8 +53,7 @@ async def test_run_inline_returns_result_without_announcement(tmp_path):
     assert result == "review result"
     manager._announce_result.assert_not_awaited()
     assert manager._running_tasks == {}
-    assert manager._task_statuses == {}
-    assert manager._session_tasks == {}
+    assert [s.state for s in manager.statuses_for_session("test:c1").values()] == ["done"]
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_run_inline_returns_structured_error(tmp_path):
     assert result == "subagent failed"
     assert is_tool_error_result(result)
     assert manager._running_tasks == {}
-    assert manager._session_tasks == {}
+    assert [s.state for s in manager.statuses_for_session("test:c1").values()] == ["error"]
 
 
 @pytest.mark.asyncio
@@ -379,7 +379,7 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
         assert await second == "done"
 
     assert manager.get_running_count() == 0
-    assert manager._session_tasks == {}
+    assert [s.state for s in manager.statuses_for_session("test:c1").values()] == ["done", "done"]
 
 
 @pytest.mark.asyncio
@@ -485,11 +485,9 @@ async def test_cancel_by_session_cancels_inline_subagent(tmp_path):
     await asyncio.wait_for(entered.wait(), timeout=1.0)
 
     assert await manager.cancel_by_session("test:c1") == 1
-    with pytest.raises(asyncio.CancelledError):
-        await inline
+    assert is_tool_error_result(await inline)
     assert manager._running_tasks == {}
-    assert manager._task_statuses == {}
-    assert manager._session_tasks == {}
+    assert [s.state for s in manager.statuses_for_session("test:c1").values()] == ["cancelled"]
 
 
 def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):

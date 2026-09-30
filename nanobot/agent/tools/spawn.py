@@ -92,7 +92,11 @@ class SpawnTool(Tool):
             return ToolResult.error("Error: spawn requires an active model runtime")
         origin_channel = request_ctx.channel
         origin_chat_id = request_ctx.chat_id
-        session_key = request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
+        session_key = request_ctx.session_key or (
+            f"{origin_channel}:{origin_chat_id}" if origin_channel and origin_chat_id else None
+        )
+        if not session_key:
+            return ToolResult.error("Error: spawn requires an active session identity")
         method = self._manager.run_inline if wait else self._manager.spawn
         return await method(
             task=task,
