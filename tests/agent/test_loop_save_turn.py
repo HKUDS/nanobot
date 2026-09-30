@@ -1879,9 +1879,8 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     loop._run_agent_loop = interrupted_run_agent_loop  # type: ignore[method-assign]
 
     first_msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="c4", content="keep progress")
-    with loop._session_scope(first_msg.session_key).activate():
-        task = asyncio.create_task(loop._process_message(first_msg))
-    loop._track_active_task(first_msg.session_key, task)
+    task = asyncio.create_task(loop._process_message(first_msg))
+    loop._active_tasks[first_msg.session_key] = {task}
     await asyncio.wait_for(checkpoint_saved.wait(), timeout=1.0)
 
     stop_msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="c4", content="/stop")

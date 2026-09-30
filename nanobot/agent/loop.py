@@ -10,7 +10,7 @@ import os
 import time
 import weakref
 from collections.abc import Coroutine, Iterable, Mapping
-from contextlib import AbstractContextManager, AsyncExitStack, ExitStack, nullcontext, suppress
+from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
@@ -96,13 +96,7 @@ from nanobot.session.summary import (
     SessionSummaryCheckpoint,
 )
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
-from nanobot.utils.cancellation import (
-    CancellationScope,
-    cancellation_boundary,
-    current_cancellation_scope,
-    raise_if_cancelling,
-    task_is_cancelling,
-)
+from nanobot.utils.cancellation import task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -410,9 +404,6 @@ class AgentLoop:
         self._running = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
-        self._session_scopes: weakref.WeakValueDictionary[str, CancellationScope] = (
-            weakref.WeakValueDictionary()
-        )
         self._discarding_sessions: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._close_lock = asyncio.Lock()
@@ -815,7 +806,6 @@ class AgentLoop:
 
     async def execute_user_shell_command(self, ctx: CommandContext) -> OutboundMessage:
         """Execute one trusted user command with the active workspace policy."""
-        raise_if_cancelling()
         metadata = dict(ctx.msg.metadata or {})
         tool = self.tools.get("exec")
         if tool is None:
@@ -843,8 +833,6 @@ class AgentLoop:
             workspace_token = bind_workspace_scope(scope)
             turn_scope_stack = ExitStack()
             try:
-                turn_scope_stack.enter_context(self._session_scope(ctx.key).activate())
-                turn_scope_stack.enter_context(cancellation_boundary(counted=True))
                 for turn_scope in ctx.turn_scopes:
                     turn_scope_stack.enter_context(turn_scope)
                 result = await tool.execute(
@@ -863,18 +851,10 @@ class AgentLoop:
             metadata={**metadata, "render_as": "text"},
         )
 
-    def _session_scope(self, key: str) -> CancellationScope:
-        scope = self._session_scopes.get(key)
-        if scope is None or scope.cancelled:
-            scope = CancellationScope()
-            self._session_scopes[key] = scope
-        return scope
-
     def _track_active_task(self, key: str, task: asyncio.Task[Any]) -> None:
         """Track active session work until its task group becomes empty."""
         tasks = self._active_tasks.setdefault(key, set())
         tasks.add(task)
-        self._session_scope(key).track_task(task)
         task.add_done_callback(partial(self._active_task_done, key, tasks))
 
     def _active_task_done(
@@ -906,26 +886,26 @@ class AgentLoop:
             else ()
         )
         pending = self._pending_queues.get(key)
-        tasks = tuple(self._active_tasks.get(key, set()))
-        scope = self._session_scopes.get(key)
-        cancelled = scope.cancel() if scope is not None else 0
-        try:
-            if scope is not None:
-                await scope.wait()
-        finally:
-            if tasks and pending is not None and self._pending_queues.get(key) is pending:
-                # A task cancelled before its first step never enters the worker's
-                # cleanup handler. Only reclaim that worker's original inbox.
-                self._pending_queues.pop(key, None)
-                await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
-            if journaled_followup_ids and journal_session is not None:
-                # Explicit session cancellation owns the follow-ups accepted before
-                # it began. Gateway shutdown uses aclose() directly and keeps this
-                # journal intact for startup recovery.
-                current_session = self.sessions.get_cached(key) or journal_session
-                acknowledge_pending_followups(current_session, journaled_followup_ids)
-                self.sessions.save(current_session)
-        return cancelled
+        tasks = tuple(self._active_tasks.pop(key, set()))
+        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
+        for t in tasks:
+            with suppress(asyncio.CancelledError, Exception):
+                await t
+        if tasks and pending is not None and self._pending_queues.get(key) is pending:
+            # A task cancelled before its first step never enters the worker's
+            # cleanup handler. Only reclaim that worker's original inbox.
+            self._pending_queues.pop(key, None)
+            await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
+        if journaled_followup_ids and journal_session is not None:
+            # Explicit session cancellation owns the follow-ups accepted before
+            # it began. Gateway shutdown uses aclose() directly and keeps this
+            # journal intact for startup recovery.
+            current_session = self.sessions.get_cached(key) or journal_session
+            acknowledge_pending_followups(current_session, journaled_followup_ids)
+            self.sessions.save(current_session)
+        sub_cancelled = await self.subagents.cancel_by_session(key)
+        exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
+        return cancelled + sub_cancelled + exec_cancelled
 
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
@@ -1471,8 +1451,7 @@ class AgentLoop:
         new_pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
         new_pending.put_nowait(msg)
         self._pending_queues[session_key] = new_pending
-        scope = self._session_scope(session_key)
-        task = asyncio.create_task(scope.run(partial(self._run_session_queue, session_key, new_pending)))
+        task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
         self._track_active_task(session_key, task)
 
     async def _run_session_queue(
@@ -1483,7 +1462,6 @@ class AgentLoop:
         """Run the sole worker for a session until its inbox is empty."""
         try:
             while self._pending_queues.get(session_key) is pending:
-                raise_if_cancelling()
                 try:
                     msg = pending.get_nowait()
                 except asyncio.QueueEmpty:
@@ -1590,7 +1568,6 @@ class AgentLoop:
                         pending_queue=pending,
                         delivery=delivery,
                     )
-                    raise_if_cancelling()
                     continuing = turn_continuation.internal_continuation_pending(msg.metadata)
                     await delivery.complete(
                         response,
@@ -1688,20 +1665,12 @@ class AgentLoop:
         active_tasks = tuple({task for tasks in active_task_groups.values() for task in tasks})
         active_task_groups.clear()
         active_tasks = tuple(task for task in active_tasks if task is not current_task)
-        scopes = tuple(self._session_scopes.values())
-        for scope in scopes:
-            scope.cancel()
         for task in active_tasks:
-            if not task.done() and not task.cancelling():
+            if not task.done():
                 task.cancel()
         try:
             if active_tasks:
-                await asyncio.wait(active_tasks, timeout=5.0)
-            if scopes:
-                scope_results = await asyncio.gather(
-                    *(scope.wait() for scope in scopes), return_exceptions=True,
-                )
-                errors.extend(result for result in scope_results if isinstance(result, BaseException))
+                await asyncio.gather(*active_tasks, return_exceptions=True)
             for key, pending in pending_queues.items():
                 if self._pending_queues.get(key) is pending:
                     self._pending_queues.pop(key)
@@ -1835,23 +1804,17 @@ class AgentLoop:
             ctx.events = EventSink(track_output, ctx.events.accepts)
 
         with logger.contextualize(turn_id=ctx.turn_id, session_key=ctx.session_key):
-            async with AsyncExitStack() as work:
-                await self._run_turn_stage(ctx, "restore", self._restore_turn)
-                await self._run_turn_stage(ctx, "compact", self._compact_session)
-                if await self._run_turn_stage(ctx, "command", self._dispatch_command):
-                    self._log_turn_completion(ctx, outcome="command")
-                    return ctx.outbound
-                if current_cancellation_scope() is None:
-                    # Commands may expand into model work after independent dispatch.
-                    work.enter_context(self._session_scope(key).activate())
-                    work.enter_context(cancellation_boundary(counted=True))
-                    await work.enter_async_context(self._get_session_lock(key))
-                await self._run_turn_stage(ctx, "build", self._build_turn)
-                await self._run_turn_stage(ctx, "run", self._run_turn)
-                await self._run_turn_stage(ctx, "save", self._persist_turn)
-                await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
-                self._log_turn_completion(ctx)
+            await self._run_turn_stage(ctx, "restore", self._restore_turn)
+            await self._run_turn_stage(ctx, "compact", self._compact_session)
+            if await self._run_turn_stage(ctx, "command", self._dispatch_command):
+                self._log_turn_completion(ctx, outcome="command")
                 return ctx.outbound
+            await self._run_turn_stage(ctx, "build", self._build_turn)
+            await self._run_turn_stage(ctx, "run", self._run_turn)
+            await self._run_turn_stage(ctx, "save", self._persist_turn)
+            await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
+            self._log_turn_completion(ctx)
+            return ctx.outbound
 
     async def _run_turn_stage(
         self,
@@ -2046,10 +2009,7 @@ class AgentLoop:
             is_user_turn=is_user_turn,
             turn_scopes=ctx.turn_scopes,
         )
-        result = (
-            await self.commands.dispatch_priority(cmd_ctx)
-            if self.commands.is_priority(raw) else await self.commands.dispatch(cmd_ctx)
-        )
+        result = await self.commands.dispatch(cmd_ctx)
         if isinstance(result, InboundMessage):
             ctx.msg = result
             result = None
@@ -2557,7 +2517,6 @@ class AgentLoop:
         attributes: Mapping[str, Any] | None = None,
     ) -> OutboundMessage | None:
         """Process an external message directly and return the outbound payload."""
-        raise_if_cancelling()
         if channel == "system":
             raise ValueError("channel 'system' is reserved for internal messages")
         metadata: dict[str, Any] = {}
@@ -2569,44 +2528,33 @@ class AgentLoop:
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._get_session_lock(session_key)
-        raw = normalize_command_text(content)
-        command_request = (
-            self.commands.is_priority(raw) or self.commands.is_dispatchable_command(raw)
-        )
-        # Match bus admission: commands run independently; compaction shares
-        # the session worker so it can safely update the turn's history.
-        session_work = not command_request or raw.lower() == "/compact"
         try:
-            with ExitStack() as stack:
-                if session_work:
-                    stack.enter_context(self._session_scope(session_key).activate())
-                    stack.enter_context(cancellation_boundary(counted=True))
-                async with lock if session_work else nullcontext():
-                    kwargs: dict[str, Any] = {
-                        "session_key": session_key,
-                        "on_progress": on_progress,
-                        "on_stream": on_stream,
-                        "on_stream_end": on_stream_end,
-                        "ephemeral": ephemeral,
-                    }
-                    if _run_extra_hooks_for_ephemeral:
-                        kwargs["run_extra_hooks_for_ephemeral"] = True
-                    if hooks is not None:
-                        kwargs["hooks"] = hooks
-                    if hook_factories is not None:
-                        kwargs["hook_factories"] = hook_factories
-                    if tools is not None:
-                        kwargs["tools"] = tools
-                    if runtime is not None:
-                        kwargs["runtime"] = runtime
-                    if on_runtime_admitted is not None:
-                        kwargs["on_runtime_admitted"] = on_runtime_admitted
-                    if attributes is not None:
-                        kwargs["attributes"] = dict(attributes)
-                    return await self._process_message(
-                        msg,
-                        **kwargs,
-                    )
+            async with lock:
+                kwargs: dict[str, Any] = {
+                    "session_key": session_key,
+                    "on_progress": on_progress,
+                    "on_stream": on_stream,
+                    "on_stream_end": on_stream_end,
+                    "ephemeral": ephemeral,
+                }
+                if _run_extra_hooks_for_ephemeral:
+                    kwargs["run_extra_hooks_for_ephemeral"] = True
+                if hooks is not None:
+                    kwargs["hooks"] = hooks
+                if hook_factories is not None:
+                    kwargs["hook_factories"] = hook_factories
+                if tools is not None:
+                    kwargs["tools"] = tools
+                if runtime is not None:
+                    kwargs["runtime"] = runtime
+                if on_runtime_admitted is not None:
+                    kwargs["on_runtime_admitted"] = on_runtime_admitted
+                if attributes is not None:
+                    kwargs["attributes"] = dict(attributes)
+                return await self._process_message(
+                    msg,
+                    **kwargs,
+                )
         finally:
             await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
             self.runtime_event_publisher.clear_turn(session_key)

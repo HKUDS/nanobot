@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import subprocess
 from pathlib import Path
 
 from pydantic import Field
@@ -19,13 +17,11 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.agent.tools.shell import ExecTool
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.apps.cli.utils import runtime_lines_for_request
 from nanobot.config_base import Base
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.security.workspace_access import current_tool_workspace
-from nanobot.utils.cancellation import raise_if_cancelling
 
 
 class CliAppsToolConfig(Base):
@@ -152,8 +148,7 @@ class CliAppsTool(Tool):
         workspace = access.project_path or self.workspace
         manager = CliAppManager(workspace=workspace, runtime=self.runtime)
         try:
-            prepared = await asyncio.to_thread(
-                manager.prepare_run,
+            return manager.run(
                 name,
                 args=args or [],
                 json_output=bool(json),
@@ -161,18 +156,5 @@ class CliAppsTool(Tool):
                 timeout=timeout,
                 restrict_to_workspace=access.restrict_to_workspace,
             )
-            raise_if_cancelling()
-            try:
-                stdout, stderr, returncode = await ExecTool.run_process(
-                    prepared.argv, str(prepared.cwd), prepared.env, timeout=prepared.timeout,
-                )
-            except asyncio.TimeoutError:
-                return f"CLI app '{name}' timed out after {prepared.timeout}s"
-            result = subprocess.CompletedProcess(
-                prepared.argv, returncode,
-                stdout=stdout.decode("utf-8", errors="replace"),
-                stderr=stderr.decode("utf-8", errors="replace"),
-            )
-            return await asyncio.to_thread(manager.format_run_result, prepared, result)
         except CliAppError as exc:
             return ToolResult.error(f"Error: {exc.message}")

@@ -15,7 +15,6 @@ from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import ToolCallRequest
-from nanobot.utils.cancellation import cancellation_boundary, raise_if_cancelling
 from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
@@ -68,7 +67,6 @@ async def execute_tool_calls(
     compacted_tool_results: set[str] | None = None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
     """Execute one model response's tool calls in stable result order."""
-    raise_if_cancelling()
     @cache
     def read_results() -> dict[str, str]:
         """Index once, on the first read-dedup check in this batch."""
@@ -168,7 +166,6 @@ async def _execute_tool_call(
     await hook.before_execute_tool(context, tool_call, tool, params)
     try:
         with (
-            cancellation_boundary(),
             file_read_context(tool_call.id, read_results)
             if tool_call.name == "read_file" else nullcontext()
         ):

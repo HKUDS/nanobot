@@ -7,7 +7,7 @@ import json
 import time
 import uuid
 import warnings
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -40,7 +40,6 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
-from nanobot.utils.cancellation import CancellationScope, current_cancellation_scope
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -114,8 +113,6 @@ class _SubagentTask:
     outcome: _SubagentOutcome | None = None
     exec_manager: ExecSessionManager = field(default_factory=ExecSessionManager)
     cleanup_task: asyncio.Task[int] | None = None
-    scope: CancellationScope = field(default_factory=CancellationScope)
-    release_from_parent: Callable[[], None] | None = None
 
     def raise_if_stopping(self) -> None:
         if self.outcome is not None:
@@ -279,18 +276,9 @@ class SubagentManager:
         if retry and cleanup is not None and cleanup.done():
             record.cleanup_task = None
         if record.cleanup_task is None:
-            record.scope.cancel()
-            record.cleanup_task = asyncio.create_task(self._close_resources(record))
+            record.cleanup_task = asyncio.create_task(record.exec_manager.close_all())
             record.cleanup_task.add_done_callback(partial(self._cleanup_done, record))
         return record.cleanup_task
-
-    async def _close_resources(self, record: _SubagentTask) -> int:
-        # Start process cleanup alongside any other registered task resources.
-        execution = self._running_tasks.get(record.status.task_id)
-        closed, _ = await asyncio.gather(
-            record.exec_manager.close_all(), record.scope.wait(timeout=None, exclude=execution),
-        )
-        return closed
 
     def _cleanup_done(self, record: _SubagentTask, task: asyncio.Task[int]) -> None:
         if not task.cancelled() and task.exception() is None:
@@ -303,9 +291,6 @@ class SubagentManager:
                 and cleanup is not None and cleanup.done()
                 and not cleanup.cancelled() and cleanup.exception() is None):
             self._tasks.pop(record.status.task_id, None)
-            if record.release_from_parent is not None:
-                record.release_from_parent()
-                record.release_from_parent = None
 
     def _finish(self, record: _SubagentTask,
                 cleanup_error: str | None = None) -> _SubagentOutcome:
@@ -359,30 +344,18 @@ class SubagentManager:
 
     async def _cancel_task(self, record: _SubagentTask,
                            *, suppress_notice: bool = False) -> None:
-        self._request_cancel(record, suppress_notice=suppress_notice)
-        await self._wait_cancelled(record)
-
-    def _request_cancel(self, record: _SubagentTask,
-                        *, suppress_notice: bool = False) -> None:
-        """Seal and broadcast without waiting for any execution to acknowledge."""
         record.suppress_notice |= suppress_notice
         task_id = record.status.task_id
         task = self._running_tasks.get(task_id)
         if record.decide(_SubagentOutcome("cancelled", "Task cancelled.", "cancelled")):
-            record.scope.cancel()
             if task is not None and record.begun and not task.done():
-                if not task.cancelling():
-                    task.cancel()
+                task.cancel()
         if record.status.finished_at is None:
             self._start_cleanup(record)
-
-    async def _wait_cancelled(self, record: _SubagentTask) -> None:
-        task = self._running_tasks.get(record.status.task_id)
         if task is not None:
             # wait_for waits for cancellation acknowledgement and can hang here.
             # Keep resistant work tracked, with its slot held, until it really exits.
             await asyncio.wait({task}, timeout=self.CANCEL_WAIT_SECONDS)
-        await record.scope.wait(timeout=self.CANCEL_WAIT_SECONDS, exclude=task)
 
     def runtime_statuses(self) -> Mapping[str, SubagentStatus]:
         """Return detached active and retained terminal data, never task resources."""
@@ -476,9 +449,6 @@ class SubagentManager:
         temperature: float | None, workspace_scope: WorkspaceScope | None,
         runtime: LLMRuntime | None, *, announce: bool,
     ) -> _SubagentTask:
-        parent_scope = current_cancellation_scope()
-        if parent_scope is not None:
-            parent_scope.check()
         if runtime is None:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
@@ -509,12 +479,6 @@ class SubagentManager:
         execution = asyncio.create_task(self._run_subagent(record))
         self._running_tasks[task_id] = execution
         execution.add_done_callback(partial(self._task_done, record))
-        if parent_scope is not None:
-            def stop() -> Awaitable[object]:
-                self._request_cancel(record, suppress_notice=True)
-                return self._wait_cancelled(record)
-
-            record.release_from_parent = parent_scope.register(stop)
         logger.info("Started subagent [{}]: {}", task_id, record.status.label)
         return record
 
@@ -601,8 +565,7 @@ class SubagentManager:
                 record.raise_if_stopping()
                 status.state = "running"
                 status.phase = "initializing"
-                with record.scope.activate():
-                    outcome = await self._run_admitted_subagent(record)
+                outcome = await self._run_admitted_subagent(record)
                 record.decide(outcome)
         except asyncio.CancelledError:
             record.decide(_SubagentOutcome("cancelled", "Task cancelled.", "cancelled"))
@@ -787,8 +750,8 @@ class SubagentManager:
                    and tid in self._running_tasks and not self._running_tasks[tid].done()]
         # Suppress every notice before cancellation can yield to a sibling.
         for record in records:
-            self._request_cancel(record, suppress_notice=True)
-        await asyncio.gather(*(self._wait_cancelled(record) for record in records))
+            record.suppress_notice = True
+        await asyncio.gather(*(self._cancel_task(record, suppress_notice=True) for record in records))
         return len(records)
 
     async def close(self) -> None:
