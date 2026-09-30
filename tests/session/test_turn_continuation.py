@@ -19,6 +19,7 @@ from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_PENDING_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
     _save_skip_for_turn,
+    idle_continuation_count,
     internal_continuation_pending,
     internal_continuation_run_started_at,
     maybe_continue_turn,
@@ -29,7 +30,8 @@ from nanobot.session.turn_continuation import (
 
 
 @pytest.mark.asyncio
-async def test_maybe_continue_turn_queues_internal_message():
+@pytest.mark.parametrize("idle_continues", [0, 1, 2])
+async def test_maybe_continue_turn_queues_internal_message(idle_continues):
     meta = {
         GOAL_STATE_KEY: {
             "status": "active",
@@ -68,13 +70,14 @@ async def test_maybe_continue_turn_queues_internal_message():
         visible_run_started_at=1234.5,
     )
 
-    assert await maybe_continue_turn(ctx) is True
+    assert await maybe_continue_turn(ctx, idle_continues=idle_continues) is True
 
     queued = pending.get_nowait()
     assert queued.sender_id == "system:continuation"
     assert queued.metadata[INTERNAL_CONTINUATION_META] is True
     assert queued.metadata[INTERNAL_CONTINUATION_KIND_META] == "sustained_goal"
     assert sustained_goal_continuation_inbound(queued.metadata) is True
+    assert idle_continuation_count(queued.metadata) == idle_continues
     assert queued.metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == 1234.5
     assert internal_continuation_run_started_at(queued.metadata) == 1234.5
     assert internal_continuation_pending(ctx.msg.metadata)
@@ -94,6 +97,32 @@ async def test_maybe_continue_turn_queues_internal_message():
 
 def test_generic_internal_continuation_is_not_a_sustained_goal_continuation() -> None:
     assert sustained_goal_continuation_inbound({INTERNAL_CONTINUATION_META: True}) is False
+
+
+@pytest.mark.parametrize("value, expected", [
+    (None, 0), (True, 0), ("2", 0), (-1, 0), (1.5, 0), (0, 0), (2, 2),
+])
+def test_idle_continuation_count_normalizes_metadata(value, expected):
+    assert idle_continuation_count({
+        INTERNAL_CONTINUATION_META: True,
+        INTERNAL_CONTINUATION_KIND_META: "sustained_goal",
+        "_internal_idle_continues": value,
+    }) == expected
+
+
+@pytest.mark.parametrize("metadata", [
+    None,
+    {"_internal_idle_continues": 2},
+    {INTERNAL_CONTINUATION_META: True, "_internal_idle_continues": 2},
+    {INTERNAL_CONTINUATION_KIND_META: "sustained_goal", "_internal_idle_continues": 2},
+    {
+        INTERNAL_CONTINUATION_META: True,
+        INTERNAL_CONTINUATION_KIND_META: "recovery",
+        "_internal_idle_continues": 2,
+    },
+])
+def test_idle_continuation_count_ignores_user_and_other_internal_turns(metadata):
+    assert idle_continuation_count(metadata) == 0
 
 
 @pytest.mark.asyncio
