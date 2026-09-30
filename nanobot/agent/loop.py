@@ -25,7 +25,7 @@ from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver, TranscriptInput
 from nanobot.agent.cron_turns import CronTurnCoordinator
-from nanobot.agent.goal_permission import goal_mutation_permission
+from nanobot.agent.goal_permission import GoalInputScope
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
@@ -1116,13 +1116,7 @@ class AgentLoop:
                     if not self._can_inject_message(pending_msg):
                         break
                     converted.append(await _to_user_message(pending_msg))
-                if any(
-                    msg.is_user_input and msg.channel != "system"
-                    and msg.sender_id != "subagent"
-                    and msg.metadata.get("goal_requested") is True
-                    for msg in pending_messages[:len(converted)]
-                ):
-                    turn_scope_stack.enter_context(goal_mutation_permission(True))
+                goal_inputs.consume_inputs(pending_messages[:len(converted)])
                 consumed = len(converted)
                 return converted
             finally:
@@ -1218,7 +1212,7 @@ class AgentLoop:
 
         session_metadata = session.metadata if session is not None else None
         try:
-            turn_scope_stack.enter_context(goal_mutation_permission(False))
+            goal_inputs = turn_scope_stack.enter_context(GoalInputScope())
             for scope in turn_scopes or ():
                 turn_scope_stack.enter_context(scope)
             hook = build_agent_turn_hook(AgentTurnHookSpec(
@@ -2019,8 +2013,7 @@ class AgentLoop:
         if isinstance(result, InboundMessage):
             ctx.msg = result
             result = None
-        if is_user_turn and ctx.msg.metadata.get("goal_requested") is True:
-            ctx.turn_scopes.append(goal_mutation_permission(True))
+        ctx.turn_scopes.append(GoalInputScope(ctx.msg))
         if cmd_ctx.raw.lower() == "/compact":
             # Compaction reports through events, not an archiveable command reply.
             return True
