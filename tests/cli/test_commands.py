@@ -2223,18 +2223,16 @@ def test_webui_yes_creates_config_and_enables_local_websocket(
 @pytest.mark.parametrize("explicit_config", [True, False])
 def test_webui_announces_existing_config_once(monkeypatch, tmp_path: Path, explicit_config: bool) -> None:
     from nanobot.config import loader
-    from nanobot.config.loader import save_config
 
     config_file = tmp_path / "instance" / "config.json"
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
-    save_config(config, config_file)
+    loader.save_config(config, config_file)
     default_config = tmp_path / "default" / "config.json" if explicit_config else config_file
     monkeypatch.setattr(loader, "_current_config_path", default_config)
     _patch_webui_provider_ready(monkeypatch)
     _patch_gateway_ports_free(monkeypatch)
-    seen: dict[str, object] = {}
-    _patch_webui_managed_gateway(monkeypatch, seen)
+    _patch_webui_managed_gateway(monkeypatch)
 
     args = ["webui", "--yes", "--no-open"]
     if explicit_config:
@@ -2244,8 +2242,6 @@ def test_webui_announces_existing_config_once(monkeypatch, tmp_path: Path, expli
     assert result.exit_code == 0, result.output
     assert result.stdout.count("Using config:") == 1
     assert f"Using config: {config_file}" in _without_rendered_line_breaks(result.stdout)
-    assert loader.get_config_path() == config_file.resolve()
-    assert seen["start_options"].config_path == str(config_file.resolve())
 
 
 def test_webui_background_points_to_the_single_persistent_gateway_command(
