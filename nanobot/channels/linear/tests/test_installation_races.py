@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -15,6 +16,79 @@ from nanobot.channels.linear import connect as linear_connect
 from nanobot.channels.linear.client import LinearApiError, LinearClient
 from nanobot.channels.linear.state import LinearStateStore
 from nanobot.channels.linear.tests.test_linear import _config, _installation, _runtime
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+@pytest.mark.parametrize("replacement", [
+    "removed", "reauthorized", "same_tokens", "reconnected", "other_app", "refreshed",
+])
+async def test_delayed_member_choice_is_scoped_to_its_authorization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str, allowed: bool,
+) -> None:
+    state = LinearStateStore(tmp_path / "linear.sqlite3")
+    monkeypatch.setattr(time, "time", lambda: 1000.0)
+    state.save_installation(_installation())
+    original = state.installation("org-1")
+    assert original is not None
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "NanobotMemberTeams" in json.loads(request.content)["query"]:
+            return httpx.Response(200, json={"data": {"teams": {
+                "nodes": [{"id": "team-1", "name": "Team"}],
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }}})
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, json={"data": {"team": {"members": {
+            "nodes": [{"id": "user-1", "name": "Member", "active": True, "app": False}],
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        }}}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        monkeypatch.setattr(linear_connect, "_load_linear_config", _config)
+        monkeypatch.setattr(linear_connect, "LinearStateStore", lambda: LinearStateStore(state.path))
+        monkeypatch.setattr(linear_connect, "LinearClient", lambda config, store: LinearClient(config, store, http))
+        pending = asyncio.create_task(linear_connect.LinearConnectStore().handle("start", {
+            "operation": ["member_access"], "organization_id": ["org-1"],
+            "user_id": ["user-1"], "allowed": [str(allowed).lower()],
+        }))
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            monkeypatch.setattr(time, "time", lambda: 2000.0)
+            if replacement in {"removed", "reconnected"}:
+                assert state.delete_installation("org-1")
+            if replacement == "refreshed":
+                assert state.refresh_installation(original, replace(
+                    original, access_token="rotated", refresh_token="rotated-refresh",
+                ))
+            elif replacement != "removed":
+                state.save_installation(replace(
+                    original,
+                    oauth_client_id="other-client" if replacement == "other_app" else "client-id",
+                    access_token=original.access_token if replacement == "same_tokens" else "new-grant",
+                    refresh_token=original.refresh_token if replacement == "same_tokens" else "new-refresh",
+                ), reauthorize=True)
+            expected = state.installation("org-1")
+            if expected is not None:
+                assert (expected.authorized_at == original.authorized_at) is (replacement == "refreshed")
+                state.set_member_access(expected.oauth_client_id, "org-1", "user-1", allowed=not allowed)
+            release.set()
+            if replacement == "refreshed":
+                assert (await pending)["status"] == "member_access_saved"
+                assert state.member_access("client-id", "org-1", "user-1") is allowed
+            else:
+                with pytest.raises(linear_connect.ChannelConnectError) as error:
+                    await pending
+                assert error.value.status == 409
+                if expected is not None:
+                    assert state.member_access(expected.oauth_client_id, "org-1", "user-1") is (not allowed)
+                else:
+                    assert state.member_access("client-id", "org-1", "user-1") is None
+            assert state.installation("org-1") == expected
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
 
 
 @pytest.mark.parametrize("replacement", ["removed", "reauthorized", "same_tokens", "other_app"])
