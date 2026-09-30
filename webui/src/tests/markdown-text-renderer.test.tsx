@@ -516,6 +516,30 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("[data-nanobot-stream-unit]")).not.toBeInTheDocument();
   });
 
+  it("stops repairing completed markdown without replacing the streaming layout", () => {
+    const source = "The old snip_history() / _legal_history_tail() path was removed.\n\nA real maintenance cost.";
+    const { container, rerender } = render(
+      <MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>,
+    );
+    const firstParagraph = container.querySelector("p");
+    expect(container.querySelector("p:last-child")?.textContent).toBe("A real maintenance cost._");
+
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+
+    expect(container.querySelector("p:last-child")?.textContent).toBe("A real maintenance cost.");
+    expect(container.querySelector("p")).toBe(firstParagraph);
+  });
+
+  it.each(["A literal trailing underscore_", "**unfinished emphasis", "_legal_history_tail()"])(
+    "preserves completed source syntax: %s",
+    (source) => {
+      const { container } = render(
+        <MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>,
+      );
+      expect(container.textContent).toBe(source);
+    },
+  );
+
   it("repairs incomplete streaming markdown without exposing syntax fragments", () => {
     const { container, rerender } = render(
       <MarkdownTextRenderer streaming>{"**partial answer"}</MarkdownTextRenderer>,

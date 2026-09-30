@@ -37,6 +37,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
 # ---------------------------------------------------------------------------
@@ -1883,13 +1884,17 @@ class WeixinChannel(BaseChannel):
         self._record_context_send(context_token)
 
     async def send(self, msg: OutboundMessage) -> None:
+        event = getattr(msg, "event", None)
+        if isinstance(event, ContextCompactionEvent) and not (
+            event.notify or self.show_compaction_notices
+        ):
+            return
         if not self._client or not self._token:
             raise RuntimeError("WeChat client not initialized or not authenticated")
         self._assert_session_active()
 
         delivery_id = self._delivery_id(msg)
         delivery_state = self._delivery_state(delivery_id)
-        event = getattr(msg, "event", None)
         progress_event = event if isinstance(event, ProgressEvent) else None
         is_progress = progress_event is not None
 

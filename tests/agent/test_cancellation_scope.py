@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.agent.goal_permission import goal_mutation_allowed
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -17,9 +18,54 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import cmd_stop
 from nanobot.command.router import CommandContext
-from nanobot.providers.base import GenerationSettings
+from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.utils.cancellation import CancellationScope
 from nanobot.utils.llm_runtime import LLMRuntime
+
+
+@pytest.mark.asyncio
+async def test_direct_goal_work_serializes_with_the_session_and_stops_while_waiting(tmp_path):
+    provider = MagicMock()
+    provider.generation = GenerationSettings()
+    provider.get_default_model.return_value = "test"
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    started, release = asyncio.Event(), asyncio.Event()
+    permissions = []
+
+    async def respond(**kwargs):
+        permissions.append(goal_mutation_allowed())
+        if len(permissions) == 1:
+            started.set()
+            await release.wait()
+        return LLMResponse(content="done")
+
+    provider.chat_stream_with_retry = respond
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test")
+    running = asyncio.create_task(loop.process_direct("Discuss the migration."))
+    goal = None
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        goal = asyncio.create_task(loop.process_direct("/goal Verify the migration."))
+        async with asyncio.timeout(3):
+            while not any(
+                row.get("content") == "/goal Verify the migration."
+                for row in loop.sessions.get_or_create("cli:direct").messages
+            ):
+                await asyncio.sleep(0)
+        assert permissions == [False]
+        response = await asyncio.wait_for(loop.process_direct("/stop"), 3)
+        assert "Stopped 2" in response.content
+        results = await asyncio.wait_for(asyncio.gather(running, goal, return_exceptions=True), 3)
+        assert all(isinstance(result, asyncio.CancelledError) for result in results)
+        assert permissions == [False]
+        response = await loop.process_direct("/goal Verify the migration.")
+        assert response.content == "done"
+        assert permissions == [False, True]
+        assert goal_mutation_allowed() is False
+    finally:
+        release.set()
+        await asyncio.gather(running, *([goal] if goal is not None else []), return_exceptions=True)
+        await loop.aclose()
 
 
 @pytest.mark.asyncio

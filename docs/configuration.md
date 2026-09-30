@@ -1623,6 +1623,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 |---------|---------|-------------|
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `true` | Stream tool-call hints (e.g. `read_file("…")`) |
+| `showCompactionNotices` | `false` | Post automatic context-compaction lifecycle notices in built-in chat channels. Each channel can override this global default. Does not hide manual `/compact` feedback or WebUI/TUI structured events. |
 | `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix / Mattermost keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
 
@@ -1655,17 +1656,24 @@ Normal tool workspace and media access rules still apply to attachment paths.
 }
 ```
 
-QQ `showCompactionNotices` defaults to `false`. It controls the context-compaction lifecycle notices ("Compressing context…" / "Context compacted."). Telegram, Discord and WebSocket present that lifecycle as one in-place-updated message or status, but QQ's C2C/group message API has no edit or recall endpoint, so each phase would land as a separate permanent message; the QQ channel therefore drops the notices by default (#5784). Set `channels.qq.showCompactionNotices: true` to post them anyway:
+Automatic context-compaction notices are quiet by default in the built-in chat channels, including WeCom, Telegram and Discord. Compaction still runs, and WebUI/TUI structured status and history remain available. Manual `/compact` keeps its start and outcome feedback, including failure or cancellation. `sendProgress` remains independent of this policy.
+
+Set `channels.showCompactionNotices: true` in `config.json` to enable automatic notices globally ("Compressing context…" / "Context compacted.", including failure and cancellation outcomes). A channel's explicit `true` or `false` overrides the global default; an omitted or `null` value inherits it. Like the global progress settings, this global option is configured in `config.json`. QQ's existing WebUI advanced setting also supports **Default** to inherit the global value; saving unrelated settings preserves inheritance. Restart the gateway after editing `config.json`.
+
+For example, enable notices globally but keep WeCom quiet:
 
 ```json
 {
   "channels": {
-    "qq": {
-      "showCompactionNotices": true
+    "showCompactionNotices": true,
+    "wecom": {
+      "showCompactionNotices": false
     }
   }
 }
 ```
+
+Existing QQ `showCompactionNotices: true` or `false` settings remain explicit overrides. QQ's C2C/group message API has no edit or recall endpoint, so enabled notices land as separate permanent messages. This setting controls only automatic chat notices, not compaction execution, saved history, structured WebUI/TUI status, or manual command feedback. Third-party channel plugins must implement the same rendering policy to honor this option.
 
 Telegram `richMessages` defaults to `false`. Enable it only to opt in to Bot API 10.1 `sendRichMessage` rendering; leave it disabled for Telegram Web clients that show unsupported-message errors for rich messages.
 

@@ -261,6 +261,10 @@ if DISCORD_AVAILABLE:
         async def send_outbound(self, msg: OutboundMessage) -> None:
             """Send a nanobot outbound message using Discord transport rules."""
             compaction = msg.event if isinstance(msg.event, ContextCompactionEvent) else None
+            if compaction is not None and not (
+                compaction.notify or self._channel.show_compaction_notices
+            ):
+                return
             # A compaction's outcome replaces its own start notice in place, so
             # the lifecycle stays visible as one message instead of two (#5719).
             # Without a stored notice (restart, edit refused) it is sent as usual.

@@ -2,7 +2,7 @@ import asyncio
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -3267,7 +3267,7 @@ def _compaction_message(phase: str, compaction_id: str = "c1") -> OutboundMessag
             "failed": "Unable to compact context.",
             "cancelled": "Context compaction cancelled.",
         }[phase],
-        event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase),
+        event=ContextCompactionEvent(compaction_id=compaction_id, phase=phase, notify=True),
     )
 
 
@@ -3295,6 +3295,29 @@ async def test_compaction_terminal_phase_edits_started_notice_in_place() -> None
         chat_id=999, message_id=77, text="Context compacted.",
     )
     assert ("999", "c1") not in channel._compaction_notices
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["started", "succeeded", "failed", "cancelled"])
+async def test_automatic_compaction_is_received_but_not_sent(phase) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    channel._app.bot.send_message = AsyncMock()
+    channel._stop_typing = Mock()
+    channel._remove_reaction = AsyncMock()
+
+    await channel.send(OutboundMessage(
+        channel="telegram", chat_id="999", content="Compressing context…",
+        metadata={"message_id": "42"},
+        event=ContextCompactionEvent(compaction_id="c1", phase=phase),
+    ))
+
+    channel._app.bot.send_message.assert_not_awaited()
+    channel._stop_typing.assert_not_called()
+    channel._remove_reaction.assert_not_awaited()
 
 
 @pytest.mark.asyncio

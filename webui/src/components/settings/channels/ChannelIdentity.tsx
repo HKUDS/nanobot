@@ -1,3 +1,4 @@
+import i18n from "i18next";
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -80,7 +81,9 @@ export function channelSetup(
     const choiceLabels = setupMessages?.fields?.[
       channelFieldMessageKey(feature.name, field.key)
     ]?.choices ?? {};
-    const choices = field.kind === "bool" ? ["true", "false"] : field.choices;
+    const choices = field.kind === "bool"
+      ? (field.inheritable ? ["", "true", "false"] : ["true", "false"])
+      : field.choices;
     return {
       ...copy,
       key: field.key,
@@ -95,7 +98,9 @@ export function channelSetup(
         field.kind === "enum" || field.kind === "bool"
           ? choices.map((choice) => ({
               value: choice,
-              label: choiceLabels[choice] ?? fieldLabel(choice),
+              label: choiceLabels[choice] ?? (choice === ""
+                ? i18n.t("settings.values.default", { lng: locale, ns: "common" })
+                : fieldLabel(choice)),
             }))
           : undefined,
     };

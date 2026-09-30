@@ -407,6 +407,55 @@ describe("NanobotTui composer", () => {
     expect(disposed).toBeTrue()
   })
 
+  test.each(["enter", "tab"])("submits a running goal with %s", async (key) => {
+    const sent: string[] = []
+    setup = await createRenderer({ width: 88, height: 24, screenMode: "alternate-screen" })
+    const transport = client(sent)
+    transport.send = (content) => {
+      sent.push(content)
+      return sent.length === 1 ? "active" : "followup"
+    }
+    const app = NanobotTui.mount(
+      setup.renderer, options, transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }),
+    )
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as {
+      ready: boolean
+      activeTurnId: string | null
+      composer: TextareaRenderable
+      commandMenu: { setCommands(commands: SlashCommand[]): void }
+      queuePreview: { root: { visible: boolean } }
+    }
+    await waitUntil(() => ui.ready)
+    ui.commandMenu.setCommands([{
+      command: "/goal",
+      title: "Goal",
+      description: "Start sustained work",
+      argHint: "<goal>",
+      lifecycle: "agent_turn_with_args",
+      acceptsArgs: true,
+    }])
+    ui.composer.setText("Discuss the migration plan")
+    setup.mockInput.pressEnter()
+    await waitUntil(() => sent.length === 1)
+    await waitUntil(() => ui.activeTurnId === "active")
+
+    const goal = "/goal implement the plan we discussed"
+    ui.composer.setText(goal)
+    if (key === "enter") setup.mockInput.pressEnter()
+    else setup.mockInput.pressTab()
+    await waitUntil(() => ui.composer.plainText === "")
+
+    expect(sent).toEqual(key === "enter" ? ["Discuss the migration plan", goal] : ["Discuss the migration plan"])
+    expect(ui.activeTurnId).toBe("active")
+    expect(ui.queuePreview.root.visible).toBe(key === "tab")
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "active" })
+    await waitUntil(() => sent.length === 2)
+    expect(sent).toEqual(["Discuss the migration plan", goal])
+    expect(ui.queuePreview.root.visible).toBeFalse()
+  })
+
   test("steers with Enter, queues with Tab, and restores queued text with Alt+Up", async () => {
     const sent: string[] = []
     const sentOptions: MessageOptions[] = []

@@ -581,11 +581,12 @@ class TestToolEventProgress:
         assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_iterations", [1, 2])
     async def test_followup_after_truncation_starts_a_new_stream(
-        self, tmp_path: Path,
+        self, tmp_path: Path, max_iterations: int,
     ) -> None:
         loop = _make_loop(tmp_path)
-        loop.max_iterations = 1
+        loop.max_iterations = max_iterations
         loop.tools.get_definitions = MagicMock(return_value=[])
         _attach_webui_runtime_events(loop, loop.bus)
         calls = 0
@@ -597,11 +598,17 @@ class TestToolEventProgress:
                 await on_content_delta("old partial")
                 loop._enqueue_session_message(InboundMessage(
                     channel="websocket", sender_id="u", chat_id="test", content="new question",
+                    metadata={"_wants_stream": True},
                 ))
                 return LLMResponse(content="old partial", finish_reason="length")
+            has_followup = any(
+                "new question" in str(message.get("content", ""))
+                for message in kwargs["messages"]
+            )
+            answer = "new answer" if has_followup else "old ending"
             if on_content_delta is not None:
-                await on_content_delta("new answer")
-            return LLMResponse(content="new answer", finish_reason="stop")
+                await on_content_delta(answer)
+            return LLMResponse(content=answer, finish_reason="stop")
 
         loop.provider.chat_stream_with_retry = chat
         try:
@@ -616,15 +623,25 @@ class TestToolEventProgress:
             endings = [
                 message.event for message in outbound if isinstance(message.event, StreamEndEvent)
             ]
-            assert [event.content for event in deltas] == ["old partial", "new answer"]
-            assert deltas[0].stream_id != deltas[1].stream_id
-            assert [(event.resuming, event.merge_next) for event in endings] == [
-                (True, False), (False, False),
-            ]
+            if max_iterations == 1:
+                assert calls == 3
+                assert [event.content for event in deltas] == [
+                    "old partial", "\n\nold ending", "new answer",
+                ]
+                assert [(event.resuming, event.merge_next) for event in endings] == [
+                    (True, True), (False, False), (False, False),
+                ]
+            else:
+                assert calls == 2
+                assert [event.content for event in deltas] == ["old partial", "new answer"]
+                assert [(event.resuming, event.merge_next) for event in endings] == [
+                    (True, False), (False, False),
+                ]
+            assert deltas[0].stream_id != deltas[-1].stream_id
             assert [
                 message.content for message in outbound
                 if isinstance(message.event, StreamedResponseEvent)
-            ] == ["new answer"]
+            ] == (["old partial\n\nold ending", "new answer"] if max_iterations == 1 else ["new answer"])
         finally:
             await loop.aclose()
 

@@ -230,8 +230,8 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     request = captured["request"]
     assert isinstance(request, httpx.Request)
     assert request.url.copy_with(query=None) == httpx.URL(DEFAULT_OPENAI_CODEX_MODELS_URL)
-    # Assert the validated wire version, not the same constant used by the request.
-    assert request.url.params["client_version"] == "0.158.0"
+    # Assert the release-independent wire version, not the constant used by the request.
+    assert request.url.params["client_version"] == "99.99.99"
     assert request.headers["Authorization"] == "Bearer secret"
     assert request.headers["chatgpt-account-id"] == "account-42"
 

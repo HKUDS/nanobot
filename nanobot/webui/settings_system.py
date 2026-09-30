@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 from zoneinfo import ZoneInfo
 
+from pydantic.alias_generators import to_snake
+
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.connect import ChannelConnectError
 from nanobot.channels.contracts import (
@@ -231,10 +233,15 @@ def save_channel_config_values(
         value_type = field_types.get(field)
         if value_type is None:
             raise WebUISettingsError(f"'{raw_key}' cannot be configured from WebUI")
-        value = coerce_channel_value(raw_key, raw_value, value_type)
+        if setup_spec.fields[field].inheritable and raw_value in (None, ""):
+            value = None
+        else:
+            value = coerce_channel_value(raw_key, raw_value, value_type)
         if value is _SKIP_FIELD:
             continue
-        assign_channel_config_value(channel_config, field, value)
+        assign_channel_config_value(
+            channel_config, field, value, inheritable=setup_spec.fields[field].inheritable,
+        )
         saved.append(raw_key)
 
     try:
@@ -339,6 +346,8 @@ def assign_channel_config_value(
     channel_config: dict[str, Any],
     field: str,
     value: Any,
+    *,
+    inheritable: bool = False,
 ) -> None:
     target = channel_config
     parts = field.split(".")
@@ -348,7 +357,15 @@ def assign_channel_config_value(
             current = {}
             target[part] = current
         target = cast(dict[str, Any], current)
-    target[parts[-1]] = value
+    key = parts[-1]
+    if inheritable:
+        # Do not leave an older snake_case override shadowing this UI edit.
+        target.pop(to_snake(key), None)
+        if value is None:
+            # Absence restores inheritance and remains readable by older configs.
+            target.pop(key, None)
+            return
+    target[key] = value
 
 
 def pairing_payload(

@@ -1058,6 +1058,10 @@ class TelegramChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         app = await self._wait_for_app()
         if app is None:
             self.logger.warning("bot not running")

@@ -21,7 +21,7 @@
     "close": "關閉網頁預覽",
     "isolated": "受限的隔離預覽，登入及部分互動功能可能無法使用。",
     "blockedHint": "部分網站禁止嵌入。若頁面空白或載入失敗，請在瀏覽器中開啟。",
-    "loopback": "localhost 指向目前瀏覽器所在裝置，而非遠端閘道。不會自動轉送連接埠。",
+    "loopback": "localhost 指向目前瀏覽器所在裝置，而非遠端閘道。不會轉送任何連接埠。",
     "native": "原生用戶端暫不支援嵌入預覽，請在瀏覽器中開啟此連結。",
     "unsupported": "此瀏覽器不支援憑證隔離預覽，請在新分頁中開啟。",
     "sameOrigin": "無法在此嵌入 nanobot 應用程式本身，請在新分頁中開啟。",
@@ -91,7 +91,7 @@
       "title": "配對你的聊天帳號",
       "description": "輸入你在聊天平台收到的配對碼。",
       "code": "配對碼",
-      "matched": "已符合 {{channel}}，正在連線…",
+      "matched": "已找到 {{channel}} 的配對請求，正在連線…",
       "expiresInline": "配對碼將於 {{expires}} 到期。",
       "queueCount": "{{count}} 個待處理",
       "noMatch": "沒有待處理請求符合此配對碼。"
@@ -176,7 +176,7 @@
         "gateway_host": {"label": "閘道監聽位址", "help": "閘道使用的位址。WebUI 的監聽位址需在聊天平台的 WebSocket 設定中另外指定。"},
         "gateway_port": {"label": "閘道連接埠", "help": "儲存的閘道連接埠，命令列參數優先。"},
         "gateway_restart_mode": {"label": "重新啟動方式", "help": "選擇閘道程序的重新啟動方式，自動模式依主機環境選擇。"},
-        "api_host": {"label": "API 監聽位址", "help": "允許其他裝置連線前，請先在「系統」中設定 API 金鑰。變更後需重新啟動 API 服務。"},
+        "api_host": {"label": "API 監聽位址", "help": "將 API 綁定至網路位址前，請先在「系統」中設定 API 金鑰。重新啟動 API 服務後，變更才會生效。"},
         "api_timeout": {"label": "API 請求逾時（秒）", "help": "API 請求的時間上限，重新啟動 API 服務後生效。"},
         "tools_image_generation_save_dir": {"label": "生成圖片目錄", "help": "nanobot 媒體目錄下的子目錄，使用相對路徑；既有圖片不會移動。"}
       },
@@ -189,7 +189,7 @@
         "sessions": {"title": "對話", "help": "跨聊天平台共用對話。"},
         "tools": {"title": "內建工具", "help": "選擇智能體可以使用的工具。"},
         "shell": {"title": "Shell 與沙箱", "help": "命令時限、環境、掛載與命令篩選。"},
-        "network": {"title": "網路連線", "help": "網路工具的代理與請求識別。"},
+        "network": {"title": "網路連線", "help": "設定網路請求使用的代理與 User-Agent 標頭。"},
         "safety": {"title": "全域存取原則", "help": "工作區限制、私人網路與遠端安裝。"},
         "cli": {"title": "命令列應用程式限制", "help": "設定安裝與執行時限，以及應用程式清單的快取時間。"},
         "gateway": {"title": "閘道程序", "help": "部署與程序重新啟動設定。"},
@@ -357,7 +357,7 @@
       "restartPending": "等待重新啟動",
       "ready": "就緒",
       "privateEngine": "私有引擎",
-      "unixSocket": "Unix 套接字",
+      "unixSocket": "Unix 通訊端",
       "defaultWorkspace": "預設工作區",
       "auto": "自動",
       "expanded": "展開",
@@ -553,7 +553,7 @@
     "capabilities": {
       "providerSupport": "供應商相依套件",
       "providerInstallOnSave": "儲存時會自動安裝此供應商所需的套件。",
-      "searchSupport": "搜尋供應商支援",
+      "searchSupport": "搜尋功能相依套件",
       "searchInstallOnSave": "儲存時會自動安裝 Olostep 所需的套件。",
       "installing": "正在安裝所需套件…"
     },
@@ -882,7 +882,7 @@
       "saveSettings": "儲存設定",
       "selectChannel": "檢視 {{name}} 設定",
       "showSecret": "顯示金鑰",
-      "toggleChannel": "啟用 {{name}}",
+      "toggleChannel": "{{name}} 通訊管道",
       "toggleInstance": "{{name}} 執行個體",
       "validationFailed": "啟用前請檢查必要設定。",
       "completeSetupToEnable": "請先完成下方必要設定，然後即可啟用此頻道。",
@@ -912,18 +912,18 @@
         "unverified": "尚未驗證連線是否可用",
         "missing": "請填寫必填欄位",
         "invalid": "檢測失敗",
-        "unsupported": "此渠道暫不支援連線檢測",
+        "unsupported": "此通訊管道尚不支援連線檢查",
         "present": "已填寫",
         "required": "必填",
-        "manual": "此渠道暫不支援連線檢測"
+        "manual": "此通訊管道尚不支援連線檢查"
       },
-      "search": "搜尋聊天平台",
+      "search": "搜尋通訊管道",
       "filterEnabled": "已啟用",
-      "noResults": "沒有符合的渠道",
+      "noResults": "沒有符合的通訊管道",
       "install": "安裝",
       "installChannel": "安裝 {{name}}",
       "noInstallNeeded": "無需安裝",
-      "installNeeded": "需要額外依賴"
+      "installNeeded": "需要額外相依套件"
     },
     "nanobotFeatures": {
       "enabled": "已啟用",
@@ -1116,7 +1116,7 @@
       "signOut": "登出",
       "signedInAs": "已使用 {{account}} 登入",
       "signInHelp": "請從這臺裝置登入；系統不會將 API 金鑰儲存在設定中。",
-      "remoteSignInHelp": "點擊「登入」在你的電腦上開啟 xAI，完成登入後貼上頁面顯示的授權碼。",
+      "remoteSignInHelp": "請點選 [登入]，在電腦上開啟 xAI，完成登入後貼上頁面顯示的授權碼。",
       "codexRemoteSignInHelp": "請在此瀏覽器中登入，然後將完整的 localhost 回呼 URL 貼回 nanobot。",
       "signInRequired": "需要登入",
       "signInBeforeSaving": "請先登入此供應商，再儲存模型預設。",
@@ -1126,7 +1126,7 @@
       "proxySaveBeforeSignIn": "請先儲存代理變更再登入。",
       "saveProxy": "儲存代理",
       "localCodeHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請將授權碼貼到下方。",
-      "remoteCodeHelp": "點擊「登入」在你的電腦上開啟 xAI。完成登入後，請將 xAI 顯示的授權碼貼到下方。",
+      "remoteCodeHelp": "請點選 [登入]，在電腦上開啟 xAI。完成登入後，請將 xAI 顯示的授權碼貼到下方。",
       "localCallbackHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請複製網址列中的完整 localhost 回呼 URL 並貼到下方。",
       "remoteCallbackHelp": "請在此瀏覽器中開啟 ChatGPT 並完成登入。當 localhost 頁面無法開啟時，請複製網址列中的完整 URL 並貼到下方。",
       "authorizationCode": "授權碼",
@@ -1676,7 +1676,7 @@
     "fileEditOpenFile": "開啟檔案",
     "fileEditDiffTruncated": "差異內容已截斷。請開啟檔案以檢視完整變更。",
     "usage": {
-      "context": "最近一次上下文：{{tokens}}{{capacity}} tokens",
+      "context": "目前上下文：{{tokens}}{{capacity}} tokens",
       "requests": "{{count}} 次模型請求",
       "estimated": "包含估算用量"
     },
@@ -1785,9 +1785,9 @@
       "opening": "正在開啟",
       "opened": "已開啟",
       "openFailed": "無法開啟",
-      "clicking": "正在點擊",
-      "clicked": "已點擊",
-      "clickFailed": "無法點擊",
+      "clicking": "正在點選",
+      "clicked": "已點選",
+      "clickFailed": "無法點選",
       "enteringText": "正在輸入文字",
       "enteredText": "已輸入文字",
       "enterTextFailed": "無法輸入文字",
@@ -1846,7 +1846,7 @@
     "cliRunFailed": "失敗",
     "automationSourceFallback": "自動化",
     "automationTriggered": "已自動觸發",
-    "askAboutSelection": "繼續提問"
+    "askAboutSelection": "針對選取內容提問"
   },
   "recovery": {
     "actionFailed": "復原操作失敗，請再試一次。",
@@ -1954,7 +1954,7 @@
       "body": "閘道拒絕了這則訊息。請檢查內容或附件後再試一次。"
     },
     "modelRequestFailed": {
-      "billingTitle": "模型供應商帳戶額度不足",
+      "billingTitle": "模型供應商額度無法使用",
       "billingBody": "請為供應商帳戶儲值或檢查帳單狀態後再試。",
       "connectionTitle": "無法連線至模型供應商",
       "timeoutTitle": "模型供應商請求逾時",

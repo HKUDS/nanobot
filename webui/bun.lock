@@ -28,6 +28,7 @@
         "remark-breaks": "^4.0.0",
         "remark-gfm": "^4.0.0",
         "remark-math": "^6.0.0",
+        "remend": "1.3.0",
         "streamdown": "2.5.0",
         "tailwind-merge": "^2.6.0",
       },
