@@ -455,7 +455,7 @@ class TestDispatch:
 
 class TestSubagentCancellation:
     @pytest.mark.asyncio
-    async def test_cancel_by_session(self):
+    async def test_cancel_by_session(self, tmp_path):
         from nanobot.agent.subagent import SubagentManager
         from nanobot.bus.queue import MessageBus
 
@@ -468,18 +468,20 @@ class TestSubagentCancellation:
         )
 
         cancelled = asyncio.Event()
+        started = asyncio.Event()
+        mgr.workspace = tmp_path
 
-        async def slow():
+        async def slow(spec):
+            started.set()
             try:
                 await asyncio.sleep(60)
             except asyncio.CancelledError:
                 cancelled.set()
                 raise
 
-        task = asyncio.create_task(slow())
-        await asyncio.sleep(0)
-        mgr._running_tasks["sub-1"] = task
-        mgr._session_tasks["test:c1"] = {"sub-1"}
+        mgr.runner.run = slow
+        await mgr.spawn("task", runtime=_runtime(MagicMock()), session_key="test:c1")
+        await started.wait()
 
         count = await mgr.cancel_by_session("test:c1")
         assert count == 1
@@ -500,7 +502,7 @@ class TestSubagentCancellation:
         assert await mgr.cancel_by_session("nonexistent") == 0
 
     @pytest.mark.asyncio
-    async def test_cancel_by_session_terminates_exec_sessions(self):
+    async def test_cancel_by_session_does_not_terminate_parent_exec_sessions(self):
         from nanobot.agent.subagent import SubagentManager
         from nanobot.agent.tools.exec_session import ExecSessionManager
         from nanobot.bus.queue import MessageBus
@@ -519,7 +521,7 @@ class TestSubagentCancellation:
 
         await mgr.cancel_by_session("test:c1")
 
-        mock_exec_mgr.terminate_by_owner.assert_awaited_once_with("test:c1")
+        mock_exec_mgr.terminate_by_owner.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_subagent_preserves_reasoning_fields_in_tool_turn(self, monkeypatch, tmp_path):
@@ -686,7 +688,7 @@ class TestSubagentCancellation:
 
     @pytest.mark.asyncio
     async def test_cancel_by_session_cancels_running_subagent_tool(self, monkeypatch, tmp_path):
-        from nanobot.agent.subagent import SubagentManager, SubagentStatus
+        from nanobot.agent.subagent import SubagentManager
         from nanobot.bus.queue import MessageBus
         from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -718,15 +720,8 @@ class TestSubagentCancellation:
 
         monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
-        task = asyncio.create_task(
-            mgr._run_subagent(
-                "sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"},
-                SubagentStatus(task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()),
-                _runtime(provider),
-            )
-        )
-        mgr._running_tasks["sub-1"] = task
-        mgr._session_tasks["test:c1"] = {"sub-1"}
+        await mgr.spawn("do task", label="label", runtime=_runtime(provider), session_key="test:c1")
+        task = next(iter(mgr._running_tasks.values()))
 
         await asyncio.wait_for(started.wait(), timeout=1.0)
 
