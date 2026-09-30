@@ -214,7 +214,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
     """Background tasks should be accepted and start when capacity becomes available."""
     from nanobot.agent.subagent import SubagentManager
-    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.agent.tools.subagent import SpawnTool
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -283,7 +283,7 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
 @pytest.mark.asyncio
 async def test_spawn_tool_waits_for_inline_result():
     from nanobot.agent.tools.context import RequestContext, request_context
-    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.agent.tools.subagent import SpawnTool
 
     class Manager:
         max_concurrent_subagents = 1
@@ -318,7 +318,7 @@ async def test_spawn_tool_waits_for_inline_result():
 async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import RequestContext, request_context
-    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.agent.tools.subagent import SpawnTool
     from nanobot.bus.queue import MessageBus
 
     manager = SubagentManager(
@@ -383,7 +383,7 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
     from nanobot.agent.tools.context import RequestContext, request_context
     from nanobot.agent.tools.execution import execute_tool_calls
     from nanobot.agent.tools.registry import ToolRegistry
-    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.agent.tools.subagent import SpawnTool
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.base import ToolCallRequest
 

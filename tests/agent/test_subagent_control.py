@@ -20,8 +20,7 @@ from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.agent.tools.runtime_control import _snapshot_subagent_statuses
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.spawn import SpawnTool
-from nanobot.agent.tools.subagent import SubagentTool
+from nanobot.agent.tools.subagent import SpawnTool, SubagentTool
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.llm_runtime import LLMRuntime
