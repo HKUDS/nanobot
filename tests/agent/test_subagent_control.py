@@ -67,7 +67,22 @@ async def test_owner_canonical_fallback_and_absent_context(tmp_path):
     manager, _, ctx = setup(tmp_path)
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="private"))
     task_id = await spawn(manager, ctx)
+    receipt = manager.send(task_id, "owner", "follow-up")
+    snapshot = manager.statuses_for_session("owner")[task_id]
+    snapshot.state = "cancelled"
+    snapshot.owner = "other"
+    snapshot.receipts.clear()
+    current = manager.runtime_statuses()[task_id]
+    assert current.state == "queued"
+    assert current.owner == "owner"
+    assert current.receipts == {receipt["message_id"]: "accepted"}
     await settled(manager)
+    terminal = await manager.cancel(task_id, "owner")
+    terminal.result = "tampered"
+    terminal.receipts.clear()
+    current = manager.statuses_for_session("owner")[task_id]
+    assert current.result == "private"
+    assert current.receipts == {receipt["message_id"]: "undelivered"}
     denied = await SubagentTool(manager).execute("cancel", task_id)
     assert is_tool_error_result(denied)
     for stranger in [RequestContext("websocket", "route", session_key="other"),
@@ -280,6 +295,7 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
         one = await spawn(manager, ctx, "one")
         two = await spawn(manager, ctx, "two")
         await asyncio.wait_for(asyncio.gather(*(event.wait() for event in events.values())), 15)
+        one_exec_manager = manager._tasks[one].exec_manager
         if ending == "cancel":
             await control(manager, ctx, one, "cancel")
         else:
@@ -289,12 +305,12 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
         assert json.loads(await control(manager, ctx, one))["state"] == expected
         assert await asyncio.wait_for(processes["one"].wait(), timeout=5) is not None
         with pytest.raises(KeyError):
-            await manager.runtime_statuses()[one].exec_manager.write(
+            await one_exec_manager.write(
                 session_id=exec_ids["one"], chars=None, close_stdin=False, terminate=False,
                 yield_time_ms=0, max_output_chars=1000, owner_session_key=f"subagent:{one}",
             )
         for session_id, owner, exec_manager in [
-            (exec_ids["two"], f"subagent:{two}", manager.runtime_statuses()[two].exec_manager),
+            (exec_ids["two"], f"subagent:{two}", manager._tasks[two].exec_manager),
             (parent_id, "owner", manager._exec_session_manager),
         ]:
             poll = await exec_manager.write(
@@ -353,7 +369,7 @@ async def test_completion_wins_cancel_race_and_rejects_late_messages(tmp_path, s
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="finished"))
     cleaning, release = asyncio.Event(), asyncio.Event()
     task_id = await spawn(manager, ctx)
-    exec_manager = manager.runtime_statuses()[task_id].exec_manager
+    exec_manager = manager._tasks[task_id].exec_manager
     cleanup = exec_manager.close_all
 
     async def gated_cleanup():
@@ -380,7 +396,8 @@ async def test_completion_wins_cancel_race_and_rejects_late_messages(tmp_path, s
 
 
 @pytest.mark.asyncio
-async def test_cancel_wins_even_when_task_returns_success_after_cancellation(tmp_path):
+@pytest.mark.parametrize("late_failure", [False, True])
+async def test_cancel_wins_over_late_execution_result(tmp_path, late_failure):
     manager, _, ctx = setup(tmp_path)
     entered, stopping, release = (asyncio.Event() for _ in range(3))
 
@@ -391,6 +408,8 @@ async def test_cancel_wins_even_when_task_returns_success_after_cancellation(tmp
         except asyncio.CancelledError:
             stopping.set()
             await release.wait()
+            if late_failure:
+                raise RuntimeError("late failure")
             return AgentRunResult(messages=[], final_content="not success")
 
     manager.runner.run = run
@@ -433,11 +452,14 @@ async def test_inline_caller_cancel_closes_child_without_notice(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cleanup_failure_is_terminal_error_with_undelivered_receipts(tmp_path):
+async def test_cleanup_failure_survives_status_eviction_and_shutdown_retries(tmp_path):
     manager, _, ctx = setup(tmp_path)
-    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="ok"))
+    manager.MAX_TERMINAL = 1
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(
+        messages=[], final_content="x" * (manager.max_tool_result_chars + 1),
+    ))
     task_id = await spawn(manager, ctx)
-    exec_manager = manager.runtime_statuses()[task_id].exec_manager
+    exec_manager = manager._tasks[task_id].exec_manager
     original_cleanup = exec_manager.close_all
     exec_manager.close_all = AsyncMock(side_effect=RuntimeError("cleanup failed"))
     message_id = json.loads(await control(manager, ctx, task_id, "send", "pending"))["message_id"]
@@ -449,10 +471,19 @@ async def test_cleanup_failure_is_terminal_error_with_undelivered_receipts(tmp_p
     assert json.loads(await control(manager, ctx, task_id, "cancel")) == state
     exec_manager.close_all.assert_awaited_once()
     assert manager.bus.inbound_size == 1
-    assert task_id in manager._resource_owners
+    assert task_id in manager._tasks
+    assert len(manager._tasks[task_id].outcome.result) == manager.max_tool_result_chars
+    newer = await spawn(manager, ctx)
+    await settled(manager)
+    assert json.loads(await control(manager, ctx, newer))["state"] == "done"
+    assert is_tool_error_result(await control(manager, ctx, task_id, "cancel"))
+    manager.MAX_ACTIVE = 1
+    with request_context(ctx):
+        assert is_tool_error_result(await SpawnTool(manager).execute(task="over capacity"))
     exec_manager.close_all = original_cleanup
     await manager.close()
-    assert not manager._resource_owners
+    assert not manager._tasks
+    assert list(manager.runtime_statuses()) == [newer]
 
 
 @pytest.mark.asyncio
@@ -546,7 +577,8 @@ async def test_resistant_dependency_has_bounded_stop_and_no_late_result(tmp_path
     else:
         task_id = await spawn(manager, ctx)
         await entered.wait()
-    status = manager.runtime_statuses()[task_id]
+    record = manager._tasks[task_id]
+    status = record.status
     try:
         if operation == "cancel":
             result = await asyncio.wait_for(control(manager, ctx, task_id, "cancel"), 1)
@@ -563,8 +595,8 @@ async def test_resistant_dependency_has_bounded_stop_and_no_late_result(tmp_path
         assert status.state == "stopping"
         assert manager.get_running_count() == 1
         assert manager._run_slots.locked()
-        assert status.cleanup_task.done()
-        assert status.exec_manager._closed
+        assert record.cleanup_task.done()
+        assert record.exec_manager._closed
         assert is_tool_error_result(await control(manager, ctx, task_id, "send", "rejected"))
         # Repeated cancel is bounded and must not interrupt the resistant coroutine.
         assert json.loads(await control(manager, ctx, task_id, "cancel"))["state"] == "stopping"
@@ -608,22 +640,23 @@ async def test_cleanup_wait_is_bounded_and_repeated_cancel_does_not_interrupt_it
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="done"))
     cleaning, release = asyncio.Event(), asyncio.Event()
     task_id = await spawn(manager, ctx)
-    status = manager.runtime_statuses()[task_id]
-    original = status.exec_manager.close_all
+    record = manager._tasks[task_id]
+    status = record.status
+    original = record.exec_manager.close_all
 
     async def cleanup():
         cleaning.set()
         await release.wait()
         return await original()
 
-    status.exec_manager.close_all = cleanup
+    record.exec_manager.close_all = cleanup
     await cleaning.wait()
     try:
         assert json.loads(await asyncio.wait_for(control(manager, ctx, task_id, "cancel"), 1))["state"] == "stopping"
         await asyncio.wait_for(manager.close(), 1)
         assert status.state == "stopping"
         assert manager.get_running_count() == 1
-        assert not status.cleanup_task.done()
+        assert not record.cleanup_task.done()
     finally:
         release.set()
         await asyncio.wait_for(settled(manager), 2)
