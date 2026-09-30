@@ -475,8 +475,11 @@ class ExecTool(Tool):
         effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
-        if self.path_prepend or self.path_append:
-            if _IS_WINDOWS or isinstance(command, list):
+        if isinstance(command, list):
+            parent_path = os.environ.get("PATH", env.get("PATH", ""))
+            env["PATH"] = self._compose_path(parent_path)
+        elif self.path_prepend or self.path_append:
+            if _IS_WINDOWS:
                 env["PATH"] = self._compose_path(env.get("PATH", ""))
             else:
                 command = self._wrap_path_export(command, env)
