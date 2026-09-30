@@ -134,7 +134,7 @@ and variable name without echoing the field value. Run `nanobot status` with the
 
 ### Loading variables at startup
 
-Pick whatever fits your deployment — nanobot only reads `os.environ` at startup, so any mechanism that populates the process environment works.
+Set the variables in the environment that starts nanobot. Choose the method that fits your deployment:
 
 **systemd** — use `EnvironmentFile=` in the service unit to load variables from a file that only the deploying user can read:
 
@@ -215,7 +215,7 @@ Internal variables such as `NANOBOT_RESTART_*` and `NANOBOT_PATH_*` are set by n
 
 ## Langfuse Observability
 
-nanobot can trace OpenAI-compatible provider calls through Langfuse's OpenAI SDK wrapper. This is configured with environment variables, not `config.json`.
+Use Langfuse to trace OpenAI-compatible model calls. Configure it with environment variables, not `config.json`.
 
 Install the optional package in the same Python environment that runs nanobot:
 
@@ -239,11 +239,11 @@ $env:LANGFUSE_PUBLIC_KEY = "pk-lf-..."
 $env:LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 ```
 
-When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed, nanobot uses `langfuse.openai.AsyncOpenAI` for OpenAI-compatible providers so model requests are sent to Langfuse in the background. If the secret key is set but `langfuse` is missing, nanobot logs a warning and falls back to the regular OpenAI client.
+When `LANGFUSE_SECRET_KEY` is set and the `langfuse` package is installed, tracing is enabled for OpenAI-compatible providers. If the package is missing, nanobot logs a warning and model calls continue without tracing.
 
 Use the Langfuse region or self-hosted URL that matches your project. The [Langfuse OpenAI SDK docs](https://langfuse.com/integrations/model-providers/openai-py) use `LANGFUSE_BASE_URL` for cloud regions and self-hosted instances.
 
-Tracing covers the providers that go through nanobot's OpenAI-compatible client path. Native providers that do not use that client may not produce Langfuse OpenAI-wrapper traces.
+Native provider integrations are not covered by this OpenAI-compatible tracing setup.
 
 ## Providers
 
@@ -251,7 +251,7 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **Voice transcription**: Voice messages and WebUI microphone input use the shared top-level `transcription` settings. The default `transcription.provider` value is `"groq"`; set it to `"openai"` for OpenAI Whisper, `"openrouter"` for OpenRouter speech-to-text models, `"xiaomi_mimo"` for Xiaomi MiMo ASR, or `"assemblyai"` for AssemblyAI. API keys still live in the matching `providers.<provider>` config.
 > - **MiniMax Coding Plan**: Exclusive discount links for the nanobot community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
-> - **MiniMax thinking mode**: `providers.minimaxAnthropic` is the config block for `reasoningEffort` / thinking mode. MiniMax exposes that capability through its Anthropic-compatible endpoint, so nanobot keeps it as a separate provider instead of guessing MiniMax-specific thinking parameters on the generic OpenAI-compatible `minimax` endpoint. It uses the same `MINIMAX_API_KEY`. Default Anthropic-compatible base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
+> - **MiniMax thinking mode**: Use `providers.minimaxAnthropic` for `reasoningEffort` / thinking mode, rather than `providers.minimax`. It uses the same `MINIMAX_API_KEY`. Default base URL: `https://api.minimax.io/anthropic`; for mainland China use `https://api.minimaxi.com/anthropic`.
 > - **Kimi Coding Plan**: Use `providers.kimiCoding` with `provider: "kimi_coding"` for Kimi's dedicated Anthropic Messages API endpoint. The endpoint requires a Claude-compatible `User-Agent`; nanobot sends `claude-code/0.1.0` by default, and you can override it with `extraHeaders.User-Agent` if your account requires a different value.
 > - **VolcEngine / BytePlus Coding Plan**: Subscription endpoints are configured through dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan`, separate from the pay-per-use `volcengine` / `byteplus` providers.
 > - **OpenCode Zen / Go**: `providers.opencode` (canonical Zen), the legacy-compatible `providers.opencodeZen`, and `providers.opencodeGo` use the same `OPENCODE_API_KEY`, but route to different OpenCode gateways. These providers use OpenCode's OpenAI-compatible `chat/completions` endpoints; choose model IDs from that endpoint family.
@@ -331,11 +331,9 @@ By default, OpenAI uses `apiType: "auto"`: nanobot calls Chat Completions normal
 
 Valid `apiType` values are exactly `auto`, `chat_completions`, and `responses`.
 
-`extraBody` follows the selected OpenAI API surface. With Chat Completions, nanobot passes
-ordinary fields through as the SDK `extra_body` value; list-valued `extraBody.tools` is handled
-specially and appended after generated function tools. With Responses, configure it in Responses
-API body shape; nanobot merges ordinary top-level fields into the Responses request body, appends
-`extraBody.tools` after generated function tools, and merges `extraBody.include` without duplicates:
+Use the selected API's request-body format for `extraBody`. Its fields customize the request,
+and `extraBody.tools` adds tools alongside nanobot's built-in tools. For Responses,
+`extraBody.include` adds output fields without duplicating existing entries:
 
 ```json
 {
@@ -380,7 +378,7 @@ WebUI provider settings, or with:
 
 The switch applies to `deepseek-v4-flash` and `deepseek-v4-pro`; DeepSeek models that remain on
 Chat Completions cannot use this Responses tool. Native search calls appear in the WebUI activity
-stream, and their opaque output items are preserved for multi-turn Responses state replay.
+stream.
 
 </details>
 
@@ -428,7 +426,7 @@ The `azure_openai` provider talks to your Azure OpenAI resource via the OpenAI *
 
 **Mode 2: Microsoft Entra ID (Azure AD) via `DefaultAzureCredential`**
 
-Omit `apiKey` (or leave it empty / unset). The provider falls back to [`DefaultAzureCredential`](https://learn.microsoft.com/azure/developer/python/sdk/authentication/credential-chains#defaultazurecredential-overview) and acquires a bearer token scoped to `https://cognitiveservices.azure.com/.default` for every request. The Azure SDK's own MSAL-backed cache returns valid tokens without a network round-trip.
+Omit `apiKey` (or leave it empty) to use your Azure identity through [`DefaultAzureCredential`](https://learn.microsoft.com/azure/developer/python/sdk/authentication/credential-chains#defaultazurecredential-overview).
 
 ```json
 {
@@ -539,7 +537,7 @@ Use the normal AWS credential chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KE
 }
 ```
 
-You can also set `providers.bedrock.apiKey` to a Bedrock API key; nanobot exports it as `AWS_BEARER_TOKEN_BEDROCK` for the AWS SDK.
+You can also supply a Bedrock API key through `providers.bedrock.apiKey` or the `AWS_BEARER_TOKEN_BEDROCK` environment variable.
 
 Credential options:
 
@@ -656,7 +654,7 @@ Anthropic models on Bedrock can also require Anthropic use-case registration and
 
 **4. Model IDs**
 
-Use Bedrock model IDs or inference profile IDs with a `bedrock/` prefix in nanobot config. nanobot removes the prefix before calling AWS.
+Use Bedrock model IDs or inference profile IDs with a `bedrock/` prefix in nanobot config.
 
 Examples:
 
@@ -693,7 +691,7 @@ Model-specific fields can be supplied with `extraBody`; nanobot merges it into C
 
 Use `apiBase` only for a custom Bedrock Runtime endpoint URL, such as a VPC endpoint or proxy. It is not needed for normal AWS regions.
 
-Current scope: nanobot passes `messages`, `system`, `inferenceConfig`, `toolConfig`, and `additionalModelRequestFields`. Bedrock Prompt Management, Guardrails, `serviceTier`, and other top-level Converse options are not first-class config fields yet.
+Bedrock Prompt Management, Guardrails, `serviceTier`, and other top-level Converse options are not available as dedicated configuration fields.
 
 **6. Quick checks**
 
@@ -771,23 +769,15 @@ nanobot agent -m "Hello from Grok."
 ```
 
 The default model is `xai-grok/grok-4.6` with a 500,000-token context window.
-The provider reads and caches xAI's online model catalog for both WebUI model
-selection and runtime capabilities. Newly available models appear automatically;
-when discovery fails, the last successful catalog or built-in fallback remains
-available. The server-hosted `x_search` tool is included only when the selected
-model advertises support. Models without that capability continue normally
-without hosted X Search. When enabled, searches run inside xAI's Responses API
-and citations arrive as inline links.
-Hosted X Search is on by default to preserve this behavior. It can be turned off in the
+Newly available models appear automatically in the WebUI. If the model catalog
+cannot be loaded, the last successful catalog or a built-in list remains available.
+Hosted X Search is enabled by default for models that support it, with citations
+shown as inline links. Other models work without X Search. Turn it off in the
 WebUI provider settings or with `providers.xaiGrok.extraBody.tools: []`.
 
-This is xAI subscription OAuth, not X Developer OAuth. nanobot follows the
-public OAuth client and proxy contract used by
-[Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md).
-The browser flow uses a random loopback callback and PKCE. The resulting token
-is stored in the active instance's `auth/xai.json` (normally
-`~/.nanobot/auth/xai.json`), separately from Grok Build so rotating refresh
-tokens cannot invalidate one another.
+Use xAI subscription OAuth, not X Developer OAuth. Login tokens are stored in
+the active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`).
+Log in to nanobot separately from Grok Build; do not share their token files.
 
 To use a provider-specific proxy, merge this into `config.json` before login:
 
@@ -801,10 +791,8 @@ To use a provider-specific proxy, merge this into `config.json` before login:
 }
 ```
 
-The proxy applies to OAuth discovery, token exchange/refresh, model-catalog
-lookups, and subscription model requests. Because this integration depends on
-xAI's public Grok Build client contract, an upstream contract change may require
-a nanobot update.
+The proxy applies to login, token refresh, model-catalog lookups, and model
+requests. Changes to xAI's authentication service may require a nanobot update.
 
 </details>
 
@@ -1679,9 +1667,7 @@ Telegram `richMessages` defaults to `false`. Enable it only to opt in to Bot API
 
 ### Retry Behavior
 
-Retry is intentionally simple.
-
-When a channel `send()` raises, nanobot retries at the channel-manager layer. By default, `channels.sendMaxRetries` is `3`, and that count includes the initial send.
+When message delivery fails, nanobot retries. `channels.sendMaxRetries` defaults to `3`, including the initial attempt.
 
 - **Attempt 1**: Send immediately
 - **Attempt 2**: Retry after `1s`
@@ -1691,9 +1677,7 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 - **Permanent failures**: Invalid tokens, revoked access, or banned channels will exhaust the retry budget and fail cleanly
 
 > [!NOTE]
-> This design is deliberate: channel implementations should raise on delivery failure, and the channel manager owns the shared retry policy.
->
-> Some channels may still apply small API-specific retries internally. For example, Telegram separately retries timeout and flood-control errors before surfacing a final failure to the manager.
+> Some channels make additional retries for specific errors, so the total number of delivery attempts can exceed `channels.sendMaxRetries`. Telegram, for example, also retries timeouts and flood-control errors.
 >
 > If a channel is completely unreachable, nanobot cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
 
@@ -2140,8 +2124,8 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.exec.timeout` | `60` | Default hard timeout in seconds for shell commands. Config values may exceed the per-call tool cap; set `0` to disable the hard timeout for trusted long-running commands. |
 | `tools.exec.pathPrepend` | `""` | Extra directories to prepend to `PATH` when running shell commands. Use this when configured tools should win executable lookup precedence, such as a Python virtual environment's `bin` or `Scripts` directory. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
-| `tools.exec.sandboxRoBinds` | `[]` | Extra absolute paths to expose read-only inside the exec sandbox (`--ro-bind-try` for `"bwrap"`, an SBPL `file-read*` rule for `"seatbelt"`), such as `/home/user/.local/bin` or `/home/user/.cargo/bin` when those paths are also in `pathPrepend`/`pathAppend`. These roots are also accepted by the shell absolute-path guard only while a sandbox is active. Bind only directories whose contents are safe for agent commands to read; paths equal to or containing the active workspace are ignored so they cannot uncover its masked parent directory. |
-| `tools.exec.sandboxRwBinds` | `[]` | Extra absolute paths to expose read-write inside the exec sandbox (`--bind-try` for `"bwrap"`, an SBPL `file-read* file-write*` rule for `"seatbelt"`), for trusted tool caches or scratch directories. Use sparingly: paths listed here are intentionally writable by shell commands inside the sandbox. Paths equal to or containing the active workspace are ignored. |
+| `tools.exec.sandboxRoBinds` | `[]` | Extra absolute paths to expose read-only inside the exec sandbox, such as `/home/user/.local/bin` or `/home/user/.cargo/bin` when those paths are also in `pathPrepend`/`pathAppend`. These roots are also accepted by the shell absolute-path guard only while a sandbox is active. Bind only directories whose contents are safe for agent commands to read; paths equal to or containing the active workspace are ignored so they cannot uncover its masked parent directory. |
+| `tools.exec.sandboxRwBinds` | `[]` | Extra absolute paths to expose read-write inside the exec sandbox, for trusted tool caches or scratch directories. Use sparingly: paths listed here are intentionally writable by shell commands inside the sandbox. Paths equal to or containing the active workspace are ignored. |
 | `tools.webuiAllowRemotePackageInstall` | `false` | When `false`, the WebUI can install missing optional packages only from a browser opened on the same machine as nanobot. Set to `true` only when a trusted remote admin is allowed to install Python packages into this nanobot environment. |
 | `tools.ssrfWhitelist` | `[]` | CIDR ranges exempted from the shared SSRF guard used by web fetches and HTTP/SSE MCP connections. Prefer exact host CIDRs such as `192.168.1.50/32`; broad ranges increase SSRF exposure. |
 | `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
@@ -2247,9 +2231,9 @@ The gateway can run a protected heartbeat cron job that periodically checks `HEA
 
 If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and sends only useful/actionable results to the most recently active chat target. If the file has no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.
 
-This is intentionally different from user-created cron jobs. A cron job created with the `cron` tool runs as a scheduled turn in its origin chat/session and normally delivers the result back to that channel. Use `HEARTBEAT.md` for recurring background checks that should not notify the user on every run.
+Use `HEARTBEAT.md` for recurring background checks that should not notify you on every run. For a scheduled task that normally sends its result back to the chat where it was created, use the `cron` tool.
 
-The heartbeat job is backed by the same cron service as user-created reminders. It is stored under the active workspace (`<workspace>/cron/jobs.json`) and shows up in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot be removed with the `cron` tool. Disable it through config and restart the gateway if you do not want periodic heartbeat checks.
+The heartbeat appears as `heartbeat` when you list cron jobs, but cannot be removed with the `cron` tool. To disable periodic checks, set `gateway.heartbeat.enabled` to `false` and restart the gateway.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -2260,12 +2244,12 @@ The heartbeat job is backed by the same cron service as user-created reminders. 
 
 ### Custom heartbeat evaluator prompt
 
-The notification gate runs on a built-in system prompt. Advanced users can override it, but you rarely need to — it's strongly advised to first read the evaluator code and the default `evaluator.md`. To override, drop your prompt at `<workspace>/prompts/evaluator.md`. It must still instruct the model to call the `evaluate_notification` tool; otherwise the gate fails closed and stays silent.
+To customize which heartbeat results trigger a notification, place your prompt at `<workspace>/prompts/evaluator.md`. Start from the bundled `evaluator.md` prompt and keep its instruction to call `evaluate_notification`; without that call, no notification is sent.
 
 
 ## Subagent Concurrency
 
-By default, nanobot allows four subagents to run at the same time. Additional subagents wait for capacity instead of being rejected. Lower the limit if a local model server cannot hold multiple KV caches, or raise it when the provider can handle more parallel work:
+By default, nanobot allows four subagents to run at the same time. Additional subagents wait for capacity instead of being rejected. Lower the limit to reduce load on a local model server, or raise it when the provider can handle more parallel work:
 
 ```json
 {
@@ -2301,25 +2285,16 @@ When a session is idle for longer than a configured threshold, nanobot summarize
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `agents.defaults.idleCompactAfterMinutes` | `15` | Minutes of idle time before auto-compaction starts. Set to `0` to disable. The default is close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
+| `agents.defaults.idleCompactAfterMinutes` | `15` | Minutes of idle time before auto-compaction starts. Set to `0` to disable. |
 | `agents.defaults.idleCompactCheckIntervalSeconds` | `60` | Minimum number of seconds between scans for idle sessions. Set to `0` to scan on every idle tick (~1 s). |
 
 `sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
 
-How it works:
-1. **Idle detection**: On each idle tick (~1 s), checks whether an idle-session scan is due. By default, the full scan runs at most once per minute.
-2. **Background compaction**: The conversation so far is summarized for the next turn.
-3. **Session preservation**: The complete session history remains stored for later inspection and reuse.
-4. **Restart-safe resume**: The compacted context remains available after a process restart.
-
-> [!NOTE]
-> Auto compact shortens the context sent to the model without deleting the session's structured message history.
+The compacted context remains available after restarting nanobot.
 
 Use `/compact` in chat to compact the current session without waiting for the idle threshold.
 
 ## Timezone
-
-Time is context. Context should be precise.
 
 By default, nanobot uses `UTC` for runtime time context. If you want the agent to think in your local time, set `agents.defaults.timezone` to a valid [IANA timezone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones):
 
@@ -2357,13 +2332,13 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 
 | Behavior | `false` (default) | `true` |
 |----------|-------------------|--------|
-| Session key | `channel:chat_id` | `unified:default` |
+| Conversation scope | Separate for each channel and chat | Shared across channels and chats |
 | Cross-channel continuity | No | Yes |
 | `/new` clears | Current channel session | Shared session |
 | `/stop` finds tasks | By channel session | By shared session |
-| Existing `session_key_override` (e.g. Telegram thread) | Respected | Still respected — not overwritten |
+| Separate conversations explicitly assigned by a channel (e.g. Telegram threads) | Kept separate | Still kept separate |
 
-> This is designed for single-user, multi-device setups. It is **off by default** — existing users see zero behavior change.
+> Use this only for single-user, multi-device setups: messages from different chats can share conversation context. It is **off by default**.
 
 ## Disabled Skills
 
@@ -2379,7 +2354,7 @@ nanobot ships with built-in skills, and your workspace can also define custom sk
 }
 ```
 
-Disabled skills are excluded from the main agent's skill summary, from always-on skill injection, and from subagent skill summaries. This is useful when some bundled skills are unnecessary for your deployment or should not be exposed to end users.
+Disabled skills are not loaded for the main agent or subagents. Use this to hide skills that are unnecessary for your deployment.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -2387,17 +2362,13 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 
 ### Agent Plugins v1
 
-nanobot discovers [Agent Plugins](https://agent-plugins.org/) under `<workspace>/plugins/`; a v1 package has `plugin.json` and may add `mcp.json`, `skills/<name>/SKILL.md`, or both. Agent Plugins are the common package and activation boundary for installable capabilities; they do not replace native providers, channels, tools, standalone workspace skills, or directly configured MCP servers.
+Install [Agent Plugins](https://agent-plugins.org/) under `<workspace>/plugins/`, then review and enable them in **Apps**. Copying a package into that directory does not activate it. Plugins can add skills and MCP servers; existing provider, channel, tool, skill, and MCP settings remain available.
 
-Directory presence means installed; activation is explicit in **Apps**. Skills use progressive loading and `$skill-name` invocation, with workspace > plugin > built-in precedence.
-Enabled `stdio` servers receive contained `PLUGIN_ROOT` and isolated `PLUGIN_DATA` paths; explicit
-`tools.mcpServers` entries win collisions. Invalid or escaping components are ignored.
-An enabled package is treated as immutable: changing any packaged file disables it until the user
-reviews and enables it again. Runtime state belongs under `PLUGIN_DATA`, not the package root.
+Invoke a plugin skill with `$skill-name`. When skill names overlap, workspace skills take precedence over plugin skills, then built-in skills. Explicit `tools.mcpServers` settings take precedence over plugin servers with the same name. Invalid plugin components or components that reference paths outside the package are ignored.
 
-Enabled plugins run as the nanobot user; permissions are descriptive, not an OS sandbox. The optional `extensions.dev.nanobot.logo` accepts a contained PNG, JPEG, or WebP up to 256 KiB.
+Changing any packaged file disables the plugin until you review and enable it again.
 
-CLI Apps use the same skills-only package layout while their installer manages executables, updates, and removal. Future catalogs can place packages before using this activation path.
+Enabled plugins run with the same operating-system permissions as nanobot. Their declared permissions are descriptive, **not an OS sandbox**. Install and enable only plugins you trust.
 
 ## Tool Hint Max Length
 
