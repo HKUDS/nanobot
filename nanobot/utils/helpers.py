@@ -630,7 +630,7 @@ def _write_text_atomic(path: Path, content: str, *, newline: str | None = None) 
             tmp.unlink(missing_ok=True)
 
 
-def _write_bytes_atomic(path: Path, data: bytes) -> None:
+def _write_bytes_atomic(path: Path, data: bytes) -> None:  # pyright: ignore[reportUnusedFunction]
     """Atomically replace *path* with *data* — binary twin of ``_write_text_atomic``.
 
     Same temp-file + ``os.replace`` protocol, with mode preservation and
