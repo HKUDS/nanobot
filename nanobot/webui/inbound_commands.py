@@ -693,7 +693,16 @@ class WebUICommandRouter:
                     metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
             if temporary_policy is not None:
-                self._temporary_chats.register_media(connection, chat_id, media_paths)
+                try:
+                    self._temporary_chats.register_media(connection, chat_id, media_paths)
+                except TemporaryChatError as exc:
+                    await self._transport.webui_send_event(
+                        connection,
+                        "error",
+                        detail=exc.detail,
+                        **rejection_fields,
+                    )
+                    return
             if is_webui and (
                 temporary_policy is None or temporary_policy.persist_transcript
             ):

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -5286,6 +5287,60 @@ async def test_user_transcript_is_ready_when_bus_consumer_receives_message() -> 
     assert records[0]["event"] == "user"
     assert records[0]["text"] == "hello"
     assert records[0]["turn_id"] == "turn-before-consumer"
+
+
+@pytest.mark.asyncio
+async def test_disconnected_temporary_message_cleans_unregistered_attachment(
+    bus: MagicMock, tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_root = tmp_path / "media"
+
+    def fake_media_dir(channel_name: str | None = None) -> Path:
+        path = media_root / channel_name if channel_name else media_root
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50126)
+    chat_id = await _new_temporary_chat(channel, conn)
+    normalizing = threading.Event()
+    release = threading.Event()
+    original = channel._commands._session_access.normalize_mentions
+
+    def blocked_normalize(raw: object, *, exclude_session_key: str | None = None):
+        normalizing.set()
+        if not release.wait(timeout=10):
+            raise TimeoutError("test normalization was not released")
+        return original(raw, exclude_session_key=exclude_session_key)
+
+    monkeypatch.setattr(channel._commands._session_access, "normalize_mentions", blocked_normalize)
+    message_task = asyncio.create_task(channel._dispatch_envelope(conn, "webui-client", {
+        "type": "message", "chat_id": chat_id, "content": "hello", "webui": True,
+        "turn_id": "turn-disconnected-attachment",
+        "media": [{"data_url": "data:text/plain;base64,aGVsbG8="}],
+    }))
+    try:
+        assert await asyncio.to_thread(normalizing.wait, 10)
+        # The outbound writer retires connections independently of the recv loop.
+        # Its cleanup can discard an owned chat while normalization is awaiting.
+        await channel._cleanup_connection(conn)
+    finally:
+        release.set()
+        await message_task
+
+    assert sessions.get_cached(f"websocket:{chat_id}") is None
+    assert list((media_root / "websocket").iterdir()) == []
+    assert bus.publish_inbound.await_count == 1
+    assert bus.publish_inbound.await_args.args[0].metadata[INBOUND_META_RUNTIME_CONTROL] == (
+        RUNTIME_CONTROL_SESSION_DISCARD
+    )
+    assert wth.websocket_turn_wall_started_at(chat_id) is None
 
 
 @pytest.mark.asyncio
