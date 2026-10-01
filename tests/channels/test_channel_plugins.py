@@ -2639,7 +2639,6 @@ def test_optional_dependency_metadata_for_enable():
     assert "boto3>=1.43.0" not in data["project"]["dependencies"]
     assert deps["bedrock"] == ["boto3>=1.43.0"]
     for dep_name in (
-        "aiohttp",
         "dingtalk-stream",
         "lark-oapi",
         "msgpack",
@@ -2651,6 +2650,7 @@ def test_optional_dependency_metadata_for_enable():
     ):
         assert not any(dep.startswith(dep_name) for dep in required)
     for dependency in (
+        "aiohttp>=3.13.3,<4.0.0",  # Streaming uploads on the default WebUI listener.
         "tzdata>=2025.2",
         "defusedxml>=0.7.1,<1.0.0",
         "pypdf>=5.0.0,<6.0.0",

@@ -125,6 +125,38 @@ describe("NanobotTui composer", () => {
     expect(ui.composer.plainText).toBe("")
   })
 
+  test("retains the image and text until acceptance and after upload failure", async () => {
+    setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
+    const transport = client()
+    let rejectSend: (error: Error) => void = () => {}
+    let resolveSend: (turnId: string) => void = () => {}
+    let attempts = 0
+    transport.sendAttachments = () => {
+      attempts++
+      return new Promise<string>((resolve, reject) => { resolveSend = resolve; rejectSend = reject })
+    }
+    const app = NanobotTui.mount(setup.renderer, options, transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }), undefined,
+      { read: async () => ({ mimeType: "image/png", dataUrl: "data:image/png;base64,eA==" }), dispose: async () => {} })
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; draft: { imageCount: number }; status: { plainText: string } }
+    await waitUntil(() => ui.ready)
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.draft.imageCount === 1)
+    ui.composer.submit()
+    await waitUntil(() => attempts === 1)
+    expect(ui.composer.plainText).toContain("[Image #1]")
+    rejectSend(new Error("Upload failed (401)"))
+    await waitUntil(() => ui.status.plainText.includes("401"))
+    expect(ui.draft.imageCount).toBe(1)
+    expect(ui.composer.plainText).toContain("[Image #1]")
+    ui.composer.submit()
+    await waitUntil(() => attempts === 2)
+    resolveSend("accepted-image")
+    await waitUntil(() => ui.composer.plainText === "")
+    expect(ui.draft.imageCount).toBe(0)
+  })
+
   test("pastes clipboard images into removable placeholders and sends their data", async () => {
     const sent: string[] = []
     const sentOptions: MessageOptions[] = []

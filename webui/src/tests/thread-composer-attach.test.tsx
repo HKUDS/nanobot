@@ -219,7 +219,7 @@ describe("ThreadComposer — attachments", () => {
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
   });
 
-  it("reports a transport limit separately from attachment policy", async () => {
+  it("does not count binary attachments against the WebSocket frame limit", async () => {
     const first = pdfFile("first.pdf", 400 * 1024);
     const second = pdfFile("second.pdf", 400 * 1024);
 
@@ -239,12 +239,10 @@ describe("ThreadComposer — attachments", () => {
       fireEvent.change(input, { target: { files: [first, second] } });
     });
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "gateway transport limit",
-    );
-    expect(screen.getAllByTestId("composer-chip")).toHaveLength(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(2);
     expect(screen.getByText("first.pdf")).toBeInTheDocument();
-    expect(screen.queryByText("second.pdf")).not.toBeInTheDocument();
+    expect(screen.getByText("second.pdf")).toBeInTheDocument();
   });
 
   it("enforces the decoded attachment-total policy independently", async () => {

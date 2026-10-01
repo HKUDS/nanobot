@@ -36,6 +36,7 @@ from nanobot.session.webui_turns import (
 )
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
+from nanobot.webui.attachment_store import AttachmentUploadError
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
@@ -156,6 +157,8 @@ class WebUICommandRouter:
         ] = {}
         self.request_operations: dict[str, WebUIRequestOperation] = {}
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
+        self._accepted_messages: dict[tuple[str, str], float] = {}
+        self._message_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
         return self._http_router.workspace_project_selection_available(connection)
@@ -216,6 +219,7 @@ class WebUICommandRouter:
             await self.discard_owned_chat(connection, chat_id)
         self._transport.webui_clear_connection_default(connection)
         self.gateway.endpoint.discard_connection(connection)
+        self._media.uploads.revoke(connection)
         self.discard_request_lock_if_idle(connection)
 
     async def broadcast_webui_event(self, event: str, **fields: Any) -> None:
@@ -485,6 +489,29 @@ class WebUICommandRouter:
         client_id: str,
         envelope: dict[str, Any],
     ) -> None:
+        chat_id, turn_id = envelope.get("chat_id"), envelope.get("turn_id")
+        if not isinstance(chat_id, str) or not isinstance(turn_id, str) or not turn_id:
+            await self._dispatch_message_once(connection, client_id, envelope)
+            return
+        key = (chat_id, turn_id)
+        lock, users = self._message_locks.get(key, (asyncio.Lock(), 0))
+        self._message_locks[key] = (lock, users + 1)
+        try:
+            async with lock:
+                await self._dispatch_message_once(connection, client_id, envelope)
+        finally:
+            _, users = self._message_locks[key]
+            if users == 1:
+                del self._message_locks[key]
+            else:
+                self._message_locks[key] = (lock, users - 1)
+
+    async def _dispatch_message_once(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
         chat_id = envelope.get("chat_id")
         content = envelope.get("content")
         if not is_valid_webui_chat_id(chat_id):
@@ -523,6 +550,19 @@ class WebUICommandRouter:
             )
             return
 
+        # A client may retry the same turn after an ACK was lost. Check before
+        # resolving already-committed refs; never dispatch that turn twice.
+        now = time.monotonic()
+        self._accepted_messages = {
+            key: expires for key, expires in self._accepted_messages.items() if expires > now
+        }
+        if turn_id and (chat_id, turn_id) in self._accepted_messages:
+            await self._transport.webui_send_event(
+                connection, "message_accepted", chat_id=chat_id, turn_id=turn_id,
+                starts_turn=False,
+            )
+            return
+
         try:
             temporary_policy = self._temporary_chats.message_policy(
                 connection,
@@ -538,37 +578,35 @@ class WebUICommandRouter:
             )
             return
 
-        raw_media = envelope.get("media")
+        raw_media = envelope.get("media", [])
         media_paths: list[str] = []
         media_names: list[str | None] = []
-        if raw_media is not None:
+        references: list[str] = []
+        upload_owner = self._media.uploads.owner(connection) if raw_media else ""
+        try:
             if not isinstance(raw_media, list):
-                await self._transport.webui_send_event(
-                    connection,
-                    "error",
-                    detail="attachment_rejected",
-                    reason="malformed",
-                    **rejection_fields,
-                )
-                return
-            media_paths, reason = self._media.store_inbound_attachments(
-                cast(list[Any], raw_media)
-            )
-            if reason is not None:
-                await self._transport.webui_send_event(
-                    connection,
-                    "error",
-                    detail="attachment_rejected",
-                    reason=reason,
-                    **rejection_fields,
-                )
-                return
-            for item in cast(list[Any], raw_media):
-                attachment = cast(dict[str, Any], item) if isinstance(item, dict) else {}
+                raise AttachmentUploadError("malformed")
+            attachments = cast(list[Any], raw_media)
+            if len(attachments) > self._media.attachment_limits.max_count + 1:
+                raise AttachmentUploadError("Too many attachments")
+            for item in attachments:
+                if not isinstance(item, dict):
+                    raise AttachmentUploadError("malformed")
+                attachment = cast(dict[str, Any], item)
+                reference = attachment.get("reference")
+                if not isinstance(reference, str) or len(reference) > 64 or "data_url" in attachment:
+                    raise AttachmentUploadError("Expected an HTTP attachment reference")
+                references.append(reference)
                 name = attachment.get("name")
                 media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
-            if temporary_policy is not None:
-                self._temporary_chats.register_media(connection, chat_id, media_paths)
+            if references:
+                media_paths = self._media.attachments.resolve(references, owner=upload_owner)
+        except AttachmentUploadError as exc:
+            await self._transport.webui_send_event(
+                connection, "error", detail="attachment_rejected", reason=str(exc),
+                **rejection_fields,
+            )
+            return
 
         if not content.strip() and not media_paths:
             await self._transport.webui_send_event(
@@ -646,6 +684,20 @@ class WebUICommandRouter:
             if session_mentions:
                 metadata["session_mentions"] = session_mentions
         metadata[WORKSPACE_SCOPE_METADATA_KEY] = scope.metadata()
+        # Revalidate after all asynchronous scope/hydration work. Commit before
+        # persisting paths, with no intervening await, so expiry cannot remove
+        # files referenced by the canonical transcript.
+        try:
+            if references:
+                media_paths = self._media.attachments.commit(references, owner=upload_owner)
+        except AttachmentUploadError as exc:
+            await self._transport.webui_send_event(
+                connection, "error", detail="attachment_rejected", reason=str(exc),
+                **rejection_fields,
+            )
+            return
+        if temporary_policy is not None:
+            self._temporary_chats.register_media(connection, chat_id, media_paths)
         is_webui = metadata.get("webui") is True
         queued_owner = None
         if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
@@ -702,6 +754,10 @@ class WebUICommandRouter:
             )
             self._workspaces.persist_scope(chat_id, scope)
             accepted = True
+            if turn_id:
+                self._accepted_messages[(chat_id, turn_id)] = time.monotonic() + 600
+                if len(self._accepted_messages) > 1024:
+                    del self._accepted_messages[next(iter(self._accepted_messages))]
         finally:
             if not accepted and queued_owner is not None:
                 clear_websocket_turn_if_current(chat_id, queued_owner)

@@ -146,6 +146,7 @@ function fakeClient() {
         return () => set!.delete(h);
       },
       sendMessage: vi.fn(),
+      sendAttachments: vi.fn().mockResolvedValue(undefined),
       requestMutation,
       finishRunLocally: vi.fn(),
       newChat: vi.fn(),
@@ -2721,7 +2722,7 @@ describe("useNanobotStream", () => {
 
     expect(result.current.messages[0].media).toEqual([attachment.preview]);
     expect(result.current.messages[0].images).toBeUndefined();
-    expect(fake.client.sendMessage).toHaveBeenCalledWith(
+    expect(fake.client.sendAttachments).toHaveBeenCalledWith(
       "chat-file-send",
       "summarize",
       [attachment.media],
