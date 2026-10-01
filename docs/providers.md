@@ -117,6 +117,14 @@ Gateway-style setup for model IDs served through OpenRouter.
 
 Use the model ID exactly as OpenRouter lists it.
 
+The structured decision client uses OpenRouter's separate System One endpoint at
+`https://openrouter.ai/api/alpha/decisions`. This route is fixed in the registered provider
+profile; it does not use `providers.openrouter.apiBase`, which configures the chat API. The
+client reads credentials and an optional proxy from `providers.openrouter`, with
+`OPENROUTER_API_KEY` as the environment fallback. OpenRouter is the only registered decision
+provider initially. Custom or local decision URLs are not configurable; another provider must
+be explicitly registered and support the System One decision API.
+
 To opt into OpenRouter server-managed search and fetch, add:
 
 ```json

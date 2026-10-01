@@ -264,6 +264,31 @@ Tracing covers the providers that go through nanobot's OpenAI-compatible client 
 > - **Custom OpenAI-compatible providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own OpenAI-compatible endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. This named-custom path uses the OpenAI-compatible request format only. For Anthropic-compatible proxies, use `providers.anthropic.apiBase` with `provider: "anthropic"`.
 > - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers, `openai_codex`, and `xai_grok`. Native provider backends such as `anthropic`, `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`.
 
+### Structured Decision Client
+
+The optional structured decision client sends all typed questions in one System One request. Its settings are separate from the model-provider settings:
+
+```json
+{
+  "structuredDecision": {
+    "enabled": false,
+    "provider": "openrouter",
+    "protocol": "system_one",
+    "model": "typesafe/jev-1.13",
+    "timeoutS": 15
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}"
+    }
+  }
+}
+```
+
+`enabled` defaults to `false`; it is an opt-in setting for a future caller and does not send a request by itself. `provider` defaults to `openrouter`, `protocol` is currently `system_one`, `model` defaults to `typesafe/jev-1.13`, and `timeoutS` defaults to 15 seconds (allowed range: greater than 0 and at most 120 seconds).
+
+OpenRouter is the only registered structured-decision provider initially. Its API key and optional `proxy` come from `providers.openrouter`; an unset key falls back to `OPENROUTER_API_KEY`. The decision URL is fixed at `https://openrouter.ai/api/alpha/decisions` and does not use `providers.openrouter.apiBase`. Custom or local decision endpoints and `baseUrl` overrides are not supported. Additional providers must be explicitly registered and support the System One decision API. Confidence thresholds belong to the calling policy, not this provider configuration.
+
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |

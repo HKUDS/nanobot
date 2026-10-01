@@ -323,14 +323,16 @@ class ProvidersConfig(Base):
         return self
 
 
-class JevConfig(Base):
-    """Configuration for opt-in JEV notification evaluation."""
+class StructuredDecisionConfig(Base):
+    """Settings for the structured decision client."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    provider: str = "openrouter"
+    # Add each supported protocol to this Literal.
+    protocol: Literal["system_one"] = "system_one"
     model: str = "typesafe/jev-1.13"
-    threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     timeout_s: float = Field(
         default=15.0,
         gt=0,
@@ -343,7 +345,18 @@ class JevConfig(Base):
     @classmethod
     def _validate_model(cls, value: str) -> str:
         if not value or not value.strip():
-            raise ValueError("jev.model cannot be empty")
+            raise ValueError("structuredDecision.model cannot be empty")
+        return value
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider_name(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("structuredDecision.provider cannot be empty")
+        from nanobot.utils.structured_decision.providers import is_registered_decision_provider
+
+        if not is_registered_decision_provider(value):
+            raise ValueError(f"Unsupported structuredDecision.provider {value!r}")
         return value
 
 
@@ -452,7 +465,11 @@ class Config(BaseSettings):
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
-    jev: JevConfig = Field(default_factory=JevConfig)
+    structured_decision: StructuredDecisionConfig = Field(
+        default_factory=StructuredDecisionConfig,
+        validation_alias=AliasChoices("structuredDecision", "structured_decision"),
+        serialization_alias="structuredDecision",
+    )
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
