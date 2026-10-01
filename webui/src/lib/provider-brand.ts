@@ -164,6 +164,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   brave: brand("brave.com", "#FB542B", "B"),
   byteplus: brand("byteplus.com", "#325CFF", "BP"),
   dashscope: brand("dashscope.aliyun.com", "#FF6A00", "DS"),
+  dashscope_native: brand("dashscope.aliyun.com", "#FF6A00", "DS"),
   deepseek: brand("deepseek.com", "#4D6BFE", "DS"),
   duckduckgo: brand("duckduckgo.com", "#DE5833", "DDG"),
   edenai: brand("edenai.co", "#080F35", "EA", [
