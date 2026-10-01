@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
-import i18n from "@/i18n";
 import {
   ApiError,
   deleteSession as apiDeleteSession,
@@ -10,7 +9,6 @@ import {
   listSessions,
 } from "@/lib/api";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
-import { deriveTitle } from "@/lib/format";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { readReloadSessions, writeReloadCache } from "@/lib/reload-cache";
@@ -706,15 +704,4 @@ export function useSessionHistory(key: string | null): {
     lineage: state.lineage,
     activeTurnId: state.activeTurnId,
   };
-}
-
-/** Produce a compact display title for a session. */
-export function sessionTitle(
-  session: ChatSummary,
-  firstUserMessage?: string,
-): string {
-  return deriveTitle(
-    session.title || firstUserMessage || session.preview,
-    i18n.t("chat.newChat"),
-  );
 }

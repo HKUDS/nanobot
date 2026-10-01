@@ -688,7 +688,7 @@ export function PaneWorkbench({
       className={cn(
         "thread-workspace relative flex h-full min-h-0 flex-col overflow-hidden bg-background",
         chrome && displayedPanes.length > 1
-          && "[--thread-header-position:relative] [--thread-prompt-inset:1rem]",
+          && "[--thread-header-position:relative]",
       )}
     >
       <TooltipProvider>

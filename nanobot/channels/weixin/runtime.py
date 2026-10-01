@@ -677,23 +677,6 @@ class WeixinChannel(BaseChannel):
             return WeixinChannel._is_retryable_http_status(status_code)
         return False
 
-    async def _api_get(
-        self,
-        endpoint: str,
-        params: dict[str, Any] | None = None,
-        *,
-        auth: bool = True,
-        extra_headers: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-        assert self._client is not None
-        url = f"{self.config.base_url}/{endpoint}"
-        hdrs = self._make_headers(auth=auth)
-        if extra_headers:
-            hdrs.update(extra_headers)
-        return await self._request_json(
-            "GET", url, endpoint=endpoint, params=params, headers=hdrs,
-        )
-
     async def _api_get_with_base(
         self,
         *,

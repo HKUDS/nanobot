@@ -14,7 +14,6 @@ from nanobot.utils.file_edit_events import (
     build_file_edit_end_event,
     build_file_edit_start_event,
     build_unified_diff_payload,
-    line_diff_stats,
     prepare_file_edit_trackers,
     read_file_snapshot,
 )
@@ -32,17 +31,19 @@ def _patch_tool(workspace: Path) -> ApplyPatchTool:
     return ApplyPatchTool(workspace=workspace)
 
 
-def test_line_diff_stats_counts_replacements_insertions_and_deletions() -> None:
-    added, deleted = line_diff_stats("a\nb\nc\n", "a\nB\nc\nd\n")
-    assert (added, deleted) == (2, 1)
+def test_file_diff_counts_replacements_insertions_and_deletions() -> None:
+    diff = FileDiff.from_text("a\nb\nc\n", "a\nB\nc\nd\n")
+    assert (diff.added, diff.deleted) == (2, 1)
 
 
-def test_line_diff_stats_normalizes_crlf() -> None:
-    assert line_diff_stats("a\r\nb\r\n", "a\nb\nc\n") == (1, 0)
+def test_file_diff_normalizes_crlf() -> None:
+    diff = FileDiff.from_text("a\r\nb\r\n", "a\nb\nc\n")
+    assert (diff.added, diff.deleted) == (1, 0)
 
 
-def test_line_diff_stats_counts_new_file_crlf_lines_once() -> None:
-    assert line_diff_stats("", "a\r\nb\r\n") == (2, 0)
+def test_file_diff_counts_new_file_crlf_lines_once() -> None:
+    diff = FileDiff.from_text("", "a\r\nb\r\n")
+    assert (diff.added, diff.deleted) == (2, 0)
 
 
 @pytest.mark.parametrize("position", [0, 3000, 6000])
@@ -50,19 +51,21 @@ def test_line_diff_stats_counts_new_file_crlf_lines_once() -> None:
     ("before_text", "after_text", "expected"),
     [("old\n", "new\n", (1, 1)), ("", "new\n", (1, 0)), ("old\n", "", (0, 1))],
 )
-def test_line_diff_stats_small_edit_in_repeated_lines(
+def test_file_diff_small_edit_in_repeated_lines(
     position: int, before_text: str, after_text: str, expected: tuple[int, int],
 ) -> None:
     prefix = "same\n" * position
     suffix = "same\n" * (6000 - position)
-    assert line_diff_stats(prefix + before_text + suffix, prefix + after_text + suffix) == expected
+    diff = FileDiff.from_text(prefix + before_text + suffix, prefix + after_text + suffix)
+    assert (diff.added, diff.deleted) == expected
 
 
 def test_sparse_edits_in_repeated_lines_have_compact_diff() -> None:
     middle = "same,0\n" * 6000
     before = "obsolete,1\n" + middle + "obsolete,2\n"
     after = "current,1\n" + middle + "current,2\n"
-    assert line_diff_stats(before, after) == (2, 2)
+    diff = FileDiff.from_text(before, after)
+    assert (diff.added, diff.deleted) == (2, 2)
     payload = build_unified_diff_payload(before, after)
     assert payload is not None and not payload["truncated"]
     body = payload["text"].splitlines()[2:]

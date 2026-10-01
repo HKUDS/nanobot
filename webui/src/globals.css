@@ -37,9 +37,7 @@
     --session-handle-lightness: 0.5;
     --session-handle-chroma: 0.12;
     --temporary-control-active: #ef8e30;
-    --temporary-accent: 24 95% 53%;
     --temporary-foreground: 17 88% 32%;
-    --temporary-border: 17 88% 40%;
     --radius: 0.4375rem;
     /* Shared shape scale: marks, compact content, controls, and progressively larger surfaces. */
     --radius-mark: 0.25rem;
@@ -91,9 +89,7 @@
     --session-handle-lightness: 0.75;
     --session-handle-chroma: 0.11;
     --temporary-control-active: #ef8e30;
-    --temporary-accent: 24 95% 53%;
     --temporary-foreground: 32 98% 73%;
-    --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
     --sidebar-content: 240 3% 84%;
@@ -637,13 +633,11 @@
   /* Split content leaves no margin for floating conversation controls. */
   .thread-workspace:has([data-file-preview-panel]) > * {
     --thread-header-position: relative;
-    --thread-prompt-inset: 1rem;
   }
   /* Keep room for the 49.5rem message column and controls in the side margin. */
   @container thread-workspace (max-width: 72rem) {
     .thread-workspace > * {
       --thread-header-position: relative;
-      --thread-prompt-inset: 1rem;
     }
   }
 
@@ -1127,7 +1121,6 @@
    desktop, 4 columns / 16px gutter on mobile. Rows share the same tracks. */
 @layer components {
   .settings-grid {
-    --settings-baseline: 4px;
     --settings-columns: 4;
     --settings-gutter: 16px;
     --settings-margin: 16px;

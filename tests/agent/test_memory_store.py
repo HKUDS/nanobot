@@ -36,15 +36,6 @@ class TestMemoryStoreBasicIO:
         store.write_user("user content")
         assert store.read_user() == "user content"
 
-    def test_get_memory_context_returns_empty_when_missing(self, store):
-        assert store.get_memory_context() == ""
-
-    def test_get_memory_context_returns_formatted_content(self, store):
-        store.write_memory("important fact")
-        ctx = store.get_memory_context()
-        assert "Long-term Memory" in ctx
-        assert "important fact" in ctx
-
 
 class TestHistoryWithCursor:
     def test_append_history_returns_cursor(self, store):

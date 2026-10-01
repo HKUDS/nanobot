@@ -877,10 +877,6 @@ class WebSocketChannel(BaseChannel):
             return
         await self._commands.dispatch(connection, client_id, envelope)
 
-    def _prune_webui_request_operations(self) -> None:
-        """Compatibility hook for request-cache boundary tests."""
-        self._commands.prune_request_operations()
-
     # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:

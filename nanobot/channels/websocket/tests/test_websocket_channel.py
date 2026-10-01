@@ -1360,7 +1360,7 @@ def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
     )
     operations["fresh"] = SimpleNamespace(completed_at=now - 1)
 
-    channel._prune_webui_request_operations()
+    channel._commands.prune_request_operations()
 
     assert "pending" in operations
     assert "expired" not in operations
@@ -1383,7 +1383,7 @@ def test_webui_request_cache_prunes_oldest_completed_at_capacity(
             completed_at=now - 1 + index / 1_000
         )
 
-    channel._prune_webui_request_operations()
+    channel._commands.prune_request_operations()
 
     assert "pending" in operations
     assert "completed-0" not in operations

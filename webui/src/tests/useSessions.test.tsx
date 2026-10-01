@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sessionTitle, useSessionHistory, useSessions } from "@/hooks/useSessions";
+import { useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
@@ -128,28 +128,6 @@ describe("useSessions", () => {
     vi.mocked(api.deleteSession).mockReset();
     vi.mocked(api.fetchWebuiThread).mockReset();
     webuiThreadCache.clear();
-  });
-
-  it("does not use low-information greetings as fallback session titles", () => {
-    expect(sessionTitle({
-      key: "websocket:chat-hi",
-      channel: "websocket",
-      chatId: "chat-hi",
-      createdAt: "2026-04-16T10:00:00Z",
-      updatedAt: "2026-04-16T10:00:00Z",
-      title: "",
-      preview: "hi",
-    })).toBe("New topic");
-
-    expect(sessionTitle({
-      key: "websocket:chat-work",
-      channel: "websocket",
-      chatId: "chat-work",
-      createdAt: "2026-04-16T10:00:00Z",
-      updatedAt: "2026-04-16T10:00:00Z",
-      title: "",
-      preview: "帮我优化 WebUI 性能",
-    })).toBe("帮我优化 WebUI 性能");
   });
 
   it("removes a session from the local list after delete succeeds", async () => {
