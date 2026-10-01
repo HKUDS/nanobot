@@ -214,10 +214,14 @@ class TestSpawn:
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
+        statuses = sm.runtime_statuses()
+        assert not statuses
         await sm.spawn("my task", runtime=_runtime())
+        assert len(statuses) == 1
+        assert next(iter(statuses.values())).task_description == "my task"
         await _drain_subagent_tasks(sm)
         # Status cleaned up after task completes
-        assert len(sm._task_statuses) == 0
+        assert not statuses
 
     @pytest.mark.asyncio
     async def test_registers_in_session_tasks(self, tmp_path):
