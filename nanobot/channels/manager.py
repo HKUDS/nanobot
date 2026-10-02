@@ -26,6 +26,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.config_bools import channels_config_resolve_bool
 from nanobot.channels.contracts import (
     channel_default_config,
     channel_instance_specs,
@@ -64,12 +65,6 @@ _RESTART_NOTICE_START_TIMEOUT_S = 30.0
 _RESTART_NOTICE_START_POLL_S = 0.25
 ORIGIN_REPLY_FINGERPRINTS_MAX_SIZE = 1000
 
-_BOOL_CAMEL_ALIASES: dict[str, str] = {
-    "send_progress": "sendProgress",
-    "send_tool_hints": "sendToolHints",
-    "show_reasoning": "showReasoning",
-    "show_compaction_notices": "showCompactionNotices",
-}
 
 def _default_channel_config(name: str) -> dict[str, Any] | None:
     from nanobot.channels.registry import load_channel_plugin
@@ -360,6 +355,13 @@ class ChannelManager:
             return False
         return ch.send_tool_hints if tool_hint else ch.send_progress
 
+    def _progress_switch(self, channel_name: str, *, tool_hint: bool) -> bool | None:
+        """Read the channel's switch without the unknown-channel default."""
+        ch = self.channels.get(channel_name)
+        if ch is None:
+            return None
+        return ch.send_tool_hints if tool_hint else ch.send_progress
+
     def _resolve_bool_override(self, section: Any, key: str, default: bool) -> bool:
         """Return *key* from *section* if it is a bool, otherwise *default*.
 
@@ -367,16 +369,8 @@ class ChannelManager:
         for ``send_progress``) so raw JSON/TOML configs work alongside
         Pydantic models.
         """
-        if isinstance(section, dict):
-            section_data = cast(dict[str, Any], section)
-            value = section_data.get(key)
-            if value is None:
-                camel = _BOOL_CAMEL_ALIASES.get(key)
-                if camel:
-                    value = section_data.get(camel)
-            return value if isinstance(value, bool) else default
-        value = getattr(section, key, None)
-        return value if isinstance(value, bool) else default
+        resolved = channels_config_resolve_bool(section, key)
+        return resolved if resolved is not None else default
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
@@ -809,13 +803,23 @@ class ChannelManager:
                     continue
 
                 if progress_event:
-                    if progress_event.tool_hint and not self._should_send_progress(
-                        msg.channel, tool_hint=True,
+                    kind = "tool_hint" if progress_event.tool_hint else "progress"
+                    if not self._should_send_progress(
+                        msg.channel, tool_hint=progress_event.tool_hint,
                     ):
-                        continue
-                    if not progress_event.tool_hint and not self._should_send_progress(
-                        msg.channel, tool_hint=False,
-                    ):
+                        # Progress is produced by the agent and then dropped here by
+                        # channel policy; without this line the drop is invisible,
+                        # so a channel that shows nothing cannot be told apart from
+                        # an agent that produced nothing.
+                        logger.debug(
+                            "Dropping {} event for {}:{} (send_progress={}, "
+                            "send_tool_hints={})",
+                            kind,
+                            msg.channel,
+                            msg.chat_id,
+                            self._progress_switch(msg.channel, tool_hint=False),
+                            self._progress_switch(msg.channel, tool_hint=True),
+                        )
                         continue
 
                 if isinstance(event, RetryWaitEvent):

@@ -105,6 +105,7 @@ class ContextBuilder:
         session_summary: SessionSummary | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
+        progress_notes: bool = False,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -148,6 +149,14 @@ class ContextBuilder:
                 f"Previous conversation summary (last active {session_summary['last_active']}):\n"
                 f"{session_summary['text']}"
             )
+
+        # Authorize short progress notes only where the channel delivers them.
+        # This is what makes ``sendProgress`` produce visible output: the delivery
+        # gate alone cannot, because the model leaves the tool-call message empty
+        # under ``tool_contract.md``. Appended last so enabling it only adds a
+        # section -- ``tool_contract.md`` and the rest of the prompt are unchanged.
+        if progress_notes:
+            parts.append(render_template("agent/progress_notes.md", progress_notes=True))
 
         return "\n\n---\n\n".join(parts)
 
@@ -280,6 +289,7 @@ class ContextBuilder:
         channel: str | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
+        progress_notes: bool = False,
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
@@ -291,6 +301,7 @@ class ContextBuilder:
                     session_summary=transcript.session_summary,
                     workspace=root,
                     include_memory=include_memory,
+                    progress_notes=progress_notes,
                 ),
             },
             *transcript.history,
