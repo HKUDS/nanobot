@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -80,26 +82,38 @@ class FakeClient:
         self.calls.append({"url": url, **kwargs})
         return self.response
 
+    @asynccontextmanager
+    async def stream(self, method: str, url: str, **kwargs: Any):
+        yield await self.post(url, **kwargs)
+
     async def get(self, url: str, **kwargs: Any) -> FakeResponse:
         self.get_calls.append({"url": url, **kwargs})
         return self.get_response
 
 
-class CodexStreamingCompleteThenErrorResponse(FakeResponse):
-    async def aiter_lines(self):
-        yield 'data: {"type":"response.output_item.added","item":{"id":"ig_1","type":"image_generation_call","status":"in_progress"}}'
-        yield ""
-        yield (
-            f'data: {{"type":"response.output_item.done","item":{{"id":"ig_1",'
-            f'"type":"image_generation_call","result":"{PNG_DATA_URL}","status":"completed"}}}}'
-        )
-        yield ""
-        yield 'data: {"type":"response.completed","response":{"status":"completed"}}'
-        yield ""
-        raise httpx.RemoteProtocolError(
-            "peer closed connection without sending complete message body "
-            "(incomplete chunked read)"
-        )
+class CodexImageResponseBody(httpx.AsyncByteStream):
+    def __init__(self, lines: list[str], tail: str) -> None:
+        self.lines = lines
+        self.tail = tail
+        self.tail_read = False
+        self.tail_started = asyncio.Event()
+        self.closed = False
+
+    async def __aiter__(self):
+        for line in self.lines:
+            yield f"{line}\n".encode()
+        self.tail_read = True
+        self.tail_started.set()
+        if self.tail == "open":
+            await asyncio.Event().wait()
+        if self.tail == "disconnect":
+            raise httpx.RemoteProtocolError(
+                "peer closed connection without sending complete message body "
+                "(incomplete chunked read)"
+            )
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 @pytest.fixture(autouse=True)
@@ -1238,6 +1252,28 @@ async def test_custom_generate_http_error() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def codex_oauth(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(
+        sys.modules,
+        "oauth_cli_kit",
+        SimpleNamespace(get_token=lambda: SimpleNamespace(account_id="acct-123", access="oauth-token")),
+    )
+
+
+@pytest.fixture
+def codex_image_sse_lines() -> list[str]:
+    return [
+        f'data: {{"type":"response.output_item.done","item":{{"type":"image_generation_call","result":"{PNG_DATA_URL}"}}}}',
+        "",
+        'data: {"type":"response.completed","response":{"status":"completed"}}',
+        "",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_codex_payload_and_response(monkeypatch) -> None:
     import sys
@@ -1324,9 +1360,10 @@ async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch) -> None:
         async def __aexit__(self, exc_type, exc, tb) -> None:
             return None
 
-        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+        @asynccontextmanager
+        async def stream(self, method: str, url: str, **kwargs: Any):
             captured["request"] = {"url": url, **kwargs}
-            return FakeResponse(
+            yield FakeResponse(
                 {},
                 sse_lines=[
                     f'data: {{"type":"response.output_item.done","item":{{"type":"image_generation_call","result":"{PNG_DATA_URL}"}}}}',
@@ -1340,7 +1377,7 @@ async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch) -> None:
         "nanobot.providers.image_generation.httpx.AsyncClient",
         FakeAsyncClient,
     )
-    client = CodexImageGenerationClient(api_key=None, proxy=proxy)
+    client = CodexImageGenerationClient(api_key=None, proxy=proxy, timeout=17)
 
     response = await client.generate(prompt="draw", model="gpt-5.4")
 
@@ -1348,35 +1385,120 @@ async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch) -> None:
     assert captured["token_proxy"] == proxy
     assert captured["client_kwargs"]["proxy"] == proxy
     assert captured["client_kwargs"]["trust_env"] is False
+    assert captured["client_kwargs"]["timeout"] == 17
 
 
 @pytest.mark.asyncio
-async def test_codex_stops_reading_after_completed_event(monkeypatch) -> None:
-    import sys
-    from dataclasses import dataclass
-    from types import SimpleNamespace
+@pytest.mark.parametrize("tail", ["disconnect", "open", "eof"])
+@pytest.mark.parametrize("terminal", ["completed", "done"])
+async def test_codex_returns_image_without_waiting_for_transport_end(
+    codex_oauth, codex_image_sse_lines, tail, terminal,
+) -> None:
+    lines = list(codex_image_sse_lines)
+    if terminal == "done":
+        lines[-2] = "data: [DONE]"
+    body = CodexImageResponseBody(lines, tail=tail)
 
-    @dataclass
-    class FakeToken:
-        account_id: str = "acct-123"
-        access: str = "oauth-token"
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=body)
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-    fake_oauth = SimpleNamespace(get_token=lambda: FakeToken())
-    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
-
-    fake = FakeClient(CodexStreamingCompleteThenErrorResponse({}, sse_lines=[]))
-    client = CodexImageGenerationClient(
-        api_key=None, client=fake  # type: ignore[arg-type]
-    )
-
-    response = await client.generate(prompt="draw a cat", model="gpt-5.4")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        client = CodexImageGenerationClient(api_key=None, client=http_client)
+        response = await asyncio.wait_for(
+            client.generate(prompt="draw a cat", model="gpt-5.4"), timeout=2,
+        )
+        assert body.closed
+        assert not http_client.is_closed
 
     assert response.images == [PNG_DATA_URL]
     assert response.content == ""
+    assert not body.tail_read
+
+
+@pytest.mark.asyncio
+async def test_codex_disconnect_before_completion_remains_an_error(
+    codex_oauth, codex_image_sse_lines,
+) -> None:
+    body = CodexImageResponseBody(codex_image_sse_lines[:2], tail="disconnect")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        client = CodexImageGenerationClient(api_key=None, client=http_client)
+        with pytest.raises(httpx.RemoteProtocolError, match="incomplete chunked read"):
+            await client.generate(prompt="draw", model="gpt-5.4")
+        assert body.closed
+        assert not http_client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_codex_streaming_http_error_preserves_response_details(codex_oauth) -> None:
+    body = CodexImageResponseBody(['{"error":{"message":"invalid image request"}}'], tail="eof")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, headers={"content-type": "application/json"}, stream=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        client = CodexImageGenerationClient(api_key=None, client=http_client)
+        with pytest.raises(ImageGenerationError, match="HTTP 400.*invalid image request"):
+            await client.generate(prompt="draw", model="gpt-5.4")
+        assert body.closed
+        assert not http_client.is_closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completed", [True, False])
+async def test_codex_closes_owned_http_client(
+    monkeypatch, codex_oauth, codex_image_sse_lines, completed,
+) -> None:
+    lines = codex_image_sse_lines if completed else codex_image_sse_lines[:2]
+    body = CodexImageResponseBody(lines, tail="disconnect")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=body)
+
+    real_async_client = httpx.AsyncClient
+    clients: list[httpx.AsyncClient] = []
+
+    def make_client(**kwargs: Any) -> httpx.AsyncClient:
+        client = real_async_client(transport=httpx.MockTransport(handle), **kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr("nanobot.providers.image_generation.httpx.AsyncClient", make_client)
+    client = CodexImageGenerationClient(api_key=None)
+    if completed:
+        response = await client.generate(prompt="draw", model="gpt-5.4")
+        assert response.images == [PNG_DATA_URL]
+    else:
+        with pytest.raises(httpx.RemoteProtocolError):
+            await client.generate(prompt="draw", model="gpt-5.4")
+
+    assert clients[0].is_closed
+    assert body.closed
+
+
+@pytest.mark.asyncio
+async def test_codex_cancellation_closes_response_body(codex_oauth) -> None:
+    body = CodexImageResponseBody([], tail="open")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        client = CodexImageGenerationClient(api_key=None, client=http_client)
+        task = asyncio.create_task(client.generate(prompt="draw", model="gpt-5.4"))
+        try:
+            await asyncio.wait_for(body.tail_started.wait(), timeout=2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert body.closed
+            assert not http_client.is_closed
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio
