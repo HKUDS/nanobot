@@ -99,7 +99,7 @@ If this fails with `401` or `unauthorized`, check that `OPENROUTER_API_KEY` is v
 ## Recipe: Opper Gateway
 
 This recipe applies when your key comes from Opper, the EU-hosted AI gateway that serves
-700+ models from 30+ providers behind one OpenAI-compatible API.
+700+ models from 50+ providers behind one OpenAI-compatible API.
 
 ```json
 {
