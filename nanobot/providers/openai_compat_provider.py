@@ -895,19 +895,13 @@ class OpenAICompatProvider(LLMProvider):
         return model_name
 
     @staticmethod
-    def _supports_temperature(
-        model_name: str,
-        reasoning_effort: str | None = None,
-    ) -> bool:
+    def _supports_temperature(model_name: str) -> bool:
         """Return True when the model accepts a temperature parameter.
 
         Kimi K3 uses a fixed temperature that should be omitted. GPT-5 family
-        and reasoning models (o1/o3/o4) reject temperature when
-        reasoning_effort is set to anything other than ``"none"``.
+        and reasoning models (o1/o3/o4) reject temperature.
         """
         if _model_slug(model_name) == _KIMI_K3_MODEL:
-            return False
-        if reasoning_effort and reasoning_effort.lower() != "none":
             return False
         name = model_name.lower()
         return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
@@ -955,9 +949,8 @@ class OpenAICompatProvider(LLMProvider):
             ),
         }
 
-        # GPT-5 and reasoning models (o1/o3/o4) reject temperature when
-        # reasoning_effort is active.  Only include it when safe.
-        if self._supports_temperature(model_name, reasoning_effort):
+        # GPT-5 and reasoning models (o1/o3/o4) reject temperature.
+        if self._supports_temperature(model_name):
             kwargs["temperature"] = temperature
 
         if (
@@ -1320,10 +1313,12 @@ class OpenAICompatProvider(LLMProvider):
                 "compact_threshold": compact_threshold,
             }]
 
-        if self._supports_temperature(model_name, reasoning_effort):
+        supports_temperature = self._supports_temperature(model_name)
+        if supports_temperature:
             body["temperature"] = temperature
 
-        if not self._supports_temperature(model_name, reasoning_effort) and not preserve_reasoning:
+        reasoning_enabled = bool(reasoning_effort and reasoning_effort.lower() != "none")
+        if (not supports_temperature or reasoning_enabled) and not preserve_reasoning:
             body["include"] = ["reasoning.encrypted_content"]
         if reasoning_effort and (reasoning_effort.lower() != "none" or is_deepseek):
             body["reasoning"] = {"effort": reasoning_effort}
