@@ -1025,6 +1025,7 @@
         "firecrawl": "Web コンテンツをクロール、検索、抽出します。",
         "parallel-search": "Web を検索して関連ページを読み込みます。",
         "exa": "Web を検索して整形済みのページ内容を抽出します。",
+        "keenable": "Web を検索し、任意のページをクリーンな Markdown として読み込みます。",
         "microsoft-learn": "Microsoft Learn の資料を検索・閲覧します。",
         "aws-docs": "AWS の資料とサービスガイドを検索します。",
         "brave-search": "Brave Search で Web、ニュース、画像、動画、ローカル情報を検索します。",

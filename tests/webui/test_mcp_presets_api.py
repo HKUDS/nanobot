@@ -76,6 +76,7 @@ def test_mcp_presets_payload_lists_supported_cards(tmp_path, monkeypatch: pytest
         "firecrawl",
         "parallel-search",
         "exa",
+        "keenable",
         "microsoft-learn",
         "aws-docs",
         "brave-search",
@@ -333,12 +334,14 @@ def test_enable_no_auth_remote_presets_write_url(tmp_path, monkeypatch: pytest.M
     mcp_presets_action("enable", {"name": ["exa"]})
     mcp_presets_action("enable", {"name": ["firecrawl"]})
     mcp_presets_action("enable", {"name": ["parallel-search"]})
+    mcp_presets_action("enable", {"name": ["keenable"]})
 
     config = load_config()
     assert config.tools.mcp_servers["microsoft-learn"].url == "https://learn.microsoft.com/api/mcp"
     assert config.tools.mcp_servers["exa"].url == "https://mcp.exa.ai/mcp"
     assert config.tools.mcp_servers["firecrawl"].url == "https://mcp.firecrawl.dev/v2/mcp"
     assert config.tools.mcp_servers["parallel-search"].url == "https://search.parallel.ai/mcp"
+    assert config.tools.mcp_servers["keenable"].url == "https://api.keenable.ai/mcp"
 
 
 def test_firecrawl_preset_is_keyless(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -378,6 +381,47 @@ def test_parallel_search_preset_is_keyless_and_tool_limited(
     assert server.url == "https://search.parallel.ai/mcp"
     assert server.enabled_tools == ["web_search", "web_fetch"]
     assert server.headers == {}
+
+
+def test_keenable_preset_is_keyless_by_default(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
+
+    payload = mcp_presets_action("enable", {"name": ["keenable"]})
+
+    row = next(item for item in payload["presets"] if item["name"] == "keenable")
+    assert row["transport"] == "streamableHttp"
+    assert row["configured"] is True
+    assert [field["required"] for field in row["required_fields"]] == [False]
+    assert "without an API key" in row["note"]
+    config = load_config()
+    server = config.tools.mcp_servers["keenable"]
+    assert server.type == "streamableHttp"
+    assert server.url == "https://api.keenable.ai/mcp"
+    assert server.enabled_tools == ["search_web_pages", "fetch_page_content"]
+    assert server.headers == {}
+
+
+def test_enable_keenable_optional_api_key_sets_header(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+
+    payload = mcp_presets_action(
+        "enable",
+        {
+            "name": ["keenable"],
+            "keenable_api_key": ["keen_secret"],
+        },
+    )
+
+    assert "keen_secret" not in str(payload)
+    config = load_config()
+    assert config.tools.mcp_servers["keenable"].headers == {"X-API-Key": "keen_secret"}
 
 
 def test_remove_mcp_preset_updates_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
