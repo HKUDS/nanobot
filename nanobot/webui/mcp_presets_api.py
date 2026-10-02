@@ -221,6 +221,28 @@ MCP_PRESETS: tuple[McpPreset, ...] = (
         note="Free anonymous access for light use; no API key is required.",
     ),
     McpPreset(
+        name="you-search",
+        display_name="You.com Search",
+        category="web",
+        description="Search the web through You.com's hosted MCP server.",
+        docs_url="https://github.com/youdotcom-oss/agent-skills",
+        transport="streamableHttp",
+        install_supported=True,
+        brand_domain="you.com",
+        brand_color="#111827",
+        requires="Network access",
+        server=MCPServerConfig(
+            type="streamableHttp",
+            url="https://api.you.com/mcp?profile=free",
+            tool_timeout=60,
+        ),
+        note=(
+            "Uses the free You.com MCP profile through the hosted endpoint; no API key is "
+            "required for the built-in preset. Use a custom MCP server URL with a You.com "
+            "API key for full search, page-content, and research tools."
+        ),
+    ),
+    McpPreset(
         name="exa",
         display_name="Exa",
         category="web",
