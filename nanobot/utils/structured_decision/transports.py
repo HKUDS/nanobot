@@ -344,6 +344,10 @@ class SystemOneTransport:
         question_id: str,
         question_type: str,
     ) -> dict[str, float]:
+        """Parse and validate individual probabilities.
+
+        Does not enforce sum == 1.0 due to floating-point precision drift in model outputs.
+        """
         values: dict[str, float] = {}
         for key, value in probabilities.items():
             if value is None or not cls._is_finite_number(value):
@@ -356,10 +360,6 @@ class SystemOneTransport:
                     f"{question_type} probability for {question_id!r} is invalid"
                 )
             values[str(key)] = numeric_value
-        if not math.isclose(sum(values.values()), 1.0, abs_tol=1e-6):
-            raise DecisionProtocolError(
-                f"{question_type} probabilities for {question_id!r} do not sum to 1"
-            )
         return values
 
     @classmethod

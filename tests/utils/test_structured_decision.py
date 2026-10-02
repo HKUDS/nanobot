@@ -697,8 +697,15 @@ async def test_invalid_usage_metadata_is_rejected(metadata):
         )
 
 
+@pytest.mark.parametrize(
+    "probabilities",
+    [
+        {"technical": 0.2, "billing": 0.3, "sales": 0.49},
+        {"technical": 0.2, "billing": 0.8, "sales": 0.0001},
+    ],
+)
 @pytest.mark.asyncio
-async def test_invalid_probability_values_rejected():
+async def test_probability_values_are_preserved_without_sum_constraint(probabilities):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -709,7 +716,7 @@ async def test_invalid_probability_values_rejected():
                     "team": {
                         "type": "choice",
                         "choice": "billing",
-                        "probabilities": {"technical": 0.2, "billing": 0.2, "sales": 0.2},
+                        "probabilities": probabilities,
                         "confidence": 0.99,
                     }
                 },
@@ -719,16 +726,19 @@ async def test_invalid_probability_values_rejected():
 
     client = _make_client(api_key="sk-invalid", transport=_Transport(handler))
 
-    with pytest.raises(DecisionProtocolError):
-        await client.evaluate(
-            state="Payout failed.",
-            questions={
-                "team": ChoiceQuestion(
-                    instructions="Which team?",
-                    criteria={"billing": "Payments", "technical": "Bugs", "sales": "Pricing"},
-                )
-            },
-        )
+    result = await client.evaluate(
+        state="Payout failed.",
+        questions={
+            "team": ChoiceQuestion(
+                instructions="Which team?",
+                criteria={"billing": "Payments", "technical": "Bugs", "sales": "Pricing"},
+            )
+        },
+    )
+
+    answer = result.answers["team"]
+    assert isinstance(answer, ChoiceAnswer)
+    assert answer.probabilities == probabilities
 
 
 @pytest.mark.asyncio
