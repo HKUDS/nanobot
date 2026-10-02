@@ -113,7 +113,8 @@ describe("temporary chat navigation", () => {
           updated_at: "2026-09-01T00:00:00Z",
         })) });
       }
-      if (path === "/api/webui/sidebar-state" && groupedTopics) {
+      if (path === "/api/webui/sidebar-state") {
+        if (!groupedTopics) return Response.json({});
         return Response.json({ workbench: { version: 1, tabs: {
           "tab:websocket:regular": {
             explicit: true, title: "Regular topic",
