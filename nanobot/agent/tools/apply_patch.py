@@ -5,7 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from filelock import AsyncFileLock
+from filelock import Timeout as FileLockTimeout
+
 from nanobot.agent.tools.base import ToolResult, tool_parameters
+from nanobot.agent.tools.file_locks import _write_bytes_atomic, _write_lock_for
 from nanobot.agent.tools.filesystem import _FsTool  # pyright: ignore[reportPrivateUsage]
 from nanobot.agent.tools.schema import (
     ArraySchema,
@@ -104,10 +108,10 @@ class ApplyPatchTool(_FsTool):
             if not edits:
                 raise _PatchError("must provide edits")
 
-            writes: dict[Path, str] = {}
-            originals: dict[Path, str] = {}
-            actions: dict[Path, str] = {}
-
+            # Resolve all targets up front so per-file locks are keyed on
+            # absolute paths and acquired in sorted order (deadlock-free)
+            # before any file reads.
+            parsed: list[tuple[str, str, dict[str, Any]]] = []
             for edit_value in edits:
                 if not isinstance(edit_value, dict):
                     raise _PatchError("each edit must be an object")
@@ -119,132 +123,163 @@ class ApplyPatchTool(_FsTool):
                 action = edit.get("action")
                 if not isinstance(action, str):
                     raise _PatchError(f"action required for edit: {path}")
-                source = self._resolve_write(path)
+                parsed.append((path, action, edit))
 
-                if action == "add":
-                    new_text = edit.get("new_text")
-                    if new_text is None:
-                        raise _PatchError(f"new_text required for add: {path}")
-                    new_text = cast(str, new_text)
-
-                    pending = writes.get(source)
-                    if pending is not None:
-                        content = pending
-                        exists = True
-                    elif source.exists():
-                        raw = source.read_bytes()
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            raise _PatchError(f"file is not UTF-8 text: {path}")
-                        exists = True
-                    else:
-                        content = ""
-                        exists = False
-
-                    if exists:
-                        uses_crlf = "\r\n" in content
-                        new_norm = _append_text(content, new_text)
-                        if uses_crlf:
-                            new_norm = new_norm.replace("\n", "\r\n")
-                        writes[source] = new_norm
-                        action_name = "update"
-                    else:
-                        new_norm = new_text.replace("\r\n", "\n")
-                        if new_norm and not new_norm.endswith("\n"):
-                            new_norm += "\n"
-                        writes[source] = new_norm
-                        action_name = "add"
-
-                elif action == "replace":
-                    old_text = edit.get("old_text") or ""
-                    if not old_text:
-                        raise _PatchError(f"old_text required for replace: {path}")
-                    old_text = cast(str, old_text)
-                    new_text = edit.get("new_text")
-                    if new_text is None:
-                        raise _PatchError(f"new_text required for replace: {path}")
-                    new_text = cast(str, new_text)
-
-                    pending = writes.get(source)
-                    if pending is not None:
-                        content = pending
-                    elif source.exists():
-                        raw = source.read_bytes()
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            raise _PatchError(f"file is not UTF-8 text: {path}")
-                    else:
-                        raise _PatchError(f"file to update does not exist: {path}")
-
-                    if pending is None and not source.is_file():
-                        raise _PatchError(f"path to update is not a file: {path}")
-
-                    uses_crlf = "\r\n" in content
-                    norm_content = content.replace("\r\n", "\n")
-                    norm_old = old_text.replace("\r\n", "\n")
-
-                    pos = norm_content.find(norm_old)
-                    if pos < 0:
-                        raise _PatchError(f"old_text not found in {path}")
-                    if norm_content.find(norm_old, pos + 1) >= 0:
-                        raise _PatchError(f"old_text appears multiple times in {path}")
-
-                    new_norm = (
-                        norm_content[:pos]
-                        + new_text.replace("\r\n", "\n")
-                        + norm_content[pos + len(norm_old) :]
-                    )
-                    if new_norm and not new_norm.endswith("\n"):
-                        new_norm += "\n"
-                    if uses_crlf:
-                        new_norm = new_norm.replace("\n", "\r\n")
-
-                    writes[source] = new_norm
-                    action_name = "update"
-
-                else:
-                    raise _PatchError(f"unknown action: {action}")
-
-                originals.setdefault(source, content)
-                actions.setdefault(source, action_name)
-
-            diffs = {
-                source: FileDiff.from_text(originals[source], content)
-                for source, content in writes.items()
-            }
-            summaries: list[str] = []
-            for source, diff in diffs.items():
-                action_name = actions[source]
-                path = display_file_edit_path(source, self._display_workspace())
-                added, deleted = diff.added, diff.deleted
-                stats = f" (+{added}/-{deleted})" if added or deleted else ""
-                summaries.append(f"- {action_name} {path}{stats}")
-
-            if dry_run:
-                return "Patch dry-run succeeded:\n" + "\n".join(summaries)
-
-            backups: dict[Path, bytes | None] = {}
-            for path in writes:
-                backups[path] = path.read_bytes() if path.exists() else None
-
+            lock_targets = sorted(
+                {self._resolve_write(path) for path, _action, _edit in parsed},
+                key=str,
+            )
+            locks: list[AsyncFileLock] = []
             try:
-                for path, content in writes.items():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(content, encoding="utf-8", newline="")
+                for target in lock_targets:
+                    lock = _write_lock_for(target)
+                    try:
+                        await lock.acquire()
+                    except FileLockTimeout as exc:
+                        raise _PatchError(
+                            f"timed out waiting for file lock on {target}: {exc}"
+                        )
+                    locks.append(lock)
             except Exception:
-                for path, data in backups.items():
-                    if data is None:
-                        if path.exists():
-                            path.unlink()
-                    else:
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(data)
+                for held in reversed(locks):
+                    await held.release()
                 raise
 
-            for path in writes:
-                self._file_states.record_write(path)
+            try:
+                writes: dict[Path, str] = {}
+                originals: dict[Path, str] = {}
+                actions: dict[Path, str] = {}
+
+                for path, action, edit in parsed:
+                    source = self._resolve_write(path)
+
+                    if action == "add":
+                        new_text = edit.get("new_text")
+                        if new_text is None:
+                            raise _PatchError(f"new_text required for add: {path}")
+                        new_text = cast(str, new_text)
+
+                        pending = writes.get(source)
+                        if pending is not None:
+                            content = pending
+                            exists = True
+                        elif source.exists():
+                            raw = source.read_bytes()
+                            try:
+                                content = raw.decode("utf-8")
+                            except UnicodeDecodeError:
+                                raise _PatchError(f"file is not UTF-8 text: {path}")
+                            exists = True
+                        else:
+                            content = ""
+                            exists = False
+
+                        if exists:
+                            uses_crlf = "\r\n" in content
+                            new_norm = _append_text(content, new_text)
+                            if uses_crlf:
+                                new_norm = new_norm.replace("\n", "\r\n")
+                            writes[source] = new_norm
+                            action_name = "update"
+                        else:
+                            new_norm = new_text.replace("\r\n", "\n")
+                            if new_norm and not new_norm.endswith("\n"):
+                                new_norm += "\n"
+                            writes[source] = new_norm
+                            action_name = "add"
+
+                    elif action == "replace":
+                        old_text = edit.get("old_text") or ""
+                        if not old_text:
+                            raise _PatchError(f"old_text required for replace: {path}")
+                        old_text = cast(str, old_text)
+                        new_text = edit.get("new_text")
+                        if new_text is None:
+                            raise _PatchError(f"new_text required for replace: {path}")
+                        new_text = cast(str, new_text)
+
+                        pending = writes.get(source)
+                        if pending is not None:
+                            content = pending
+                        elif source.exists():
+                            raw = source.read_bytes()
+                            try:
+                                content = raw.decode("utf-8")
+                            except UnicodeDecodeError:
+                                raise _PatchError(f"file is not UTF-8 text: {path}")
+                        else:
+                            raise _PatchError(f"file to update does not exist: {path}")
+
+                        if pending is None and not source.is_file():
+                            raise _PatchError(f"path to update is not a file: {path}")
+
+                        uses_crlf = "\r\n" in content
+                        norm_content = content.replace("\r\n", "\n")
+                        norm_old = old_text.replace("\r\n", "\n")
+
+                        pos = norm_content.find(norm_old)
+                        if pos < 0:
+                            raise _PatchError(f"old_text not found in {path}")
+                        if norm_content.find(norm_old, pos + 1) >= 0:
+                            raise _PatchError(f"old_text appears multiple times in {path}")
+
+                        new_norm = (
+                            norm_content[:pos]
+                            + new_text.replace("\r\n", "\n")
+                            + norm_content[pos + len(norm_old) :]
+                        )
+                        if new_norm and not new_norm.endswith("\n"):
+                            new_norm += "\n"
+                        if uses_crlf:
+                            new_norm = new_norm.replace("\n", "\r\n")
+
+                        writes[source] = new_norm
+                        action_name = "update"
+
+                    else:
+                        raise _PatchError(f"unknown action: {action}")
+
+                    originals.setdefault(source, content)
+                    actions.setdefault(source, action_name)
+
+                diffs = {
+                    source: FileDiff.from_text(originals[source], content)
+                    for source, content in writes.items()
+                }
+                summaries: list[str] = []
+                for source, diff in diffs.items():
+                    action_name = actions[source]
+                    path = display_file_edit_path(source, self._display_workspace())
+                    added, deleted = diff.added, diff.deleted
+                    stats = f" (+{added}/-{deleted})" if added or deleted else ""
+                    summaries.append(f"- {action_name} {path}{stats}")
+
+                if dry_run:
+                    return "Patch dry-run succeeded:\n" + "\n".join(summaries)
+
+                backups: dict[Path, bytes | None] = {}
+                for target in writes:
+                    backups[target] = target.read_bytes() if target.exists() else None
+
+                try:
+                    for target, content in writes.items():
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        _write_bytes_atomic(target, content.encode("utf-8"))
+                except Exception:
+                    for target, data in backups.items():
+                        if data is None:
+                            if target.exists():
+                                target.unlink()
+                        else:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            _write_bytes_atomic(target, data)
+                    raise
+
+                for target in writes:
+                    self._file_states.record_write(target)
+            finally:
+                for held in reversed(locks):
+                    await held.release()
             return FileEditResult("Patch applied:\n" + "\n".join(summaries), diffs)
         except PermissionError as exc:
             return ToolResult.error(f"Error: {exc}")
