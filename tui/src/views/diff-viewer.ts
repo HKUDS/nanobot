@@ -56,7 +56,7 @@ export function latestTurnFileEdits(messages: HistoryMessage[]): FileEditEvent[]
     const message = messages[index]
     if (!message) continue
     if (message.role === "user") break
-    if (message.fileEdits?.length) edits = mergeFileEdits(edits, message.fileEdits)
+    if (message.fileEdits?.length) edits = mergeFileEdits(message.fileEdits, edits)
   }
   return edits
 }
