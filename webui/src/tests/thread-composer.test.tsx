@@ -3297,6 +3297,29 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("automatically sends attachment-only guidance before later text", async () => {
+    mockBlobUrls();
+    const onSend = vi.fn();
+    const { container, rerender } = render(<ThreadComposer onSend={onSend} isStreaming />);
+    const input = screen.getByLabelText("Message input");
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, {
+      target: { files: [new File(["image"], "only.png", { type: "image/png" })] },
+    });
+    await waitFor(() => expect(screen.queryByLabelText("Encoding...")).not.toBeInTheDocument());
+    await screen.findByText("only.png");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("only.png");
+    fireEvent.change(input, { target: { value: "later text" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    rerender(<ThreadComposer onSend={onSend} isStreaming={false} />);
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("", [expect.objectContaining({
+      media: { data_url: "data:image/png;base64,aW1hZ2U=", name: "only.png" },
+    })]));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("later text");
+  });
+
   it("reorders queued guidance while dragging over another row", async () => {
     const onSend = vi.fn();
     const { rerender } = render(
