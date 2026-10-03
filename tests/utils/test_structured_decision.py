@@ -8,6 +8,8 @@ import httpx
 import pytest
 
 from nanobot.config.schema import Config
+from nanobot.llm_usage.models import LLMCallRecord
+from nanobot.llm_usage.store import LLMUsageStore
 from nanobot.utils.structured_decision import (
     ChoiceAnswer,
     ChoiceQuestion,
@@ -43,6 +45,24 @@ class _Transport(httpx.AsyncBaseTransport):
         return self._handler(request)
 
 
+class _RaisingTransport(httpx.AsyncBaseTransport):
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise self.error
+
+
+class _BlockingTransport(httpx.AsyncBaseTransport):
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
 def _make_client(
     *,
     model: str = "typesafe/jev-1.13",
@@ -63,6 +83,220 @@ def _make_client(
         }
     )
     return StructuredDecisionClient.from_config(config, transport=transport)
+
+
+async def _evaluate_noul(client: StructuredDecisionClient):
+    return await client.evaluate(
+        state="Task: check",
+        questions={"safe_to_run": NoulQuestion(instructions="Should this run?")},
+    )
+
+
+@pytest.mark.asyncio
+async def test_usage_observer_records_decision_call_in_existing_store(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "typesafe/jev-1.13-20260917",
+                "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
+                "usage": {"input_tokens": 40, "output_tokens": 6},
+            },
+        )
+
+    store = LLMUsageStore(tmp_path / "llm_usage.sqlite3")
+    client = _make_client(transport=_Transport(handler))
+    client.set_llm_call_observer(store.record)
+
+    result = await _evaluate_noul(client)
+
+    calls = store.recent_calls(limit=1)
+    assert len(calls) == 1
+    assert calls[0]["provider"] == "openrouter"
+    assert calls[0]["model"] == result.model
+    assert calls[0]["total_tokens"] == 46
+    assert calls[0]["duration_ms"] >= 0
+    assert calls[0]["stream"] == 0
+    assert calls[0]["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "usage_metadata",
+    [None, {"input_tokens": 40}, {"output_tokens": 6}],
+)
+async def test_usage_observer_keeps_absent_or_partial_usage_unknown(
+    usage_metadata: dict[str, int] | None,
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        response: dict[str, object] = {
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
+        }
+        if usage_metadata is not None:
+            response["usage"] = usage_metadata
+        return httpx.Response(200, json=response)
+
+    client = _make_client(transport=_Transport(handler))
+    calls: list[LLMCallRecord] = []
+    client.set_llm_call_observer(calls.append)
+
+    await _evaluate_noul(client)
+
+    assert len(calls) == 1
+    assert calls[0].usage is None
+
+
+@pytest.mark.asyncio
+async def test_usage_observer_records_http_failure():
+    client = _make_client(
+        transport=_Transport(lambda request: httpx.Response(429)),
+    )
+    calls: list[LLMCallRecord] = []
+    client.set_llm_call_observer(calls.append)
+
+    with pytest.raises(DecisionHttpError):
+        await _evaluate_noul(client)
+
+    assert len(calls) == 1
+    assert calls[0].finish_reason == "error"
+    assert calls[0].error_status_code == 429
+    assert calls[0].error_kind == "http"
+    assert calls[0].usage is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_error", "error_kind"),
+    [
+        (httpx.ReadTimeout("timed out"), DecisionTimeoutError, "timeout"),
+        (httpx.ConnectError("connection failed"), DecisionTransportError, "connection"),
+    ],
+)
+async def test_usage_observer_records_transport_failures(
+    failure: Exception,
+    expected_error: type[Exception],
+    error_kind: str,
+):
+    client = _make_client(transport=_RaisingTransport(failure))
+    calls: list[LLMCallRecord] = []
+    client.set_llm_call_observer(calls.append)
+
+    with pytest.raises(expected_error):
+        await _evaluate_noul(client)
+
+    assert len(calls) == 1
+    assert calls[0].finish_reason == "error"
+    assert calls[0].error_kind == error_kind
+
+
+@pytest.mark.asyncio
+async def test_usage_observer_records_protocol_failure():
+    client = _make_client(
+        transport=_Transport(
+            lambda request: httpx.Response(
+                200,
+                json={"model": "typesafe/jev-1.13-20260917", "answers": {}},
+            )
+        ),
+    )
+    calls: list[LLMCallRecord] = []
+    client.set_llm_call_observer(calls.append)
+
+    with pytest.raises(IncompleteDecisionResponseError):
+        await _evaluate_noul(client)
+
+    assert len(calls) == 1
+    assert calls[0].finish_reason == "error"
+    assert calls[0].error_kind == "server_error"
+
+
+@pytest.mark.asyncio
+async def test_usage_observer_failure_does_not_break_decision_call():
+    client = _make_client(
+        transport=_Transport(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "model": "typesafe/jev-1.13-20260917",
+                    "answers": {"safe_to_run": {"type": "noul", "noul": 0.9}},
+                },
+            )
+        ),
+    )
+
+    def fail(_call: LLMCallRecord) -> None:
+        raise RuntimeError("usage store unavailable")
+
+    client.set_llm_call_observer(fail)
+
+    result = await _evaluate_noul(client)
+
+    answer = result.answers["safe_to_run"]
+    assert isinstance(answer, NoulAnswer)
+    assert answer.noul == 0.9
+
+
+@pytest.mark.asyncio
+async def test_usage_observer_failure_does_not_mask_http_failure():
+    client = _make_client(transport=_Transport(lambda request: httpx.Response(503)))
+
+    def fail(_call: LLMCallRecord) -> None:
+        raise RuntimeError("usage store unavailable")
+
+    client.set_llm_call_observer(fail)
+
+    with pytest.raises(DecisionHttpError) as exc_info:
+        await _evaluate_noul(client)
+
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_usage_observer_skips_missing_credentials(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    client = _make_client(api_key=None)
+    calls: list[LLMCallRecord] = []
+    client.set_llm_call_observer(calls.append)
+
+    with pytest.raises(MissingCredentialsError):
+        await _evaluate_noul(client)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_usage_observer_skips_invalid_request():
+    client = _make_client(transport=_Transport(lambda request: httpx.Response(200, json={})))
+    calls: list[LLMCallRecord] = []
+    client.set_llm_call_observer(calls.append)
+
+    with pytest.raises(DecisionProtocolError):
+        await client.evaluate(
+            state=" ",
+            questions={"safe_to_run": NoulQuestion(instructions="Should this run?")},
+        )
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_usage_observer_records_cancelled_decision_call():
+    transport = _BlockingTransport()
+    client = _make_client(transport=transport)
+    calls: list[LLMCallRecord] = []
+    client.set_llm_call_observer(calls.append)
+    evaluation = asyncio.create_task(_evaluate_noul(client))
+    await transport.started.wait()
+
+    evaluation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await evaluation
+
+    assert len(calls) == 1
+    assert calls[0].finish_reason == "cancelled"
+    assert calls[0].error_kind == "cancelled"
+    assert calls[0].usage is None
 
 
 def test_client_from_config_uses_named_provider_settings_and_injected_transport():
