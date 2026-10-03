@@ -1,0 +1,46 @@
+{
+  "setup": {
+    "primaryAction": "Connect WeChat",
+    "docsLabel": "Open WeChat setup",
+    "officialLabel": "Open WeChat",
+    "fields": {
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "User IDs, comma separated"
+      },
+      "token": {
+        "label": "Token",
+        "placeholder": "Saved by QR login"
+      },
+      "sendProgress": { "label": "Send progress" },
+      "sendToolHints": { "label": "Send tool activity summaries" },
+      "streaming": { "label": "Use streaming API" },
+      "replyProgressMessages": { "label": "Send structured progress" },
+      "replyProgressMaxMessages": { "label": "Structured progress limit" },
+      "contextMessageBudget": { "label": "Context message limit" },
+      "blockStreaming": { "label": "Send response blocks" },
+      "blockStreamingMinChars": { "label": "Minimum block size" },
+      "blockStreamingMaxMessages": { "label": "Block message limit" },
+      "baseUrl": { "label": "API URL" },
+      "cdnBaseUrl": { "label": "CDN URL" },
+      "routeTag": { "label": "Route tag" },
+      "stateDir": { "label": "State directory" },
+      "pollTimeout": { "label": "Poll timeout (seconds)" }
+    }
+  },
+  "custom": {
+    "qrAlt": "WeChat login QR code",
+    "scanTitle": "Scan with WeChat",
+    "waiting": "Waiting for you to scan with WeChat…",
+    "connected": "WeChat is connected.",
+    "stopped": "WeChat login stopped.",
+    "connecting": "Connecting...",
+    "verifyTitle": "Verification required",
+    "verifyDescription": "Enter the number shown in WeChat to continue.",
+    "verifyMismatch": "That code did not match. Enter the new number shown in WeChat.",
+    "expired": "WeChat login expired. Scan again to reconnect.",
+    "failed": "Unable to connect WeChat. Try again.",
+    "verifyPlaceholder": "Code",
+    "verifySubmit": "Verify"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "setup": {
+    "docsLabel": "DingTalk 설정 가이드 열기",
+    "officialLabel": "DingTalk 콘솔 열기",
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "DingTalk Client ID"
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "미디어 리디렉션 허용",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "미디어 리디렉션 호스트"
+      },
+      "groupUserIsolation": {
+        "label": "별도의 그룹 세션",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "다이렉트 메시지 비활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,157 @@
+import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+
+import { cn } from "@/lib/utils";
+import type { UIMediaAttachment } from "@/lib/types";
+import { ImageThumbnail } from "@/components/ImageGallery";
+import { ImageLightbox } from "@/components/ImageLightbox";
+import { useRegisterInlineImage } from "@/components/InlineImageContext";
+import { FileReferenceIcon, fileKindForPath } from "@/components/FileReferenceChip";
+
+interface AttachmentTileProps {
+  attachment: UIMediaAttachment;
+  className?: string;
+  inline?: boolean;
+  variant?: "default" | "compact";
+}
+
+export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
+  const { t } = useTranslation();
+  const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
+  const failed = !!attachment.url && failedUrl === attachment.url;
+  const [imageOpen, setImageOpen] = useState(false);
+  const hasUrl = typeof attachment.url === "string" && attachment.url.length > 0;
+  const label = attachmentLabel(attachment, t);
+  useRegisterInlineImage(inline && attachment.kind === "image" && hasUrl && !failed ? attachment.url : undefined);
+
+  if (attachment.kind === "image" && hasUrl && !failed) {
+    return (
+      <span className={cn("not-prose my-3 block max-w-full", className)}>
+        <ImageThumbnail key={attachment.url} image={attachment}
+          size={variant === "compact" ? "compact" : "large"}
+          onOpen={() => setImageOpen(true)} onError={() => setFailedUrl(attachment.url)} />
+        <ImageLightbox images={[attachment]} index={imageOpen ? 0 : null}
+          onIndexChange={() => {}} onOpenChange={setImageOpen} />
+      </span>
+    );
+  }
+
+  if (attachment.kind === "video" && hasUrl) {
+    return (
+      <AttachmentFrame
+        attachment={attachment}
+        className={className}
+        inline={inline}
+        variant={variant}
+      >
+        <video
+          src={attachment.url}
+          controls
+          preload="metadata"
+          className={cn(
+            "block w-full bg-black",
+            variant === "compact" ? "max-h-40" : "max-h-[26rem]",
+          )}
+          aria-label={attachment.name ? `${t("message.videoAttachment", { defaultValue: "Video attachment" })}: ${attachment.name}` : t("message.videoAttachment", { defaultValue: "Video attachment" })}
+        />
+      </AttachmentFrame>
+    );
+  }
+
+  const fileKind = attachment.kind === "file"
+    ? fileKindForPath(attachment.name || attachment.url || "")
+    : attachment.kind;
+  const body = (
+    <>
+      <FileReferenceIcon kind={fileKind} className="size-4" />
+      <span className="min-w-0 truncate">{attachment.name ?? label}</span>
+    </>
+  );
+
+  if (hasUrl && !failed) {
+    return (
+      <a
+        href={attachment.url}
+        download={attachment.name ?? label}
+        title={attachment.name ?? undefined}
+        aria-label={label}
+        className={cn(
+          "flex max-w-[18rem] items-center gap-2 rounded-control",
+          "border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground",
+          "transition-colors hover:bg-muted/55 hover:text-foreground",
+          variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
+          className,
+        )}
+      >
+        {body}
+      </a>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex max-w-[18rem] items-center gap-2 rounded-control",
+        "border border-border/60 bg-muted/35 px-3 py-2 text-xs text-muted-foreground",
+        variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
+        className,
+      )}
+      title={attachment.name ?? undefined}
+      aria-label={label}
+    >
+      {body}
+      <span className="sr-only">
+        {t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
+      </span>
+    </div>
+  );
+}
+
+function AttachmentFrame({
+  attachment,
+  children,
+  className,
+  inline = false,
+  variant = "default",
+}: {
+  attachment: UIMediaAttachment;
+  children: ReactNode;
+  className?: string;
+  inline?: boolean;
+  variant?: "default" | "compact";
+}) {
+  const frameClassName = cn(
+    "not-prose my-3 block w-fit max-w-full overflow-hidden rounded-control",
+    "border border-border/60 bg-muted/40",
+    attachment.kind === "image" && "bg-background/85",
+    attachment.kind === "video" ? "w-[min(100%,32rem)]" : "",
+    variant === "compact" && "my-1 rounded-xl shadow-none",
+    variant === "compact" && attachment.kind === "video" && "w-[min(100%,20rem)]",
+    className,
+  );
+  const bodyClassName = "block max-w-full";
+  const body = inline ? (
+    <span className={bodyClassName}>{children}</span>
+  ) : (
+    <div className={bodyClassName}>{children}</div>
+  );
+  return inline ? (
+    <span className={frameClassName}>
+      {body}
+    </span>
+  ) : (
+    <figure className={frameClassName}>
+      {body}
+    </figure>
+  );
+}
+
+function attachmentLabel(attachment: UIMediaAttachment, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (attachment.kind === "video") {
+    return t("message.videoAttachment", { defaultValue: "Video attachment" });
+  }
+  if (attachment.kind === "image") {
+    return t("message.imageAttachment", { defaultValue: "Image attachment" });
+  }
+  return t("message.fileAttachment", { defaultValue: "File attachment" });
+}

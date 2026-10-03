@@ -1,0 +1,112 @@
+{
+  "setup": {
+    "docsLabel": "開啟 Mattermost 設定指南",
+    "officialLabel": "開啟 Mattermost 機器人指南",
+    "fields": {
+      "serverUrl": {
+        "label": "伺服器網址",
+        "placeholder": "https://mattermost.example.com"
+      },
+      "token": {
+        "label": "機器人權杖",
+        "placeholder": "Mattermost 機器人權杖"
+      },
+      "teamId": {
+        "label": "團隊 ID",
+        "placeholder": "選填的團隊 ID"
+      },
+      "groupPolicy": {
+        "label": "頻道行為",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息",
+          "allowlist": "允許清單"
+        }
+      },
+      "groupPolicyInThread": {
+        "label": "討論串回覆方式",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息（無需提及）",
+          "allowlist": "允許清單"
+        }
+      },
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "使用者 ID，以逗號分隔"
+      },
+      "allowFromMatchMode": {
+        "label": "用戶匹配方式",
+        "choices": {
+          "email": "信箱",
+          "id": "使用者 ID",
+          "username": "使用者名稱"
+        }
+      },
+      "groupAllowFrom": {
+        "label": "允許的頻道"
+      },
+      "replyInThread": {
+        "label": "在話題中回复",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "includeThreadContext": {
+        "label": "包含話題上下文",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "threadContextLimit": {
+        "label": "話題上下文上限"
+      },
+      "streaming": {
+        "label": "串流輸出",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "reactEmoji": {
+        "label": "已讀表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "sendProgress": {
+        "label": "發送進度訊息",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "sendToolHints": {
+        "label": "發送工具提示",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_enabled": {
+        "label": "啟用私聊",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_policy": {
+        "label": "私聊權限",
+        "choices": {
+          "allowlist": "白名單",
+          "open": "全部"
+        }
+      },
+      "dm_allowFrom": {
+        "label": "允許私聊的用戶"
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "setup": {
+    "docsLabel": "NapCat 설정 가이드 열기",
+    "officialLabel": "NapCat 문서 열기",
+    "fields": {
+      "wsUrl": {
+        "label": "WebSocket URL",
+        "placeholder": "ws://127.0.0.1:3001"
+      },
+      "accessToken": {
+        "label": "액세스 토큰",
+        "placeholder": "액세스 토큰(선택 사항)"
+      },
+      "groupPolicy": {
+        "label": "그룹 동작",
+        "choices": {
+          "mention": "멘션만",
+          "open": "모든 메시지",
+          "allowlist": "허용 목록"
+        }
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "QQ ID, 쉼표로 구분"
+      },
+      "groupPolicyOverrides": {
+        "label": "그룹 동작 재정의(JSON)"
+      },
+      "welcomeNewMembers": {
+        "label": "새로운 회원을 환영합니다",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "maxImageBytes": {
+        "label": "최대 이미지 크기"
+      }
+    }
+  }
+}

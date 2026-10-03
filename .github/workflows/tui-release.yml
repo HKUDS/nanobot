@@ -1,0 +1,96 @@
+name: Publish Terminal UI
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example, v0.3.1)
+        required: true
+        type: string
+      compliance_reviewed:
+        description: Confirm notices, source offer, source archive, and relinking were reviewed
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ inputs.compliance_reviewed }}
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - darwin-arm64
+          - darwin-x64
+          - linux-arm64
+          - linux-x64
+          - win32-x64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          gh release view "$TAG" >/dev/null
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$TAG")"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: Install dependencies
+        working-directory: tui
+        run: bun install --frozen-lockfile
+
+      - name: Install ${{ matrix.target }} native dependencies
+        working-directory: tui
+        run: bun scripts/prepare-target.ts ${{ matrix.target }}
+
+      - name: Build ${{ matrix.target }}
+        working-directory: tui
+        run: bun run build -- ${{ matrix.target }}
+
+      - name: Ad-hoc sign macOS executable
+        if: startsWith(matrix.target, 'darwin-')
+        uses: indygreg/apple-code-sign-action@44d0985b7f4363198e80b6fea63ac3e9dd3e9957 # v1
+        with:
+          input_path: tui/dist/nanobot-tui-${{ matrix.target }}
+          rcodesign_version: 0.29.0
+
+      - name: Build notices and release archive
+        working-directory: tui
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          bun scripts/release-notices.ts "$TARGET"
+          python3 scripts/package-release.py "$TARGET"
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          gh release view "$TAG" >/dev/null
+          asset="nanobot-tui-${TARGET}"
+          if [[ "$TARGET" == win32-* ]]; then asset="${asset}.exe"; fi
+          gh release upload "$TAG" \
+            "tui/dist/${asset}.zip" \
+            "tui/dist/${asset}.zip.sha256" \
+            --clobber

@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "primaryAction": "Kết nối WeChat",
+    "docsLabel": "Mở hướng dẫn WeChat",
+    "officialLabel": "Mở WeChat",
+    "fields": {
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "token": {
+        "label": "Token",
+        "placeholder": "Được lưu khi đăng nhập QR"
+      },
+      "sendProgress": {
+        "label": "Gửi thông báo tiến độ"
+      },
+      "sendToolHints": {
+        "label": "Gửi tóm tắt hoạt động công cụ"
+      },
+      "streaming": {
+        "label": "Dùng API truyền theo luồng"
+      },
+      "replyProgressMessages": {
+        "label": "Gửi tiến độ theo từng bước"
+      },
+      "replyProgressMaxMessages": {
+        "label": "Số thông báo tiến độ tối đa"
+      },
+      "contextMessageBudget": {
+        "label": "Số tin nhắn ngữ cảnh tối đa"
+      },
+      "blockStreaming": {
+        "label": "Gửi phản hồi theo khối"
+      },
+      "blockStreamingMinChars": {
+        "label": "Số ký tự tối thiểu mỗi phần"
+      },
+      "blockStreamingMaxMessages": {
+        "label": "Giới hạn tin nhắn theo khối"
+      },
+      "baseUrl": {
+        "label": "URL API"
+      },
+      "cdnBaseUrl": {
+        "label": "URL CDN"
+      },
+      "routeTag": {
+        "label": "Thẻ định tuyến"
+      },
+      "stateDir": {
+        "label": "Thư mục trạng thái"
+      },
+      "pollTimeout": {
+        "label": "Thời gian chờ thăm dò (giây)"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Mã QR đăng nhập WeChat",
+    "scanTitle": "Quét bằng WeChat",
+    "waiting": "Đang chờ bạn quét mã bằng WeChat…",
+    "connected": "WeChat đã kết nối.",
+    "stopped": "Đăng nhập WeChat đã dừng.",
+    "connecting": "Đang kết nối...",
+    "verifyTitle": "Cần xác minh",
+    "verifyDescription": "Nhập số hiển thị trong WeChat để tiếp tục.",
+    "verifyMismatch": "Mã không khớp. Nhập số mới hiển thị trong WeChat.",
+    "expired": "Đăng nhập WeChat đã hết hạn. Hãy quét lại để kết nối lại.",
+    "failed": "Không thể kết nối WeChat. Hãy thử lại.",
+    "verifyPlaceholder": "Mã",
+    "verifySubmit": "Xác minh"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan WeCom",
+    "officialLabel": "Buka konsol WeCom",
+    "fields": {
+      "botId": {
+        "label": "Bot ID",
+        "placeholder": "Bot ID WeCom"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan",
+        "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "welcomeMessage": {
+        "label": "Pesan selamat datang"
+      }
+    }
+  }
+}

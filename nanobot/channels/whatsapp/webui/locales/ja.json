@@ -1,0 +1,36 @@
+{
+  "setup": {
+    "primaryAction": "WhatsApp に接続",
+    "docsLabel": "WhatsApp 設定ガイドを開く",
+    "officialLabel": "WhatsApp ヘルプを開く",
+    "fields": {
+      "allowFrom": {
+        "label": "許可する連絡先",
+        "placeholder": "電話番号または WhatsApp ID"
+      },
+      "groupPolicy": {
+        "label": "グループでの動作",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "すべてのメッセージ",
+          "allowlist": "許可リスト"
+        }
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "WhatsApp リンク用 QR コード",
+    "scanTitle": "WhatsApp をリンク",
+    "scanDescription": "WhatsApp でリンク済みデバイスを開き、デバイスをリンクを選んでこのコードを読み取ります。",
+    "waiting": "WhatsApp を待機中…",
+    "connected": "WhatsApp に接続しました。",
+    "stopped": "接続が停止しました。新しいコードを取得するには再開してください。",
+    "connecting": "接続中…",
+    "scanAgain": "別のアカウントをリンク",
+    "connect": "WhatsApp をリンク"
+  }
+}

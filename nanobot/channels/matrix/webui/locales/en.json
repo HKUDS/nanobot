@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "docsLabel": "Open Matrix setup",
+    "officialLabel": "Open Matrix clients",
+    "fields": {
+      "homeserver": {
+        "label": "Homeserver",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "User ID",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Password",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "Access token",
+        "placeholder": "Enter an access token"
+      },
+      "deviceId": {
+        "label": "Device ID",
+        "placeholder": "Required with an access token"
+      },
+      "groupPolicy": {
+        "label": "Group behavior",
+        "choices": {
+          "mention": "Mention only",
+          "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      },
+      "allowFrom": {
+        "label": "Allowed users"
+      },
+      "e2eeEnabled": {
+        "label": "End-to-end encryption",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS verification",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Sync stop grace period"
+      },
+      "maxMediaBytes": {
+        "label": "Maximum media size"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Concurrent media downloads"
+      },
+      "groupAllowFrom": {
+        "label": "Allowed groups"
+      },
+      "allowRoomMentions": {
+        "label": "Allow room mentions",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "proxy": {
+        "label": "Network proxy",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}

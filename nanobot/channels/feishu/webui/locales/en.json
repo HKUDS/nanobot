@@ -1,0 +1,87 @@
+{
+  "setup": {
+    "primaryAction": "Connect with Feishu",
+    "docsLabel": "Open Feishu setup",
+    "officialLabel": "Open Feishu console",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "Leave blank to keep current secret"
+      },
+      "domain": {
+        "label": "Region",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "Group behavior",
+        "choices": {
+          "mention": "Mention only",
+          "open": "All messages",
+          "allowlist": "Allowlist"
+        }
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "User IDs, comma separated"
+      },
+      "topicIsolation": {
+        "label": "Topic isolation",
+        "choices": {
+          "true": "Separate session for each topic",
+          "false": "One shared session for the group"
+        }
+      },
+      "name": {
+        "label": "Account name"
+      },
+      "encryptKey": {
+        "label": "Encryption key"
+      },
+      "verificationToken": {
+        "label": "Verification token"
+      },
+      "reactEmoji": {
+        "label": "Read emoji"
+      },
+      "doneEmoji": {
+        "label": "Done emoji"
+      },
+      "toolHintPrefix": {
+        "label": "Tool hint prefix"
+      },
+      "replyToMessage": {
+        "label": "Reply to message",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "{{name}} assistant",
+    "configured": "Connected",
+    "needsSetup": "Needs authorization",
+    "qrAlt": "Feishu connection QR code",
+    "scanTitle": "Scan with Feishu",
+    "scanDescription": "Use Feishu or Lark on your phone to scan this code. nanobot will finish setup automatically after authorization.",
+    "waiting": "Waiting for authorization...",
+    "connected": "Feishu is connected.",
+    "stopped": "Connection stopped.",
+    "connecting": "Connecting..."
+  }
+}

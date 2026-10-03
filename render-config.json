@@ -1,0 +1,33 @@
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-4-8",
+      "provider": "auto"
+    }
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}"
+    }
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790
+  },
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8765,
+      "tokenIssueSecret": "${NANOBOT_WEB_TOKEN}",
+      "websocketRequiresToken": true
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": true,
+    "webuiAllowRemotePackageInstall": false,
+    "my": {
+      "allowSet": false
+    }
+  }
+}

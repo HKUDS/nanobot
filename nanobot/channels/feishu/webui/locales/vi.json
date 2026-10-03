@@ -1,0 +1,87 @@
+{
+  "setup": {
+    "primaryAction": "Kết nối Feishu",
+    "docsLabel": "Mở hướng dẫn Feishu",
+    "officialLabel": "Mở bảng điều khiển Feishu",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "Để trống để giữ khóa hiện tại"
+      },
+      "domain": {
+        "label": "Khu vực",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "Hành vi trong nhóm",
+        "choices": {
+          "mention": "Chỉ khi được nhắc",
+          "open": "Mọi tin nhắn",
+          "allowlist": "Danh sách cho phép"
+        }
+      },
+      "allowFrom": {
+        "label": "Người dùng được phép",
+        "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
+      },
+      "topicIsolation": {
+        "label": "Tách biệt chủ đề",
+        "choices": {
+          "true": "Phiên riêng cho từng chủ đề",
+          "false": "Dùng chung một phiên cho nhóm"
+        }
+      },
+      "name": {
+        "label": "Tên tài khoản"
+      },
+      "encryptKey": {
+        "label": "Khóa mã hóa"
+      },
+      "verificationToken": {
+        "label": "Mã thông báo xác minh"
+      },
+      "reactEmoji": {
+        "label": "Đọc biểu tượng cảm xúc"
+      },
+      "doneEmoji": {
+        "label": "biểu tượng cảm xúc xong"
+      },
+      "toolHintPrefix": {
+        "label": "Tiền tố gợi ý công cụ"
+      },
+      "replyToMessage": {
+        "label": "Trả lời tin nhắn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "streaming": {
+        "label": "Truyền phát",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "Bật trợ lý {{name}}",
+    "configured": "Đã kết nối",
+    "needsSetup": "Cần cấp quyền",
+    "qrAlt": "Mã QR kết nối Feishu",
+    "scanTitle": "Quét bằng Feishu",
+    "scanDescription": "Quét bằng Feishu hoặc Lark trên điện thoại. nanobot sẽ hoàn tất cấu hình sau khi cấp quyền.",
+    "waiting": "Đang chờ cấp quyền...",
+    "connected": "Feishu đã kết nối.",
+    "stopped": "Kết nối đã dừng.",
+    "connecting": "Đang kết nối..."
+  }
+}

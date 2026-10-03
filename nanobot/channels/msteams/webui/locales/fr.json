@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Ouvrir le guide Teams",
+    "officialLabel": "Ouvrir le portail développeur Teams",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "Secret client",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "ID du locataire",
+        "placeholder": "ID de locataire facultatif"
+      },
+      "path": {
+        "label": "Chemin de rappel",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID utilisateur Teams séparés par des virgules"
+      },
+      "host": {
+        "label": "Écouter l'hôte"
+      },
+      "port": {
+        "label": "Port d'écoute"
+      },
+      "replyInThread": {
+        "label": "Répondre dans le fil de discussion",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Réponse avec mention uniquement"
+      },
+      "validateInboundAuth": {
+        "label": "Valider les demandes entrantes",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "refTtlDays": {
+        "label": "Durée de vie des conversations"
+      },
+      "pruneWebChatRefs": {
+        "label": "Supprimer les conversations de chat Web",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Supprimer les conversations non personnelles",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Intervalle d'actualisation des conversations"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Hôtes de services de confiance"
+      }
+    }
+  }
+}

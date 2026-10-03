@@ -1,0 +1,36 @@
+{
+  "setup": {
+    "primaryAction": "Conectar WhatsApp",
+    "docsLabel": "Abrir guía de WhatsApp",
+    "officialLabel": "Abrir la ayuda de WhatsApp",
+    "fields": {
+      "allowFrom": {
+        "label": "Contactos permitidos",
+        "placeholder": "Números o ID de WhatsApp"
+      },
+      "groupPolicy": {
+        "label": "Comportamiento en grupos",
+        "choices": {
+          "mention": "Solo menciones",
+          "open": "Todos los mensajes",
+          "allowlist": "Lista de permitidos"
+        }
+      },
+      "proxy": {
+        "label": "Proxy de red",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "Código QR para vincular WhatsApp",
+    "scanTitle": "Vincular WhatsApp",
+    "scanDescription": "En WhatsApp, abre Dispositivos vinculados, elige Vincular un dispositivo y escanea este código.",
+    "waiting": "Esperando a WhatsApp…",
+    "connected": "WhatsApp está conectado.",
+    "stopped": "El intento de conexión se detuvo. Inicia de nuevo para obtener otro código.",
+    "connecting": "Conectando…",
+    "scanAgain": "Vincular otra cuenta",
+    "connect": "Vincular WhatsApp"
+  }
+}

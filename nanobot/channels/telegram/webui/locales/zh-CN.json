@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "打开 Telegram 配置指南",
+    "officialLabel": "打开 BotFather",
+    "fields": {
+      "token": {
+        "label": "机器人令牌",
+        "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "网络代理",
+        "placeholder": "http://127.0.0.1:7890"
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "* 或 Telegram 用户 ID"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "mode": {
+        "label": "连接方式",
+        "choices": {
+          "polling": "长轮询",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "引用回复",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "reactEmoji": {
+        "label": "已读表情"
+      },
+      "connectionPoolSize": {
+        "label": "连接池大小"
+      },
+      "poolTimeout": {
+        "label": "连接池超时"
+      },
+      "streaming": {
+        "label": "流式输出",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "内联键盘",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "richMessages": {
+        "label": "富文本消息",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "streamEditInterval": {
+        "label": "流式更新间隔"
+      },
+      "webhookUrl": {
+        "label": "Webhook 地址"
+      },
+      "webhookListenHost": {
+        "label": "Webhook 监听地址"
+      },
+      "webhookListenPort": {
+        "label": "Webhook 监听端口"
+      },
+      "webhookPath": {
+        "label": "Webhook 路径"
+      },
+      "webhookSecretToken": {
+        "label": "Webhook 密钥"
+      },
+      "webhookMaxConnections": {
+        "label": "Webhook 最大连接数"
+      }
+    }
+  }
+}

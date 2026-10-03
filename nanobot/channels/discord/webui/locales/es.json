@@ -1,0 +1,63 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guía de Discord",
+    "officialLabel": "Abrir portal de Discord",
+    "fields": {
+      "token": {
+        "label": "Token del bot",
+        "placeholder": "Token del bot de Discord"
+      },
+      "allowChannels": {
+        "label": "Canales permitidos",
+        "placeholder": "ID de canal separados por comas"
+      },
+      "groupPolicy": {
+        "label": "Comportamiento en grupos",
+        "choices": {
+          "mention": "Solo menciones",
+          "open": "Todos los mensajes",
+          "allowlist": "Lista de permitidos"
+        }
+      },
+      "allowFrom": {
+        "label": "Usuarios permitidos",
+        "placeholder": "ID de usuario separados por comas"
+      },
+      "proxy": {
+        "label": "proxy de red"
+      },
+      "proxyUsername": {
+        "label": "Nombre de usuario proxy"
+      },
+      "proxyPassword": {
+        "label": "Contraseña de proxy"
+      },
+      "intents": {
+        "label": "Intentos de puerta de enlace"
+      },
+      "readReceiptEmoji": {
+        "label": "Leer emojis"
+      },
+      "workingEmoji": {
+        "label": "Emoji de trabajo"
+      },
+      "workingEmojiDelay": {
+        "label": "Retraso de emoji de trabajo"
+      },
+      "streaming": {
+        "label": "Transmisión",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "replyToMessage": {
+        "label": "Responder al mensaje",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      }
+    }
+  }
+}

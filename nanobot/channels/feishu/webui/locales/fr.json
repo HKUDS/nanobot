@@ -1,0 +1,87 @@
+{
+  "setup": {
+    "primaryAction": "Connecter Feishu",
+    "docsLabel": "Ouvrir le guide Feishu",
+    "officialLabel": "Ouvrir la console Feishu",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "Laisser vide pour conserver le secret"
+      },
+      "domain": {
+        "label": "Région",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "Comportement en groupe",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages",
+          "allowlist": "Liste d’autorisation"
+        }
+      },
+      "allowFrom": {
+        "label": "Utilisateurs autorisés",
+        "placeholder": "ID utilisateur séparés par des virgules"
+      },
+      "topicIsolation": {
+        "label": "Isolation par sujet",
+        "choices": {
+          "true": "Une session séparée par sujet",
+          "false": "Une session partagée pour le groupe"
+        }
+      },
+      "name": {
+        "label": "Nom du compte"
+      },
+      "encryptKey": {
+        "label": "Clé de chiffrement"
+      },
+      "verificationToken": {
+        "label": "Jeton de vérification"
+      },
+      "reactEmoji": {
+        "label": "Lire les emoji"
+      },
+      "doneEmoji": {
+        "label": "Terminé emoji"
+      },
+      "toolHintPrefix": {
+        "label": "Préfixe d'indice d'outil"
+      },
+      "replyToMessage": {
+        "label": "Répondre au message",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      },
+      "streaming": {
+        "label": "Diffusion en continu",
+        "choices": {
+          "true": "Sur",
+          "false": "Désactivé"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "Activer l’assistant {{name}}",
+    "configured": "Connecté",
+    "needsSetup": "Autorisation requise",
+    "qrAlt": "QR code de connexion Feishu",
+    "scanTitle": "Scanner avec Feishu",
+    "scanDescription": "Utilisez Feishu ou Lark sur votre téléphone pour scanner ce code. nanobot terminera la configuration après autorisation.",
+    "waiting": "En attente d’autorisation...",
+    "connected": "Feishu est connecté.",
+    "stopped": "Connexion arrêtée.",
+    "connecting": "Connexion..."
+  }
+}

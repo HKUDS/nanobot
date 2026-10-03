@@ -1,0 +1,93 @@
+{
+  "setup": {
+    "docsLabel": "Telegram 設定ガイドを開く",
+    "officialLabel": "BotFather を開く",
+    "fields": {
+      "token": {
+        "label": "ボットトークン",
+        "placeholder": "123456:ABC..."
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
+      },
+      "allowFrom": {
+        "label": "許可するユーザー",
+        "placeholder": "* または Telegram ユーザー ID"
+      },
+      "groupPolicy": {
+        "label": "グループでの動作",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "すべてのメッセージ",
+          "allowlist": "許可リスト"
+        }
+      },
+      "mode": {
+        "label": "接続モード",
+        "choices": {
+          "polling": "ロングポーリング",
+          "webhook": "Webhook"
+        }
+      },
+      "replyToMessage": {
+        "label": "メッセージに返信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "reactEmoji": {
+        "label": "絵文字を読む"
+      },
+      "connectionPoolSize": {
+        "label": "接続プールのサイズ"
+      },
+      "poolTimeout": {
+        "label": "接続プールのタイムアウト"
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "inlineKeyboards": {
+        "label": "インラインキーボード",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "richMessages": {
+        "label": "リッチメッセージ",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "streamEditInterval": {
+        "label": "ストリーム更新間隔"
+      },
+      "webhookUrl": {
+        "label": "Webhook URL"
+      },
+      "webhookListenHost": {
+        "label": "Webhook リッスン ホスト"
+      },
+      "webhookListenPort": {
+        "label": "Webhook リッスン ポート"
+      },
+      "webhookPath": {
+        "label": "Webhook パス"
+      },
+      "webhookSecretToken": {
+        "label": "Webhook シークレット トークン"
+      },
+      "webhookMaxConnections": {
+        "label": "Webhook 接続の最大数"
+      }
+    }
+  }
+}

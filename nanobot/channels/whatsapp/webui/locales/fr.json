@@ -1,0 +1,36 @@
+{
+  "setup": {
+    "primaryAction": "Connecter WhatsApp",
+    "docsLabel": "Ouvrir le guide WhatsApp",
+    "officialLabel": "Ouvrir l’aide WhatsApp",
+    "fields": {
+      "allowFrom": {
+        "label": "Contacts autorisés",
+        "placeholder": "Numéros ou ID WhatsApp"
+      },
+      "groupPolicy": {
+        "label": "Comportement en groupe",
+        "choices": {
+          "mention": "Mentions uniquement",
+          "open": "Tous les messages",
+          "allowlist": "Liste d’autorisation"
+        }
+      },
+      "proxy": {
+        "label": "Proxy réseau",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  },
+  "custom": {
+    "qrAlt": "QR code d’association WhatsApp",
+    "scanTitle": "Associer WhatsApp",
+    "scanDescription": "Dans WhatsApp, ouvrez Appareils connectés, choisissez Connecter un appareil, puis scannez ce code.",
+    "waiting": "En attente de WhatsApp…",
+    "connected": "WhatsApp est connecté.",
+    "stopped": "La tentative de connexion s’est arrêtée. Recommencez pour obtenir un nouveau code.",
+    "connecting": "Connexion…",
+    "scanAgain": "Associer un autre compte",
+    "connect": "Associer WhatsApp"
+  }
+}

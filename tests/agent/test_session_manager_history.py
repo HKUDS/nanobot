@@ -1,0 +1,794 @@
+from nanobot.runtime_context import (
+    RUNTIME_CONTEXT_HISTORY_META,
+    RuntimeContextBlock,
+    append_runtime_context,
+)
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+from nanobot.session.manager import Session, SessionManager
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
+
+
+def _assert_no_orphans(history: list[dict]) -> None:
+    """Assert every tool result in history has a matching assistant tool_call."""
+    declared = {
+        tc["id"]
+        for m in history if m.get("role") == "assistant"
+        for tc in (m.get("tool_calls") or [])
+    }
+    orphans = [
+        m.get("tool_call_id") for m in history
+        if m.get("role") == "tool" and m.get("tool_call_id") not in declared
+    ]
+    assert orphans == [], f"orphan tool_call_ids: {orphans}"
+
+
+def _tool_turn(prefix: str, idx: int) -> list[dict]:
+    """Helper: one assistant with 2 tool_calls + 2 tool results."""
+    return [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": f"{prefix}_{idx}_a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+                {"id": f"{prefix}_{idx}_b", "type": "function", "function": {"name": "y", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": f"{prefix}_{idx}_a", "name": "x", "content": "ok"},
+        {"role": "tool", "tool_call_id": f"{prefix}_{idx}_b", "name": "y", "content": "ok"},
+    ]
+
+
+def test_list_sessions_includes_metadata_title(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-title")
+    session.metadata["title"] = "自动生成标题"
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["key"] == "websocket:chat-title"
+    assert rows[0]["title"] == "自动生成标题"
+
+
+def test_list_sessions_hides_generated_think_title(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-think-title")
+    session.metadata["title"] = "<think> The user said hello and assistant replied"
+    session.add_message("user", "hello")
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["key"] == "websocket:chat-think-title"
+    assert rows[0]["title"] == ""
+    assert rows[0]["preview"] == "hello"
+
+
+def test_list_sessions_keeps_user_edited_think_title(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-user-title")
+    session.metadata["title"] = "<think> literally discussed"
+    session.metadata["title_user_edited"] = True
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["title"] == "<think> literally discussed"
+
+
+def test_list_sessions_includes_user_preview(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-preview")
+    session.add_message("user", "帮我总结一下 OpenAI 的最新硬件计划")
+    session.add_message("assistant", "可以，我会先查最新消息。")
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["key"] == "websocket:chat-preview"
+    assert rows[0]["preview"] == "帮我总结一下 OpenAI 的最新硬件计划"
+
+
+def test_list_sessions_bounds_preview_scan(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-long-preview")
+    for index in range(220):
+        session.add_message("assistant", f"assistant trace {index}")
+    session.add_message("user", "this should not force a full sidebar scan")
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["key"] == "websocket:chat-long-preview"
+    assert rows[0]["preview"] == "assistant trace 0"
+
+
+# --- Original regression test (from PR 2075) ---
+
+def test_get_history_drops_orphan_tool_results_when_window_cuts_tool_calls():
+    session = Session(key="telegram:test")
+    session.messages.append({"role": "user", "content": "old turn"})
+    for i in range(20):
+        session.messages.extend(_tool_turn("old", i))
+    session.messages.append({"role": "user", "content": "problem turn"})
+    for i in range(25):
+        session.messages.extend(_tool_turn("cur", i))
+    session.messages.append({"role": "user", "content": "new telegram question"})
+
+    history = session.get_history(max_messages=100)
+    _assert_no_orphans(history)
+    assert history[-1]["content"] == "new telegram question"
+
+
+# --- Positive test: legitimate pairs survive trimming ---
+
+def test_legitimate_tool_pairs_preserved_after_trim():
+    """Complete tool-call groups within the window must not be dropped."""
+    session = Session(key="test:positive")
+    session.messages.append({"role": "user", "content": "hello"})
+    for i in range(5):
+        session.messages.extend(_tool_turn("ok", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+
+    history = session.get_history(max_messages=500)
+    _assert_no_orphans(history)
+    tool_ids = [m["tool_call_id"] for m in history if m.get("role") == "tool"]
+    assert len(tool_ids) == 10
+    assert history[0]["role"] == "user"
+
+
+# --- last_archived > 0 ---
+
+def test_orphan_trim_with_last_archived():
+    """Orphan trimming works correctly when a session is partially archived."""
+    session = Session(key="test:consolidated")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"old {i}"})
+        session.messages.extend(_tool_turn("cons", i))
+    session.last_archived = 30
+
+    session.messages.append({"role": "user", "content": "recent"})
+    for i in range(15):
+        session.messages.extend(_tool_turn("new", i))
+    session.messages.append({"role": "user", "content": "latest"})
+
+    history = session.get_history(max_messages=20)
+    _assert_no_orphans(history)
+    assert all(m.get("role") != "tool" or m["tool_call_id"].startswith("new_") for m in history)
+
+
+def test_get_history_does_not_replay_messages_after_full_archive():
+    session = Session(key="test:fully-archived")
+    for i in range(10):
+        session.messages.append({"role": "user", "content": f"u{i}"})
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=100)
+
+    assert history == []
+
+
+def test_get_history_omits_persisted_summary_marker_after_reload(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("cli:compacted")
+    session.add_message("user", "finish the task")
+    session.add_message("assistant", "done")
+    session.commit_summary_checkpoint("The task is complete.")
+    manager.save(session)
+    manager.invalidate(session.key)
+
+    reloaded = manager.get_or_create(session.key)
+    assert reloaded.messages[-1]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert reloaded.messages[-1][HIDDEN_HISTORY_META] is True
+    assert reloaded.get_history() == []
+
+    reloaded.add_message("user", "hi")
+    assert reloaded.get_history() == [{"role": "user", "content": "hi"}]
+
+
+def test_get_history_keeps_real_user_continuation_and_hidden_subagent_result():
+    session = Session(key="cli:followups")
+    session.add_message("user", SUMMARY_CONTINUATION_TEXT)
+    session.add_message(
+        "user", "Subagent finished the requested check.",
+        **{HIDDEN_HISTORY_META: {"kind": "subagent_result"}},
+    )
+
+    assert [message["content"] for message in session.get_history()] == [
+        SUMMARY_CONTINUATION_TEXT, "Subagent finished the requested check.",
+    ]
+
+
+def test_get_history_does_not_restore_archived_user_turn():
+    session = Session(key="test:archived-tool-turn")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "run tools"},
+            *_tool_turn("keep", 0),
+            *_tool_turn("keep", 1),
+            *_tool_turn("keep", 2),
+            {"role": "assistant", "content": "done"},
+        ]
+    )
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=100)
+
+    assert history == []
+    assert len(session.messages) > 8
+
+
+def test_archived_tool_turn_stays_out_of_replay():
+    session = Session(key="test:long-archived-tool-turn")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "run many tools"},
+        ]
+    )
+    for i in range(50):
+        session.messages.extend(_tool_turn("keep", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+    session.last_archived = len(session.messages)
+
+    history = session.get_history(max_messages=120)
+
+    assert history == []
+    assert len(session.messages) > 8
+
+
+# --- Edge: no tool messages at all ---
+
+def test_no_tool_messages_unchanged():
+    session = Session(key="test:plain")
+    for i in range(5):
+        session.messages.append({"role": "user", "content": f"q{i}"})
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+
+    history = session.get_history(max_messages=6)
+    assert len(history) == 6
+    _assert_no_orphans(history)
+
+
+# --- Edge: all leading messages are orphan tool results ---
+
+def test_all_orphan_prefix_stripped():
+    """If the window starts with orphan tool results and nothing else, they're all dropped."""
+    session = Session(key="test:all-orphan")
+    session.messages.append({"role": "tool", "tool_call_id": "gone_1", "name": "x", "content": "ok"})
+    session.messages.append({"role": "tool", "tool_call_id": "gone_2", "name": "y", "content": "ok"})
+    session.messages.append({"role": "user", "content": "fresh start"})
+    session.messages.append({"role": "assistant", "content": "hi"})
+
+    history = session.get_history(max_messages=500)
+    _assert_no_orphans(history)
+    assert history[0]["role"] == "user"
+    assert len(history) == 2
+
+
+# --- Edge: empty session ---
+
+def test_empty_session_history():
+    session = Session(key="test:empty")
+    history = session.get_history(max_messages=500)
+    assert history == []
+
+
+def test_get_history_preserves_reasoning_content():
+    session = Session(key="test:reasoning")
+    session.messages.append({"role": "user", "content": "hi"})
+    session.messages.append({
+        "role": "assistant",
+        "content": "done",
+        "reasoning_content": "hidden chain of thought",
+        "thinking_blocks": [{"type": "thinking", "thinking": "hidden chain of thought", "signature": "sig"}],
+    })
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "done",
+            "reasoning_content": "hidden chain of thought",
+            "thinking_blocks": [{
+                "type": "thinking",
+                "thinking": "hidden chain of thought",
+                "signature": "sig",
+            }],
+        },
+    ]
+
+
+def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
+    """Persisted timestamps are session metadata, not prompt content."""
+    session = Session(key="test:timestamps")
+    session.messages.append({
+        "role": "user",
+        "content": "10 点提醒是昨天发生的",
+        "timestamp": "2026-04-26T22:00:00",
+    })
+    session.messages.append({
+        "role": "assistant",
+        "content": "记下来了",
+        "timestamp": "2026-04-26T22:00:05",
+    })
+
+    history = session.get_history(max_messages=500)
+
+    assert session.messages[0]["timestamp"] == "2026-04-26T22:00:00"
+    assert session.messages[1]["timestamp"] == "2026-04-26T22:00:05"
+    assert history == [
+        {
+            "role": "user",
+            "content": "10 点提醒是昨天发生的",
+        },
+        {
+            "role": "assistant",
+            "content": "记下来了",
+        },
+    ]
+
+
+def test_get_history_keeps_proactive_delivery_timestamps_out_of_replay_content():
+    """Timestamp metadata remains persisted without becoming prompt text."""
+    session = Session(key="test:proactive-timestamps")
+    session.messages.append({
+        "role": "assistant",
+        "content": "记得喝水",
+        "timestamp": "2026-04-26T15:00:00",
+        "_channel_delivery": True,
+    })
+    session.messages.append({
+        "role": "user",
+        "content": "好",
+        "timestamp": "2026-04-26T18:00:00",
+    })
+
+    history = session.get_history(max_messages=500)
+
+    assert session.messages[0]["timestamp"] == "2026-04-26T15:00:00"
+    assert session.messages[1]["timestamp"] == "2026-04-26T18:00:00"
+    assert history == [
+        {
+            "role": "assistant",
+            "content": "记得喝水",
+        },
+        {
+            "role": "user",
+            "content": "好",
+        },
+    ]
+
+
+def test_get_history_does_not_inject_tool_result_timestamps():
+    session = Session(key="test:tool-timestamps")
+    session.messages.append({"role": "user", "content": "run tool"})
+    session.messages.extend(_tool_turn("ts", 0))
+    session.messages[-1]["timestamp"] = "2026-04-26T22:00:10"
+
+    history = session.get_history(max_messages=500)
+
+    tool_result = history[-1]
+    assert tool_result["role"] == "tool"
+    assert tool_result["content"] == "ok"
+
+
+# --- Window cuts mid-group: assistant present but some tool results orphaned ---
+
+def test_window_cuts_mid_tool_group():
+    """If the window starts between an assistant's tool results, the partial group is trimmed."""
+    session = Session(key="test:mid-cut")
+    session.messages.append({"role": "user", "content": "setup"})
+    session.messages.append({
+        "role": "assistant", "content": None,
+        "tool_calls": [
+            {"id": "split_a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
+            {"id": "split_b", "type": "function", "function": {"name": "y", "arguments": "{}"}},
+        ],
+    })
+    session.messages.append({"role": "tool", "tool_call_id": "split_a", "name": "x", "content": "ok"})
+    session.messages.append({"role": "tool", "tool_call_id": "split_b", "name": "y", "content": "ok"})
+    session.messages.append({"role": "user", "content": "next"})
+    session.messages.extend(_tool_turn("intact", 0))
+    session.messages.append({"role": "assistant", "content": "final"})
+
+    # Window of 6 should cut off the "setup" user msg and the assistant with split_a/split_b,
+    # leaving orphan tool results for split_a at the front.
+    history = session.get_history(max_messages=6)
+    _assert_no_orphans(history)
+    assert history[0]["role"] == "user"
+
+
+# --- Image breadcrumbs: media kwarg is synthesized into content for replay ---
+
+
+def test_get_history_synthesizes_image_breadcrumb_from_media_kwarg():
+    """Persisted user turns carry image paths as a ``media`` kwarg; LLM
+    replay must still see an ``[image: path]`` breadcrumb so the assistant's
+    follow-up reply has a referent instead of trailing an empty user row."""
+    session = Session(key="test:media")
+    session.messages.append(
+        {"role": "user", "content": "look", "media": ["/m/a.png", "/m/b.png"]}
+    )
+    session.messages.append({"role": "assistant", "content": "nice"})
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [
+        {"role": "user", "content": "look\n[image: /m/a.png]\n[image: /m/b.png]"},
+        {"role": "assistant", "content": "nice"},
+    ]
+
+
+def test_get_history_synthesizes_breadcrumb_for_image_only_turn():
+    """Turns with no text but attached images must not replay as empty
+    strings — the LLM would otherwise see a bare user turn followed by an
+    unexplained assistant answer."""
+    session = Session(key="test:image-only")
+    session.messages.append({"role": "user", "content": "", "media": ["/m/pic.png"]})
+    session.messages.append({"role": "assistant", "content": "I see a cat"})
+
+    history = session.get_history(max_messages=500)
+
+    assert history[0] == {"role": "user", "content": "[image: /m/pic.png]"}
+
+
+def test_get_history_synthesizes_cli_app_attachment_breadcrumb():
+    session = Session(key="test:cli-app")
+    session.messages.append(
+        {
+            "role": "user",
+            "content": "please use @drawio",
+            "cli_apps": [{
+                "name": "drawio",
+                "entry_point": "cli-anything-drawio",
+            }],
+        }
+    )
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [{
+        "role": "user",
+        "content": (
+            "please use @drawio\n"
+            "[CLI App Attachment: @drawio; tool=run_cli_app; "
+            "entry_point=cli-anything-drawio; skill=skills/cli-app-drawio/SKILL.md]"
+        ),
+    }]
+
+
+def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
+    content, marker = append_runtime_context(
+        "please use @drawio",
+        [RuntimeContextBlock(
+            source="cli_apps",
+            content="[Runtime Context]\nCLI App Attachment: @drawio",
+        )],
+    )
+    session = Session(key="test:cli-app-persisted")
+    session.messages.append({
+        "role": "user",
+        "content": content,
+        "cli_apps": [{
+            "name": "drawio",
+            "entry_point": "cli-anything-drawio",
+        }],
+        RUNTIME_CONTEXT_HISTORY_META: marker,
+    })
+
+    model_history = session.get_history(max_messages=500)
+    public_history = session.get_history(
+        max_messages=500,
+        include_runtime_context=False,
+    )
+
+    assert model_history == [{"role": "user", "content": content}]
+    assert model_history[0]["content"].count("CLI App Attachment: @drawio") == 1
+    assert public_history == [{"role": "user", "content": "please use @drawio"}]
+
+
+def test_public_history_omits_cli_app_breadcrumb():
+    session = Session(key="test:legacy-capabilities")
+    session.messages.append({
+        "role": "user",
+        "content": "please use the attachments",
+        "cli_apps": [{"name": "drawio", "entry_point": "cli-anything-drawio"}],
+    })
+
+    public_history = session.get_history(
+        max_messages=500,
+        include_runtime_context=False,
+    )
+
+    assert public_history == [{
+        "role": "user",
+        "content": "please use the attachments",
+    }]
+
+
+def test_fork_session_before_user_index_copies_only_prefix(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.metadata["webui"] = True
+    source.metadata["title"] = "Old title"
+    source.metadata["goal_state"] = {"status": "active", "objective": "do not inherit"}
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "round2 fork me")
+    source.add_message("assistant", "answer2")
+    source.add_message("user", "round3 must not appear")
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
+    assert forked.metadata["webui"] is True
+    assert "title" not in forked.metadata
+    assert "goal_state" not in forked.metadata
+    saved = manager.read_session_file("websocket:fork")
+    assert [m["content"] for m in saved["messages"]] == ["round1", "answer1"]
+
+
+def test_fork_session_drops_source_runtime_context(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    content, marker = append_runtime_context(
+        "round1",
+        [
+            RuntimeContextBlock(source="goal", content="host-only goal guidance"),
+            RuntimeContextBlock(source="cli_apps", content="attached CLI App context"),
+        ],
+    )
+    source.add_message(
+        "user",
+        content,
+        cli_apps=[{"name": "drawio", "entry_point": "cli-anything-drawio"}],
+        **{RUNTIME_CONTEXT_HISTORY_META: marker},
+    )
+    source.add_message("assistant", "answer1")
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert forked.messages[0]["content"] == "round1"
+    assert RUNTIME_CONTEXT_HISTORY_META not in forked.messages[0]
+    model_content = forked.get_history()[0]["content"]
+    assert model_content.startswith("round1")
+    assert "CLI App Attachment: @drawio" in model_content
+    assert "host-only goal guidance" not in model_content
+
+
+def test_fork_session_rejects_negative_missing_and_out_of_range(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.add_message("user", "round1")
+    manager.save(source)
+
+    assert manager.fork_session_before_user_index("websocket:source", "websocket:x", -1) is None
+    assert manager.fork_session_before_user_index("websocket:missing", "websocket:x", 0) is None
+    assert manager.fork_session_before_user_index("websocket:source", "websocket:x", 2) is None
+
+
+def test_fork_session_allows_index_equal_to_user_count(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
+
+
+def test_fork_session_user_index_ignores_hidden_checkpoint_anchor(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.add_message("user", "round1")
+    source.add_message("assistant", "answer1")
+    source.add_message("user", "round2")
+    source.add_message(
+        "user",
+        SUMMARY_CONTINUATION_TEXT,
+        **{HIDDEN_HISTORY_META: True},
+    )
+    source.add_message("assistant", "answer2")
+    source.last_archived = 3
+    source.metadata["_last_summary"] = {"text": "round1 and round2"}
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        2,
+    )
+
+    assert forked is not None
+    assert [message["content"] for message in forked.messages] == [
+        "round1",
+        "answer1",
+        "round2",
+        SUMMARY_CONTINUATION_TEXT,
+        "answer2",
+    ]
+    assert forked.last_archived == 3
+    assert forked.metadata["_last_summary"]["text"] == "round1 and round2"
+
+
+def test_fork_session_drops_summary_when_fork_point_is_inside_archived_prefix(tmp_path):
+    manager = SessionManager(tmp_path)
+    source = manager.get_or_create("websocket:source")
+    source.messages = [
+        {"role": "user", "content": "round1"},
+        {"role": "assistant", "content": "answer1"},
+        {"role": "user", "content": "round2 fork me"},
+        {"role": "assistant", "content": "answer2"},
+    ]
+    source.last_archived = 4
+    source.metadata["_last_summary"] = {"text": "round2 fork me and answer2"}
+    manager.save(source)
+
+    forked = manager.fork_session_before_user_index(
+        "websocket:source",
+        "websocket:fork",
+        1,
+    )
+
+    assert forked is not None
+    assert [m["content"] for m in forked.messages] == ["round1", "answer1"]
+    assert forked.last_archived == 0
+    assert "_last_summary" not in forked.metadata
+
+
+def test_get_history_ignores_media_kwarg_on_non_user_rows():
+    """``media`` only ever appears on user entries in practice, but the
+    synthesizer must be defensive: assistants / tools with list content
+    don't get the breadcrumb pasted on top."""
+    session = Session(key="test:defensive")
+    session.messages.append(
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "structured"}],
+            "media": ["/m/x.png"],  # nonsense but shouldn't crash
+        }
+    )
+    history = session.get_history(max_messages=500)
+    # List content is passed through verbatim — the synthesizer only
+    # rewrites plain-string content.
+    assert history[0]["content"] == [{"type": "text", "text": "structured"}]
+
+
+def test_get_history_does_not_paste_assistant_media_paths_into_replay():
+    session = Session(key="test:assistant-media")
+    session.messages.append(
+        {
+            "role": "assistant",
+            "content": "来了 🎨",
+            "media": ["/home/user/.nanobot/media/generated/img_abc.png"],
+        }
+    )
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [{"role": "assistant", "content": "来了 🎨"}]
+
+
+def test_get_history_sanitizes_existing_assistant_replay_artifacts():
+    session = Session(key="test:polluted-assistant")
+    session.messages.append(
+        {
+            "role": "assistant",
+            "content": (
+                "[Message Time: 2026-05-09 00:33:48]\n"
+                "来了 🎨\n"
+                "[image: /home/user/.nanobot/media/generated/img_old.png]\n\n"
+                "generate_image(\"16:9\")\n"
+                "message(\"来了 🎨\")"
+            ),
+        }
+    )
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [{"role": "assistant", "content": "来了 🎨"}]
+
+
+def test_get_history_respects_max_tokens(monkeypatch):
+    session = Session(key="test:token-cap")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "u3"},
+            {"role": "assistant", "content": "a3"},
+        ]
+    )
+
+    token_map = {"u1": 50, "a1": 50, "u2": 50, "a2": 50, "u3": 50, "a3": 50}
+    monkeypatch.setattr(
+        "nanobot.session.manager.estimate_message_tokens",
+        lambda message: token_map.get(message.get("content"), 0),
+    )
+
+    history = session.get_history(max_messages=500, max_tokens=120)
+    assert [m["content"] for m in history] == ["u3", "a3"]
+
+
+def test_get_history_recovers_user_when_token_slice_would_be_assistant_only(monkeypatch):
+    session = Session(key="test:assistant-only-slice")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+        ]
+    )
+    token_map = {"u1": 100, "a1": 100, "u2": 100, "a2": 100}
+    monkeypatch.setattr(
+        "nanobot.session.manager.estimate_message_tokens",
+        lambda message: token_map.get(message.get("content"), 0),
+    )
+
+    history = session.get_history(max_messages=500, max_tokens=100)
+    assert [m["content"] for m in history] == ["u2", "a2"]
+
+
+def test_get_history_can_extend_to_user_for_long_recent_turn():
+    session = Session(key="test:history-extend-to-user")
+    session.messages.append({"role": "user", "content": "old"})
+    session.messages.append({"role": "assistant", "content": "old answer"})
+    session.messages.append({"role": "user", "content": "record this"})
+    for i in range(4):
+        session.messages.extend(_tool_turn("recent", i))
+    session.messages.append({"role": "assistant", "content": "done"})
+
+    hard_capped = session.get_history(max_messages=8)
+    extended = session.get_history(max_messages=8, extend_to_user=True)
+
+    assert len(hard_capped) <= 8
+    assert len(extended) > 8
+    assert extended[0]["content"] == "record this"
+    assert extended[-1]["content"] == "done"
+    _assert_no_orphans(extended)
+
+
+def test_get_history_extend_to_user_keeps_newer_user_inside_window():
+    session = Session(key="test:history-extend-newer-user")
+    session.messages.append({"role": "user", "content": "old"})
+    session.messages.append({"role": "assistant", "content": "old answer"})
+    session.messages.append({"role": "user", "content": "long older turn"})
+    for i in range(8):
+        session.messages.extend(_tool_turn("older", i))
+    session.messages.append({"role": "assistant", "content": "older final"})
+    session.messages.append({"role": "user", "content": "new question"})
+    session.messages.append({"role": "assistant", "content": "new answer"})
+
+    history = session.get_history(max_messages=6, extend_to_user=True)
+
+    assert [m["content"] for m in history] == ["new question", "new answer"]
+    _assert_no_orphans(history)

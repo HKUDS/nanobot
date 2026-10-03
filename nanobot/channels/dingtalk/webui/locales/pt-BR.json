@@ -1,0 +1,44 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guia do DingTalk",
+    "officialLabel": "Abrir console do DingTalk",
+    "fields": {
+      "clientId": {
+        "label": "Client ID",
+        "placeholder": "Client ID do DingTalk"
+      },
+      "clientSecret": {
+        "label": "Client Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Usuários permitidos",
+        "placeholder": "IDs de usuário separados por vírgulas"
+      },
+      "allowRemoteMediaRedirects": {
+        "label": "Permitir redirecionamentos de mídia",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "remoteMediaRedirectAllowedHosts": {
+        "label": "Hosts de redirecionamento de mídia"
+      },
+      "groupUserIsolation": {
+        "label": "Sessões de grupo separadas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "disablePrivateChat": {
+        "label": "Desativar mensagens diretas",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      }
+    }
+  }
+}

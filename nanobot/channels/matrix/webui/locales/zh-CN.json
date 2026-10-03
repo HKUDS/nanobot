@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "docsLabel": "打开 Matrix 配置指南",
+    "officialLabel": "打开 Matrix 客户端列表",
+    "fields": {
+      "homeserver": {
+        "label": "账户服务器",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "用户 ID",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "密码",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "访问令牌",
+        "placeholder": "输入访问令牌"
+      },
+      "deviceId": {
+        "label": "设备 ID",
+        "placeholder": "使用访问令牌时必填"
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "allowFrom": {
+        "label": "允许的用户"
+      },
+      "e2eeEnabled": {
+        "label": "端到端加密",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 验证",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "同步停止等待时间"
+      },
+      "maxMediaBytes": {
+        "label": "媒体大小上限"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "并发媒体下载数"
+      },
+      "groupAllowFrom": {
+        "label": "允许的群组"
+      },
+      "allowRoomMentions": {
+        "label": "响应房间提及",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "streaming": {
+        "label": "流式输出",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "proxy": {
+        "label": "网络代理",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}

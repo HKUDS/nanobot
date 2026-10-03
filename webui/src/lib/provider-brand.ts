@@ -1,0 +1,288 @@
+import anthropicLogo from "@/assets/providers/anthropic.svg";
+import deepseekLogo from "@/assets/providers/deepseek-color.svg";
+import geminiLogo from "@/assets/providers/gemini-color.svg";
+import openaiLogo from "@/assets/providers/openai.svg";
+
+export interface ProviderBrand {
+  logoUrl: string;
+  logoUrls: string[];
+  color: string;
+  initials: string;
+  /** The primary asset already includes its own background and safe area. */
+  logoLayout?: "tile";
+}
+
+function officialFaviconUrl(domain: string): string {
+  return `https://${domain}/favicon.ico`;
+}
+
+function duckDuckGoFaviconUrl(domain: string): string {
+  return `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`;
+}
+
+function googleFaviconUrl(domain: string): string {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+}
+
+function faviconImUrl(domain: string): string {
+  return `https://favicon.im/${encodeURIComponent(domain)}?larger=true`;
+}
+
+export function faviconUrls(domain: string): string[] {
+  const faviconDomain = faviconDomainFromValue(domain);
+  return [
+    officialFaviconUrl(faviconDomain),
+    duckDuckGoFaviconUrl(faviconDomain),
+    googleFaviconUrl(domain),
+  ];
+}
+
+/**
+ * Cross-origin page favicons commonly opt into same-origin resource policy.
+ * Prefer image proxies for arbitrary links while retaining the official icon
+ * as a final fallback. Explicit first-party brand assets remain first when a
+ * provider supplies them.
+ */
+export function browserSafeFaviconUrls(domain: string): string[] {
+  const faviconDomain = faviconDomainFromValue(domain);
+  return [
+    faviconImUrl(faviconDomain),
+    googleFaviconUrl(domain),
+    duckDuckGoFaviconUrl(faviconDomain),
+    officialFaviconUrl(faviconDomain),
+  ];
+}
+
+function brand(
+  domain: string,
+  color: string,
+  initials: string,
+  logoOverrides: string[] = [],
+): ProviderBrand {
+  const logoUrls = [...logoOverrides];
+  browserSafeFaviconUrls(domain).forEach((url) => addUniqueLogoUrl(logoUrls, url));
+  return {
+    logoUrl: logoUrls[0],
+    logoUrls,
+    color,
+    initials,
+  };
+}
+
+function addUniqueLogoUrl(urls: string[], url: string | null | undefined): void {
+  const value = url?.trim();
+  if (value && !urls.includes(value)) urls.push(value);
+}
+
+function domainFromLogoUrl(url: string): string | null {
+  if (url.startsWith("/")) return null;
+  try {
+    const parsed = new URL(url);
+    if (!/^https?:$/.test(parsed.protocol)) return null;
+    const host = parsed.hostname.toLowerCase();
+    if (host === "www.google.com" || host === "google.com") {
+      return parsed.searchParams.get("domain");
+    }
+    if (host === "icons.duckduckgo.com") {
+      const match = parsed.pathname.match(/^\/ip3\/(.+)\.ico$/);
+      return match ? decodeURIComponent(match[1]) : null;
+    }
+    if (host === "favicon.im") {
+      return decodeURIComponent(parsed.pathname.replace(/^\//, "")) || null;
+    }
+    return host.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A repository favicon identifies the hosting service, not the app itself.
+ * Apps backed by GitHub repositories should keep their distinct initials
+ * instead of appearing to share one GitHub identity.
+ */
+export function isGenericRepositoryLogoUrl(logoUrl: string | null | undefined): boolean {
+  const value = logoUrl?.trim();
+  if (!value) return false;
+  const domain = domainFromLogoUrl(value)?.toLowerCase();
+  return domain === "github.com" || domain?.startsWith("github.com/") === true;
+}
+
+function faviconDomainFromValue(value: string): string {
+  const host = value.split("/")[0]?.trim();
+  return host || value;
+}
+
+export function logoFallbackUrls(logoUrl: string | null | undefined): string[] {
+  const value = logoUrl?.trim();
+  if (!value) return [];
+  if (value.startsWith("/")) return [value];
+
+  const urls: string[] = [];
+  const domain = domainFromLogoUrl(value);
+  const isFaviconProxy = /^(https?:\/\/)?(www\.google\.com|google\.com|icons\.duckduckgo\.com)\//i.test(value);
+  if (domain && isFaviconProxy) {
+    addUniqueLogoUrl(urls, value);
+    faviconUrls(domain).forEach((url) => addUniqueLogoUrl(urls, url));
+    return urls;
+  }
+  addUniqueLogoUrl(urls, value);
+  if (domain) faviconUrls(domain).forEach((url) => addUniqueLogoUrl(urls, url));
+  return urls;
+}
+
+const PROVIDER_BRAND_ALIASES: Record<string, string> = {
+  brave_search: "brave",
+  byteplus_coding_plan: "byteplus",
+  mimo: "xiaomi_mimo",
+  minimaxAnthropic: "minimax",
+  minimax_anthropic: "minimax",
+  openai_codex: "openai",
+  opencode_zen: "opencode",
+  opencode_go: "opencode",
+  "xai-grok": "xai",
+  xai_grok: "xai",
+  xiaomi: "xiaomi_mimo",
+  volcengine_coding_plan: "volcengine",
+};
+
+const PROVIDER_LABEL_ALIASES: Record<string, string> = {
+  brave_search: "Brave Search",
+  byteplus_coding_plan: "BytePlus",
+  minimaxAnthropic: "MiniMax",
+  minimax_anthropic: "MiniMax",
+  openai_codex: "OpenAI",
+  "xai-grok": "xAI",
+  xai_grok: "xAI",
+  volcengine_coding_plan: "Volcengine",
+};
+
+const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
+  aihubmix: { ...brand("aihubmix.com", "#111827", "AH"), logoLayout: "tile" },
+  ant_ling: brand("ant-ling.com", "#7C3AED", "AL"),
+  anthropic: brand("anthropic.com", "#D97757", "A", [anthropicLogo]),
+  assemblyai: brand("assemblyai.com", "#111827", "AA"),
+  atomic_chat: brand("atomic.chat", "#111827", "AC"),
+  azure_openai: brand("azure.microsoft.com", "#0078D4", "AZ"),
+  bedrock: { ...brand("aws.amazon.com", "#FF9900", "AWS"), logoLayout: "tile" },
+  bocha: brand("bochaai.com", "#2563EB", "B"),
+  brave: brand("brave.com", "#FB542B", "B"),
+  byteplus: brand("byteplus.com", "#325CFF", "BP"),
+  dashscope: brand("dashscope.aliyun.com", "#FF6A00", "DS"),
+  deepseek: brand("deepseek.com", "#4D6BFE", "DS", [deepseekLogo]),
+  duckduckgo: brand("duckduckgo.com", "#DE5833", "DDG"),
+  edenai: brand("edenai.co", "#080F35", "EA", [
+    "https://cdn.prod.website-files.com/61e7d259b7746e2d1df0b68d/6a63231f5c459827c2d18d7a_eden%20ai%20logo%20light.png",
+  ]),
+  exa: { ...brand("exa.ai", "#5B5BF6", "E"), logoLayout: "tile" },
+  gemini: brand("gemini.google.com", "#4285F4", "G", [geminiLogo]),
+  github_copilot: brand("github.com", "#24292F", "GH", [
+    "https://raw.githubusercontent.com/primer/octicons/main/icons/copilot-24.svg",
+  ]),
+  groq: {
+    ...brand("groq.com", "#F55036", "GQ", ["https://groq.com/favicon.svg"]),
+    logoLayout: "tile",
+  },
+  huggingface: brand("huggingface.co", "#FF9D00", "HF"),
+  jina: brand("jina.ai", "#7C3AED", "J"),
+  kagi: brand("kagi.com", "#FFB319", "K"),
+  keenable: brand("keenable.ai", "#0EA5E9", "K"),
+  kimi_coding: brand("kimi.com", "#1783FF", "K", [
+    "https://raw.githubusercontent.com/MoonshotAI/Branding-Guide/main/scenarios/04-k-only/k-only-light.svg",
+  ]),
+  lm_studio: { ...brand("lmstudio.ai", "#111827", "LM"), logoLayout: "tile" },
+  longcat: brand("longcat.ai", "#4F8CFF", "LC", [
+    "https://s3plus.meituan.net/aigc-media-resources/longcat/yeqian-logo.svg",
+  ]),
+  minimax: { ...brand("minimax.io", "#111827", "MM"), logoLayout: "tile" },
+  mistral: brand("mistral.ai", "#FA520F", "M"),
+  modelscope: { ...brand("modelscope.cn", "#5B5BF6", "MS"), logoLayout: "tile" },
+  moonshot: {
+    ...brand("moonshot.ai", "#111827", "MS", [
+      "https://statics.kimi.ai/moonshot-ai/favicon.ico",
+    ]),
+    logoLayout: "tile",
+  },
+  novita: brand("novita.ai", "#7C3AED", "N"),
+  olostep: { ...brand("olostep.com", "#111827", "O"), logoLayout: "tile" },
+  nvidia: brand("nvidia.com", "#76B900", "NV"),
+  ollama: brand("ollama.com", "#111827", "O"),
+  openai: brand("openai.com", "#111827", "AI", [openaiLogo]),
+  opencode: brand("opencode.ai", "#111827", "OC", [
+    "https://opencode.ai/favicon-96x96-v3.png",
+  ]),
+  openrouter: brand("openrouter.ai", "#111827", "OR", [
+    "https://openrouter.ai/brand/logos/transparent/glyph/svg/glyph-grape.svg",
+  ]),
+  orcarouter: brand("orcarouter.ai", "#111827", "OR"),
+  ovms: brand("openvino.ai", "#0071C5", "OV"),
+  qianfan: brand("cloud.baidu.com", "#2932E1", "QF"),
+  // Its landing page redirects without an icon; favicon proxies return their own placeholder.
+  searxng: {
+    logoUrl: "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.svg",
+    logoUrls: [
+      "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.svg",
+      "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.png",
+    ],
+    color: "#3050FF",
+    initials: "SX",
+  },
+  siliconflow: brand("siliconflow.cn", "#111827", "SF"),
+  skywork: brand("skywork.ai", "#5B5BF6", "SW"),
+  stepfun: brand("stepfun.com", "#2F6BFF", "SF", [
+    "https://www.stepfun.com/step_favicon.svg",
+  ]),
+  tavily: { ...brand("tavily.com", "#111827", "T"), logoLayout: "tile" },
+  volcengine: brand("volcengine.com", "#1664FF", "VE"),
+  vllm: brand("vllm.ai", "#2563EB", "VL"),
+  xiaomi_mimo: {
+    ...brand("mimo.xiaomi.com", "#FF6900", "MI", [
+      "https://cdn.cnbj1.fds.api.mi-img.com/aife/mimo-blog-fe/doc_build/mimo.ico",
+    ]),
+    logoLayout: "tile",
+  },
+  xai: brand("x.ai", "#111827", "xAI"),
+  zhipu: {
+    ...brand("z.ai", "#155EEF", "Z", [
+      "https://mintcdn.com/zhipu-32152247/B_E8wI-eiNa1QlPV/logo/dark.svg",
+      "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+      "https://www.google.com/s2/favicons?domain=z.ai&sz=64",
+    ]),
+    logoLayout: "tile",
+  },
+};
+
+export function providerBrand(provider: string | null | undefined): ProviderBrand | null {
+  if (!provider) return null;
+  const key = PROVIDER_BRAND_ALIASES[provider] ?? provider;
+  return PROVIDER_BRANDS[key] ?? null;
+}
+
+export function providerDisplayLabel(
+  providers: Array<{ name: string; label: string }>,
+  value: string | null | undefined,
+): string {
+  if (!value) return "";
+  return providers.find((provider) => provider.name === value)?.label
+    ?? PROVIDER_LABEL_ALIASES[value]
+    ?? value;
+}
+
+export function inferProviderFromModelName(modelName: string | null | undefined): string | null {
+  const normalized = (modelName ?? "").trim().toLowerCase();
+  if (!normalized) return null;
+  const prefix = normalized.split(/[/:]/)[0];
+  if (providerBrand(prefix)) return prefix;
+  if (/claude|anthropic/.test(normalized)) return "anthropic";
+  if (/gpt-|^o\d|chatgpt|openai/.test(normalized)) return "openai";
+  if (/deepseek/.test(normalized)) return "deepseek";
+  if (/gemini/.test(normalized)) return "gemini";
+  if (/modelscope/.test(normalized)) return "modelscope";
+  if (/qwen|dashscope/.test(normalized)) return "dashscope";
+  if (/kimi|moonshot/.test(normalized)) return "moonshot";
+  if (/minimax/.test(normalized)) return "minimax";
+  if (/mistral|mixtral/.test(normalized)) return "mistral";
+  if (/skywork|skyclaw/.test(normalized)) return "skywork";
+  if (/ring-/.test(normalized)) return "ant_ling";
+  return null;
+}

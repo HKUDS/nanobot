@@ -1,0 +1,23 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guía de WeCom",
+    "officialLabel": "Abrir consola de WeCom",
+    "fields": {
+      "botId": {
+        "label": "Bot ID",
+        "placeholder": "Bot ID de WeCom"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Usuarios permitidos",
+        "placeholder": "ID de usuario separados por comas"
+      },
+      "welcomeMessage": {
+        "label": "Mensaje de bienvenida"
+      }
+    }
+  }
+}

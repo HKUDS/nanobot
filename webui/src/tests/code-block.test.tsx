@@ -1,0 +1,350 @@
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { CodeBlock } from "@/components/CodeBlock";
+import { ThemeProvider } from "@/hooks/useTheme";
+
+const mockedStyles = vi.hoisted(() => ({
+  dark: { pre: { background: "#111" } },
+  light: { pre: { background: "#fff" } },
+}));
+
+vi.mock("react-syntax-highlighter/dist/esm/prism-async-light", () => ({
+  default: ({
+    children,
+    language,
+    style,
+    customStyle,
+  }: {
+    children: string;
+    language?: string;
+    style: Record<string, unknown>;
+    customStyle?: React.CSSProperties;
+  }) => (
+    <pre
+      data-testid="highlighted-code"
+      data-language={language}
+      data-theme={style === mockedStyles.dark ? "dark" : "light"}
+      style={customStyle}
+    >
+      <code>{children}</code>
+    </pre>
+  ),
+}));
+
+vi.mock("react-syntax-highlighter/dist/esm/styles/prism/one-dark", () => ({
+  default: mockedStyles.dark,
+}));
+
+vi.mock("react-syntax-highlighter/dist/esm/styles/prism/one-light", () => ({
+  default: mockedStyles.light,
+}));
+
+describe("CodeBlock", () => {
+  it("renders and copies a large code block in full without pagination", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const source = Array.from({ length: 1200 }, (_, i) => `const value${i} = ${i};`).join("\n");
+
+    try {
+      render(<CodeBlock code={source} language="typescript" showLineNumbers />);
+      expect((await screen.findByTestId("highlighted-code")).textContent).toBe(source);
+      expect(screen.getAllByRole("button")).toHaveLength(1);
+      await user.click(screen.getByRole("button", { name: "Copy code" }));
+      expect(writeText).toHaveBeenCalledWith(source);
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("renders long plain text with Unicode in full", () => {
+    const source = "x".repeat(23999) + "😀tail";
+    render(<CodeBlock code={source} highlight={false} />);
+    expect(screen.getByTestId("plain-code-fallback").textContent).toBe(source);
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
+  it.each([
+    ["many lines", "x\n".repeat(60_000)],
+    ["many short lines", "\n".repeat(2_000)],
+    ["a minified line", "x".repeat(2_001) + "😀tail"],
+  ])("keeps an oversized file preview (%s) complete without a huge token/line DOM", (_name, code) => {
+    const { container } = render(<CodeBlock code={code} language="html" chrome="none"
+      showLineNumbers wrapLongLines={false} viewportHighlight />);
+    expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
+    expect(screen.getByTestId("plain-code-fallback").querySelector("code > span > span:last-child")?.textContent).toBe(code);
+    expect(container.querySelectorAll("*").length).toBeLessThan(10);
+  });
+
+  it("paints large preview text before enhancing it, and cancels enhancement on unmount", async () => {
+    const callbacks = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => {
+      callbacks.set(++next, callback);
+      return next;
+    });
+    const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(id => { callbacks.delete(id); });
+    const code = "const value = 1;\n".repeat(600);
+    try {
+      const { unmount } = render(<CodeBlock code={code} language="ts" chrome="none"
+        showLineNumbers wrapLongLines={false} viewportHighlight />);
+      expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
+      expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
+      expect(screen.getByTestId("plain-code-fallback")).toHaveClass("overflow-visible");
+      expect(screen.getByTestId("plain-code-fallback").parentElement).toHaveClass("overflow-visible");
+      // Clicking a tab can clear a previous selection. That browser event must
+      // not bypass the initial paint opportunity reserved for the new tab.
+      await act(async () => { document.dispatchEvent(new Event("selectionchange")); });
+      expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
+      await act(async () => { callbacks.get(1)?.(0); });
+      expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
+      await act(async () => { document.dispatchEvent(new Event("selectionchange")); });
+      expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
+      const selection = document.getSelection()!;
+      const range = document.createRange();
+      range.selectNodeContents(screen.getByTestId("plain-code-fallback"));
+      act(() => selection.addRange(range));
+      await act(async () => { callbacks.get(2)?.(16); });
+      expect(screen.getByTestId("plain-code-fallback")).toBeInTheDocument();
+      await act(async () => { selection.removeAllRanges(); document.dispatchEvent(new Event("selectionchange")); });
+      expect(await screen.findByTestId("highlighted-code")).toBeInTheDocument();
+      expect(screen.getByTestId("highlighted-code")).toHaveStyle({ overflow: "visible" });
+      unmount();
+      expect(cancel).toHaveBeenCalledWith(2);
+      const second = render(<CodeBlock code={code} language="ts" chrome="none"
+        showLineNumbers wrapLongLines={false} viewportHighlight />);
+      const pending = next;
+      second.unmount();
+      expect(callbacks.has(pending)).toBe(false);
+    } finally {
+      raf.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
+  it("renders plain code without mounting the highlighter when highlighting is disabled", () => {
+    render(
+      <ThemeProvider theme="dark">
+        <CodeBlock language="ts" code="const value = 1;" highlight={false} />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
+    expect(screen.getByText("const value = 1;")).toBeInTheDocument();
+    expect(screen.queryByText("ts")).not.toBeInTheDocument();
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("text-foreground/90");
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("bg-transparent");
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("py-4", "pl-5", "pr-14");
+
+    const container = screen.getByTestId("plain-code-fallback").closest(".not-prose");
+    expect(container).toHaveClass("relative", "rounded-floating", "bg-secondary/70");
+    expect(container).not.toHaveClass("border");
+    expect(container).toHaveAttribute("data-language", "ts");
+
+    const copyButton = screen.getByRole("button", { name: "Copy code" });
+    expect(copyButton.parentElement).toBe(container);
+    expect(copyButton).toHaveClass("absolute", "h-8", "w-8", "rounded-full");
+    expect(copyButton).toHaveTextContent("");
+  });
+
+  it("can render without chat-style chrome for file previews", () => {
+    render(
+      <ThemeProvider theme="light">
+        <CodeBlock
+          language="html"
+          code="<main />"
+          chrome="none"
+          highlight={false}
+          showLineNumbers
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByText("html")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copy/i })).not.toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByTestId("plain-code-fallback")).toHaveClass("bg-transparent");
+  });
+
+  it("falls back to 'text' language when language is undefined", async () => {
+    render(
+      <ThemeProvider theme="dark">
+        <CodeBlock language={undefined} code="const value = 1;" />
+      </ThemeProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("highlighted-code")).toBeInTheDocument();
+    expect(screen.getByTestId("highlighted-code")).toHaveAttribute("data-language", "text");
+    expect(screen.getByText("const value = 1;")).toBeInTheDocument();
+  });
+
+  it("normalizes file language aliases before loading Prism", async () => {
+    render(
+      <ThemeProvider theme="light">
+        <CodeBlock language="html" code="<main />" />
+      </ThemeProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("highlighted-code")).toHaveAttribute("data-language", "markup");
+  });
+
+  it("renders ANSI output without mounting the syntax highlighter", () => {
+    render(
+      <ThemeProvider theme="dark">
+        <CodeBlock
+          language="ansi"
+          code={"\x1b[32mPASS\x1b[0m <script>alert(1)</script>"}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ansi-code")).toBeInTheDocument();
+    expect(screen.getByTestId("ansi-code").closest(".not-prose")).toHaveAttribute(
+      "data-language",
+      "ansi",
+    );
+    expect(screen.queryByText("ansi")).not.toBeInTheDocument();
+    expect(screen.getByText("PASS")).toHaveStyle({ color: "#0dbc79" });
+    expect(screen.getByText("<script>alert(1)</script>")).toBeInTheDocument();
+    expect(document.querySelector("script")).toBeNull();
+  });
+
+  it("detects ANSI sequences in regular code blocks", () => {
+    render(
+      <ThemeProvider theme="light">
+        <CodeBlock
+          language="text"
+          code={"\x1b[38;2;35;209;139mtruecolor\x1b[0m"}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
+    expect(screen.getByText("truecolor")).toHaveStyle({
+      color: "rgb(35, 209, 139)",
+    });
+  });
+
+  it("copies ANSI output as clean text", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(
+        <ThemeProvider theme="dark">
+          <CodeBlock language="ansi" code={"\x1b[32mPASS\x1b[0m"} />
+        </ThemeProvider>,
+      );
+
+      await user.click(screen.getByRole("button", { name: /copy/i }));
+
+      expect(writeText).toHaveBeenCalledWith("PASS");
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("copies with the textarea fallback when Clipboard API is unavailable", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
+    });
+
+    try {
+      render(
+        <ThemeProvider theme="dark">
+          <CodeBlock language="ts" code="const value = 1;" highlight={false} />
+        </ThemeProvider>,
+      );
+
+      await user.click(screen.getByRole("button", { name: /copy/i }));
+
+      await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+      Reflect.deleteProperty(document, "execCommand");
+    }
+  });
+
+  it("reads theme from context without creating per-block observers", async () => {
+    const originalMutationObserver = globalThis.MutationObserver;
+    const observer = vi.fn();
+    class MockMutationObserver {
+      constructor(callback: MutationCallback) {
+        observer(callback);
+      }
+
+      observe = vi.fn();
+
+      disconnect = vi.fn();
+
+      takeRecords() {
+        return [];
+      }
+    }
+    vi.stubGlobal("MutationObserver", MockMutationObserver);
+
+    try {
+      const { rerender } = render(
+        <ThemeProvider theme="dark">
+          <CodeBlock language="ts" code="const value = 1;" />
+        </ThemeProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId("highlighted-code")).toHaveAttribute(
+        "data-theme",
+        "dark",
+      );
+
+      rerender(
+        <ThemeProvider theme="light">
+          <CodeBlock language="ts" code="const value = 1;" />
+        </ThemeProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId("highlighted-code")).toHaveAttribute(
+        "data-theme",
+        "light",
+      );
+      expect(observer).not.toHaveBeenCalled();
+    } finally {
+      vi.stubGlobal("MutationObserver", originalMutationObserver);
+    }
+  });
+});

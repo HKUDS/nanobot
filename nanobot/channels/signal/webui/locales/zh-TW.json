@@ -1,0 +1,69 @@
+{
+  "setup": {
+    "docsLabel": "開啟 Signal 設定指南",
+    "officialLabel": "開啟 signal-cli 指南",
+    "fields": {
+      "phoneNumber": {
+        "label": "電話號碼",
+        "placeholder": "+1234567890"
+      },
+      "daemonHost": {
+        "label": "服務主機",
+        "placeholder": "localhost"
+      },
+      "daemonPort": {
+        "label": "服務連接埠",
+        "placeholder": "8080"
+      },
+      "dm_allowFrom": {
+        "label": "允許傳送私訊的使用者",
+        "placeholder": "電話號碼或 UUID"
+      },
+      "group_allowFrom": {
+        "label": "允許的群組",
+        "placeholder": "群組 ID"
+      },
+      "groupMessageBufferSize": {
+        "label": "群組上下文訊息數"
+      },
+      "attachmentsDir": {
+        "label": "附件目錄"
+      },
+      "dm_enabled": {
+        "label": "啟用私聊",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "dm_policy": {
+        "label": "私聊權限",
+        "choices": {
+          "allowlist": "白名單",
+          "open": "全部"
+        }
+      },
+      "group_enabled": {
+        "label": "啟用群組",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "group_policy": {
+        "label": "群組權限",
+        "choices": {
+          "allowlist": "白名單",
+          "open": "全部"
+        }
+      },
+      "group_requireMention": {
+        "label": "群組需要提及",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      }
+    }
+  }
+}

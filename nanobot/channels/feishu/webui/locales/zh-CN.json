@@ -1,0 +1,88 @@
+{
+  "displayName": "飞书",
+  "setup": {
+    "primaryAction": "连接飞书",
+    "docsLabel": "打开飞书配置指南",
+    "officialLabel": "打开飞书开发者后台",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "留空以保留现有密钥"
+      },
+      "domain": {
+        "label": "区域",
+        "choices": {
+          "feishu": "飞书",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "群组行为",
+        "choices": {
+          "mention": "仅提及时",
+          "open": "所有消息",
+          "allowlist": "白名单"
+        }
+      },
+      "allowFrom": {
+        "label": "允许的用户",
+        "placeholder": "用户 ID，用逗号分隔"
+      },
+      "topicIsolation": {
+        "label": "话题隔离",
+        "choices": {
+          "true": "每个话题使用独立会话",
+          "false": "群聊共用一个会话"
+        }
+      },
+      "name": {
+        "label": "账户名称"
+      },
+      "encryptKey": {
+        "label": "加密密钥"
+      },
+      "verificationToken": {
+        "label": "验证令牌"
+      },
+      "reactEmoji": {
+        "label": "已读表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "toolHintPrefix": {
+        "label": "工具提示前缀"
+      },
+      "replyToMessage": {
+        "label": "引用回复",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "streaming": {
+        "label": "流式输出",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "{{name}} 助手",
+    "configured": "已连接",
+    "needsSetup": "需要授权",
+    "qrAlt": "飞书连接二维码",
+    "scanTitle": "使用飞书扫码",
+    "scanDescription": "用手机上的飞书或 Lark 扫描二维码。授权完成后，nanobot 会自动完成配置。",
+    "waiting": "正在等待授权...",
+    "connected": "飞书已连接。",
+    "stopped": "连接已停止。",
+    "connecting": "正在连接..."
+  }
+}

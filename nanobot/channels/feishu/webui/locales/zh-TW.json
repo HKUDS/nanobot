@@ -1,0 +1,88 @@
+{
+  "displayName": "飛書",
+  "setup": {
+    "primaryAction": "連接飛書",
+    "docsLabel": "開啟飛書設定指南",
+    "officialLabel": "開啟飛書開發者後台",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "留空以保留現有金鑰"
+      },
+      "domain": {
+        "label": "區域",
+        "choices": {
+          "feishu": "飛書",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "群組行為",
+        "choices": {
+          "mention": "僅提及時",
+          "open": "所有訊息",
+          "allowlist": "允許清單"
+        }
+      },
+      "allowFrom": {
+        "label": "允許的使用者",
+        "placeholder": "使用者 ID，以逗號分隔"
+      },
+      "topicIsolation": {
+        "label": "主題隔離",
+        "choices": {
+          "true": "每個主題使用獨立工作階段",
+          "false": "群組共用一個工作階段"
+        }
+      },
+      "name": {
+        "label": "帳戶名稱"
+      },
+      "encryptKey": {
+        "label": "加密金鑰"
+      },
+      "verificationToken": {
+        "label": "驗證令牌"
+      },
+      "reactEmoji": {
+        "label": "已讀表情"
+      },
+      "doneEmoji": {
+        "label": "完成表情"
+      },
+      "toolHintPrefix": {
+        "label": "工具提示前綴"
+      },
+      "replyToMessage": {
+        "label": "引用回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "streaming": {
+        "label": "串流輸出",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "{{name}} 助手",
+    "configured": "已連接",
+    "needsSetup": "需要授權",
+    "qrAlt": "飛書連線 QR Code",
+    "scanTitle": "使用飛書掃描",
+    "scanDescription": "請使用手機上的飛書或 Lark 掃描此 QR Code。完成授權後，nanobot 會自動完成設定。",
+    "waiting": "正在等待授權…",
+    "connected": "飛書已連線。",
+    "stopped": "連線已停止。",
+    "connecting": "正在連線…"
+  }
+}

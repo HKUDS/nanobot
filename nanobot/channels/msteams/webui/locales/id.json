@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Buka panduan Teams",
+    "officialLabel": "Buka portal pengembang Teams",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "Client secret",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "Tenant ID",
+        "placeholder": "Tenant ID opsional"
+      },
+      "path": {
+        "label": "Jalur callback",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan",
+        "placeholder": "ID pengguna Teams, dipisahkan koma"
+      },
+      "host": {
+        "label": "Dengarkan tuan rumah"
+      },
+      "port": {
+        "label": "Dengarkan pelabuhan"
+      },
+      "replyInThread": {
+        "label": "Balas di thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Balasan yang hanya disebutkan saja"
+      },
+      "validateInboundAuth": {
+        "label": "Validasi permintaan masuk",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "refTtlDays": {
+        "label": "Percakapan seumur hidup"
+      },
+      "pruneWebChatRefs": {
+        "label": "Hapus percakapan Obrolan Web",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Hapus percakapan non-pribadi",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Interval penyegaran percakapan"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Host layanan tepercaya"
+      }
+    }
+  }
+}

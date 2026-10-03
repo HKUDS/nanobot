@@ -5,7 +5,9 @@ description: Schedule reminders and recurring tasks.
 
 # Cron
 
-Use the `cron` tool to schedule reminders or recurring tasks.
+Use the `cron` tool to schedule reminders or recurring tasks that should report back to the originating chat/session when they run.
+
+Do not use `cron` for periodic background checks that should stay quiet when there is nothing useful to report. For those, update `HEARTBEAT.md`; the protected heartbeat job runs those checks and only delivers results that pass the notification gate.
 
 ## Three Modes
 

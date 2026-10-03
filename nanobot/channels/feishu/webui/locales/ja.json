@@ -1,0 +1,87 @@
+{
+  "setup": {
+    "primaryAction": "Feishu に接続",
+    "docsLabel": "Feishu 設定ガイドを開く",
+    "officialLabel": "Feishu コンソールを開く",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "現在のシークレットを保持するには空欄"
+      },
+      "domain": {
+        "label": "地域",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "グループでの動作",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "すべてのメッセージ",
+          "allowlist": "許可リスト"
+        }
+      },
+      "allowFrom": {
+        "label": "許可するユーザー",
+        "placeholder": "ユーザー ID（カンマ区切り）"
+      },
+      "topicIsolation": {
+        "label": "トピック分離",
+        "choices": {
+          "true": "トピックごとにセッションを分離",
+          "false": "グループでセッションを共有"
+        }
+      },
+      "name": {
+        "label": "アカウント名"
+      },
+      "encryptKey": {
+        "label": "暗号化キー"
+      },
+      "verificationToken": {
+        "label": "検証トークン"
+      },
+      "reactEmoji": {
+        "label": "絵文字を読む"
+      },
+      "doneEmoji": {
+        "label": "完了絵文字"
+      },
+      "toolHintPrefix": {
+        "label": "ツールヒントの接頭辞"
+      },
+      "replyToMessage": {
+        "label": "メッセージに返信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "アシスタント {{name}} を有効にする",
+    "configured": "接続済み",
+    "needsSetup": "認可が必要",
+    "qrAlt": "Feishu 接続 QR コード",
+    "scanTitle": "Feishu でスキャン",
+    "scanDescription": "スマートフォンの Feishu または Lark でスキャンしてください。認可後に nanobot が設定を完了します。",
+    "waiting": "認可を待っています...",
+    "connected": "Feishu に接続しました。",
+    "stopped": "接続を停止しました。",
+    "connecting": "接続中..."
+  }
+}

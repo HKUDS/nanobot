@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "docsLabel": "Abrir guía de Matrix",
+    "officialLabel": "Abrir lista de clientes Matrix",
+    "fields": {
+      "homeserver": {
+        "label": "Servidor de la cuenta",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ID de usuario",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "Contraseña",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "Token de acceso",
+        "placeholder": "Introduce un token de acceso"
+      },
+      "deviceId": {
+        "label": "ID del dispositivo",
+        "placeholder": "Obligatorio con token"
+      },
+      "groupPolicy": {
+        "label": "Comportamiento en grupos",
+        "choices": {
+          "mention": "Solo menciones",
+          "open": "Todos los mensajes",
+          "allowlist": "Lista de permitidos"
+        }
+      },
+      "allowFrom": {
+        "label": "Usuarios permitidos"
+      },
+      "e2eeEnabled": {
+        "label": "Cifrado de extremo a extremo",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "sasVerification": {
+        "label": "verificación SAS",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "Período de gracia para detener la sincronización"
+      },
+      "maxMediaBytes": {
+        "label": "Tamaño máximo de medios"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "Descargas multimedia simultáneas"
+      },
+      "groupAllowFrom": {
+        "label": "Grupos permitidos"
+      },
+      "allowRoomMentions": {
+        "label": "Permitir menciones de sala",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "streaming": {
+        "label": "Transmisión",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "proxy": {
+        "label": "Proxy de red",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}

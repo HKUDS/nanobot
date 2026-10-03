@@ -1,0 +1,46 @@
+{
+  "setup": {
+    "docsLabel": "QQ 설정 가이드 열기",
+    "officialLabel": "QQ 봇 콘솔 열기",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "QQ 봇 App ID"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "Open ID, 쉼표로 구분"
+      },
+      "msgFormat": {
+        "label": "메시지 형식",
+        "choices": {
+          "plain": "일반 텍스트",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "확인 메시지"
+      },
+      "mediaDir": {
+        "label": "미디어 디렉토리"
+      },
+      "downloadChunkSize": {
+        "label": "청크 크기 다운로드"
+      },
+      "downloadMaxBytes": {
+        "label": "최대 다운로드 크기"
+      },
+      "showCompactionNotices": {
+        "label": "컨텍스트 압축 알림",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      }
+    }
+  }
+}

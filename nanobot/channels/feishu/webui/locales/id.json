@@ -1,0 +1,87 @@
+{
+  "setup": {
+    "primaryAction": "Hubungkan Feishu",
+    "docsLabel": "Buka panduan Feishu",
+    "officialLabel": "Buka konsol Feishu",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "cli_xxx"
+      },
+      "appSecret": {
+        "label": "App Secret",
+        "placeholder": "Kosongkan untuk mempertahankan secret"
+      },
+      "domain": {
+        "label": "Wilayah",
+        "choices": {
+          "feishu": "Feishu",
+          "lark": "Lark"
+        }
+      },
+      "groupPolicy": {
+        "label": "Perilaku grup",
+        "choices": {
+          "mention": "Hanya saat disebut",
+          "open": "Semua pesan",
+          "allowlist": "Daftar izin"
+        }
+      },
+      "allowFrom": {
+        "label": "Pengguna yang diizinkan",
+        "placeholder": "ID pengguna, dipisahkan koma"
+      },
+      "topicIsolation": {
+        "label": "Isolasi topik",
+        "choices": {
+          "true": "Sesi terpisah untuk setiap topik",
+          "false": "Satu sesi bersama untuk grup"
+        }
+      },
+      "name": {
+        "label": "Nama akun"
+      },
+      "encryptKey": {
+        "label": "Kunci enkripsi"
+      },
+      "verificationToken": {
+        "label": "Token verifikasi"
+      },
+      "reactEmoji": {
+        "label": "Baca emoji"
+      },
+      "doneEmoji": {
+        "label": "Selesai emoji"
+      },
+      "toolHintPrefix": {
+        "label": "Awalan petunjuk alat"
+      },
+      "replyToMessage": {
+        "label": "Membalas pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      }
+    }
+  },
+  "custom": {
+    "toggleAssistant": "Aktifkan asisten {{name}}",
+    "configured": "Terhubung",
+    "needsSetup": "Perlu otorisasi",
+    "qrAlt": "Kode QR koneksi Feishu",
+    "scanTitle": "Pindai dengan Feishu",
+    "scanDescription": "Pindai kode ini dengan Feishu atau Lark di ponsel. nanobot akan menyelesaikan penyiapan setelah Anda menyetujui akses.",
+    "waiting": "Menunggu otorisasi...",
+    "connected": "Feishu sudah terhubung.",
+    "stopped": "Koneksi dihentikan.",
+    "connecting": "Menghubungkan..."
+  }
+}

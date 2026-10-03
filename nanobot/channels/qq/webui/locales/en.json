@@ -1,0 +1,46 @@
+{
+  "setup": {
+    "docsLabel": "Open QQ setup",
+    "officialLabel": "Open QQ bot console",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "QQ bot app ID"
+      },
+      "secret": {
+        "label": "Secret",
+        "placeholder": "••••••"
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "Open IDs, comma separated"
+      },
+      "msgFormat": {
+        "label": "Message format",
+        "choices": {
+          "plain": "Plain text",
+          "markdown": "Markdown"
+        }
+      },
+      "ackMessage": {
+        "label": "Acknowledgement message"
+      },
+      "mediaDir": {
+        "label": "Media directory"
+      },
+      "downloadChunkSize": {
+        "label": "Download chunk size"
+      },
+      "downloadMaxBytes": {
+        "label": "Maximum download size"
+      },
+      "showCompactionNotices": {
+        "label": "Compaction notices",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "setup": {
+    "docsLabel": "Matrix 設定ガイドを開く",
+    "officialLabel": "Matrix クライアント一覧を開く",
+    "fields": {
+      "homeserver": {
+        "label": "ホームサーバー",
+        "placeholder": "https://matrix.org"
+      },
+      "userId": {
+        "label": "ユーザー ID",
+        "placeholder": "@nanobot:matrix.org"
+      },
+      "password": {
+        "label": "パスワード",
+        "placeholder": "••••••"
+      },
+      "accessToken": {
+        "label": "アクセストークン",
+        "placeholder": "アクセストークンを入力"
+      },
+      "deviceId": {
+        "label": "デバイス ID",
+        "placeholder": "アクセストークン使用時に必須"
+      },
+      "groupPolicy": {
+        "label": "グループでの動作",
+        "choices": {
+          "mention": "メンションのみ",
+          "open": "すべてのメッセージ",
+          "allowlist": "許可リスト"
+        }
+      },
+      "allowFrom": {
+        "label": "許可されたユーザー"
+      },
+      "e2eeEnabled": {
+        "label": "エンドツーエンドの暗号化",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 検証",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "同期停止猶予期間"
+      },
+      "maxMediaBytes": {
+        "label": "最大メディアサイズ"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "メディアの同時ダウンロード"
+      },
+      "groupAllowFrom": {
+        "label": "許可されたグループ"
+      },
+      "allowRoomMentions": {
+        "label": "部屋のメンションを許可する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}

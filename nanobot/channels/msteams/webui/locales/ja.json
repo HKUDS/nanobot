@@ -1,0 +1,74 @@
+{
+  "setup": {
+    "docsLabel": "Teams 設定ガイドを開く",
+    "officialLabel": "Teams 開発者ポータルを開く",
+    "fields": {
+      "appId": {
+        "label": "App ID",
+        "placeholder": "Microsoft App ID"
+      },
+      "appPassword": {
+        "label": "クライアントシークレット",
+        "placeholder": "••••••"
+      },
+      "tenantId": {
+        "label": "テナント ID",
+        "placeholder": "テナント ID（任意）"
+      },
+      "path": {
+        "label": "コールバックパス",
+        "placeholder": "/api/messages"
+      },
+      "allowFrom": {
+        "label": "許可するユーザー",
+        "placeholder": "Teams ユーザー ID（カンマ区切り）"
+      },
+      "host": {
+        "label": "リッスンホスト"
+      },
+      "port": {
+        "label": "リッスンポート"
+      },
+      "replyInThread": {
+        "label": "スレッド内で返信する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "メンションのみの返信"
+      },
+      "validateInboundAuth": {
+        "label": "受信リクエストを検証する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "refTtlDays": {
+        "label": "会話の存続期間"
+      },
+      "pruneWebChatRefs": {
+        "label": "Web チャットの会話を削除する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "個人的ではない会話を削除する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "会話の更新間隔"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "信頼できるサービスホスト"
+      }
+    }
+  }
+}

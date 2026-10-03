@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="244 18 800 164" fill="none">
+  <title>nanobot</title>
+  <metadata>Wordmark paths from images/nanobot_logo.svg, distributed under the repository MIT license.</metadata>
+  <g stroke="#B94D0B" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M260 164V78M260 118C260 91 276 77 299 77C323 77 339 93 339 119V164"/>
+    <path d="M450 164V78M450 121C450 95 433 77 408 77C383 77 366 95 366 121C366 146 383 164 408 164C433 164 450 146 450 121"/>
+    <path d="M490 164V78M490 118C490 91 506 77 529 77C553 77 569 93 569 119V164"/>
+    <path d="M686 121C686 147 670 164 644 164C618 164 602 147 602 121C602 94 618 77 644 77C670 77 686 94 686 121Z"/>
+  </g>
+  <g stroke="#D96016" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M730 34V164M731 121C731 94 747 77 773 77C799 77 815 94 815 121C815 147 799 164 773 164C747 164 731 147 731 121Z"/>
+    <path d="M934 121C934 147 918 164 892 164C866 164 850 147 850 121C850 94 866 77 892 77C918 77 934 94 934 121Z"/>
+    <path d="M1000 47V138C1000 156 1011 164 1028 164M969 78H1028"/>
+  </g>
+</svg>
