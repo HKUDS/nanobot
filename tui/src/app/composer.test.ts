@@ -50,6 +50,35 @@ describe("NanobotTui composer", () => {
     expect(composer.plainText).toBe("next")
   })
 
+  test("submits with keypad Enter and keeps its modified forms as newlines", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({
+      width: 72,
+      height: 20,
+      screenMode: "alternate-screen",
+      kittyKeyboard: true,
+    })
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+
+    await setup.mockInput.typeText("11111")
+    await setup.mockInput.pressKeys(["\u001b[57414u"])
+    await waitUntil(() => sent.length === 1)
+    expect(sent).toEqual(["11111"])
+
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    for (const modifier of [2, 3, 5]) {
+      composer.setText("first")
+      composer.cursorOffset = 5
+      await setup.mockInput.pressKeys([`\u001b[57414;${modifier}u`])
+      await setup.mockInput.typeText("second")
+      expect(composer.plainText).toBe("first\nsecond")
+      expect(sent).toEqual(["11111"])
+    }
+  })
+
   test("inserts newlines with Shift+Enter and the universal Ctrl+J fallback", async () => {
     const sent: string[] = []
     setup = await createRenderer({
