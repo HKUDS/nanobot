@@ -2298,9 +2298,11 @@ In the WebUI, only unfinished tasks appear above the input. Completed, failed, c
 
 Use `/stop` to stop the current session and its subagent tasks; other sessions are unaffected. Cancellation does not remove files already created, and some operations may take time to stop.
 
-The gateway saves task observations with the parent conversation: task ID, initiating turn, timestamps, status, exit reason, and bounded final or partial output. Records remain until the parent conversation is deleted; the runtime's 128-record cache does not limit this history. Forking a conversation does not transfer task ownership or copy its task records. Temporary conversations do not persist task records.
+Each subagent has a private child session in the existing session store. Its transcript uses the same JSONL format as a conversation; session metadata records its parent, task ID, initiating turn, timestamps, status, exit reason, message receipts, and bounded final or partial output. These sessions have no public handle and do not appear as conversation topics or in general session search, reading, or messaging tools. The parent manages them through the `subagent` tool.
 
-Refreshing or reopening the WebUI only reads these records. After a gateway restart, finished records remain available and unfinished work is marked `interrupted`, with the most recently saved partial output when available. Nanobot does not automatically resume tasks, repeat tool calls, or resend completion notifications. A new task must be started explicitly to continue the work. Before this record format was introduced, task observations were held only in memory and cannot be recovered after that process exits.
+Deleting a parent conversation stops its work and removes its child sessions. The runtime's 128-record cache does not limit saved task history. Forking a conversation does not transfer task ownership or copy child sessions. Children of temporary conversations also remain temporary.
+
+Refreshing or reopening the WebUI only reads saved task observations. After a gateway acquires execution ownership at startup, finished tasks remain available and unfinished work is marked `interrupted`, with the most recently saved partial output when available. Constructing a session reader does not change task state. Nanobot does not automatically resume tasks, repeat tool calls, or resend completion notifications. A new task must be started explicitly to continue the work.
 
 ## Auto Compact
 

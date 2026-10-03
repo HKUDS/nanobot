@@ -7,6 +7,8 @@ from loguru import logger
 from agent.session_helpers import run_session
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.runner import AgentRunResult
+from nanobot.agent.subagent_sessions import SubagentSessions
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import (
@@ -293,6 +295,47 @@ async def test_missing_required_session_cannot_fall_back_to_disk(tmp_path) -> No
 
     loop.provider.chat_stream_with_retry.assert_not_awaited()
     assert loop.sessions.read_session_file(key) is None
+
+
+@pytest.mark.asyncio
+async def test_required_durable_session_survives_cache_eviction(tmp_path) -> None:
+    loop = _loop(tmp_path, ["received"])
+    key = "websocket:durable-parent"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "earlier question")
+    loop.sessions.save(session)
+    loop.sessions.invalidate(key)
+    try:
+        response = await loop._process_message(_message(key, "follow-up"))
+        assert response is not None and response.content == "received"
+        assert "earlier question" in str(loop.provider.chat_stream_with_retry.await_args.kwargs["messages"])
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.asyncio
+async def test_deleted_child_cannot_notify_a_recreated_parent(tmp_path) -> None:
+    loop = _loop(tmp_path, [])
+    key = "websocket:recreated-parent"
+    loop.subagents.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="old result"))
+    try:
+        await loop.subagents.spawn("old task", session_key=key, runtime=loop.llm_runtime())
+        await asyncio.gather(*loop.subagents._running_tasks.values())
+        task_id, = loop.subagents.statuses_for_session(key)
+        notice = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=2)
+        assert notice.require_existing_session
+        assert loop.sessions.delete_session(key)
+        assert loop.sessions.read_session_file(SubagentSessions.key(task_id)) is None
+        loop.sessions.save(loop.sessions.get_or_create(key))
+
+        assert loop.subagents.statuses_for_session(key) == {}
+        loop._enqueue_session_message(notice)
+        assert key not in loop._pending_queues
+        assert await loop._process_message(notice) is None
+        loop.provider.chat_stream_with_retry.assert_not_awaited()
+        assert loop.sessions.read_session_file(key)["messages"] == []
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.subagent_sessions import SubagentSessions
 from nanobot.agent.subagent_status import SubagentState as SubagentState
 from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.base import Tool, ToolResult
@@ -42,8 +43,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
-from nanobot.session.manager import SessionManager
-from nanobot.session.subagent_records import SubagentRecords
+from nanobot.session.manager import Session, SessionManager, SessionPolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
@@ -86,6 +86,7 @@ class _SubagentTask:
     """Own one execution, its inbox, and resources until cleanup succeeds."""
 
     status: SubagentStatus
+    session: Session
     runtime: LLMRuntime
     origin: _SubagentOrigin
     origin_message_id: str | None = None
@@ -152,15 +153,21 @@ class _SubagentHook(AgentHook):
     def __init__(self, task_id: str, status: SubagentStatus | None = None,
                  *, check_active: Callable[[], None] | None = None,
                  max_result_chars: int = 16000,
-                 on_status: Callable[[SubagentStatus], None] | None = None) -> None:
+                 on_status: Callable[[SubagentStatus], None] | None = None,
+                 session: Session | None = None) -> None:
         super().__init__()
         self._task_id = task_id
         self._status = status
         self._check_active = check_active
         self._max_result_chars = max_result_chars
         self._on_status = on_status
+        self._session = session
 
     def _remember_output(self, context: AgentHookContext) -> None:
+        if self._session is not None and context.messages:
+            self._session.messages = deepcopy([
+                message for message in context.messages if message.get("role") != "system"
+            ])
         if self._status is None or context.error or context.response is None:
             return
         content = context.response.content
@@ -274,9 +281,7 @@ class SubagentManager:
         self._terminal_statuses: dict[str, SubagentStatus] = {}
         self._closed = False
         self._close_task: asyncio.Task[int] | None = None
-        self.records = SubagentRecords(session_manager) if session_manager is not None else None
-        if self.records is not None:
-            self.records.interrupt_pending()
+        self.sessions = SubagentSessions(session_manager) if session_manager is not None else None
 
     MAX_ACTIVE = 128
     MAX_TERMINAL = 128
@@ -287,10 +292,15 @@ class SubagentManager:
     CANCEL_WAIT_SECONDS = 5.0
 
     def _save_status(
-        self, status: SubagentStatus, *, create: bool = False, fsync: bool = False,
+        self, status: SubagentStatus, *, fsync: bool = False,
     ) -> None:
-        if self.records is not None:
-            self.records.save(status, create=create, fsync=fsync)
+        if self.sessions is not None:
+            self.sessions.save(status, fsync=fsync)
+
+    def recover_interrupted(self) -> None:
+        """Recover observations only after the host has claimed execution ownership."""
+        if self.sessions is not None:
+            self.sessions.interrupt_pending()
 
     def _start_cleanup(self, record: _SubagentTask, *, retry: bool = False) -> asyncio.Task[int]:
         cleanup = record.cleanup_task
@@ -336,11 +346,11 @@ class SubagentManager:
         record = self._tasks.get(task_id)
         if status is None and record is not None and record.status.finished_at is None:
             status = record.status
-        if self.records is not None and owner:
-            if not self.records.exists(owner):
+        if self.sessions is not None and owner:
+            if not self.sessions.exists(owner) or not self.sessions.contains(task_id, owner):
                 raise SubagentControlError("task unavailable")
             if status is None:
-                status = self.records.load(owner).get(task_id)
+                status = self.sessions.status(task_id, owner)
         if not owner or status is None or status.owner != owner:
             raise SubagentControlError("task unavailable")
         return status
@@ -404,14 +414,16 @@ class SubagentManager:
         self, session_key: str | None, *, include_history: bool = True,
     ) -> Mapping[str, SubagentStatus]:
         """Return only tasks owned by the given session, never a global fallback."""
-        if not session_key or (self.records is not None and not self.records.exists(session_key)):
+        if not session_key or (self.sessions is not None and not self.sessions.exists(session_key)):
             return {}
         return {
-            **(self.records.load(session_key) if include_history and self.records is not None else {}),
+            **(self.sessions.load(session_key) if include_history and self.sessions is not None else {}),
             **{tid: record.snapshot() for tid, record in self._tasks.items()
-               if record.status.owner == session_key and record.status.finished_at is None},
+               if record.status.owner == session_key and record.status.finished_at is None
+               and (self.sessions is None or self.sessions.contains(tid, session_key))},
             **{tid: deepcopy(status) for tid, status in self._terminal_statuses.items()
-               if status.owner == session_key},
+               if status.owner == session_key
+               and (self.sessions is None or self.sessions.contains(tid, session_key))},
         }
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
@@ -496,16 +508,23 @@ class SubagentManager:
             raise SubagentControlError("subagent manager is closed or at task capacity")
         owner = session_key or f"{origin_channel}:{origin_chat_id}"
         task_id = str(uuid.uuid4())
+        status = SubagentStatus(
+            task_id=task_id,
+            label=label or task[:30] + ("..." if len(task) > 30 else ""),
+            task_description=task,
+            started_at=time.monotonic(),
+            owner=owner,
+            origin_message_id=origin_message_id,
+            origin_turn_id=origin_turn_id,
+        )
+        if self.sessions is not None:
+            child = self.sessions.create(status)
+        else:
+            child = Session(key=SubagentSessions.key(task_id), policy=SessionPolicy(persist=False))
+            child.add_message("user", task)
         record = _SubagentTask(
-            status=SubagentStatus(
-                task_id=task_id,
-                label=label or task[:30] + ("..." if len(task) > 30 else ""),
-                task_description=task,
-                started_at=time.monotonic(),
-                owner=owner,
-                origin_message_id=origin_message_id,
-                origin_turn_id=origin_turn_id,
-            ),
+            status=status,
+            session=child,
             runtime=runtime,
             origin={
                 "channel": origin_channel, "chat_id": origin_chat_id,
@@ -515,7 +534,6 @@ class SubagentManager:
             workspace_scope=workspace_scope,
             announce=announce,
         )
-        self._save_status(record.status, create=True, fsync=True)
         self._tasks[task_id] = record
         execution = asyncio.create_task(self._run_subagent(record))
         self._running_tasks[task_id] = execution
@@ -645,7 +663,7 @@ class SubagentManager:
     async def _run_admitted_subagent(self, record: _SubagentTask) -> _SubagentOutcome:
         """Execute the admitted task with task-owned shell resources."""
         status, origin, runtime = record.status, record.origin, record.runtime
-        task_id, task, label = status.task_id, status.task_description, status.label
+        task_id, label = status.task_id, status.label
         origin_message_id, workspace_scope = record.origin_message_id, record.workspace_scope
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
@@ -664,16 +682,16 @@ class SubagentManager:
         system_prompt = self._build_subagent_prompt(workspace=root)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": task},
+            *record.session.get_history(),
         ]
 
-        sess_key = origin.get("session_key")
         request_token = bind_request_context(RequestContext(
             channel=origin["channel"],
             chat_id=origin["chat_id"],
             message_id=origin_message_id,
-            session_key=f"subagent:{task_id}",
+            session_key=record.session.key,
             runtime=runtime,
+            log_content=record.session.policy.log_content,
         ))
         token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
         try:
@@ -681,14 +699,14 @@ class SubagentManager:
             consolidate_history = partial(
                 self.consolidator.summarize_transcript,
                 runtime=runtime,
-                session_key=f"subagent:{task_id}",
+                session_key=record.session.key,
                 tools=tool_definitions,
                 persist=False,
             )
             consolidate_provider_compaction = partial(
                 self.consolidator.summarize_provider_compaction,
                 runtime=runtime,
-                session_key=f"subagent:{task_id}",
+                session_key=record.session.key,
                 tools=tool_definitions,
                 persist=False,
             )
@@ -702,13 +720,14 @@ class SubagentManager:
                     task_id, status, check_active=record.raise_if_stopping,
                     max_result_chars=self.max_tool_result_chars,
                     on_status=self._save_status,
+                    session=record.session,
                 ),
                 max_iterations_message="Task stopped at its iteration limit before producing a final response.",
                 finalize_on_max_iterations=False,
                 error_message=None,
                 checkpoint_callback=_on_checkpoint,
                 injection_callback=partial(self._drain_inbox, record),
-                session_key=sess_key,
+                session_key=record.session.key,
                 workspace=root,
                 llm_usage_source=origin.get(
                     "llm_usage_source",
@@ -722,6 +741,17 @@ class SubagentManager:
                 reset_workspace_scope(token)
             reset_request_context(request_token)
         status.usage = result.usage
+        if result.messages:
+            record.session.messages = deepcopy([
+                message for message in result.messages if message.get("role") != "system"
+            ])
+        record.session.provider_state = result.provider_state
+        checkpoint = result.summary_checkpoint
+        if checkpoint is not None:
+            boundary = checkpoint.transcript_boundary
+            if 0 <= boundary <= len(result.messages):
+                insert_at = sum(message.get("role") != "system" for message in result.messages[:boundary])
+                record.session.commit_summary_checkpoint(checkpoint.summary, insert_at=insert_at)
         if result.stop_reason in {"error", "empty_final_response"}:
             final_result = result.error or "Error: subagent execution failed."
             return _SubagentOutcome("error", final_result, result.stop_reason, result.error)
@@ -768,6 +798,10 @@ class SubagentManager:
         # routed to the correct pending queue (mid-turn injection) instead of
         # being dispatched as a competing independent task.
         override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"
+        if self.sessions is not None and (
+            not self.sessions.exists(override) or not self.sessions.contains(task_id, override)
+        ):
+            return
         metadata: dict[str, Any] = {
             "injected_event": "subagent_result",
             "subagent_task_id": task_id,
@@ -786,6 +820,7 @@ class SubagentManager:
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
             session_key_override=override,
+            require_existing_session=True,
             metadata=metadata,
         )
 

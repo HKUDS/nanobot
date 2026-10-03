@@ -1,4 +1,4 @@
-"""Task observations shared by execution and durable parent-session records."""
+"""Task observations shared by execution and private child sessions."""
 
 from __future__ import annotations
 

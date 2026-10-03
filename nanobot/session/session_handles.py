@@ -172,6 +172,8 @@ class SessionHandleResolver:
                     if isinstance(raw_metadata, dict)
                     else {}
                 )
+                if not self._sessions.types.needs_handle(metadata):
+                    continue
                 raw_name = metadata.get(SESSION_HANDLE_METADATA_KEY)
                 try:
                     name = normalize_session_handle(raw_name) if isinstance(raw_name, str) else ""
