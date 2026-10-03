@@ -640,7 +640,7 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, monkeypatch):
+async def test_subagent_max_iterations_announces_partial_incomplete_result(tmp_path, monkeypatch):
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
@@ -658,7 +658,6 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
         consolidator=MagicMock(),
         max_iterations=2,
     )
-    mgr._announce_result = AsyncMock()
 
     async def fake_execute(self, **kwargs):
         return "tool result"
@@ -674,7 +673,13 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     )
     await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
-    mgr._announce_result.assert_awaited_once()
-    args = mgr._announce_result.await_args.args
-    assert args[3] == "Task completed but no final response was generated."
-    assert args[5] == "ok"
+    status = next(iter(mgr.statuses_for_session("test:c1").values()))
+    assert status.state == "incomplete"
+    assert status.stop_reason == "max_iterations"
+    assert status.partial is True
+    assert status.result == "working"
+    notice = await asyncio.wait_for(bus.consume_inbound(), timeout=1)
+    assert notice.metadata["subagent_state"] == "incomplete"
+    assert notice.metadata["subagent_partial"] is True
+    assert "working" in notice.content
+    await mgr.close()

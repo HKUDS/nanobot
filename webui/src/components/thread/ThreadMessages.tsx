@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MessageBlockMenuActions, MessageBubble, MessageCopyButton } from "@/components/MessageBubble";
@@ -10,6 +10,7 @@ import {
   formatActivityDuration,
 } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
+import { SubagentHistory } from "@/components/thread/SubagentTasks";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -223,6 +224,7 @@ export function ThreadMessages({
         ) nextUserIndex += 1;
 
         return (
+          <Fragment key={unitKeys[index]}>
           <ThreadDisplayUnit
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
@@ -264,8 +266,13 @@ export function ThreadMessages({
             onContextBlockFocusChange={setContextBlockFocused}
             onContextBlockMenuOpenChange={setContextBlockMenuOpen}
           />
+          {unit.type === "message" && unit.message.role === "user" ? (
+            <SubagentHistory turnId={unit.message.turnId} messageId={unit.message.id} />
+          ) : null}
+          </Fragment>
         );
       })}
+      <SubagentHistory unlinked />
       {pendingActivity ? (
         <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>
           <AgentActivityCluster

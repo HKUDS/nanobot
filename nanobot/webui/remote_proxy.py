@@ -259,7 +259,8 @@ class RemoteProxy:
             "limits", "model_name", "runtime_surface", "runtime_capabilities",
         ) if key in data}
         result.update(token=token, api_token=api_token, expires_in=ttl,
-                      terminal={"protocolVersion": 1, "gatewayId": self._gateway_id},
+                      terminal={"protocolVersion": 1, "gatewayId": self._gateway_id,
+                                "webui": terminal["webui"]},
                       ws_path=self._ws_path, ws_url=f"ws://127.0.0.1:{self.port}{self._ws_path}")
         result["host_compatibility"] = report
         return web.json_response(result, headers={"Cache-Control": "no-store"})

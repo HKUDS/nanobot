@@ -1759,11 +1759,11 @@ async def test_process_direct_skip_user_persist_does_not_save_retry_user(
 
 
 @pytest.mark.asyncio
-async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
+async def test_request_context_uses_effective_key_for_subagent_tool(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    spawn_tool = loop.tools.get("spawn")
-    assert spawn_tool is not None
-    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    subagent_tool = loop.tools.get("subagent")
+    assert subagent_tool is not None
+    subagent_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
     runtime = loop.llm_runtime()
 
     with request_context(RequestContext(
@@ -1772,9 +1772,9 @@ async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path)
         session_key="discord:parent-456:thread:thread-777",
         runtime=runtime,
     )):
-        await spawn_tool.execute(task="inspect context")
+        await subagent_tool.execute(action="create", task="inspect context")
 
-    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    call = subagent_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
     assert call["origin_channel"] == "discord"
     assert call["origin_chat_id"] == "thread-777"
     assert call["session_key"] == "discord:parent-456:thread:thread-777"
@@ -2291,11 +2291,11 @@ def test_subagent_followup_skips_empty_content() -> None:
 
 
 @pytest.mark.asyncio
-async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
+async def test_request_context_passes_thread_session_key_to_subagent_create(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    spawn_tool = loop.tools.get("spawn")
-    assert spawn_tool is not None
-    spawn_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
+    subagent_tool = loop.tools.get("subagent")
+    assert subagent_tool is not None
+    subagent_tool._manager.spawn = AsyncMock(return_value="started")  # type: ignore[attr-defined]
     runtime = loop.llm_runtime()
 
     with request_context(RequestContext(
@@ -2306,9 +2306,9 @@ async def test_request_context_passes_thread_session_key_to_spawn(tmp_path: Path
         session_key="slack:C123:1700.42",
         runtime=runtime,
     )):
-        await spawn_tool.execute(task="inspect thread")
+        await subagent_tool.execute(action="create", task="inspect thread")
 
-    call = spawn_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
+    call = subagent_tool._manager.spawn.await_args.kwargs  # type: ignore[attr-defined]
     assert call["session_key"] == "slack:C123:1700.42"
     assert call["origin_message_id"] == "msg-123"
     assert call["runtime"] is runtime

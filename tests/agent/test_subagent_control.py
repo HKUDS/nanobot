@@ -15,12 +15,11 @@ import pytest
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
-from nanobot.agent.tools.runtime_control import _snapshot_subagent_statuses
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.subagent import SpawnTool, SubagentTool
+from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -40,7 +39,7 @@ def setup(tmp_path, **kwargs):
 
 async def spawn(manager, ctx, text="task"):
     with request_context(ctx):
-        result = await SpawnTool(manager).execute(task=text)
+        result = await SubagentTool(manager).execute(action="create", task=text)
     task_id = re.search(r"id: ([\w-]+)", result).group(1)
     assert str(uuid.UUID(task_id)) == task_id
     return task_id
@@ -48,17 +47,37 @@ async def spawn(manager, ctx, text="task"):
 
 async def control(manager, ctx, task_id, action=None, message=None):
     with request_context(ctx):
-        if action is None:
-            status = _snapshot_subagent_statuses(manager).get(task_id)
-            if status is None:
-                return ToolResult.error("Error: task unavailable")
-            return json.dumps({k: status[k] for k in ("task_id", "state", "receipts", "result", "error")})
-        return await SubagentTool(manager).execute(action, task_id, message)
+        return await SubagentTool(manager).execute(action or "check", task_id, message)
 
 
 async def settled(manager):
     await asyncio.gather(*list(manager._running_tasks.values()), return_exceptions=True)
     await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_direct_turn_waits_for_child_without_a_background_consumer(loop_factory):
+    loop = loop_factory()
+    loop.provider.provider_name = "test"
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="delegate", name="subagent",
+            arguments={"action": "create", "task": "Inspect the configuration"},
+        )]),
+        LLMResponse(content="Verified child findings"),
+        LLMResponse(content="Parent conclusion from the child findings"),
+    ])
+    try:
+        response = await loop.process_direct("Delegate this inspection")
+        assert response.content == "Parent conclusion from the child findings"
+        parent_followup = loop.provider.chat_stream_with_retry.call_args_list[-1].kwargs["messages"]
+        assert any(m.get("role") == "tool" and m.get("content") == "Verified child findings"
+                   for m in parent_followup)
+        assert loop.bus.inbound_size == 0
+        assert loop.subagents.get_running_count() == 0
+        assert next(iter(loop.subagents.statuses_for_session("cli:direct").values())).state == "done"
+    finally:
+        await loop.subagents.close()
 
 
 @pytest.mark.asyncio
@@ -198,7 +217,7 @@ async def test_queued_cancel_is_idempotent_and_never_admitted(tmp_path, begun):
     await manager.close()
     assert manager.bus.inbound_size == 1
     with request_context(ctx):
-        assert is_tool_error_result(await SpawnTool(manager).execute(task="after close"))
+        assert is_tool_error_result(await SubagentTool(manager).execute(action="create", task="after close"))
 
 
 @pytest.mark.asyncio
@@ -226,6 +245,110 @@ async def test_real_runner_injects_followup_without_durable_child_session(tmp_pa
     assert user_text.index("first update") < user_text.index("second update")
     assert json.loads(await control(manager, ctx, task_id))["receipts"] == dict.fromkeys(ids, "delivered")
     assert not (tmp_path / "sessions").exists()
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_iteration_limit_returns_partial_findings_without_success_notice(tmp_path):
+    manager, provider, ctx = setup(tmp_path, max_iterations=1)
+    (tmp_path / "note.txt").write_text("evidence", encoding="utf-8")
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="Found the relevant file; verification is still pending.",
+        tool_calls=[ToolCallRequest("read", "read_file", {"path": "note.txt"})],
+    ))
+    task_id = await spawn(manager, ctx)
+    await settled(manager)
+    status = json.loads(await control(manager, ctx, task_id))
+    assert status["state"] == "incomplete"
+    assert status["stop_reason"] == "max_iterations"
+    assert status["partial"] is True
+    assert status["result"] == "Found the relevant file; verification is still pending."
+    notice = await manager.bus.consume_inbound()
+    assert "completed successfully" not in notice.content
+    assert notice.metadata["subagent_state"] == "incomplete"
+    assert notice.metadata["subagent_partial"] is True
+    assert notice.metadata["subagent_stop_reason"] == "max_iterations"
+    with request_context(ctx):
+        inline = await SubagentTool(manager).execute("create", task="verify", wait=True)
+    assert is_tool_error_result(inline)
+    assert "max_iterations" in inline
+    assert "verification is still pending" in inline
+    await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inline", [False, True])
+async def test_cancel_preserves_completed_iteration_output_and_receipts(tmp_path, inline):
+    manager, provider, ctx = setup(tmp_path)
+    (tmp_path / "note.txt").write_text("evidence", encoding="utf-8")
+    entered = asyncio.Event()
+    calls = 0
+
+    async def chat(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return LLMResponse(content="Found a possible cause; not yet verified.", tool_calls=[
+                ToolCallRequest("read", "read_file", {"path": "note.txt"}),
+            ])
+        entered.set()
+        await asyncio.Event().wait()
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=chat)
+    if inline:
+        execution = asyncio.create_task(manager.run_inline(
+            task="task", session_key=ctx.session_key, runtime=ctx.runtime,
+        ))
+    else:
+        task_id = await spawn(manager, ctx)
+    await entered.wait()
+    if inline:
+        task_id = next(iter(manager.statuses_for_session(ctx.session_key)))
+    receipt = json.loads(await control(manager, ctx, task_id, "send", "please verify"))
+    status = json.loads(await control(manager, ctx, task_id, "cancel"))
+    assert status["state"] == "cancelled"
+    assert status["partial"] is True
+    assert status["result"] == "Found a possible cause; not yet verified."
+    assert status["receipts"][receipt["message_id"]] == "undelivered"
+    if inline:
+        result = await execution
+        assert is_tool_error_result(result)
+        assert result == f"Task cancelled.\nPartial result:\n{status['result']}"
+        assert manager.bus.inbound_size == 0
+    else:
+        notice = await manager.bus.consume_inbound()
+        assert status["result"] in notice.content
+        assert notice.metadata["subagent_state"] == "cancelled"
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_empty_final_response_is_a_failure(tmp_path):
+    manager, provider, ctx = setup(tmp_path)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content=""))
+    task_id = await spawn(manager, ctx)
+    await settled(manager)
+    status = json.loads(await control(manager, ctx, task_id))
+    assert status["state"] == "error"
+    assert status["stop_reason"] == "empty_final_response"
+    assert status["error"]
+    notice = await manager.bus.consume_inbound()
+    assert "completed successfully" not in notice.content
+    assert notice.metadata["subagent_state"] == "error"
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_host_without_background_consumer_returns_the_child_result(tmp_path):
+    manager, _, ctx = setup(tmp_path)
+    ctx = RequestContext("cli", "oneshot", session_key="cli:oneshot", runtime=ctx.runtime,
+                         background_subagents=False)
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="verified"))
+    with request_context(ctx):
+        result = await SubagentTool(manager).execute("create", task="verify")
+    assert result == "verified"
+    assert manager.get_running_count() == 0
+    assert manager.bus.inbound_size == 0
     await manager.close()
 
 
@@ -349,7 +472,7 @@ async def test_terminal_retention_and_active_capacity_are_bounded(tmp_path):
     first = await spawn(manager, ctx)
     await entered.wait()
     with request_context(ctx):
-        assert is_tool_error_result(await SpawnTool(manager).execute(task="overflow"))
+        assert is_tool_error_result(await SubagentTool(manager).execute(action="create", task="overflow"))
     release.set()
     await settled(manager)
     for _ in range(3):
@@ -439,7 +562,7 @@ async def test_inline_caller_cancel_closes_child_without_notice(tmp_path):
 
     manager.runner.run = run
     with request_context(ctx):
-        inline = asyncio.create_task(SpawnTool(manager).execute(task="wait", wait=True))
+        inline = asyncio.create_task(SubagentTool(manager).execute(action="create", task="wait", wait=True))
     await entered.wait()
     inline.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -478,7 +601,7 @@ async def test_cleanup_failure_survives_status_eviction_and_shutdown_retries(tmp
     assert is_tool_error_result(await control(manager, ctx, task_id, "cancel"))
     manager.MAX_ACTIVE = 1
     with request_context(ctx):
-        assert is_tool_error_result(await SpawnTool(manager).execute(task="over capacity"))
+        assert is_tool_error_result(await SubagentTool(manager).execute(action="create", task="over capacity"))
     exec_manager.close_all = original_cleanup
     await manager.close()
     assert not manager._tasks
@@ -570,7 +693,7 @@ async def test_resistant_dependency_has_bounded_stop_and_no_late_result(tmp_path
     inline = None
     if operation == "inline":
         with request_context(ctx):
-            inline = asyncio.create_task(SpawnTool(manager).execute(task="wait", wait=True))
+            inline = asyncio.create_task(SubagentTool(manager).execute(action="create", task="wait", wait=True))
         await entered.wait()
         task_id = next(iter(manager.statuses_for_session("owner")))
     else:
@@ -622,7 +745,7 @@ async def test_targeted_inline_cancel_does_not_cancel_waiting_parent(tmp_path):
 
     manager.runner.run = run
     with request_context(ctx):
-        parent = asyncio.create_task(SpawnTool(manager).execute(task="wait", wait=True))
+        parent = asyncio.create_task(SubagentTool(manager).execute(action="create", task="wait", wait=True))
     await entered.wait()
     task_id = next(iter(manager.statuses_for_session("owner")))
     await control(manager, ctx, task_id, "cancel")
@@ -663,8 +786,13 @@ async def test_cleanup_wait_is_bounded_and_repeated_cancel_does_not_interrupt_it
     assert manager.bus.inbound_size == 0
 
 
-def test_control_schema_has_no_inspection_or_owner_argument(tmp_path):
+def test_subagent_schema_exposes_task_actions(tmp_path):
     manager, _, _ = setup(tmp_path)
     properties = SubagentTool(manager).parameters["properties"]
-    assert set(properties) == {"action", "task_id", "message"}
-    assert properties["action"]["enum"] == ["send", "cancel"]
+    assert properties["action"]["enum"] == ["create", "send", "cancel", "check"]
+    assert "owner" not in properties
+    tool = SubagentTool(manager)
+    assert tool.validate_params({"action": "create", "task": "review"}) == []
+    assert tool.validate_params({"action": "check"}) == []
+    assert tool.validate_params({"action": "send", "task_id": "task", "message": "update"}) == []
+    assert tool.validate_params({"action": "cancel", "task_id": "task"}) == []

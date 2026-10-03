@@ -8,6 +8,7 @@ import pytest
 
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.memory import Consolidator
+from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.config.schema import AgentDefaults
@@ -35,7 +36,8 @@ async def test_run_inline_returns_result_without_announcement(tmp_path):
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
-    manager.runner.run = AsyncMock(return_value=SimpleNamespace(
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(
+        messages=[],
         stop_reason="done",
         final_content="review result",
         error=None,
@@ -68,7 +70,8 @@ async def test_run_inline_returns_structured_error(tmp_path):
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
-    manager.runner.run = AsyncMock(return_value=SimpleNamespace(
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(
+        messages=[],
         stop_reason="error",
         final_content=None,
         error="subagent failed",
@@ -111,7 +114,8 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
         exec_tool = spec.tools.get("exec")
         assert exec_tool is not None
         assert exec_tool.allowed_env_keys == ["GOPATH", "JAVA_HOME"]
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content="done",
             error=None,
@@ -152,7 +156,8 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
 
     async def fake_run(spec):
         assert spec.max_iterations == 37
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content="done",
             error=None,
@@ -196,7 +201,8 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
     async def fake_run(spec):
         seen["temperature"] = spec.runtime.generation.temperature
         seen["runtime"] = spec.runtime
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done", final_content="done", error=None, tool_events=[],
         )
 
@@ -214,7 +220,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
     """Background tasks should be accepted and start when capacity becomes available."""
     from nanobot.agent.subagent import SubagentManager
-    from nanobot.agent.tools.subagent import SpawnTool
+    from nanobot.agent.tools.subagent import SubagentTool
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -242,7 +248,8 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
         else:
             second_entered.set()
             await release_second.wait()
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content="done",
             error=None,
@@ -253,18 +260,18 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
 
     from nanobot.agent.tools.context import RequestContext, request_context
 
-    tool = SpawnTool(mgr)
+    tool = SubagentTool(mgr)
     with request_context(RequestContext(
         channel="test",
         chat_id="c1",
         session_key="test:c1",
         runtime=_runtime(provider),
     )):
-        first_result = await tool.execute(task="first task")
+        first_result = await tool.execute(action="create", task="first task")
         assert "started" in first_result
         await asyncio.wait_for(first_entered.wait(), timeout=1.0)
 
-        second_result = await tool.execute(task="second task")
+        second_result = await tool.execute(action="create", task="second task")
         assert "started" in second_result
         tasks = list(mgr._running_tasks.values())
         await asyncio.sleep(0)
@@ -281,9 +288,9 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_waits_for_inline_result():
+async def test_subagent_tool_waits_for_inline_result():
     from nanobot.agent.tools.context import RequestContext, request_context
-    from nanobot.agent.tools.subagent import SpawnTool
+    from nanobot.agent.tools.subagent import SubagentTool
 
     class Manager:
         max_concurrent_subagents = 1
@@ -299,7 +306,7 @@ async def test_spawn_tool_waits_for_inline_result():
             return await self.inline(**kwargs)
 
     manager = Manager()
-    tool = SpawnTool(manager)
+    tool = SubagentTool(manager)
     runtime = _runtime(MagicMock())
     with request_context(RequestContext(
         channel="test",
@@ -307,7 +314,7 @@ async def test_spawn_tool_waits_for_inline_result():
         session_key="test:c1",
         runtime=runtime,
     )):
-        result = await tool.execute(task="review this", wait=True)
+        result = await tool.execute(action="create", task="review this", wait=True)
 
     assert result == "review result"
     manager.inline.assert_awaited_once()
@@ -318,7 +325,7 @@ async def test_spawn_tool_waits_for_inline_result():
 async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import RequestContext, request_context
-    from nanobot.agent.tools.subagent import SpawnTool
+    from nanobot.agent.tools.subagent import SubagentTool
     from nanobot.bus.queue import MessageBus
 
     manager = SubagentManager(
@@ -341,7 +348,8 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
         else:
             second_entered.set()
             await release_second.wait()
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content="done",
             error=None,
@@ -349,17 +357,17 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
         )
 
     manager.runner.run = AsyncMock(side_effect=fake_run)
-    tool = SpawnTool(manager)
+    tool = SubagentTool(manager)
     with request_context(RequestContext(
         channel="test",
         chat_id="c1",
         session_key="test:c1",
         runtime=_runtime(MagicMock()),
     )):
-        first = asyncio.create_task(tool.execute(task="first", wait=True))
+        first = asyncio.create_task(tool.execute(action="create", task="first", wait=True))
         await asyncio.wait_for(first_entered.wait(), timeout=1.0)
 
-        second = asyncio.create_task(tool.execute(task="second", wait=True))
+        second = asyncio.create_task(tool.execute(action="create", task="second", wait=True))
         await asyncio.sleep(0)
 
         assert not second.done()
@@ -383,7 +391,7 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
     from nanobot.agent.tools.context import RequestContext, request_context
     from nanobot.agent.tools.execution import execute_tool_calls
     from nanobot.agent.tools.registry import ToolRegistry
-    from nanobot.agent.tools.subagent import SpawnTool
+    from nanobot.agent.tools.subagent import SubagentTool
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.base import ToolCallRequest
 
@@ -403,7 +411,8 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
         if len(entered) == 2:
             both_entered.set()
         await release.wait()
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content=spec.initial_messages[-1]["content"],
             error=None,
@@ -412,18 +421,18 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
 
     manager.runner.run = AsyncMock(side_effect=fake_run)
     tools = ToolRegistry()
-    tools.register(SpawnTool(manager))
+    tools.register(SubagentTool(manager))
     runtime = _runtime(MagicMock())
     calls = [
         ToolCallRequest(
-            id="spawn-1",
-            name="spawn",
-            arguments={"task": "first", "wait": True},
+            id="create-1",
+            name="subagent",
+            arguments={"action": "create", "task": "first", "wait": True},
         ),
         ToolCallRequest(
-            id="spawn-2",
-            name="spawn",
-            arguments={"task": "second", "wait": True},
+            id="create-2",
+            name="subagent",
+            arguments={"action": "create", "task": "second", "wait": True},
         ),
     ]
 
@@ -478,7 +487,9 @@ async def test_cancel_by_session_cancels_inline_subagent(tmp_path):
     await asyncio.wait_for(entered.wait(), timeout=1.0)
 
     assert await manager.cancel_by_session("test:c1") == 1
-    assert is_tool_error_result(await inline)
+    result = await inline
+    assert is_tool_error_result(result)
+    assert result == "Task cancelled."
     assert manager._running_tasks == {}
     assert [s.state for s in manager.statuses_for_session("test:c1").values()] == ["cancelled"]
 
@@ -558,13 +569,12 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
     async def fake_run(spec):
         assert spec.max_iterations == 55
         assert loop.subagents.max_iterations == 55
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content="done",
             error=None,
             tool_events=[],
-            messages=[],
-            usage=None,
             had_injections=False,
             tools_used=[],
         )
@@ -600,13 +610,12 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
         nonlocal injection_callback, terminal_injection_callback
         injection_callback = spec.injection_callback
         terminal_injection_callback = spec.terminal_injection_callback
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content="done",
             error=None,
             tool_events=[],
-            messages=[],
-            usage=None,
             had_injections=False,
             tools_used=[],
             provider_state=None,
@@ -651,13 +660,12 @@ async def test_terminal_drain_timeout(tmp_path):
     async def fake_runner_run(spec):
         nonlocal terminal_injection_callback
         terminal_injection_callback = spec.terminal_injection_callback
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content="done",
             error=None,
             tool_events=[],
-            messages=[],
-            usage=None,
             had_injections=False,
             tools_used=[],
             provider_state=None,
@@ -720,13 +728,12 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
     async def fake_runner_run(spec):
         nonlocal terminal_injection_callback
         terminal_injection_callback = spec.terminal_injection_callback
-        return SimpleNamespace(
+        return AgentRunResult(
+            messages=[],
             stop_reason="done",
             final_content="done",
             error=None,
             tool_events=[],
-            messages=[],
-            usage=None,
             had_injections=False,
             tools_used=[],
             provider_state=None,

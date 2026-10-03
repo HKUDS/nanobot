@@ -1561,6 +1561,33 @@
     "error": "연결 오류"
   },
   "thread": {
+    "subagents": {
+      "loadFailed": "하위 작업을 불러올 수 없습니다.",
+      "stopFailed": "이 작업을 중지할 수 없습니다.",
+      "stopTask": "{{label}} 중지",
+      "iteration": "반복 {{count}}",
+      "result": "결과",
+      "partialResult": "부분 결과",
+      "receiptHelp": "전달됨은 메시지가 하위 작업의 다음 모델 요청에 포함되었음을 뜻하며, 실행 완료를 의미하지 않습니다.",
+      "states": {
+        "queued": "대기 중",
+        "running": "실행 중",
+        "stopping": "중지 중",
+        "done": "완료",
+        "incomplete": "미완료",
+        "error": "실패",
+        "cancelled": "취소됨",
+        "interrupted": "중단됨"
+      },
+      "receipts": {
+        "accepted": "대기 중: {{count}}",
+        "delivered": "전달됨: {{count}}",
+        "undelivered": "미전달: {{count}}"
+      },
+      "activeTitle": "실행 중인 작업",
+      "historyTitle": "작업 결과",
+      "interruptedHelp": "작업이 완료되기 전에 서버가 다시 시작되었습니다. 작업은 자동으로 다시 실행되지 않았습니다."
+    },
     "compaction": {
       "cancelled": "컨텍스트 압축이 취소되었습니다",
       "empty": "압축할 컨텍스트가 없습니다.",
