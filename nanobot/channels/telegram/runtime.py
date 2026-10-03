@@ -421,6 +421,10 @@ class TelegramConfig(Base):
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
+    # Per-chat / per-forum-topic overrides for `group_policy`.
+    # Keys are either "<chat_id>" (whole chat) or "<chat_id>:<thread_id>"
+    # (one forum topic). An unlisted chat or topic falls back to `group_policy`.
+    group_policy_overrides: dict[str, Literal["open", "mention"]] = Field(default_factory=dict)
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -537,7 +541,7 @@ class TelegramChannel(BaseChannel):
     # Telegram-safe aliases are normalized before reaching the core router.
     # Canonical hyphenated commands stay on a separate handler (below).
     TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
-        r"^/(?:new|compact|stop|restart|status|dream|history|goal|trigger|pairing|model|skill"
+        r"^/(?:new|compact|stop|restart|status|dream|history|goal|trigger|pairing|group|model|skill"
         r"|dream_log|dream_restore|dream_prompt|evaluator_prompt|evaluator-prompt)(?:@\w+)?(?:\s+.*)?$"
     )
 
@@ -1803,9 +1807,28 @@ class TelegramChannel(BaseChannel):
                 return True
         return handle in text.lower()
 
+    def _effective_group_policy(self, message: Message) -> Literal["open", "mention"]:
+        """Resolve the group policy for a message's chat and forum topic.
+
+        Most specific match wins: ``"<chat_id>:<thread_id>"`` overrides
+        ``"<chat_id>"``, which overrides the channel-wide ``group_policy``.
+        """
+        from nanobot.group_policy import resolve_policy
+
+        return cast(
+            "Literal['open', 'mention']",
+            resolve_policy(
+                self.name,
+                str(message.chat_id),
+                thread_id=getattr(message, "message_thread_id", None),
+                static_overrides=self.config.group_policy_overrides,
+                default_policy=self.config.group_policy,
+            ),
+        )
+
     async def _is_group_message_for_bot(self, message: Message) -> bool:
         """Allow group messages when policy is open, @mentioned, or replying to the bot."""
-        if message.chat.type == "private" or self.config.group_policy == "open":
+        if message.chat.type == "private" or self._effective_group_policy(message) == "open":
             return True
 
         bot_id, bot_username = await self._ensure_bot_identity()

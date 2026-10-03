@@ -188,6 +188,14 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "[list|approve <code>|deny <code>|revoke <user_id>]",
         accepts_args=True,
     ),
+    BuiltinCommandSpec(
+        "/group",
+        "Group reply policy",
+        "Show or change how the bot replies in this chat or topic.",
+        "users",
+        "[policy|reset]",
+        accepts_args=True,
+    ),
 )
 
 
@@ -951,6 +959,94 @@ async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_group(ctx: CommandContext) -> OutboundMessage:
+    """Show or change the group reply policy for this chat or topic.
+
+    Without arguments it reports the effective policy for the current scope.
+    ``/group <policy>`` stores an override; ``/group reset`` removes it.
+    """
+    from nanobot.group_policy import POLICIES, clear_policy, set_policy
+
+    metadata = dict(ctx.msg.metadata or {})
+    if metadata.get("is_group") is not True:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="This command applies to group chats and topics only.",
+            metadata={**metadata, "render_as": "text"},
+        )
+
+    thread_id = metadata.get("message_thread_id")
+    scope = f"{ctx.msg.chat_id}:{thread_id}" if thread_id else str(ctx.msg.chat_id)
+    arg = ctx.args.strip().lower()
+
+    def _reply(text: str) -> OutboundMessage:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=text,
+            metadata={**metadata, "render_as": "text"},
+        )
+
+    if not arg or arg == "status":
+        current = _effective_policy_for(ctx)
+        where = f"topic `{scope}`" if thread_id else f"chat `{scope}`"
+        return _reply(
+            f"Group reply policy for {where}: **{current}**.\n"
+            f"Use `/group mention` to only reply when mentioned, or "
+            f"`/group open` to reply to every message. `/group reset` clears it."
+        )
+
+    if arg == "reset":
+        removed = clear_policy(ctx.msg.channel, str(ctx.msg.chat_id), thread_id=thread_id)
+        return _reply("Override cleared." if removed else "No override was set here.")
+
+    if arg not in POLICIES:
+        return _reply(
+            f"Unsupported policy `{arg}`. Available: {', '.join(POLICIES)}. "
+            "Use `/group reset` to clear the override."
+        )
+
+    set_policy(ctx.msg.channel, str(ctx.msg.chat_id), arg, thread_id=thread_id)
+    where = f"topic `{scope}`" if thread_id else f"chat `{scope}`"
+    if arg == "mention":
+        return _reply(f"Done — I will only reply in {where} when mentioned.")
+    return _reply(f"Done — I will reply to every message in {where}.")
+
+
+def _effective_policy_for(ctx: CommandContext) -> str:
+    """Resolve the effective policy for the current scope.
+
+    Reads the same resolution order the channel uses, so the reply matches the
+    behavior the next message will get.
+    """
+    from nanobot.group_policy import resolve_policy
+
+    section: Any = None
+    channels_config = getattr(ctx.loop, "channels_config", None)
+    if channels_config is not None:
+        section = getattr(channels_config, ctx.msg.channel, None)
+        if section is None and hasattr(channels_config, "model_extra"):
+            extra = channels_config.model_extra or {}
+            section = extra.get(ctx.msg.channel)
+
+    def _get(key: str, default: Any) -> Any:
+        if section is None:
+            return default
+        if isinstance(section, dict):
+            return section.get(key, default)
+        return getattr(section, key, default)
+
+    metadata = ctx.msg.metadata or {}
+    return resolve_policy(
+        ctx.msg.channel,
+        str(ctx.msg.chat_id),
+        thread_id=metadata.get("message_thread_id"),
+        static_overrides=_get("group_policy_overrides", {}) or _get("groupPolicyOverrides", {}),
+        default_policy=str(_get("group_policy", None) or _get("groupPolicy", "mention")),
+    )
+
+
 async def cmd_skill(ctx: CommandContext) -> OutboundMessage:
     """List all enabled skills (name and description only)."""
     loop = ctx.loop
@@ -1092,6 +1188,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/skill", cmd_skill)
     router.exact("/help", cmd_help)
     router.exact("/pairing", cmd_pairing)
+    router.exact("/group", cmd_group)
     router.prefix("/pairing ", cmd_pairing)
     router.exact(USER_SHELL_COMMAND, cmd_user_shell)
     router.prefix(f"{USER_SHELL_COMMAND} ", cmd_user_shell)

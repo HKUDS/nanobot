@@ -21,6 +21,10 @@ These commands work inside chat channels and interactive agent sessions:
 | `/skill` | List enabled skills and their descriptions |
 | `/trigger` | Show local trigger usage |
 | `/trigger <name>` | Create a named local trigger for the current chat/session |
+| `/group` | Show the group reply policy for this chat or topic |
+| `/group mention` | Only reply in this chat/topic when mentioned |
+| `/group open` | Reply to every message in this chat/topic |
+| `/group reset` | Clear the override for this chat/topic |
 | `/pairing` | List pending pairing requests |
 | `/pairing approve <code>` | Approve a pairing code |
 | `/pairing deny <code>` | Deny a pending pairing request |
