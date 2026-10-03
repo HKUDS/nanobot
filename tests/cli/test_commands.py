@@ -14,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -84,6 +85,7 @@ class _GatewayAgentContractStub:
     """Minimal stable AgentLoop surface required by gateway assembly tests."""
 
     tools = ToolRegistry()
+    subagents = MagicMock(spec=SubagentManager)
 
     @staticmethod
     def mcp_runtime_status() -> dict[str, str]:
@@ -3500,7 +3502,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         enabled_channels: list[str] = []
 
         def __init__(self, *_args, **_kwargs) -> None:
-            return None
+            seen["webui_subagent_manager"] = _kwargs["webui_subagent_manager"]
 
         def get_channel(self, name: str) -> object | None:
             return object() if name == "websocket" else None
@@ -3531,6 +3533,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     agent = seen["agent"]
     agent_kwargs = seen["agent_from_config_kwargs"]
     kwargs = seen["local_trigger_queue_kwargs"]
+    assert seen["webui_subagent_manager"] is agent.subagents
     assert isinstance(agent_kwargs["provider"], UnconfiguredProvider) is bool(setup_error)
     refreshed_snapshot = agent_kwargs["provider_snapshot_loader"]()
     assert not isinstance(refreshed_snapshot.provider, UnconfiguredProvider)
