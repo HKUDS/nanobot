@@ -125,6 +125,8 @@ function applySgrParams(state: AnsiState, params: number[]): void {
   for (let index = 0; index < params.length; index += 1) {
     const code = params[index];
     if (code === 0) {
+      delete state.color;
+      delete state.backgroundColor;
       Object.assign(state, initialState());
     } else if (code === 1) {
       state.bold = true;
