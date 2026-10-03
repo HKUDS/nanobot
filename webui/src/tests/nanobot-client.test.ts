@@ -2211,6 +2211,32 @@ describe("NanobotClient", () => {
     expect(seen.at(-1)).toBe("closed");
   });
 
+  it.each([true, false])("stays closed when pending reauthentication finishes (success=%s)", async (success) => {
+    let finishReauth!: () => void;
+    const reauth = new Promise<string | null>((resolve, reject) => {
+      finishReauth = () => success ? resolve("ws://refreshed") : reject(new Error("reauth failed"));
+    });
+    const onReauth = vi.fn(() => reauth);
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: true,
+      maxBackoffMs: 10,
+      onReauth,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().close();
+    vi.advanceTimersByTime(10);
+    expect(onReauth).toHaveBeenCalledOnce();
+    client.close();
+    finishReauth();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(FakeSocket.instances).toHaveLength(1);
+    expect(client.status).toBe("closed");
+  });
+
   it("passes media through into the message envelope", () => {
     const client = new NanobotClient({
       url: "ws://test",
