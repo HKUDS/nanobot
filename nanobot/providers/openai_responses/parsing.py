@@ -72,7 +72,7 @@ def _response_object(value: object) -> dict[str, Any] | None:
         return object_value
     dump = getattr(value, "model_dump", None)
     if callable(dump):
-        dumped = _as_json_object(dump())
+        dumped = _as_json_object(dump(by_alias=True))
         if dumped is not None:
             return dumped
     try:
