@@ -271,6 +271,10 @@ class HostWebSocket {
     this.unsubscribe = api.onSocketEvent((event) => this.handleEvent(event));
     void api.openSocket(url).then(
       (id) => {
+        if (this.readyState === HOST_WS_CLOSED) {
+          void this.api.closeSocket(id);
+          return;
+        }
         this.id = id;
       },
       () => {

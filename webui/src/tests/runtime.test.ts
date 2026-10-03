@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createHostWebSocket,
   getRuntimeHost,
   initializeLoopbackRuntimeHost,
   isNativeRuntime,
@@ -15,6 +16,34 @@ afterEach(() => {
 });
 
 describe("runtime host facade", () => {
+  it("closes a host socket that finishes opening after the client closes", async () => {
+    let resolveOpen!: (id: string) => void;
+    const openSocket = vi.fn(() => new Promise<string>((resolve) => {
+      resolveOpen = resolve;
+    }));
+    const closeSocket = vi.fn(async () => undefined);
+    const unsubscribe = vi.fn();
+    Object.defineProperty(window, "nanobotHost", {
+      configurable: true,
+      value: {
+        openSocket,
+        closeSocket,
+        sendSocket: vi.fn(async () => undefined),
+        onSocketEvent: vi.fn(() => unsubscribe),
+      },
+    });
+
+    const socket = createHostWebSocket("ws://localhost/ws");
+    socket.close();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    resolveOpen("pending-socket");
+    await Promise.resolve();
+
+    expect(closeSocket).toHaveBeenCalledOnce();
+    expect(closeSocket).toHaveBeenCalledWith("pending-socket");
+    expect(socket.readyState).toBe(3);
+  });
+
   it("defaults to browser runtime without host actions", () => {
     const host = getRuntimeHost();
 
