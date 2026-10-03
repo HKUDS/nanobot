@@ -597,9 +597,8 @@ def _read_segment_manifest_entries(
     *,
     stats: TranscriptReplayStats | None = None,
 ) -> list[dict[str, Any]]:
-    entries = _load_segment_manifest_entries(session_key)
-    if entries is not None:
-        return entries
+    # Readers must share the writers' lock: Windows cannot replace a manifest
+    # while another thread still has it open.
     with _manifest_rebuild_lock(session_key):
         entries = _load_segment_manifest_entries(session_key)
         if entries is not None:

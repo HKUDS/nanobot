@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event, Lock
 
@@ -601,6 +602,73 @@ def test_manifest_repair_is_single_flight(tmp_path, monkeypatch) -> None:
         assert first.result(timeout=2) == second.result(timeout=2)
 
     assert calls == 1
+
+
+def test_concurrent_history_reads_close_manifest_before_repair(tmp_path, monkeypatch) -> None:
+    key = "websocket:manifest-reader"
+    _write_segmented_turns(tmp_path, monkeypatch, key, "manifest-reader", 4)
+    manifest = webui_transcript_segments_dir(key) / "manifest.json"
+    manifest.write_text("{not json", encoding="utf-8")
+    original_read = Path.read_text
+    original_replace = transcript_module.os.replace
+    original_lock = transcript_module._manifest_rebuild_lock
+    read_started = Event()
+    reader_open = Event()
+    release_reader = Event()
+    contender_ready = Event()
+
+    def hold_first_reader(path, *args, **kwargs):
+        if path != manifest or read_started.is_set():
+            return original_read(path, *args, **kwargs)
+        read_started.set()
+        try:
+            with path.open(encoding="utf-8") as stream:
+                reader_open.set()
+                assert release_reader.wait(5)
+                return stream.read()
+        finally:
+            reader_open.clear()
+
+    @contextmanager
+    def observe_contention(session_key):
+        lock = original_lock(session_key)
+        if not lock.acquire(blocking=False):
+            contender_ready.set()
+            assert lock.acquire(timeout=5)
+        try:
+            yield
+        finally:
+            lock.release()
+
+    def replace_without_open_reader(source, destination, *args, **kwargs):
+        if Path(destination) == manifest and reader_open.is_set():
+            contender_ready.set()
+            # Model Windows' open-handle restriction on every test platform.
+            raise PermissionError("Cannot replace an open manifest")
+        return original_replace(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", hold_first_reader)
+    monkeypatch.setattr(transcript_module, "_manifest_rebuild_lock", observe_contention)
+    monkeypatch.setattr(transcript_module.os, "replace", replace_without_open_reader)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(build_webui_thread_response, key)
+        try:
+            assert reader_open.wait(5)
+            second = executor.submit(build_webui_thread_response, key)
+            # Wait for lock contention (fixed) or the conflicting replace (broken).
+            assert contender_ready.wait(5)
+        finally:
+            release_reader.set()
+        first_result = first.result(timeout=5)
+        second_result = second.result(timeout=5)
+
+    assert first_result is not None
+    assert second_result is not None
+    assert _message_contents(first_result) == _numbered_turn_texts(1, 4)
+    assert _message_contents(second_result) == _numbered_turn_texts(1, 4)
+    assert json.loads(manifest.read_text(encoding="utf-8"))["segments"]
+    assert not list(manifest.parent.glob("*.tmp"))
 
 
 def test_page_read_compacts_legacy_immutable_segment(tmp_path, monkeypatch) -> None:
