@@ -1137,19 +1137,21 @@ async def connect_mcp_servers(
 
             read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
+            initialization = await session.initialize()
 
             # Finish discovery before registering tools so a failed page leaves no partial set.
-            page = await session.list_tools()
-            tool_defs = list(page.tools)
-            seen_cursors: set[str] = set()
-            while page.nextCursor is not None:
-                cursor = page.nextCursor
-                if cursor in seen_cursors:
-                    raise ValueError("MCP tools/list returned a repeated pagination cursor")
-                seen_cursors.add(cursor)
-                page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
+            tool_defs: list[MCPToolDefinition] = []
+            if initialization.capabilities.tools is not None:
+                page = await session.list_tools()
                 tool_defs.extend(page.tools)
+                seen_cursors: set[str] = set()
+                while page.nextCursor is not None:
+                    cursor = page.nextCursor
+                    if cursor in seen_cursors:
+                        raise ValueError("MCP tools/list returned a repeated pagination cursor")
+                    seen_cursors.add(cursor)
+                    page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
+                    tool_defs.extend(page.tools)
 
             enabled_tools = set(cfg.enabled_tools)
             allow_all_tools = "*" in enabled_tools
