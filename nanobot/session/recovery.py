@@ -256,9 +256,8 @@ def _runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
     if phase == "awaiting_tools":
         return (
             bool(assistant_call_ids)
-            and not completed_ids
-            and len(assistant_call_ids) == len(pending_ids)
-            and set(assistant_call_ids) == set(pending_ids)
+            and not (set(completed_ids) & set(pending_ids))
+            and set(completed_ids) | set(pending_ids) == set(assistant_call_ids)
         )
     if phase == "tools_completed":
         return (

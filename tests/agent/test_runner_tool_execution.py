@@ -523,3 +523,94 @@ async def test_runner_blocks_repeated_external_fetches():
         if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_3"
     ][0]
     assert "repeated external lookup blocked" in blocked_tool_message["content"]
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_emits_batch_checkpoint_callback():
+    """每批完成后回调一次，completed_pairs 按批顺序累计。"""
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    read_a = _DelayTool("read_a", delay=0.01, read_only=True, shared_events=shared_events)
+    read_b = _DelayTool("read_b", delay=0.01, read_only=True, shared_events=shared_events)
+    write_a = _DelayTool("write_a", delay=0.01, read_only=False, shared_events=shared_events)
+    tools.register(read_a)
+    tools.register(read_b)
+    tools.register(write_a)
+
+    callback = AsyncMock()
+
+    await execute_tool_calls(
+        tools,
+        [
+            ToolCallRequest(id="ro1", name="read_a", arguments={}),
+            ToolCallRequest(id="ro2", name="read_b", arguments={}),
+            ToolCallRequest(id="rw1", name="write_a", arguments={}),
+        ],
+        concurrent=True,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=AgentHook(),
+        context=AgentHookContext(iteration=0, messages=[]),
+        checkpoint_callback=callback,
+    )
+
+    # 批1=[read_a, read_b]（只读合并）、批2=[write_a]（副作用单批）→ 2 次回调
+    assert callback.await_count == 2
+    first = callback.await_args_list[0].args[0]
+    second = callback.await_args_list[1].args[0]
+    assert [(tc.id, tc.name) for tc, _ in first] == [("ro1", "read_a"), ("ro2", "read_b")]
+    assert [tc.id for tc, _ in second] == ["ro1", "ro2", "rw1"]
+    assert [result for _, result in first] == ["read_a", "read_b"]
+    assert [result for _, result in second] == ["read_a", "read_b", "write_a"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_serial_mode_emits_callback_per_tool():
+    """concurrent=False 时每个工具单独一批 → 每次回调只新增一个工具。"""
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    read_a = _DelayTool("read_a", delay=0.01, read_only=True, shared_events=shared_events)
+    read_b = _DelayTool("read_b", delay=0.01, read_only=True, shared_events=shared_events)
+    tools.register(read_a)
+    tools.register(read_b)
+
+    callback = AsyncMock()
+
+    await execute_tool_calls(
+        tools,
+        [
+            ToolCallRequest(id="ro1", name="read_a", arguments={}),
+            ToolCallRequest(id="ro2", name="read_b", arguments={}),
+        ],
+        concurrent=False,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=AgentHook(),
+        context=AgentHookContext(iteration=0, messages=[]),
+        checkpoint_callback=callback,
+    )
+
+    assert callback.await_count == 2
+    assert [tc.id for tc, _ in callback.await_args_list[0].args[0]] == ["ro1"]
+    assert [tc.id for tc, _ in callback.await_args_list[1].args[0]] == ["ro1", "ro2"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_without_callback_keeps_previous_behavior():
+    """未传 checkpoint_callback 时行为不变（兼容性冒烟）。"""
+    tools = ToolRegistry()
+    shared_events: list[str] = []
+    read_a = _DelayTool("read_a", delay=0.01, read_only=True, shared_events=shared_events)
+    tools.register(read_a)
+
+    results, events = await execute_tool_calls(
+        tools,
+        [ToolCallRequest(id="ro1", name="read_a", arguments={})],
+        concurrent=True,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=AgentHook(),
+        context=AgentHookContext(iteration=0, messages=[]),
+    )
+
+    assert results == ["read_a"]
+    assert events[0]["name"] == "read_a"
