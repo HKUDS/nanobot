@@ -11,6 +11,7 @@ Example:
 """
 
 import sys
+import tempfile
 import zipfile
 from contextlib import suppress
 from pathlib import Path
@@ -87,7 +88,6 @@ def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) 
         # Fail closed on symlinks so the packaged contents are explicit and predictable.
         if file_path.is_symlink():
             print(f"[ERROR] Symlink not allowed in packaged skill: {file_path}")
-            _cleanup_partial_archive(skill_filename)
             return None
 
         rel_parts = file_path.relative_to(skill_path).parts
@@ -98,7 +98,6 @@ def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) 
             resolved_file = file_path.resolve()
             if not _is_within(resolved_file, skill_path):
                 print(f"[ERROR] File escapes skill root: {file_path}")
-                _cleanup_partial_archive(skill_filename)
                 return None
             # If output lives under skill_path, avoid writing archive into itself.
             if resolved_file == resolved_archive:
@@ -107,19 +106,25 @@ def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) 
             files_to_package.append(file_path)
 
     # Create the .skill file (zip format)
+    partial_archive: Path | None = None
     try:
-        with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
+        with tempfile.NamedTemporaryFile(dir=output_path, prefix=f".{skill_name}-", suffix=".tmp", delete=False) as partial:
+            partial_archive = Path(partial.name)
+        with zipfile.ZipFile(partial_archive, "w", zipfile.ZIP_DEFLATED) as zipf:
             for file_path in files_to_package:
                 # Calculate the relative path within the zip.
                 arcname = Path(skill_name) / file_path.relative_to(skill_path)
                 zipf.write(file_path, arcname)
                 print(f"  Added: {arcname}")
 
+        partial_archive.replace(skill_filename)
+
         print(f"\n[OK] Successfully packaged skill to: {skill_filename}")
         return skill_filename
 
     except Exception as e:
-        _cleanup_partial_archive(skill_filename)
+        if partial_archive is not None:
+            _cleanup_partial_archive(partial_archive)
         print(f"[ERROR] Error creating .skill file: {e}")
         return None
 

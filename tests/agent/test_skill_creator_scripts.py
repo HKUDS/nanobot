@@ -3,6 +3,8 @@ import sys
 import zipfile
 from pathlib import Path
 
+import pytest
+
 SCRIPT_DIR = Path("nanobot/skills/skill-creator/scripts").resolve()
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -123,3 +125,28 @@ def test_package_skill_rejects_symlink(tmp_path: Path) -> None:
 
     assert archive_path is None
     assert not (tmp_path / "dist" / "symlink-skill.skill").exists()
+
+
+def test_package_skill_preserves_existing_archive_on_write_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_dir = tmp_path / "existing-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: existing-skill\ndescription: Package safely.\n---\n# Skill\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "dist"
+    output_dir.mkdir()
+    archive_path = output_dir / "existing-skill.skill"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("previous.txt", "previous working release")
+    previous = archive_path.read_bytes()
+
+    def fail_write(*_args: object, **_kwargs: object) -> None:
+        raise OSError("simulated read failure")
+
+    monkeypatch.setattr(zipfile.ZipFile, "write", fail_write)
+    assert package_skill.package_skill(skill_dir, output_dir) is None
+    assert archive_path.read_bytes() == previous
+    assert list(output_dir.iterdir()) == [archive_path]
