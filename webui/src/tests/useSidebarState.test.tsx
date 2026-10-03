@@ -8,6 +8,50 @@ import type { SidebarStatePayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 describe("useSidebarState", () => {
+  it("blocks writes after a failed read and retries before allowing edits", async () => {
+    const setSidebarState = vi.fn(async (state: SidebarStatePayload) => state);
+    const client = {
+      status: "open",
+      onStatus: () => () => {},
+      onSidebarStateUpdate: () => () => {},
+      setSidebarState,
+    } as unknown as NanobotClient;
+    const saved = {
+      pinned_keys: ["websocket:old"],
+      archived_keys: ["websocket:archived"],
+      title_overrides: { "websocket:old": "Saved title" },
+      tags_by_key: { "websocket:old": ["important"] },
+      session_order: ["websocket:old", "websocket:archived"],
+    };
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new Error("Gateway restarting"))
+      .mockResolvedValue({ ok: true, json: async () => saved });
+    vi.stubGlobal("fetch", fetch);
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="token">{children}</ClientProvider>
+    );
+    const { result, unmount } = renderHook(() => useSidebarState([], false), { wrapper });
+    await act(async () => {});
+    expect(fetch).toHaveBeenCalled();
+    await act(async () => {
+      await result.current.update((current) => ({ ...current, pinned_keys: ["websocket:new"] }));
+    });
+    expect(setSidebarState).not.toHaveBeenCalled();
+    expect(result.current.loading).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5_000 });
+    expect(result.current.state).toEqual(expect.objectContaining(saved));
+    await act(async () => {
+      await result.current.update((current) => ({
+        ...current, pinned_keys: [...current.pinned_keys, "websocket:new"],
+      }));
+    });
+    expect(setSidebarState).toHaveBeenCalledTimes(1);
+    expect(setSidebarState).toHaveBeenCalledWith(expect.objectContaining({
+      ...saved, pinned_keys: ["websocket:old", "websocket:new"],
+    }));
+    unmount();
+  }, 10_000);
+
   it("serializes full-state writes so an older request cannot overwrite a newer update", async () => {
     let resolveFirstWrite: (() => void) | null = null;
     let sidebarStateUpdateHandler: ((state: SidebarStatePayload) => void) | null = null;
