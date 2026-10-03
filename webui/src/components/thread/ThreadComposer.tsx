@@ -2034,14 +2034,11 @@ export function ThreadComposer({
         : undefined;
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
-    // While streaming, sending carries continueActiveTurn so the new message
-    // interjects instead of waiting for the running turn to finish.
     const options: SendOptions | undefined =
       attachedCliApps.length > 0
       || attachedMcpPresets.length > 0
       || activeSessionMentions.length > 0
       || normalizedQuotedContext
-      || isStreaming
         ? {
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
@@ -2049,7 +2046,6 @@ export function ThreadComposer({
               ? { sessionMentions: activeSessionMentions }
               : {}),
             ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
-            ...(isStreaming ? { continueActiveTurn: true } : {}),
           }
         : undefined;
     const hasPlainTextCommandPayload =
@@ -2081,7 +2077,8 @@ export function ThreadComposer({
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      setQueuedPrompts([]);
+      // Sending new guidance must not discard other messages still waiting.
+      if (!isStreaming || finalizeActiveTurn) setQueuedPrompts([]);
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2097,7 +2094,7 @@ export function ThreadComposer({
             sideChannel: true,
             ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
           }
-        : options,
+        : isStreaming ? { ...options, continueActiveTurn: true } : options,
     );
     if (result instanceof Promise) {
       setSendPending(true);
@@ -2289,12 +2286,8 @@ export function ThreadComposer({
       : voiceRecorder.state === "transcribing"
         ? t("thread.composer.voice.transcribing")
         : t("thread.composer.voice.hint");
-  // While streaming, the primary action is Stop only while the composer is
-  // empty. Once the user types, the send affordance takes over (like ChatGPT):
-  // tapping send interjects instead of waiting — this keeps the flow working
-  // on touch devices where Enter now inserts a newline instead of queueing
-  // guidance.
-  const showStopButton = isStreaming && !!onStop && !hasComposerContent;
+  // Touch users need an explicit send action; keep Stop while sending is unavailable.
+  const showStopButton = isStreaming && !!onStop && !canSend;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError

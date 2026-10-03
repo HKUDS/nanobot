@@ -271,6 +271,18 @@ MCP presets, or persisted topics. Topics have short, pronounceable handles such 
 from the menu, or drag it from the sidebar, to attach its structured reference.
 Typing the same text without selecting it remains plain text.
 
+On touch-primary phones and tablets, **Enter** inserts a newline; tap the send
+arrow to submit. This also applies when a coarse-pointer tablet has a hardware
+keyboard attached. On desktop, **Enter** sends and **Shift+Enter** adds a newline.
+An open slash-command or mention menu takes precedence: Enter selects its item.
+
+While a response is running, the send arrow delivers a ready draft as guidance
+for the active turn; it does not issue a stop command. Other messages already
+waiting in the queue stay there. On desktop, Enter queues guidance and a second
+Enter with an empty input sends that queued message immediately. Queued messages
+also have a **Send now** action. The primary button shows **Stop** when there is
+no sendable draft; clear the draft or use `/stop` to stop instead of sending it.
+
 The agent can inspect an attached topic with `read_session`. It can discover other
 persisted topics with `list_sessions` and send asynchronous messages with
 `send_session_message`; topic messaging is not limited by workspace scope.

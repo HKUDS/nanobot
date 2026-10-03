@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ComposerDraftStore } from "@/lib/composer-draft";
+import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
 
@@ -3019,6 +3020,43 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("hold on, actually…", undefined, {
       continueActiveTurn: true,
     });
+  });
+
+  it("preserves waiting guidance when the send button submits a newer draft", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onStop={vi.fn()} isStreaming />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "waiting guidance" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "send this now" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("send this now", undefined, { continueActiveTurn: true });
+    expect(screen.getByText("waiting guidance")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenLastCalledWith("waiting guidance", undefined, { continueActiveTurn: true });
+  });
+
+  it("does not mark side-channel commands as guidance during an active turn", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onStop={vi.fn()} isStreaming slashCommands={COMMANDS} />);
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/history 5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/history 5", undefined, { sideChannel: true });
+  });
+
+  it("keeps Stop available while a draft attachment is encoding", () => {
+    vi.mocked(encodeImage).mockReturnValueOnce(new Promise(() => {}));
+    const onStop = vi.fn();
+    const { container } = render(<ThreadComposer onSend={vi.fn()} onStop={onStop} isStreaming />);
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "unfinished draft" } });
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["image"], "photo.png", { type: "image/png" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Message input")).toHaveValue("unfinished draft");
   });
 
   it("queues plain guidance while a task is running", () => {
