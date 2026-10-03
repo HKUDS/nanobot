@@ -59,12 +59,6 @@ def _make_mock_loop(**overrides):
 
     # SubagentManager mock
     loop.subagents = MagicMock()
-    loop.subagents._running_tasks = {"abc123": MagicMock(done=MagicMock(return_value=False))}
-    loop.subagents._task_statuses = {}
-    loop.subagents.statuses_for_session.side_effect = (
-        lambda key: loop.subagents._task_statuses if key == "test:owner" else {}
-    )
-    loop.subagents.get_running_count = MagicMock(return_value=1)
 
     for k, v in overrides.items():
         setattr(loop, k, v)
@@ -412,11 +406,11 @@ class TestModifyOpen:
 
     @pytest.mark.asyncio
     async def test_modify_subagents_blocked(self):
-        """subagents is READ_ONLY — cannot be replaced."""
+        """Subagent control is outside the self-inspection capability."""
         tool = _make_tool()
         new_subagents = MagicMock()
         result = await tool.execute(action="set", key="subagents", value=new_subagents)
-        assert "read-only" in result
+        assert "protected" in result
 
     @pytest.mark.asyncio
     async def test_modify_runner_blocked(self):
@@ -585,78 +579,6 @@ class TestDeniedAttrs:
 
 
 # ---------------------------------------------------------------------------
-# SubagentStatus formatting
-# ---------------------------------------------------------------------------
-
-class TestSubagentStatusFormatting:
-
-    def test_format_single_status(self):
-        """_format_value should produce a rich multi-line display for a SubagentStatus."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="abc12345",
-            label="read logs and summarize",
-            task_description="Read the log files and produce a summary",
-            started_at=time.monotonic() - 12.4,
-            phase="awaiting_tools",
-            iteration=3,
-            tool_events=[
-                {"name": "read_file", "status": "ok", "detail": "read app.log"},
-                {"name": "grep", "status": "ok", "detail": "searched ERROR"},
-                {"name": "exec", "status": "error", "detail": "timeout"},
-            ],
-            usage=LLMUsage.reported(input_tokens=4500, output_tokens=1200),
-        )
-        result = MyTool._format_value(status)
-        assert "abc12345" in result
-        assert "read logs and summarize" in result
-        assert "awaiting_tools" in result
-        assert "iteration: 3" in result
-        assert "read_file(ok)" in result
-        assert "exec(error)" in result
-        assert "4500" in result
-
-    def test_format_status_dict(self):
-        """_format_value should handle dict[str, SubagentStatus] with rich display."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        statuses = {
-            "abc12345": SubagentStatus(
-                task_id="abc12345",
-                label="task A",
-                task_description="Do task A",
-                started_at=time.monotonic() - 5.0,
-                phase="awaiting_tools",
-                iteration=1,
-            ),
-        }
-        result = MyTool._format_value(statuses)
-        assert "1 subagent(s)" in result
-        assert "abc12345" in result
-        assert "task A" in result
-
-    def test_format_empty_status_dict(self):
-        """Empty dict[str, SubagentStatus] should show 'no running subagents'."""
-        result = MyTool._format_value({})
-        assert "{}" in result
-
-    def test_format_status_with_error(self):
-        """Status with error should include the error message."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        status = SubagentStatus(
-            task_id="err00001",
-            label="failing task",
-            task_description="A task that fails",
-            started_at=time.monotonic() - 1.0,
-            phase="error",
-            error="Connection refused",
-        )
-        result = MyTool._format_value(status)
-        assert "error: Connection refused" in result
-
-# ---------------------------------------------------------------------------
 # _SubagentHook after_iteration updates status
 # ---------------------------------------------------------------------------
 
@@ -778,60 +700,6 @@ class TestCheckpointCallback:
         await _on_checkpoint({"iteration": 1})
         assert status.phase == "initializing"
         assert status.iteration == 1
-
-
-# ---------------------------------------------------------------------------
-# check subagents._task_statuses via dot-path
-# Task status inspection requires the owning session context.
-# ---------------------------------------------------------------------------
-
-class TestInspectTaskStatuses:
-
-    @pytest.mark.asyncio
-    async def test_inspect_task_statuses_accessible(self):
-        """subagents is READ_ONLY — check should show subagent statuses."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        loop = _make_mock_loop()
-        loop.subagents._task_statuses = {
-            "abc12345": SubagentStatus(
-                task_id="abc12345",
-                label="read logs",
-                task_description="Read the log files",
-                started_at=time.monotonic() - 8.0,
-                phase="awaiting_tools",
-                iteration=2,
-                tool_events=[{"name": "read_file", "status": "ok", "detail": "ok"}],
-                usage=LLMUsage.reported(input_tokens=500, output_tokens=100),
-            ),
-        }
-        tool = _make_tool(loop=loop)
-        with request_context(RequestContext("test", "owner", session_key="test:owner")):
-            result = await tool.execute(action="check", key="subagents._task_statuses")
-        assert "abc12345" in result
-        assert "read logs" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_single_subagent_status_accessible(self):
-        """subagents._task_statuses.<id> should return individual SubagentStatus."""
-        from nanobot.agent.subagent import SubagentStatus
-
-        loop = _make_mock_loop()
-        status = SubagentStatus(
-            task_id="xyz",
-            label="search code",
-            task_description="Search the codebase",
-            started_at=time.monotonic() - 3.0,
-            phase="done",
-            iteration=4,
-            stop_reason="completed",
-        )
-        loop.subagents._task_statuses = {"xyz": status}
-        tool = _make_tool(loop=loop)
-        with request_context(RequestContext("test", "owner", session_key="test:owner")):
-            result = await tool.execute(action="check", key="subagents._task_statuses.xyz")
-        assert "search code" in result
-        assert "completed" in result
 
 
 # ---------------------------------------------------------------------------

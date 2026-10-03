@@ -47,6 +47,8 @@ class TurnRoute:
     chat_id: str
     metadata: dict[str, Any] = field(default_factory=dict)
     publish_lifecycle: bool = False
+    # Public turn identity supplied by the owning channel adapter.
+    turn_id: str | None = None
 
 
 TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]

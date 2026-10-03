@@ -1562,6 +1562,45 @@
     "error": "Error de conexión"
   },
   "thread": {
+    "subagents": {
+      "loadFailed": "No se pudieron cargar las subtareas.",
+      "stopFailed": "No se pudo detener esta tarea.",
+      "stopTask": "Detener {{label}}",
+      "iteration": "Iteración {{count}}",
+      "result": "Resultado",
+      "partialResult": "Resultado parcial",
+      "receiptHelp": "Entregado significa que el mensaje se incluyó en la siguiente solicitud del subagente, sin confirmar su ejecución.",
+      "states": {
+        "queued": "En cola",
+        "running": "En curso",
+        "stopping": "Deteniendo",
+        "done": "Completado",
+        "incomplete": "Incompleto",
+        "error": "Fallido",
+        "cancelled": "Cancelado",
+        "interrupted": "Interrumpida"
+      },
+      "receipts": {
+        "accepted": "En cola: {{count}}",
+        "delivered": "Entregados: {{count}}",
+        "undelivered": "Sin entregar: {{count}}"
+      },
+      "interruptedHelp": "El servidor se reinició antes de terminar esta tarea. No se ha vuelto a ejecutar automáticamente.",
+      "workTitle": "Trabajo delegado",
+      "progress": "{{completed}} de {{total}} completados",
+      "running": "En curso: {{count}}",
+      "finished": "Finalizados: {{count}}",
+      "needsReview": "Revisar: {{count}}",
+      "details": "Detalles de la tarea",
+      "description": "Descripción de la tarea",
+      "activity": "Actividad de ejecución",
+      "messages": "Confirmaciones de mensajes",
+      "toolStates": {
+        "running": "En curso",
+        "ok": "Completado",
+        "error": "Fallido"
+      }
+    },
     "compaction": {
       "cancelled": "Compresión de contexto cancelada",
       "empty": "No hay contexto que comprimir.",

@@ -1761,6 +1761,45 @@
     "error": "Connection error"
   },
   "thread": {
+    "subagents": {
+      "loadFailed": "Could not load subagent tasks.",
+      "stopFailed": "Could not stop this task.",
+      "stopTask": "Stop {{label}}",
+      "iteration": "Iteration {{count}}",
+      "result": "Result",
+      "partialResult": "Partial result",
+      "receiptHelp": "Delivered means the message reached the child’s next model request; it does not confirm completion.",
+      "states": {
+        "queued": "Queued",
+        "running": "Running",
+        "stopping": "Stopping",
+        "done": "Completed",
+        "incomplete": "Incomplete",
+        "error": "Failed",
+        "cancelled": "Cancelled",
+        "interrupted": "Interrupted"
+      },
+      "receipts": {
+        "accepted": "Queued: {{count}}",
+        "delivered": "Delivered: {{count}}",
+        "undelivered": "Undelivered: {{count}}"
+      },
+      "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically.",
+      "workTitle": "Delegated work",
+      "progress": "{{completed}} of {{total}} completed",
+      "running": "Running: {{count}}",
+      "finished": "Finished: {{count}}",
+      "needsReview": "Review needed: {{count}}",
+      "details": "Task details",
+      "description": "Task description",
+      "activity": "Execution activity",
+      "messages": "Message receipts",
+      "toolStates": {
+        "running": "Running",
+        "ok": "Completed",
+        "error": "Failed"
+      }
+    },
     "compaction": {
       "cancelled": "Context compaction cancelled",
       "empty": "Nothing to compact.",
