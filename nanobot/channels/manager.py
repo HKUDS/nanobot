@@ -113,6 +113,7 @@ class ChannelManager:
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None,
         webui_subagent_manager: SubagentManager | None = None,
+        webui_discard_session: Callable[[str], Awaitable[None]] | None = None,
         config_path: Path | None = None,
     ):
         if config_path is None:
@@ -137,6 +138,7 @@ class ChannelManager:
         self._webui_skill_state_action = webui_skill_state_action
         self._webui_recovery_action = webui_recovery_action
         self._webui_subagent_manager = webui_subagent_manager
+        self._webui_discard_session = webui_discard_session
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -215,6 +217,7 @@ class ChannelManager:
                 skill_state_action=self._webui_skill_state_action,
                 recovery_action=self._webui_recovery_action,
                 subagent_manager=self._webui_subagent_manager,
+                discard_session=self._webui_discard_session,
                 logger=logger,
             )
             kwargs["gateway"] = gateway

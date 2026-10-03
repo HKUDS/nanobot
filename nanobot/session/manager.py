@@ -30,6 +30,7 @@ from nanobot.runtime_context import (
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
+from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionTypes
 from nanobot.utils.helpers import (
     atomic_write_lines,
     content_with_media_breadcrumbs,
@@ -59,7 +60,8 @@ _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 _RUNTIME_CHECKPOINT_VERSION = 1
 _RUNTIME_CHECKPOINT_SUFFIX = ".checkpoint.json"
 _FORK_VOLATILE_METADATA_KEYS = {
-    "subagent_tasks",
+    PARENT_SESSION_KEY,
+    SESSION_TYPE_KEY,
     "goal_state",
     "pending_user_turn",
     "pending_user_followups",
@@ -171,9 +173,9 @@ class SessionPolicy:
 
 @dataclass
 class Session:
-    """A conversation session."""
+    """Message history, runtime state, and metadata for one agent session."""
 
-    key: str  # channel:chat_id
+    key: str  # namespace:identity
     messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -780,31 +782,7 @@ class JsonlSessionStore:
             f"{src.stem}.{label}.{snapshot.digest[:12]}.{secrets.token_hex(4)}.jsonl"
         )
         self._install_snapshot(src, conflict, snapshot)
-        self._copy_subagent_records(src, conflict)
         return conflict
-
-    @classmethod
-    def _copy_subagent_records(cls, src: Path, dst: Path, *, replace: bool = False) -> None:
-        """Preserve durable observations whenever their parent history is copied."""
-        source = src.with_suffix(".subagents.json")
-        target = dst.with_suffix(".subagents.json")
-        if not source.exists() and not source.is_symlink():
-            if replace:
-                target.unlink(missing_ok=True)
-                cls._fsync_directory(target.parent)
-            return
-        snapshot = cls._session_file_snapshot(source)
-        if snapshot is None:
-            raise OSError(f"invalid subagent records during session migration: {source}")
-        if target.exists() or target.is_symlink():
-            current = cls._session_file_snapshot(target)
-            if current is None:
-                raise OSError(f"invalid subagent records destination: {target}")
-            if current.digest == snapshot.digest:
-                return
-            if not replace:
-                raise OSError(f"conflicting subagent records: {target}")
-        cls._install_snapshot(source, target, snapshot)
 
     @classmethod
     def _remove_migrated_source(
@@ -844,13 +822,6 @@ class JsonlSessionStore:
                 logger.warning("Skipping invalid or changing legacy session file: {}", src)
                 continue
             try:
-                records_path = src.with_suffix(".subagents.json")
-                records_snapshot = (
-                    self._session_file_snapshot(records_path)
-                    if records_path.exists() or records_path.is_symlink() else None
-                )
-                if (records_path.exists() or records_path.is_symlink()) and records_snapshot is None:
-                    raise OSError(f"invalid subagent records: {records_path}")
                 destination_snapshot = self._session_file_snapshot(dst) if dst.exists() else None
                 if dst.exists() and destination_snapshot is None:
                     logger.warning(
@@ -861,13 +832,11 @@ class JsonlSessionStore:
 
                 if destination_snapshot is None:
                     self._install_snapshot(src, dst, source_snapshot)
-                    self._copy_subagent_records(src, dst)
                 elif destination_snapshot.digest == source_snapshot.digest:
-                    self._copy_subagent_records(src, dst)
+                    pass
                 elif source_snapshot.updated_at > destination_snapshot.updated_at:
                     archived = self._archive_conflict(dst, destination_snapshot, "destination")
                     self._install_snapshot(src, dst, source_snapshot)
-                    self._copy_subagent_records(src, dst, replace=True)
                     logger.warning("Archived older session migration conflict at {}", archived)
                 else:
                     archived = self._archive_conflict(src, source_snapshot, "workspace")
@@ -889,9 +858,6 @@ class JsonlSessionStore:
                         "Session migrated but legacy source changed or could not be removed: {}",
                         src,
                     )
-                elif records_snapshot is not None:
-                    if not self._remove_migrated_source(records_path, records_snapshot):
-                        logger.warning("Migrated subagent records source changed: {}", records_path)
             except OSError as exc:
                 logger.warning("Failed to migrate session {}: {}", src, exc)
 
@@ -921,19 +887,11 @@ class JsonlSessionStore:
                         and destination_snapshot.digest == source_snapshot.digest
                     ):
                         unchanged += 1
-                        try:
-                            self._copy_subagent_records(src, dst)
-                        except OSError:
-                            conflicts.append(dst.with_suffix(".subagents.json"))
                     else:
                         conflicts.append(dst)
                     continue
                 self._install_snapshot(src, dst, source_snapshot)
                 restored += 1
-                try:
-                    self._copy_subagent_records(src, dst)
-                except OSError:
-                    conflicts.append(dst.with_suffix(".subagents.json"))
         return SessionRestoreResult(
             restored=restored,
             unchanged=unchanged,
@@ -1322,30 +1280,6 @@ class JsonlSessionStore:
             finally:
                 tmp_path.unlink(missing_ok=True)
 
-    def get_subagent_records_path(self, key: str) -> Path:
-        return self.get_session_path(key).with_suffix(".subagents.json")
-
-    def read_subagent_records(self, key: str) -> dict[str, Any] | None:
-        with self._session_files_lock:
-            if not self.get_session_path(key).exists():
-                return None
-            path = self.get_subagent_records_path(key)
-            try:
-                if not stat.S_ISREG(path.lstat().st_mode):
-                    raise ValueError("task records must be a regular file")
-                return _json_object(json.loads(path.read_text(encoding="utf-8")))
-            except FileNotFoundError:
-                return None
-
-    def save_subagent_records(self, key: str, payload: dict[str, Any], *, fsync: bool = False) -> bool:
-        with self._session_files_lock:
-            if not self.get_session_path(key).exists():
-                return False
-            atomic_write_lines(
-                self.get_subagent_records_path(key), [json.dumps(payload, ensure_ascii=False)], fsync=fsync,
-            )
-            return True
-
     def delete(self, key: str) -> bool:
         with self._session_files_lock:
             return self._delete_unlocked(key)
@@ -1354,7 +1288,6 @@ class JsonlSessionStore:
         paths = [
             self.get_session_path(key),
             self.get_runtime_checkpoint_path(key),
-            self.get_subagent_records_path(key),
             self.get_legacy_lossy_path(key),
             self.get_legacy_session_path(key),
         ]
@@ -1604,6 +1537,7 @@ class SessionManager:
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._delete_observer: Callable[[str], None] | None = None
+        self.types = SessionTypes()
 
     def _remember(self, session: Session) -> None:
         """Keep recent sessions strongly cached without duplicating live objects."""
@@ -1700,6 +1634,32 @@ class SessionManager:
 
         self._remember(session)
         return session
+
+    def get_existing(self, key: str) -> Session | None:
+        """Load an existing session without creating a deleted conversation."""
+        session = self._cached(key) or self._load(key)
+        if session is not None:
+            self._remember(session)
+        return session
+
+    def child_session_keys(self, parent_key: str) -> list[str]:
+        """Find persisted and active children through their declared parent."""
+        return [key for key, parent in self._session_parents().items() if parent == parent_key]
+
+    def _session_parents(self) -> dict[str, str]:
+        keys = {row["key"] for row in self.list_sessions()}
+        cached = {**self._overflow_cache, **self._cache}
+        keys.update(cached)
+        parents: dict[str, str] = {}
+        for key in sorted(keys):
+            session = cached.get(key)
+            metadata = session.metadata if session is not None else (
+                (self.read_session_metadata(key) or {}).get("metadata", {})
+            )
+            parent = metadata.get(PARENT_SESSION_KEY)
+            if isinstance(parent, str):
+                parents[key] = parent
+        return parents
 
     def get_or_create_transient(
         self,
@@ -1811,12 +1771,28 @@ class SessionManager:
         self._overflow_cache.pop(key, None)
 
     def delete_session(self, key: str) -> bool:
-        """Delete a persisted session and invalidate its cache entry."""
-        self.invalidate(key)
-        deleted = self._store.delete(key)
-        if self._delete_observer is not None:
-            self._delete_observer(key)
-        return deleted
+        """Delete a session and its descendants, invalidating their cache entries."""
+        # Collect descendants before deletion; the common file lock also keeps
+        # handle allocation and child-session saves outside this boundary.
+        with self.locked_session_files():
+            children: dict[str, list[str]] = {}
+            for child, parent in self._session_parents().items():
+                children.setdefault(parent, []).append(child)
+            pending = [key]
+            collected: set[str] = set()
+            while pending:
+                current = pending.pop()
+                if current in collected:
+                    continue
+                collected.add(current)
+                pending.extend(children.get(current, ()))
+            deleted = False
+            for current in collected:
+                self.invalidate(current)
+                deleted = self._store.delete(current) or deleted
+                if self._delete_observer is not None:
+                    self._delete_observer(current)
+            return deleted
 
     def restore_sessions_to_workspace(self) -> SessionRestoreResult:
         """Restore session files to the pre-relocation path for an explicit rollback."""
@@ -1902,25 +1878,6 @@ class SessionManager:
         if updated and (session := self.get_cached(key)) is not None:
             session.metadata.update(deepcopy(updates))
         return updated
-
-    def read_subagent_records(self, key: str) -> dict[str, Any] | None:
-        """Read task observations without loading or modifying conversation history."""
-        if self._store is self._jsonl_store:
-            return self._jsonl_store.read_subagent_records(key)
-        session = self.get_cached(key)
-        metadata = session.metadata if session is not None else (self.read_session_metadata(key) or {}).get("metadata", {})
-        value: object = metadata.get("subagent_tasks")
-        return None if value is None else _json_object(value)
-
-    def save_subagent_records(self, key: str, payload: dict[str, Any], *, fsync: bool = False) -> bool:
-        """Atomically replace observations; never change the main turn's checkpoint."""
-        session = self.get_cached(key)
-        if session is not None and not session.policy.persist:
-            return False
-        if self._store is self._jsonl_store:
-            return self._jsonl_store.save_subagent_records(key, payload, fsync=fsync)
-        # Third-party stores retain their existing atomic metadata-update boundary.
-        return self.update_session_metadata(key, {"subagent_tasks": payload}, fsync=fsync)
 
     def list_sessions(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._store.list_sessions())

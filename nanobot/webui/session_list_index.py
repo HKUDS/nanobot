@@ -75,6 +75,11 @@ def list_webui_sessions(session_manager: SessionManager) -> list[dict[str, Any]]
         _public_row(session_manager.sessions_dir, get_webui_dir(), row)
         for row in rows
     ]
+    sessions = [
+        row for row in sessions if session_manager.types.public_history(
+            (session_manager.read_session_metadata(row["key"]) or {}).get("metadata", {})
+        )
+    ]
     return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
 
 

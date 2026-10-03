@@ -27,6 +27,7 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.agent.subagent import SubagentControlError
+from nanobot.agent.subagent_sessions import SubagentSessionError
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -36,7 +37,6 @@ from nanobot.session.recovery import RecoveryActionError
 from nanobot.session.session_handles import (
     SessionHandleResolver,
 )
-from nanobot.session.subagent_records import SubagentRecordsError
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.webui.automation_results import cron_run_response, trigger_run_response
 from nanobot.webui.file_preview import (
@@ -380,6 +380,7 @@ class GatewayHTTPHandler:
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None,
         subagent_manager: SubagentManager | None = None,
+        discard_session: Callable[[str], Awaitable[None]] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -404,6 +405,7 @@ class GatewayHTTPHandler:
         self.skill_state_action = skill_state_action
         self.recovery_action = recovery_action
         self.subagent_manager = subagent_manager
+        self.discard_session = discard_session
         self._skill_install_lock = asyncio.Lock()
         self._folder_picker_lock = asyncio.Lock()
         self.cron_service = cron_service
@@ -862,7 +864,7 @@ class GatewayHTTPHandler:
 
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
-            return self._handle_session_delete(request, m.group(1))
+            return await self._handle_session_delete(request, m.group(1))
 
         return None
 
@@ -897,11 +899,11 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
-        if self.subagent_manager.records is not None and not self.subagent_manager.records.exists(session_key):
+        if self.subagent_manager.sessions is not None and not self.subagent_manager.sessions.exists(session_key):
             return _http_error(404, "session not found")
         try:
             statuses = self.subagent_manager.statuses_for_session(session_key)
-        except (OSError, SubagentRecordsError):
+        except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response({
             "tasks": [status.as_dict() for status in statuses.values()],
@@ -924,7 +926,7 @@ class GatewayHTTPHandler:
             status = await self.subagent_manager.cancel(task_id, session_key)
         except SubagentControlError:
             return _http_error(404, "task unavailable")
-        except (OSError, SubagentRecordsError):
+        except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response(status.as_dict(), extra_headers=_NO_STORE_HEADERS)
 
@@ -1270,7 +1272,7 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
+    async def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
@@ -1303,6 +1305,10 @@ class GatewayHTTPHandler:
                 elif self.cron_service is not None:
                     self.cron_service.remove_job(job.id)
         draft_deleted = self.workspaces.discard_draft_scope(decoded_key)
+        if self.discard_session is not None:
+            await self.discard_session(decoded_key)
+        elif self.subagent_manager is not None:
+            await self.subagent_manager.cancel_by_session(decoded_key)
         session_deleted = self.session_manager.delete_session(decoded_key)
         transcript_deleted = delete_webui_thread(decoded_key)
         return _http_json_response(

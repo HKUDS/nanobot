@@ -1358,7 +1358,7 @@ class AgentLoop:
                     continue
                 if (
                     msg.require_existing_session
-                    and self.sessions.get_cached(effective_key) is None
+                    and self.sessions.get_existing(effective_key) is None
                 ):
                     continue
                 if msg.is_user_input:
@@ -1432,9 +1432,17 @@ class AgentLoop:
         self.sessions.save(session)
         return pending_msg
 
+    def _accepts_subagent_result(self, msg: InboundMessage, session_key: str) -> bool:
+        task_id = msg.metadata.get("subagent_task_id")
+        if msg.sender_id != "subagent" or not isinstance(task_id, str) or self.subagents.sessions is None:
+            return True
+        return self.subagents.sessions.contains(task_id, session_key)
+
     def _enqueue_session_message(self, msg: InboundMessage) -> None:
         """Admit session work without waiting for its execution or result."""
         session_key = self._effective_session_key(msg)
+        if not self._accepts_subagent_result(msg, session_key):
+            return
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
 
@@ -1748,6 +1756,8 @@ class AgentLoop:
             key = session_key or msg.session_key_override or f"{destination[0]}:{destination[1]}"
         else:
             key = session_key or msg.session_key
+        if not self._accepts_subagent_result(msg, key):
+            return None
         if delivery is None:
             delivery = self.turn_delivery_factory.create(msg, key)
         elif delivery.session_key != key:
@@ -1939,7 +1949,7 @@ class AgentLoop:
 
         if ctx.session is None:
             if msg.require_existing_session:
-                ctx.session = self.sessions.get_cached(ctx.session_key)
+                ctx.session = self.sessions.get_existing(ctx.session_key)
                 if ctx.session is None:
                     raise RuntimeError("required session is not active")
             else:

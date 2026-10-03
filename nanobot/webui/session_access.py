@@ -180,7 +180,10 @@ class WebuiSessionAccess:
     ) -> dict[str, Any] | None:
         if session_key == exclude_session_key:
             return None
-        return self._sessions.read_session_metadata(session_key)
+        payload = self._sessions.read_session_metadata(session_key)
+        if payload is None or not self._sessions.types.public_history(_session_metadata(payload)):
+            return None
+        return payload
 
     def _messages(self, session_key: str, *, needle: str, limit: int) -> list[SessionMessage]:
         @cache
