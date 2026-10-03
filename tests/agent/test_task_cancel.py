@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.session_helpers import run_session
+from nanobot.agent.memory import Consolidator
 from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
@@ -463,6 +464,7 @@ class TestSubagentCancellation:
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
         )
 
         cancelled = asyncio.Event()
@@ -493,6 +495,7 @@ class TestSubagentCancellation:
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
         )
         assert await mgr.cancel_by_session("nonexistent") == 0
 
@@ -507,6 +510,7 @@ class TestSubagentCancellation:
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
         )
         # Replace the real exec session manager with a mock
         mock_exec_mgr = AsyncMock(spec=ExecSessionManager)
@@ -588,6 +592,7 @@ class TestSubagentCancellation:
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
             tools_config=ToolsConfig(exec=ExecToolConfig(enable=False)),
         )
         mgr._announce_result = AsyncMock()
@@ -746,6 +751,7 @@ class TestSubagentAnnounceSessionKey:
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
         )
         return mgr, bus
 

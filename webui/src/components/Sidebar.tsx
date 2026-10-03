@@ -22,7 +22,7 @@ import {
   type SidebarDeleteItem,
   type SidebarPaneGroup,
 } from "@/components/ChatList";
-import { ConnectionBadge } from "@/components/ConnectionBadge";
+import { HostSwitcher } from "@/components/remote/HostSwitcher";
 import {
   SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
   SidebarSelectionHighlight,
@@ -332,7 +332,7 @@ export function Sidebar(props: SidebarProps) {
           className="w-9"
           icon={<Settings className="h-4 w-4" />}
         />
-        <ConnectionBadge />
+        <HostSwitcher collapsed={collapsed} portalContainer={props.containActionMenus ? menuPortalContainer : undefined} />
       </div>
     </nav>
     </TooltipProvider>

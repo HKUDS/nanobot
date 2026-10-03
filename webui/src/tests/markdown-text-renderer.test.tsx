@@ -516,6 +516,30 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("[data-nanobot-stream-unit]")).not.toBeInTheDocument();
   });
 
+  it("stops repairing completed markdown without replacing the streaming layout", () => {
+    const source = "The old snip_history() / _legal_history_tail() path was removed.\n\nA real maintenance cost.";
+    const { container, rerender } = render(
+      <MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>,
+    );
+    const firstParagraph = container.querySelector("p");
+    expect(container.querySelector("p:last-child")?.textContent).toBe("A real maintenance cost._");
+
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+
+    expect(container.querySelector("p:last-child")?.textContent).toBe("A real maintenance cost.");
+    expect(container.querySelector("p")).toBe(firstParagraph);
+  });
+
+  it.each(["A literal trailing underscore_", "**unfinished emphasis", "_legal_history_tail()"])(
+    "preserves completed source syntax: %s",
+    (source) => {
+      const { container } = render(
+        <MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>,
+      );
+      expect(container.textContent).toBe(source);
+    },
+  );
+
   it("repairs incomplete streaming markdown without exposing syntax fragments", () => {
     const { container, rerender } = render(
       <MarkdownTextRenderer streaming>{"**partial answer"}</MarkdownTextRenderer>,
@@ -816,6 +840,48 @@ describe("MarkdownTextRenderer", () => {
     }
     expect(container.querySelector(".katex-error")).toBeNull();
     expect(container.querySelector("annotation")).toHaveTextContent("C = \\sum_i c_i");
+  });
+
+  it.each([false, true])("keeps TeX equations out of Markdown headings (streaming=%s)", (streaming) => {
+    const formula = String.raw`\tan\left(\frac{\mathrm{HFOV}}{2}\right)
+=
+\frac{X}{Z}`;
+    const source = "Before\n\n\\[\n" + formula + "\n\n\\]\n\nAfter";
+    const { container } = render(
+      <MarkdownTextRenderer streaming={streaming}>{source}</MarkdownTextRenderer>,
+    );
+    expect(container.querySelector(".katex-display annotation")?.textContent?.trim()).toBe(formula);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("h1, h2")).toBeNull();
+    expect(container).toHaveTextContent("Before");
+    expect(container).toHaveTextContent("After");
+  });
+
+  it("keeps an unfinished TeX command renderable when Remend adds a link suffix", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming>{"\\[\n\\"}</MarkdownTextRenderer>,
+    );
+    expect(container.textContent).not.toBe("");
+  });
+
+  it("recovers a complete TeX equation after every streaming prefix", () => {
+    const source = String.raw`\[
+\boxed{
+\mathrm{HFOV}
+=
+
+2\arctan\left(\frac{W}{2f_x}\right)
+}
+\]`;
+    const { container, rerender } = render(<MarkdownTextRenderer streaming>{""}</MarkdownTextRenderer>);
+    for (let end = 1; end <= source.length; end++) {
+      rerender(<MarkdownTextRenderer streaming>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    rerender(<MarkdownTextRenderer streaming>{source + "\n\nFollowing paragraph"}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("h1, h2")).toBeNull();
+    expect(container).toHaveTextContent("Following paragraph");
   });
 
   it("still renders explicit math blocks", () => {

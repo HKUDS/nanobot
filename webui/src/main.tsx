@@ -4,6 +4,7 @@ import App from "./App";
 import "./globals.css";
 import { initializeI18n } from "./i18n";
 import { initializeLoopbackRuntimeHost } from "./lib/runtime";
+import { initializePairReturn } from "./lib/remote-pair-return";
 
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
 // LAN access over plain HTTP leaves it undefined, which crashes components that
@@ -24,6 +25,8 @@ if (typeof globalThis.crypto !== "undefined" && !("randomUUID" in globalThis.cry
 const root = document.getElementById("root");
 if (!root) throw new Error("root element missing");
 
+initializePairReturn();
+window.addEventListener("hashchange", initializePairReturn);
 initializeLoopbackRuntimeHost();
 
 async function renderWebui(container: HTMLElement) {

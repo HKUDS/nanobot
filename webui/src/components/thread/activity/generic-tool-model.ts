@@ -8,6 +8,7 @@ export type ToolFamily = "content-search" | "file-search" | "list" | "read" | "m
 interface ToolField {
   key:
     | "query"
+    | "args"
     | "pattern"
     | "glob"
     | "path"
@@ -88,6 +89,14 @@ export function parseGenericToolTrace(line: string): GenericToolTrace | null {
   if (!call || isExcludedTool(call.name)) return null;
   const family = toolFamily(call.name);
   const fields = safeFields(call.args);
+  if (call.name === "rg" && call.args && typeof call.args === "object") {
+    const argv = (call.args as Record<string, unknown>).args;
+    if (Array.isArray(argv) && argv.every((arg) => typeof arg === "string")) {
+      fields.push({ key: "args", value: argv.map((arg) =>
+        arg && !/[\s"']/u.test(arg) ? arg : JSON.stringify(arg),
+      ).join(" ") });
+    }
+  }
   const collectedSource = fields.some((field) => isCollectedSourcePath(field.value));
   return {
     name: call.name,
@@ -283,6 +292,7 @@ function activityLabel(
 function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: string): string {
   if (items.length !== 1) return "";
   const trace = items[0].trace;
+  if (name === "rg") return safeText(fieldValue(trace, "args"));
   if (family === "content-search") {
     return quote(fieldValue(trace, "query") || fieldValue(trace, "pattern"));
   }

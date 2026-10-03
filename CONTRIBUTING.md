@@ -35,6 +35,10 @@ PRs are welcome for:
 For riskier or larger changes, please open an issue or draft PR early so the
 shape of the work can be discussed before the implementation grows too large.
 
+WebUI and remote-host interface changes must follow the
+[client/host compatibility review checklist](.agent/review-guide.md), including
+independent client/server upgrades, host isolation, and actionable update guidance.
+
 ### Starting Work
 
 Before making changes, sync your local checkout and create a topic branch.

@@ -554,6 +554,7 @@ async def consume_sse_with_reasoning(
                     reasoning_content = summary
                     if on_reasoning_delta:
                         await on_reasoning_delta(summary)
+            break
         elif event_type in {"error", "response.failed"}:
             detail = event.get("error") or event.get("message") or event
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
@@ -850,6 +851,7 @@ async def consume_sdk_stream(
                     )
                     if reasoning_content and on_reasoning_delta:
                         await on_reasoning_delta(reasoning_content)
+            break
         elif event_type in {"error", "response.failed"}:
             detail = getattr(event, "error", None) or getattr(event, "message", None) or event
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")

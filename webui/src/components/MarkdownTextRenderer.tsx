@@ -12,6 +12,9 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { Streamdown, type Components, type StreamdownProps } from "streamdown";
+import remend from "remend";
+
+import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
@@ -42,6 +45,7 @@ interface MarkdownTextRendererProps {
   className?: string;
   highlightCode?: boolean;
   streaming?: boolean;
+  preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
 }
 
@@ -530,6 +534,7 @@ export default function MarkdownTextRenderer({
   className,
   highlightCode = true,
   streaming = false,
+  preserveStreamingLayout = false,
   onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
@@ -826,9 +831,9 @@ export default function MarkdownTextRenderer({
   return (
     <Streamdown
       key={needsMath && mathPlugin ? "math" : "text"}
-      mode={streaming ? "streaming" : "static"}
-      parseIncompleteMarkdown
-      remend={REMEND_OPTIONS}
+      mode={streaming || preserveStreamingLayout ? "streaming" : "static"}
+      parseIncompleteMarkdown={false}
+      parseMarkdownIntoBlocksFn={parseMathAwareMarkdownBlocks}
       isAnimating={false}
       animated={false}
       linkSafety={DIRECT_LINKS}
@@ -851,7 +856,8 @@ export default function MarkdownTextRenderer({
         className,
       )}
     >
-      {children}
+      {/* Streamdown 2.5 ignores repair-option changes in its memo comparator. */}
+      {streaming ? remend(children, REMEND_OPTIONS) : children}
     </Streamdown>
   );
 }

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from nanobot.channels.connect import ChannelConnectError, QueryParams, query_first
+from nanobot.channels.linear.access import member_allowed
 from nanobot.channels.linear.client import LinearApiError, LinearClient
 from nanobot.channels.linear.config import LinearConfig
 from nanobot.channels.linear.oauth import (
@@ -44,11 +45,29 @@ class LinearConnectStore:
             operation = (query_first(query, "operation") or "connect").strip().lower()
             if operation == "inspect":
                 return self.inspect()
+            if operation == "workspace_profile":
+                organization_id = (query_first(query, "organization_id") or "").strip()
+                if not organization_id:
+                    raise ChannelConnectError("missing Linear workspace")
+                return await self.workspace_profile(organization_id)
             if operation == "disconnect":
                 organization_id = (query_first(query, "organization_id") or "").strip()
                 if not organization_id:
                     raise ChannelConnectError("missing Linear workspace")
                 return await self.disconnect(organization_id)
+            if operation in {"members", "member_access"}:
+                organization_id = (query_first(query, "organization_id") or "").strip()
+                if not organization_id:
+                    raise ChannelConnectError("missing Linear workspace")
+                user_id: str | None = None
+                allowed: bool | None = None
+                if operation == "member_access":
+                    user_id = (query_first(query, "user_id") or "").strip()
+                    raw_allowed = query_first(query, "allowed")
+                    if not user_id or raw_allowed not in {"true", "false"}:
+                        raise ChannelConnectError("member access requires a user ID and true/false")
+                    allowed = raw_allowed == "true"
+                return await self.members(organization_id, user_id=user_id, allowed=allowed)
             if operation != "connect":
                 raise ChannelConnectError(f"unsupported Linear connect operation: {operation}")
             return await self.start(force=_query_bool(query, "force"))
@@ -180,6 +199,57 @@ class LinearConnectStore:
             "redirect_uri": config.redirect_uri if config.public_base_url else "",
         }
 
+    async def workspace_profile(self, organization_id: str) -> dict[str, Any]:
+        config = _load_linear_config()
+        state = LinearStateStore()
+        installation = state.installation(organization_id)
+        if installation is None or installation.oauth_client_id != config.client_id:
+            raise ChannelConnectError("Linear workspace is not connected", status=404)
+        client = LinearClient(config, state)
+        try:
+            profile = await client.workspace_profile(organization_id)
+        except LinearApiError as exc:
+            raise ChannelConnectError("Unable to read Linear workspace profile", status=502) from exc
+        finally:
+            await client.close()
+        return {"session_id": "", "status": "workspace_profile", **profile}
+
+    async def members(
+        self, organization_id: str, *, user_id: str | None = None, allowed: bool | None = None,
+    ) -> dict[str, Any]:
+        config = _load_linear_config()
+        state = LinearStateStore()
+        installation = state.installation(organization_id)
+        if installation is None or installation.oauth_client_id != config.client_id:
+            raise ChannelConnectError("Linear workspace is not connected", status=404)
+        client = LinearClient(config, state)
+        try:
+            members = await client.list_members(organization_id, user_id=user_id)
+        except LinearApiError as exc:
+            raise ChannelConnectError(f"Unable to read Linear members: {exc}", status=502) from exc
+        finally:
+            await client.close()
+        if user_id is not None and allowed is not None:
+            if not any(member["id"] == user_id for member in members):
+                raise ChannelConnectError("Member is not active in an accessible Linear team", status=404)
+            try:
+                state.set_member_access(
+                    config.client_id, organization_id, user_id, allowed=allowed,
+                    expected_authorized_at=installation.authorized_at,
+                )
+            except ValueError as exc:
+                raise ChannelConnectError(str(exc), status=409) from exc
+        return {
+            "session_id": "",
+            "status": "members" if allowed is None else "member_access_saved",
+            "organization_id": organization_id,
+            "legacy_allow_all": "*" in config.allow_from,
+            "members": [
+                {**member, "allowed": member_allowed(config, state, organization_id, member["id"])}
+                for member in members
+            ],
+        }
+
     async def disconnect(self, organization_id: str) -> dict[str, Any]:
         config = _load_linear_config()
         state = LinearStateStore()
@@ -196,7 +266,12 @@ class LinearConnectStore:
             ) from exc
         finally:
             await client.close()
-        state.delete_installation(organization_id)
+        removed = state.delete_installation(organization_id, expected=installation)
+        if not removed and state.installation(organization_id) is not None:
+            raise ChannelConnectError(
+                "Linear workspace authorization changed while disconnecting. Refresh and try again.",
+                status=409,
+            )
         installations = _installation_payloads(state, config.client_id)
         return {
             "session_id": "",

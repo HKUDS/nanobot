@@ -7,6 +7,7 @@ from websockets.datastructures import Headers
 from websockets.http11 import Request
 
 from nanobot.channels.websocket.runtime import WebSocketConfig
+from nanobot.webui.client_contract import gateway_identity
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ws_http import GatewayHTTPHandler
 
@@ -22,9 +23,7 @@ def test_terminal_probe_is_private_stable_and_does_not_issue_credentials():
     for _ in range(3):
         response = handler._handle_bootstrap(connection, request, terminal_probe=True)
         assert response.status_code == 200
-        assert json.loads(response.body) == {
-            "protocolVersion": 1, "gatewayId": handler.tokens.instance_id,
-        }
+        assert json.loads(response.body) == gateway_identity(handler.tokens.instance_id)
         assert "no-store" in response.headers["Cache-Control"]
     assert not handler.tokens.api_tokens and not handler.tokens.issued_tokens
     assert GatewayTokenStore().instance_id != handler.tokens.instance_id

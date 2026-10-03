@@ -249,9 +249,8 @@ class MemoryStore:
     def write_user(self, content: str) -> None:
         self.user_file.write_text(content, encoding="utf-8")
 
-    # -- context injection (used by context.py) ------------------------------
-
     def get_memory_context(self) -> str:
+        """Return long-term memory formatted for context injection."""
         long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
@@ -1245,6 +1244,7 @@ class Consolidator:
         runtime: LLMRuntime,
         max_suffix: int = 0,
         events: EventSink = NO_EVENTS,
+        notify: bool = False,
     ) -> str | None:
         """Replace archived history with a summary checkpoint.
 
@@ -1267,7 +1267,7 @@ class Consolidator:
 
             compaction_id = uuid4().hex
             await events.emit(
-                ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+                ContextCompactionEvent(compaction_id=compaction_id, phase="started", notify=notify),
             )
             last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
@@ -1288,12 +1288,13 @@ class Consolidator:
                     ContextCompactionEvent(
                         compaction_id=compaction_id,
                         phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                        notify=notify,
                     ),
                 )
                 raise
             if not summary:
                 await events.emit(
-                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed", notify=notify),
                 )
                 return None
 
@@ -1301,6 +1302,7 @@ class Consolidator:
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="succeeded",
+                    notify=notify,
                 ),
             )
 

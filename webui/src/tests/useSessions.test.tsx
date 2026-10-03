@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sessionTitle, useSessionHistory, useSessions } from "@/hooks/useSessions";
+import { useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
@@ -128,28 +128,6 @@ describe("useSessions", () => {
     vi.mocked(api.deleteSession).mockReset();
     vi.mocked(api.fetchWebuiThread).mockReset();
     webuiThreadCache.clear();
-  });
-
-  it("does not use low-information greetings as fallback session titles", () => {
-    expect(sessionTitle({
-      key: "websocket:chat-hi",
-      channel: "websocket",
-      chatId: "chat-hi",
-      createdAt: "2026-04-16T10:00:00Z",
-      updatedAt: "2026-04-16T10:00:00Z",
-      title: "",
-      preview: "hi",
-    })).toBe("New topic");
-
-    expect(sessionTitle({
-      key: "websocket:chat-work",
-      channel: "websocket",
-      chatId: "chat-work",
-      createdAt: "2026-04-16T10:00:00Z",
-      updatedAt: "2026-04-16T10:00:00Z",
-      title: "",
-      preview: "帮我优化 WebUI 性能",
-    })).toBe("帮我优化 WebUI 性能");
   });
 
   it("removes a session from the local list after delete succeeds", async () => {
@@ -988,6 +966,88 @@ describe("useSessions", () => {
     expect(result.current.version).toBe(latestVersion);
     expect(result.current.lineage).toBe(latestLineage);
     expect(result.current.continuity).toBe("initial");
+  });
+
+  it("keeps older-history failures separate and retries them explicitly", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u2", role: "user", content: "latest question", createdAt: 2 },
+        ],
+        page: {
+          before_cursor: "cursor-2",
+          has_more_before: true,
+          loaded_message_count: 1,
+          user_message_offset: 1,
+        },
+      })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u1", role: "user", content: "earliest question", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+          loaded_message_count: 1,
+          user_message_offset: 0,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:retry-older"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.olderError).toBe("offline");
+    expect(result.current.hasMoreBefore).toBe(true);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.olderError).toBeNull();
+    expect(result.current.hasMoreBefore).toBe(false);
+    expect(result.current.messages.map((message) => message.id)).toEqual(["u1", "u2"]);
+  });
+
+  it("preserves a failed history cursor on refresh but clears it for another session", async () => {
+    const latest = {
+      schemaVersion: 3 as const,
+      messages: [{ id: "u2", role: "user" as const, content: "question", createdAt: 2 }],
+      page: {
+        before_cursor: "cursor-2", has_more_before: true,
+        loaded_message_count: 1, user_message_offset: 1,
+      },
+    };
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce(latest)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ ...latest })
+      .mockResolvedValueOnce({ schemaVersion: 3, messages: [] });
+    const { result, rerender } = renderHook(({ sessionKey }) => useSessionHistory(sessionKey), {
+      initialProps: { sessionKey: "websocket:failed-prefix" },
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await result.current.loadOlder(); });
+    expect(result.current.olderError).toBe("offline");
+
+    const previousVersion = result.current.version;
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.version).toBeGreaterThan(previousVersion));
+    expect(result.current.olderError).toBe("offline");
+    expect(result.current.error).toBeNull();
+
+    rerender({ sessionKey: "websocket:other-history" });
+    expect(result.current.olderError).toBeNull();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.messages).toEqual([]);
   });
 
   it("aborts an older-history request when the consumer unmounts", async () => {

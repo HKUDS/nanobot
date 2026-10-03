@@ -21,6 +21,8 @@ export function SettingsTextEditor({ id, title, description, value, placeholder,
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const editor = useRef<HTMLTextAreaElement>(null);
+  const help = description?.trim();
+  const hasDescription = !!help && help !== title.trim();
   const save = async () => {
     setSaving(true);
     setError("");
@@ -49,12 +51,13 @@ export function SettingsTextEditor({ id, title, description, value, placeholder,
       <TooltipContent>{t("settings.actions.edit")}</TooltipContent>
     </Tooltip></TooltipProvider>
     <DialogContent className="max-w-xl" showCloseButton={!saving}
+      {...(hasDescription ? {} : { "aria-describedby": undefined })}
       onOpenAutoFocus={(event) => { event.preventDefault(); editor.current?.focus(); }}
       onEscapeKeyDown={(event) => { if (saving) event.preventDefault(); }}
       onPointerDownOutside={(event) => { if (saving) event.preventDefault(); }}>
       <DialogHeader>
         <DialogTitle className="pr-6 text-base">{title}</DialogTitle>
-        <DialogDescription>{description || title}</DialogDescription>
+        {hasDescription && <DialogDescription>{help}</DialogDescription>}
       </DialogHeader>
       <Textarea ref={editor} aria-label={title} value={draft} placeholder={placeholder} disabled={saving}
         aria-invalid={Boolean(error)} spellCheck={false}

@@ -1360,7 +1360,7 @@ def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
     )
     operations["fresh"] = SimpleNamespace(completed_at=now - 1)
 
-    channel._prune_webui_request_operations()
+    channel._commands.prune_request_operations()
 
     assert "pending" in operations
     assert "expired" not in operations
@@ -1383,7 +1383,7 @@ def test_webui_request_cache_prunes_oldest_completed_at_capacity(
             completed_at=now - 1 + index / 1_000
         )
 
-    channel._prune_webui_request_operations()
+    channel._commands.prune_request_operations()
 
     assert "pending" in operations
     assert "completed-0" not in operations
@@ -3146,7 +3146,9 @@ async def test_failed_turn_end_exposes_safe_terminal_outcome() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_compaction_started_is_live_only() -> None:
+@pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("show_notices", [False, True])
+async def test_context_compaction_started_is_live_only(notify, show_notices) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -3155,6 +3157,7 @@ async def test_context_compaction_started_is_live_only() -> None:
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-compaction-started")
+    channel.show_compaction_notices = show_notices
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -3163,6 +3166,7 @@ async def test_context_compaction_started_is_live_only() -> None:
         event=ContextCompactionEvent(
             compaction_id="compact-started",
             phase="started",
+            notify=notify,
         ),
     ))
 
@@ -3176,7 +3180,10 @@ async def test_context_compaction_started_is_live_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_compaction_is_structured_persisted_and_summary_free() -> None:
+@pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("show_notices", [False, True])
+@pytest.mark.parametrize("phase", ["succeeded", "failed", "cancelled"])
+async def test_context_compaction_is_structured_persisted_and_summary_free(notify, show_notices, phase) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -3185,6 +3192,7 @@ async def test_context_compaction_is_structured_persisted_and_summary_free() -> 
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-compaction")
+    channel.show_compaction_notices = show_notices
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -3192,7 +3200,8 @@ async def test_context_compaction_is_structured_persisted_and_summary_free() -> 
         content="Context compacted · LLM summary",
         event=ContextCompactionEvent(
             compaction_id="compact-1",
-            phase="succeeded",
+            phase=phase,
+            notify=notify,
         ),
     ))
 
@@ -3200,7 +3209,7 @@ async def test_context_compaction_is_structured_persisted_and_summary_free() -> 
         "event": "context_compaction",
         "chat_id": "chat-compaction",
         "compaction_id": "compact-1",
-        "phase": "succeeded",
+        "phase": phase,
     }
     assert _sent_ws_payloads(mock_ws) == [expected]
     [persisted] = read_transcript_lines("websocket:chat-compaction")

@@ -81,7 +81,6 @@ def _make_fake_compact(
     summary: str = "Summary.",
     on_archive=None,
     track_archived: list | None = None,
-    track_count: bool = False,
 ):
     state = {"count": 0}
 

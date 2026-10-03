@@ -57,6 +57,26 @@
         color: #fafafa;
       }
 
+      /* Work around iOS standalone's scroll-edge blur with a fixed color surface.
+         Keep this outside React's root for cold starts and route changes.
+         See docs/guides/ios-pwa-status-bar.md for the WebKit sampling contract. */
+      .pwa-status-bar-surface { display: none; }
+      @supports (-webkit-touch-callout: none) and (background-clip: text) {
+        @media (display-mode: standalone) {
+          .pwa-status-bar-surface {
+            display: block;
+            position: fixed;
+            inset: 0 0 auto;
+            height: 11px; /* Must exceed WebKit's 10px thin-border threshold. */
+            z-index: 100;
+            pointer-events: none;
+            background-color: inherit;
+            -webkit-background-clip: text;
+            background-clip: text; /* Empty text paints nothing over the controls. */
+          }
+        }
+      }
+
       .startup-shell { position: relative; height: 100%; }
       .startup-header { display: flex; justify-content: space-between; padding: 5px 13px; }
       .startup-control-shadow {
@@ -99,6 +119,7 @@
     <title>nanobot</title>
   </head>
   <body class="bg-background text-foreground antialiased">
+    <div class="pwa-status-bar-surface" aria-hidden="true"></div>
     <div id="root">
       <main class="startup-shell" aria-busy="true">
         <div class="startup-header" aria-hidden="true">

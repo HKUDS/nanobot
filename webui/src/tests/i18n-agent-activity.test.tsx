@@ -29,7 +29,15 @@ describe("localized agent activity contracts", () => {
 
     await setAppLanguage(locale);
     const trace = parseGenericToolTrace('read_file({"path":"src/app.tsx"})')!;
+    const rg = parseGenericToolTrace('rg({"args":["-n","hello world","src"]})')!;
     for (const status of ["running", "done", "error"] as const) {
+      const rgPresentation = describeGenericToolRun([{ trace: rg, status }], i18n.t);
+      const searchKey = status === "running" ? "searchingFiles" : status === "done" ? "searchedFiles" : "searchFilesFailed";
+      expect(rgPresentation).toMatchObject({
+        label: translated[searchKey],
+        detail: '-n "hello world" src',
+        status,
+      });
       const generic = describeGenericToolRun([{ trace, status }], i18n.t);
       const command = describeTraceLine('exec({"command":"bun run test"})', status, i18n.t);
       const browser = describeMcpActivity("browser_press_key", { key: "Enter" }, status, i18n.t);

@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Star } from "lucide-react";
+import { ExternalLink, Sparkle, Star, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import starInvitation from "@/assets/star-invitation.webp";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { starPromptAction } from "@/lib/api";
 import { useClient } from "@/providers/ClientProvider";
 
+import "./StarPrompt.css";
+
 const REPOSITORY_URL = "https://github.com/HKUDS/nanobot";
+const actionClassName = "h-full min-h-[46px] min-w-0 !whitespace-normal px-3 py-2.5 text-center text-[15px] font-medium max-[480px]:text-sm";
 
 export function StarLink({ onSaved, fullWidth = false }: {
   onSaved?: () => void;
@@ -28,12 +32,18 @@ export function StarLink({ onSaved, fullWidth = false }: {
       <span className="min-w-0">
         {t(fullWidth ? "starPrompt.action" : "starPrompt.footerAction")}
       </span>
-      <ExternalLink className={fullWidth ? "ml-2 h-3.5 w-3.5 shrink-0" : "h-3.5 w-3.5 shrink-0 text-muted-foreground"} aria-hidden />
+      {fullWidth ? (
+        <span className="star-prompt-decoration" aria-hidden="true">
+          <Star className="star-prompt-star" size={23} strokeWidth={1.5} fill="currentColor" />
+          <Sparkle className="star-prompt-sparkle star-prompt-sparkle-first" size={10} strokeWidth={1.5} fill="currentColor" />
+          <Sparkle className="star-prompt-sparkle star-prompt-sparkle-second" size={7} strokeWidth={1.5} fill="currentColor" />
+        </span>
+      ) : <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />}
     </a>
   );
   return (
     <>
-      {fullWidth ? <Button asChild className="h-full min-h-11 w-full !whitespace-normal px-3 py-2.5 text-center text-sm font-medium">{link}</Button> : link}
+      {fullWidth ? <Button asChild className={`star-prompt-action relative isolate w-full overflow-visible ${actionClassName}`}>{link}</Button> : link}
       {error && <p role="alert" className="text-sm text-destructive">{t("starPrompt.saveError")}</p>}
     </>
   );
@@ -93,7 +103,8 @@ export function StarPrompt({ ready }: { ready: boolean }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-w-[440px] gap-0 p-6 text-center outline-none"
+      <DialogContent showCloseButton={false}
+        className="flex max-h-[calc(100dvh-32px)] max-w-[520px] flex-col gap-0 overflow-y-auto overscroll-contain p-5 pb-2.5 outline-none max-[480px]:p-4 max-[480px]:pb-2"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           titleRef.current?.focus({ preventScroll: true });
@@ -101,22 +112,33 @@ export function StarPrompt({ ready }: { ready: boolean }) {
         event.preventDefault();
         previousFocus.current?.focus({ preventScroll: true });
       }}>
-        <img src="/brand/nanobot_mark.svg" alt="" className="mx-auto mb-4 h-10 w-10 select-none" draggable={false} />
-        <DialogTitle ref={titleRef} tabIndex={-1}
-          className="text-xl font-semibold leading-tight tracking-normal outline-none">
-          {t("starPrompt.title")}
-        </DialogTitle>
-        <DialogDescription className="mt-3 text-sm leading-6 text-muted-foreground">
-          {t("starPrompt.description")}
-        </DialogDescription>
-        <div className="mt-6 grid grid-cols-2 items-stretch gap-2">
-          <Button variant="ghost" className="h-full min-h-11 !whitespace-normal bg-muted/70 px-3 py-2.5 text-sm font-medium settings-hover"
+        <img src={starInvitation} alt="" width={1672} height={941} draggable={false}
+          className="aspect-[1672/941] w-full shrink-0 select-none rounded-control bg-muted object-cover" />
+        <DialogClose aria-label={t("common.close")}
+          className="absolute right-[23px] top-[23px] grid h-11 w-11 place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white max-[480px]:right-[18px] max-[480px]:top-[18px]">
+          <span className="grid h-[30px] w-[30px] place-items-center rounded-full bg-black/40 text-white backdrop-blur-sm transition-colors hover:bg-black/60 motion-reduce:transition-none">
+            <X size={18} strokeWidth={1.75} aria-hidden />
+          </span>
+        </DialogClose>
+        <div className="shrink-0 px-2 pt-[27px] text-left max-[480px]:px-1 max-[480px]:pt-[23px]">
+          <DialogTitle ref={titleRef} tabIndex={-1}
+            className="text-[26px] font-semibold leading-[1.4] tracking-[-0.035em] outline-none [overflow-wrap:anywhere] max-[480px]:text-[clamp(18px,5.6vw,24px)]">
+            {t("starPrompt.title")}
+          </DialogTitle>
+          <DialogDescription className="mt-[15px] text-[15px] leading-[1.9] text-muted-foreground max-[480px]:mt-3 max-[480px]:text-[13px] max-[480px]:leading-[1.95]">
+            <span className="block">{t("starPrompt.intro")}</span>{" "}
+            <span className="block">{t("starPrompt.invitation")}</span>{" "}
+            <span className="block">{t("starPrompt.thanks")}</span>
+          </DialogDescription>
+        </div>
+        <div className="mt-[27px] grid shrink-0 grid-cols-2 items-stretch gap-3 px-2 max-[480px]:mt-[23px] max-[480px]:gap-2.5 max-[480px]:px-1">
+          <Button variant="outline" className={actionClassName}
             onClick={() => setOpen(false)}>{t("starPrompt.later")}</Button>
-          <div className="flex flex-col gap-2">
+          <div className="flex min-w-0 flex-col gap-2">
             <StarLink fullWidth onSaved={() => setOpen(false)} />
           </div>
         </div>
-        <Button variant="ghost" className="mx-auto mt-3 h-9 px-3 text-xs font-normal text-muted-foreground" disabled={saving}
+        <Button variant="ghost" className="mt-[7px] min-h-11 shrink-0 self-center !whitespace-normal px-4 text-xs font-normal text-muted-foreground" disabled={saving}
           onClick={() => void dismissForever()}>{t("starPrompt.never")}</Button>
         {error && <p role="alert" className="text-sm text-destructive">{t("starPrompt.saveError")}</p>}
       </DialogContent>

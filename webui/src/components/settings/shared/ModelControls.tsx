@@ -600,6 +600,15 @@ export function ProviderPickerIcon({
         )}
         aria-hidden
       >
+        <span
+          className={cn(
+            "col-start-1 row-start-1 grid h-full w-full place-items-center rounded-md text-[7.5px] font-semibold text-white",
+            logoLoaded ? "opacity-0" : "opacity-100",
+          )}
+          style={{ backgroundColor: brand?.color }}
+        >
+          {brand?.initials}
+        </span>
         <img
           src={logoUrl}
           alt=""
@@ -608,7 +617,7 @@ export function ProviderPickerIcon({
           referrerPolicy="no-referrer"
           draggable={false}
           className={cn(
-            "object-contain",
+            "col-start-1 row-start-1 object-contain",
             isLogoTile ? "h-5 w-5" : "h-3.5 w-3.5",
             logoLoaded ? "opacity-100" : "opacity-0",
           )}

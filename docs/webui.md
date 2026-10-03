@@ -95,6 +95,15 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 | Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
 | Settings | Adjust models, providers, image generation, voice, web tools, runtime, and safety options |
 
+### Optional GitHub invitation
+
+Returning users may see an illustrated invitation to star nanobot on GitHub.
+It follows the WebUI language and theme; the button's star animation also
+supports keyboard focus and respects reduced-motion preferences. **Maybe later**,
+the close button, or Escape dismisses it for now. **Don't ask again** or opening
+GitHub from the invitation stops future reminders for the gateway instance,
+including in other browsers. Starring is optional and never required to use nanobot.
+
 ## Topic Workspace
 
 The sidebar is the topic switcher. Each topic keeps its own history, title,

@@ -872,7 +872,9 @@ async def test_openrouter_gpt5_stays_on_chat_completions() -> None:
 @pytest.mark.asyncio
 async def test_direct_openai_streaming_gpt5_uses_responses_api() -> None:
     mock_chat = AsyncMock(return_value=_StalledStream())
-    mock_responses = AsyncMock(return_value=_fake_responses_stream("hi"))
+    stream = MagicMock()
+    stream.__aiter__.side_effect = lambda: _fake_responses_stream("hi")
+    mock_responses = AsyncMock(return_value=stream)
     spec = find_by_name("openai")
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_class:
@@ -892,6 +894,7 @@ async def test_direct_openai_streaming_gpt5_uses_responses_api() -> None:
 
     assert result.content == "hi"
     assert result.finish_reason == "stop"
+    stream.__aexit__.assert_awaited_once()
     mock_responses.assert_awaited_once()
     mock_chat.assert_not_awaited()
 
@@ -1948,3 +1951,30 @@ def test_deepseek_no_backfill_when_reasoning_effort_none_string() -> None:
     )
     assistant = kw["messages"][1]
     assert "reasoning_content" not in assistant
+
+
+@pytest.mark.asyncio
+async def test_responses_request_preserves_optional_tool_fields() -> None:
+    mock_responses = AsyncMock(return_value=_fake_responses_response())
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": [],
+    }
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client:
+        mock_client.return_value.responses.create = mock_responses
+        provider = OpenAICompatProvider(
+            api_key="sk-test", default_model="gpt-5", spec=find_by_name("openai"),
+        )
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "Search issues"}],
+            tools=[{"type": "function", "function": {
+                "name": "list_issues", "parameters": parameters,
+            }}],
+        )
+
+    assert result.content == "ok"
+    mock_responses.assert_awaited_once()
+    tool = mock_responses.call_args.kwargs["tools"][0]
+    assert tool["strict"] is False
+    assert tool["parameters"] == parameters

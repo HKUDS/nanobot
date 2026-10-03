@@ -1088,13 +1088,6 @@ export async function fetchSidebarState(
   );
 }
 
-export async function updateSidebarState(
-  transport: WebUIMutationTransport,
-  state: SidebarStatePayload,
-): Promise<SidebarStatePayload> {
-  return mutation<SidebarStatePayload>(transport, "sidebar.update", { state });
-}
-
 function modelGenerationSettingsPayload(
   configuration: Pick<
     ModelConfigurationCreate,

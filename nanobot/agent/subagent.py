@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, cast
 
 from loguru import logger
 
@@ -111,8 +111,11 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
-        consolidator: Consolidator | None = None,
+        *,
+        consolidator: Consolidator,
     ):
+        if cast(object, consolidator) is None:
+            raise TypeError("SubagentManager requires a consolidator")
         if workspace is None:
             raise TypeError("SubagentManager.__init__() missing required argument: 'workspace'")
         if bus is None:
@@ -163,8 +166,19 @@ class SubagentManager:
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
     def runtime_statuses(self) -> Mapping[str, SubagentStatus]:
-        """Return the observable task statuses used by runtime-control snapshots."""
+        """Return the observable statuses of all active tasks."""
         return self._task_statuses
+
+    def statuses_for_session(self, session_key: str | None) -> Mapping[str, SubagentStatus]:
+        """Return only tasks owned by the given session, never a global fallback."""
+        if not session_key:
+            return {}
+        task_ids = self._session_tasks.get(session_key, set())
+        return {
+            task_id: status
+            for task_id, status in self._task_statuses.items()
+            if task_id in task_ids
+        }
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         """Update the deprecated runtime source used by legacy ``spawn`` calls."""
@@ -433,27 +447,19 @@ class SubagentManager:
             token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
             try:
                 tool_definitions = tools.get_definitions()
-                consolidate_history = (
-                    partial(
-                        self.consolidator.summarize_transcript,
-                        runtime=runtime,
-                        session_key=f"subagent:{task_id}",
-                        tools=tool_definitions,
-                        persist=False,
-                    )
-                    if self.consolidator is not None
-                    else None
+                consolidate_history = partial(
+                    self.consolidator.summarize_transcript,
+                    runtime=runtime,
+                    session_key=f"subagent:{task_id}",
+                    tools=tool_definitions,
+                    persist=False,
                 )
-                consolidate_provider_compaction = (
-                    partial(
-                        self.consolidator.summarize_provider_compaction,
-                        runtime=runtime,
-                        session_key=f"subagent:{task_id}",
-                        tools=tool_definitions,
-                        persist=False,
-                    )
-                    if self.consolidator is not None
-                    else None
+                consolidate_provider_compaction = partial(
+                    self.consolidator.summarize_provider_compaction,
+                    runtime=runtime,
+                    session_key=f"subagent:{task_id}",
+                    tools=tool_definitions,
+                    persist=False,
                 )
                 result = await self.runner.run(AgentRunSpec(
                     initial_messages=messages,

@@ -1,3 +1,8 @@
+import anthropicLogo from "@/assets/providers/anthropic.svg";
+import deepseekLogo from "@/assets/providers/deepseek-color.svg";
+import geminiLogo from "@/assets/providers/gemini-color.svg";
+import openaiLogo from "@/assets/providers/openai.svg";
+
 export interface ProviderBrand {
   logoUrl: string;
   logoUrls: string[];
@@ -155,7 +160,7 @@ const PROVIDER_LABEL_ALIASES: Record<string, string> = {
 const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   aihubmix: { ...brand("aihubmix.com", "#111827", "AH"), logoLayout: "tile" },
   ant_ling: brand("ant-ling.com", "#7C3AED", "AL"),
-  anthropic: brand("anthropic.com", "#D97757", "A"),
+  anthropic: brand("anthropic.com", "#D97757", "A", [anthropicLogo]),
   assemblyai: brand("assemblyai.com", "#111827", "AA"),
   atomic_chat: brand("atomic.chat", "#111827", "AC"),
   azure_openai: brand("azure.microsoft.com", "#0078D4", "AZ"),
@@ -164,13 +169,13 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   brave: brand("brave.com", "#FB542B", "B"),
   byteplus: brand("byteplus.com", "#325CFF", "BP"),
   dashscope: brand("dashscope.aliyun.com", "#FF6A00", "DS"),
-  deepseek: brand("deepseek.com", "#4D6BFE", "DS"),
+  deepseek: brand("deepseek.com", "#4D6BFE", "DS", [deepseekLogo]),
   duckduckgo: brand("duckduckgo.com", "#DE5833", "DDG"),
   edenai: brand("edenai.co", "#080F35", "EA", [
     "https://cdn.prod.website-files.com/61e7d259b7746e2d1df0b68d/6a63231f5c459827c2d18d7a_eden%20ai%20logo%20light.png",
   ]),
   exa: { ...brand("exa.ai", "#5B5BF6", "E"), logoLayout: "tile" },
-  gemini: brand("gemini.google.com", "#4285F4", "G"),
+  gemini: brand("gemini.google.com", "#4285F4", "G", [geminiLogo]),
   github_copilot: brand("github.com", "#24292F", "GH", [
     "https://raw.githubusercontent.com/primer/octicons/main/icons/copilot-24.svg",
   ]),
@@ -202,7 +207,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   olostep: { ...brand("olostep.com", "#111827", "O"), logoLayout: "tile" },
   nvidia: brand("nvidia.com", "#76B900", "NV"),
   ollama: brand("ollama.com", "#111827", "O"),
-  openai: brand("openai.com", "#111827", "AI"),
+  openai: brand("openai.com", "#111827", "AI", [openaiLogo]),
   opencode: brand("opencode.ai", "#111827", "OC", [
     "https://opencode.ai/favicon-96x96-v3.png",
   ]),

@@ -15,8 +15,25 @@ function describeRun(line: string, status: GenericToolStatus = "done") {
 }
 
 describe("generic tool activity semantics", () => {
+  it.each(["running", "done", "error"] as const)("shows rg arguments during %s", (status) => {
+    const presentation = describeRun('rg({"args":["-n","hello world","src"]})', status);
+    expect(presentation.detail).toBe('-n "hello world" src');
+    expect(presentation.status).toBe(status);
+  });
+
+  it("bounds and redacts rg argument previews", () => {
+    const presentation = describeRun(`rg(${JSON.stringify({ args: ["sk-proj-abcdefghijklmno", "x".repeat(120)] })})`);
+    expect(presentation.detail).toContain("<redacted>");
+    expect(presentation.detail.length).toBeLessThanOrEqual(88);
+  });
+
+  it("shows rg regex characters and empty arguments", () => {
+    const presentation = describeRun(`rg(${JSON.stringify({ args: [String.raw`resolve\(`, ""] })})`);
+    expect(presentation.detail).toBe('resolve\\( ""');
+  });
+
   it.each([
-    ['find_files({"glob":"*.tsx"})', "Found files", "*.tsx"],
+    ['find_files({"glob":"*.tsx"})', "File search complete", "*.tsx"],
     ['grep({"pattern":"dream_cursor"})', "Searched files", "“dream_cursor”"],
     ['list_dir({"path":"memory"})', "Listed files", "memory"],
     ['read_file({"path":"docs/guide.md"})', "Read file", "docs/guide.md"],
@@ -90,8 +107,8 @@ describe("generic tool activity semantics", () => {
       { trace: first, status: "done" },
       { trace: second, status: "done" },
     ], i18n.t)).toMatchObject({
-      label: "已搜索文件",
-      aside: "2 次搜索",
+      label: "文件搜索完成",
+      aside: "2 次",
     });
   });
 

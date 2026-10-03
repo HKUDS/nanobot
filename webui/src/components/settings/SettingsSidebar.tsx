@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
+import { HostNavigationContext, HostSwitcher } from "@/components/remote/HostSwitcher";
 import {
   Activity,
   Info,
@@ -76,6 +77,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
     isNativeHost,
   } = props;
   const { t } = useTranslation();
+  const hostNavigation = useContext(HostNavigationContext);
   const mobile = useMediaQuery("(max-width: 1023px)");
   const restartLabel = isRestarting
     ? t(isNativeHost ? "app.system.restartingEngine" : "app.system.restarting")
@@ -185,6 +187,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
             <span>{t("app.account.logout")}</span>
           </Button>
         ) : null}
+        {hostNavigation && <div className="mt-2 flex min-w-0"><HostSwitcher /></div>}
       </div>
     </aside>
   );
@@ -207,6 +210,7 @@ function MobileSettingsNavigation({
   restartLabel: string;
 }) {
   const { t } = useTranslation();
+  const hostNavigation = useContext(HostNavigationContext);
   const [open, setOpen] = useState(false);
   const restart = () => { setOpen(false); onRestart?.(); };
   const restartTone = restartPending && !isRestarting
@@ -274,6 +278,7 @@ function MobileSettingsNavigation({
             </> : null}
           </DropdownMenuContent>
         </DropdownMenu>
+        {hostNavigation && <HostSwitcher collapsed />}
       </div>
       {onRestart && (restartPending || isRestarting) ? (
         <div className="flex min-h-11 items-center justify-between gap-2 px-4 pb-1">

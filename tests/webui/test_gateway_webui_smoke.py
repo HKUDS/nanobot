@@ -9,16 +9,81 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote
 
 import httpx
 import pytest
 import websockets
 
+from nanobot.config.loader import load_config
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import PENDING_USER_TURN_KEY, RUNTIME_CHECKPOINT_KEY
+from nanobot.webui.local_client_assets import LocalClientAssets
+from nanobot.webui.remote_proxy import RemoteProxy
+from nanobot.webui.remote_ssh import Tunnel
 
 _BOOTSTRAP_SECRET = "smoke-secret"
+
+
+async def test_remote_proxy_with_real_gateway_chat_settings_and_renewal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The auth proxy must preserve the actual gateway's WebUI mutation audience."""
+    # Python CI runs from a clean source tree without a frontend build. Supply
+    # this transport smoke's own local shell instead of relying on build leftovers.
+    assets = tmp_path / "local-dist"
+    assets.mkdir()
+    shell = "<!doctype html><title>Local smoke client</title>"
+    (assets / "index.html").write_text(shell, encoding="utf-8")
+    monkeypatch.setattr("nanobot.webui.remote_proxy.LocalClientAssets", lambda: LocalClientAssets(assets))
+    ws_port, gateway_port = _free_port(), _free_port()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config_path, log_path = tmp_path / "config.json", tmp_path / "gateway.log"
+    _write_smoke_config(config_path, workspace=workspace, ws_port=ws_port, gateway_port=gateway_port)
+    process = _start_gateway(config_path, log_path)
+    proxy = None
+    try:
+        upstream = _wait_for_bootstrap(f"http://127.0.0.1:{ws_port}", process, log_path)
+        # The real gateway already owns this private listener. SSH pipe ownership
+        # and shutdown are exercised separately by test_remote_proxy/remote_tunnel.
+        transport = MagicMock(spec=Tunnel, port=ws_port, active=True,
+                              pause=AsyncMock(), close=AsyncMock())
+        proxy = await RemoteProxy.open(transport, _BOOTSTRAP_SECRET, upstream["terminal"]["gatewayId"])
+        async with httpx.AsyncClient(trust_env=False) as client:
+            assert (await client.get(proxy.origin + "/")).text == shell
+            first = (await client.get(proxy.origin + "/webui/bootstrap", headers={
+                "X-Nanobot-Auth": proxy.secret,
+            })).json()
+            assert _BOOTSTRAP_SECRET not in json.dumps(first)
+            async with websockets.connect(first["ws_url"] + "?token=" + first["token"] + "&client_id=proxy-smoke") as ws:
+                assert (await _recv_until(ws, "ready"))["client_id"] == "proxy-smoke"
+                await ws.send(json.dumps({"type": "new_chat"}))
+                chat_id = (await _recv_until(ws, "attached"))["chat_id"]
+                await _recv_until(ws, "session_updated")
+                await ws.send(json.dumps({"type": "message", "chat_id": chat_id,
+                                         "content": "/model", "webui": True, "turn_id": "proxy-turn"}))
+                assert "custom/smoke-model" in (await _recv_until(ws, "message"))["text"]
+                await _recv_until(ws, "turn_end")
+                await ws.send(json.dumps({"type": "webui_request", "request_id": "proxy-settings",
+                                         "action": "settings.runtime_config.update",
+                                         "payload": {"values": {"agents.defaults.max_tool_iterations": 2}}}))
+                mutation = await _recv_until(ws, "webui_response")
+                assert mutation["ok"] is True, mutation
+                assert load_config(config_path).agents.defaults.max_tool_iterations == 2
+            renewed = (await client.get(proxy.origin + "/webui/bootstrap", headers={
+                "X-Nanobot-Auth": proxy.secret,
+            })).json()
+            assert renewed["token"] != first["token"]
+            response = await client.get(proxy.origin + "/api/sessions", headers={
+                "Authorization": "Bearer " + renewed["api_token"],
+            })
+            assert f"websocket:{chat_id}" in {row["key"] for row in response.json()["sessions"]}
+    finally:
+        if proxy is not None:
+            await proxy.close()
+        _stop_gateway(process)
 
 
 def _free_port() -> int:

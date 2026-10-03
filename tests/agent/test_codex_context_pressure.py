@@ -22,7 +22,7 @@ from nanobot.providers.openai_codex_provider import OpenAICodexProvider, _CodexH
 from nanobot.providers.openai_responses import build_responses_state
 
 
-def _request_state(provider, *, prior_tokens=180_000, repetitions=15_000):
+def _request_state(provider, *, prior_tokens=180_000, repetitions=12_000):
     model = "openai-codex/gpt-5.6-sol"
     accepted = [
         {"role": "system", "content": "Continue the coding task."},
@@ -42,6 +42,8 @@ def _request_state(provider, *, prior_tokens=180_000, repetitions=15_000):
         ],
         usage=LLMUsage.reported(input_tokens=prior_tokens, output_tokens=10),
     )
+    # The default delta pressures prior state but fits after compaction, even with
+    # UTF-8 byte estimates while the fallback tokenizer is unavailable.
     delta = {"role": "tool", "name": "read_file", "tool_call_id": "read-1",
              "content": "source_line\n" * repetitions}
     raw = [*deepcopy(accepted), delta]

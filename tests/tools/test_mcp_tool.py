@@ -82,6 +82,7 @@ def _fake_mcp_module(
         TextResourceContents=_FakeTextResourceContents,
         BlobResourceContents=_FakeBlobResourceContents,
         ImageContent=_FakeImageContent,
+        PaginatedRequestParams=SimpleNamespace,
     )
 
     class _FakeStdioServerParameters:
@@ -304,6 +305,32 @@ async def test_registry_executes_mcp_tools_with_boolean_subschemas(
         assert is_tool_error_result(result)
         assert f"Invalid parameters for tool '{wrapper.name}': {error}" in result
         session.call_tool.assert_not_awaited()
+
+
+@pytest.mark.parametrize("types", [["integer", "string"], ["string", "integer"]])
+@pytest.mark.parametrize("value", ["00123", "doc-A", 42])
+async def test_registry_preserves_mcp_type_union_arguments(types, value) -> None:
+    session = SimpleNamespace(
+        call_tool=AsyncMock(return_value=SimpleNamespace(content=[_FakeTextContent("ok")])),
+    )
+    tool_def = SimpleNamespace(
+        name="lookup",
+        description="Look up an id without changing its type or value.",
+        inputSchema={
+            "type": "object",
+            "properties": {"id": {"type": types}},
+            "required": ["id"],
+        },
+    )
+    wrapper = MCPToolWrapper(session, "test", tool_def)
+    registry = ToolRegistry()
+    registry.register(wrapper)
+
+    result = await registry.execute(wrapper.name, {"id": value})
+
+    assert result == "ok"
+    session.call_tool.assert_awaited_once_with("lookup", arguments={"id": value})
+    assert type(session.call_tool.call_args.kwargs["arguments"]["id"]) is type(value)
 
 
 def test_wrapper_preserves_non_nullable_unions() -> None:
@@ -756,9 +783,97 @@ def _make_fake_session(tool_names: list[str]) -> SimpleNamespace:
         return None
 
     async def list_tools() -> SimpleNamespace:
-        return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names])
+        return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
 
     return SimpleNamespace(initialize=initialize, list_tools=list_tools)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enabled_tools", "expected_names"),
+    [
+        pytest.param(["*"], ["first", "second"], id="wildcard"),
+        pytest.param(["second"], ["second"], id="raw-allowlist"),
+        pytest.param(["mcp_test_second"], ["second"], id="wrapped-allowlist"),
+        pytest.param([], [], id="deny-all"),
+    ],
+)
+async def test_connect_mcp_servers_loads_all_tool_pages(
+    fake_mcp_runtime: dict[str, object | None],
+    enabled_tools: list[str],
+    expected_names: list[str],
+) -> None:
+    cursors: list[str | None] = []
+    pages = {
+        None: SimpleNamespace(tools=[_make_tool_def("first")], nextCursor=""),
+        "": SimpleNamespace(tools=[], nextCursor="opaque:+/="),
+        "opaque:+/=": SimpleNamespace(tools=[_make_tool_def("second")], nextCursor=None),
+    }
+
+    async def list_tools(*, params: SimpleNamespace | None = None) -> SimpleNamespace:
+        cursor = params.cursor if params is not None else None
+        cursors.append(cursor)
+        return pages[cursor]
+
+    session = _make_fake_session([])
+    session.list_tools = list_tools
+    session.call_tool = AsyncMock(
+        return_value=SimpleNamespace(content=[_FakeTextContent("second page result")])
+    )
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=enabled_tools)}, registry,
+    )
+    try:
+        assert set(stacks) == {"test"}
+        assert cursors == [None, "", "opaque:+/="]
+        expected = [f"mcp_test_{name}" for name in expected_names]
+        assert registry.tool_names == expected
+        assert [tool["function"]["name"] for tool in registry.get_definitions()] == expected
+        if expected_names:
+            assert await registry.execute("mcp_test_second", {}) == "second page result"
+            session.call_tool.assert_awaited_once_with("second", arguments={})
+        else:
+            session.call_tool.assert_not_awaited()
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["request-error", "repeated-cursor"])
+async def test_connect_mcp_servers_pagination_failure_registers_no_tools(
+    fake_mcp_runtime: dict[str, object | None], failure: str,
+) -> None:
+    cursors: list[str | None] = []
+
+    async def list_tools(*, params: SimpleNamespace | None = None) -> SimpleNamespace:
+        cursor = params.cursor if params is not None else None
+        cursors.append(cursor)
+        if cursor is None:
+            return SimpleNamespace(tools=[_make_tool_def("first")], nextCursor="next")
+        if failure == "request-error":
+            raise RuntimeError("second page failed")
+        if len(cursors) > 2:
+            raise AssertionError("A repeated cursor must not be requested again")
+        return SimpleNamespace(tools=[_make_tool_def("second")], nextCursor="next")
+
+    session = _make_fake_session([])
+    session.list_tools = list_tools
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake")}, registry,
+    )
+    try:
+        assert cursors == [None, "next"]
+        assert stacks == {}
+        assert registry.tool_names == []
+        assert registry.get_definitions() == []
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
 
 
 @pytest.mark.asyncio
@@ -1790,7 +1905,7 @@ def _make_fake_session_with_capabilities(
         return None
 
     async def list_tools() -> SimpleNamespace:
-        return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names])
+        return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
 
     async def list_resources() -> SimpleNamespace:
         resources = []
@@ -2018,3 +2133,43 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
     assert removed == 1
     assert wrapper.name not in registry.tool_names
     assert other_wrapper.name in registry.tool_names
+
+
+@pytest.mark.parametrize("params, error", [
+    ({"team": "nanobot", "query": "bug"}, None),
+    ({"team": "nanobot", "customView": "saved-view"}, None),
+    ({"query": "bug"}, "missing required team"),
+    ({"team": "nanobot", "customView": ""}, "customView must be at least 1 chars"),
+])
+async def test_optional_mcp_filters_reach_server_unchanged(params, error):
+    async def call_tool(name, arguments):
+        assert name == "list_issues"
+        assert not ({"query", "customView"} <= arguments.keys())
+        return SimpleNamespace(content=[_FakeTextContent("ok")])
+
+    session = SimpleNamespace(call_tool=AsyncMock(side_effect=call_tool))
+    wrapper = MCPToolWrapper(session, "linear", SimpleNamespace(
+        name="list_issues",
+        description="Search issues or use a saved view",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "team": {"type": "string"},
+                "query": {"type": "string"},
+                "customView": {"type": "string", "minLength": 1},
+            },
+            "required": ["team"],
+        },
+    ))
+    registry = ToolRegistry()
+    registry.register(wrapper)
+
+    result = await registry.execute(wrapper.name, params)
+
+    if error:
+        assert is_tool_error_result(result)
+        assert error in result
+        session.call_tool.assert_not_awaited()
+    else:
+        assert result == "ok"
+        session.call_tool.assert_awaited_once_with("list_issues", arguments=params)

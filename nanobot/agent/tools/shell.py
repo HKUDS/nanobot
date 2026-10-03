@@ -107,7 +107,7 @@ class ExecToolConfig(Base):
 
 @dataclass(slots=True)
 class _PreparedCommand:
-    command: str
+    command: str | list[str]
     cwd: str
     env: dict[str, str]
     timeout: int | None
@@ -272,7 +272,7 @@ class ExecTool(Tool):
         return True
 
     async def execute(
-        self, command: str | None = None, cmd: str | None = None,
+        self, command: str | list[str] | None = None, cmd: str | None = None,
         working_dir: str | None = None, workdir: str | None = None,
         timeout: int | None = None, shell: str | None = None,
         login: bool | None = None, yield_time_ms: int | None = None,
@@ -399,7 +399,7 @@ class ExecTool(Tool):
 
     def _prepare_command(
         self,
-        command: str,
+        command: str | list[str],
         working_dir: str | None = None,
         timeout: int | None = None,
         shell: str | None = None,
@@ -445,7 +445,7 @@ class ExecTool(Tool):
         # continuing to block commands after workspace restriction is disabled.
         if access.restrict_to_workspace:
             guard_error = self._guard_command(
-                command,
+                shlex.join(command) if isinstance(command, list) else command,
                 cwd,
                 restrict_to_workspace=True,
                 workspace_root=workspace_root,
@@ -461,20 +461,24 @@ class ExecTool(Tool):
                 )
             else:
                 workspace = workspace_root or cwd
-                command = wrap_command(
+                wrapped = wrap_command(
                     self.sandbox,
-                    command,
+                    shlex.join(command) if isinstance(command, list) else command,
                     workspace,
                     cwd,
                     sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
                     sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
                 )
+                command = shlex.split(wrapped) if isinstance(command, list) else wrapped
                 cwd = str(Path(workspace).resolve())
 
         effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
-        if self.path_prepend or self.path_append:
+        if isinstance(command, list):
+            parent_path = os.environ.get("PATH", env.get("PATH", ""))
+            env["PATH"] = self._compose_path(parent_path)
+        elif self.path_prepend or self.path_append:
             if _IS_WINDOWS:
                 env["PATH"] = self._compose_path(env.get("PATH", ""))
             else:
@@ -517,14 +521,43 @@ class ExecTool(Tool):
 
     @staticmethod
     async def _spawn(
-        command: str, cwd: str, env: dict[str, str],
+        command: str | list[str], cwd: str, env: dict[str, str],
         shell_program: str | None = None,
         login: bool = False,
         *,
         stdin: int = asyncio.subprocess.DEVNULL,
         process_tree: bool = False,
     ) -> asyncio.subprocess.Process:
-        """Launch *command* in a platform-appropriate shell."""
+        """Launch an argument vector directly or a command string through a shell."""
+        if isinstance(command, list):
+            executable = shutil.which(command[0], path=env.get("PATH", ""))
+            if executable is None:
+                raise FileNotFoundError(f"Executable not found: {command[0]}")
+            windows_job = None
+            process = None
+            try:
+                if process_tree and sys.platform == "win32":
+                    windows_job = ExecTool._create_windows_job()
+                process = await asyncio.create_subprocess_exec(
+                    executable, *command[1:],
+                    stdin=stdin,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=env,
+                    creationflags=windows_job.creation_flags if windows_job else 0,
+                    start_new_session=process_tree and sys.platform != "win32",
+                )
+                if windows_job is not None:
+                    windows_job.assign_and_resume(process.pid)
+                    setattr(process, _PROCESS_TREE_OWNER_ATTR, windows_job)
+                return process
+            except BaseException:
+                if windows_job is not None:
+                    windows_job.terminate()
+                if process is not None:
+                    await ExecTool._kill_process(process)
+                raise
         if _IS_WINDOWS:
             windows_job = None
             process = None

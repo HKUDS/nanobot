@@ -31,7 +31,9 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report'). "
         "Not used for action='list' or action='remove'."
     ),
-    every_seconds=IntegerSchema(description="Interval in seconds (for recurring tasks)"),
+    every_seconds=IntegerSchema(
+        description="Interval in seconds (for recurring tasks)", minimum=1
+    ),
     cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
     tz=StringSchema(
         "Optional IANA timezone for cron expressions (e.g. 'America/Vancouver'). "
@@ -183,7 +185,9 @@ class CronTool(Tool):
 
         # Build schedule
         delete_after = False
-        if every_seconds:
+        if every_seconds is not None:
+            if every_seconds <= 0:
+                return ToolResult.error("Error: every_seconds must be a positive integer")
             schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
         elif cron_expr:
             effective_tz = tz or self._default_timezone

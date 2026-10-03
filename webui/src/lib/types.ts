@@ -1018,6 +1018,7 @@ export interface ChannelSetupContractField {
   choices: string[];
   required: boolean;
   default_value?: string;
+  inheritable?: boolean;
 }
 
 export interface ChannelSetupContract {

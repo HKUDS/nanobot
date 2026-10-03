@@ -430,6 +430,9 @@ class AgentRunner:
                 await hook.on_stream_end(segment_context, resuming=True)
 
         for iteration in range(spec.max_iterations):
+            # A resumed iteration must not inherit a previous iteration's failure.
+            stop_reason = "completed"
+            error = None
             # The session inbox cuts a finite snapshot before every model call.
             # This includes follow-ups that arrived before the first request and
             # messages received while the previous request or tools were running.
@@ -684,10 +687,7 @@ class AgentRunner:
             # Check for mid-turn injections BEFORE signaling stream end.
             # If injections are found we keep the stream alive (resuming=True)
             # so streaming channels don't prematurely finalize the card.
-            can_make_followup_request = (
-                iteration + 1 < spec.max_iterations
-                or spec.finalize_on_max_iterations
-            )
+            can_make_followup_request = iteration + 1 < spec.max_iterations
             should_continue, injection_cycles = await self._try_drain_injections(
                 spec, messages, assistant_message, injection_cycles,
                 conversation_state=conversation_state,
@@ -794,22 +794,8 @@ class AgentRunner:
         else:
             stop_reason = "max_iterations"
             terminal_content = None
+            await end_length_segment(interrupted=False)
             if spec.finalize_on_max_iterations:
-                # The no-tools finalization is a real model boundary, so include
-                # exactly the inputs waiting before that request. Without this
-                # request, leave them in the session inbox for its worker.
-                drained_after_max_iterations, injection_cycles = (
-                    await self._try_drain_injections(
-                        spec,
-                        messages,
-                        None,
-                        injection_cycles,
-                        phase="before max-iterations finalization",
-                    )
-                )
-                if drained_after_max_iterations:
-                    had_injections = True
-                await end_length_segment(interrupted=drained_after_max_iterations)
                 terminal_content, usage = await self._try_finalize_after_max_iterations(
                     spec,
                     hook,
@@ -818,8 +804,6 @@ class AgentRunner:
                     request_state=request_state,
                     round_usages=round_usages,
                 )
-            else:
-                await end_length_segment(interrupted=False)
             if terminal_content is None:
                 terminal_content = self._max_iterations_fallback(spec)
             if length_recovery_parts:

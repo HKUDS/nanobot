@@ -404,15 +404,16 @@ class AzureOpenAIProvider(LLMProvider):
                         break
 
             capture = ResponsesStreamCapture()
-            content, tool_calls, finish_reason, usage, reasoning_content = (
-                await consume_sdk_stream(
-                    _timed_stream(),
-                    on_content_delta,
-                    on_tool_call_delta,
-                    on_reasoning_delta=on_thinking_delta,
-                    capture=capture,
+            async with stream:
+                content, tool_calls, finish_reason, usage, reasoning_content = (
+                    await consume_sdk_stream(
+                        _timed_stream(),
+                        on_content_delta,
+                        on_tool_call_delta,
+                        on_reasoning_delta=on_thinking_delta,
+                        capture=capture,
+                    )
                 )
-            )
             result = LLMResponse(
                 content=content or None,
                 tool_calls=tool_calls,

@@ -73,6 +73,8 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
     """Validate schedule fields that would otherwise create non-runnable jobs."""
     if schedule.tz and schedule.kind != "cron":
         raise ValueError("tz can only be used with cron schedules")
+    if schedule.kind == "every" and (schedule.every_ms is None or schedule.every_ms <= 0):
+        raise ValueError("every schedule requires a positive 'every_ms'")
 
     if schedule.kind == "cron":
         if not schedule.expr or not schedule.expr.strip():
@@ -309,8 +311,9 @@ class CronService:
                         continue
             self._store.jobs = list(jobs_map.values())  # pyright: ignore[reportOptionalMemberAccess]
             if self._should_persist_store() and changed:
-                self._action_path.write_text("", encoding="utf-8")
+                # Keep accepted actions recoverable until the merged snapshot is durable.
                 self._save_store()
+                self._action_path.write_text("", encoding="utf-8")
         return
 
     def _load_store(self, *, reload_during_execution: bool = False) -> CronStore | None:

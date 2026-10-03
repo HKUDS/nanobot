@@ -895,7 +895,6 @@ async def test_qr_login_switches_polling_base_url_on_redirect_status(
             "ilink_user_id": "wx-user",
         },
     ]
-    channel._api_get = AsyncMock(side_effect=list(status_side_effect))
     channel._api_get_with_base = AsyncMock(side_effect=list(status_side_effect))
 
     ok = await channel._qr_login()
@@ -929,7 +928,6 @@ async def test_qr_login_redirect_without_host_keeps_current_polling_base_url(
             "ilink_user_id": "wx-user",
         },
     ]
-    channel._api_get = AsyncMock(side_effect=list(status_side_effect))
     channel._api_get_with_base = AsyncMock(side_effect=list(status_side_effect))
 
     ok = await channel._qr_login()

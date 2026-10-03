@@ -56,7 +56,6 @@ from nanobot.session.turn_continuation import (
 )
 from nanobot.session.webui_turns import (
     TITLE_GENERATION_MAX_TOKENS,
-    TITLE_GENERATION_REASONING_EFFORT,
     WEBUI_SESSION_METADATA_KEY,
     WEBUI_TITLE_METADATA_KEY,
     WebuiTurnCoordinator,
@@ -358,7 +357,7 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
     assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
     assert (
         loop.provider.chat_stream_with_retry.await_args.kwargs["reasoning_effort"]
-        == TITLE_GENERATION_REASONING_EFFORT
+        is None
     )
 
 

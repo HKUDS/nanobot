@@ -6,6 +6,11 @@ export interface LinearInstallationSummary {
   missing_scopes?: string[];
 }
 
+export interface LinearWorkspaceProfile {
+  organization_id: string;
+  logo_url: string | null;
+}
+
 export interface LinearWorkspacePayload {
   session_id: string;
   status: "inspected" | "disconnected";
@@ -14,4 +19,20 @@ export interface LinearWorkspacePayload {
   installations: LinearInstallationSummary[];
   webhook_url?: string;
   redirect_uri?: string;
+}
+
+export interface LinearMember {
+  id: string;
+  name: string;
+  teams: string[];
+  avatar_url?: string | null;
+  allowed: boolean;
+}
+
+export interface LinearMembersPayload {
+  session_id: string;
+  status: "members" | "member_access_saved";
+  organization_id: string;
+  legacy_allow_all: boolean;
+  members: LinearMember[];
 }

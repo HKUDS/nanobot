@@ -179,14 +179,6 @@ def read_file_snapshot(path: Path, *, max_bytes: int = _MAX_SNAPSHOT_BYTES) -> F
     return FileSnapshot(path=path, exists=True, text=text.replace("\r\n", "\n"))
 
 
-def line_diff_stats(before: str | None, after: str | None) -> tuple[int, int]:
-    """Return ``(added, deleted)`` for a UTF-8 text line-level diff."""
-    if before is None or after is None:
-        return 0, 0
-    diff = FileDiff.from_text(before, after)
-    return diff.added, diff.deleted
-
-
 def build_unified_diff_payload(
     before: str | None,
     after: str | None,

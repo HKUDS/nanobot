@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import ssl
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -51,8 +52,8 @@ from nanobot.utils.helpers import estimate_prompt_tokens
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
-# The server gates model visibility by client version; older catalogs omit Astra.
-OPENAI_CODEX_CATALOG_CLIENT_VERSION = "0.153.4"
+# Avoid restricting model discovery to a pinned Codex client release.
+OPENAI_CODEX_CATALOG_CLIENT_VERSION = "99.99.99"
 DEFAULT_ORIGINATOR = "nanobot"
 _COMPACTION_RETAINED_CHAR_BUDGET = 256_000
 
@@ -143,6 +144,12 @@ class OpenAICodexProvider(LLMProvider):
             # Apply explicit provider overrides last, matching other provider backends.
             body.update(self._extra_body)
         effective_cache_key = body.get("prompt_cache_key")
+        request_model = _diagnostic_token(body.get("model"))
+        effective_reasoning = body.get("reasoning")
+        request_effort = _diagnostic_token(
+            cast(dict[object, object], effective_reasoning).get("effort")
+            if isinstance(effective_reasoning, dict) else None
+        )
 
         stage = "oauth_token"
         native_compaction_applied = False
@@ -265,10 +272,16 @@ class OpenAICodexProvider(LLMProvider):
                         raise
                     logger.warning(
                         "Codex native compaction unavailable; continuing without it "
-                        "(type={} status={} disabled={})",
+                        "(type={} status={} disabled={} model={} "
+                        "error_code={} error_param={} error_message={} request_id={})",
                         type(compact_error).__name__,
                         getattr(compact_error, "status_code", None),
                         not self._native_compaction_available,
+                        request_model,
+                        getattr(compact_error, "error_code", None),
+                        getattr(compact_error, "error_param", None),
+                        getattr(compact_error, "error_message", None),
+                        getattr(compact_error, "request_id", None),
                     )
 
             if input_budget is not None:
@@ -301,7 +314,9 @@ class OpenAICodexProvider(LLMProvider):
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
             logger.warning(
                 "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
-                "error_type={} error_code={} retry_after={} summary={}",
+                "error_type={} error_code={} retry_after={} summary={} "
+                "model={} reasoning_effort={} replayed={} compaction_applied={} "
+                "error_param={} error_message={} request_id={}",
                 stage,
                 exc_type,
                 response.error_kind,
@@ -311,6 +326,13 @@ class OpenAICodexProvider(LLMProvider):
                 response.error_code,
                 response.retry_after,
                 _codex_log_summary(exc_type, response),
+                request_model,
+                request_effort,
+                replayed,
+                native_compaction_applied,
+                getattr(e, "error_param", None),
+                getattr(e, "error_message", None),
+                getattr(e, "request_id", None),
             )
             return response
 
@@ -527,6 +549,9 @@ class _CodexHTTPError(RuntimeError):
         error_code: str | None = None,
         should_retry: bool | None = None,
         compaction_unsupported: bool = False,
+        error_param: str | None = None,
+        error_message: str | None = None,
+        request_id: str | None = None,
     ):
         super().__init__(message)
         self.status_code = status_code
@@ -535,6 +560,9 @@ class _CodexHTTPError(RuntimeError):
         self.error_code = error_code
         self.should_retry = should_retry
         self.compaction_unsupported = compaction_unsupported
+        self.error_param = error_param
+        self.error_message = error_message
+        self.request_id = request_id
 
 
 async def _request_codex(
@@ -559,6 +587,7 @@ async def _request_codex(
                 raw = text.decode("utf-8", "ignore")
                 retry_after = LLMProvider._extract_retry_after_from_headers(response.headers)
                 error_type, error_code = LLMProvider._extract_error_type_code(raw)
+                error_param, error_message = _codex_error_details(raw)
                 compaction_unsupported = response.status_code in {400, 404, 422} and any(
                     marker in raw.lower()
                     for marker in (
@@ -577,6 +606,9 @@ async def _request_codex(
                         response.status_code, error_type, error_code, raw
                     ),
                     compaction_unsupported=compaction_unsupported,
+                    error_param=error_param,
+                    error_message=error_message,
+                    request_id=_diagnostic_token(response.headers.get("x-request-id")),
                 )
             capture = ResponsesStreamCapture()
             (
@@ -619,6 +651,41 @@ def _friendly_error(status_code: int, raw: str) -> str:
     if status_code == 429:
         return "ChatGPT usage quota exceeded or rate limit triggered. Please try again later."
     return f"HTTP {status_code}: Codex API request failed"
+
+
+def _diagnostic_token(value: object) -> str | None:
+    if isinstance(value, str) and re.fullmatch(r"[a-zA-Z0-9_.:/\[\]-]{1,160}", value):
+        return value
+    return None
+
+
+def _codex_error_details(raw: str) -> tuple[str | None, str | None]:
+    """Retain parameter paths and known enum errors without upstream prompt echoes."""
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None, None
+    error = cast(dict[str, object], payload).get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return None, None
+    fields = cast(dict[str, object], error)
+    param = _diagnostic_token(fields.get("param"))
+    message = fields.get("message")
+    # Arbitrary upstream messages may contain credentials or user input. Only
+    # retain this bounded rejection template with known reasoning/verbosity values.
+    enum = r"'(?:none|minimal|low|medium|high|xhigh|max|ultra|auto|concise|detailed)'"
+    if (
+        param in {"reasoning.effort", "text.verbosity"}
+        and isinstance(message, str)
+        and len(message) <= 512
+        and re.fullmatch(
+            rf"Unsupported value: {enum} is not supported with the 'gpt-[a-zA-Z0-9.-]{{1,80}}' "
+            rf"model\. Supported values are: {enum}(?:(?:, |, and | and ){enum})*\.",
+            message,
+        )
+    ):
+        return param, message
+    return param, None
 
 
 def _codex_error_response(exc: Exception) -> LLMResponse:
