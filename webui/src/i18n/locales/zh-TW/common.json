@@ -1584,9 +1584,21 @@
         "delivered": "已送達：{{count}}",
         "undelivered": "未送達：{{count}}"
       },
-      "activeTitle": "進行中的子任務",
-      "historyTitle": "子任務記錄",
-      "interruptedHelp": "後端重新啟動時此任務尚未結束，任務沒有自動恢復或重新執行。"
+      "interruptedHelp": "後端重新啟動時此任務尚未結束，任務沒有自動恢復或重新執行。",
+      "workTitle": "委派工作",
+      "progress": "已完成 {{completed}} / {{total}} 項",
+      "running": "{{count}} 項進行中",
+      "finished": "{{count}} 項已結束",
+      "needsReview": "{{count}} 項需檢查",
+      "details": "任務詳情",
+      "description": "任務描述",
+      "activity": "執行記錄",
+      "messages": "訊息回執",
+      "toolStates": {
+        "running": "執行中",
+        "ok": "已完成",
+        "error": "失敗"
+      }
     },
     "compaction": {
       "cancelled": "上下文壓縮已取消",

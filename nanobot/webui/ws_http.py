@@ -899,8 +899,6 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
-        if self.subagent_manager.sessions is not None and not self.subagent_manager.sessions.exists(session_key):
-            return _http_error(404, "session not found")
         try:
             statuses = self.subagent_manager.statuses_for_session(session_key)
         except (OSError, SubagentSessionError):

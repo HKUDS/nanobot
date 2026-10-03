@@ -10,7 +10,7 @@ import {
   formatActivityDuration,
 } from "@/components/thread/AgentActivityCluster";
 import { AssistantSelectionAction } from "@/components/thread/AssistantSelectionAction";
-import { SubagentHistory } from "@/components/thread/SubagentTasks";
+import { SubagentWork, SubagentTaskErrors, useSubagentTaskGroups } from "@/components/thread/SubagentTasks";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -95,6 +95,7 @@ export function ThreadMessages({
   onActivityToggle,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
+  const taskGroups = useSubagentTaskGroups(messages);
   const messageListRef = useRef<HTMLDivElement>(null);
   const mobileActions = useMediaQuery("(max-width: 767px)");
   const units = useMemo(
@@ -267,12 +268,13 @@ export function ThreadMessages({
             onContextBlockMenuOpenChange={setContextBlockMenuOpen}
           />
           {unit.type === "message" && unit.message.role === "user" ? (
-            <SubagentHistory turnId={unit.message.turnId} messageId={unit.message.id} />
+            <SubagentWork tasks={taskGroups.byMessage.get(unit.message.id) ?? []} />
           ) : null}
           </Fragment>
         );
       })}
-      <SubagentHistory unlinked />
+      <SubagentWork tasks={taskGroups.unlinked} />
+      <SubagentTaskErrors />
       {pendingActivity ? (
         <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>
           <AgentActivityCluster
@@ -915,10 +917,10 @@ export function unitKeysForDisplay(units: DisplayUnit[]): string[] {
   const occurrences = new Map<string, number>();
   return units.map((unit, index) => {
     const base = unitKeyBase(unit, index);
-    if (!base.startsWith("turn-") || base.endsWith("-user")) return base;
+    if (!base.startsWith("turn-")) return base;
     const next = (occurrences.get(base) ?? 0) + 1;
     occurrences.set(base, next);
-    return `${base}-${next}`;
+    return base.endsWith("-user") && next === 1 ? base : `${base}-${next}`;
   });
 }
 

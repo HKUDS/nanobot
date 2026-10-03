@@ -1584,9 +1584,21 @@
         "delivered": "Livrés : {{count}}",
         "undelivered": "Non livrés : {{count}}"
       },
-      "activeTitle": "Tâches en cours",
-      "historyTitle": "Résultats des tâches",
-      "interruptedHelp": "Le serveur a redémarré avant la fin de cette tâche. Elle n’a pas été relancée automatiquement."
+      "interruptedHelp": "Le serveur a redémarré avant la fin de cette tâche. Elle n’a pas été relancée automatiquement.",
+      "workTitle": "Travail délégué",
+      "progress": "{{completed}} sur {{total}} terminés",
+      "running": "En cours : {{count}}",
+      "finished": "Terminés : {{count}}",
+      "needsReview": "À vérifier : {{count}}",
+      "details": "Détails de la tâche",
+      "description": "Description de la tâche",
+      "activity": "Historique d’exécution",
+      "messages": "Accusés de réception",
+      "toolStates": {
+        "running": "En cours",
+        "ok": "Terminé",
+        "error": "Échec"
+      }
     },
     "compaction": {
       "cancelled": "Compression du contexte annulée",

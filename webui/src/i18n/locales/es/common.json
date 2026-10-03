@@ -1585,9 +1585,21 @@
         "delivered": "Entregados: {{count}}",
         "undelivered": "Sin entregar: {{count}}"
       },
-      "activeTitle": "Tareas en curso",
-      "historyTitle": "Resultados de tareas",
-      "interruptedHelp": "El servidor se reinició antes de terminar esta tarea. No se ha vuelto a ejecutar automáticamente."
+      "interruptedHelp": "El servidor se reinició antes de terminar esta tarea. No se ha vuelto a ejecutar automáticamente.",
+      "workTitle": "Trabajo delegado",
+      "progress": "{{completed}} de {{total}} completados",
+      "running": "En curso: {{count}}",
+      "finished": "Finalizados: {{count}}",
+      "needsReview": "Revisar: {{count}}",
+      "details": "Detalles de la tarea",
+      "description": "Descripción de la tarea",
+      "activity": "Actividad de ejecución",
+      "messages": "Confirmaciones de mensajes",
+      "toolStates": {
+        "running": "En curso",
+        "ok": "Completado",
+        "error": "Fallido"
+      }
     },
     "compaction": {
       "cancelled": "Compresión de contexto cancelada",

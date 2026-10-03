@@ -1584,9 +1584,21 @@
         "delivered": "Đã chuyển: {{count}}",
         "undelivered": "Chưa chuyển: {{count}}"
       },
-      "activeTitle": "Tác vụ đang chạy",
-      "historyTitle": "Kết quả tác vụ",
-      "interruptedHelp": "Máy chủ khởi động lại trước khi tác vụ hoàn thành. Tác vụ không tự động chạy lại."
+      "interruptedHelp": "Máy chủ khởi động lại trước khi tác vụ hoàn thành. Tác vụ không tự động chạy lại.",
+      "workTitle": "Công việc được giao",
+      "progress": "Hoàn thành {{completed}} / {{total}}",
+      "running": "Đang chạy: {{count}}",
+      "finished": "Đã kết thúc: {{count}}",
+      "needsReview": "Cần kiểm tra: {{count}}",
+      "details": "Chi tiết tác vụ",
+      "description": "Mô tả tác vụ",
+      "activity": "Nhật ký thực thi",
+      "messages": "Biên nhận tin nhắn",
+      "toolStates": {
+        "running": "Đang chạy",
+        "ok": "Hoàn thành",
+        "error": "Thất bại"
+      }
     },
     "compaction": {
       "cancelled": "Đã hủy nén ngữ cảnh",

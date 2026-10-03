@@ -1784,9 +1784,21 @@
         "delivered": "已送达：{{count}}",
         "undelivered": "未送达：{{count}}"
       },
-      "activeTitle": "进行中的子任务",
-      "historyTitle": "子任务记录",
-      "interruptedHelp": "后端重启时此任务尚未结束，任务没有自动恢复或重新执行。"
+      "interruptedHelp": "后端重启时此任务尚未结束，任务没有自动恢复或重新执行。",
+      "workTitle": "委派工作",
+      "progress": "已完成 {{completed}} / {{total}} 项",
+      "running": "{{count}} 项进行中",
+      "finished": "{{count}} 项已结束",
+      "needsReview": "{{count}} 项需检查",
+      "details": "任务详情",
+      "description": "任务描述",
+      "activity": "执行记录",
+      "messages": "消息回执",
+      "toolStates": {
+        "running": "执行中",
+        "ok": "已完成",
+        "error": "失败"
+      }
     },
     "compaction": {
       "cancelled": "上下文压缩已取消",

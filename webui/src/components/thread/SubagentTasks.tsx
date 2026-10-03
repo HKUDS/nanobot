@@ -1,13 +1,14 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, LoaderCircle, Square, Workflow } from "lucide-react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { CheckCircle2, ChevronDown, ChevronRight, CircleAlert, CircleMinus, LoaderCircle, Square, Workflow } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MarkdownText } from "@/components/MarkdownText";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import { cancelSubagentTask, fetchSubagentTasks, type WebUIMutationTransport } from "@/lib/api";
-import type { SubagentTaskSnapshot } from "@/lib/types";
+import type { SubagentTaskSnapshot, UIMessage } from "@/lib/types";
 
 function isActive(task: SubagentTaskSnapshot): boolean {
   return task.state === "queued" || task.state === "running" || task.state === "stopping";
@@ -78,7 +79,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, acti
       try {
         const payload = await fetchSubagentTasks(token, sessionKey);
         if (!cancelled && currentRevision === revision.current) {
-          setTasks(payload.tasks);
+          setTasks(payload.tasks.sort((a, b) => a.created_at - b.created_at || a.task_id.localeCompare(b.task_id)));
           setLoadError(null);
         }
       } catch {
@@ -128,39 +129,73 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, acti
 
   return <TasksContext.Provider value={value}>
       {children}
-      <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
-        <DialogContent className="max-w-xl" onCloseAutoFocus={(event) => {
+      <Sheet open={!!selected} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
+        <SheetContent className="w-full gap-0 overflow-hidden border-l p-0 sm:w-[min(32rem,calc(100vw-1rem))] sm:max-w-none"
+          overlayClassName="bg-black/20 backdrop-blur-[8px]"
+          closeButtonClassName="right-3 top-3 grid h-9 w-9 place-items-center rounded-full hover:bg-muted"
+          onCloseAutoFocus={(event) => {
           event.preventDefault();
           if (!active || !paneVisible) return;
           const target = trigger.current?.isConnected ? trigger.current
             : buttons.current.get(trigger.current?.dataset.subagentId ?? "");
-          target?.focus({ preventScroll: true });
+          const focusTarget = target?.closest("[hidden]")
+            ? target.closest("[data-subagent-work]")?.querySelector<HTMLButtonElement>("[aria-expanded]") : target;
+          focusTarget?.focus({ preventScroll: true });
         }}>
-          <DialogHeader>
-            <DialogTitle className="break-words pr-6">{selected?.label}</DialogTitle>
-            <DialogDescription>{selected ? t(`thread.subagents.states.${selected.state}`) : ""}</DialogDescription>
-          </DialogHeader>
-          {selected ? <div className="max-h-[65vh] space-y-4 overflow-y-auto text-sm">
+          <div className="shrink-0 space-y-2 border-b px-5 py-5 pr-14">
+            <p className="text-xs text-muted-foreground">{t("thread.subagents.details")}</p>
+            <SheetTitle className="break-words text-base">{selected?.label}</SheetTitle>
+            <SheetDescription className="flex items-center gap-2">
+              {selected ? <><TaskStateIcon task={selected} />{t(`thread.subagents.states.${selected.state}`)}
+                <span className="tabular-nums">· {Math.round(selected.elapsed_seconds)}s</span></> : null}
+            </SheetDescription>
+          </div>
+          {selected ? <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 py-5 text-sm">
             {selected.state === "interrupted" ? <p className="text-muted-foreground">{t("thread.subagents.interruptedHelp")}</p> : null}
-            <p className="whitespace-pre-wrap break-words">{selected.task_description}</p>
-            <p className="text-xs text-muted-foreground">{t("thread.subagents.iteration", { count: selected.iteration })}</p>
-            {selected.tool_events.length ? <p className="text-xs text-muted-foreground">{selected.tool_events.map((event) => event.name).join(", ")}</p> : null}
+            <section className="min-w-0 space-y-2">
+              <h3 className="font-medium">{t("thread.subagents.description")}</h3>
+              <MarkdownText className="text-sm">{selected.task_description}</MarkdownText>
+            </section>
             {selected.error ? <p role="alert" className="whitespace-pre-wrap break-words text-destructive">{selected.error}</p> : null}
-            {selected.result ? <div>
-              <p className="mb-1 font-medium">{t(selected.partial ? "thread.subagents.partialResult" : "thread.subagents.result")}</p>
-              <p className="whitespace-pre-wrap break-words">{selected.result}</p>
-            </div> : null}
-            {Object.keys(selected.receipts).length ? <div className="space-y-1 text-xs text-muted-foreground">
+            {selected.result ? <section className="min-w-0 space-y-2">
+              <h3 className="font-medium">{t(selected.partial ? "thread.subagents.partialResult" : "thread.subagents.result")}</h3>
+              <MarkdownText className="text-sm">{selected.result}</MarkdownText>
+            </section> : null}
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("thread.subagents.activity")}</summary>
+              <p className="py-2">{t("thread.subagents.iteration", { count: selected.iteration })}</p>
+              {selected.tool_events.length ? <ul className="space-y-1">
+                {selected.tool_events.map((event, index) => <li key={index} className="flex min-w-0 items-center gap-2">
+                  <code className="min-w-0 flex-1 break-all">{event.name}</code>
+                  <span className="shrink-0">{t(`thread.subagents.toolStates.${event.status}`, { defaultValue: event.status })}</span>
+                </li>)}
+              </ul> : null}
+            </details>
+            {Object.keys(selected.receipts).length ? <details className="space-y-2 text-xs text-muted-foreground">
+              <summary className="cursor-pointer py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("thread.subagents.messages")}</summary>
               <p>{t("thread.subagents.receiptHelp")}</p>
               {(["accepted", "delivered", "undelivered"] as const).map((receipt) => {
                 const count = Object.values(selected.receipts).filter((entry) => entry === receipt).length;
                 return count ? <p key={receipt}>{t(`thread.subagents.receipts.${receipt}`, { count })}</p> : null;
               })}
-            </div> : null}
+            </details> : null}
           </div> : null}
-        </DialogContent>
-      </Dialog>
+          {selected && (selected.state === "queued" || selected.state === "running") ? <div className="shrink-0 border-t px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <Button type="button" variant="outline" size="sm" disabled={stoppingId !== null}
+              onClick={() => void stop(selected)}><Square className="mr-2 h-3 w-3" aria-hidden />{t("thread.subagents.stopTask", { label: selected.label })}</Button>
+            {stopError ? <p role="alert" className="mt-2 text-xs text-destructive">{stopError}</p> : null}
+          </div> : null}
+        </SheetContent>
+      </Sheet>
   </TasksContext.Provider>;
+}
+
+function TaskStateIcon({ task }: { task: SubagentTaskSnapshot }) {
+  const className = "h-3.5 w-3.5 shrink-0";
+  if (isActive(task)) return <LoaderCircle className={`${className} animate-spin motion-reduce:animate-none text-muted-foreground`} aria-hidden />;
+  if (task.state === "done") return <CheckCircle2 className={`${className} text-emerald-600 dark:text-emerald-400`} aria-hidden />;
+  if (task.state === "cancelled") return <CircleMinus className={`${className} text-muted-foreground`} aria-hidden />;
+  return <CircleAlert className={`${className} text-destructive`} aria-hidden />;
 }
 
 function TaskButton({ task }: { task: SubagentTaskSnapshot }) {
@@ -172,8 +207,8 @@ function TaskButton({ task }: { task: SubagentTaskSnapshot }) {
     button.current = node;
   }}
     onClick={(event) => context?.open(task, event.currentTarget)}
-    className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-1.5 text-left text-sm hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-    {isActive(task) ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden /> : <Workflow className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <TaskStateIcon task={task} />
     <span className="min-w-0 flex-1 truncate">{task.label}</span>
     <span className="shrink-0 text-xs text-muted-foreground">{t(`thread.subagents.states.${task.state}`)}</span>
     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{Math.round(task.elapsed_seconds)}s</span>
@@ -181,36 +216,72 @@ function TaskButton({ task }: { task: SubagentTaskSnapshot }) {
   </button>;
 }
 
-export function ActiveSubagentTasks() {
+export function useHasSubagentContent(): boolean {
+  const context = useContext(TasksContext);
+  return !!context && (context.tasks.length > 0 || !!context.loadError || !!context.stopError);
+}
+
+/** Prefer an exact prompt, then its turn's first prompt when replay changed message IDs. */
+export function useSubagentTaskGroups(messages: UIMessage[]) {
+  const context = useContext(TasksContext);
+  const prompts = messages.filter((message) => message.role === "user");
+  const byMessage = new Map<string, SubagentTaskSnapshot[]>();
+  const unlinked: SubagentTaskSnapshot[] = [];
+  for (const task of context?.tasks ?? []) {
+    const prompt = prompts.find((message) => message.id === task.origin_message_id)
+      ?? prompts.find((message) => !!task.origin_turn_id && message.turnId === task.origin_turn_id);
+    if (prompt) {
+      const group = byMessage.get(prompt.id) ?? [];
+      group.push(task);
+      byMessage.set(prompt.id, group);
+    } else unlinked.push(task);
+  }
+  return { byMessage, unlinked };
+}
+
+export function SubagentWork({ tasks }: { tasks: SubagentTaskSnapshot[] }) {
   const context = useContext(TasksContext);
   const { t } = useTranslation("common");
-  if (!context) return null;
-  const active = context.tasks.filter(isActive);
-  if (!active.length && !context.loadError && !context.stopError) return null;
-  return <section aria-label={t("thread.subagents.activeTitle")} className="mx-auto mb-2 w-full max-w-[49.5rem] rounded-control bg-muted/35 px-2 py-1">
-    <div className="max-h-40 overflow-y-auto">
-      {active.map((task) => <div key={task.task_id} className="flex items-center gap-1">
-        <TaskButton task={task} />
-        {task.state === "queued" || task.state === "running" ? <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-          aria-label={t("thread.subagents.stopTask", { label: task.label })} disabled={context.stoppingId !== null}
-          onClick={() => void context.stop(task)}><Square className="h-3 w-3" aria-hidden /></Button> : null}
-      </div>)}
+  const rowsId = useId();
+  const [expanded, setExpanded] = useState<boolean | null>(null);
+  if (!context || !tasks.length) return null;
+  const activeCount = tasks.filter(isActive).length;
+  const completedCount = tasks.filter((task) => task.state === "done").length;
+  const failedCount = tasks.filter((task) => ["error", "incomplete", "interrupted"].includes(task.state)).length;
+  const open = expanded ?? activeCount > 0;
+  const summary = activeCount
+    ? t("thread.subagents.progress", { completed: completedCount, total: tasks.length })
+    : t("thread.subagents.finished", { count: tasks.length });
+  return <section data-subagent-work aria-label={t("thread.subagents.workTitle")} className="thread-message-row mt-3">
+    <div className="overflow-hidden rounded-control border border-border/60 bg-muted/15">
+      <button type="button" aria-expanded={open} aria-controls={rowsId}
+        onClick={() => setExpanded(!open)}
+        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+        <Workflow className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span className="font-medium">{t("thread.subagents.workTitle")}</span>
+        <span className="ml-auto min-w-0 text-right">
+          {summary}{activeCount ? ` · ${t("thread.subagents.running", { count: activeCount })}` : ""}
+          {failedCount ? <span className="ml-2 text-destructive">{t("thread.subagents.needsReview", { count: failedCount })}</span> : null}
+        </span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+      </button>
+      <div id={rowsId} hidden={!open} className="border-t border-border/50 py-0.5">
+        {tasks.map((task) => <div key={task.task_id} className="flex items-center gap-1 pr-1">
+          <TaskButton task={task} />
+          {task.state === "queued" || task.state === "running" ? <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0"
+            aria-label={t("thread.subagents.stopTask", { label: task.label })} disabled={context.stoppingId !== null}
+            onClick={() => void context.stop(task)}><Square className="h-3 w-3" aria-hidden /></Button> : null}
+        </div>)}
+      </div>
     </div>
-    {context.loadError ? <p role="alert" className="px-2 py-1 text-xs text-destructive">{context.loadError}</p> : null}
-    {context.stopError ? <p role="alert" className="px-2 py-1 text-xs text-destructive">{context.stopError}</p> : null}
   </section>;
 }
 
-export function SubagentHistory({ turnId, messageId, unlinked = false }: { turnId?: string; messageId?: string; unlinked?: boolean }) {
+export function SubagentTaskErrors() {
   const context = useContext(TasksContext);
-  const { t } = useTranslation("common");
-  const completed = context?.tasks.filter((task) => !isActive(task) && (unlinked
-    ? !task.origin_turn_id && !task.origin_message_id
-    : (turnId ? task.origin_turn_id === turnId : false) || (!!messageId && task.origin_message_id === messageId))) ?? [];
-  if (!completed.length) return null;
-  return <section aria-label={t("thread.subagents.historyTitle")} className="thread-message-row mt-2 flex flex-col items-end gap-1">
-    {completed.map((task) => <div key={task.task_id} className="flex w-full max-w-md text-muted-foreground">
-      <TaskButton task={task} />
-    </div>)}
-  </section>;
+  if (!context?.loadError && !context?.stopError) return null;
+  return <div className="thread-message-row mt-2 space-y-1 text-xs text-destructive">
+    {context.loadError ? <p role="alert">{context.loadError}</p> : null}
+    {context.stopError ? <p role="alert">{context.stopError}</p> : null}
+  </div>;
 }

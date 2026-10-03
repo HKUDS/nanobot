@@ -1584,9 +1584,21 @@
         "delivered": "配信済み: {{count}}",
         "undelivered": "未配信: {{count}}"
       },
-      "activeTitle": "実行中のタスク",
-      "historyTitle": "タスクの結果",
-      "interruptedHelp": "タスクの完了前にサーバーが再起動しました。タスクは自動的に再実行されていません。"
+      "interruptedHelp": "タスクの完了前にサーバーが再起動しました。タスクは自動的に再実行されていません。",
+      "workTitle": "委任した作業",
+      "progress": "{{total}} 件中 {{completed}} 件完了",
+      "running": "実行中: {{count}}",
+      "finished": "終了: {{count}}",
+      "needsReview": "要確認: {{count}}",
+      "details": "タスクの詳細",
+      "description": "タスクの説明",
+      "activity": "実行履歴",
+      "messages": "メッセージの受信状況",
+      "toolStates": {
+        "running": "実行中",
+        "ok": "完了",
+        "error": "失敗"
+      }
     },
     "compaction": {
       "cancelled": "コンテキストの圧縮をキャンセルしました",
