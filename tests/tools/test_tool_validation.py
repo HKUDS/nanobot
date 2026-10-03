@@ -177,6 +177,51 @@ def test_validate_params_enum_and_min_length() -> None:
     assert any("mode must be one of" in e for e in errors)
 
 
+@pytest.mark.parametrize(
+    "value, allowed, valid",
+    [
+        (True, 1, False),
+        (False, 0, False),
+        (1, True, False),
+        (0, False, False),
+        ([True], [1], False),
+        ({"enabled": True}, {"enabled": 1}, False),
+        (1.0, 1, True),
+        (True, True, True),
+        ("x", "x", True),
+        ({"a": 1, "b": 2}, {"b": 2.0, "a": 1.0}, True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_registry_enforces_json_enum_equality(value, allowed, valid) -> None:
+    calls = []
+
+    class EnumTool(SampleTool):
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return {
+                "type": "object",
+                "properties": {"value": {"enum": [allowed]}},
+                "required": ["value"],
+            }
+
+        async def execute(self, **kwargs: Any) -> str:
+            calls.append(kwargs["value"])
+            return "ok"
+
+    registry = ToolRegistry()
+    registry.register(EnumTool())
+
+    result = await registry.execute("sample", {"value": value})
+
+    if valid:
+        assert result == "ok"
+        assert calls == [value]
+    else:
+        assert "value must be one of" in result
+        assert calls == []
+
+
 def test_validate_params_nested_object_and_array() -> None:
     tool = SampleTool()
     errors = tool.validate_params(
