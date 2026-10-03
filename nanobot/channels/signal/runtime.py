@@ -415,6 +415,8 @@ class SignalChannel(BaseChannel):
         signal exposes (phone with/without ``+``, UUID, ACI), so we check
         each part of the pipe-joined composite against ``is_approved``.
         """
+        if is_approved(self.name, str(sender_id)):
+            return True
         for part in str(sender_id).split("|"):
             for variant in self._normalize_signal_id(part):
                 if is_approved(self.name, variant):
@@ -891,7 +893,10 @@ class SignalChannel(BaseChannel):
             self.logger.debug("Ignoring DM from {} (DMs disabled)", sender_id)
             return False, chat_id
         if self.config.dm.policy == "allowlist":
-            if not self._sender_matches_allowlist(sender_id, self.config.dm.allow_from):
+            if not (
+                self._sender_matches_allowlist(sender_id, self.config.dm.allow_from)
+                or self._sender_approved_via_pairing(sender_id)
+            ):
                 self.logger.debug(
                     "Ignoring DM from {} (policy: {})", sender_id, self.config.dm.policy
                 )
