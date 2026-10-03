@@ -20,8 +20,10 @@ from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.subagent import SubagentTool
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -76,6 +78,28 @@ async def test_direct_turn_waits_for_child_without_a_background_consumer(loop_fa
         assert loop.bus.inbound_size == 0
         assert loop.subagents.get_running_count() == 0
         assert next(iter(loop.subagents.statuses_for_session("cli:direct").values())).state == "done"
+    finally:
+        await loop.subagents.close()
+
+
+@pytest.mark.asyncio
+async def test_child_origin_uses_the_channel_turn_identity(loop_factory):
+    loop = loop_factory()
+    loop.provider.provider_name = "test"
+    loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(loop.sessions)
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="delegate", name="subagent", arguments={"action": "create", "task": "Inspect config"},
+        )]),
+        LLMResponse(content="Child findings"),
+        LLMResponse(content="Parent conclusion"),
+    ])
+    message = InboundMessage("websocket", "user", "origin-check", "Delegate this inspection",
+                             metadata={"webui_turn_id": "visible-parent-turn"})
+    try:
+        await loop._process_message(message)
+        status = next(iter(loop.subagents.statuses_for_session(message.session_key).values()))
+        assert status.origin_turn_id == "visible-parent-turn"
     finally:
         await loop.subagents.close()
 

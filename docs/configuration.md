@@ -2294,7 +2294,9 @@ Single-turn CLI and direct API calls without a running background message consum
 
 Tasks that reach their iteration limit are `incomplete`, not completed. Cancelled, failed, and incomplete tasks retain the latest completed model response when available, marked as a partial result. A stopped task may have changed files even if it did not produce a final response.
 
-In the WebUI, only unfinished tasks appear above the input. Completed, failed, cancelled, and incomplete tasks move to a compact result entry under the message that started them. Open an entry to inspect its result and message receipts; active tasks also show current tools and a stop button. A host must advertise `webui.subagents.v1` for these controls to appear.
+In the WebUI, delegated work stays under the request that started it. Running tasks expand by default; when all tasks finish, the same block folds into a retained result entry. Expand it to check individual outcomes, including failures or partial results. Refreshing restores saved task observations without starting work again. A host must advertise `webui.subagents.v1` for these controls to appear.
+
+Select a task to open its details on the right, or across the screen on mobile. Task descriptions and results render Markdown, including lists, links, tables, and code blocks. Execution activity and message receipts can be expanded separately. Closing details leaves the task running; its stop button cancels only that task. Continue giving instructions to the main agent in the conversation.
 
 Use `/stop` to stop the current session and its subagent tasks; other sessions are unaffected. Cancellation does not remove files already created, and some operations may take time to stop.
 

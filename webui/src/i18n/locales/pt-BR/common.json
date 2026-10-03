@@ -1598,9 +1598,21 @@
         "delivered": "Entregues: {{count}}",
         "undelivered": "Não entregues: {{count}}"
       },
-      "activeTitle": "Tarefas em andamento",
-      "historyTitle": "Resultados das tarefas",
-      "interruptedHelp": "O servidor reiniciou antes de concluir esta tarefa. Ela não foi executada novamente automaticamente."
+      "interruptedHelp": "O servidor reiniciou antes de concluir esta tarefa. Ela não foi executada novamente automaticamente.",
+      "workTitle": "Trabalho delegado",
+      "progress": "{{completed}} de {{total}} concluídos",
+      "running": "Em andamento: {{count}}",
+      "finished": "Finalizados: {{count}}",
+      "needsReview": "Revisar: {{count}}",
+      "details": "Detalhes da tarefa",
+      "description": "Descrição da tarefa",
+      "activity": "Atividade de execução",
+      "messages": "Confirmações de mensagens",
+      "toolStates": {
+        "running": "Em andamento",
+        "ok": "Concluído",
+        "error": "Falhou"
+      }
     },
     "compaction": {
       "cancelled": "Compactação do contexto cancelada",

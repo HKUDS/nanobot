@@ -734,7 +734,7 @@ class AgentLoop:
             metadata=dict(ctx.msg.metadata or {}),
             attributes=dict(ctx.attributes),
             sender_id=ctx.msg.sender_id,
-            turn_id=ctx.turn_id,
+            turn_id=ctx.delivery.route.turn_id or ctx.turn_id,
             workspace=scope.project_path,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
             background_subagents=self._running,

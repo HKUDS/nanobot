@@ -1784,9 +1784,21 @@
         "delivered": "Delivered: {{count}}",
         "undelivered": "Undelivered: {{count}}"
       },
-      "activeTitle": "Running tasks",
-      "historyTitle": "Task results",
-      "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically."
+      "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically.",
+      "workTitle": "Delegated work",
+      "progress": "{{completed}} of {{total}} completed",
+      "running": "Running: {{count}}",
+      "finished": "Finished: {{count}}",
+      "needsReview": "Review needed: {{count}}",
+      "details": "Task details",
+      "description": "Task description",
+      "activity": "Execution activity",
+      "messages": "Message receipts",
+      "toolStates": {
+        "running": "Running",
+        "ok": "Completed",
+        "error": "Failed"
+      }
     },
     "compaction": {
       "cancelled": "Context compaction cancelled",

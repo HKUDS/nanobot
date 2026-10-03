@@ -15,7 +15,7 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
-import { ActiveSubagentTasks, SubagentTasksProvider } from "@/components/thread/SubagentTasks";
+import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import type { ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -1703,7 +1703,6 @@ export function ThreadShell({
 
   const composer = (
     <>
-      <ActiveSubagentTasks />
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
           model={modelFallback.model}

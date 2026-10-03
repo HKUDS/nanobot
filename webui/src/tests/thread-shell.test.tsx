@@ -511,6 +511,8 @@ describe("ThreadShell", () => {
     const shell = () => wrap(client, <ThreadShell session={session("persisted-tasks")} title="Task history"
       onToggleSidebar={() => {}} />, null, "tok", ["webui.core.v1", "webui.subagents.v1"]);
     const view = render(shell());
+    await screen.findByText("Delegate inspection");
+    fireEvent.click(await screen.findByRole("button", { name: /Delegated work Finished: 1/ }));
     const task = await screen.findByRole("button", { name: /Inspect settings Completed/ });
     await screen.findByText("Delegate inspection");
     expect(screen.getAllByRole("button", { name: /Inspect settings/ })).toHaveLength(1);
@@ -518,6 +520,8 @@ describe("ThreadShell", () => {
     expect(within(screen.getByTestId("thread-composer-motion")).queryByText("Inspect settings")).not.toBeInTheDocument();
     view.unmount();
     render(shell());
+    await screen.findByText("Delegate inspection");
+    fireEvent.click(await screen.findByRole("button", { name: /Delegated work Finished: 1/ }));
     await screen.findByRole("button", { name: /Inspect settings Completed/ });
     expect(client.sendMessage).not.toHaveBeenCalled();
   });

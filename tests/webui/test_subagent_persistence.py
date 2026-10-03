@@ -55,6 +55,24 @@ def gateway_for(manager, sessions, workspace):
 
 
 @pytest.mark.asyncio
+async def test_new_unsaved_parent_has_an_empty_task_collection(tmp_path):
+    workspace = tmp_path / "agent"
+    manager, sessions, _ = manager_with_storage(workspace, tmp_path / "sessions")
+    gateway, connection, headers = gateway_for(manager, sessions, workspace)
+    key = "websocket:new-chat"
+    try:
+        response = await gateway.http.dispatch(
+            connection, Request(f"/api/sessions/{quote(key, safe='')}/subagents", headers),
+        )
+        assert response.status_code == 200
+        assert json.loads(response.body) == {"tasks": []}
+        assert response.headers["Cache-Control"] == "no-store"
+        assert sessions.read_session_metadata(key) is None
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_abrupt_process_exit_preserves_terminal_records_and_interrupts_pending_work(tmp_path):
     workspace, sessions_root = tmp_path / "agent", tmp_path / "sessions"
     script = tmp_path / "host.py"

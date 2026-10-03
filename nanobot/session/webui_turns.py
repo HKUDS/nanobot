@@ -502,7 +502,7 @@ class WebuiTurnRoutePolicy:
                 else uuid4().hex
             )
             metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
-            routed = replace(routed, metadata=metadata)
+            routed = replace(routed, metadata=metadata, turn_id=current_turn_id)
             # Direct websocket turns publish their final idle transition from
             # the original input message. Carry the same server-owned identity
             # there, overwriting any untrusted client-supplied value.

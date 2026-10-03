@@ -1584,9 +1584,21 @@
         "delivered": "Terkirim: {{count}}",
         "undelivered": "Tidak terkirim: {{count}}"
       },
-      "activeTitle": "Tugas aktif",
-      "historyTitle": "Hasil tugas",
-      "interruptedHelp": "Server dimulai ulang sebelum tugas ini selesai. Tugas tidak dijalankan ulang secara otomatis."
+      "interruptedHelp": "Server dimulai ulang sebelum tugas ini selesai. Tugas tidak dijalankan ulang secara otomatis.",
+      "workTitle": "Pekerjaan yang didelegasikan",
+      "progress": "{{completed}} dari {{total}} selesai",
+      "running": "Berjalan: {{count}}",
+      "finished": "Berakhir: {{count}}",
+      "needsReview": "Perlu diperiksa: {{count}}",
+      "details": "Detail tugas",
+      "description": "Deskripsi tugas",
+      "activity": "Aktivitas eksekusi",
+      "messages": "Tanda terima pesan",
+      "toolStates": {
+        "running": "Berjalan",
+        "ok": "Selesai",
+        "error": "Gagal"
+      }
     },
     "compaction": {
       "cancelled": "Pemadatan konteks dibatalkan",
