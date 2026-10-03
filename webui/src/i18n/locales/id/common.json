@@ -1561,6 +1561,33 @@
     "error": "Kesalahan koneksi"
   },
   "thread": {
+    "subagents": {
+      "loadFailed": "Tidak dapat memuat subtugas.",
+      "stopFailed": "Tidak dapat menghentikan tugas ini.",
+      "stopTask": "Hentikan {{label}}",
+      "iteration": "Iterasi {{count}}",
+      "result": "Hasil",
+      "partialResult": "Hasil parsial",
+      "receiptHelp": "Terkirim berarti pesan disertakan dalam permintaan model berikutnya dari subagen, bukan konfirmasi bahwa pekerjaan selesai.",
+      "states": {
+        "queued": "Dalam antrean",
+        "running": "Berjalan",
+        "stopping": "Menghentikan",
+        "done": "Selesai",
+        "incomplete": "Belum selesai",
+        "error": "Gagal",
+        "cancelled": "Dibatalkan",
+        "interrupted": "Terputus"
+      },
+      "receipts": {
+        "accepted": "Dalam antrean: {{count}}",
+        "delivered": "Terkirim: {{count}}",
+        "undelivered": "Tidak terkirim: {{count}}"
+      },
+      "activeTitle": "Tugas aktif",
+      "historyTitle": "Hasil tugas",
+      "interruptedHelp": "Server dimulai ulang sebelum tugas ini selesai. Tugas tidak dijalankan ulang secara otomatis."
+    },
     "compaction": {
       "cancelled": "Pemadatan konteks dibatalkan",
       "empty": "Tidak ada konteks yang perlu dipadatkan.",

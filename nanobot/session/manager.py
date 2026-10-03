@@ -59,6 +59,7 @@ _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 _RUNTIME_CHECKPOINT_VERSION = 1
 _RUNTIME_CHECKPOINT_SUFFIX = ".checkpoint.json"
 _FORK_VOLATILE_METADATA_KEYS = {
+    "subagent_tasks",
     "goal_state",
     "pending_user_turn",
     "pending_user_followups",
@@ -779,7 +780,31 @@ class JsonlSessionStore:
             f"{src.stem}.{label}.{snapshot.digest[:12]}.{secrets.token_hex(4)}.jsonl"
         )
         self._install_snapshot(src, conflict, snapshot)
+        self._copy_subagent_records(src, conflict)
         return conflict
+
+    @classmethod
+    def _copy_subagent_records(cls, src: Path, dst: Path, *, replace: bool = False) -> None:
+        """Preserve durable observations whenever their parent history is copied."""
+        source = src.with_suffix(".subagents.json")
+        target = dst.with_suffix(".subagents.json")
+        if not source.exists() and not source.is_symlink():
+            if replace:
+                target.unlink(missing_ok=True)
+                cls._fsync_directory(target.parent)
+            return
+        snapshot = cls._session_file_snapshot(source)
+        if snapshot is None:
+            raise OSError(f"invalid subagent records during session migration: {source}")
+        if target.exists() or target.is_symlink():
+            current = cls._session_file_snapshot(target)
+            if current is None:
+                raise OSError(f"invalid subagent records destination: {target}")
+            if current.digest == snapshot.digest:
+                return
+            if not replace:
+                raise OSError(f"conflicting subagent records: {target}")
+        cls._install_snapshot(source, target, snapshot)
 
     @classmethod
     def _remove_migrated_source(
@@ -819,6 +844,13 @@ class JsonlSessionStore:
                 logger.warning("Skipping invalid or changing legacy session file: {}", src)
                 continue
             try:
+                records_path = src.with_suffix(".subagents.json")
+                records_snapshot = (
+                    self._session_file_snapshot(records_path)
+                    if records_path.exists() or records_path.is_symlink() else None
+                )
+                if (records_path.exists() or records_path.is_symlink()) and records_snapshot is None:
+                    raise OSError(f"invalid subagent records: {records_path}")
                 destination_snapshot = self._session_file_snapshot(dst) if dst.exists() else None
                 if dst.exists() and destination_snapshot is None:
                     logger.warning(
@@ -829,11 +861,13 @@ class JsonlSessionStore:
 
                 if destination_snapshot is None:
                     self._install_snapshot(src, dst, source_snapshot)
+                    self._copy_subagent_records(src, dst)
                 elif destination_snapshot.digest == source_snapshot.digest:
-                    pass
+                    self._copy_subagent_records(src, dst)
                 elif source_snapshot.updated_at > destination_snapshot.updated_at:
                     archived = self._archive_conflict(dst, destination_snapshot, "destination")
                     self._install_snapshot(src, dst, source_snapshot)
+                    self._copy_subagent_records(src, dst, replace=True)
                     logger.warning("Archived older session migration conflict at {}", archived)
                 else:
                     archived = self._archive_conflict(src, source_snapshot, "workspace")
@@ -855,6 +889,9 @@ class JsonlSessionStore:
                         "Session migrated but legacy source changed or could not be removed: {}",
                         src,
                     )
+                elif records_snapshot is not None:
+                    if not self._remove_migrated_source(records_path, records_snapshot):
+                        logger.warning("Migrated subagent records source changed: {}", records_path)
             except OSError as exc:
                 logger.warning("Failed to migrate session {}: {}", src, exc)
 
@@ -884,11 +921,19 @@ class JsonlSessionStore:
                         and destination_snapshot.digest == source_snapshot.digest
                     ):
                         unchanged += 1
+                        try:
+                            self._copy_subagent_records(src, dst)
+                        except OSError:
+                            conflicts.append(dst.with_suffix(".subagents.json"))
                     else:
                         conflicts.append(dst)
                     continue
                 self._install_snapshot(src, dst, source_snapshot)
                 restored += 1
+                try:
+                    self._copy_subagent_records(src, dst)
+                except OSError:
+                    conflicts.append(dst.with_suffix(".subagents.json"))
         return SessionRestoreResult(
             restored=restored,
             unchanged=unchanged,
@@ -1277,6 +1322,30 @@ class JsonlSessionStore:
             finally:
                 tmp_path.unlink(missing_ok=True)
 
+    def get_subagent_records_path(self, key: str) -> Path:
+        return self.get_session_path(key).with_suffix(".subagents.json")
+
+    def read_subagent_records(self, key: str) -> dict[str, Any] | None:
+        with self._session_files_lock:
+            if not self.get_session_path(key).exists():
+                return None
+            path = self.get_subagent_records_path(key)
+            try:
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    raise ValueError("task records must be a regular file")
+                return _json_object(json.loads(path.read_text(encoding="utf-8")))
+            except FileNotFoundError:
+                return None
+
+    def save_subagent_records(self, key: str, payload: dict[str, Any], *, fsync: bool = False) -> bool:
+        with self._session_files_lock:
+            if not self.get_session_path(key).exists():
+                return False
+            atomic_write_lines(
+                self.get_subagent_records_path(key), [json.dumps(payload, ensure_ascii=False)], fsync=fsync,
+            )
+            return True
+
     def delete(self, key: str) -> bool:
         with self._session_files_lock:
             return self._delete_unlocked(key)
@@ -1285,6 +1354,7 @@ class JsonlSessionStore:
         paths = [
             self.get_session_path(key),
             self.get_runtime_checkpoint_path(key),
+            self.get_subagent_records_path(key),
             self.get_legacy_lossy_path(key),
             self.get_legacy_session_path(key),
         ]
@@ -1832,6 +1902,25 @@ class SessionManager:
         if updated and (session := self.get_cached(key)) is not None:
             session.metadata.update(deepcopy(updates))
         return updated
+
+    def read_subagent_records(self, key: str) -> dict[str, Any] | None:
+        """Read task observations without loading or modifying conversation history."""
+        if self._store is self._jsonl_store:
+            return self._jsonl_store.read_subagent_records(key)
+        session = self.get_cached(key)
+        metadata = session.metadata if session is not None else (self.read_session_metadata(key) or {}).get("metadata", {})
+        value: object = metadata.get("subagent_tasks")
+        return None if value is None else _json_object(value)
+
+    def save_subagent_records(self, key: str, payload: dict[str, Any], *, fsync: bool = False) -> bool:
+        """Atomically replace observations; never change the main turn's checkpoint."""
+        session = self.get_cached(key)
+        if session is not None and not session.policy.persist:
+            return False
+        if self._store is self._jsonl_store:
+            return self._jsonl_store.save_subagent_records(key, payload, fsync=fsync)
+        # Third-party stores retain their existing atomic metadata-update boundary.
+        return self.update_session_metadata(key, {"subagent_tasks": payload}, fsync=fsync)
 
     def list_sessions(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._store.list_sessions())

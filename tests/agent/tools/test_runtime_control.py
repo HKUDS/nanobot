@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -71,7 +73,6 @@ def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path
         "tool_names",
         "web_config",
         "exec_config",
-        "subagents",
     })
     assert RUNTIME_SNAPSHOT_KEYS == expected_snapshot_keys
     assert frozenset(values) == expected_snapshot_keys
@@ -247,73 +248,80 @@ def runtime() -> LLMRuntime:
     return LLMRuntime(MagicMock(), "test", GenerationSettings(), 128_000)
 
 
-@pytest.mark.parametrize("key", [None, "subagents", "subagents._task_statuses"])
-async def test_my_subagent_snapshot_is_session_scoped(tmp_path, key, runtime):
+@pytest.mark.parametrize("params", [
+    {"action": "create"},
+    {"action": "create", "task": "  "},
+    {"action": "send", "message": "update"},
+    {"action": "cancel"},
+])
+async def test_subagent_rejects_missing_action_inputs(tmp_path, runtime, params):
+    loop = _make_loop(tmp_path)
+    with request_context(RequestContext("test", "route", session_key="owner", runtime=runtime)):
+        result = await loop.tools.execute("subagent", params)
+    assert result.startswith("Error:")
+    assert loop.subagents.get_running_count() == 0
+
+
+@pytest.mark.parametrize("single_task", [False, True])
+async def test_subagent_check_is_session_scoped(tmp_path, single_task, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
-    # Spawn without yielding to the child runner: queued tasks must be scoped too.
+    # Queued tasks must be scoped before their runner starts.
     await manager.spawn("ALPHA_PRIVATE_TASK", label="ALPHA_LABEL", session_key="owner:a", runtime=runtime)
     await manager.spawn("BETA_PRIVATE_TASK", label="BETA_LABEL", session_key="owner:b", runtime=runtime)
     try:
-        tool = _my_tool(loop)
-        with request_context(RequestContext("test", "same-chat", session_key="owner:a")):
-            snapshot = tool._runtime_control.snapshot()
-            assert len(snapshot.subagent_statuses) == 1
-            assert "BETA" not in repr(snapshot.as_mapping())
-            result = await tool.execute(action="check", key=key)
-            assert "ALPHA_LABEL" in result
-            assert "BETA" not in result
-        with request_context(RequestContext("test", "same-chat", session_key="owner:b")):
-            result = await tool.execute(action="check", key=key)
-            assert "BETA_LABEL" in result
-            assert "ALPHA" not in result
+        for owner, visible, hidden in [("owner:a", "ALPHA", "BETA"), ("owner:b", "BETA", "ALPHA")]:
+            with request_context(RequestContext("test", "same-chat", session_key=owner)):
+                params = {"action": "check"}
+                if single_task:
+                    params["task_id"] = next(iter(manager.statuses_for_session(owner)))
+                result = await loop.tools.execute("subagent", params)
+                assert visible + "_LABEL" in result
+                assert visible + "_PRIVATE_TASK" in result
+                assert hidden not in result
+                assert "queued" in result
+                overview = await loop.tools.execute("my", {"action": "check"})
+                assert "ALPHA" not in overview and "BETA" not in overview
+                assert "not accessible" in await loop.tools.execute("my", {
+                    "action": "check", "key": "subagents",
+                })
     finally:
         await manager.close()
 
 
-@pytest.mark.parametrize("field", ["", ".task_description", ".tool_events", ".usage"])
-async def test_my_rejects_other_sessions_task_paths(tmp_path, field, runtime):
+async def test_subagent_check_rejects_foreign_task(tmp_path, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
     await manager.spawn("PRIVATE_TASK", session_key="owner:a", runtime=runtime)
     try:
         task_id = next(iter(manager.statuses_for_session("owner:a")))
-        tool = _my_tool(loop)
-        with request_context(RequestContext("test", "same-chat", session_key="owner:a")):
-            detail = await tool.execute(action="check", key=f"subagents._task_statuses.{task_id}")
-            assert "PRIVATE_TASK" in detail
         with request_context(RequestContext("test", "same-chat", session_key="owner:b")):
-            result = await tool.execute(
-                action="check", key=f"subagents._task_statuses.{task_id}{field}",
-            )
-            assert result.startswith("Error:")
-            assert "PRIVATE_TASK" not in result
+            result = await loop.tools.execute("subagent", {"action": "check", "task_id": task_id})
+            unknown = await loop.tools.execute("subagent", {"action": "check", "task_id": "unknown"})
+            assert result == unknown
+            assert result.startswith("Error: task unavailable")
     finally:
         await manager.close()
 
 
 @pytest.mark.parametrize("session_key", [None, ""])
-async def test_my_without_session_cannot_enumerate_tasks(tmp_path, session_key, runtime):
+async def test_subagent_check_without_session_cannot_enumerate_tasks(tmp_path, session_key, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
     await manager.spawn("PRIVATE_TASK", session_key="owner:a", runtime=runtime)
     try:
-        tool = _my_tool(loop)
-        assert tool._runtime_control.snapshot().subagent_statuses == {}
-        assert "PRIVATE_TASK" not in await tool.execute(action="check")
-        assert "unavailable" in await tool.execute(action="check", key="subagents")
+        task_id = next(iter(manager.statuses_for_session("owner:a")))
+        assert "unavailable" in await loop.tools.execute("subagent", {"action": "check"})
         with request_context(RequestContext("test", "same-chat", session_key=session_key)):
-            assert tool._runtime_control.snapshot().subagent_statuses == {}
-            assert "PRIVATE_TASK" not in await tool.execute(action="check")
-            assert "unavailable" in await tool.execute(action="check", key="subagents._task_statuses")
+            assert "unavailable" in await loop.tools.execute("subagent", {"action": "check"})
+            assert "unavailable" in await loop.tools.execute("subagent", {
+                "action": "check", "task_id": task_id,
+            })
     finally:
         await manager.close()
 
 
-async def test_my_retained_results_and_receipts_are_scoped_and_detached(tmp_path, runtime):
-    import asyncio
-    import json
-
+async def test_subagent_check_retained_results_and_receipts_are_scoped_and_detached(tmp_path, runtime):
     from nanobot.agent.runner import AgentRunResult
 
     loop = _make_loop(tmp_path)
@@ -329,7 +337,7 @@ async def test_my_retained_results_and_receipts_are_scoped_and_detached(tmp_path
     owner = RequestContext("test", "route", session_key="owner:a", runtime=runtime)
     try:
         with request_context(owner):
-            await loop.tools.execute("spawn", {"task": "private"})
+            await loop.tools.execute("subagent", {"action": "create", "task": "private"})
             await entered.wait()
             task_id = next(iter(manager.statuses_for_session("owner:a")))
             sent = json.loads(await loop.tools.execute("subagent", {
@@ -337,19 +345,20 @@ async def test_my_retained_results_and_receipts_are_scoped_and_detached(tmp_path
             }))
             release.set()
             await asyncio.gather(*manager._running_tasks.values())
-            tool = _my_tool(loop)
-            key = f"subagents._task_statuses.{task_id}"
-            result = await tool.execute(action="check", key=key)
-            assert "state: done" in result
-            assert "PRIVATE_RESULT" in result
-            assert sent["message_id"] in result and "undelivered" in result
-            snapshot = tool._runtime_control.snapshot().subagent_statuses[task_id]
-            snapshot["receipts"].clear()
-            assert "undelivered" in await tool.execute(action="check", key=key + ".receipts")
-            for field in ["", ".result", ".receipts", ".state"]:
-                with request_context(RequestContext("test", "route", session_key="owner:b")):
-                    denied = await tool.execute(action="check", key=key + field)
-                    assert denied.startswith("Error:") and "PRIVATE_RESULT" not in denied
+            params = {"action": "check", "task_id": task_id}
+            result = json.loads(await loop.tools.execute("subagent", params))
+            assert result["state"] == "done"
+            assert result["result"] == "PRIVATE_RESULT"
+            assert result["receipts"] == {sent["message_id"]: "undelivered"}
+            snapshot = manager.check(task_id, "owner:a")
+            snapshot.receipts.clear()
+            snapshot.result = "tampered"
+            assert json.loads(await loop.tools.execute("subagent", params)) == result
+            listed = json.loads(await loop.tools.execute("subagent", {"action": "check"}))
+            assert listed == {"tasks": [result]}
+            with request_context(RequestContext("test", "route", session_key="owner:b")):
+                assert "unavailable" in await loop.tools.execute("subagent", params)
+                assert json.loads(await loop.tools.execute("subagent", {"action": "check"})) == {"tasks": []}
     finally:
         release.set()
         await manager.close()

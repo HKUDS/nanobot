@@ -2288,9 +2288,19 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 
 In the conversation that started a subagent, you can ask nanobot to check its progress, send it follow-up instructions, or cancel it. Cancelling one subagent leaves other tasks running.
 
+The `subagent` tool manages these tasks with four actions: `create`, `send`, `cancel`, and `check`. Use `create` with `wait=true` to wait for a result in the current turn; background tasks notify the conversation when they finish. Use `check` with a `task_id` to inspect one task, or omit it to list the current session's active and recently finished tasks. Older results remain available by their task ID. Status includes progress, message receipts, and retained results. A delivered receipt means the message entered the task's context; it does not confirm that the task acted on the instruction.
+
+Single-turn CLI and direct API calls without a running background message consumer wait for child results automatically. They return the child result to the parent instead of leaving a completion notification without a consumer.
+
+Tasks that reach their iteration limit are `incomplete`, not completed. Cancelled, failed, and incomplete tasks retain the latest completed model response when available, marked as a partial result. A stopped task may have changed files even if it did not produce a final response.
+
+In the WebUI, only unfinished tasks appear above the input. Completed, failed, cancelled, and incomplete tasks move to a compact result entry under the message that started them. Open an entry to inspect its result and message receipts; active tasks also show current tools and a stop button. A host must advertise `webui.subagents.v1` for these controls to appear.
+
 Use `/stop` to stop the current session and its subagent tasks; other sessions are unaffected. Cancellation does not remove files already created, and some operations may take time to stop.
 
-Subagent tasks cannot resume after nanobot restarts. Start a new task if you need to continue the work.
+The gateway saves task observations with the parent conversation: task ID, initiating turn, timestamps, status, exit reason, and bounded final or partial output. Records remain until the parent conversation is deleted; the runtime's 128-record cache does not limit this history. Forking a conversation does not transfer task ownership or copy its task records. Temporary conversations do not persist task records.
+
+Refreshing or reopening the WebUI only reads these records. After a gateway restart, finished records remain available and unfinished work is marked `interrupted`, with the most recently saved partial output when available. Nanobot does not automatically resume tasks, repeat tool calls, or resend completion notifications. A new task must be started explicitly to continue the work. Before this record format was introduced, task observations were held only in memory and cannot be recovered after that process exits.
 
 ## Auto Compact
 

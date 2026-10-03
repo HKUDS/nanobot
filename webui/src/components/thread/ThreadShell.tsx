@@ -15,6 +15,7 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
+import { ActiveSubagentTasks, SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import type { ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -696,7 +697,7 @@ export function ThreadShell({
     version: historyVersion,
     forkBoundaryMessageCount,
   } = useSessionHistory(historyKey);
-  const { client, getToken, ingressLimits, modelName, token } = useClient();
+  const { client, getToken, ingressLimits, modelName, token, webuiCapabilities } = useClient();
   const pickWorkspaceFolder = useCallback(async (): Promise<string | null> => {
     const response = await client.requestMutation<{ path: unknown }>(
       "workspace.pick_folder",
@@ -1702,6 +1703,7 @@ export function ThreadShell({
 
   const composer = (
     <>
+      <ActiveSubagentTasks />
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
           model={modelFallback.model}
@@ -1879,6 +1881,10 @@ export function ThreadShell({
   ) : null;
 
   return (
+    <SubagentTasksProvider client={client} token={token}
+      sessionKey={session?.key ?? null}
+      active={composerActive}
+      enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
     <section ref={shellRef} data-preview-open={previewOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
       <div className={cn(
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
@@ -1977,5 +1983,6 @@ export function ThreadShell({
         </FileActionsProvider>
       ) : null}
     </section>
+    </SubagentTasksProvider>
   );
 }

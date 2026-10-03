@@ -40,6 +40,9 @@ async def test_subagent_uses_tool_loader():
     assert not tools.has("message")
     assert not tools.has("spawn")
     assert not tools.has("subagent")
+    assert not tools.has("send_session_message")
+    assert not tools.has("read_session")
+    assert not tools.has("my")
 
 
 @pytest.mark.asyncio

@@ -1561,6 +1561,33 @@
     "error": "Lỗi kết nối"
   },
   "thread": {
+    "subagents": {
+      "loadFailed": "Không thể tải tác vụ con.",
+      "stopFailed": "Không thể dừng tác vụ này.",
+      "stopTask": "Dừng {{label}}",
+      "iteration": "Vòng {{count}}",
+      "result": "Kết quả",
+      "partialResult": "Kết quả một phần",
+      "receiptHelp": "Đã chuyển nghĩa là tin nhắn đã được đưa vào yêu cầu mô hình tiếp theo của tác nhân con, không xác nhận công việc đã hoàn tất.",
+      "states": {
+        "queued": "Đang chờ",
+        "running": "Đang chạy",
+        "stopping": "Đang dừng",
+        "done": "Hoàn tất",
+        "incomplete": "Chưa hoàn tất",
+        "error": "Thất bại",
+        "cancelled": "Đã hủy",
+        "interrupted": "Bị gián đoạn"
+      },
+      "receipts": {
+        "accepted": "Đang chờ: {{count}}",
+        "delivered": "Đã chuyển: {{count}}",
+        "undelivered": "Chưa chuyển: {{count}}"
+      },
+      "activeTitle": "Tác vụ đang chạy",
+      "historyTitle": "Kết quả tác vụ",
+      "interruptedHelp": "Máy chủ khởi động lại trước khi tác vụ hoàn thành. Tác vụ không tự động chạy lại."
+    },
     "compaction": {
       "cancelled": "Đã hủy nén ngữ cảnh",
       "empty": "Không có ngữ cảnh cần nén.",

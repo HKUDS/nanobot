@@ -1575,6 +1575,33 @@
     "error": "Erro de conexão"
   },
   "thread": {
+    "subagents": {
+      "loadFailed": "Não foi possível carregar as subtarefas.",
+      "stopFailed": "Não foi possível interromper esta tarefa.",
+      "stopTask": "Interromper {{label}}",
+      "iteration": "Iteração {{count}}",
+      "result": "Resultado",
+      "partialResult": "Resultado parcial",
+      "receiptHelp": "Entregue significa que a mensagem foi incluída na próxima solicitação do subagente, sem confirmar sua execução.",
+      "states": {
+        "queued": "Na fila",
+        "running": "Em execução",
+        "stopping": "Interrompendo",
+        "done": "Concluído",
+        "incomplete": "Incompleto",
+        "error": "Falhou",
+        "cancelled": "Cancelado",
+        "interrupted": "Interrompida"
+      },
+      "receipts": {
+        "accepted": "Na fila: {{count}}",
+        "delivered": "Entregues: {{count}}",
+        "undelivered": "Não entregues: {{count}}"
+      },
+      "activeTitle": "Tarefas em andamento",
+      "historyTitle": "Resultados das tarefas",
+      "interruptedHelp": "O servidor reiniciou antes de concluir esta tarefa. Ela não foi executada novamente automaticamente."
+    },
     "compaction": {
       "cancelled": "Compactação do contexto cancelada",
       "empty": "Não há contexto para compactar.",

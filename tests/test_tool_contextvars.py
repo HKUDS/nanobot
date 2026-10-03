@@ -9,7 +9,7 @@ import pytest
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.subagent import SpawnTool
+from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.cron.service import CronService
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, RuntimeContextBlock
@@ -56,7 +56,7 @@ async def test_message_tool_keeps_task_local_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_keeps_task_local_context() -> None:
+async def test_subagent_tool_keeps_task_local_context() -> None:
     seen: list[tuple[str, str, str]] = []
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -83,7 +83,7 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             seen.append((origin_channel, origin_chat_id, session_key))
             return f"{origin_channel}:{origin_chat_id}:{task}"
 
-    tool = SpawnTool(_Manager())
+    tool = SubagentTool(_Manager())
 
     async def task_one() -> str:
         with request_context(RequestContext(
@@ -93,7 +93,7 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
         )):
             entered.set()
             await release.wait()
-            return await tool.execute(task="one")
+            return await tool.execute(action="create", task="one")
 
     async def task_two() -> str:
         await entered.wait()
@@ -103,7 +103,7 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             runtime=_runtime("model-b"),
         )):
             release.set()
-            return await tool.execute(task="two")
+            return await tool.execute(action="create", task="two")
 
     result_one, result_two = await asyncio.gather(task_one(), task_two())
 
@@ -188,7 +188,7 @@ async def test_message_tool_default_values_without_request_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_basic_request_context_and_execute() -> None:
+async def test_subagent_tool_basic_request_context_and_execute() -> None:
     """A bound request context should provide the correct origin."""
     seen: list[tuple[str, str, str]] = []
 
@@ -214,19 +214,19 @@ async def test_spawn_tool_basic_request_context_and_execute() -> None:
             seen.append((origin_channel, origin_chat_id, session_key))
             return f"ok: {task}"
 
-    tool = SpawnTool(_Manager())
+    tool = SubagentTool(_Manager())
     with request_context(RequestContext(
         channel="feishu",
         chat_id="chat-abc",
         runtime=_runtime(),
     )):
-        result = await tool.execute(task="do something")
+        result = await tool.execute(action="create", task="do something")
     assert result == "ok: do something"
     assert seen == [("feishu", "chat-abc", "feishu:chat-abc")]
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_rejects_missing_request_runtime() -> None:
+async def test_subagent_tool_rejects_missing_request_runtime() -> None:
     """Spawning cannot reconstruct a model runtime outside turn admission."""
     seen: list[tuple[str, str, str]] = []
 
@@ -252,10 +252,10 @@ async def test_spawn_tool_rejects_missing_request_runtime() -> None:
             seen.append((origin_channel, origin_chat_id, session_key))
             return "ok"
 
-    tool = SpawnTool(_Manager())
+    tool = SubagentTool(_Manager())
 
-    result = await tool.execute(task="test")
-    assert result == "Error: spawn requires an active model runtime"
+    result = await tool.execute(action="create", task="test")
+    assert result == "Error: create requires an active model runtime"
     assert result.is_error
     assert seen == []
 

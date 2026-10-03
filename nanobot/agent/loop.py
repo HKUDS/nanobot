@@ -399,6 +399,7 @@ class AgentLoop:
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
             consolidator=self.consolidator,
+            session_manager=self.sessions,
         )
         self._unified_session = unified_session
         self._running = False
@@ -736,6 +737,7 @@ class AgentLoop:
             turn_id=ctx.turn_id,
             workspace=scope.project_path,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
+            background_subagents=self._running,
         )
 
     async def _resolve_runtime_context_for_turn(
@@ -1166,6 +1168,7 @@ class AgentLoop:
             chat_id="direct",
             session_key=session.key if session is not None else None,
             runtime=runtime,
+            background_subagents=self._running,
         )
         active_session_key = session.key if session else request_ctx.session_key
         consolidation_session_key = active_session_key or "agent:transient"

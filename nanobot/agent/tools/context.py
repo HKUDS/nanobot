@@ -41,6 +41,8 @@ class RequestContext:
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
     log_content: bool = True
+    # The host has a live consumer for automatic child completion notices.
+    background_subagents: bool = True
 
 
 @runtime_checkable

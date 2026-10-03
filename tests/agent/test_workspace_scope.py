@@ -16,7 +16,7 @@ from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGene
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.subagent import SpawnTool
+from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
 from nanobot.security.workspace_access import (
@@ -532,7 +532,7 @@ async def test_cli_app_scope_controls_working_dir(
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> None:
+async def test_subagent_tool_forwards_current_workspace_scope(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     scope = validate_workspace_scope_payload(
@@ -555,7 +555,7 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
             return "spawned"
 
     manager = Manager()
-    tool = SpawnTool(manager)  # type: ignore[arg-type]
+    tool = SubagentTool(manager)  # type: ignore[arg-type]
     token = bind_workspace_scope(scope)
     try:
         with request_context(RequestContext(
@@ -563,7 +563,7 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
             chat_id="chat",
             runtime=MagicMock(),
         )):
-            result = await tool.execute(task="inspect")
+            result = await tool.execute(action="create", task="inspect")
     finally:
         reset_workspace_scope(token)
 
