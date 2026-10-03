@@ -1400,26 +1400,25 @@ class TelegramChannel(BaseChannel):
             except BadRequest as e:
                 if self._is_not_modified_error(e):
                     self.logger.debug("Final stream edit already applied for {}", chat_id)
-                    self._stream_bufs.pop(chat_id, None)
-                    return
-                self.logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
-                primary_plain = (
-                    split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0]
-                    if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN
-                    else raw_text
-                )
-                try:
-                    await self._call_with_retry(
-                        app.bot.edit_message_text,
-                        chat_id=int_chat_id, message_id=buf.message_id,
-                        text=primary_plain,
+                else:
+                    self.logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                    primary_plain = (
+                        split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0]
+                        if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN
+                        else raw_text
                     )
-                except Exception as e2:
-                    if self._is_not_modified_error(e2):
-                        self.logger.debug("Final stream plain edit already applied for {}", chat_id)
-                    else:
-                        self.logger.warning("Final stream edit failed: {}", e2)
-                        raise
+                    try:
+                        await self._call_with_retry(
+                            app.bot.edit_message_text,
+                            chat_id=int_chat_id, message_id=buf.message_id,
+                            text=primary_plain,
+                        )
+                    except Exception as e2:
+                        if self._is_not_modified_error(e2):
+                            self.logger.debug("Final stream plain edit already applied for {}", chat_id)
+                        else:
+                            self.logger.warning("Final stream edit failed: {}", e2)
+                            raise
             for extra_html_chunk in extra_html_chunks:
                 try:
                     await self._call_with_retry(
