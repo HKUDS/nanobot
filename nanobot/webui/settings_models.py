@@ -19,6 +19,7 @@ import secrets
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict, cast
 
@@ -572,6 +573,28 @@ def _model_context_window(row: Any) -> int | None:
     return None
 
 
+def _model_shutdown_date(row: Any) -> date | None:
+    if not isinstance(row, dict):
+        return None
+    row_mapping = cast(dict[str, Any], row)
+    raw = row_mapping.get("shutdown_date")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return date.fromisoformat(raw.strip())
+    except ValueError:
+        return None
+
+
+def _model_catalog_row_active(row: Any, *, on: date | None = None) -> bool:
+    """True when a provider catalog row should stay in the advisory model list."""
+    shutdown = _model_shutdown_date(row)
+    if shutdown is None:
+        return True
+    reference = on if on is not None else datetime.now(timezone.utc).date()
+    return shutdown > reference
+
+
 def _model_row_payload(row: Any) -> dict[str, Any] | None:
     model_id = _model_id_from_row(row)
     if not model_id:
@@ -608,6 +631,8 @@ def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw_row in cast(list[object], raw_rows):
+        if not _model_catalog_row_active(raw_row):
+            continue
         row = _model_row_payload(raw_row)
         if row is None or row["id"] in seen:
             continue
