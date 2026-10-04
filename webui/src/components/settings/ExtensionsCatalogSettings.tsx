@@ -2,6 +2,7 @@ import { Blocks, ExternalLink, Puzzle, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
+import { ToggleButton } from "@/components/settings/ToggleButton";
 import { Button } from "@/components/ui/button";
 import type { WebUIExtensionSummary } from "@/lib/types";
 
@@ -78,16 +79,19 @@ export function ExtensionsCatalogSettings({
                     </p>
                   </div>
                 </div>
-                <span
-                  className={[
-                    "rounded-full border px-2 py-1 text-[10px] font-medium",
-                    enabled
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                      : "border-border/80 bg-muted text-muted-foreground",
-                  ].join(" ")}
-                >
-                  {enabled ? t("extensions.enabled", { defaultValue: "Enabled" }) : t("extensions.disabled", { defaultValue: "Disabled" })}
-                </span>
+                {onToggleExtension ? (
+                  <ToggleButton
+                    checked={enabled}
+                    ariaLabel={t("extensions.toggle", {
+                      name: extension.name,
+                      defaultValue: "Toggle {{name}}",
+                    })}
+                    label={enabled ? t("settings.values.on", { defaultValue: "On" }) : t("settings.values.off", { defaultValue: "Off" })}
+                    onChange={(next) => {
+                      void onToggleExtension(extension.id, next);
+                    }}
+                  />
+                ) : null}
               </div>
 
               <p className="line-clamp-3 min-h-[2.75rem] text-xs leading-5 text-muted-foreground">
@@ -106,16 +110,6 @@ export function ExtensionsCatalogSettings({
               </div>
 
               <div className="mt-auto flex flex-wrap gap-2">
-                {onToggleExtension ? (
-                  <Button
-                    variant={enabled ? "outline" : "secondary"}
-                    size="sm"
-                    className="flex-1 min-w-[110px]"
-                    onClick={() => void onToggleExtension(extension.id, !enabled)}
-                  >
-                    {enabled ? t("extensions.disable") : t("extensions.enable")}
-                  </Button>
-                ) : null}
                 <Button
                   variant="outline"
                   size="sm"
