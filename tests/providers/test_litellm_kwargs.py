@@ -1012,7 +1012,34 @@ def test_openai_compat_supports_temperature_matches_reasoning_model_rules() -> N
     assert OpenAICompatProvider._supports_temperature("gpt-4o") is True
     assert OpenAICompatProvider._supports_temperature("gpt-5-chat") is False
     assert OpenAICompatProvider._supports_temperature("o3-mini") is False
-    assert OpenAICompatProvider._supports_temperature("gpt-4o", reasoning_effort="medium") is False
+
+
+@pytest.mark.parametrize("responses", [False, True])
+def test_deepseek_keeps_temperature_when_reasoning_effort_is_set(responses: bool) -> None:
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="deepseek-v4-flash",
+            spec=spec,
+        )
+
+    build_request = provider._build_responses_body if responses else provider._build_kwargs
+    request = build_request(
+        messages=[{"role": "user", "content": "hello"}],
+        tools=None,
+        model="deepseek-v4-flash",
+        max_tokens=4096,
+        temperature=0.2,
+        reasoning_effort="high",
+        tool_choice=None,
+    )
+
+    assert request["temperature"] == 0.2
+    if responses:
+        assert request["reasoning"] == {"effort": "high"}
+    else:
+        assert request["reasoning_effort"] == "high"
 
 
 def test_openai_compat_build_kwargs_uses_gpt5_safe_parameters() -> None:
