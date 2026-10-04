@@ -1,5 +1,7 @@
 """Tests for Memory checkpoint consolidation and history journaling."""
 
+import gc
+import weakref
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -80,6 +82,18 @@ def _tool_round(call_id: str) -> list[dict]:
         },
         {"role": "tool", "tool_call_id": call_id, "name": "x", "content": "ok"},
     ]
+
+
+def test_get_lock_persists_lock_reference(consolidator):
+    """Per-session locks remain shared after the caller releases its reference."""
+    lock = consolidator.get_lock("cli:lock")
+    lock_ref = weakref.ref(lock)
+    assert consolidator.get_lock("cli:lock") is lock
+
+    del lock
+    gc.collect()
+
+    assert consolidator.get_lock("cli:lock") is lock_ref()
 
 
 def _provider_state() -> ProviderConversationState:
