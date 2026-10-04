@@ -1561,6 +1561,36 @@
     "error": "接続エラー"
   },
   "thread": {
+    "subagents": {
+      "loadFailed": "サブタスクを読み込めませんでした。",
+      "stopFailed": "このタスクを停止できませんでした。",
+      "stopTask": "{{label}} を停止",
+      "receiptHelp": "配信済みは子タスクの次のモデルリクエストにメッセージが含まれたことを示し、実行完了を意味しません。",
+      "states": {
+        "queued": "待機中",
+        "running": "実行中",
+        "stopping": "停止中",
+        "done": "完了",
+        "incomplete": "未完了",
+        "error": "失敗",
+        "cancelled": "キャンセル済み",
+        "interrupted": "中断"
+      },
+      "receipts": {
+        "accepted": "待機中: {{count}}",
+        "delivered": "配信済み: {{count}}",
+        "undelivered": "未配信: {{count}}"
+      },
+      "interruptedHelp": "タスクの完了前にサーバーが再起動しました。タスクは自動的に再実行されていません。",
+      "workTitle": "委任した作業",
+      "otherWorkTitle": "その他の委任した作業",
+      "unlinkedHelp": "表示中のメッセージには、これらのタスクに対応する依頼がありません。",
+      "progress": "{{total}} 件中 {{completed}} 件完了",
+      "running": "実行中: {{count}}",
+      "finished": "終了: {{count}}",
+      "needsReview": "要確認: {{count}}",
+      "messages": "メッセージの送信状況"
+    },
     "compaction": {
       "cancelled": "コンテキストの圧縮をキャンセルしました",
       "empty": "圧縮するコンテキストはありません。",
@@ -1964,9 +1994,21 @@
       "generatingImage": "画像を生成中",
       "generatedImage": "画像を生成しました",
       "generateImageFailed": "画像を生成できませんでした",
-      "delegatingTask": "タスクを委任中",
-      "delegatedTask": "タスクを委任しました",
-      "delegateTaskFailed": "タスクを委任できませんでした",
+      "delegatingTask": "サブタスクを作成中",
+      "delegatedTask": "サブタスクを作成しました",
+      "delegateTaskFailed": "サブタスクを作成できませんでした",
+      "checkingSubtask": "サブタスクの状態を確認中",
+      "checkedSubtask": "サブタスクの状態を取得しました",
+      "checkSubtaskFailed": "サブタスクの状態を確認できませんでした",
+      "messagingSubtask": "サブタスクにメッセージを送信中",
+      "queuedSubtaskMessage": "サブタスクへのメッセージをキューに追加しました",
+      "messageSubtaskFailed": "サブタスクにメッセージを送信できませんでした",
+      "stoppingSubtask": "サブタスクを停止中",
+      "requestedSubtaskStop": "停止要求を処理しました",
+      "stopSubtaskFailed": "サブタスクを停止できませんでした",
+      "managingSubtasks": "サブタスクの操作を実行中",
+      "managedSubtasks": "サブタスクの操作が完了しました",
+      "manageSubtasksFailed": "サブタスクの操作に失敗しました",
       "sendingMessage": "メッセージを送信中",
       "sentMessage": "メッセージを送信しました",
       "sendMessageFailed": "メッセージを送信できませんでした",
@@ -2072,8 +2114,9 @@
       "editFileFailedShort": "編集できませんでした",
       "deletingFile": "削除中",
       "editingFileShort": "編集中",
-      "deletedFile": "削除しました",
-      "editedFileShort": "編集しました"
+      "deletedFile": "削除",
+      "createdFile": "作成",
+      "editedFileShort": "編集"
     },
     "collapseActivity": "アクティビティの詳細を折りたたむ",
     "activityShow": "処理過程を表示",

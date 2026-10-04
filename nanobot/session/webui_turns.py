@@ -31,6 +31,7 @@ from nanobot.bus.runtime_events import (
     RuntimeEventContext,
     RuntimeModelChanged,
     SessionTurnStarted,
+    SubagentTaskChanged,
     TurnCompleted,
     TurnRunStatusChanged,
     TurnRuntimeAdmitted,
@@ -55,7 +56,7 @@ from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
-from nanobot.webui.session_identity import is_webui_session_key
+from nanobot.webui.session_identity import is_webui_session_key, webui_session_key
 from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import append_session_message_input
 
@@ -502,7 +503,7 @@ class WebuiTurnRoutePolicy:
                 else uuid4().hex
             )
             metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
-            routed = replace(routed, metadata=metadata)
+            routed = replace(routed, metadata=metadata, turn_id=current_turn_id)
             # Direct websocket turns publish their final idle transition from
             # the original input message. Carry the same server-owned identity
             # there, overwriting any untrusted client-supplied value.
@@ -578,6 +579,7 @@ class WebuiTurnCoordinator:
                 self._handle_goal_state_changed,
                 GoalStateChanged,
             ),
+            self.bus.subscribe(self._handle_subagent_task_changed, SubagentTaskChanged),
             self.bus.subscribe(
                 self._handle_runtime_model_changed,
                 RuntimeModelChanged,
@@ -733,6 +735,12 @@ class WebuiTurnCoordinator:
                 metadata=event.context.metadata,
             ),
         )
+
+    async def _handle_subagent_task_changed(self, event: SubagentTaskChanged) -> None:
+        ctx = event.context
+        if not self._is_websocket_event(ctx) or ctx.session_key != webui_session_key(ctx.chat_id):
+            return
+        await self.bus.publish_event(event, channel=ctx.channel, chat_id=ctx.chat_id)
 
     async def _handle_runtime_model_changed(self, event: RuntimeModelChanged) -> None:
         await self.bus.publish_outbound(

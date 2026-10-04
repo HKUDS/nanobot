@@ -13,7 +13,7 @@ import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { PromptRail } from "@/components/thread/PromptRail";
-import { ThreadMessages } from "@/components/thread/ThreadMessages";
+import { SubagentThreadMessages, useHasSubagentContent } from "@/components/thread/SubagentTasks";
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
@@ -219,6 +219,9 @@ function canScrollInDirection(
 }
 
 function readSoftKeyboardInsetBottom(container: HTMLElement | null): number {
+  // The touch App shell already fits the visual viewport, including portaled
+  // composers. Keep the existing local inset only for unfitted/native layouts.
+  if (container?.closest("#root.visual-viewport")) return 0;
   const viewport = window.visualViewport;
   if (!viewport) return 0;
   const active = document.activeElement;
@@ -341,7 +344,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       onAutoFollow: () => setAtBottom(true),
     });
   }
-  const hasMessages = messages.length > 0;
+  const hasTaskContent = useHasSubagentContent();
+  const hasMessages = messages.length > 0 || (hasTaskContent && conversationReady);
   useLayoutEffect(() => {
     scrollRef.current = hasMessages
       ? messageRegionRef.current
@@ -970,7 +974,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               )}
             >
               <div ref={messageContentRef} className="w-full">
-                <ThreadMessages
+                <SubagentThreadMessages
                   messages={visibleMessages}
                   temporary={temporary}
                   isStreaming={isStreaming}

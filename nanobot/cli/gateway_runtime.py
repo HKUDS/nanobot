@@ -735,6 +735,8 @@ def _run_gateway(
         webui_mcp_reload=mcp_provider.reload,
         webui_skill_state_action=_webui_skill_state_action,
         webui_recovery_action=recovery.handle_action,
+        webui_subagent_manager=agent.subagents,
+        webui_discard_session=agent.discard_session,
         config_path=Path(config_path),
     )
 
@@ -1035,6 +1037,7 @@ def _run_gateway(
         gateway_runtime.foreground_instance(gateway_start_options),
         webui_turn_coordinator.connected(),
     ):
+        agent.subagents.recover_interrupted()
         if health_server_enabled:
             gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

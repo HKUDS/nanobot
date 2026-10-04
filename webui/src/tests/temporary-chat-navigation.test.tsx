@@ -1,3 +1,4 @@
+// @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +11,7 @@ import { canonicalThreadPayload } from "./thread-test-payload";
 
 let groupedTopics = false;
 let withFiles = false;
+const credentialless = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "credentialless");
 const previewFile = (path: string) => ({
   path: `/workspace/${path}`, display_path: path, project_path: "/workspace",
   language: "text", content: `Preview of ${path}`, size: 20, truncated: false,
@@ -142,6 +144,8 @@ describe("temporary chat navigation", () => {
 
   afterEach(() => {
     cleanup();
+    if (credentialless) Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", credentialless);
+    else Reflect.deleteProperty(HTMLIFrameElement.prototype, "credentialless");
     if (vi.isFakeTimers()) vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -313,6 +317,8 @@ describe("temporary chat navigation", () => {
   });
 
   it("restores website targets per session, switches to files, and closes below menus", async () => {
+    // Exercise the working embed path; unsupported browsers do not offer it.
+    Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, value: false });
     withFiles = true;
     render(<App />);
     await screen.findByRole("button", { name: "Temporary chat" });

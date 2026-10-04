@@ -1022,7 +1022,9 @@ describe("remote instance UX", () => {
     fireEvent.submit(address.closest("form")!);
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(i18n.t("remote.errors.ssh_agent_refused"));
-    expect(alert.closest(".overflow-y-auto")).toBeNull();
+    // Errors stay outside the form's field scroller. The outer dialog frame
+    // may itself scroll when a mobile keyboard leaves less room than the form.
+    expect(address.closest("form")!.querySelector(".overflow-y-auto")).not.toContainElement(alert);
     expect(address).toHaveValue("ubuntu@example.test");
     fireEvent.click(screen.getByRole("button", { name: "Connection options" }));
     expect(screen.getByRole("spinbutton", { name: "SSH port" })).toHaveValue(2222);

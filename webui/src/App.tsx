@@ -54,6 +54,7 @@ import { useSkills } from "@/hooks/useSkills";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useAppViewport } from "@/hooks/useAppViewport";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { logoFallbackUrls } from "@/lib/provider-brand";
@@ -115,7 +116,13 @@ type BootState =
       modelName: string | null;
       ingressLimits: BootstrapResponse["limits"] | null;
       runtimeSurface: RuntimeSurface;
+      webuiCapabilities: string[];
     };
+
+function bootstrapCapabilities(boot: BootstrapResponse): string[] {
+  const capabilities = boot.terminal?.webui?.capabilities;
+  return Array.isArray(capabilities) ? capabilities.filter((entry) => typeof entry === "string") : [];
+}
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
 const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
@@ -894,6 +901,7 @@ function resolveRuntimeSurface(
 }
 
 export default function App() {
+  useAppViewport();
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
   const bootstrapSecretRef = useRef("");
@@ -922,6 +930,7 @@ export default function App() {
               modelName: boot.model_name ?? current.modelName,
               ingressLimits: boot.limits ?? current.ingressLimits,
               runtimeSurface,
+              webuiCapabilities: bootstrapCapabilities(boot),
             }
           : current,
       );
@@ -969,6 +978,7 @@ export default function App() {
             modelName: boot.model_name ?? null,
             ingressLimits: boot.limits ?? null,
             runtimeSurface,
+            webuiCapabilities: bootstrapCapabilities(boot),
           });
         } catch (e) {
           if (cancelled) return;
@@ -1088,6 +1098,7 @@ export default function App() {
       token={state.token}
       modelName={state.modelName}
       ingressLimits={state.ingressLimits}
+      webuiCapabilities={state.webuiCapabilities}
     >
       <RemoteInstances><Shell
         runtimeSurface={state.runtimeSurface}

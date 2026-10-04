@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ComposerDraftStore } from "@/lib/composer-draft";
+import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand } from "@/lib/types";
 
@@ -347,6 +348,17 @@ function renderPresetComposer(
   };
 }
 
+function stubCoarsePointer(): void {
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+    matches: query.includes("pointer: coarse"),
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })));
+}
+
 describe("ThreadComposer", () => {
   it("locks an async send and keeps the draft when it is rejected", async () => {
     let resolveSend!: (accepted: boolean) => void;
@@ -405,6 +417,87 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("hello from mobile", undefined, undefined);
     expect(input).toHaveValue("");
     expect(input).not.toHaveFocus();
+  });
+
+  it("inserts a newline instead of sending on Enter on coarse-pointer devices", () => {
+    stubCoarsePointer();
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "line one" } });
+    const keyEvent = createEvent.keyDown(input, { key: "Enter" });
+    fireEvent(input, keyEvent);
+
+    expect(keyEvent.defaultPrevented).toBe(false);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps sending on Enter on precision-pointer devices", () => {
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "desktop message" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("desktop message", undefined, undefined);
+  });
+
+  it("still selects a slash command with Enter on coarse-pointer devices", () => {
+    stubCoarsePointer();
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+        slashCommands={COMMANDS}
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/" } });
+    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("/history ");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("labels the keyboard action as enter on coarse-pointer devices", () => {
+    stubCoarsePointer();
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+      />,
+    );
+
+    expect(screen.getByLabelText("Message input")).toHaveAttribute("enterkeyhint", "enter");
+  });
+
+  it("does not set enterkeyhint on precision-pointer devices", () => {
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+      />,
+    );
+
+    expect(screen.getByLabelText("Message input")).not.toHaveAttribute("enterkeyhint");
   });
 
   it("focuses and sends a removable quoted answer excerpt", async () => {
@@ -2343,6 +2436,9 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
     const gimp = screen.getByRole("option", { name: /GIMP @gimp .* CLI/i });
     const browserbase = screen.getByRole("option", { name: /Browserbase @browserbase .* MCP/i });
+    // Reuse the app's 44px coarse-pointer targets without changing desktop density.
+    expect(gimp).toHaveClass("touch-target");
+    expect(browserbase).toHaveClass("touch-target");
     expect(within(gimp).getByText("CLI")).toBeInTheDocument();
     expect(within(browserbase).getByText("MCP")).toBeInTheDocument();
     expect(within(gimp).getByText("@gimp")).toBeInTheDocument();
@@ -2647,6 +2743,95 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it.each(["/", "@"]) ("fits %s suggestions in the app frame while iOS pans the keyboard", (trigger) => {
+    stubVisualViewport({ height: 396, offsetTop: 350 });
+    let formTop = 274;
+    let frameHeight = 396;
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => rect({ top: formTop, width: 388, height: 112 }),
+    );
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => rect({ top: 0, width: 420, height: frameHeight }),
+    );
+    render(
+      <div id="root" className="visual-viewport" style={{ overflowY: "hidden" }}>
+        <ThreadComposer onSend={vi.fn()} slashCommands={COMMANDS} cliApps={CLI_APPS} />
+      </div>,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: trigger, selectionStart: 1 } });
+    const palette = screen.getByRole("listbox");
+    expect(palette).toHaveClass("bottom-full");
+    expect(palette).toHaveStyle({ maxHeight: "266px" });
+
+    // Keyboard dismissal moves the composer; keep measuring the same frame.
+    formTop = 620;
+    frameHeight = 746;
+    Object.assign(window.visualViewport!, { height: 746, offsetTop: 0 });
+    act(() => window.visualViewport!.dispatchEvent(new Event("resize")));
+    expect(palette).toHaveStyle({ maxHeight: "288px" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).not.toHaveValue(trigger);
+  });
+
+  it.each(["/", "@"]) ("keeps %s selectable beside the input in a short landscape frame", (trigger) => {
+    stubVisualViewport({ height: 128, offsetTop: 208 });
+    let landscape = true;
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => rect({ top: landscape ? 44 : 274, width: landscape ? 744 : 388, height: 112 }),
+    );
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      return this.id === "root"
+        ? rect({ top: 0, width: landscape ? 776 : 420, height: landscape ? 128 : 396 })
+        : rect({ top: landscape ? 44 : 0, width: landscape ? 776 : 420, height: landscape ? 84 : 396 });
+    });
+    const onSend = vi.fn();
+    render(
+      <div id="root" className="visual-viewport short-visual-viewport" style={{ overflowY: "hidden" }}>
+        <div style={{ overflowY: "auto" }}>
+          <ThreadComposer onSend={onSend} slashCommands={COMMANDS} cliApps={CLI_APPS} />
+        </div>
+      </div>,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: trigger, selectionStart: 1 } });
+    const palette = screen.getByRole("listbox");
+    expect(palette).toHaveClass("col-start-2");
+    expect(palette).not.toHaveClass("absolute");
+    expect(palette).toHaveStyle({ maxHeight: "84px" });
+    expect(input.closest("form")).toHaveAttribute("data-palette-beside", "true");
+
+    // Rotation restores the ordinary floating menu, without changing the draft.
+    landscape = false;
+    document.getElementById("root")!.classList.remove("short-visual-viewport");
+    Object.assign(window.visualViewport!, { height: 396, offsetTop: 350 });
+    act(() => window.visualViewport!.dispatchEvent(new Event("resize")));
+    expect(palette).toHaveClass("bottom-full");
+    expect(palette).toHaveStyle({ maxHeight: "266px" });
+    expect(input).toHaveValue(trigger);
+    fireEvent.mouseDown(screen.getAllByRole("option")[0]!);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input.closest("form")).not.toHaveAttribute("data-palette-beside");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("uses visual bounds outside fitting (pinch zoom: %s)", (zoomed) => {
+    stubVisualViewport({ height: 300, offsetTop: 100 });
+    if (zoomed) Object.assign(window.visualViewport!, { scale: 2 });
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(
+      rect({ top: 220, width: 390, height: 100 }),
+    );
+    render(
+      <div id="root" className={zoomed ? "visual-viewport" : undefined}>
+        <ThreadComposer onSend={vi.fn()} slashCommands={COMMANDS} />
+      </div>,
+    );
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/" } });
+    expect(screen.getByRole("listbox")).toHaveStyle({ maxHeight: "112px" });
+    expect(screen.getByRole("listbox")).toHaveClass("bottom-full");
+  });
+
   it("dismisses the slash command palette on outside click", () => {
     render(
       <div>
@@ -2872,6 +3057,98 @@ describe("ThreadComposer", () => {
 
     expect(onStop).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+  });
+
+  it("switches the primary action from Stop to Send while streaming once the user types", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={onStop}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "one more thing: " } });
+
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onStop).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("one more thing:", undefined, {
+      continueActiveTurn: true,
+    });
+  });
+
+  it("interjects with the send button on coarse-pointer devices while streaming", () => {
+    stubCoarsePointer();
+    const onSend = vi.fn();
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        onStop={vi.fn()}
+        isStreaming
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "hold on, actually…" } });
+    const keyEvent = createEvent.keyDown(input, { key: "Enter" });
+    fireEvent(input, keyEvent);
+
+    // Enter inserts a newline on touch; the send button is the interject path.
+    expect(keyEvent.defaultPrevented).toBe(false);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("hold on, actually…", undefined, {
+      continueActiveTurn: true,
+    });
+  });
+
+  it("preserves waiting guidance when the send button submits a newer draft", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onStop={vi.fn()} isStreaming />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "waiting guidance" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "send this now" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("send this now", undefined, { continueActiveTurn: true });
+    expect(screen.getByText("waiting guidance")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenLastCalledWith("waiting guidance", undefined, { continueActiveTurn: true });
+  });
+
+  it("does not mark side-channel commands as guidance during an active turn", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onStop={vi.fn()} isStreaming slashCommands={COMMANDS} />);
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/history 5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(onSend).toHaveBeenCalledWith("/history 5", undefined, { sideChannel: true });
+  });
+
+  it("keeps Stop available while a draft attachment is encoding", () => {
+    vi.mocked(encodeImage).mockReturnValueOnce(new Promise(() => {}));
+    const onStop = vi.fn();
+    const { container } = render(<ThreadComposer onSend={vi.fn()} onStop={onStop} isStreaming />);
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "unfinished draft" } });
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["image"], "photo.png", { type: "image/png" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Message input")).toHaveValue("unfinished draft");
   });
 
   it("queues plain guidance while a task is running", () => {

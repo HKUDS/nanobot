@@ -222,12 +222,14 @@ function wrap(
   children: ReactNode,
   modelName?: string | null,
   token = "tok",
+  webuiCapabilities: string[] = [],
 ) {
   return (
     <ClientProvider
       client={client as unknown as import("@/lib/nanobot-client").NanobotClient}
       token={token}
       modelName={modelName ?? null}
+      webuiCapabilities={webuiCapabilities}
     >
       {children}
     </ClientProvider>
@@ -489,6 +491,39 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("renders one persisted task entry at the initiating prompt through the full shell", async () => {
+    const client = makeClient();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [{
+        task_id: "completed-task", label: "Inspect settings", task_description: "Inspect settings",
+        origin_turn_id: "delegation-turn", origin_message_id: null, created_at: 100, completed_at: 102,
+        state: "done", phase: "done", elapsed_seconds: 2, iteration: 1, tool_events: [],
+        usage: null, receipts: {}, result: "Verified", partial: false, stop_reason: "completed", error: null,
+      }] });
+      if (String(input).includes("/webui-thread")) return httpJson(transcriptFromSimpleMessages([
+        { role: "user", content: "Delegate inspection", turnId: "delegation-turn" },
+        { role: "assistant", content: "Parent conclusion", turnId: "delegation-turn" },
+      ]));
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    const shell = () => wrap(client, <ThreadShell session={session("persisted-tasks")} title="Task history"
+      onToggleSidebar={() => {}} />, null, "tok", ["webui.core.v1", "webui.subagents.v1"]);
+    const view = render(shell());
+    await screen.findByText("Delegate inspection");
+    fireEvent.click(await screen.findByRole("button", { name: /Delegated work Finished: 1/ }));
+    const task = await screen.findByRole("button", { name: /Inspect settings Completed/ });
+    await screen.findByText("Delegate inspection");
+    expect(screen.getAllByRole("button", { name: /Inspect settings/ })).toHaveLength(1);
+    expect(screen.getByTestId("thread-message-region")).toContainElement(task);
+    expect(within(screen.getByTestId("thread-composer-motion")).queryByText("Inspect settings")).not.toBeInTheDocument();
+    view.unmount();
+    render(shell());
+    await screen.findByText("Delegate inspection");
+    fireEvent.click(await screen.findByRole("button", { name: /Delegated work Finished: 1/ }));
+    await screen.findByRole("button", { name: /Inspect settings Completed/ });
+    expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
   it("clears the welcome draft after a delayed new-chat send and an unchanged round-trip", async () => {

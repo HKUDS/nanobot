@@ -111,6 +111,15 @@ workspace selection, and linked automations. Use a new topic when you want a
 separate context; use fork when you want to continue from an existing point
 without changing the original thread.
 
+On touch devices, sidebar action buttons stay visible with larger touch areas
+for topics, conversation groups, panes, and projects. Tap a title to select it
+or the adjacent action button for its menu. Desktop actions still appear on
+hover or keyboard focus. Press Escape in an action menu to return focus to its
+button and continue with Tab, including from the **Move to** submenu. ArrowLeft
+leaves the submenu and returns to **Move to** without closing the parent menu.
+Choosing Rename instead moves focus into the
+dialog; clicking outside a menu keeps focus at the clicked destination.
+
 Drag a topic within its current sidebar group to keep frequently used work in
 your preferred order. Drag a topic from the sidebar into the composer when you
 want to reference it in the next message instead of switching to it.
@@ -180,6 +189,42 @@ File previews follow the active topic's access mode. Restricted workspace access
 previews only files under the selected workspace. Full Access can preview files
 outside the workspace when that access mode is allowed by the gateway.
 
+Website links normally open in a new browser tab. Right-click a link (or press
+**Shift+F10** while it is focused) for link actions. On mobile, use the reply's
+**Message actions → View links** menu. **Preview website** appears only when the
+current browser and URL allow credential-isolated embedding; otherwise the menu
+explains the restriction and keeps **Open in browser** and **Copy link** available.
+Sites can still refuse embedding through their own security headers. nanobot
+does not proxy pages or bypass those restrictions; use **Open in browser** instead.
+
+On touch devices with Visual Viewport support, the app follows the visible area
+when the on-screen keyboard opens or pans the page. Navigation and the composer
+stay in view while messages scroll independently. Session search also follows
+the visible area: the search field stays above the keyboard and results scroll
+inside the dialog. In short landscape viewports, its input and results sit side
+by side so a result remains reachable. Taller dialogs scroll from their top
+instead of centering content outside the visible area. The `@` mention and `/` command
+menus use the visible app area above or below the composer, including when the
+keyboard pans the page. Scroll within a menu to reach more results. Mention rows
+use the app's larger touch targets on phones while retaining desktop density.
+In very short, wide viewports (such as landscape with the keyboard open), menus
+sit beside the input instead of overflowing the scrollable composer. Scroll the
+menu for more candidates and the input area for its controls. If the browser
+bars and keyboard leave no usable page area, dismiss
+the keyboard or return to portrait. Pinch zoom keeps the existing layout instead of resizing it to the
+magnified area; normal fitting resumes when
+you return to the default zoom. Non-touch desktop and native-host layout remain
+unchanged.
+
+On touch devices, compact text fields use a readable 16px minimum baseline to
+avoid Safari automatically zooming the page on focus. Desktop field density
+and manual page zoom remain unchanged.
+
+On touch devices, preview tab controls and
+the full-screen image viewer's close button use larger touch areas without
+enlarging the icons. Preview tabs remain horizontally scrollable when space is
+limited.
+
 Open the context indicator beside the composer model badge to see how much of
 the model's context window is in use. The **Recent rounds** chart shows input
 tokens for each logical model round, including tool-call rounds. Hover or focus
@@ -192,6 +237,28 @@ The model continues with a summary and any messages after it; messages covered
 by the summary remain in your chat history but are no longer sent to the model
 verbatim. Use `/compact` to compact the current topic's context manually.
 See [Memory](./memory.md) for compaction and Dream consolidation.
+
+### Delegated work
+
+When nanobot delegates work to subagents, a work group appears under the request
+that started it. Progress continues to update after the main reply finishes.
+Completed tasks stay available for inspection, and refreshing or reopening the
+WebUI restores saved progress and results without restarting the work.
+
+Work groups follow the browser's **Activity details** preference: **Auto** opens
+running work and folds it when all tasks finish; **Expanded** keeps it open by
+default. You can also expand or fold a group manually to check individual
+outcomes, including failures and partial results.
+
+Select a task to open its read-only conversation on the right, or across the
+screen on mobile. Read its messages, tool activity, file edits, and results,
+including formatted Markdown. Closing the details leaves the task running; its
+stop button cancels only that task. Give follow-up instructions to nanobot in
+the main conversation.
+
+These controls appear when the connected host supports subagent tasks. See
+[Subagents](./concepts.md#subagents) for cancellation, saved history, and gateway
+restart behavior.
 
 ## Temporary Chats
 
@@ -271,6 +338,18 @@ MCP presets, or persisted topics. Topics have short, pronounceable handles such 
 from the menu, or drag it from the sidebar, to attach its structured reference.
 Typing the same text without selecting it remains plain text.
 
+On touch-primary phones and tablets, **Enter** inserts a newline; tap the send
+arrow to submit. This also applies when a coarse-pointer tablet has a hardware
+keyboard attached. On desktop, **Enter** sends and **Shift+Enter** adds a newline.
+An open slash-command or mention menu takes precedence: Enter selects its item.
+
+While a response is running, the send arrow delivers a ready draft as guidance
+for the active turn; it does not issue a stop command. Other messages already
+waiting in the queue stay there. On desktop, Enter queues guidance and a second
+Enter with an empty input sends that queued message immediately. Queued messages
+also have a **Send now** action. The primary button shows **Stop** when there is
+no sendable draft; clear the draft or use `/stop` to stop instead of sending it.
+
 The agent can inspect an attached topic with `read_session`. It can discover other
 persisted topics with `list_sessions` and send asynchronous messages with
 `send_session_message`; topic messaging is not limited by workspace scope.
@@ -314,6 +393,11 @@ default **Ready** view shows only capabilities that can be used immediately:
   page. Presets such as Xmind, Notion, and Linear already use OAuth. HTTPS and
   localhost WebUIs return automatically; a remote plain-HTTP WebUI shows one
   field for pasting the complete localhost callback URL.
+
+CLI Apps run with a limited environment that excludes provider API keys. On
+Unix, they inherit `XDG_RUNTIME_DIR` when it is set in the gateway's environment,
+so desktop CLIs such as Obsidian can locate the running application. Start the
+gateway in the same desktop session as the app to inherit that runtime directory.
 
 Apps intentionally does not list nanobot runtime support packages such as
 `api` or `bedrock`. Those packages enable providers, servers, or channels; they

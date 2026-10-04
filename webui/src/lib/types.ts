@@ -64,6 +64,34 @@ interface TurnUsage {
 
 export type RoundUsage = TurnUsage;
 
+export type SubagentTaskState = "queued" | "running" | "stopping" | "done" | "incomplete" | "error" | "cancelled" | "interrupted";
+
+export interface SubagentTaskSnapshot {
+  task_id: string;
+  revision?: number;
+  origin_message_id: string | null;
+  origin_turn_id: string | null;
+  created_at: number;
+  completed_at: number | null;
+  label: string;
+  task_description: string;
+  state: SubagentTaskState;
+  phase: string;
+  elapsed_seconds: number;
+  iteration: number;
+  tool_events: { name: string; status: string }[];
+  usage: Record<string, number | string | null> | null;
+  receipts: Record<string, "accepted" | "delivered" | "undelivered">;
+  result: string | null;
+  partial: boolean;
+  stop_reason: string | null;
+  error: string | null;
+}
+
+export interface SubagentTasksPayload {
+  tasks: SubagentTaskSnapshot[];
+}
+
 export interface ResponseSource {
   provider: string;
   model: string;
@@ -389,7 +417,7 @@ export interface UIFileEdit {
   deleted: number;
   approximate?: boolean;
   status: "editing" | "done" | "error";
-  operation?: "edit" | "delete" | string;
+  operation?: "create" | "edit" | "delete" | string;
   binary?: boolean;
   error?: string;
   pending?: boolean;
@@ -488,6 +516,9 @@ export interface SidebarStatePayload {
 }
 
 export interface BootstrapResponse {
+  terminal?: {
+    webui?: { capabilities?: string[] };
+  };
   token?: string;
   api_token?: string;
   ws_path: string;
@@ -1353,6 +1384,7 @@ interface InboundTurnMetadata {
 }
 
 export type InboundEvent =
+  | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
   | { event: "ready"; chat_id: string; client_id: string }
   | {
       event: "attached";

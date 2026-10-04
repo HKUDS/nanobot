@@ -99,6 +99,28 @@ describe("ChatList", () => {
     expect(conversation.querySelector("[data-sidebar-selection-track]")).toBeNull();
   });
 
+  it("opens topic actions with a dedicated touch target without selecting the topic", async () => {
+    const onSelect = vi.fn();
+    const onRequestRename = vi.fn();
+    render(<ChatList
+      sessions={[session({ chatId: "review", title: "Review the patch" })]}
+      activeKey={null}
+      onSelect={onSelect}
+      onRequestDelete={vi.fn()}
+      onTogglePin={vi.fn()}
+      onRequestRename={onRequestRename}
+      onToggleArchive={vi.fn()}
+    />);
+    const trigger = screen.getByRole("button", { name: "Topic actions for Review the patch" });
+    expect(trigger).toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    expect(onRequestRename).toHaveBeenCalledWith("websocket:review", "Review the patch");
+    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Review the patch" }));
+    expect(onSelect).toHaveBeenCalledWith("websocket:review");
+  });
+
   it("marks a conversation that needs recovery attention with a warning indicator", () => {
     render(
       <ChatList
@@ -689,7 +711,10 @@ describe("ChatList", () => {
       .toHaveAttribute("data-active-id", "websocket:root");
     expect(screen.getByRole("button", {
       name: "Research pane pane actions",
-    })).toHaveClass("opacity-0");
+    })).toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
+    expect(screen.getByRole("button", {
+      name: "Topic actions for Root topic",
+    })).toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
     expect(within(tabGroup).getByRole("button", { name: "Root topic" }))
       .not.toHaveAttribute("aria-current");
     expect(tabGroup).not.toHaveTextContent("2/4");
@@ -754,6 +779,8 @@ describe("ChatList", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
 
     expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Root topic pane actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Topic actions for Root topic" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }));
     expect(screen.getByRole("button", { name: "Group: Root topic" }))
       .toHaveAttribute("aria-pressed", "true");
@@ -1189,6 +1216,8 @@ describe("ChatList", () => {
     );
 
     const projectSection = screen.getByRole("region", { name: "Photos" });
+    expect(within(projectSection).getByRole("button", { name: "Topic actions for Photos" }))
+      .toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
     fireEvent.click(within(projectSection).getByRole("button", { name: "Photos" }));
 
     expect(onToggleGroup).toHaveBeenCalledWith("project:/Users/me/nanobot");

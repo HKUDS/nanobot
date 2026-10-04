@@ -52,6 +52,71 @@ function openMessageBlockMenu(root: ParentNode): {
 }
 
 describe("ThreadMessages", () => {
+  it.each(["diff", "collapsed_diff"] as const)(
+    "keeps completed %s edits visible when answer activity is toggled",
+    (fileEditDisplayMode) => {
+      localStorage.setItem(
+        "nanobot-webui.settings-preferences",
+        JSON.stringify({ fileEditDisplayMode }),
+      );
+      const messages: UIMessage[] = [
+        { id: "user", role: "user", content: "edit the file", createdAt: 1 },
+        { id: "before", role: "assistant", content: "", reasoning: "Before edit", createdAt: 2 },
+        {
+          id: "edit", role: "tool", kind: "trace", content: "edit_file()", createdAt: 3,
+          traces: ["edit_file()"],
+          fileEdits: [{
+            call_id: "edit-call", tool: "edit_file", path: "src/app.tsx", phase: "end",
+            added: 1, deleted: 1, status: "done",
+            diff: {
+              format: "unified", context: 3, truncated: false,
+              text: "--- a/src/app.tsx\n+++ b/src/app.tsx\n@@ -1 +1 @@\n-old\n+new\n",
+            },
+          }],
+        },
+        { id: "after", role: "assistant", content: "", reasoning: "After edit", createdAt: 4 },
+        { id: "answer", role: "assistant", content: "File updated", latencyMs: 5_000, createdAt: 5 },
+      ];
+      try {
+        const { container, rerender } = render(<ThreadMessages messages={messages} isStreaming />);
+        rerender(<ThreadMessages messages={messages} isStreaming={false} />);
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        const assertIndependentDiff = () => {
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(diff).toBeVisible();
+          expect(screen.getByText("Edited")).toBeInTheDocument();
+          expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
+            .toBeNull();
+          expect(screen.getByText("File updated")).toBeVisible();
+          return diff;
+        };
+        assertIndependentDiff();
+        openAssistantBlockMenu(container);
+        const disclosure = screen.getByRole("button", { name: "Worked for 5s", exact: true });
+        expect(disclosure).toHaveAttribute("aria-expanded", "false");
+        const detailsId = disclosure.getAttribute("aria-controls")!;
+        expect(container.querySelectorAll(`[id="${detailsId}"]`)).toHaveLength(1);
+        fireEvent.click(disclosure);
+        const diff = assertIndependentDiff();
+        expect(screen.getByText("Before edit").compareDocumentPosition(diff)
+          & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(diff.compareDocumentPosition(screen.getByText("After edit"))
+          & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        fireEvent.click(screen.getAllByRole("button", { name: /Worked for 5s.*Collapse activity/ })[0]);
+        assertIndependentDiff();
+        expect(screen.getByText("Before edit").closest('[aria-hidden="true"][inert]')).not.toBeNull();
+        expect(screen.getByText("After edit").closest('[aria-hidden="true"][inert]')).not.toBeNull();
+
+        rerender(<ThreadMessages messages={[messages[0], messages[2], messages[4]]} isStreaming={false} />);
+        assertIndependentDiff();
+      } finally {
+        localStorage.removeItem("nanobot-webui.settings-preferences");
+      }
+    },
+  );
+
   it.each([0, -13_000, -14_000, -15_000, 15_000])(
     "keeps the optimistic timer through acknowledgement and output with %i ms server clock skew",
     (clockSkewMs) => {

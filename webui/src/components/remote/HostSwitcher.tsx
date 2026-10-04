@@ -91,7 +91,7 @@ function HostMenuItems({ picker }: { picker: HostPicker }) {
       <Search aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
       <input ref={search} aria-label={t("remote.searchHosts")} placeholder={t("remote.searchHosts")}
         value={query} onChange={(event) => setQuery(event.target.value)} autoComplete="off" spellCheck={false}
-        className="h-7 min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground" />
+        className="touch-text-input h-7 min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground" />
     </div> : <DropdownMenuLabel className="shrink-0">{t("remote.switchHost")}</DropdownMenuLabel>}
     <div ref={list} role="group" aria-label={t("remote.switchHost")}
       className="min-h-0 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-transparent">

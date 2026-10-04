@@ -504,7 +504,11 @@ def build_file_edit_end_event(
         deleted=deleted,
         approximate=False,
         binary=binary,
-        operation="delete" if tracker.before.exists and not after.exists else None,
+        operation=(
+            "delete" if tracker.before.exists and not after.exists
+            else "create" if not tracker.before.exists and after.exists
+            else None
+        ),
     )
     if diff_payload is not None:
         payload["diff"] = diff_payload

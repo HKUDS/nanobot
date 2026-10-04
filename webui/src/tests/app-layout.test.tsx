@@ -59,7 +59,8 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const route = routes[String(input)]
-        ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined);
+        ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
+        ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(String(input)) ? { tasks: [] } : undefined);
       const body =
         typeof route === "function"
           ? await (route as () => unknown | Promise<unknown>)()
@@ -339,12 +340,7 @@ describe("App layout", () => {
       expires_in: 300,
     });
     vi.mocked(deriveWsUrl).mockReset().mockReturnValue("ws://test");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/webui/sidebar-state"
-        ? jsonResponse({})
-        : ({ ok: false, status: 404 })),
-    );
+    mockFetchRoutes({});
   });
 
   afterEach(() => {
@@ -364,6 +360,34 @@ describe("App layout", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveClass("startup-status");
     expect(screen.queryByText("Loading nanobot…")).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("enables task controls only when bootstrap advertises support: %s", async (supported) => {
+    mockSessions = [{
+      key: "websocket:chat-a", channel: "websocket", chatId: "chat-a",
+      createdAt: null, updatedAt: null, title: "Inspection", preview: "Inspect config",
+    }];
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 300,
+      terminal: { webui: { capabilities: supported ? ["webui.core.v1", "webui.subagents.v1"] : ["webui.core.v1"] } },
+    });
+    mockFetchRoutes({
+      "/api/sessions/websocket%3Achat-a/subagents": { tasks: [{
+        task_id: "task-1", label: "Config check", task_description: "Inspect configuration",
+        state: "running", phase: "awaiting_model", elapsed_seconds: 2, iteration: 1,
+        tool_events: [], usage: null, receipts: {}, result: null, partial: false,
+        stop_reason: null, error: null, origin_turn_id: null, origin_message_id: null,
+        created_at: 100, completed_at: null,
+      }] },
+    });
+    render(<App />);
+    await screen.findByRole("textbox");
+    if (supported) await screen.findByRole("button", { name: /Config check Running/ });
+    else expect(screen.queryByText("Config check")).not.toBeInTheDocument();
+    const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/subagents"));
+    expect(reads).toHaveLength(supported ? 1 : 0);
+    expect(requestMutationSpy).not.toHaveBeenCalled();
   });
 
   it("shows the auth form without an invalid-password error on first load", async () => {
@@ -2394,7 +2418,7 @@ describe("App layout", () => {
     expect(screen.queryByText("Daily repo check")).not.toBeInTheDocument();
   }, 15_000);
 
-  it("opens a mobile topic with one click and closes the drawer without a search tooltip", async () => {
+  it("closes the mobile drawer when selecting a new or current topic without a search tooltip", async () => {
     restoreBrowserFocus = mockBrowserFocus();
     const user = userEvent.setup();
     mockSessions = ["First", "Second"].map((title, index) => ({
@@ -2418,7 +2442,7 @@ describe("App layout", () => {
 
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    for (const title of ["First", "Second"]) {
+    for (const title of ["First", "First", "Second"]) {
       await user.click(await screen.findByRole("button", { name: "Toggle sidebar" }));
       const sheet = await screen.findByRole("dialog");
       await waitFor(() => expect(sheet).toHaveFocus());

@@ -1,13 +1,15 @@
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -85,6 +87,37 @@ interface SidebarActionMenuController {
   openId: string | null;
   onOpenChange: (id: string, open: boolean) => void;
   openFromContextMenu: (event: ReactMouseEvent<HTMLElement>, id: string) => void;
+}
+
+const SidebarActionMenuEscapeContext = createContext<(() => void) | undefined>(undefined);
+
+function SidebarActionMenuContent({
+  children,
+  portalContainer,
+}: {
+  children: ReactNode;
+  portalContainer?: HTMLElement | null;
+}) {
+  const restoreFocusOnEscape = useRef(false);
+  const markEscape = () => { restoreFocusOnEscape.current = true; };
+  return (
+    <SidebarActionMenuEscapeContext.Provider value={markEscape}>
+      <DropdownMenuContent
+        align="end"
+        className={ACTION_MENU_CONTENT_CLASS}
+        portalContainer={portalContainer}
+        onEscapeKeyDown={markEscape}
+        onCloseAutoFocus={(event) => {
+          // Actions can open a dialog or remove the trigger. Only Escape returns
+          // to it; Radix still owns the trigger and outside-interaction handling.
+          if (!restoreFocusOnEscape.current) event.preventDefault();
+          restoreFocusOnEscape.current = false;
+        }}
+      >
+        {children}
+      </DropdownMenuContent>
+    </SidebarActionMenuEscapeContext.Provider>
+  );
 }
 
 function SidebarItemTooltip({
@@ -974,7 +1007,7 @@ export const ChatList = memo(function ChatList({
                                   toggleDeleteSelection(tabDeleteKeys, event.shiftKey, s.key);
                                   return;
                                 }
-                                if (!topicActive) onSelect(s.key);
+                                onSelect(s.key);
                               }}
                               draggable={canDragSession}
                               onDragStart={(event) => {
@@ -1048,7 +1081,7 @@ export const ChatList = memo(function ChatList({
                             >
                             <DropdownMenuTrigger
                               className={cn(
-                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
+                                "sidebar-action-trigger touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
                                 "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100",
                                 "focus-visible:opacity-100 data-[state=open]:opacity-100",
                               )}
@@ -1056,11 +1089,8 @@ export const ChatList = memo(function ChatList({
                             >
                               <MoreHorizontal className="h-3.5 w-3.5" />
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="end"
-                              className={ACTION_MENU_CONTENT_CLASS}
+                            <SidebarActionMenuContent
                               portalContainer={actionMenuPortalContainer}
-                              onCloseAutoFocus={(event) => event.preventDefault()}
                             >
                               <DropdownMenuItem onSelect={() => onTogglePin(s.key)}>
                                 {isPinned ? (
@@ -1113,7 +1143,7 @@ export const ChatList = memo(function ChatList({
                                 <Trash2 className="h-4 w-4 shrink-0" />
                                 {t("chat.delete")}
                               </DropdownMenuItem>
-                            </DropdownMenuContent>
+                            </SidebarActionMenuContent>
                           </DropdownMenu>
                           ) : null}
                         </div>
@@ -1295,7 +1325,7 @@ function WorkbenchTabHeader({
           >
             <DropdownMenuTrigger
               className={cn(
-                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+                "sidebar-action-trigger touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
                 "text-sidebar-muted-foreground opacity-0 transition-opacity",
                 "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover/tab:opacity-100",
                 "focus-visible:opacity-100 data-[state=open]:opacity-100",
@@ -1304,11 +1334,8 @@ function WorkbenchTabHeader({
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className={ACTION_MENU_CONTENT_CLASS}
+            <SidebarActionMenuContent
               portalContainer={actionMenuPortalContainer}
-              onCloseAutoFocus={(event) => event.preventDefault()}
             >
               {onRequestRename ? (
                 <DropdownMenuItem onSelect={onRequestRename}>
@@ -1330,7 +1357,7 @@ function WorkbenchTabHeader({
                 <Trash2 className="h-4 w-4 shrink-0" />
                 {t("workbench.deleteConversations")}
               </DropdownMenuItem>
-            </DropdownMenuContent>
+            </SidebarActionMenuContent>
           </DropdownMenu>
 
         </>
@@ -1491,7 +1518,7 @@ function ActivePaneRows({
               >
                 <DropdownMenuTrigger
                   className={cn(
-                    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
+                    "sidebar-action-trigger touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
                     "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover/pane:opacity-100",
                     "focus-visible:opacity-100 data-[state=open]:opacity-100",
                   )}
@@ -1499,11 +1526,8 @@ function ActivePaneRows({
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className={ACTION_MENU_CONTENT_CLASS}
+                <SidebarActionMenuContent
                   portalContainer={actionMenuPortalContainer}
-                  onCloseAutoFocus={(event) => event.preventDefault()}
                 >
                   <DropdownMenuItem onSelect={() => onTogglePin(pane.key)}>
                     {isPinned ? (
@@ -1554,7 +1578,7 @@ function ActivePaneRows({
                     <Trash2 className="h-4 w-4 shrink-0" />
                     {t("chat.delete")}
                   </DropdownMenuItem>
-                </DropdownMenuContent>
+                </SidebarActionMenuContent>
               </DropdownMenu> : null}
             </div>
           </li>
@@ -1600,6 +1624,8 @@ function MoveToGroupSubmenu({
   onMove: (targetKey: string) => void;
 }) {
   const { t } = useTranslation();
+  // Radix sends Escape only to the topmost submenu before closing the root.
+  const onEscapeKeyDown = useContext(SidebarActionMenuEscapeContext);
   if (targets.length === 0) return null;
   return (
     <DropdownMenuSub>
@@ -1607,7 +1633,7 @@ function MoveToGroupSubmenu({
         <MoveRight className="h-4 w-4 shrink-0" aria-hidden />
         {t("workbench.moveTo")}
       </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
+      <DropdownMenuSubContent onEscapeKeyDown={onEscapeKeyDown}>
         {targets.map((target) => (
           <DropdownMenuItem
             key={target.key}
@@ -1787,7 +1813,7 @@ function ProjectGroupHeader({
           >
             <DropdownMenuTrigger
               className={cn(
-                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
+                "sidebar-action-trigger touch-target inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity",
                 "media-hover:hover:bg-sidebar-accent media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100 focus-visible:opacity-100",
                 "data-[state=open]:opacity-100",
               )}
@@ -1796,11 +1822,8 @@ function ProjectGroupHeader({
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className={ACTION_MENU_CONTENT_CLASS}
+            <SidebarActionMenuContent
               portalContainer={actionMenuPortalContainer}
-              onCloseAutoFocus={(event) => event.preventDefault()}
             >
               {onNewChat ? (
                 <DropdownMenuItem onSelect={onNewChat}>
@@ -1814,7 +1837,7 @@ function ProjectGroupHeader({
                   {t("chat.rename")}
                 </DropdownMenuItem>
               ) : null}
-            </DropdownMenuContent>
+            </SidebarActionMenuContent>
           </DropdownMenu>
         ) : null}
 

@@ -52,6 +52,7 @@ import {
   isReasoningOnlyAssistant,
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
@@ -179,7 +180,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
     [messages, props.isTurnStreaming],
   );
-  if (props.expanded !== undefined || displayMode === "summary" || !editsByMessage.size) {
+  if (displayMode === "summary" || !editsByMessage.size) {
     return <FoldedAgentActivity {...props} />;
   }
 
@@ -192,6 +193,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     items.push(
       <FoldedAgentActivity
         {...props}
+        detailsId={undefined}
         key={pending[0]?.id ?? "tail-status"}
         messages={pending}
         isTurnStreaming={last && props.isTurnStreaming}
@@ -225,7 +227,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
   }
   flush(true);
   return (
-    <div className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
+    <div id={props.detailsId} className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
       {items}
     </div>
   );
@@ -249,7 +251,7 @@ function FoldedAgentActivity({
   detailsId,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
-  const fileEditDisplayMode = useFileEditDisplayMode();
+  const { activityMode, fileEditDisplayMode } = useLocalPreferences();
   const pageVisible = usePageVisibility();
   const threadVisible = useThreadVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
@@ -287,12 +289,15 @@ function FoldedAgentActivity({
   const [now, setNow] = useState(() => Date.now());
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
-  /** Live work stays open; completed work briefly shows the done state, then tucks away. */
+  /** Auto follows execution; expanded keeps details open unless manually collapsed. */
   const outerExpanded = expanded ?? (
     userToggledOuter
       ? outerOpenLocal
-      : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming)
+      : activityMode === "expanded" || isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming)
   );
+  useEffect(() => {
+    setUserToggledOuter(false);
+  }, [activityMode]);
   const deferredTraceRefs = useMemo(
     () => Array.from(new Set(
       messages

@@ -696,6 +696,7 @@ async def test_run_forwards_non_default_runtime_options(tmp_path):
         media=["/tmp/image.png"],
         ephemeral=True,
         _run_extra_hooks_for_ephemeral=True,
+        _session_policy=ANY,
         hooks=ANY,
     )
 

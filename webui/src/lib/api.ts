@@ -38,6 +38,8 @@ import type {
   SkillsTrendingPayload,
   SlashCommand,
   SlashCommandLifecycle,
+  SubagentTaskSnapshot,
+  SubagentTasksPayload,
   TranscriptionSettingsUpdate,
   ThreadProjectionEvent,
   WebSearchSettingsUpdate,
@@ -47,6 +49,7 @@ import type {
   WorkspaceScopePayload,
 } from "./types";
 import { fetchWithTimeout } from "./http";
+import { isSubagentTask } from "./subagent-tasks";
 
 const API_READ_TIMEOUT_MS = 20_000;
 const API_MUTATION_TIMEOUT_MS = 20_000;
@@ -545,6 +548,37 @@ export async function updateAutomation(
   values: AutomationUpdatePayload,
 ): Promise<AutomationsPayload> {
   return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
+}
+
+export async function fetchSubagentTasks(token: string, sessionKey: string): Promise<SubagentTasksPayload> {
+  const payload = await request<unknown>(
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`, token, undefined, API_READ_TIMEOUT_MS,
+  );
+  if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)
+    || new Set(payload.tasks.map((task) => task.task_id)).size !== payload.tasks.length) {
+    throw new Error("Invalid subagent tasks response");
+  }
+  return { tasks: payload.tasks };
+}
+
+export async function fetchSubagentThread(
+  token: string, sessionKey: string, taskId: string, signal?: AbortSignal,
+): Promise<WebuiThreadPersistedPayload> {
+  const payload = await request<unknown>(
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents/${encodeURIComponent(taskId)}/webui-thread`,
+    token, { signal, cache: "no-store" }, API_READ_TIMEOUT_MS,
+  );
+  return parseWebuiThreadPayload(payload);
+}
+
+export async function cancelSubagentTask(
+  transport: WebUIMutationTransport, sessionKey: string, taskId: string,
+): Promise<SubagentTaskSnapshot> {
+  const result = await mutation<unknown>(transport, "subagent.cancel", {
+    session_key: sessionKey, task_id: taskId,
+  });
+  if (!isSubagentTask(result) || result.task_id !== taskId) throw new Error("Invalid subagent cancellation response");
+  return result;
 }
 
 export async function fetchSkills(

@@ -26,6 +26,8 @@ from websockets.datastructures import Headers
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from nanobot.agent.subagent import SubagentControlError
+from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -131,6 +133,7 @@ from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import (
     TranscriptReplayStats,
+    build_session_thread_response,
     build_webui_thread_response,
     build_webui_trace_detail_response,
     webui_transcript_revision,
@@ -193,6 +196,7 @@ _WEBUI_MUTATION_PATHS = {
     "workspace.pick_folder": "/api/workspaces/pick-folder",
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
+    "subagent.cancel": "/api/webui/subagents/cancel",
     "settings.agent.update": "/api/settings/update",
     "settings.model_configuration.create": "/api/settings/model-configurations/create",
     "settings.model_configuration.update": "/api/settings/model-configurations/update",
@@ -266,6 +270,7 @@ for _ext, _ctype in _MIME_FIXES.items():
 
 
 if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
@@ -375,6 +380,8 @@ class GatewayHTTPHandler:
         recovery_action: (
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None,
+        subagent_manager: SubagentManager | None = None,
+        discard_session: Callable[[str], Awaitable[None]] | None = None,
         log: Any = logger,
     ) -> None:
         self.config = config
@@ -398,6 +405,8 @@ class GatewayHTTPHandler:
         )
         self.skill_state_action = skill_state_action
         self.recovery_action = recovery_action
+        self.subagent_manager = subagent_manager
+        self.discard_session = discard_session
         self._skill_install_lock = asyncio.Lock()
         self._folder_picker_lock = asyncio.Lock()
         self.cron_service = cron_service
@@ -550,6 +559,7 @@ class GatewayHTTPHandler:
             "/api/webui/star-prompt/dismiss",
             "/api/webui/sidebar-state/update",
             "/api/workspaces/pick-folder",
+            "/api/webui/subagents/cancel",
         }
 
     @staticmethod
@@ -605,6 +615,9 @@ class GatewayHTTPHandler:
         response = await self._dispatch_recovery_route(request, got)
         if response is not None:
             return response
+
+        if got == "/api/webui/subagents/cancel":
+            return await self._handle_subagent_cancel(request)
 
         # Session routes
         response = await self._dispatch_session_routes(request, got)
@@ -756,6 +769,7 @@ class GatewayHTTPHandler:
                 ),
                 "runtime_surface": self._runtime_surface,
                 "runtime_capabilities": self._capabilities,
+                "terminal": terminal,
             }
             return _http_json_response(payload, extra_headers=_NO_STORE_HEADERS)
 
@@ -845,9 +859,17 @@ class GatewayHTTPHandler:
         if m:
             return self._handle_session_automations(request, m.group(1))
 
+        m = re.fullmatch(r"/api/sessions/([^/]+)/subagents/([^/]+)/webui-thread", got)
+        if m:
+            return await asyncio.to_thread(self._handle_subagent_thread_get, request, m.group(1), m.group(2))
+
+        m = re.fullmatch(r"/api/sessions/([^/]+)/subagents", got)
+        if m:
+            return self._handle_subagents_get(request, m.group(1))
+
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
         if m:
-            return self._handle_session_delete(request, m.group(1))
+            return await self._handle_session_delete(request, m.group(1))
 
         return None
 
@@ -871,6 +893,75 @@ class GatewayHTTPHandler:
         except RecoveryActionError as exc:
             return _http_error(exc.status, str(exc))
         return _http_json_response(result)
+
+    def _handle_subagents_get(self, request: WsRequest, key: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        session_key = _decode_api_key(key)
+        if session_key is None:
+            return _http_error(400, "invalid session key")
+        if not is_webui_session_key(session_key):
+            return _http_error(404, "session not found")
+        if self.subagent_manager is None:
+            return _http_error(503, "subagent manager unavailable")
+        try:
+            statuses = self.subagent_manager.statuses_for_session(session_key)
+        except (OSError, SubagentSessionError):
+            return _http_error(503, "task history unavailable")
+        return _http_json_response({
+            "tasks": [status.as_dict() for status in statuses.values()],
+        }, extra_headers=_NO_STORE_HEADERS)
+
+    async def _handle_subagent_cancel(self, request: WsRequest) -> Response:
+        if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
+            return _http_error(405, "Subagent cancellation requires an authenticated WebSocket")
+        if self.subagent_manager is None:
+            return _http_error(503, "subagent manager unavailable")
+        payload = _mutation_payload(request)
+        if payload is None:
+            return _http_error(400, "invalid subagent cancellation payload")
+        session_key, task_id = payload.get("session_key"), payload.get("task_id")
+        if not isinstance(session_key, str) or not is_webui_session_key(session_key):
+            return _http_error(400, "invalid session key")
+        if not isinstance(task_id, str) or not task_id.strip():
+            return _http_error(400, "missing task id")
+        try:
+            status = await self.subagent_manager.cancel(task_id, session_key)
+        except SubagentControlError:
+            return _http_error(404, "task unavailable")
+        except (OSError, SubagentSessionError):
+            return _http_error(503, "task history unavailable")
+        return _http_json_response(status.as_dict(), extra_headers=_NO_STORE_HEADERS)
+
+    def _handle_subagent_thread_get(self, request: WsRequest, key: str, task_id: str) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        session_key, decoded_task_id = _decode_api_key(key), _decode_api_key(task_id)
+        if session_key is None or decoded_task_id is None:
+            return _http_error(400, "invalid task key")
+        if not is_webui_session_key(session_key):
+            return _http_error(404, "task unavailable")
+        if self.subagent_manager is None:
+            return _http_error(503, "task history unavailable")
+        try:
+            status, child = self.subagent_manager.read_session(decoded_task_id, session_key)
+        except SubagentControlError:
+            return _http_error(404, "task unavailable")
+        except (OSError, SubagentSessionError):
+            return _http_error(503, "task history unavailable")
+        scope = self.workspaces.scope_for_session_key(session_key)
+        data = build_session_thread_response(
+            child,
+            active=status.state in {"queued", "running", "stopping"},
+            latency_ms=(int(max(0.0, status.finished_at - status.started_at) * 1000)
+                        if status.finished_at is not None else None),
+            augment_user_media=self.media.augment_transcript_media,
+            augment_assistant_media=self.media.augment_transcript_media,
+            augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(
+                text, workspace_path=scope.project_path,
+            ),
+        )
+        return _http_json_response(data, extra_headers=_NO_STORE_HEADERS)
 
     async def _handle_session_context_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
@@ -1214,7 +1305,7 @@ class GatewayHTTPHandler:
             )
         )
 
-    def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
+    async def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
@@ -1247,6 +1338,10 @@ class GatewayHTTPHandler:
                 elif self.cron_service is not None:
                     self.cron_service.remove_job(job.id)
         draft_deleted = self.workspaces.discard_draft_scope(decoded_key)
+        if self.discard_session is not None:
+            await self.discard_session(decoded_key)
+        elif self.subagent_manager is not None:
+            await self.subagent_manager.cancel_by_session(decoded_key)
         session_deleted = self.session_manager.delete_session(decoded_key)
         transcript_deleted = delete_webui_thread(decoded_key)
         return _http_json_response(

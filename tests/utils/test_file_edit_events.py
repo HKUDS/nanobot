@@ -166,6 +166,35 @@ def test_write_file_start_tracks_snapshot_and_end_emits_exact_diff(tmp_path: Pat
     assert "+extra" in diff_text
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("before", "content", "operation"), [
+    (None, "", "create"),
+    (None, "hello\n", "create"),
+    ("", "hello\n", None),
+])
+async def test_file_creation_is_distinct_from_editing_an_empty_file(
+    tmp_path: Path, before: str | None, content: str, operation: str | None,
+) -> None:
+    target = tmp_path / "new.txt"
+    if before is not None:
+        target.write_text(before, encoding="utf-8")
+    tool = _edit_tool(tmp_path)
+    params = {"path": "new.txt", "old_text": "", "new_text": content}
+    [tracker] = prepare_file_edit_trackers(
+        call_id="call-create", tool_name="edit_file", tool=tool, workspace=tmp_path,
+        params=params,
+    )
+    await tool.execute(**params)
+    assert target.read_text(encoding="utf-8") == content
+    event = build_file_edit_end_event(tracker)
+    assert event.get("operation") == operation
+    assert (event["added"], event["deleted"]) == (int(bool(content)), 0)
+    if content:
+        assert "+hello" in event["diff"]["text"]
+    else:
+        assert "diff" not in event
+
+
 def test_unified_diff_payload_truncates_large_diffs() -> None:
     before = "\n".join(f"old {i}" for i in range(12))
     after = "\n".join(f"new {i}" for i in range(12))

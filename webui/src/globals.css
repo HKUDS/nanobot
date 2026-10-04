@@ -122,6 +122,44 @@
     overflow: hidden;
   }
 
+  #root.visual-viewport {
+    position: fixed;
+    top: var(--app-viewport-top);
+    left: 0;
+    width: 100%;
+    height: var(--app-viewport-height);
+  }
+
+  /* A landscape keyboard can leave less room than the composer needs. Keep
+     navigation reachable and scroll the composer instead of overlapping it. */
+  #root.visual-viewport .workbench-body {
+    min-height: 2.75rem;
+  }
+
+  #root.short-visual-viewport .workbench-composer-footer {
+    max-height: max(0px, calc(var(--app-viewport-height) - 2.75rem));
+    overflow-y: auto;
+  }
+
+  /* Body portals share the viewport owner's short-frame state. A landscape
+     keyboard needs input and results beside each other, not stacked. */
+  @media (min-width: 640px) {
+    body:has(> #root.short-visual-viewport) .session-search-dialog {
+      flex-direction: row;
+    }
+
+    body:has(> #root.short-visual-viewport) .session-search-input {
+      width: 40%;
+      height: auto;
+      border-bottom-width: 0;
+      border-right-width: 1px;
+    }
+
+    body:has(> #root.short-visual-viewport) .session-search-label {
+      @apply sr-only;
+    }
+  }
+
   * {
     scrollbar-color: var(--scrollbar-thumb) transparent;
     scrollbar-width: thin;
@@ -847,6 +885,14 @@
 }
 
 @media (pointer: coarse) {
+  /* Readable form text avoids Safari's focus zoom without disabling the user's
+     pinch zoom. Keep this after utilities so compact desktop overrides cannot
+     shrink shared form fields on touch devices. Larger chat/search text stays
+     on its own typography; this is not a blanket rule for every input. */
+  .touch-text-input {
+    font-size: max(16px, 1rem);
+  }
+
   .thread-message-row,
   .message-block-menu-trigger,
   [data-message-block-menu] {
@@ -858,6 +904,15 @@
   .touch-target {
     min-width: 2.75rem;
     min-height: 2.75rem;
+  }
+
+  .touch-target.preview-tab-close {
+    opacity: 1;
+  }
+
+  /* Touch users cannot hover a sidebar row to discover its actions. */
+  .sidebar-action-trigger {
+    opacity: 1;
   }
 }
 

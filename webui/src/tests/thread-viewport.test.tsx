@@ -1289,6 +1289,22 @@ describe("ThreadViewport", () => {
     }
   });
 
+  it("does not apply the keyboard inset twice when the App shell owns the viewport", () => {
+    const visualViewport = stubVisualViewport({ innerHeight: 800, height: 480 });
+    try {
+      const { container } = render(
+        <div id="root" className="visual-viewport">
+          <ThreadViewport messages={messages} isStreaming={false}
+            composer={<textarea aria-label="Message input" />} />
+        </div>,
+      );
+      act(() => { screen.getByLabelText("Message input").focus(); });
+      expect(container.querySelector(".thread-viewport-frame")).not.toHaveStyle({ bottom: "320px" });
+    } finally {
+      visualViewport.restore();
+    }
+  });
+
   it("keeps the welcome composer above a mobile soft keyboard", async () => {
     const visualViewport = stubVisualViewport({ innerHeight: 800, height: 480 });
     try {
