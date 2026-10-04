@@ -16,7 +16,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import ProviderSpec
+from nanobot.providers.registry import find_by_name
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -96,7 +96,7 @@ async def make_provider(monkeypatch):
         else:
             provider = OpenAICompatProvider(
                 api_key="test", default_model="gpt-5.2",
-                spec=ProviderSpec(name="openai", keywords=(), env_key=""),
+                spec=find_by_name("openai"),
                 api_type="chat_completions" if api == "chat" else "responses",
             )
         provider._client = client
