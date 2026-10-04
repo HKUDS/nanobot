@@ -881,6 +881,19 @@ async def test_team_filtering_resolves_missing_broadcast_team_and_rejects_wrong_
 
 
 @pytest.mark.asyncio
+async def test_thread_context_attempt_cache_is_bounded():
+    channel, fake = _make_channel()
+    channel._thread_context_attempted.update(
+        f"channel:root-{index}" for index in range(channel._THREAD_CONTEXT_CACHE_LIMIT)
+    )
+
+    await channel._with_thread_context("current", channel_id="new-channel", root_id="new-root")
+
+    assert channel._thread_context_attempted == {"new-channel:new-root"}
+    assert fake.get_calls[-1]["path"].startswith("/api/v4/posts/new-root/thread")
+
+
+@pytest.mark.asyncio
 async def test_thread_session_key():
     channel, fake = _make_channel()
     channel._self_id = "bot_id"
