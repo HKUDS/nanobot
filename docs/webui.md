@@ -180,6 +180,29 @@ File previews follow the active topic's access mode. Restricted workspace access
 previews only files under the selected workspace. Full Access can preview files
 outside the workspace when that access mode is allowed by the gateway.
 
+Website links normally open in a new browser tab. Right-click a link (or press
+**Shift+F10** while it is focused) for link actions. On mobile, use the reply's
+**Message actions → View links** menu. **Preview website** appears only when the
+current browser and URL allow credential-isolated embedding; otherwise the menu
+explains the restriction and keeps **Open in browser** and **Copy link** available.
+Sites can still refuse embedding through their own security headers. nanobot
+does not proxy pages or bypass those restrictions; use **Open in browser** instead.
+
+On touch devices with Visual Viewport support, the app follows the visible area
+when the on-screen keyboard opens or pans the page. Navigation and the composer
+stay in view while messages scroll independently. In very short viewports (such
+as landscape with the keyboard open), scroll within the composer to reach its
+controls. If the browser bars and keyboard leave no usable page area, dismiss
+the keyboard or return to portrait. Pinch zoom keeps the existing layout instead of resizing it to the
+magnified area; normal fitting resumes when
+you return to the default zoom. Non-touch desktop and native-host layout remain
+unchanged.
+
+On touch devices, preview tab controls and
+the full-screen image viewer's close button use larger touch areas without
+enlarging the icons. Preview tabs remain horizontally scrollable when space is
+limited.
+
 Open the context indicator beside the composer model badge to see how much of
 the model's context window is in use. The **Recent rounds** chart shows input
 tokens for each logical model round, including tool-call rounds. Hover or focus
@@ -270,6 +293,18 @@ MCP presets, or persisted topics. Topics have short, pronounceable handles such 
 `@luma`; titles are display text rather than addresses. Select a topic
 from the menu, or drag it from the sidebar, to attach its structured reference.
 Typing the same text without selecting it remains plain text.
+
+On touch-primary phones and tablets, **Enter** inserts a newline; tap the send
+arrow to submit. This also applies when a coarse-pointer tablet has a hardware
+keyboard attached. On desktop, **Enter** sends and **Shift+Enter** adds a newline.
+An open slash-command or mention menu takes precedence: Enter selects its item.
+
+While a response is running, the send arrow delivers a ready draft as guidance
+for the active turn; it does not issue a stop command. Other messages already
+waiting in the queue stay there. On desktop, Enter queues guidance and a second
+Enter with an empty input sends that queued message immediately. Queued messages
+also have a **Send now** action. The primary button shows **Stop** when there is
+no sendable draft; clear the draft or use `/stop` to stop instead of sending it.
 
 The agent can inspect an attached topic with `read_session`. It can discover other
 persisted topics with `list_sessions` and send asynchronous messages with

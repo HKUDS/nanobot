@@ -1,3 +1,5 @@
+import { isNativeRuntime } from "@/lib/runtime";
+
 /** Only explicit web URLs belong in the web-link menu; file/session links have other owners. */
 export function parseWebLink(value: string): URL | null {
   if (value.length > 8192 || value.includes("\\")
@@ -21,4 +23,10 @@ export function webPreviewRestriction(
   if (url.origin === pageUrl.origin) return "sameOrigin";
   if (pageUrl.protocol === "https:" && url.protocol === "http:") return "mixedContent";
   return null;
+}
+
+/** Menus and restored preview tabs must agree on the current browser's boundary. */
+export function currentWebPreviewRestriction(url: URL | null) {
+  return url ? webPreviewRestriction(url, new URL(window.location.href), isNativeRuntime(),
+    "credentialless" in HTMLIFrameElement.prototype) : "invalid";
 }

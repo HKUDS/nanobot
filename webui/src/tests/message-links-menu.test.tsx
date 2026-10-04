@@ -1,13 +1,21 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useRef } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { WebLink, WebPreviewContext } from "@/components/WebLink";
 import { useMessageWebLinks } from "@/components/MessageLinksMenu";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 vi.mock("@/lib/clipboard", () => ({ copyTextToClipboard: vi.fn(async () => true) }));
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.mocked(copyTextToClipboard).mockReset().mockResolvedValue(true); });
+const credentialless = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "credentialless");
+beforeEach(() => {
+  Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, value: false });
+});
+afterEach(() => {
+  cleanup(); vi.unstubAllGlobals(); vi.mocked(copyTextToClipboard).mockReset().mockResolvedValue(true);
+  if (credentialless) Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", credentialless);
+  else Reflect.deleteProperty(HTMLIFrameElement.prototype, "credentialless");
+});
 
 function view(content: string, openPreview?: (url: string) => void) {
   return <WebPreviewContext.Provider value={openPreview}>
@@ -72,6 +80,23 @@ describe("message link actions", () => {
     // Resizing may close the modal as focus is returned; either way its trigger stays usable.
     if (!screen.queryByRole("dialog")) fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+  it("keeps mobile users in the link sheet when isolated previews are unsupported", async () => {
+    mobileViewport();
+    Reflect.deleteProperty(HTMLIFrameElement.prototype, "credentialless");
+    const preview = vi.fn();
+    render(view("[Website](https://example.com/demo)", preview));
+    await screen.findByRole("link", { name: /Website/ });
+    const menu = await openLinks();
+    expect(within(menu).queryByRole("button", { name: "Preview website" })).not.toBeInTheDocument();
+    expect(within(menu).getByText(/does not support credential-isolated/)).toBeVisible();
+    const external = within(menu).getByRole("link", { name: "Open in browser" });
+    expect(external).toHaveAttribute("href", "https://example.com/demo");
+    expect(external).toHaveAttribute("rel", "noreferrer noopener");
+    fireEvent.click(within(menu).getByRole("button", { name: "Copy link" }));
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenLastCalledWith("https://example.com/demo"));
+    expect(preview).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBe(menu);
   });
 
   it("keeps user actions outside the bubble and exposes a labelled mobile fork action", async () => {
