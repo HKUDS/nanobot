@@ -367,6 +367,7 @@ async def consume_sse_with_reasoning(
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
+    item_id_to_call_id: dict[str, str] = {}
     tool_call_args_emitted: set[str] = set()
     finish_reason: str | None = None
     usage: LLMUsage | None = None
@@ -390,6 +391,9 @@ async def consume_sse_with_reasoning(
                 call_id = item.get("call_id")
                 if not call_id:
                     continue
+                item_id = item.get("id")
+                if isinstance(item_id, str):
+                    item_id_to_call_id[item_id] = call_id
                 arguments = item.get("arguments")
                 tool_call_buffers[call_id] = {
                     "id": item.get("id") or "fc_0",
@@ -467,7 +471,7 @@ async def consume_sse_with_reasoning(
                 if on_reasoning_delta:
                     await on_reasoning_delta(text)
         elif event_type == "response.function_call_arguments.delta":
-            call_id = event.get("call_id")
+            call_id = event.get("call_id") or item_id_to_call_id.get(event.get("item_id") or "")
             if call_id and call_id in tool_call_buffers:
                 delta = event.get("delta") or ""
                 current = tool_call_buffers[call_id].get("arguments")
@@ -481,7 +485,7 @@ async def consume_sse_with_reasoning(
                         "arguments_delta": str(delta),
                     })
         elif event_type == "response.function_call_arguments.done":
-            call_id = event.get("call_id")
+            call_id = event.get("call_id") or item_id_to_call_id.get(event.get("item_id") or "")
             if call_id and call_id in tool_call_buffers:
                 arguments = event.get("arguments")
                 tool_call_buffers[call_id]["arguments"] = arguments
@@ -683,6 +687,7 @@ async def consume_sdk_stream(
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
+    item_id_to_call_id: dict[str, str] = {}
     tool_call_args_emitted: set[str] = set()
     finish_reason: str | None = None
     usage: LLMUsage | None = None
@@ -704,6 +709,9 @@ async def consume_sdk_stream(
                 call_id = getattr(item, "call_id", None)
                 if not call_id:
                     continue
+                item_id = getattr(item, "id", None)
+                if isinstance(item_id, str):
+                    item_id_to_call_id[item_id] = call_id
                 arguments = getattr(item, "arguments", None)
                 tool_call_buffers[call_id] = {
                     "id": getattr(item, "id", None) or "fc_0",
@@ -762,7 +770,9 @@ async def consume_sdk_stream(
                 if on_content_delta and remaining_text:
                     await on_content_delta(remaining_text)
         elif event_type == "response.function_call_arguments.delta":
-            call_id = getattr(event, "call_id", None)
+            call_id = getattr(event, "call_id", None) or item_id_to_call_id.get(
+                getattr(event, "item_id", None) or "",
+            )
             if call_id and call_id in tool_call_buffers:
                 delta = getattr(event, "delta", "") or ""
                 current = tool_call_buffers[call_id].get("arguments")
@@ -776,7 +786,9 @@ async def consume_sdk_stream(
                         "arguments_delta": str(delta),
                     })
         elif event_type == "response.function_call_arguments.done":
-            call_id = getattr(event, "call_id", None)
+            call_id = getattr(event, "call_id", None) or item_id_to_call_id.get(
+                getattr(event, "item_id", None) or "",
+            )
             if call_id and call_id in tool_call_buffers:
                 arguments = getattr(event, "arguments", None)
                 tool_call_buffers[call_id]["arguments"] = arguments
