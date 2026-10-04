@@ -204,6 +204,41 @@ def _strip_md(s: str) -> str:
     return s.strip()
 
 
+_FENCE_OPEN_RE = re.compile(r'^[ \t]*(`{3,}|~{3,})(.*)$')
+_INLINE_FENCE_RE = re.compile(r'```(?:[^\n]*\n)?([\s\S]*?)```')
+
+
+def _replace_fenced_code(text: str, replace: Callable[[str], str]) -> str:
+    """Replace fenced code blocks with ``replace(code)``.
+
+    A block opens on a ``` or ~~~ line and closes on a line holding only a run
+    of the same character that is at least as long, so tilde fences work and a
+    ```` fence can show a ``` example. What remains (one-line ```code``` and
+    unclosed fences) keeps the previous regex handling.
+    """
+    lines = text.split('\n')
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        match = _FENCE_OPEN_RE.match(lines[i])
+        if match and not (match.group(1)[0] == '`' and '`' in match.group(2)):
+            fence = match.group(1)
+            for j in range(i + 1, len(lines)):
+                closing = lines[j].strip()
+                if len(closing) >= len(fence) and closing == fence[0] * len(closing):
+                    out.append(replace(''.join(line + '\n' for line in lines[i + 1:j])))
+                    i = j + 1
+                    break
+            else:
+                out.append(lines[i])
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    text = '\n'.join(out)
+    return _INLINE_FENCE_RE.sub(lambda m: replace(m.group(1)), text)
+
+
 def _strip_md_block(text: str) -> str:
     """Strip block-level and inline markdown for readable plain-text preview.
 
@@ -211,7 +246,7 @@ def _strip_md_block(text: str) -> str:
     markdown syntax while the response is still being generated.
     """
     # Code blocks -> just the code
-    text = re.sub(r'```(?:[^\n]*\n)?([\s\S]*?)```', r'\1', text)
+    text = _replace_fenced_code(text, lambda code: code)
     # Headers -> plain text
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
     # Blockquotes
@@ -273,11 +308,11 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
-    def save_code_block(m: re.Match[str]) -> str:
-        code_blocks.append(m.group(1))
+    def save_code_block(code: str) -> str:
+        code_blocks.append(code)
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
-    text = re.sub(r'```(?:[^\n]*\n)?([\s\S]*?)```', save_code_block, text)
+    text = _replace_fenced_code(text, save_code_block)
 
     # 1.5. Convert markdown tables to box-drawing (reuse code_block placeholders)
     lines = text.split('\n')
