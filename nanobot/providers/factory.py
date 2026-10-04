@@ -198,6 +198,15 @@ def _make_provider_core(
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
         provider = GitHubCopilotProvider(default_model=model, provider_name=provider_name)
+    elif backend == "google_vertex_ai":
+        from nanobot.providers.vertex_ai_provider import VertexAIProvider
+
+        provider = VertexAIProvider(
+            default_model=model,
+            project=getattr(p, "project", None) if p else None,
+            region=getattr(p, "region", None) if p else None,
+            provider_name=provider_name,
+        )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 

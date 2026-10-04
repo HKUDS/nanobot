@@ -238,6 +238,13 @@ class BedrockProviderConfig(ProviderConfig):
     profile: str | None = None  # Optional AWS shared config profile
 
 
+class VertexAIProviderConfig(ProviderConfig):
+    """Google Vertex AI provider configuration for Claude models."""
+
+    project: str | None = None
+    region: str | None = None
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers.
 
@@ -250,6 +257,7 @@ class ProvidersConfig(Base):
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     bedrock: BedrockProviderConfig = Field(default_factory=BedrockProviderConfig)  # AWS Bedrock Converse
+    google_vertex_ai: VertexAIProviderConfig = Field(default_factory=VertexAIProviderConfig)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)

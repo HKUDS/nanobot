@@ -51,7 +51,7 @@ class ProviderSpec:
 
     # which provider implementation to use
     # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "xai_grok"
-    # | "github_copilot" | "bedrock"
+    # | "github_copilot" | "bedrock" | "google_vertex_ai"
     backend: str = "openai_compat"
 
     # extra env vars / request headers supplied by the provider integration.
@@ -185,6 +185,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="AWS Bedrock",
         backend="bedrock",
         is_direct=True,
+    ),
+    # === Google Vertex AI (Claude via Anthropic SDK) =======================
+    ProviderSpec(
+        name="google_vertex_ai",
+        keywords=("google_vertex_ai", "vertex_ai", "vertex"),
+        env_key="",
+        display_name="Google Vertex AI",
+        backend="google_vertex_ai",
+        is_direct=True,
+        supports_prompt_caching=True,
     ),
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
