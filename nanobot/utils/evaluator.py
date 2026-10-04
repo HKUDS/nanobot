@@ -96,7 +96,7 @@ async def evaluate_response(
     """
 
     try:
-        llm_response = await provider.chat_with_retry(
+        llm_response = await provider.chat_stream_with_retry(
             messages=[
                 {"role": "system", "content": evaluator_prompt},
                 {"role": "user", "content": render_template(
@@ -129,9 +129,15 @@ async def evaluate_response(
 
         args = llm_response.tool_calls[0].arguments
         should_notify = args.get("should_notify", default_notify)
+        if not isinstance(should_notify, bool):
+            logger.warning(
+                "evaluate_response: non-boolean should_notify, defaulting to notify={}",
+                default_notify,
+            )
+            return default_notify
         reason = args.get("reason", "")
         logger.info("evaluate_response: should_notify={}, reason={}", should_notify, reason)
-        return bool(should_notify)
+        return should_notify
 
     except Exception:
         logger.exception("evaluate_response failed, defaulting to notify={}", default_notify)

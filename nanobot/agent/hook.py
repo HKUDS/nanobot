@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
@@ -180,7 +181,9 @@ class CompositeHook(AgentHook):
             try:
                 await getattr(h, method_name)(*args, **kwargs)
             except Exception:
-                logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+                logger.opt(exception=tool_log_content_allowed()).error(
+                    "AgentHook.{} error in {}", method_name, type(h).__name__,
+                )
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)

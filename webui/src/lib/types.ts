@@ -1,5 +1,5 @@
-import type { ContextCompaction, NotificationEvent, RecoveryState } from "../../../packages/client-events/notifications";
-export type { RecoveryState, RecoveryStatus } from "../../../packages/client-events/notifications";
+import type { ContextCompaction, NotificationEvent, RecoveryState, RetryStatus as WireRetryStatus } from "../../../packages/client-events/notifications";
+export type { RecoveryState } from "../../../packages/client-events/notifications";
 
 type Role = "user" | "assistant" | "tool" | "system";
 
@@ -47,7 +47,7 @@ export interface UIMediaAttachment {
 
 interface UIMessageSource { kind: "cron" | "local_trigger" | "trigger" | string; label?: string; }
 
-export interface TurnUsage {
+interface TurnUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
@@ -64,10 +64,29 @@ export interface TurnUsage {
 
 export type RoundUsage = TurnUsage;
 
+export interface ResponseSource {
+  provider: string;
+  model: string;
+  preset: string;
+  fallback?: boolean;
+}
+
+interface UITraceDetail {
+  ref: string;
+  bytes: number;
+  traceCount: number;
+}
+
+export interface RetryStatus extends WireRetryStatus {
+  next_retry_at?: number;
+  turn_id?: string;
+}
 export interface UIMessage {
   id: string;
   role: Role;
   content: string;
+  /** Invocation-time snapshots, never resolved from today's model presets. */
+  responseSources?: ResponseSource[];
   kind?: MessageKind;
   isStreaming?: boolean;
   createdAt: number;
@@ -77,6 +96,8 @@ export interface UIMessage {
   /** Structured tool events behind trace rows. Kept so activity cards can
    * distinguish running, completed, and failed tool phases. */
   toolEvents?: ToolProgressEvent[];
+  /** Oversized persisted trace content that can be fetched when activity is expanded. */
+  traceDetail?: UITraceDetail;
   /** Activity rows: explicit file edits emitted by edit tools. */
   fileEdits?: UIFileEdit[];
   /** Activity rows created during the same agent phase share one collapsible block. */
@@ -345,8 +366,6 @@ export interface ToolProgressEvent {
   name?: string;
   arguments?: unknown;
   result?: unknown;
-  /** Structured data kept out of model-facing tool-result text. */
-  data?: unknown;
   error?: unknown;
   files?: unknown[];
   embeds?: unknown[];
@@ -545,6 +564,7 @@ export interface ProviderModelsPayload {
     | "custom"
     | "unsupported";
   source?: "remote" | "cache" | "stale" | "fallback";
+  error_kind?: "auth_required" | "unavailable" | null;
   models: ProviderModelInfo[];
   model_count: number;
   message?: string | null;
@@ -557,7 +577,8 @@ export interface ProviderOAuthAuthorizationRequired {
   flow_id: string;
   authorization_url: string;
   expires_in: number;
-  completion_input?: "authorization_code" | "callback_url";
+  completion_input?: "authorization_code" | "callback_url" | "device_code";
+  user_code?: string;
 }
 
 export interface ProviderOAuthPending {
@@ -569,7 +590,11 @@ export interface ProviderOAuthPending {
 export type ProviderOAuthLoginResult = SettingsPayload | ProviderOAuthAuthorizationRequired;
 export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPending;
 
+export type RuntimeConfigValue = string | number | boolean | string[] | null;
+
+
 export interface SettingsPayload {
+  runtime_config?: Record<string, RuntimeConfigValue>;
   surface?: RuntimeSurface;
   runtime_surface?: RuntimeSurface;
   runtime_capabilities?: RuntimeCapabilities;
@@ -817,6 +842,12 @@ export interface SettingsPayload {
       timed_requests: number;
       duration_ms: number;
     }>;
+    model_days_30d?: Array<{
+      date: string;
+      provider: string;
+      model: string;
+      total_tokens: number;
+    }>;
     updated_at?: string | null;
   };
   advanced: {
@@ -972,8 +1003,9 @@ export interface NanobotFeatureInfo {
   configured_fields?: string[];
   setup?: ChannelSetupContract;
   instances?: NanobotChannelInstanceInfo[];
-  installed: boolean;
-  ready: boolean;
+    installed: boolean;
+    requires_dependencies?: boolean;
+    ready: boolean;
   status: "enabled" | "missing_dependency" | "not_enabled" | string;
   install_supported: boolean;
   requires_restart: boolean;
@@ -986,11 +1018,18 @@ export interface ChannelSetupContractField {
   choices: string[];
   required: boolean;
   default_value?: string;
+  inheritable?: boolean;
 }
 
 export interface ChannelSetupContract {
   fields: ChannelSetupContractField[];
+  requirements?: ChannelSetupContractRequirement[];
   official_url?: string;
+  verifies_connection?: boolean;
+}
+
+interface ChannelSetupContractRequirement {
+  alternatives: string[][];
 }
 
 export interface NanobotChannelInstanceInfo {
@@ -1182,11 +1221,8 @@ export interface ChannelConnectPayload {
   status: ChannelConnectStatus;
   message?: string;
   qr_url?: string;
-  domain?: string;
   interval_ms?: number;
   expires_at_ms?: number;
-  app_id?: string;
-  account?: string;
   nanobot_features?: NanobotFeaturesPayload;
 }
 
@@ -1356,6 +1392,8 @@ export type InboundEvent =
       media?: string[];
       media_urls?: Array<{ url: string; name?: string }>;
       tool_events?: ToolProgressEvent[];
+      /** Oversized persisted activity detail, fetched only when the trace is expanded. */
+      trace_detail?: UITraceDetail;
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress" | "reasoning";
@@ -1363,6 +1401,7 @@ export type InboundEvent =
       latency_ms?: number;
       /** Lightweight provenance for proactive assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
@@ -1379,6 +1418,7 @@ export type InboundEvent =
       stream_id?: string;
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
@@ -1387,6 +1427,7 @@ export type InboundEvent =
       text?: string;
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
+      response_sources?: ResponseSource[];
       /** This answer segment ended, but the active agent turn will continue. */
       resuming?: boolean;
       /** The next answer segment continues this same assistant message. */
@@ -1402,6 +1443,8 @@ export type InboundEvent =
       event: "reasoning_end";
       chat_id: string;
       stream_id?: string;
+      /** Legacy persisted transcripts may carry the final reasoning text here. */
+      text?: string;
     } & InboundTurnMetadata)
   | {
       event: "runtime_model_updated";
@@ -1414,6 +1457,7 @@ export type InboundEvent =
       model_name: string;
       model_preset?: string | null;
       fallback?: boolean;
+      reauth_provider?: string;
     }
   | ({
       event: "turn_end";
@@ -1424,6 +1468,11 @@ export type InboundEvent =
       context_window_tokens?: number;
       /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
       goal_state?: GoalStateWsPayload;
+      outcome?: "completed" | "failed" | "cancelled" | "interrupted";
+      failure_kind?: string;
+      failure_error_kind?: string;
+      failure_attempts?: number;
+      failure_message?: string;
     } & InboundTurnMetadata)
   | ({
       event: "goal_status";
@@ -1476,6 +1525,25 @@ export type InboundEvent =
       turn_id?: string;
     };
 
+type ThreadProjectionEventName =
+  | "user_message"
+  | "message"
+  | "file_edit"
+  | "delta"
+  | "stream_end"
+  | "reasoning_delta"
+  | "reasoning_end"
+  | "context_compaction"
+  | "turn_end";
+
+export type ThreadProjectionEvent = Extract<
+  InboundEvent,
+  { event: ThreadProjectionEventName }
+> & {
+  projection_id?: string;
+  created_at_ms?: number;
+};
+
 /** Base64-encoded file attached to an outbound ``message`` envelope.
  *
  * ``data_url`` must use a server-whitelisted image, video, or document MIME
@@ -1512,17 +1580,20 @@ export interface OutboundMcpPresetMention {
 interface WebuiThreadPagePayload {
   before_cursor?: string | null;
   has_more_before?: boolean;
-  loaded_message_count?: number;
-  total_known_message_count?: number;
   user_message_offset?: number;
+  loaded_event_count?: number;
 }
 
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;
-  messages: UIMessage[];
-  fork_boundary_message_count?: number;
+  /** Cheap server revision used for application-managed conditional revalidation. */
+  revision?: string;
+  /** Canonical transcript events projected by the same reducer as live events. */
+  events: ThreadProjectionEvent[];
+  projection: "events";
+  fork_boundary_event_index?: number;
   /** Turn ids backed by an explicit persisted ``turn_end`` event. */
   completed_turn_ids?: string[];
   has_pending_tool_calls?: boolean;
@@ -1532,15 +1603,27 @@ export interface WebuiThreadPersistedPayload {
   workspace_scope?: WorkspaceScopePayload;
 }
 
-export interface FilePreviewPayload {
+export interface WebuiThreadTraceDetailPayload {
+  message_id: string;
+  events: ThreadProjectionEvent[];
+}
+
+export interface FileReferenceMetadata {
+  path: string;
+  relative_path: string | null;
+}
+
+interface FilePreviewMetadata {
   path: string;
   display_path: string;
   project_path: string;
-  language: string;
-  content: string;
   size: number;
-  truncated: boolean;
 }
+
+export type FilePreviewPayload = FilePreviewMetadata & (
+  | { kind?: "text"; language: string; content: string; truncated: boolean }
+  | { kind: "image"; mime_type: string; data_url: string }
+);
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
@@ -1566,6 +1649,7 @@ export type Outbound =
       mcp_presets?: OutboundMcpPresetMention[];
       session_mentions?: SessionMention[];
       quoted_context?: string;
+      intent?: "create_automation";
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the

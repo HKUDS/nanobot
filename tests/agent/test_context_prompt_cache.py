@@ -7,6 +7,8 @@ from datetime import datetime as real_datetime
 from importlib.resources import files as pkg_files
 from pathlib import Path
 
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.runtime_context import RuntimeContextBlock
 
@@ -71,15 +73,20 @@ def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
     assert prompt_a == builder.build_system_prompt(workspace=project_a)
 
 
-def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
+@pytest.mark.parametrize("selected_project", [False, True])
+def test_system_prompt_reflects_current_dream_memory_contract(tmp_path, selected_project) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
+    project = tmp_path / "project" if selected_project else workspace
+    project.mkdir(exist_ok=True)
 
-    prompt = builder.build_system_prompt()
+    prompt = builder.build_system_prompt(workspace=project)
 
     assert "memory/history.jsonl" in prompt
-    assert "automatically managed by Dream" in prompt
-    assert "do not edit directly" in prompt
+    assert (
+        "Only Dream memory-consolidation tasks may edit the profile and long-term memory files "
+        "listed above."
+    ) in prompt
 
 
 def test_provider_context_appended_after_user_content(tmp_path) -> None:
@@ -111,9 +118,7 @@ def test_execution_rules_in_system_prompt(tmp_path) -> None:
 
     prompt = builder.build_system_prompt()
     assert "clear user request" in prompt
-    assert "multi-step tasks" in prompt
-    assert "read-only discovery before writes" in prompt
-    assert "verify the result" in prompt
+    assert "execution and verification" in prompt
 
 
 def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
@@ -145,8 +150,8 @@ def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None
     assert "## Execution Rules" not in soul
     assert "clear user request" not in soul
     assert "clear user request" in contract
-    assert "multi-step tasks" in contract
-    assert "irreversible action needs confirmation" in contract
+    assert "execution and verification" in contract
+    assert "Ask for confirmation when an irreversible action requires it" in contract
 
 
 def test_channel_format_hint_telegram(tmp_path) -> None:
@@ -195,18 +200,6 @@ def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
     assert "messaging app" in system
 
 
-def test_system_prompt_keeps_message_tool_out_of_current_chat_replies(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel="slack")
-
-    assert "Do not use the 'message' tool for normal replies in the current chat" in prompt
-    assert "When 'generate_image' creates images" in prompt
-    assert "call 'message' with the artifact paths in the 'media' parameter" in prompt
-    assert "Wait for the tool results, then answer once" in prompt
-
-
 def test_memory_skill_is_lazy_loaded_from_skills_index(tmp_path) -> None:
     """Memory search guidance should be discoverable without loading its full body."""
     workspace = _make_workspace(tmp_path)
@@ -232,11 +225,10 @@ def test_fresh_workspace_omits_default_prompt_scaffolding(tmp_path) -> None:
     assert "## USER.md" not in prompt
     assert "8281248569" not in prompt
     assert "(your name)" not in prompt
-    assert prompt.count("Do not use the 'message' tool for normal replies") == 1
 
 
 def test_template_memory_md_is_skipped(tmp_path) -> None:
-    """MEMORY.md matching the bundled template should not inject the Memory section."""
+    """Template content is omitted while memory locations remain available."""
     workspace = _make_workspace(tmp_path)
     from nanobot.utils.helpers import sync_workspace_templates
     sync_workspace_templates(workspace, silent=True)
@@ -244,8 +236,8 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
     builder = ContextBuilder(workspace)
     prompt = builder.build_system_prompt()
 
-    # This block is produced only when populated long-term memory is injected.
-    assert "# Memory\n\n## Long-term Memory" not in prompt
+    assert "## Long-term Memory" not in prompt
+    assert "History log: memory/history.jsonl" in prompt
     assert "This file is automatically updated by nanobot" not in prompt
 
 

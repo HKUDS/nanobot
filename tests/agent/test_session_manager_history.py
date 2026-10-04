@@ -157,7 +157,7 @@ def test_orphan_trim_with_last_archived():
     assert all(m.get("role") != "tool" or m["tool_call_id"].startswith("new_") for m in history)
 
 
-def test_get_history_replays_recent_messages_after_full_archive():
+def test_get_history_does_not_replay_messages_after_full_archive():
     session = Session(key="test:fully-archived")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"u{i}"})
@@ -166,19 +166,41 @@ def test_get_history_replays_recent_messages_after_full_archive():
 
     history = session.get_history(max_messages=100)
 
-    assert [message["content"] for message in history] == [
-        "u6",
-        "a6",
-        "u7",
-        "a7",
-        "u8",
-        "a8",
-        "u9",
-        "a9",
+    assert history == []
+
+
+def test_get_history_omits_persisted_summary_marker_after_reload(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("cli:compacted")
+    session.add_message("user", "finish the task")
+    session.add_message("assistant", "done")
+    session.commit_summary_checkpoint("The task is complete.")
+    manager.save(session)
+    manager.invalidate(session.key)
+
+    reloaded = manager.get_or_create(session.key)
+    assert reloaded.messages[-1]["content"] == SUMMARY_CONTINUATION_TEXT
+    assert reloaded.messages[-1][HIDDEN_HISTORY_META] is True
+    assert reloaded.get_history() == []
+
+    reloaded.add_message("user", "hi")
+    assert reloaded.get_history() == [{"role": "user", "content": "hi"}]
+
+
+def test_get_history_keeps_real_user_continuation_and_hidden_subagent_result():
+    session = Session(key="cli:followups")
+    session.add_message("user", SUMMARY_CONTINUATION_TEXT)
+    session.add_message(
+        "user", "Subagent finished the requested check.",
+        **{HIDDEN_HISTORY_META: {"kind": "subagent_result"}},
+    )
+
+    assert [message["content"] for message in session.get_history()] == [
+        SUMMARY_CONTINUATION_TEXT, "Subagent finished the requested check.",
     ]
 
 
-def test_get_history_extends_archived_replay_to_preceding_user():
+def test_get_history_does_not_restore_archived_user_turn():
     session = Session(key="test:archived-tool-turn")
     session.messages.extend(
         [
@@ -195,12 +217,11 @@ def test_get_history_extends_archived_replay_to_preceding_user():
 
     history = session.get_history(max_messages=100)
 
-    assert history[0]["content"] == "run tools"
-    assert history[-1]["content"] == "done"
-    _assert_no_orphans(history)
+    assert history == []
+    assert len(session.messages) > 8
 
 
-def test_archived_tool_turn_can_extend_past_message_cap():
+def test_archived_tool_turn_stays_out_of_replay():
     session = Session(key="test:long-archived-tool-turn")
     session.messages.extend(
         [
@@ -216,10 +237,8 @@ def test_archived_tool_turn_can_extend_past_message_cap():
 
     history = session.get_history(max_messages=120)
 
-    assert len(history) > 120
-    assert history[0]["content"] == "run many tools"
-    assert history[-1]["content"] == "done"
-    _assert_no_orphans(history)
+    assert history == []
+    assert len(session.messages) > 8
 
 
 # --- Edge: no tool messages at all ---

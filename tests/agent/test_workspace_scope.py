@@ -315,6 +315,37 @@ async def test_exec_tool_uses_scope_project_as_default_cwd(
 
 
 @pytest.mark.asyncio
+async def test_exec_tool_resolves_relative_working_dir_from_scope_project(
+    tmp_path: Path,
+    cmd_python: str,
+) -> None:
+    project = tmp_path / "project"
+    subdir = project / "subdir"
+    subdir.mkdir(parents=True)
+
+    tool = ExecTool(working_dir=str(tmp_path), restrict_to_workspace=False, timeout=5)
+    scope = validate_workspace_scope_payload(
+        {"project_path": str(project), "access_mode": "full"},
+        default_workspace=tmp_path,
+        default_restrict_to_workspace=False,
+    )
+    token = bind_workspace_scope(scope)
+    try:
+        result = await tool.execute(
+            command=(
+                f'{cmd_python} -c "from pathlib import Path; '
+                "print(Path.cwd())\""
+            ),
+            working_dir="subdir",
+        )
+    finally:
+        reset_workspace_scope(token)
+
+    assert "Exit code: 0" in result
+    assert str(subdir.resolve()) in result
+
+
+@pytest.mark.asyncio
 async def test_exec_full_scope_allows_explicit_cwd_outside_project(
     tmp_path: Path,
     cmd_python: str,

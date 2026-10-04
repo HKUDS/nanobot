@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from loguru import logger
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
@@ -20,6 +21,7 @@ from nanobot.agent.tools.exec_session import (
     ExecSessionTool,
     ListExecSessionsTool,
     _BoundedOutputBuffer,
+    _ExecSession,
     _SessionPoll,
     _truncate_output,
 )
@@ -149,6 +151,32 @@ def test_bounded_output_buffer_keeps_head_tail_and_exact_drop_count():
     assert buffer.retained_chars == 10
     assert buffer.drain() == ("01234BCDEF", 6)
     assert buffer.retained_chars == 0
+
+
+async def test_exec_session_preserves_utf8_across_stdout_and_stderr_chunks():
+    stdout = asyncio.StreamReader()
+    stderr = asyncio.StreamReader()
+    stdout_bytes = b"a" * 4095 + "你好🙂".encode() + b"\xe2\x82"
+    stderr_bytes = b"b" * 4094 + "🙂é".encode() + b"\xff"
+    stdout.feed_data(stdout_bytes[:4096])
+    stderr.feed_data(stderr_bytes[:4096])
+    session = _ExecSession(
+        session_id="utf8-output",
+        process=SimpleNamespace(stdout=stdout, stderr=stderr),
+        command="test",
+        cwd=".",
+        timeout=None,
+    )
+
+    await asyncio.sleep(0)
+    stdout.feed_data(stdout_bytes[4096:])
+    stderr.feed_data(stderr_bytes[4096:])
+    stdout.feed_eof()
+    stderr.feed_eof()
+    await asyncio.gather(session._stdout_task, session._stderr_task)
+
+    assert session._stdout.drain() == ("a" * 4095 + "你好🙂\ufffd", 0)
+    assert session._stderr.drain() == ("b" * 4094 + "🙂é\ufffd", 0)
 
 
 def test_exec_session_bounds_unpolled_stdout_and_stderr(tmp_path):
@@ -1021,3 +1049,137 @@ def test_agent_loop_shutdown_preserves_single_cleanup_error():
         loop._exec_session_manager.close_all.assert_awaited_once()
 
     asyncio.run(run())
+
+
+async def test_exec_session_shared_kill_survives_cancelled_caller(monkeypatch):
+    process = SimpleNamespace(stdout=None, stderr=None, returncode=None)
+    session = _ExecSession(
+        session_id="shared-kill", process=process, command="test", cwd=".",
+        timeout=None, process_tree=True,
+    )
+    kill_started = asyncio.Event()
+    release_kill = asyncio.Event()
+    second_started = asyncio.Event()
+
+    async def kill_process_tree(target):
+        assert target is process
+        kill_started.set()
+        await release_kill.wait()
+        process.returncode = -9
+
+    kill_tree = AsyncMock(side_effect=kill_process_tree)
+    monkeypatch.setattr(ExecTool, "_kill_process_tree", kill_tree)
+
+    async def second_caller():
+        second_started.set()
+        await session.kill()
+
+    first = asyncio.create_task(session.kill())
+    second = None
+    try:
+        await asyncio.wait_for(kill_started.wait(), timeout=2)
+        second = asyncio.create_task(second_caller())
+        await asyncio.wait_for(second_started.wait(), timeout=2)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert process.returncode is None
+        assert not second.done()
+        kill_tree.assert_awaited_once_with(process)
+        release_kill.set()
+        await asyncio.wait_for(second, timeout=2)
+        assert process.returncode == -9
+        kill_tree.assert_awaited_once_with(process)
+    finally:
+        release_kill.set()
+        await asyncio.gather(first, *([second] if second is not None else []), return_exceptions=True)
+        await asyncio.gather(session._stdout_task, session._stderr_task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("log_content", [True, False])
+async def test_exec_session_failed_kill_can_be_retried(monkeypatch, log_content):
+    process = SimpleNamespace(stdout=None, stderr=None, returncode=None)
+    session = _ExecSession(
+        session_id="retry-kill", process=process, command="test", cwd=".",
+        timeout=None, process_tree=True,
+    )
+    attempts = 0
+
+    async def kill_process_tree(target):
+        nonlocal attempts
+        assert target is process
+        attempts += 1
+        if attempts == 1:
+            raise OSError("temporary process-tree cleanup failure")
+        process.returncode = -9
+
+    monkeypatch.setattr(ExecTool, "_kill_process_tree", kill_process_tree)
+    records = []
+    sink = logger.add(lambda message: records.append(message.record), format="{message}")
+    token = bind_request_context(RequestContext(
+        channel="websocket", chat_id="test", log_content=log_content,
+    ))
+    try:
+        with pytest.raises(OSError, match="temporary process-tree cleanup failure"):
+            await session.kill()
+        assert process.returncode is None
+        await session.kill()
+        assert process.returncode == -9
+        assert attempts == 2
+        assert len(records) == 1
+        assert (records[0]["exception"] is not None) is log_content
+        assert "temporary process-tree cleanup failure" not in records[0]["message"]
+    finally:
+        reset_request_context(token)
+        logger.remove(sink)
+        await asyncio.gather(session._stdout_task, session._stderr_task, return_exceptions=True)
+
+
+async def test_exec_session_deadline_during_explicit_kill_is_not_timeout(monkeypatch):
+    exited = asyncio.Event()
+    process = SimpleNamespace(stdout=None, stderr=None, returncode=None, wait=exited.wait)
+    session = _ExecSession(
+        session_id="explicit-kill", process=process, command="test", cwd=".",
+        timeout=None, process_tree=True,
+    )
+    kill_started = asyncio.Event()
+    release_kill = asyncio.Event()
+    watcher_joined = asyncio.Event()
+
+    async def kill_process_tree(target):
+        assert target is process
+        kill_started.set()
+        await release_kill.wait()
+        process.returncode = -9
+        exited.set()
+
+    kill_tree = AsyncMock(side_effect=kill_process_tree)
+    monkeypatch.setattr(ExecTool, "_kill_process_tree", kill_tree)
+    explicit_kill = asyncio.create_task(session.kill())
+    watcher = None
+    try:
+        await asyncio.wait_for(kill_started.wait(), timeout=2)
+        original_kill = session.kill
+
+        async def join_existing_kill():
+            watcher_joined.set()
+            await original_kill()
+
+        monkeypatch.setattr(session, "kill", join_existing_kill)
+        session.deadline = time.monotonic() - 1
+        watcher = asyncio.create_task(session._watch_timeout())
+        await asyncio.wait_for(watcher_joined.wait(), timeout=2)
+        assert not session._timed_out
+        assert not watcher.done()
+        kill_tree.assert_awaited_once_with(process)
+        release_kill.set()
+        await asyncio.wait_for(asyncio.gather(explicit_kill, watcher), timeout=2)
+        assert process.returncode == -9
+        assert not session._timed_out
+        kill_tree.assert_awaited_once_with(process)
+    finally:
+        release_kill.set()
+        await asyncio.gather(
+            explicit_kill, *([watcher] if watcher is not None else []), return_exceptions=True,
+        )
+        await asyncio.gather(session._stdout_task, session._stderr_task, return_exceptions=True)

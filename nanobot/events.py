@@ -14,14 +14,48 @@ class AgentEvent:
 
 
 @dataclass(frozen=True)
+class ResponseSource:
+    """Display-safe identity captured at the actual provider invocation."""
+
+    provider: str
+    model: str
+    preset: str
+    fallback: bool = False
+
+
+@dataclass(frozen=True)
+class ResponseSourceEvent(AgentEvent):
+    """Set the source of subsequent answer text in this operation only."""
+
+    source: ResponseSource | None
+    # Completed provider text authorizes attribution of a non-streamed reply;
+    # synthetic runner/command messages must not inherit the last model's name.
+    content: str | None = None
+
+
+@dataclass(frozen=True)
 class ContextCompactionEvent(AgentEvent):
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
+    # Request a chat notice (e.g. /compact), not event delivery or persistence.
+    # Interactive clients still consume every phase when this is false.
+    notify: bool = False
 
 
 @dataclass(frozen=True)
 class RetryWaitEvent(AgentEvent):
     content: str = ""
+
+
+@dataclass(frozen=True)
+class RetryStatusEvent(AgentEvent):
+    """Sanitized retry lifecycle for one model request chain."""
+
+    state: Literal["waiting", "recovered", "cleared", "exhausted"]
+    attempt: int
+    max_attempts: int | None
+    error_kind: str
+    next_retry_at: float | None = None
 
 
 @dataclass(frozen=True)

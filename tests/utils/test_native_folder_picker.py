@@ -110,3 +110,51 @@ async def test_pick_native_folder_wraps_process_start_failure(tmp_path, monkeypa
 
     with pytest.raises(picker.NativeFolderPickerError, match="failed to start"):
         await picker.pick_native_folder()
+
+
+@pytest.mark.parametrize("result", ["file", "directory", "cancel"])
+async def test_pick_native_file_returns_only_existing_file_path(tmp_path, monkeypatch, result):
+    selected = tmp_path / "ssh-config"
+    selected.write_text("must-not-be-read-or-returned")
+    output = str(selected if result == "file" else tmp_path)
+    command = _picker_command(tmp_path, "raise SystemExit(1)" if result == "cancel" else f"print({output!r})")
+    monkeypatch.setattr(picker, "_picker_command", lambda kind: command)
+    if result == "directory":
+        with pytest.raises(picker.NativeFolderPickerError, match="invalid file"):
+            await picker.pick_native_file()
+    else:
+        assert await picker.pick_native_file() == (str(selected) if result == "file" else None)
+
+
+@pytest.mark.parametrize("platform,marker", [
+    ("darwin", "choose file"), ("win32", "OpenFileDialog"), ("linux", "--file-selection"),
+])
+def test_file_picker_uses_platform_file_dialog(monkeypatch, platform, marker):
+    monkeypatch.setattr(picker.sys, "platform", platform)
+    monkeypatch.setattr(picker.shutil, "which", lambda executable: executable)
+    monkeypatch.setenv("DISPLAY", ":test")
+    command = picker._picker_command("file")
+    assert command is not None
+    assert marker in " ".join(command.argv)
+    assert "--directory" not in command.argv
+
+
+def test_file_picker_is_unavailable_on_headless_linux(monkeypatch):
+    monkeypatch.setattr(picker.sys, "platform", "linux")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    assert picker._picker_command("file") is None
+
+
+async def test_file_picker_cancellation_reaps_process(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    process = MagicMock(returncode=None)
+    process.communicate = AsyncMock(side_effect=asyncio.CancelledError)
+    process.wait = AsyncMock(return_value=0)
+    monkeypatch.setattr(picker, "_picker_command", lambda kind: picker._PickerCommand(("picker",), frozenset()))
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
+    with pytest.raises(asyncio.CancelledError):
+        await picker.pick_native_file()
+    process.terminate.assert_called_once()

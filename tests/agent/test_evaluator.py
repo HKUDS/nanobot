@@ -96,6 +96,25 @@ async def test_should_notify_false() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["false", "true", 0, 1, None, [], {"notify": True}])
+@pytest.mark.parametrize("default_notify", [False, True])
+async def test_invalid_notification_decision_uses_default(decision, default_notify) -> None:
+    response = LLMResponse(
+        content="",
+        tool_calls=[ToolCallRequest(
+            id="eval_1", name="evaluate_notification",
+            arguments={"should_notify": decision},
+        )],
+    )
+    result = await evaluate_response(
+        "All clear", "check status", DummyProvider([response]), "m",
+        evaluator_prompt=_EVAL_PROMPT, default_notify=default_notify,
+    )
+
+    assert result is default_notify
+
+
+@pytest.mark.asyncio
 async def test_fallback_on_error() -> None:
     class FailingProvider(DummyProvider):
         async def chat(self, *args, **kwargs) -> LLMResponse:

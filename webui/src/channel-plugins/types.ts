@@ -6,14 +6,27 @@ import type {
   NanobotFeaturesPayload,
 } from "@/lib/types";
 
+export type ChannelFeatureActionOptions = {
+  confirmed?: boolean;
+  installOnly?: boolean;
+};
+
+export type ChannelFeatureAction = (
+  action: "enable" | "disable",
+  name: string,
+  options?: ChannelFeatureActionOptions,
+) => void;
+
 export type ChannelPluginPanelProps = {
+  connectRequestId?: number;
   token: string;
   feature: NanobotFeatureInfo;
   actionKey: string | null;
-  chatAppsDocsUrl?: string;
   showBrandLogos: boolean;
-  onAction: (action: "enable" | "disable", name: string) => void;
+  onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  onConfigureMcp?: (name: string) => void;
+  onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
 };
 
 export type ChannelPluginConnectFlowProps = {
@@ -24,10 +37,15 @@ export type ChannelPluginConnectFlowProps = {
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 };
 
+export type ChannelPluginHelpProps = {
+  feature: NanobotFeatureInfo;
+};
+
 export type ChannelUiContribution = {
   presentation: ChannelPresentation;
   aliases?: Record<string, Partial<ChannelPresentation>>;
   Panel?: ComponentType<ChannelPluginPanelProps>;
+  HelpContent?: ComponentType<ChannelPluginHelpProps>;
   ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   canConnectBeforeConfigured?: boolean;
 };

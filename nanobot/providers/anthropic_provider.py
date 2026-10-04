@@ -784,6 +784,7 @@ class AnthropicProvider(LLMProvider):
             reasoning_effort, tool_choice,
         )
         idle_timeout_s = resolve_stream_idle_timeout_s()
+        kwargs["timeout"] = idle_timeout_s
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 # Idle timeout must track *any* SSE chunk (thinking_delta,
@@ -848,6 +849,8 @@ class AnthropicProvider(LLMProvider):
                                 "arguments_delta": partial,
                             })
                 response = await stream.get_final_message()
+                if not response.stop_reason:
+                    raise ConnectionError("Model stream ended before a stop reason was received")
             return self._parse_response(response)
         except asyncio.TimeoutError:
             return LLMResponse(

@@ -17,6 +17,7 @@ import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -123,26 +124,33 @@ def _payload_value(payload: Any, key: str) -> Any:
     return getattr(payload, key, None)
 
 
-def _mcp_json_value(value: Any) -> Any:
+def _mcp_json_value(value: Any, *, depth: int = 0, remaining: list[int] | None = None) -> Any:
     """Convert SDK models to JSON-compatible values without trusting their shape."""
+    if remaining is None:
+        remaining = [4096]
+    remaining[0] -= 1
+    if depth > 16 or remaining[0] < 0:
+        raise ValueError("MCP App metadata exceeds structural limits")
+    if isinstance(value, str) and len(value) > 65536:
+        raise ValueError("MCP App metadata exceeds size limit")
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
-        return _mcp_json_value(model_dump(by_alias=True, exclude_none=True))
+        return _mcp_json_value(model_dump(by_alias=True, exclude_none=True), depth=depth + 1, remaining=remaining)
     if isinstance(value, Mapping):
         return {
-            str(key): _mcp_json_value(item)
+            str(key): _mcp_json_value(item, depth=depth + 1, remaining=remaining)
             for key, item in cast(Mapping[Any, Any], value).items()
         }
     if isinstance(value, (list, tuple)):
-        return [_mcp_json_value(item) for item in cast(Iterable[Any], value)]
+        return [_mcp_json_value(item, depth=depth + 1, remaining=remaining) for item in cast(Iterable[Any], value)]
     try:
         attributes = cast(dict[str, Any], vars(value))
     except TypeError:
-        return str(value)
+        raise ValueError("MCP App metadata is not JSON compatible") from None
     return {
-        str(key): _mcp_json_value(item)
+        str(key): _mcp_json_value(item, depth=depth + 1, remaining=remaining)
         for key, item in attributes.items()
         if not str(key).startswith("_")
     }
@@ -152,8 +160,19 @@ def _mcp_tool_meta(tool_def: Any) -> dict[str, Any]:
     raw = getattr(tool_def, "meta", None)
     if raw is None:
         raw = getattr(tool_def, "_meta", None)
-    value = _mcp_json_value(raw)
+    value = _bounded_mcp_json_value(raw)
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
+
+
+def _bounded_mcp_json_value(value: Any) -> Any:
+    """Keep optional opaque metadata bounded without changing model text."""
+    try:
+        converted = _mcp_json_value(value)
+        if len(json.dumps(converted, ensure_ascii=False, allow_nan=False).encode("utf-8")) <= 65536:
+            return converted
+    except (TypeError, ValueError, RecursionError):
+        pass
+    return None
 
 
 def _mcp_app_ui(tool_def: Any) -> dict[str, Any] | None:
@@ -200,7 +219,7 @@ def _mcp_app_tool_data(server_name: str, tool_def: Any) -> dict[str, Any] | None
         raw = getattr(tool_def, attribute, None)
         if raw is None and attribute == "meta":
             raw = getattr(tool_def, "_meta", None)
-        value = _mcp_json_value(raw)
+        value = _bounded_mcp_json_value(raw)
         if value is not None:
             data[output_key] = value
     return data
@@ -296,13 +315,14 @@ def _is_transient_connection_failure(exc: BaseException) -> bool:
 
 
 def _log_mcp_connection_failure(name: str, exc: BaseException, hint: str = "") -> None:
+    exception = exc if tool_log_content_allowed() else False
     if _is_transient_connection_failure(exc):
         logger.warning("MCP server '{}': transient connection failure", name)
-        logger.opt(exception=exc).debug(
+        logger.opt(exception=exception).debug(
             "MCP server '{}' transient connection failure details", name
         )
         return
-    logger.opt(exception=exc).error("MCP server '{}': failed to connect: {}", name, hint)
+    logger.opt(exception=exception).error("MCP server '{}': failed to connect: {}", name, hint)
 
 
 def _is_session_terminated(exc: BaseException) -> bool:
@@ -751,7 +771,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                         await asyncio.sleep(1)  # Brief backoff before retry
                         continue
                     # Second transient failure — give up with retry-specific message
-                    logger.exception(
+                    logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP tool '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
@@ -759,11 +779,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                     return ToolResult.error(
                         f"(MCP tool call failed after retry: {type(exc).__name__})"
                     )
-                logger.exception(
+                logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP tool '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
-                    exc,
+                    exc if tool_log_content_allowed() else "[content hidden]",
                 )
                 return ToolResult.error(
                     f"(MCP tool call failed: {type(exc).__name__})"
@@ -780,11 +800,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                         return ToolResult.error(rendered)
                     return rendered
                 except Exception as exc:
-                    logger.exception(
+                    logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP tool '{}' failed while rendering result: {}: {}",
                         self._name,
                         type(exc).__name__,
-                        exc,
+                        exc if tool_log_content_allowed() else "[content hidden]",
                     )
                     return ToolResult.error(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
@@ -797,18 +817,20 @@ class MCPToolWrapper(_MCPWrapperBase):
         result_meta = getattr(result, "meta", None)
         if result_meta is None:
             result_meta = getattr(result, "_meta", None)
-        return {
+        data = {
             "kind": _MCP_APP_RESULT_KIND,
             "tool": self._mcp_app_tool,
             "result": {
-                "content": _mcp_json_value(getattr(result, "content", [])),
-                "structuredContent": _mcp_json_value(
+                "content": _bounded_mcp_json_value(getattr(result, "content", [])),
+                "structuredContent": _bounded_mcp_json_value(
                     getattr(result, "structuredContent", None)
                 ),
-                "_meta": _mcp_json_value(result_meta),
+                "_meta": _bounded_mcp_json_value(result_meta),
                 "isError": bool(getattr(result, "isError", False)),
             },
         }
+        bounded = _bounded_mcp_json_value(data)
+        return cast(dict[str, Any], bounded) if isinstance(bounded, dict) else None
 
     def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
         """Turn MCP content blocks into a tool result string.
@@ -858,7 +880,7 @@ class MCPToolWrapper(_MCPWrapperBase):
             logger.warning(
                 "MCP tool '{}' returned an image that could not be stored: {}",
                 self._name,
-                exc,
+                exc if tool_log_content_allowed() else type(exc).__name__,
             )
             return None
 
@@ -942,17 +964,17 @@ class MCPResourceWrapper(_MCPWrapperBase):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.exception(
+                    logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP resource '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
                     )
                     return f"(MCP resource read failed after retry: {type(exc).__name__})"
-                logger.exception(
+                logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP resource '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
-                    exc,
+                    exc if tool_log_content_allowed() else "[content hidden]",
                 )
                 return f"(MCP resource read failed: {type(exc).__name__})"
             else:
@@ -1051,11 +1073,11 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 ):
                     refreshed_session = True
                     continue
-                logger.exception(
+                logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP prompt '{}' failed: code={} message={}",
                     self._name,
                     exc.error.code,
-                    exc.error.message,
+                    exc.error.message if tool_log_content_allowed() else "[content hidden]",
                 )
                 return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
             except Exception as exc:
@@ -1076,17 +1098,17 @@ class MCPPromptWrapper(_MCPWrapperBase):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.exception(
+                    logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP prompt '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
                     )
                     return f"(MCP prompt call failed after retry: {type(exc).__name__})"
-                logger.exception(
+                logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP prompt '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
-                    exc,
+                    exc if tool_log_content_allowed() else "[content hidden]",
                 )
                 return f"(MCP prompt call failed: {type(exc).__name__})"
             else:
@@ -1118,7 +1140,7 @@ async def connect_mcp_servers(
     entered the MCP SDK contexts alive so reconnect and shutdown can close
     AnyIO cancel scopes from their owning task.
     """
-    from mcp import ClientSession, StdioServerParameters
+    from mcp import ClientSession, StdioServerParameters, types
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
@@ -1246,13 +1268,24 @@ async def connect_mcp_servers(
             session = await server_stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
 
-            tools = await session.list_tools()
+            # Finish discovery before registering tools so a failed page leaves no partial set.
+            page = await session.list_tools()
+            tool_defs = list(page.tools)
+            seen_cursors: set[str] = set()
+            while page.nextCursor is not None:
+                cursor = page.nextCursor
+                if cursor in seen_cursors:
+                    raise ValueError("MCP tools/list returned a repeated pagination cursor")
+                seen_cursors.add(cursor)
+                page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
+                tool_defs.extend(page.tools)
+
             enabled_tools = set(cfg.enabled_tools)
             allow_all_tools = "*" in enabled_tools
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             model_tools: list["MCPToolDefinition"] = []
-            tool_definitions: list["MCPToolDefinition"] = tools.tools
+            tool_definitions: list["MCPToolDefinition"] = tool_defs
             for tool_def in tool_definitions:
                 if _mcp_tool_is_app_only(tool_def):
                     logger.debug(

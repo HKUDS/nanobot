@@ -3,15 +3,15 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
 import difflib
+import hashlib
 import mimetypes
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext
-from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
+from nanobot.agent.tools.file_state import FileStates, current_file_states
 from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
     BooleanSchema,
@@ -21,6 +21,7 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.config_base import Base
 from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
@@ -342,66 +343,40 @@ class ReadFileTool(_FsTool):
             if mime and mime.startswith("image/"):
                 return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
-            # Read dedup: same path + offset + limit + unchanged mtime → stub
-            # Always check for external modifications before dedup
-            entry = self._file_states.get(fp)
-            try:
-                current_mtime = os.path.getmtime(fp)
-            except OSError:
-                current_mtime = 0.0
-            if (
-                not force
-                and entry
-                and entry.can_dedup
-                and entry.offset == offset
-                and entry.limit == limit
+            content_hash = hashlib.sha256(raw).hexdigest()
+            if not force and self._file_states.is_unchanged(
+                fp, offset=offset, limit=limit, content_hash=content_hash,
             ):
-                if current_mtime != entry.mtime:
-                    # File was modified externally - force full read and mark as not dedupable
-                    entry.can_dedup = False
-                    self._file_states.record_read(fp, offset=offset, limit=limit)  # Update state with new mtime
-                    # Continue to read full content (don't return dedup message)
-                else:
-                    # File unchanged - return dedup message
-                    # But only if content is actually unchanged (not just mtime)
-                    current_hash = _hash_file(str(fp))
-                    if current_hash == entry.content_hash:
-                        return f"[File unchanged since last read: {path}]"
+                return f"[File unchanged since last read: {path}]"
+            from nanobot.utils.document import _decode_bom_text
+
+            text_content = _decode_bom_text(raw)
+            if text_content is None:
+                try:
+                    text_content = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    # Match the former eager extractor for known text formats while
+                    # keeping arbitrary binary files on the guarded error path.
+                    from nanobot.utils.document import _is_text_extension
+
+                    if _is_text_extension(fp.suffix.lower()):
+                        text_content = raw.decode("latin-1")
                     else:
-                        # Content changed despite same mtime - force full read
-                        entry.can_dedup = False
-                        self._file_states.record_read(fp, offset=offset, limit=limit)
-            else:
-                # No previous state or marked as not dedupable - read full content
-                self._file_states.record_read(fp, offset=offset, limit=limit)
-                # Force full read by setting can_dedup to False for this read
-                if entry:
-                    entry.can_dedup = False
-
-            # Read the file content after dedup check
-            raw = fp.read_bytes()
-            try:
-                text_content = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                # Match the former eager extractor for known text formats while
-                # keeping arbitrary binary files on the guarded error path.
-                from nanobot.utils.document import _is_text_extension
-
-                if _is_text_extension(fp.suffix.lower()):
-                    text_content = raw.decode("latin-1")
-                else:
-                    mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-                    if mime and mime.startswith("image/"):
-                        return build_image_content_blocks(
-                            raw,
-                            mime,
-                            str(fp),
-                            f"(Image file: {path})",
+                        mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+                        if mime and mime.startswith("image/"):
+                            return build_image_content_blocks(
+                                raw,
+                                mime,
+                                str(fp),
+                                f"(Image file: {path})",
+                            )
+                        return ToolResult.error(
+                            f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
+                            "Only supported text files and images can be read."
                         )
-                    return ToolResult.error(
-                        f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
-                        "Only supported text files and images can be read."
-                    )
+
+            if not text_content:
+                return f"(Empty file: {path})"
 
             # Normalize CRLF -> LF before line-splitting. Primarily a Windows
             # concern (git checkouts with autocrlf, editors saving CRLF) but
@@ -421,23 +396,35 @@ class ReadFileTool(_FsTool):
             end = min(start + (limit or self._DEFAULT_LIMIT), total)
             numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(all_lines[start:end])]
             result = "\n".join(numbered)
+            line_truncated = False
 
             if len(result) > self._MAX_CHARS:
                 trimmed: list[str] = []
                 chars = 0
                 for line in numbered:
-                    chars += len(line) + 1
-                    if chars > self._MAX_CHARS:
+                    extra = len(line) + (1 if trimmed else 0)
+                    if chars + extra > self._MAX_CHARS:
+                        if not trimmed:
+                            trimmed.append(line[: self._MAX_CHARS])
+                            line_truncated = True
                         break
                     trimmed.append(line)
+                    chars += extra
                 end = start + len(trimmed)
                 result = "\n".join(trimmed)
 
+            if line_truncated:
+                result += (
+                    f"\n\n(Line {offset} truncated; its remaining characters are not shown. "
+                    "Use exec with a targeted command to inspect the omitted content.)"
+                )
             if end < total:
                 result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
             else:
                 result += f"\n\n(End of file — {total} lines total)"
-            self._file_states.record_read(fp, offset=offset, limit=limit)
+            self._file_states.record_read(
+                fp, offset=offset, limit=limit, content_hash=content_hash, result=result,
+            )
             return result
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
@@ -592,7 +579,7 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown content")
             fp = self._resolve_write(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8")
+            fp.write_text(content, encoding="utf-8", newline="")
             self._file_states.record_write(fp)
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
@@ -664,8 +651,9 @@ def _leading_ws(line: str) -> str:
 
 def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
     """Preserve the outer indentation from the actual matched block."""
-    old_lines = old_text.split("\n")
-    actual_lines = actual_text.split("\n")
+    # A terminal newline does not add a logical line, even at an unterminated EOF.
+    old_lines = old_text.removesuffix("\n").split("\n")
+    actual_lines = actual_text.removesuffix("\n").split("\n")
     if len(old_lines) != len(actual_lines):
         return new_text
 
@@ -769,7 +757,11 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
 
         start = offsets[i]
         end = offsets[i + window_size]
-        if content_lines_keepends[i + window_size - 1].endswith("\n"):
+        # Include the line terminator only when the requested match includes it.
+        if (
+            not old_text.endswith("\n")
+            and content_lines_keepends[i + window_size - 1].endswith("\n")
+        ):
             end -= 1
         matches.append(
             _MatchSpan(
@@ -907,9 +899,25 @@ class EditFileTool(_FsTool):
         )
 
     @staticmethod
-    def _strip_trailing_ws(text: str) -> str:
-        """Strip trailing whitespace from each line."""
-        return "\n".join(line.rstrip() for line in text.split("\n"))
+    def _strip_trailing_ws(text: str, *, preserve_last_line: bool = False) -> str:
+        """Strip line-ending whitespace, except a final fragment that continues inline."""
+        lines = text.split("\n")
+        return "\n".join(
+            line if preserve_last_line and i == len(lines) - 1 else line.rstrip()
+            for i, line in enumerate(lines)
+        )
+
+    def _format_summary(
+        self, resolved_path: Path, before: str, after: str, *,
+        created: bool = False,
+    ) -> FileEditResult:
+        diff = FileDiff.from_text(before, after)
+        added, deleted = diff.added, diff.deleted
+        action = "add" if created else "update"
+        stats = f" (+{added}/-{deleted})" if added or deleted else ""
+        path = display_file_edit_path(resolved_path, self._display_workspace())
+        text = f"Patch applied:\n- {action} {path}{stats}"
+        return FileEditResult(text, {resolved_path: diff})
 
     async def execute(
         self, path: str | None = None, old_text: str | None = None,
@@ -940,9 +948,9 @@ class EditFileTool(_FsTool):
             if not file_exists:
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
-                    fp.write_text(new_text, encoding="utf-8")
+                    fp.write_text(new_text, encoding="utf-8", newline="")
                     self._file_states.record_write(fp)
-                    return f"Successfully created {fp}"
+                    return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
                 return self._file_not_found_msg(path, fp)
 
             # File size protection
@@ -959,12 +967,9 @@ class EditFileTool(_FsTool):
                 content = raw.decode("utf-8")
                 if content.strip():
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
-                fp.write_text(new_text, encoding="utf-8")
+                fp.write_text(new_text, encoding="utf-8", newline="")
                 self._file_states.record_write(fp)
-                return f"Successfully edited {fp}"
-
-            # Read-before-edit check
-            warning = self._file_states.check_read(fp)
+                return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
 
             raw = fp.read_bytes()
             uses_crlf = b"\r\n" in raw
@@ -1000,10 +1005,6 @@ class EditFileTool(_FsTool):
 
             norm_new = new_text.replace("\r\n", "\n")
 
-            # Trailing whitespace stripping (skip markdown to preserve double-space line breaks)
-            if fp.suffix.lower() not in self._MARKDOWN_EXTS:
-                norm_new = self._strip_trailing_ws(norm_new)
-
             if replace_all:
                 selected = matches
             elif occurrence is not None:
@@ -1034,13 +1035,29 @@ class EditFileTool(_FsTool):
                 )
             new_content = content
             for match in reversed(selected):
-                replacement = _preserve_quote_style(norm_old, match.text, norm_new)
+                replacement = norm_new
+                # Preserve separator whitespace when the remaining line has content.
+                # Markdown keeps all trailing whitespace for hard line breaks.
+                if fp.suffix.lower() not in self._MARKDOWN_EXTS:
+                    line_end = content.find("\n", match.end)
+                    if line_end == -1:
+                        line_end = len(content)
+                    replacement = self._strip_trailing_ws(
+                        replacement,
+                        preserve_last_line=bool(content[match.end:line_end].strip()),
+                    )
+                replacement = _preserve_quote_style(norm_old, match.text, replacement)
                 replacement = _reindent_like_match(norm_old, match.text, replacement)
 
-                # Delete-line cleanup: when deleting text (new_text=''), consume trailing
-                # newline to avoid leaving a blank line
+                # Only consume the trailing newline when deleting complete lines;
+                # inline suffix deletions must preserve the remaining line boundary.
                 end = match.end
-                if replacement == "" and not match.text.endswith("\n") and content[end:end + 1] == "\n":
+                if (
+                    replacement == ""
+                    and (match.start == 0 or content[match.start - 1] == "\n")
+                    and not match.text.endswith("\n")
+                    and content[end:end + 1] == "\n"
+                ):
                     end += 1
 
                 new_content = new_content[: match.start] + replacement + new_content[end:]
@@ -1049,10 +1066,7 @@ class EditFileTool(_FsTool):
 
             fp.write_bytes(new_content.encode("utf-8"))
             self._file_states.record_write(fp)
-            msg = f"Successfully edited {fp}"
-            if warning:
-                msg = f"{warning}\n{msg}"
-            return msg
+            return self._format_summary(fp, content, new_content)
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
@@ -1160,11 +1174,11 @@ class ListDirTool(_FsTool):
 
             if recursive:
                 for item in sorted(dp.rglob("*")):
-                    if any(p in self._IGNORE_DIRS for p in item.parts):
+                    rel = item.relative_to(dp)
+                    if any(p in self._IGNORE_DIRS for p in rel.parts):
                         continue
                     total += 1
                     if len(items) < cap:
-                        rel = item.relative_to(dp)
                         items.append(f"{rel}/" if item.is_dir() else str(rel))
             else:
                 for item in sorted(dp.iterdir()):

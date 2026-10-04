@@ -36,9 +36,14 @@ from nanobot.config.paths import is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayInstance
 from nanobot.security.network import is_loopback_host
-from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
+from nanobot.session.keys import (
+    HEARTBEAT_SESSION_KEY,
+    UNIFIED_SESSION_KEY,
+    last_channel_from_metadata,
+)
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.token_encoding import warmup_token_encoding
 from nanobot.webui.build import BuildMode
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
 from nanobot.webui.sidebar_state import read_webui_sidebar_state
@@ -362,7 +367,7 @@ def _run_gateway(
     from nanobot.cron.bound_runner import run_bound_cron_job
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
-    from nanobot.cron.types import CronJob
+    from nanobot.cron.types import CronJob, CronRunResult
     from nanobot.llm_usage import record_llm_call
     from nanobot.llm_usage.context import llm_usage_source
     from nanobot.providers.factory import (
@@ -402,6 +407,7 @@ def _run_gateway(
         raise typer.Exit(1)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+    warmup_token_encoding()
     _prepare_webui_bundle_for_gateway(
         config,
         mode=webui_bundle_mode,
@@ -553,7 +559,7 @@ def _run_gateway(
         message_tool.set_send_callback(_deliver_to_channel)
 
     # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
+    async def on_cron_job(job: CronJob) -> str | CronRunResult | None:
         """Execute a cron job through the agent."""
         async def _silent(*_args: Any, **_kwargs: Any) -> None:
             pass
@@ -648,7 +654,7 @@ def _run_gateway(
                 await mcp_provider.connect()
                 resp = await agent.process_direct(
                     prompt,
-                    session_key="heartbeat",
+                    session_key=HEARTBEAT_SESSION_KEY,
                     channel=channel,
                     chat_id=chat_id,
                     on_progress=_silent,

@@ -3,17 +3,17 @@ import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
 export default {
   presentation: {
+    logoUrl: "https://work.weixin.qq.com/favicon.ico",
     displayName: "WeCom",
     initials: "WC",
     color: "#2F7DFF",
-    logoUrl: "https://work.weixin.qq.com/favicon.ico",
     setup: {
       mode: "credentials",
       docsUrl: chatAppGuideUrl("wecom"),
       fields: [
-        { key: "channels.wecom.botId" },
-        { key: "channels.wecom.secret" },
-        { key: "channels.wecom.allowFrom" },
+        { key: "channels.wecom.botId", section: "credentials" },
+        { key: "channels.wecom.secret", section: "credentials" },
+        { key: "channels.wecom.allowFrom", section: "access" },
       ],
     },
   },

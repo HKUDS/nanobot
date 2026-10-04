@@ -44,22 +44,49 @@ class Schema(ABC):
         return cast(str | None, t)
 
     @staticmethod
+    def match_json_schema_type(val: Any, types: list[Any]) -> str | None:
+        """Select a union member matching the value without coercion."""
+        for t in types:
+            if not isinstance(t, str) or t not in _JSON_TYPE_MAP:
+                continue
+            if t in ("integer", "number") and isinstance(val, bool):
+                continue
+            if isinstance(val, _JSON_TYPE_MAP[t]):
+                return t
+        return None
+
+    @staticmethod
     def subpath(path: str, key: str) -> str:
         return f"{path}.{key}" if path else key
 
     @staticmethod
-    def validate_json_schema_value(val: Any, schema: dict[str, Any], path: str = "") -> list[str]:
+    def validate_json_schema_value(
+        val: Any, schema: dict[str, Any] | bool, path: str = "",
+    ) -> list[str]:
         """Validate ``val`` against a JSON Schema fragment; returns error messages (empty means valid).
 
         Used by :class:`Tool` and each concrete Schema's :meth:`validate_value`.
         """
+        label = path or "parameter"
+        if isinstance(schema, bool):
+            return [] if schema else [f"{label} is not allowed by schema"]
+
         raw_type = schema.get("type")
         nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get("nullable", False)
         t = Schema.resolve_json_schema_type(raw_type)
-        label = path or "parameter"
 
+        if (raw_type == "null" or raw_type == ["null"]) and val is not None:
+            return [f"{label} should be null"]
         if nullable and val is None:
+            if "enum" in schema and val not in schema["enum"]:
+                return [f"{label} must be one of {schema['enum']}"]
             return []
+        if isinstance(raw_type, list):
+            types = [item for item in cast(list[Any], raw_type) if item != "null"]
+            if len(types) > 1:
+                t = Schema.match_json_schema_type(val, types)
+                if t is None:
+                    return [f"{label} should match one of the types {types}"]
         if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
             return [f"{label} should be integer"]
         if t == "number" and (
@@ -263,8 +290,18 @@ class Tool(ABC):
             return params
         return self._cast_object(params, schema)
 
-    def _cast_value(self, val: Any, schema: dict[str, Any]) -> Any:
-        t = self._resolve_type(schema.get("type"))
+    def _cast_value(self, val: Any, schema: dict[str, Any] | bool) -> Any:
+        if isinstance(schema, bool):
+            return val
+        raw_type = schema.get("type")
+        t = self._resolve_type(raw_type)
+        if isinstance(raw_type, list):
+            types = [item for item in cast(list[Any], raw_type) if item != "null"]
+            if len(types) > 1:
+                # A union does not imply a preferred type or a safe conversion target.
+                t = Schema.match_json_schema_type(val, types)
+                if t is None:
+                    return val
 
         if t == "boolean" and isinstance(val, bool):
             return val

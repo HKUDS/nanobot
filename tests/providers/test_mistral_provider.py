@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from nanobot.config.schema import ProvidersConfig
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import PROVIDERS, find_by_name
@@ -54,37 +56,35 @@ def test_mistral_keyword_match_covers_model_families() -> None:
         assert config.get_provider_name(model) == "mistral", model
 
 
-def test_reasoning_effort_low_remaps_to_none_omitted() -> None:
-    """Mistral rejects low/medium efforts: low should map to "none" (omitted)."""
+@pytest.mark.parametrize(
+    "model, effort",
+    [
+        pytest.param("mistral-medium-3-5", "low", id="low_remaps_to_none_omitted"),
+        pytest.param("mistral-vibe-cli-latest", "minimal", id="minimal_remaps_to_none_omitted"),
+    ],
+)
+def test_mistral_omits_low_reasoning_effort(model, effort) -> None:
     p = _mistral_provider()
     kwargs = p._build_kwargs(
         messages=[{"role": "user", "content": "hi"}],
         tools=None,
-        model="mistral-medium-3-5",
+        model=model,
         max_tokens=64,
         temperature=0.5,
-        reasoning_effort="low",
+        reasoning_effort=effort,
         tool_choice=None,
     )
     assert "reasoning_effort" not in kwargs
 
 
-def test_reasoning_effort_minimal_remaps_to_none_omitted() -> None:
-    p = _mistral_provider()
-    kwargs = p._build_kwargs(
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        model="mistral-vibe-cli-latest",
-        max_tokens=64,
-        temperature=0.5,
-        reasoning_effort="minimal",
-        tool_choice=None,
-    )
-    assert "reasoning_effort" not in kwargs
-
-
-def test_reasoning_effort_medium_remaps_to_high() -> None:
-    """Mistral has no 'medium' tier: bump up to 'high'."""
+@pytest.mark.parametrize(
+    "effort",
+    [
+        pytest.param("medium", id="medium_remaps_to_high"),
+        pytest.param("high", id="high_passes_through"),
+    ],
+)
+def test_mistral_uses_high_reasoning_effort(effort) -> None:
     p = _mistral_provider()
     kwargs = p._build_kwargs(
         messages=[{"role": "user", "content": "hi"}],
@@ -92,21 +92,7 @@ def test_reasoning_effort_medium_remaps_to_high() -> None:
         model="mistral-medium-3-5",
         max_tokens=64,
         temperature=0.5,
-        reasoning_effort="medium",
-        tool_choice=None,
-    )
-    assert kwargs["reasoning_effort"] == "high"
-
-
-def test_reasoning_effort_high_passes_through() -> None:
-    p = _mistral_provider()
-    kwargs = p._build_kwargs(
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        model="mistral-medium-3-5",
-        max_tokens=64,
-        temperature=0.5,
-        reasoning_effort="high",
+        reasoning_effort=effort,
         tool_choice=None,
     )
     assert kwargs["reasoning_effort"] == "high"
@@ -353,3 +339,26 @@ def test_mistral_tool_call_ids_get_normalized() -> None:
     assert len(assistant_id) == 9
     assert assistant_id.isalnum()
     assert assistant_id == tool_id
+
+
+def test_mistral_preserves_text_with_tool_call_history() -> None:
+    p = _mistral_provider()
+    messages = [
+        {"role": "user", "content": "check"},
+        {
+            "role": "assistant",
+            "content": "I will inspect it.",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+    ]
+
+    sanitized = p._sanitize_messages(messages)
+
+    assert sanitized[1]["content"] == "I will inspect it."
