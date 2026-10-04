@@ -4050,10 +4050,18 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     assert isinstance(hook, cli_gateway_runtime._MCPReadinessHook)
 
 
+@pytest.mark.parametrize("force_signal", [False, True])
 def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     monkeypatch,
     tmp_path: Path,
+    force_signal: bool,
 ) -> None:
+    from nanobot.session.manager import SessionManager
+
+    class _RuntimeSessionManager(SessionManager):
+        def __init__(self, _workspace) -> None:
+            super().__init__(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
+
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.gateway.port = 18791
@@ -4134,14 +4142,32 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     async def _fake_start_server(_handler, _host: str, _port: int):
         return _FakeServer()
 
+    install_shutdown_handlers = cli_gateway_runtime._install_gateway_shutdown_handlers
+
     def _fake_install_shutdown_handlers(_loop, event, _tasks, _print_status):
+        handlers = {}
+        loop = MagicMock()
+        loop.add_signal_handler.side_effect = lambda sig, callback, *args: handlers.update(
+            {sig: (callback, args)}
+        )
+        restore = install_shutdown_handlers(loop, event, _tasks, _print_status)
+
         async def _trigger_shutdown() -> None:
             await asyncio.sleep(0)
-            event.set()
+            if force_signal:
+                callback, args = handlers[signal.SIGINT]
+                callback(*args)
+                callback(*args)
+                seen["force_cancelled"] = bool(_tasks) and all(
+                    task.cancelling() > 0 for task in _tasks if not task.done()
+                )
+            else:
+                event.set()
 
         asyncio.create_task(_trigger_shutdown())
 
         def _restore() -> None:
+            restore()
             seen["shutdown_handlers_restored"] = True
 
         return _restore
@@ -4150,7 +4176,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         monkeypatch,
         config,
         message_bus=MessageBus,
-        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
+        session_manager=_RuntimeSessionManager,
     )
     monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
@@ -4173,7 +4199,11 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     assert seen["shutdown_handlers_restored"] is True
     # Channel cleanup must run before cancellation drains the manager task.
     # DingTalk's stream SDK can otherwise swallow cancellation and reconnect.
-    assert shutdown_order == ["channels_stopped", "channel_task_cleaned_up"]
+    if force_signal:
+        assert seen["force_cancelled"] is True
+        assert sorted(shutdown_order) == ["channel_task_cleaned_up", "channels_stopped"]
+    else:
+        assert shutdown_order == ["channels_stopped", "channel_task_cleaned_up"]
 
 
 def test_serve_uses_api_config_defaults_and_workspace_override(
