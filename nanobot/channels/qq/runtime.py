@@ -27,6 +27,7 @@ import os
 import re
 import time
 from collections import deque
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, BinaryIO, Literal, cast
@@ -176,6 +177,119 @@ def _make_bot_class(channel: QQChannel) -> type[Any]:
     return _Bot
 
 
+# ---------------------------------------------------------------------------
+# Quoted messages
+#
+# QQ's C2C/group events do not carry ``message_reference``; botpy models that
+# field because the object is shared with guild messages, but QQ never sends it
+# here.  The quoted original arrives in ``msg_elements``, linked from
+# ``message_scene.ext`` by ``ref_msg_idx``.  botpy parses neither field, and
+# ``BaseMessage.__slots__`` drops the raw payload, so
+# ``_install_qq_payload_capture`` keeps the payload from the constructor before
+# it is discarded.  If a future botpy exposes those fields on the message
+# object, ``_quoted_content_for`` prefers that copy and the hook becomes dead
+# weight rather than a correctness dependency.
+# ---------------------------------------------------------------------------
+
+QQ_QUOTED_CONTEXT_MAX_CHARS = 4_000
+QQ_RAW_PAYLOAD_CACHE = 200
+
+_qq_raw_payloads: dict[str, dict[str, Any]] = {}
+
+
+def _flatten_scene_ext(scene: Any) -> dict[str, str]:
+    """Turn QQ's ``message_scene.ext`` (``["key=value", ...]``) into a mapping."""
+    if not isinstance(scene, Mapping):
+        return {}
+    ext = cast("Mapping[str, Any]", scene).get("ext")
+    if not isinstance(ext, list):
+        return {}
+    flattened: dict[str, str] = {}
+    for item in cast("list[Any]", ext):
+        if isinstance(item, str) and "=" in item:
+            key, _, value = item.partition("=")
+            flattened[key] = value
+    return flattened
+
+
+def extract_quoted_content(raw: Mapping[str, Any] | None) -> str | None:
+    """Return the text of the message the sender quoted, if any.
+
+    QQ points at the quoted message from ``message_scene.ext``: ``ref_msg_idx=X``
+    matches the ``msg_elements`` entry whose ``msg_idx`` is ``X``, and that
+    entry's ``content`` is the original text.  Matching on the index instead of
+    taking the first element keeps this correct if QQ ever sends more than one.
+    """
+    if not isinstance(raw, Mapping):
+        return None
+
+    ref_idx = _flatten_scene_ext(raw.get("message_scene")).get("ref_msg_idx")
+    if not ref_idx:
+        return None
+
+    elements = raw.get("msg_elements")
+    if not isinstance(elements, list):
+        return None
+
+    for element in cast("list[Any]", elements):
+        if not isinstance(element, Mapping):
+            continue
+        entry = cast("Mapping[str, Any]", element)
+        if entry.get("msg_idx") != ref_idx:
+            continue
+        text = entry.get("content")
+        if not isinstance(text, str) or not text.strip():
+            return None
+        text = text.strip()
+        if len(text) > QQ_QUOTED_CONTEXT_MAX_CHARS:
+            text = text[:QQ_QUOTED_CONTEXT_MAX_CHARS] + "..."
+        return text
+    return None
+
+
+def _install_qq_payload_capture() -> None:
+    """Keep raw QQ payloads that botpy would otherwise discard (idempotent)."""
+    if not QQ_AVAILABLE:
+        return
+    try:
+        from botpy import message as botpy_message
+
+        for message_cls in (botpy_message.C2CMessage, botpy_message.GroupMessage):
+            original_init = cast("Callable[..., Any]", message_cls.__init__)
+            if getattr(original_init, "_nanobot_qq_capture", False):
+                continue
+
+            def _capture(
+                self: Any,
+                api: Any,
+                event_id: Any,
+                data: Any,
+                _original: Callable[..., Any] = original_init,
+            ) -> Any:
+                if isinstance(data, Mapping):
+                    payload = cast("Mapping[str, Any]", data)
+                    message_id = payload.get("id")
+                    if isinstance(message_id, str):
+                        _qq_raw_payloads[message_id] = dict(payload)
+                        while len(_qq_raw_payloads) > QQ_RAW_PAYLOAD_CACHE:
+                            _qq_raw_payloads.pop(next(iter(_qq_raw_payloads)))
+                return _original(self, api, event_id, data)
+
+            setattr(_capture, "_nanobot_qq_capture", True)
+            setattr(message_cls, "__init__", _capture)
+    except Exception:  # pragma: no cover - optional dependency shape may vary
+        logger.debug("QQ quoted-message payload capture unavailable")
+
+
+def _quoted_content_for(message: Any) -> str | None:
+    """Resolve the quoted text for one inbound QQ message."""
+    scene = getattr(message, "message_scene", None)
+    elements = getattr(message, "msg_elements", None)
+    if scene is not None or elements is not None:
+        return extract_quoted_content({"message_scene": scene, "msg_elements": elements})
+    return extract_quoted_content(_qq_raw_payloads.get(str(getattr(message, "id", ""))))
+
+
 class QQConfig(Base):
     """QQ channel configuration using botpy SDK."""
 
@@ -224,6 +338,9 @@ class QQChannel(BaseChannel):
         self._processed_ids: deque[str] = deque(maxlen=1000)
         self._msg_seq: int = 1  # used to avoid QQ API dedup
         self._chat_type_cache: dict[str, str] = {}
+
+        # QQ delivers the quoted original in a payload field botpy discards.
+        _install_qq_payload_capture()
 
         self._media_root: Path = self._init_media_root()
 
@@ -597,6 +714,14 @@ class QQChannel(BaseChannel):
                 getattr(message, "attachments", None) or [],
             )
             media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
+
+            # Surface the quoted message to the agent.  The inbound reply context
+            # is always on, matching Telegram; QQ needs the payload hook above
+            # because it exposes no way to fetch a message by id.
+            quoted = _quoted_content_for(message)
+            if quoted:
+                quote_tag = f"[Reply to: {quoted}]"
+                content = f"{quote_tag}\n{content}" if content else quote_tag
 
             # Compose content that always contains actionable saved paths
             if recv_lines:
