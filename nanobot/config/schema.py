@@ -30,7 +30,7 @@ class ChannelsConfig(Base):
 
     model_config = ConfigDict(extra="allow")
 
-    send_progress: bool = True  # stream agent's text progress to the channel
+    send_progress: bool = False  # show agent progress notes; also authorizes the model to write them
     send_tool_hints: bool = True  # stream tool-call hints (e.g. read_file("…"))
     show_reasoning: bool = True  # surface model reasoning when channel implements it
     show_compaction_notices: bool = False  # automatic compaction chat notices, not UI lifecycle events
