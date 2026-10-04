@@ -1125,11 +1125,19 @@ class JsonlSessionStore:
                 self.get_runtime_checkpoint_path(session.key).unlink(missing_ok=True)
                 return
 
+            with open(path, encoding="utf-8") as handle:
+                base_revision = _json_object(json.loads(handle.readline())).get("revision")
+            if not isinstance(base_revision, str) or not base_revision:
+                # Upgrade old records through a full save, including this checkpoint.
+                self._save_unlocked(session)
+                return
+
             payload: dict[str, Any] = {
                 "version": _RUNTIME_CHECKPOINT_VERSION,
                 "session_key": session.key,
                 "base_updated_at": session.updated_at.isoformat(),
                 "base_message_count": len(session.messages),
+                "base_revision": base_revision,
                 "checkpoint": checkpoint,
                 "provider_state": (
                     session.provider_state.to_private_record()
@@ -1162,13 +1170,18 @@ class JsonlSessionStore:
                     session.key,
                 )
                 return
-            # A complete session save supersedes an older sidecar. This comparison
-            # closes the small crash window between replacing the JSONL and unlinking
-            # its previous checkpoint.
-            if main_path.stat().st_mtime_ns > checkpoint_stat.st_mtime_ns:
+            raw = _json_object(json.loads(checkpoint_path.read_text(encoding="utf-8")))
+            base_revision = raw.get("base_revision")
+            if isinstance(base_revision, str) and base_revision:
+                with open(main_path, encoding="utf-8") as handle:
+                    revision = _json_object(json.loads(handle.readline())).get("revision")
+                stale = revision != base_revision
+            else:
+                # Legacy sidecars used timestamps to detect a completed full save.
+                stale = main_path.stat().st_mtime_ns > checkpoint_stat.st_mtime_ns
+            if stale:
                 checkpoint_path.unlink(missing_ok=True)
                 return
-            raw = _json_object(json.loads(checkpoint_path.read_text(encoding="utf-8")))
             if (
                 raw.get("version") != _RUNTIME_CHECKPOINT_VERSION
                 or raw.get("session_key") != session.key
@@ -1208,6 +1221,7 @@ class JsonlSessionStore:
         path = self.get_session_path(session.key)
         metadata_line = {
             "_type": "metadata",
+            "revision": secrets.token_hex(16),
             "key": session.key,
             "created_at": session.created_at.isoformat(),
             "updated_at": session.updated_at.isoformat(),
@@ -1253,6 +1267,14 @@ class JsonlSessionStore:
                     data = _json_object(json.loads(first_line))
                     if data.get("_type") != "metadata":
                         return False
+                    revision = data.get("revision")
+                    if not isinstance(revision, str) or not revision:
+                        # Read the old sidecar before replacing its timestamp-based base.
+                        upgraded = self._load_unlocked(key)
+                        if upgraded is None:
+                            return False
+                    else:
+                        upgraded = None
                     raw_metadata = cast(object, data.get("metadata", {}))
                     metadata = (
                         dict(cast(dict[str, Any], raw_metadata))
@@ -1261,12 +1283,17 @@ class JsonlSessionStore:
                     )
                     metadata.update(deepcopy(updates))
                     data["metadata"] = metadata
-                    with open(tmp_path, "x", encoding="utf-8") as target:
-                        target.write(json.dumps(data, ensure_ascii=False) + "\n")
-                        shutil.copyfileobj(source, target)
-                        if fsync:
-                            target.flush()
-                            os.fsync(target.fileno())
+                    if upgraded is None:
+                        with open(tmp_path, "x", encoding="utf-8") as target:
+                            target.write(json.dumps(data, ensure_ascii=False) + "\n")
+                            shutil.copyfileobj(source, target)
+                            if fsync:
+                                target.flush()
+                                os.fsync(target.fileno())
+                if upgraded is not None:
+                    upgraded.metadata.update(deepcopy(updates))
+                    self._save_unlocked(upgraded, fsync=fsync)
+                    return True
                 os.replace(tmp_path, path)
                 if fsync:
                     self._fsync_directory(path.parent)

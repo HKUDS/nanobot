@@ -1,9 +1,14 @@
+import json
+import os
 from unittest.mock import MagicMock
+
+import pytest
 
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session import Session, SessionManager
 from nanobot.session.manager import SessionStore
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.session_handles import SessionHandleResolver
 
 
 def test_manager_delegates_persistence_to_store(tmp_path) -> None:
@@ -180,6 +185,89 @@ def test_completed_session_supersedes_stale_checkpoint(tmp_path) -> None:
     assert "runtime_checkpoint" not in restored.metadata
     assert restored.messages[-1]["content"] == "answer"
     assert not checkpoint_path.exists()
+
+
+@pytest.mark.parametrize("legacy_sidecar", [False, True])
+def test_handle_allocation_preserves_inflight_checkpoint(tmp_path, legacy_sidecar) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:handle-checkpoint")
+    session.add_message("user", "question")
+    manager.save(session)
+    checkpoint = {"phase": "tools_completed"}
+    session.metadata["runtime_checkpoint"] = checkpoint
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses",
+        provider="openai:test",
+        model="test-model",
+        version=1,
+        payload={"response_id": "saved-response"},
+    )
+    manager.save_runtime_checkpoint(session)
+    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
+    if legacy_sidecar:
+        # Records from before revision-bound sidecars must also survive an upgrade.
+        main_path = manager._get_session_path(session.key)
+        lines = main_path.read_text(encoding="utf-8").splitlines()
+        metadata = json.loads(lines[0])
+        metadata.pop("revision")
+        lines[0] = json.dumps(metadata)
+        main_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        payload.pop("base_revision")
+        checkpoint_path.write_text(json.dumps(payload), encoding="utf-8")
+    checkpoint_time = checkpoint_path.stat().st_mtime_ns
+
+    handle = SessionHandleResolver(manager).handle_for_session(session.key)
+    assert handle is not None
+    # Force distinct timestamps even on coarse-resolution filesystems.
+    main_path = manager._get_session_path(session.key)
+    os.utime(main_path, ns=(checkpoint_time + 1_000_000, checkpoint_time + 1_000_000))
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+
+    assert restored.metadata["session_handle"] == handle.name
+    assert restored.metadata["runtime_checkpoint"] == checkpoint
+    assert restored.provider_state is not None
+    assert restored.provider_state.payload == {"response_id": "saved-response"}
+
+
+def test_full_save_without_new_messages_supersedes_checkpoint(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:cleared-checkpoint")
+    session.add_message("user", "question")
+    manager.save(session)
+    session.metadata["runtime_checkpoint"] = {"phase": "awaiting_tools"}
+    manager.save_runtime_checkpoint(session)
+    checkpoint_path = manager._get_runtime_checkpoint_path(session.key)
+    stale_checkpoint = checkpoint_path.read_bytes()
+
+    session.metadata.pop("runtime_checkpoint")
+    manager.save(session)
+    checkpoint_path.write_bytes(stale_checkpoint)
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+
+    assert "runtime_checkpoint" not in restored.metadata
+    assert not checkpoint_path.exists()
+
+
+def test_checkpoint_upgrades_legacy_session_record(tmp_path) -> None:
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:legacy-checkpoint")
+    session.add_message("user", "question")
+    manager.save(session)
+    path = manager._get_session_path(session.key)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    metadata = json.loads(lines[0])
+    metadata.pop("revision")
+    lines[0] = json.dumps(metadata)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    session.metadata["runtime_checkpoint"] = {"phase": "awaiting_tools"}
+
+    manager.save_runtime_checkpoint(session)
+    assert SessionHandleResolver(manager).handle_for_session(session.key) is not None
+    restored = SessionManager(tmp_path).get_or_create(session.key)
+
+    assert restored.metadata["runtime_checkpoint"] == {"phase": "awaiting_tools"}
+    assert json.loads(path.read_text(encoding="utf-8").splitlines()[0])["revision"]
 
 
 def test_delete_session_removes_runtime_checkpoint(tmp_path) -> None:
