@@ -73,6 +73,7 @@ working directory; it does not relocate the files below.
 
 ```text
 workspace/
+├── .git/                # Version history for long-term memory files
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
 ├── prompts/
@@ -82,8 +83,7 @@ workspace/
     ├── MEMORY.md        # Project facts, decisions, and durable context
     ├── history.jsonl    # Append-only history summaries
     ├── .cursor          # Consolidator write cursor
-    ├── .dream_cursor    # Dream consumption cursor
-    └── .git/            # Version history for long-term memory files
+    └── .dream_cursor    # Dream consumption cursor
 ```
 
 A selected project may provide its own `AGENTS.md`, but project-local `SOUL.md`,
@@ -119,8 +119,20 @@ grep -i "keyword" memory/history.jsonl
 # jq
 cat memory/history.jsonl | jq -r 'select(.content | test("keyword"; "i")) | .content' | tail -20
 
-# Python
-python -c "import json; [print(json.loads(l).get('content','')) for l in open('memory/history.jsonl','r',encoding='utf-8') if l.strip() and 'keyword' in l.lower()][-20:]"
+# Python: last 20 matching entries
+python - <<'PY'
+import json
+from collections import deque
+
+matches = deque(maxlen=20)
+with open('memory/history.jsonl', encoding='utf-8') as history:
+    for line in history:
+        if line.strip():
+            content = json.loads(line).get('content', '')
+            if 'keyword' in content.lower():
+                matches.append(content)
+print('\n'.join(matches))
+PY
 ```
 
 The difference is philosophical as much as technical:
