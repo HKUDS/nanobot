@@ -375,9 +375,20 @@
     },
     "apps": "應用程式",
     "automations": "自動任務",
-    "skills": {
+        "skills": {
       "title": "技能"
-    }
+    },
+    "extensions": "擴充功能"
+  },
+  "extensions": {
+    "documentTitle": "擴充功能",
+    "notFound": "找不到擴充功能。",
+    "empty": "未安裝任何 WebUI 擴充功能。",
+    "installed": "已安裝 {{count}} 個",
+    "open": "開啟",
+    "version": "v{{version}}",
+    "description": "WebUI 擴充功能是從擴充功能目錄提供的自包含瀏覽器應用程式。",
+    "settingsTitle": "擴充功能"
   },
   "settings": {
     "timezoneNoMatches": "沒有符合的時區。",

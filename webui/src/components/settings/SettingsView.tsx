@@ -2,7 +2,7 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 import type { SettingsExitGuard, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import type { SettingsPayload, SkillSummary } from "@/lib/types";
+import type { SettingsPayload, SkillSummary, WebUIExtensionSummary } from "@/lib/types";
 
 export type { SettingsSectionKey } from "@/components/settings/contracts";
 
@@ -18,6 +18,11 @@ interface SettingsViewProps {
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
   skills?: SkillSummary[];
+  extensions?: WebUIExtensionSummary[];
+  onOpenExtension?: (extensionId: string) => void;
+  onToggleExtension?: (extensionId: string, enabled: boolean) => Promise<void> | void;
+  onEditExtension?: (extensionId: string, config: Record<string, unknown>) => Promise<void> | void;
+  onDeleteExtension?: (extensionId: string) => Promise<void> | void;
   onStartAutomationChat?: (
     content: string,
     images?: SendAttachment[],
@@ -45,6 +50,11 @@ export function SettingsView({
   onModelNameChange,
   onSettingsChange,
   skills = [],
+  extensions = [],
+  onOpenExtension,
+  onToggleExtension,
+  onEditExtension,
+  onDeleteExtension,
   onStartAutomationChat,
   titleOverrides,
   onSectionChange,
@@ -74,6 +84,11 @@ export function SettingsView({
       onToggleTheme={onToggleTheme}
       onBackToChat={onBackToChat}
       skills={skills}
+      extensions={extensions}
+      onOpenExtension={onOpenExtension}
+      onToggleExtension={onToggleExtension}
+      onEditExtension={onEditExtension}
+      onDeleteExtension={onDeleteExtension}
       onStartAutomationChat={onStartAutomationChat}
       titleOverrides={titleOverrides}
       onLogout={onLogout}

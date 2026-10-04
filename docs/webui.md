@@ -95,6 +95,49 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 | Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
 | Settings | Adjust models, providers, image generation, voice, web tools, runtime, and safety options |
 
+## WebUI Extensions
+
+WebUI extensions are local, trusted add-ons for the browser workbench. They are installed as folders under the configured extension root and discovered by the gateway at startup. The default root is `<data-dir>/extensions`; override it with `tools.webui_extensions_path` (or the legacy `webuiExtensionsPath` config alias) if you want a different location.
+
+Each extension is a plain directory containing an `extension.json` manifest and its static files. The manifest is intentionally small and must include a unique `id`, a human-readable `name`, `description`, `entry`, and `version`:
+
+```json
+{
+  "id": "query-quota",
+  "name": "Query Quota",
+  "description": "Live quota dashboard",
+  "entry": "index.html",
+  "version": "0.1.0",
+  "api": {
+    "script": "api.py"
+  }
+}
+```
+
+The gateway validates the manifest and serves the extension in two namespaces:
+
+- `/extensions/<id>/...` for static HTML, JS, CSS, and images
+- `/api/extensions/<id>/...` for authenticated JSON endpoints that the extension can call through the same WebUI token flow
+
+This is a trusted local plugin model rather than a third-party browser sandbox. The extension directory lives on the gateway machine, the browser only renders the extension page, and the host bridge forwards authenticated requests while keeping credentials out of the iframe. This makes it practical for admin-installed extensions that read local services or fetch data from configured APIs.
+
+Extensions are discovered from the configured directory and shown in the WebUI extension catalog. If a manifest is invalid or a file is missing, that extension is skipped rather than crashing the whole catalog. For example, a minimal extension can expose a dashboard page and a Python handler script that resolves configuration values, token secrets, or headers before returning a JSON summary for the page to render.
+
+### Install layout
+
+A typical layout looks like this:
+
+```text
+<extensions-root>/
+  query-quota/
+    extension.json
+    index.html
+    api.py
+    styles.css
+```
+
+The gateway does not require a package manager or an embedded app runtime. The extension is just a folder with a manifest and assets, so it is easy to copy, version, and review in a source-controlled workspace.
+
 ### Optional GitHub invitation
 
 Returning users may see an illustrated invitation to star nanobot on GitHub.

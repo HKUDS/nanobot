@@ -375,9 +375,20 @@
     },
     "apps": "应用",
     "automations": "自动任务",
-    "skills": {
+        "skills": {
       "title": "技能"
-    }
+    },
+    "extensions": "扩展"
+  },
+  "extensions": {
+    "documentTitle": "扩展",
+    "notFound": "未找到扩展。",
+    "empty": "未安装任何 WebUI 扩展。",
+    "installed": "已安装 {{count}} 个",
+    "open": "打开",
+    "version": "v{{version}}",
+    "description": "WebUI 扩展是从扩展目录提供服务的自包含浏览器应用。",
+    "settingsTitle": "扩展"
   },
   "settings": {
     "timezoneNoMatches": "没有匹配的时区。",

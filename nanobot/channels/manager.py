@@ -56,6 +56,14 @@ def _default_webui_dist() -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+def _webui_extensions_root(config: Any) -> Path | None:
+    """Resolve the configured WebUI extensions root, if any."""
+    raw = getattr(config.tools, "webui_extensions_path", "") or ""
+    if not raw.strip():
+        return None
+    return Path(raw).expanduser().resolve()
+
+
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
 _OUTBOUND_CONCURRENCY = 32
@@ -188,6 +196,7 @@ class ChannelManager:
             parsed = WebSocketConfig.model_validate(section)
             static_path = _default_webui_dist() if self._webui_static_dist else None
             workspace = Path(self.config.workspace_path)
+            extensions_root = _webui_extensions_root(self.config)
             gateway = build_gateway_services(
                 config=parsed,
                 bus=self.bus,
@@ -196,6 +205,7 @@ class ChannelManager:
                 workspace_path=workspace,
                 default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
                 config_path=self._config_path,
+                extensions_root=extensions_root,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,
                 refresh_runtime_config=self._webui_refresh_runtime_config,
