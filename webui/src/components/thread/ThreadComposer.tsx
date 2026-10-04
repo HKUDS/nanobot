@@ -971,6 +971,9 @@ export function ThreadComposer({
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
+  // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
+  // keyboard still get the newline-on-Enter behavior.
+  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -2074,7 +2077,8 @@ export function ThreadComposer({
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      setQueuedPrompts([]);
+      // Sending new guidance must not discard other messages still waiting.
+      if (!isStreaming || finalizeActiveTurn) setQueuedPrompts([]);
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2090,7 +2094,7 @@ export function ThreadComposer({
             sideChannel: true,
             ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
           }
-        : options,
+        : isStreaming ? { ...options, continueActiveTurn: true } : options,
     );
     if (result instanceof Promise) {
       setSendPending(true);
@@ -2181,6 +2185,19 @@ export function ThreadComposer({
         return;
       }
     }
+    // Touch keyboards: a plain Enter inserts a newline; sending stays on the
+    // send button. The select-on-Enter menu branches above take precedence.
+    if (
+      e.key === "Enter"
+      && !e.shiftKey
+      && !e.altKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && !e.nativeEvent.isComposing
+      && hasCoarsePointer
+    ) {
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (canQueueGuidance) {
@@ -2269,7 +2286,8 @@ export function ThreadComposer({
       : voiceRecorder.state === "transcribing"
         ? t("thread.composer.voice.transcribing")
         : t("thread.composer.voice.hint");
-  const showStopButton = isStreaming && !!onStop;
+  // Touch users need an explicit send action; keep Stop while sending is unavailable.
+  const showStopButton = isStreaming && !!onStop && !canSend;
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
@@ -2533,6 +2551,7 @@ export function ThreadComposer({
             }}
             onPaste={onPaste}
             rows={1}
+            enterKeyHint={hasCoarsePointer ? "enter" : undefined}
             placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
             disabled={interactionDisabled}
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
@@ -2688,10 +2707,10 @@ export function ThreadComposer({
             >
               {showStopButton ? (
                 <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
-              ) : isStreaming ? (
-                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
-              ) : (
+              ) : canSend || !isStreaming ? (
                 <ArrowUp className={cn(isHero ? "h-4 w-4" : "h-4 w-4")} />
+              ) : (
+                <Loader2 className={cn(isHero ? "h-4 w-4" : "h-4 w-4", "animate-spin")} />
               )}
             </Button>
           </div>
