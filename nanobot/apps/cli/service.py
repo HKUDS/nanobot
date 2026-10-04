@@ -31,6 +31,13 @@ CLI_ANYTHING_RAW_BASE = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/ma
 AGENT_PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 NANOBOT_EXTENSION_REGISTRY_URL = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main/registry.json"
 NANOBOT_EXTENSION_RAW_BASE = "https://raw.githubusercontent.com/Re-bin/nanobot-extension/main"
+_INSTALL_SURFACE_FIELDS = (
+    "package_manager",
+    "install_strategy",
+    "install_cmd",
+    "npm_package",
+    "entry_point",
+)
 _CATALOG_SOURCES = (
     ("harness", CLI_ANYTHING_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
     ("public", CLI_ANYTHING_PUBLIC_REGISTRY_URL, CLI_ANYTHING_RAW_BASE, True),
@@ -547,7 +554,7 @@ class CliAppManager:
         force_refresh: bool = False,
         cache_only: bool = False,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        registries: list[tuple[str, str, dict[str, Any]]] = []
+        registries: list[tuple[str, str, str, dict[str, Any]]] = []
         for source, url, raw_base, required in _CATALOG_SOURCES:
             try:
                 cache_path = self._cache_path(source)
@@ -565,13 +572,18 @@ class CliAppManager:
                 if required:
                     raise
                 continue
-            registries.append((source, raw_base, registry))
+            registries.append((source, url, raw_base, registry))
         apps_by_name: dict[str, dict[str, Any]] = {}
         updated_values: list[str] = []
-        for source, raw_base, registry in registries:
+        for source, url, raw_base, registry in registries:
             meta = _as_object_dict(registry.get("meta"))
-            if meta is not None and isinstance(meta.get("updated"), str):
-                updated_values.append(meta["updated"])
+            catalog_updated = (
+                str(meta["updated"])
+                if meta is not None and isinstance(meta.get("updated"), str)
+                else None
+            )
+            if catalog_updated is not None:
+                updated_values.append(catalog_updated)
             for row in cast(Iterable[object], registry.get("clis", [])):
                 entry = _as_object_dict(row)
                 if entry is None or not entry.get("name"):
@@ -579,6 +591,9 @@ class CliAppManager:
                 entry = dict(entry)
                 entry["_source"] = source
                 entry["_raw_base"] = raw_base
+                entry["_registry_url"] = url
+                if catalog_updated is not None:
+                    entry["_catalog_updated_at"] = catalog_updated
                 key = str(entry["name"]).lower()
                 previous = apps_by_name.get(key)
                 if previous:
@@ -586,7 +601,16 @@ class CliAppManager:
                     merged_source = (
                         previous_source if previous_source == source else f"{previous_source}+{source}"
                     )
-                    apps_by_name[key] = {**previous, **entry, "_source": merged_source}
+                    merged = {**previous, **entry, "_source": merged_source}
+                    # Keep provenance pointing at the registry that actually
+                    # supplied the winning install metadata: a later duplicate
+                    # without install fields must not re-attribute the surface.
+                    if not any(entry.get(field) for field in _INSTALL_SURFACE_FIELDS):
+                        merged["_registry_url"] = previous.get("_registry_url", url)
+                        merged["_catalog_updated_at"] = previous.get(
+                            "_catalog_updated_at", catalog_updated
+                        )
+                    apps_by_name[key] = merged
                 else:
                     apps_by_name[key] = entry
         return list(apps_by_name.values()), max(updated_values) if updated_values else None
@@ -1047,6 +1071,21 @@ class CliAppManager:
             "strategy": strategy,
             "installed_at": int(_now()),
         }
+        # Provenance: which remote registry dictated this install and the exact
+        # install metadata it carried. Without it, a later registry change
+        # (compromised or not) is invisible after the fact.
+        registry_url = str(app.get("_registry_url") or "")
+        if registry_url:
+            entry["registry_url"] = registry_url
+        catalog_updated = app.get("_catalog_updated_at")
+        if isinstance(catalog_updated, str) and catalog_updated:
+            entry["catalog_updated_at"] = catalog_updated
+        install_cmd = str(app.get("install_cmd") or "")
+        if install_cmd:
+            entry["install_cmd"] = install_cmd
+        npm_package = str(app.get("npm_package") or "")
+        if npm_package:
+            entry["npm_package"] = npm_package
         for field in (
             "display_name",
             "category",
@@ -1066,6 +1105,39 @@ class CliAppManager:
             if distribution:
                 entry["pip_distribution"] = distribution
         return entry
+
+    def _registry_drift(
+        self,
+        app: dict[str, Any],
+        installed_entry: dict[str, Any],
+    ) -> dict[str, dict[str, str]]:
+        """Compare a fresh catalog entry against recorded install provenance.
+
+        Returns ``field -> {"from": recorded, "to": current}`` for every
+        install-determining field that changed. ``version`` is reported but
+        never blocks — bumping it is what ``update`` is for. A changed command
+        surface (strategy / install command / package / entry point) means the
+        refreshed registry is no longer the source the user originally approved.
+        """
+        drift: dict[str, dict[str, str]] = {}
+        recorded_strategy = str(installed_entry.get("strategy") or "")
+        current_strategy = self._strategy(app)
+        if recorded_strategy and recorded_strategy != current_strategy:
+            drift["strategy"] = {"from": recorded_strategy, "to": current_strategy}
+        for field in ("install_cmd", "npm_package", "entry_point"):
+            recorded = str(installed_entry.get(field) or "")
+            current = str(app.get(field) or "")
+            if recorded and recorded != current:
+                drift[field] = {"from": recorded, "to": current}
+        recorded_version = str(installed_entry.get("version") or "")
+        current_version = str(app.get("version") or "")
+        if (
+            recorded_version
+            and recorded_version != "unknown"
+            and recorded_version != current_version
+        ):
+            drift["version"] = {"from": recorded_version, "to": current_version}
+        return drift
 
     def _fetch_skill_content(self, app: dict[str, Any]) -> str | None:
         skill_md = str(app.get("skill_md") or "").strip()
@@ -1217,16 +1289,27 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
                 "message": f"Installed CLI for {app['display_name']}.",
                 "installed": True,
                 "verification": ["package_manager_ok", "state_recorded", "managed_paths_present"],
+                "command": subprocess.list2cmdline(argv),
             }
         }
 
     def update(self, name: str) -> dict[str, Any]:
         app = self.get_app(name, force_refresh=True)
-        if str(app["name"]) not in self._load_installed():
+        installed = self._load_installed()
+        installed_entry = _as_object_dict(installed.get(str(app["name"])))
+        if installed_entry is None:
             raise CliAppError("CLI app is not installed")
+        drift = self._registry_drift(app, installed_entry)
+        blocking = {field: change for field, change in drift.items() if field != "version"}
+        if blocking:
+            changed = ", ".join(sorted(blocking))
+            raise CliAppError(
+                f"registry install metadata for '{app['name']}' changed since install "
+                f"({changed}); uninstall and install again to accept the new source"
+            )
         if self._strategy(app) == "bundled":
             self._record_installed(app)
-            return self.payload() | {
+            payload = self.payload() | {
                 "last_action": {
                     "ok": True,
                     "message": f"Checked {app['display_name']}.",
@@ -1234,20 +1317,27 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
                     "verification": ["state_recorded"],
                 }
             }
+            if drift:
+                payload["last_action"]["registry_drift"] = drift
+            return payload
         argv = self._argv_for_action(app, "update")
         assert argv is not None
         result = self._run_argv(argv, timeout=self.runtime.install_timeout)
         if result.returncode != 0:
             raise CliAppError(_truncate(result.stderr or result.stdout or "update failed"), status=500)
         self._record_installed(app)
-        return self.payload() | {
+        payload = self.payload() | {
             "last_action": {
                 "ok": True,
                 "message": f"Updated CLI for {app['display_name']}.",
                 "installed": True,
                 "verification": ["package_manager_ok", "state_recorded", "managed_paths_present"],
+                "command": subprocess.list2cmdline(argv),
             }
         }
+        if drift:
+            payload["last_action"]["registry_drift"] = drift
+        return payload
 
     def uninstall(self, name: str) -> dict[str, Any]:
         app = self.get_app(name)
