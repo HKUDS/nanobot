@@ -116,6 +116,21 @@ describe("web link actions", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });
+  it.each(["unsupported", "native", "sameOrigin"])("omits unusable preview actions for %s links while keeping external open and copy", async (reason) => {
+    if (reason === "unsupported") Reflect.deleteProperty(HTMLIFrameElement.prototype, "credentialless");
+    if (reason === "native") vi.mocked(isNativeRuntime).mockReturnValue(true);
+    const href = reason === "sameOrigin" ? `${window.location.origin}/settings` : "https://example.com/demo";
+    const open = vi.fn();
+    render(<WebPreviewContext.Provider value={open}><WebLink href={href}>Example</WebLink></WebPreviewContext.Provider>);
+    fireEvent.contextMenu(screen.getByRole("link", { name: "Example" }));
+    expect(screen.queryByRole("menuitem", { name: "Preview website" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Open in browser" })).toHaveAttribute("href", href);
+    const explanation = reason === "unsupported" ? /does not support credential-isolated/ : reason === "native" ? /native host/ : /application itself cannot be embedded/;
+    expect(screen.getByText(explanation)).toBeVisible();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy link" }));
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenLastCalledWith(href));
+    expect(open).not.toHaveBeenCalled();
+  });
   it("ignores a late copy completion after the user reopens the menu", async () => {
     let finish!: (result: boolean) => void;
     vi.mocked(copyTextToClipboard).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
