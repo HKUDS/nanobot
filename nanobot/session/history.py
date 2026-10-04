@@ -95,6 +95,13 @@ class SessionHistoryReader:
             key = row.get("key")
             if not isinstance(key, str) or key == exclude_session_key:
                 continue
+            payload = self._sessions.read_session_metadata(key)
+            if payload is None:
+                continue
+            raw_metadata = cast(object, payload.get("metadata"))
+            metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
+            if not self._sessions.types.public_history(metadata):
+                continue
             title = _text(row.get("title"))
             folded = title.casefold()
             rank = (
@@ -139,6 +146,8 @@ class SessionHistoryReader:
             return None
         raw_metadata = cast(object, payload.get("metadata"))
         metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
+        if not self._sessions.types.public_history(metadata):
+            return None
         updated = payload.get("updated_at")
         return {
             "session_key": session_key,
