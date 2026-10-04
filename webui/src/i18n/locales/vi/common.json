@@ -1025,6 +1025,7 @@
         "firecrawl": "Thu thập, tìm kiếm và trích xuất nội dung web.",
         "parallel-search": "Tìm kiếm trên web và đọc các trang liên quan.",
         "exa": "Tìm kiếm trên web và trích xuất nội dung trang đã làm sạch.",
+        "keenable": "Tìm kiếm trên web và đọc mọi trang dưới dạng markdown gọn gàng.",
         "microsoft-learn": "Tìm kiếm và đọc tài liệu Microsoft Learn.",
         "aws-docs": "Tìm kiếm tài liệu và hướng dẫn dịch vụ AWS.",
         "brave-search": "Tìm kiếm web, tin tức, hình ảnh, video và kết quả địa phương bằng Brave Search.",
