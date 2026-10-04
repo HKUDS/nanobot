@@ -1606,6 +1606,8 @@ class GatewayHTTPHandler:
             from nanobot.webui.extensions_api import extension_payload
 
             return _http_json_response(extension_payload(extension))
+        if not extension.enabled:
+            return _http_error(403, "extension is disabled")
         from nanobot.webui.extensions_api_handler import dispatch_extension_api
 
         status, headers, body = dispatch_extension_api(
@@ -1631,6 +1633,8 @@ class GatewayHTTPHandler:
         extension = self.extensions.get(extension_id)
         if extension is None:
             return _http_error(404, "extension not found")
+        if not extension.enabled:
+            return _http_error(403, "extension is disabled")
         from nanobot.webui.extensions_api import (
             WebUIExtensionError,
             serve_extension_asset,
