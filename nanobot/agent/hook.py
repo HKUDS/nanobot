@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.events import NO_EVENTS, EventSink
+from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
 
 @dataclass(slots=True)
@@ -19,7 +21,7 @@ class AgentHookContext:
     iteration: int
     messages: list[dict[str, Any]]
     response: LLMResponse | None = None
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     tool_results: list[Any] = field(default_factory=list)
     tool_events: list[dict[str, str]] = field(default_factory=list)
@@ -39,7 +41,7 @@ class AgentRunHookContext:
     messages: list[dict[str, Any]]
     final_content: str | None = None
     tools_used: list[str] = field(default_factory=list)
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: LLMUsage | None = None
     stop_reason: str | None = None
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
@@ -51,7 +53,7 @@ class AgentRunHookContext:
 class AgentTurnHookContext:
     """Turn-local inputs available when constructing per-turn hooks."""
 
-    on_progress: Callable[..., Awaitable[None]] | None = None
+    events: EventSink = NO_EVENTS
     workspace: Path | None = None
     channel: str = "cli"
     chat_id: str = "direct"
@@ -179,7 +181,9 @@ class CompositeHook(AgentHook):
             try:
                 await getattr(h, method_name)(*args, **kwargs)
             except Exception:
-                logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+                logger.opt(exception=tool_log_content_allowed()).error(
+                    "AgentHook.{} error in {}", method_name, type(h).__name__,
+                )
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)
@@ -284,7 +288,7 @@ class SDKCaptureHook(AgentHook):
         super().__init__()
         self.tools_used: list[str] = []
         self.messages: list[dict[str, Any]] = []
-        self.usage: dict[str, int] = {}
+        self.usage: LLMUsage | None = None
         self.stop_reason: str | None = None
         self.error: str | None = None
         self.tool_events: list[dict[str, str]] = []
@@ -294,7 +298,7 @@ class SDKCaptureHook(AgentHook):
         for call in context.tool_calls:
             self.tools_used.append(call.name)
         self.messages = list(context.messages)
-        self.usage = dict(context.usage)
+        self.usage = context.usage
         self.stop_reason = context.stop_reason
         self.error = context.error
         self.tool_events = list(context.tool_events)
@@ -302,7 +306,7 @@ class SDKCaptureHook(AgentHook):
     async def after_run(self, context: AgentRunHookContext) -> None:
         self.tools_used = list(context.tools_used)
         self.messages = list(context.messages)
-        self.usage = dict(context.usage)
+        self.usage = context.usage
         self.stop_reason = context.stop_reason
         self.error = context.error
         self.tool_events = list(context.tool_events)

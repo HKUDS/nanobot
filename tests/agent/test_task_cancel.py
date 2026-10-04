@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import run_session
+from nanobot.agent.memory import Consolidator
+from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
 from nanobot.session.keys import UNIFIED_SESSION_KEY
@@ -40,6 +43,173 @@ def _make_loop(*, tools_config=None):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, tools_config=tools_config)
     return loop, bus
+
+
+class TestActiveTaskTracking:
+    @pytest.mark.asyncio
+    async def test_completed_task_removes_empty_session_group(self):
+        loop, _bus = _make_loop()
+        release = asyncio.Event()
+        task = asyncio.create_task(release.wait())
+
+        loop._track_active_task("test:c1", task)
+        release.set()
+        await task
+        await asyncio.sleep(0)
+
+        assert "test:c1" not in loop._active_tasks
+
+    @pytest.mark.asyncio
+    async def test_session_group_remains_until_last_task_completes(self):
+        loop, _bus = _make_loop()
+        releases = [asyncio.Event(), asyncio.Event()]
+        tasks = [asyncio.create_task(release.wait()) for release in releases]
+        for task in tasks:
+            loop._track_active_task("test:c1", task)
+
+        releases[0].set()
+        await tasks[0]
+        await asyncio.sleep(0)
+
+        assert loop._active_tasks["test:c1"] == {tasks[1]}
+
+        releases[1].set()
+        await tasks[1]
+        await asyncio.sleep(0)
+
+        assert "test:c1" not in loop._active_tasks
+
+    @pytest.mark.asyncio
+    async def test_old_callback_preserves_replacement_session_group(self):
+        loop, _bus = _make_loop()
+        old_release = asyncio.Event()
+        new_release = asyncio.Event()
+        old_task = asyncio.create_task(old_release.wait())
+        new_task = asyncio.create_task(new_release.wait())
+
+        loop._track_active_task("test:c1", old_task)
+        loop._active_tasks.pop("test:c1")
+        loop._track_active_task("test:c1", new_task)
+
+        old_release.set()
+        await old_task
+        await asyncio.sleep(0)
+
+        assert loop._active_tasks["test:c1"] == {new_task}
+
+        new_release.set()
+        await new_task
+        await asyncio.sleep(0)
+
+        assert "test:c1" not in loop._active_tasks
+
+
+async def _wait_for_background_callbacks(loop) -> None:
+    for _ in range(10):
+        if not loop._background_tasks:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("background task callback did not run")
+
+
+class TestBackgroundTaskTracking:
+    @pytest.mark.asyncio
+    async def test_successful_background_task_is_removed(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+
+        loop.schedule_background(asyncio.sleep(0))
+        await _wait_for_background_callbacks(loop)
+
+        assert not loop._background_tasks
+        mock_logger.opt.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failed_background_task_is_retrieved_and_logged(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        failure = RuntimeError("background failure")
+        loop_errors: list[dict[str, object]] = []
+        event_loop = asyncio.get_running_loop()
+        previous_handler = event_loop.get_exception_handler()
+        event_loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+
+        async def fail():
+            raise failure
+
+        try:
+            loop.schedule_background(fail())
+            task_name = next(iter(loop._background_tasks)).get_name()
+            await _wait_for_background_callbacks(loop)
+        finally:
+            event_loop.set_exception_handler(previous_handler)
+
+        assert not loop._background_tasks
+        assert not loop_errors
+        mock_logger.opt.assert_called_once_with(exception=failure)
+        mock_logger.opt.return_value.error.assert_called_once_with(
+            "Background task '{}' failed",
+            task_name,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_background_task_is_removed_without_error(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def wait_forever():
+            started.set()
+            await release.wait()
+
+        loop.schedule_background(wait_forever())
+        await started.wait()
+        task = next(iter(loop._background_tasks))
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await _wait_for_background_callbacks(loop)
+
+        assert not loop._background_tasks
+        mock_logger.opt.assert_not_called()
+
+
+    @pytest.mark.asyncio
+    async def test_shutdown_drains_background_failure_and_logs_it_once(self, monkeypatch):
+        loop, _bus = _make_loop()
+        loop.subagents.close = AsyncMock()
+        loop._exec_session_manager.close_all = AsyncMock()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        failure = RuntimeError("failure while draining")
+
+        async def fail_later():
+            started.set()
+            await release.wait()
+            raise failure
+
+        loop.schedule_background(fail_later())
+        await started.wait()
+        closing = asyncio.create_task(loop.aclose())
+        try:
+            await asyncio.sleep(0)
+            assert not closing.done()
+            loop.subagents.close.assert_not_awaited()
+        finally:
+            release.set()
+            await closing
+
+        assert not loop._background_tasks
+        mock_logger.opt.assert_called_once_with(exception=failure)
+        mock_logger.opt.return_value.error.assert_called_once()
+        loop.subagents.close.assert_awaited_once()
+        loop._exec_session_manager.close_all.assert_awaited_once()
 
 
 class TestHandleStop:
@@ -211,14 +381,13 @@ class TestDispatch:
         loop._process_message = AsyncMock(
             return_value=OutboundMessage(channel="test", chat_id="c1", content="hi")
         )
-        await loop._dispatch(msg)
+        await run_session(loop, msg)
         out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert out.content == "hi"
 
     @pytest.mark.asyncio
     async def test_dispatch_streaming_preserves_message_metadata(self):
         from nanobot.bus.events import InboundMessage
-        from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 
         loop, bus = _make_loop()
         msg = InboundMessage(
@@ -233,16 +402,15 @@ class TestDispatch:
             },
         )
 
-        async def fake_process(_msg, *, on_stream=None, on_stream_end=None, **kwargs):
-            assert on_stream is not None
-            assert on_stream_end is not None
-            await on_stream("hi")
-            await on_stream_end(resuming=False)
+        async def fake_process(_msg, *, delivery, **kwargs):
+            assert delivery.streaming
+            await delivery.events.emit(StreamDeltaEvent(content="hi"))
+            await delivery.events.emit(StreamEndEvent())
             return None
 
         loop._process_message = fake_process
 
-        await loop._dispatch(msg)
+        await run_session(loop, msg)
         first = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         second = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
 
@@ -254,7 +422,7 @@ class TestDispatch:
         assert isinstance(second.event, StreamEndEvent)
 
     @pytest.mark.asyncio
-    async def test_processing_lock_serializes(self):
+    async def test_same_session_dispatches_serialize(self):
         from nanobot.bus.events import InboundMessage, OutboundMessage
 
         loop, bus = _make_loop()
@@ -274,9 +442,9 @@ class TestDispatch:
         msg1 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="a")
         msg2 = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="b")
 
-        t1 = asyncio.create_task(loop._dispatch(msg1))
+        t1 = asyncio.create_task(run_session(loop, msg1))
         await asyncio.wait_for(first_started.wait(), timeout=1.0)
-        t2 = asyncio.create_task(loop._dispatch(msg2))
+        t2 = asyncio.create_task(run_session(loop, msg2))
         await asyncio.sleep(0)
         assert order == ["start-a"]
 
@@ -296,6 +464,7 @@ class TestSubagentCancellation:
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
         )
 
         cancelled = asyncio.Event()
@@ -326,6 +495,7 @@ class TestSubagentCancellation:
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
         )
         assert await mgr.cancel_by_session("nonexistent") == 0
 
@@ -340,6 +510,7 @@ class TestSubagentCancellation:
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
         )
         # Replace the real exec session manager with a mock
         mock_exec_mgr = AsyncMock(spec=ExecSessionManager)
@@ -364,7 +535,7 @@ class TestSubagentCancellation:
 
         call_count = {"n": 0}
 
-        async def scripted_chat_with_retry(*, messages, **kwargs):
+        async def scripted_chat_stream_with_retry(*, messages, **kwargs):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 return LLMResponse(
@@ -375,11 +546,12 @@ class TestSubagentCancellation:
                 )
             captured_second_call[:] = messages
             return LLMResponse(content="done", tool_calls=[])
-        provider.chat_with_retry = scripted_chat_with_retry
+        provider.chat_stream_with_retry = scripted_chat_stream_with_retry
         mgr = SubagentManager(
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(),
         )
 
         async def fake_execute(self, **kwargs):
@@ -420,6 +592,7 @@ class TestSubagentCancellation:
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
             tools_config=ToolsConfig(exec=ExecToolConfig(enable=False)),
         )
         mgr._announce_result = AsyncMock()
@@ -450,7 +623,9 @@ class TestSubagentCancellation:
         mgr._announce_result.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_subagent_announces_error_when_tool_execution_fails(self, monkeypatch, tmp_path):
+    async def test_subagent_announces_success_after_recovering_from_tool_failure(
+        self, monkeypatch, tmp_path
+    ):
         from nanobot.agent.subagent import SubagentManager
         from nanobot.bus.queue import MessageBus
         from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -458,14 +633,26 @@ class TestSubagentCancellation:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-            content="thinking",
-            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-        ))
+        provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(
+                content="first attempt",
+                tool_calls=[
+                    ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})
+                ],
+            ),
+            LLMResponse(
+                content="retrying",
+                tool_calls=[
+                    ToolCallRequest(id="call_2", name="list_dir", arguments={"path": "."})
+                ],
+            ),
+            LLMResponse(content="recovered after tool failure", tool_calls=[]),
+        ])
         mgr = SubagentManager(
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(),
         )
         mgr._announce_result = AsyncMock()
 
@@ -492,11 +679,10 @@ class TestSubagentCancellation:
 
         mgr._announce_result.assert_awaited_once()
         args = mgr._announce_result.await_args.args
-        assert "Completed steps:" in args[3]
-        assert "- list_dir: first result" in args[3]
-        assert "Failure:" in args[3]
-        assert "- list_dir: boom" in args[3]
-        assert args[5] == "error"
+        assert args[3] == "recovered after tool failure"
+        assert args[5] == "ok"
+        assert calls["n"] == 2
+        assert provider.chat_stream_with_retry.await_count == 3
 
     @pytest.mark.asyncio
     async def test_cancel_by_session_cancels_running_subagent_tool(self, monkeypatch, tmp_path):
@@ -507,7 +693,7 @@ class TestSubagentCancellation:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
             content="thinking",
             tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
         ))
@@ -515,6 +701,7 @@ class TestSubagentCancellation:
             workspace=tmp_path,
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(),
         )
         mgr._announce_result = AsyncMock()
 
@@ -564,6 +751,7 @@ class TestSubagentAnnounceSessionKey:
             workspace=MagicMock(),
             bus=bus,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            consolidator=MagicMock(spec=Consolidator),
         )
         return mgr, bus
 

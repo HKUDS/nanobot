@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, TypeGuard, cast
 if TYPE_CHECKING:
     from nanobot.channels.plugin import ChannelPlugin
 
-FieldKind = Literal["string", "secret", "list", "bool", "int", "enum"]
+FieldKind = Literal["string", "secret", "list", "bool", "int", "float", "json", "enum"]
 RouteFieldType = str | tuple[str, set[str]]
 
 
@@ -117,6 +118,8 @@ class ChannelFieldSpec:
     default: Any = None
     writable: bool = True
     snapshot: bool = True
+    # An omitted/null override inherits host policy instead of materializing a default.
+    inheritable: bool = False
 
     @property
     def route_type(self) -> RouteFieldType:
@@ -162,6 +165,7 @@ class ChannelSetupSpec:
     required: tuple[SetupRequirement, ...] = ()
     official_url: str | None = None
     validator: SetupValidator | None = None
+    verifies_connection: bool = False
 
     @property
     def secrets(self) -> frozenset[str]:
@@ -208,12 +212,25 @@ class ChannelSetupSpec:
             }
             if field.default is not None:
                 public_field["default_value"] = stringify_channel_value(field.default)
+            if field.inheritable:
+                public_field["inheritable"] = True
             fields.append(public_field)
         payload: dict[str, Any] = {
             "fields": fields,
+            "requirements": [
+                {
+                    "alternatives": [
+                        [f"channels.{channel_name}.{name}" for name in alternative]
+                        for alternative in requirement.alternatives
+                    ]
+                }
+                for requirement in self.required
+            ],
         }
         if self.official_url:
             payload["official_url"] = self.official_url
+        if self.verifies_connection:
+            payload["verifies_connection"] = True
         return payload
 
 
@@ -270,6 +287,8 @@ def channel_default_config(plugin: ChannelPlugin) -> dict[str, Any]:
     defaults: dict[str, Any] = {"enabled": plugin.default_enabled}
     if plugin.setup is not None:
         for name, field in plugin.setup.fields.items():
+            if field.inheritable:
+                continue
             value: Any = field.default
             if value is None:
                 fallback_defaults: dict[str, Any] = {
@@ -572,6 +591,8 @@ def stringify_channel_value(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, list):
         return ", ".join(str(item) for item in cast(list[Any], value))
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, indent=2)
     return str(value)
 
 

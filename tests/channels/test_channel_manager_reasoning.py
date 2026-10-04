@@ -23,7 +23,6 @@ import pytest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     ProgressEvent,
-    outbound_event_from_message,
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
@@ -282,7 +281,7 @@ async def _pump_one(manager: ChannelManager) -> None:
     """Process currently queued messages through the reasoning dispatch branch."""
 
     async def dispatch_one(msg: OutboundMessage) -> None:
-        event = outbound_event_from_message(msg)
+        event = msg.event
         if isinstance(event, ProgressEvent) and (
             event.reasoning_delta
             or event.reasoning_end

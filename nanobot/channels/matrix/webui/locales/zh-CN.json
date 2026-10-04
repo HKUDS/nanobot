@@ -1,19 +1,10 @@
 {
-  "description": "在 Matrix 房间中使用 nanobot。",
-  "requirements": "主服务器、账户令牌和房间访问权限",
   "setup": {
     "docsLabel": "打开 Matrix 配置指南",
     "officialLabel": "打开 Matrix 客户端列表",
-    "tryIt": "将 Matrix 账户邀请进房间并发送一条测试消息。",
-    "summary": "Matrix 需要主服务器账户，并使用密码或访问令牌登录。",
-    "steps": [
-      "为 nanobot 创建或选择一个 Matrix 账户。",
-      "填写主服务器、用户 ID，以及密码或访问令牌凭据。",
-      "保存并启用 Matrix，将账户邀请进房间，然后发送一条测试消息。"
-    ],
     "fields": {
       "homeserver": {
-        "label": "主服务器",
+        "label": "账户服务器",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -22,18 +13,15 @@
       },
       "password": {
         "label": "密码",
-        "placeholder": "••••••",
-        "help": "密码登录和访问令牌登录任选其一。"
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "访问令牌",
-        "placeholder": "可选的令牌登录",
-        "help": "如果 Matrix 客户端可以显示访问令牌，建议使用该方式。"
+        "placeholder": "输入访问令牌"
       },
       "deviceId": {
         "label": "设备 ID",
-        "placeholder": "使用访问令牌时必填",
-        "help": "复制与访问令牌关联的设备 ID；密码登录不需要。"
+        "placeholder": "使用访问令牌时必填"
       },
       "groupPolicy": {
         "label": "群组行为",
@@ -42,6 +30,53 @@
           "open": "所有消息",
           "allowlist": "白名单"
         }
+      },
+      "allowFrom": {
+        "label": "允许的用户"
+      },
+      "e2eeEnabled": {
+        "label": "端到端加密",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 验证",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "同步停止等待时间"
+      },
+      "maxMediaBytes": {
+        "label": "媒体大小上限"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "并发媒体下载数"
+      },
+      "groupAllowFrom": {
+        "label": "允许的群组"
+      },
+      "allowRoomMentions": {
+        "label": "响应房间提及",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "streaming": {
+        "label": "流式输出",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "proxy": {
+        "label": "网络代理",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

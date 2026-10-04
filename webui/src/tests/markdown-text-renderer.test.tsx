@@ -1,8 +1,16 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
+
+
+// Exercise the asynchronous math boundary once, then test the loaded grammar cases.
+beforeAll(async () => {
+  const view = render(<MarkdownTextRenderer>{"$$x^2$$"}</MarkdownTextRenderer>);
+  await waitFor(() => expect(view.container.querySelector(".katex")).toBeInTheDocument());
+  view.unmount();
+});
 
 describe("MarkdownTextRenderer", () => {
   it("renders clickable markdown links in blue", () => {
@@ -215,10 +223,13 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByText("src/**/*.json").tagName).toBe("CODE");
   });
 
-  it("does not wrap complete fenced code blocks in an extra pre", () => {
+  it.each([
+    ["complete", "\n```"],
+    ["streaming", ""],
+  ])("renders a %s fenced code block in one shell", (_state, closingFence) => {
     const { container } = render(
       <MarkdownTextRenderer highlightCode={false}>
-        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace\n```"}
+        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace" + closingFence}
       </MarkdownTextRenderer>,
     );
 
@@ -240,27 +251,13 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelectorAll("pre")).toHaveLength(1);
   });
 
-  it("keeps streaming unfinished fenced code blocks to a single shell", () => {
-    const { container } = render(
-      <MarkdownTextRenderer highlightCode={false}>
-        {"当前目录:\n\n```text\n/Users/renxubin/.nanobot/workspace"}
-      </MarkdownTextRenderer>,
-    );
-
-    expect(screen.getByText("/Users/renxubin/.nanobot/workspace")).toBeInTheDocument();
-    expect(container.querySelectorAll("pre")).toHaveLength(1);
-    expect(container.querySelector("pre div")).toBeNull();
-  });
 
   it("renders markdown images as inline previews", () => {
     render(<MarkdownTextRenderer>![Diagram](/api/media/sig/payload)</MarkdownTextRenderer>);
 
     const image = screen.getByRole("img", { name: "Diagram" });
     expect(image).toHaveAttribute("src", "/api/media/sig/payload");
-    expect(screen.getByRole("link", { name: "Open Diagram" })).toHaveAttribute(
-      "href",
-      "/api/media/sig/payload",
-    );
+    expect(screen.getByRole("button", { name: "View image: Diagram" })).toBeInTheDocument();
   });
 
   it("renders markdown videos as inline players", () => {
@@ -370,16 +367,13 @@ describe("MarkdownTextRenderer", () => {
       "src",
       "/api/media/sig/payload",
     );
-    expect(screen.getByRole("link", { name: "Open Diagram" })).toHaveAttribute(
-      "href",
-      "/api/media/sig/payload",
-    );
+    expect(screen.getByRole("button", { name: "View image: Diagram" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Code" })).not.toBeInTheDocument();
   });
 
-  it("renders a safe subset of inline HTML", () => {
+  it.each([false, true])("renders a safe subset of inline HTML (streaming=%s)", (streaming) => {
     const { container } = render(
-      <MarkdownTextRenderer>
+      <MarkdownTextRenderer streaming={streaming}>
         {"<mark>高亮文本</mark>\n\n上标：x<sup>2</sup>\n下标：H<sub>2</sub>O"}
       </MarkdownTextRenderer>,
     );
@@ -389,9 +383,9 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("sub")).toHaveTextContent("2");
   });
 
-  it("keeps unsafe HTML as text", () => {
+  it.each([false, true])("keeps unsafe HTML as text (streaming=%s)", (streaming) => {
     const { container } = render(
-      <MarkdownTextRenderer>
+      <MarkdownTextRenderer streaming={streaming}>
         {"<script>alert(1)</script>\n\n<mark onclick=\"alert(1)\">bad</mark>"}
       </MarkdownTextRenderer>,
     );
@@ -400,6 +394,16 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("mark")).toBeNull();
     expect(container).toHaveTextContent("<script>alert(1)</script>");
     expect(container).toHaveTextContent("<mark onclick=\"alert(1)\">bad</mark>");
+  });
+
+  it("keeps incomplete unsafe HTML inert throughout streaming", () => {
+    const source = '<img src=x onerror="alert(1)">';
+    const { container, rerender } = render(<MarkdownTextRenderer>{""}</MarkdownTextRenderer>);
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming>{source.slice(0, end)}</MarkdownTextRenderer>);
+      expect(container.querySelector("img, [onerror]")).toBeNull();
+    }
+    expect(container).toHaveTextContent(source);
   });
 
   it("renders safe details blocks", () => {
@@ -465,7 +469,16 @@ describe("MarkdownTextRenderer", () => {
     expect(surface).toHaveAttribute("role", "region");
     expect(surface).toHaveAttribute("tabindex", "0");
     expect(surface).toHaveAccessibleName("Data table");
-    expect(screen.getByRole("table")).toHaveTextContent("nanobot");
+    const table = screen.getByRole("table");
+    expect(table).toHaveTextContent("nanobot");
+    expect(table).not.toHaveClass("min-w-max");
+    expect(table).toHaveClass(
+      "table-fixed",
+      "[&_th]:whitespace-normal",
+      "[&_th]:[overflow-wrap:anywhere]",
+      "[&_td]:whitespace-normal",
+      "[&_td]:[overflow-wrap:anywhere]",
+    );
     expect(container.firstElementChild).toHaveClass("space-y-4");
     expect(container.firstElementChild).not.toHaveClass("space-y-0");
   });
@@ -502,6 +515,30 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("[data-sd-animate]")).not.toBeInTheDocument();
     expect(container.querySelector("[data-nanobot-stream-unit]")).not.toBeInTheDocument();
   });
+
+  it("stops repairing completed markdown without replacing the streaming layout", () => {
+    const source = "The old snip_history() / _legal_history_tail() path was removed.\n\nA real maintenance cost.";
+    const { container, rerender } = render(
+      <MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>,
+    );
+    const firstParagraph = container.querySelector("p");
+    expect(container.querySelector("p:last-child")?.textContent).toBe("A real maintenance cost._");
+
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+
+    expect(container.querySelector("p:last-child")?.textContent).toBe("A real maintenance cost.");
+    expect(container.querySelector("p")).toBe(firstParagraph);
+  });
+
+  it.each(["A literal trailing underscore_", "**unfinished emphasis", "_legal_history_tail()"])(
+    "preserves completed source syntax: %s",
+    (source) => {
+      const { container } = render(
+        <MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>,
+      );
+      expect(container.textContent).toBe(source);
+    },
+  );
 
   it("repairs incomplete streaming markdown without exposing syntax fragments", () => {
     const { container, rerender } = render(
@@ -669,6 +706,182 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector(".katex")).toBeNull();
     expect(screen.getByText("\\(x\\)").tagName).toBe("CODE");
     expect(screen.getByText("\\[x^2\\]")).toBeInTheDocument();
+  });
+
+  it.each([false, true])("renders multiline dollar math with attached fences (streaming=%s)", (streaming) => {
+    const formula = String.raw`C = \sum_i \underbrace{\alpha_i T_i}_{w_i}\, c_i`;
+    const sources = [
+      "$$C\n" + formula.slice(2) + "$$",
+      "$$\n" + formula + "$$",
+      "$$" + formula + "\n$$",
+      "$$\n" + formula + "\n$$",
+    ];
+    const { container, rerender } = render(<MarkdownTextRenderer>{""}</MarkdownTextRenderer>);
+
+    for (const source of sources) {
+      rerender(
+        <MarkdownTextRenderer streaming={streaming}>
+          {source + "\n\nAfter the formula: $z_i$."}
+        </MarkdownTextRenderer>,
+      );
+      expect(container.querySelector(".katex-error")).toBeNull();
+      expect(container.querySelector(".katex-display annotation")?.textContent?.replace(/\s+/g, " ")).toBe(formula);
+      expect(container.querySelectorAll(".katex")).toHaveLength(2);
+      expect(container).toHaveTextContent("After the formula:");
+    }
+  });
+
+  it.each([false, true])("preserves less-than comparisons in math and following content (streaming=%s)", (streaming) => {
+    const formula = String.raw`\hat d(u,v) = \sum_{i} \frac{1}{z_i}\,\alpha_i\, T_i, \qquad T_i = \prod_{j<i}(1-\alpha_j)`;
+    const { container } = render(
+      <MarkdownTextRenderer streaming={streaming}>
+        {"## Expected inverse depth\n\n$$\n" + formula + "\n$$\n\n## Supervision loss\n\nThe next section stays visible."}
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector(".katex-display annotation")?.textContent).toBe(formula);
+    expect(screen.getByRole("heading", { name: "Supervision loss" })).toBeInTheDocument();
+    expect(container).toHaveTextContent("The next section stays visible.");
+  });
+
+  it.each([
+    "$j<i$",
+    "$$j<i$$",
+    String.raw`\(j<i\)`,
+    String.raw`\[j<i\]`,
+  ])("preserves less-than comparisons across math delimiters: %s", (source) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{""}</MarkdownTextRenderer>);
+    rerender(<MarkdownTextRenderer streaming>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent).toBe("j<i");
+
+    rerender(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent).toBe("j<i");
+  });
+
+  it.each(["$j<i$", "$$j<i$$"])("preserves comparisons after partial streaming updates: %s", (source) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{""}</MarkdownTextRenderer>);
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent).toBe("j<i");
+  });
+
+  it("preserves a block formula and following section across streaming updates", () => {
+    const prefix = "$$\n" + String.raw`T_i = \prod_{j`;
+    const comparison = prefix + "<i";
+    const formula = comparison + String.raw`}(1-\alpha_j)` + "\n$$";
+    const content = formula + "\n\n## Supervision loss\n\nThe next section stays visible.";
+    const { container, rerender } = render(<MarkdownTextRenderer streaming>{prefix}</MarkdownTextRenderer>);
+
+    rerender(<MarkdownTextRenderer streaming>{comparison}</MarkdownTextRenderer>);
+    expect(container).toHaveTextContent("<i");
+
+    for (const source of [formula, content]) {
+      rerender(<MarkdownTextRenderer streaming>{source}</MarkdownTextRenderer>);
+      expect(container.querySelector(".katex-error")).toBeNull();
+      expect(container.querySelector(".katex-display annotation")?.textContent).toBe(
+        String.raw`T_i = \prod_{j<i}(1-\alpha_j)`,
+      );
+    }
+    expect(screen.getByRole("heading", { name: "Supervision loss" })).toBeInTheDocument();
+    expect(container).toHaveTextContent("The next section stays visible.");
+
+    rerender(<MarkdownTextRenderer>{content}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector(".katex-display annotation")?.textContent).toBe(
+      String.raw`T_i = \prod_{j<i}(1-\alpha_j)`,
+    );
+    expect(screen.getByRole("heading", { name: "Supervision loss" })).toBeInTheDocument();
+    expect(container).toHaveTextContent("The next section stays visible.");
+  });
+
+  it("keeps less-than comparisons literal inside streaming code", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming highlightCode={false}>
+        {"Inline `$j<i$`.\n\n```latex\n$$\\prod_{j<i}(1-\\alpha_j)$$\n```"}
+      </MarkdownTextRenderer>,
+    );
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(screen.getByText("$j<i$").tagName).toBe("CODE");
+    expect(container).toHaveTextContent(String.raw`$$\prod_{j<i}(1-\alpha_j)$$`);
+  });
+
+  it("keeps multiline dollar formulas in code literal", () => {
+    const source = "$$C\n= x_i$$";
+    const { container } = render(
+      <MarkdownTextRenderer highlightCode={false}>{"```latex\n" + source + "\n```"}</MarkdownTextRenderer>,
+    );
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container).toHaveTextContent("$$C");
+    expect(container).toHaveTextContent("= x_i$$");
+  });
+
+  it.each([
+    "$$x_i$$ and $y_i$ afterwards.",
+    "Before $$x_i$$ and $y_i$ afterwards.",
+    "$$$\nx_i\n$$$\n\nAnd $y_i$ afterwards.",
+    "$$\\text{cost: \\$} + x_i$$\n\nAnd $y_i$ afterwards.",
+  ])("preserves surrounding text and existing dollar syntax: %s", (source) => {
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelectorAll(".katex")).toHaveLength(2);
+    expect(container).toHaveTextContent("afterwards.");
+  });
+
+  it("renders the complete formula after partial streaming updates", () => {
+    const source = "$$C\n= \\sum_i c_i$$";
+    const { container, rerender } = render(<MarkdownTextRenderer>{""}</MarkdownTextRenderer>);
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")).toHaveTextContent("C = \\sum_i c_i");
+  });
+
+  it.each([false, true])("keeps TeX equations out of Markdown headings (streaming=%s)", (streaming) => {
+    const formula = String.raw`\tan\left(\frac{\mathrm{HFOV}}{2}\right)
+=
+\frac{X}{Z}`;
+    const source = "Before\n\n\\[\n" + formula + "\n\n\\]\n\nAfter";
+    const { container } = render(
+      <MarkdownTextRenderer streaming={streaming}>{source}</MarkdownTextRenderer>,
+    );
+    expect(container.querySelector(".katex-display annotation")?.textContent?.trim()).toBe(formula);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("h1, h2")).toBeNull();
+    expect(container).toHaveTextContent("Before");
+    expect(container).toHaveTextContent("After");
+  });
+
+  it("keeps an unfinished TeX command renderable when Remend adds a link suffix", () => {
+    const { container } = render(
+      <MarkdownTextRenderer streaming>{"\\[\n\\"}</MarkdownTextRenderer>,
+    );
+    expect(container.textContent).not.toBe("");
+  });
+
+  it("recovers a complete TeX equation after every streaming prefix", () => {
+    const source = String.raw`\[
+\boxed{
+\mathrm{HFOV}
+=
+
+2\arctan\left(\frac{W}{2f_x}\right)
+}
+\]`;
+    const { container, rerender } = render(<MarkdownTextRenderer streaming>{""}</MarkdownTextRenderer>);
+    for (let end = 1; end <= source.length; end++) {
+      rerender(<MarkdownTextRenderer streaming>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    rerender(<MarkdownTextRenderer streaming>{source + "\n\nFollowing paragraph"}</MarkdownTextRenderer>);
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("h1, h2")).toBeNull();
+    expect(container).toHaveTextContent("Following paragraph");
   });
 
   it("still renders explicit math blocks", () => {

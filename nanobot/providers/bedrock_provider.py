@@ -14,6 +14,7 @@ from typing import Any, cast
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
+    LLMUsage,
     ToolCallRequest,
     parse_tool_arguments,
     resolve_stream_idle_timeout_s,
@@ -60,8 +61,9 @@ class BedrockProvider(LLMProvider):
         profile: str | None = None,
         extra_body: dict[str, Any] | None = None,
         client: Any | None = None,
+        provider_name: str = "bedrock",
     ):
-        super().__init__(api_key, api_base)
+        super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self.region = region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         self.profile = profile
@@ -73,6 +75,7 @@ class BedrockProvider(LLMProvider):
             os.environ["AWS_BEARER_TOKEN_BEDROCK"] = self.api_key
         try:
             import boto3
+            from botocore.config import Config
         except ImportError as exc:  # pragma: no cover - exercised only without boto3 installed
             raise RuntimeError(
                 "AWS Bedrock provider requires boto3. Run `nanobot plugins enable bedrock`."
@@ -84,7 +87,10 @@ class BedrockProvider(LLMProvider):
         boto3_module = cast(Any, boto3)
         session = boto3_module.Session(**session_kwargs)
 
-        client_kwargs: dict[str, Any] = {}
+        idle_timeout_s = resolve_stream_idle_timeout_s()
+        client_kwargs: dict[str, Any] = {
+            "config": Config(connect_timeout=idle_timeout_s, read_timeout=idle_timeout_s),
+        }
         if self.region:
             client_kwargs["region_name"] = self.region
         if self.api_base:
@@ -453,25 +459,25 @@ class BedrockProvider(LLMProvider):
         }.get(stop_reason or "", stop_reason or "stop")
 
     @staticmethod
-    def _usage(usage: dict[str, Any] | None) -> dict[str, int]:
+    def _usage(usage: dict[str, Any] | None) -> LLMUsage | None:
         if not usage:
-            return {}
-        prompt = int(usage.get("inputTokens") or 0)
-        completion = int(usage.get("outputTokens") or 0)
-        total = int(usage.get("totalTokens") or prompt + completion)
-        result = {
-            "prompt_tokens": prompt,
-            "completion_tokens": completion,
-            "total_tokens": total,
-        }
-        cache_read = int(usage.get("cacheReadInputTokens") or 0)
-        cache_write = int(usage.get("cacheWriteInputTokens") or 0)
-        if cache_read:
-            result["cached_tokens"] = cache_read
-            result["cache_read_input_tokens"] = cache_read
-        if cache_write:
-            result["cache_creation_input_tokens"] = cache_write
-        return result
+            return None
+
+        def _optional_count(key: str) -> int | None:
+            raw = usage.get(key)
+            return int(raw) if raw is not None else None
+
+        cache_read = _optional_count("cacheReadInputTokens")
+        cache_write = _optional_count("cacheWriteInputTokens")
+        logical_input = int(usage.get("inputTokens") or 0) + (cache_read or 0) + (
+            cache_write or 0
+        )
+        return LLMUsage.reported(
+            input_tokens=logical_input,
+            output_tokens=int(usage.get("outputTokens") or 0),
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+        )
 
     @staticmethod
     def _parse_reasoning(block: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
@@ -773,7 +779,10 @@ class BedrockProvider(LLMProvider):
             )
             response = cast(
                 dict[str, Any],
-                await asyncio.to_thread(self._client.converse_stream, **kwargs),
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._client.converse_stream, **kwargs),
+                    timeout=idle_timeout_s,
+                ),
             )
             stream = cast(Iterator[dict[str, Any]], iter(response.get("stream") or []))
             while True:
@@ -793,6 +802,8 @@ class BedrockProvider(LLMProvider):
                 )
                 if delta and on_content_delta:
                     await on_content_delta(delta)
+            if not state.get("stop_reason"):
+                raise ConnectionError("Model stream ended before a stop reason was received")
             return self._stream_result(
                 content_parts=content_parts,
                 reasoning_parts=reasoning_parts,

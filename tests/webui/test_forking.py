@@ -139,8 +139,9 @@ async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_e
     channel = SimpleNamespace(
         send_webui_protocol_error=AsyncMock(),
         gateway=SimpleNamespace(session_manager=MagicMock()),
-        logger=SimpleNamespace(warning=MagicMock()),
     )
+    warning = MagicMock()
+    monkeypatch.setattr(forking, "logger", SimpleNamespace(warning=warning))
     envelope = {"source_chat_id": "source", "before_user_index": 0}
     monkeypatch.setattr(forking, "create_webui_chat_fork", lambda *_args, **_kwargs: None)
 
@@ -158,5 +159,5 @@ async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_e
     )
     await forking.handle_webui_fork_chat(channel, connection, envelope)
 
-    channel.logger.warning.assert_called_once_with("fork_chat failed: {}", ANY)
+    warning.assert_called_once_with("fork_chat failed: {}", ANY)
     channel.send_webui_protocol_error.assert_awaited_once_with(connection, "fork_chat_failed")

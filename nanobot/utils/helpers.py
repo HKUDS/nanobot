@@ -1,6 +1,9 @@
 """Utility functions for nanobot."""
 
+from __future__ import annotations
+
 import base64
+import errno
 import json
 import os
 import re
@@ -8,14 +11,20 @@ import shutil
 import stat
 import time
 import uuid
+from collections.abc import Iterable
 from contextlib import suppress
 from datetime import datetime
-from functools import lru_cache
 from pathlib import Path
-from typing import Any, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
-import tiktoken
 from loguru import logger
+
+from nanobot.utils.token_encoding import get_token_encoding as _get_token_encoding
+
+if TYPE_CHECKING:
+    from tiktoken import Encoding
+
+    from nanobot.providers.base import LLMUsage
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
@@ -97,11 +106,6 @@ def sanitize_surrogates_deep(value: Any) -> Any:
     return value
 
 
-@lru_cache(maxsize=1)
-def _get_token_encoding() -> Any:
-    return tiktoken.get_encoding("cl100k_base")
-
-
 def _cache_tools_token_count(
     tools_id: int,
     fingerprint: tuple[int, ...],
@@ -116,7 +120,7 @@ def _cache_tools_token_count(
 
 
 def _estimate_tools_tokens(
-    enc: Any,
+    enc: Encoding,
     tools: list[dict[str, Any]],
     *,
     leading_separator: bool,
@@ -137,7 +141,7 @@ def _estimate_tools_tokens(
     rendered = json.dumps(tools, ensure_ascii=False)
     if leading_separator:
         rendered = "\n" + rendered
-    token_count = len(enc.encode(rendered))
+    token_count = len(enc.encode_ordinary(rendered))
     counts[leading_separator] = token_count
     _cache_tools_token_count(tools_id, fingerprint, counts)
     return token_count
@@ -186,6 +190,9 @@ def strip_think(text: str) -> str:
     tokens mid-text would silently rewrite any message where a user or the
     assistant discusses the tokens themselves.
     """
+    # Every supported control tag contains '<'; ordinary text only needs trimming.
+    if "<" not in text:
+        return text.strip()
     # Well-formed blocks first.
     text = re.sub(rf"<(?P<tag>{_THINKING_TAG})>[\s\S]*?</(?P=tag)>", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>[\s\S]*$", "", text)
@@ -219,6 +226,8 @@ def strip_reasoning_tags(text: object) -> str:
     """Remove wrapper tags from text that is already known to be reasoning."""
     if not isinstance(text, str):
         return ""
+    if "<" not in text:
+        return text.strip()
     text = re.sub(rf"^\s*<{_THINKING_TAG}/>\s*", "", text)
     text = re.sub(rf"\s*<{_THINKING_TAG}/>\s*$", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>\s*", "", text)
@@ -234,6 +243,8 @@ def extract_think(text: str) -> tuple[str | None, str]:
     extracted; unclosed streaming prefixes are stripped from the cleaned
     text but not surfaced — :func:`strip_think` handles that case.
     """
+    if "<" not in text:
+        return None, text.strip()
     parts: list[str] = []
     for m in re.finditer(rf"<(?P<tag>{_THINKING_TAG})>([\s\S]*?)</(?P=tag)>", text):
         parts.append(m.group(2).strip())
@@ -352,7 +363,6 @@ def timestamp() -> str:
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
-_TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
@@ -397,34 +407,35 @@ def truncate_text(text: str, max_chars: int) -> str:
 def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
     """Truncate text to a token budget with a stable suffix.
 
-    Unlike :func:`truncate_text`, this measures actual tokens, so the cap holds
-    regardless of language or content (CJK and code cost more tokens per char).
-    Falls back to a conservative UTF-8 byte budget if tiktoken is unavailable.
+    Uses cl100k_base when ready, which may differ from the model's tokenizer.
+    Falls back to a UTF-8 byte budget while loading or if initialization failed.
     """
     if max_tokens <= 0:
         return text
     try:
         enc = _get_token_encoding()
-        tokens = enc.encode(text)
-        if len(tokens) <= max_tokens:
-            return text
-        suffix_tokens = enc.encode(_TRUNCATED_SUFFIX)
-        body_budget = max_tokens - len(suffix_tokens)
-        if body_budget <= 0:
+        if enc is not None:
+            tokens = enc.encode_ordinary(text)
+            if len(tokens) <= max_tokens:
+                return text
+            suffix_tokens = enc.encode_ordinary(_TRUNCATED_SUFFIX)
+            body_budget = max_tokens - len(suffix_tokens)
+            if body_budget <= 0:
+                return enc.decode(tokens[:max_tokens])
+            for candidate_budget in range(body_budget, -1, -1):
+                result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
+                if len(enc.encode_ordinary(result)) <= max_tokens:
+                    return result
             return enc.decode(tokens[:max_tokens])
-        for candidate_budget in range(body_budget, -1, -1):
-            result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
-            if len(enc.encode(result)) <= max_tokens:
-                return result
-        return enc.decode(tokens[:max_tokens])
     except Exception:
-        if len(text.encode("utf-8")) <= max_tokens:
-            return text
-        suffix_bytes = len(_TRUNCATED_SUFFIX.encode("utf-8"))
-        if max_tokens <= suffix_bytes:
-            return _truncate_text_to_utf8_bytes(text, max_tokens)
-        body = _truncate_text_to_utf8_bytes(text, max_tokens - suffix_bytes)
-        return body + _TRUNCATED_SUFFIX
+        pass
+    if len(text.encode("utf-8")) <= max_tokens:
+        return text
+    suffix_bytes = len(_TRUNCATED_SUFFIX.encode("utf-8"))
+    if max_tokens <= suffix_bytes:
+        return _truncate_text_to_utf8_bytes(text, max_tokens)
+    body = _truncate_text_to_utf8_bytes(text, max_tokens - suffix_bytes)
+    return body + _TRUNCATED_SUFFIX
 
 
 def _truncate_text_to_utf8_bytes(text: str, max_bytes: int) -> str:
@@ -498,20 +509,24 @@ def stringify_text_blocks(content: list[object]) -> str | None:
 
 
 def _render_tool_result_reference(
-    filepath: Path,
+    reference_path: str,
     *,
     original_size: int,
     preview: str,
     truncated_preview: bool,
+    max_chars: int | None = None,
 ) -> str:
     result = (
         f"[tool output persisted]\n"
-        f"Full output saved to: {filepath}\n"
+        f"Full output saved to workspace path: {reference_path}\n"
         f"Original size: {original_size} chars\n"
         f"Preview:\n{preview}"
     )
     if truncated_preview:
-        result += "\n...\n(Read the saved file if you need the full output.)"
+        result += "\n...\nPreview is also truncated."
+    result += "\nResult truncated. Read the saved file if you need the complete output."
+    if max_chars and len(result) > max_chars:
+        result = f"[truncated: {reference_path}]"
     return result
 
 
@@ -535,6 +550,51 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
     siblings.sort(key=_bucket_mtime, reverse=True)
     for path in siblings[keep:]:
         shutil.rmtree(path, ignore_errors=True)
+
+
+def atomic_write_lines(path: Path, lines: Iterable[str], *, fsync: bool = True) -> None:
+    """Atomically replace *path* with already-serialized record lines.
+
+    Each item is one record. A trailing newline is added when the item does
+    not already end with one. The bytes are written to a uniquely named temp
+    file in the same directory, then published with ``os.replace``.
+
+    ``fsync=True`` (the default) flushes and fsyncs the file before the
+    replace, then fsyncs the parent directory. ``fsync=False`` skips both,
+    which session saves use when the caller does not ask for durability.
+    Directory fsync suppresses ``PermissionError`` (Windows cannot open a
+    directory this way) and ``EINVAL`` (filesystems that reject directory
+    fsync). Any other directory fsync error propagates. The temp file is
+    removed on every ``BaseException``.
+    """
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "x", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(line if line.endswith("\n") else f"{line}\n")
+            if fsync:
+                handle.flush()
+                os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        if fsync:
+            _fsync_directory_after_replace(path.parent)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def _fsync_directory_after_replace(directory: Path) -> None:
+    """Fsync *directory* after a replace, ignoring unsupported platforms."""
+    with suppress(PermissionError):
+        fd = os.open(str(directory), os.O_RDONLY)
+        try:
+            try:
+                os.fsync(fd)
+            except OSError as exc:
+                if exc.errno != errno.EINVAL:
+                    raise
+        finally:
+            os.close(fd)
 
 
 def _write_text_atomic(path: Path, content: str) -> None:
@@ -565,28 +625,16 @@ def maybe_persist_tool_result(
     workspace: Path | None,
     session_key: str | None,
     tool_call_id: str,
-    content: Any,
+    content: str,
     *,
     max_chars: int,
-) -> Any:
-    """Persist oversized tool output and replace it with a stable reference string."""
-    if workspace is None or max_chars <= 0:
-        return content
+) -> str:
+    """Offload oversized text.
 
-    text_payload: str | None = None
-    suffix = "txt"
-    if isinstance(content, str):
-        text_payload = content
-    elif isinstance(content, list):
-        text_payload = stringify_text_blocks(cast(list[object], content))
-        if text_payload is None:
-            return cast(Any, content)
-        suffix = "json"
-    else:
+    Complete references may exceed the per-block ``max_chars`` budget.
+    """
+    if workspace is None or max_chars <= 0 or len(content) <= max_chars:
         return content
-
-    if len(text_payload) <= max_chars:
-        return cast(Any, content)
 
     root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
     bucket = ensure_dir(root / safe_filename(session_key or "default"))
@@ -594,19 +642,28 @@ def maybe_persist_tool_result(
         _cleanup_tool_result_buckets(root, bucket)
     except Exception:
         logger.exception("Failed to clean stale tool result buckets in {}", root)
-    path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
+    path = bucket / f"{safe_filename(tool_call_id)}.txt"
     if not path.exists():
-        if suffix == "json" and isinstance(content, list):
-            _write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
-        else:
-            _write_text_atomic(path, text_payload)
+        _write_text_atomic(path, content)
 
-    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    reference_path = str(path.resolve())
+    overhead = len(_render_tool_result_reference(
+        reference_path, original_size=len(content), preview="", truncated_preview=True,
+    ))
+    available = max(0, max_chars - overhead)
+    separator = "\n...\n"
+    tail_chars = min(1200, max(0, (available - len(separator)) // 4))
+    if tail_chars:
+        head_chars = available - tail_chars - len(separator)
+        preview = content[:head_chars] + separator + content[-tail_chars:]
+    else:
+        preview = content[:available]
     return _render_tool_result_reference(
-        path,
-        original_size=len(text_payload),
+        reference_path,
+        original_size=len(content),
         preview=preview,
-        truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
+        truncated_preview=True,
+        max_chars=max_chars,
     )
 
 
@@ -628,21 +685,69 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
         return [content]
     if len(content) <= max_len:
         return [content]
+    original_content = content
     chunks: list[str] = []
     while content:
         if len(content) <= max_len:
-            chunks.append(content)
+            if content.strip():
+                chunks.append(content)
             break
         cut = content[:max_len]
-        # Try to break at newline first, then space, then hard break
-        pos = cut.rfind("\n")
-        if pos <= 0:
-            pos = cut.rfind(" ")
-        if pos <= 0:
-            pos = max_len
-        chunks.append(content[:pos])
-        content = content[pos:].lstrip()
-    return chunks
+        # Consume only the newline itself so indentation starts the next chunk.
+        newline_pos = cut.rfind("\n")
+        if newline_pos >= 0:
+            # Exclude both bytes of a CRLF boundary from the emitted chunk.
+            line_end = newline_pos
+            if line_end > 0 and content[line_end - 1] == "\r":
+                line_end -= 1
+            chunk = content[:line_end]
+            if chunk.strip():
+                chunks.append(chunk)
+            content = content[newline_pos + 1 :]
+            continue
+
+        # Keep the existing word-boundary behavior, but avoid emitting a
+        # whitespace-only chunk when an indented line exceeds max_len.
+        space_pos = cut.rfind(" ")
+        if space_pos > 0 and cut[:space_pos].strip():
+            chunks.append(content[:space_pos])
+            content = content[space_pos:].lstrip(" \t")
+            # A space boundary may sit immediately before a line break. Drop
+            # that delimiter too, without stripping the next line's indent.
+            if content.startswith("\r\n"):
+                content = content[2:]
+            elif content.startswith("\n"):
+                content = content[1:]
+            continue
+
+        # Do not split between the two code points of a CRLF delimiter.
+        if cut.endswith("\r") and content[max_len : max_len + 1] == "\n":
+            chunk = cut[:-1]
+            if chunk.strip():
+                chunks.append(chunk)
+            content = content[max_len + 1 :]
+            continue
+
+        chunk = content[:max_len]
+        if chunk.strip():
+            chunks.append(chunk)
+        content = content[max_len:]
+        if not chunk.strip():
+            # Keep any remaining indentation so the final non-blank chunk can
+            # retain as much of it as the channel limit permits.
+            continue
+        # A delimiter can sit immediately after the hard-break boundary. Keep
+        # ordinary space trimming, but consume only the newline so indentation
+        # on the following line is preserved.
+        content = content.lstrip(" \t")
+        if content.startswith("\r\n"):
+            content = content[2:]
+        elif content.startswith("\n"):
+            content = content[1:]
+    # Preserve the historical non-empty-input contract for callers that take
+    # the first chunk directly. This fallback is only reachable for content
+    # made entirely of whitespace.
+    return chunks or [original_content[:max_len]]
 
 
 def build_assistant_message(
@@ -705,20 +810,22 @@ def _estimate_prompt_tokens_with_source(
     per_message_overhead = len(messages) * 4
     try:
         enc = _get_token_encoding()
-        tool_tokens = (
-            _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
-        )
-        message_tokens = len(enc.encode(message_payload)) if message_payload else 0
-        return message_tokens + tool_tokens + per_message_overhead, "tiktoken"
+        if enc is not None:
+            tool_tokens = (
+                _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
+            )
+            message_tokens = len(enc.encode_ordinary(message_payload)) if message_payload else 0
+            return message_tokens + tool_tokens + per_message_overhead, "tiktoken"
     except Exception:
-        tool_payload = (
-            ("\n" if message_payload else "") + json.dumps(tools, ensure_ascii=False)
-            if tools
-            else ""
-        )
-        payload = message_payload + tool_payload
-        estimated = len(payload.encode("utf-8"))
-        return estimated + per_message_overhead, "heuristic"
+        pass
+    tool_payload = (
+        ("\n" if message_payload else "") + json.dumps(tools, ensure_ascii=False)
+        if tools
+        else ""
+    )
+    payload = message_payload + tool_payload
+    estimated = len(payload.encode("utf-8"))
+    return estimated + per_message_overhead, "heuristic"
 
 
 def estimate_prompt_tokens(
@@ -764,9 +871,11 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
         return 4
     try:
         enc = _get_token_encoding()
-        return max(4, len(enc.encode(payload)) + 4)
+        if enc is not None:
+            return max(4, len(enc.encode_ordinary(payload)) + 4)
     except Exception:
-        return max(4, len(payload.encode("utf-8")) + 4)
+        pass
+    return max(4, len(payload.encode("utf-8")) + 4)
 
 
 def estimate_prompt_tokens_chain(
@@ -793,7 +902,7 @@ def build_status_content(
     version: str,
     model: str,
     start_time: float,
-    last_usage: dict[str, int],
+    last_usage: LLMUsage | None,
     context_window_tokens: int,
     session_msg_count: int,
     context_tokens_estimate: int,
@@ -814,9 +923,9 @@ def build_status_content(
         if uptime_s >= 3600
         else f"{uptime_s // 60}m {uptime_s % 60}s"
     )
-    last_in = last_usage.get("prompt_tokens", 0)
-    last_out = last_usage.get("completion_tokens", 0)
-    cached = last_usage.get("cached_tokens", 0)
+    last_in = last_usage.input_tokens if last_usage else 0
+    last_out = last_usage.output_tokens if last_usage else 0
+    cached = last_usage.cache_read_tokens if last_usage else None
     ctx_total = max(context_window_tokens, 0)
     # Budget mirrors Consolidator formula: ctx_window - max_completion - _SAFETY_BUFFER
     ctx_budget = max(ctx_total - int(max_completion_tokens) - 1024, 1)

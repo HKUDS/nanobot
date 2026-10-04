@@ -25,6 +25,13 @@ function applyTheme(theme: Theme): void {
   const root = document.documentElement;
   if (theme === "dark") root.classList.add("dark");
   else root.classList.remove("dark");
+
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  const color =
+    theme === "dark"
+      ? themeColor?.dataset.themeColorDark
+      : themeColor?.dataset.themeColorLight;
+  if (themeColor && color) themeColor.content = color;
 }
 
 export function useTheme(): {

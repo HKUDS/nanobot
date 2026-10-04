@@ -69,17 +69,21 @@ function weixinConnectMessage(
 export function WeixinConnectFlow({
   token,
   feature,
+  authRecoveryActive = false,
   idleLabel,
   connectRequestId,
   onFeaturesUpdate,
-}: ChannelPluginConnectFlowProps) {
+}: ChannelPluginConnectFlowProps & { authRecoveryActive?: boolean }) {
   const { t } = useTranslation();
   const tx = channelTranslator(t, "weixin");
   const [verificationCode, setVerificationCode] = useState("");
-  const authExpired = feature.runtime_error === WEIXIN_AUTH_EXPIRED_MESSAGE;
+  const authExpired = authRecoveryActive
+    || feature.runtime_error === WEIXIN_AUTH_EXPIRED_MESSAGE;
   const scanAgainLabel = t("settings.channels.scanAgain", {
     defaultValue: "Scan again",
   });
+
+  if (feature.configured && !authExpired) return null;
 
   const renderVerification = ({
     connect,
@@ -134,9 +138,11 @@ export function WeixinConnectFlow({
     <ChannelQrConnectFlow
       token={token}
       channelName="weixin"
-      startOptions={{ force: authExpired }}
+      startParams={authExpired ? { force: true } : {}}
       idleLabel={authExpired ? scanAgainLabel : idleLabel}
       connectRequestId={connectRequestId}
+      autoStart={!feature.configured || authExpired}
+      minimalPending
       forceOnRepeat
       onFeaturesUpdate={onFeaturesUpdate}
       pausePolling={isVerificationChallenge}
@@ -146,10 +152,7 @@ export function WeixinConnectFlow({
       labels={{
         qrAlt: tx("custom.qrAlt", "WeChat login QR code"),
         scanTitle: tx("custom.scanTitle", "Scan with WeChat"),
-        scanDescription: tx(
-          "custom.scanDescription",
-          "Use WeChat on your phone to scan this code. nanobot saves the account state locally after login.",
-        ),
+        scanDescription: "",
         waiting: tx("custom.waiting", "Waiting for WeChat scan..."),
         connected: tx("custom.connected", "WeChat is connected."),
         stopped: tx("custom.stopped", "WeChat login stopped."),

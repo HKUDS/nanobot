@@ -21,12 +21,17 @@ from nanobot.bus.events import (
     INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     RUNTIME_CONTROL_SESSION_DISCARD,
+    InboundMessage,
     OutboundMessage,
 )
 from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
     ProgressEvent,
+    RecoveryStateEvent,
+    RetryStatusEvent,
+    RetryWaitEvent,
     RuntimeModelUpdatedEvent,
     SessionUpdatedEvent,
     TurnEndEvent,
@@ -43,6 +48,7 @@ from nanobot.channels.websocket.runtime import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session import webui_turns as wth
@@ -86,6 +92,44 @@ from .ws_test_client import http_get as _http_get
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
 _PORT = 29876
+
+
+async def _register_running_turn(
+    chat_id: str, started_at: float, *, owner: str | None = None,
+) -> None:
+    metadata = {}
+    if owner:
+        metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
+    await wth.publish_turn_run_status(
+        MessageBus(),
+        InboundMessage(channel="websocket", sender_id="user", chat_id=chat_id,
+                       content="hello", metadata=metadata),
+        "running", started_at=started_at,
+    )
+
+
+def _thread_conversation_events(body: dict[str, Any]) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for event in body["events"]:
+        name = event.get("event")
+        if name == "turn_end":
+            if messages and messages[-1]["role"] == "assistant":
+                messages[-1]["latencyMs"] = event.get("latency_ms")
+            continue
+        if name == "user_message":
+            role = "user"
+        elif name == "message" and event.get("kind") is None:
+            role = "assistant"
+        elif name == "stream_end" and isinstance(event.get("text"), str):
+            role = "assistant"
+        else:
+            continue
+        messages.append({
+            "role": role,
+            "content": event.get("text", ""),
+            "latencyMs": event.get("latency_ms"),
+        })
+    return messages
 
 
 def _ch(bus: Any, **kw: Any) -> WebSocketChannel:
@@ -139,6 +183,14 @@ async def _connect_when_ready(url: str) -> Any:
             return await websockets.connect(url)
         except OSError:
             await asyncio.sleep(0.02)
+
+
+async def _wait_for_connection_cleanup(
+    channel: WebSocketChannel,
+    connection: Any,
+) -> None:
+    while connection in channel._conn_chats:
+        await asyncio.sleep(0)
 
 
 async def _webui_mutate(
@@ -225,6 +277,7 @@ async def test_start_extends_http_open_timeout_for_slow_settings_routes(
         return Server()
 
     monkeypatch.setattr(websocket_module, "serve", fake_serve)
+    monkeypatch.setattr(channel, "_listener_is_serving", lambda _server: True)
 
     await channel.start()
 
@@ -264,6 +317,59 @@ async def _new_temporary_chat(
     assert payload["temporary"] is True
     connection.send.reset_mock()
     return payload["chat_id"]
+
+
+@pytest.mark.asyncio
+async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("synthetic preview")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    sessions = SessionManager(workspace)
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(
+            bus, session_manager=sessions, workspace_path=workspace,
+            default_restrict_to_workspace=False,
+        ),
+    )
+    owner, other = AsyncMock(), AsyncMock()
+    chat_id = await _new_temporary_chat(channel, owner)
+    channel._webui_connections.add(other)
+    disk_before = {path for path in tmp_path.rglob("*") if path.is_file()}
+
+    async def preview(connection, path="notes.txt", probe=False, metadata=False):
+        await channel._dispatch_envelope(connection, "webui-client", {
+            "type": "webui_request", "request_id": "private-preview",
+            "action": "temporary_chat.file_preview",
+            "payload": {"chat_id": chat_id, "path": path, "probe": probe, "metadata": metadata},
+        })
+        return json.loads(connection.send.await_args.args[0])
+
+    result = await preview(owner)
+    assert result["ok"] is True
+    assert result["result"]["content"] == "synthetic preview"
+    assert (await preview(owner, probe=True))["result"] == {"available": True}
+    assert (await preview(owner, metadata=True))["result"] == {
+        "path": str((workspace / "notes.txt").resolve()), "relative_path": "notes.txt",
+    }
+    assert (await preview(other, metadata=True))["error"]["status"] == 404
+    assert (await preview(owner, str(outside), metadata=True))["error"]["status"] == 403
+    assert (await preview(other))["error"]["status"] == 404
+    assert (await preview(owner, str(outside)))["error"]["status"] == 403
+    assert (await preview(owner, str(outside), probe=True))["result"] == {"available": False}
+    assert (await preview(AsyncMock()))["error"]["status"] == 403
+    assert not channel._webui_request_operations
+    assert {path for path in tmp_path.rglob("*") if path.is_file()} == disk_before
+    assert sessions.list_sessions() == []
+
+    await channel._dispatch_envelope(owner, "webui-client", {
+        "type": "discard_temporary_chat", "chat_id": chat_id,
+    })
+    assert (await preview(owner))["error"]["status"] == 404
+    assert (await preview(owner, metadata=True))["error"]["status"] == 404
+    assert not channel._webui_request_operations
 
 
 @pytest.mark.asyncio
@@ -901,8 +1007,12 @@ async def test_webui_message_envelope_persists_user_transcript_for_refresh(
 
     body = build_webui_thread_response("websocket:chat-1")
     assert body is not None
-    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
-    assert [message["content"] for message in body["messages"]] == ["hello", "hi back"]
+    assert [message["role"] for message in _thread_conversation_events(body)] == [
+        "user", "assistant",
+    ]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "hello", "hi back",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1238,7 +1348,7 @@ def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
     bus: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import nanobot.channels.websocket.runtime as websocket_module
+    import nanobot.webui.inbound_commands as websocket_module
 
     channel = _ch(bus)
     now = 1_000.0
@@ -1250,7 +1360,7 @@ def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
     )
     operations["fresh"] = SimpleNamespace(completed_at=now - 1)
 
-    channel._prune_webui_request_operations()
+    channel._commands.prune_request_operations()
 
     assert "pending" in operations
     assert "expired" not in operations
@@ -1261,7 +1371,7 @@ def test_webui_request_cache_prunes_oldest_completed_at_capacity(
     bus: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import nanobot.channels.websocket.runtime as websocket_module
+    import nanobot.webui.inbound_commands as websocket_module
 
     channel = _ch(bus)
     now = 1_000.0
@@ -1273,7 +1383,7 @@ def test_webui_request_cache_prunes_oldest_completed_at_capacity(
             completed_at=now - 1 + index / 1_000
         )
 
-    channel._prune_webui_request_operations()
+    channel._commands.prune_request_operations()
 
     assert "pending" in operations
     assert "completed-0" not in operations
@@ -1389,6 +1499,7 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
     source.request = SimpleNamespace(headers=Headers())
     other_device = AsyncMock()
     channel._webui_connections.update({source, other_device})
+    channel._register_connection_outbound(other_device)
     request_id = "sidebar-workbench-state"
 
     await channel._dispatch_envelope(
@@ -1481,6 +1592,89 @@ async def test_webui_message_projects_quote_to_trusted_runtime_context(bus: Magi
 
 
 @pytest.mark.asyncio
+async def test_webui_automation_intent_is_hidden_and_not_inherited_by_cron(
+    bus: MagicMock, tmp_path: Path,
+) -> None:
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronSchedule
+    from nanobot.runtime_context import (
+        RUNTIME_CONTEXT_HISTORY_META,
+        append_runtime_context,
+        public_history_message,
+    )
+
+    channel = _ch(bus)
+    conn = MagicMock()
+    channel._webui_connections.add(conn)
+    original = "每天八点提醒我喝水"
+    envelope = {
+        "type": "message", "chat_id": "chat-automation", "content": original,
+        "intent": "create_automation", "webui": True,
+    }
+    await channel._dispatch_envelope(conn, "webui-client", envelope)
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.content == original
+    assert "intent" not in msg.metadata
+    [block] = msg.metadata[RUNTIME_CONTEXT_INPUT_META]
+    assert block.source == "webui_automation_creation"
+    assert "create an automation" in block.content
+    assert "not to execute the task immediately" in block.content
+
+    # Model input includes the context; public history strips the exact saved suffix.
+    content, marker = append_runtime_context(msg.content, [block])
+    assert block.content in content
+    assert public_history_message({
+        "role": "user", "content": content, RUNTIME_CONTEXT_HISTORY_META: marker,
+    }) == {"role": "user", "content": original}
+    body = build_webui_thread_response("websocket:chat-automation")
+    assert body is not None
+    assert [message["content"] for message in _thread_conversation_events(body)] == [original]
+
+    store_path = tmp_path / "cron" / "jobs.json"
+    cron = CronService(store_path)
+    job = cron.add_job(
+        name="Water", schedule=CronSchedule(kind="every", every_ms=60_000),
+        message=original, session_key="websocket:chat-automation",
+        origin_channel="websocket", origin_chat_id="chat-automation",
+        origin_metadata=msg.metadata,
+    )
+    reloaded = CronService(store_path).get_job(job.id)
+    assert reloaded is not None
+    assert RUNTIME_CONTEXT_INPUT_META not in reloaded.payload.origin_metadata
+    assert "intent" not in reloaded.payload.origin_metadata
+
+    await channel._dispatch_envelope(conn, "webui-client", {
+        **envelope, "content": "Thanks", "intent": None,
+    })
+    assert RUNTIME_CONTEXT_INPUT_META not in bus.publish_inbound.await_args.args[0].metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("trusted", "webui", "intent", "shell"), [
+    (False, True, "create_automation", False),
+    (True, False, "create_automation", False),
+    (True, True, None, False),
+    (True, True, "delete_automation", False),
+    (True, True, {"instruction": "arbitrary prompt"}, False),
+    (True, True, "create_automation", True),
+])
+async def test_webui_automation_context_requires_valid_trusted_intent(
+    bus: MagicMock, trusted: bool, webui: bool, intent: object, shell: bool,
+) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    if trusted:
+        channel._webui_connections.add(conn)
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": "chat-intent",
+        "content": "!echo hello" if shell else "hello",
+        "intent": intent, "webui": webui, "user_shell": shell,
+    })
+    msg = bus.publish_inbound.await_args.args[0]
+    assert RUNTIME_CONTEXT_INPUT_META not in msg.metadata
+
+
+@pytest.mark.asyncio
 async def test_webui_message_scope_inherits_persisted_session_scope(
     bus: MagicMock,
     tmp_path,
@@ -1497,6 +1691,7 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
     )
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
 
     await channel._dispatch_envelope(
         conn,
@@ -1510,6 +1705,7 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
             },
         },
     )
+    assert sessions.list_sessions() == []
     await channel._dispatch_envelope(
         conn,
         "webui-client",
@@ -1521,6 +1717,87 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
         "project_path": str(project.resolve()),
         "access_mode": "full",
     }
+
+
+@pytest.mark.asyncio
+async def test_new_chat_without_message_does_not_create_session(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "tui-client",
+        {
+            "type": "new_chat",
+            "workspace_scope": {
+                "project_path": str(tmp_path),
+                "access_mode": "full",
+            },
+        },
+    )
+
+    attached = json.loads(conn.send.await_args_list[0].args[0])
+    assert attached["event"] == "attached"
+    assert sessions.list_sessions() == []
+    assert channel.gateway.workspaces.scope_for_session_key(
+        f"websocket:{attached['chat_id']}"
+    ).access_mode == "full"
+
+    await channel._cleanup_connection(conn)
+
+    assert sessions.list_sessions() == []
+
+
+@pytest.mark.asyncio
+async def test_failed_first_message_does_not_persist_draft_session(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "tui-client",
+        {
+            "type": "new_chat",
+            "workspace_scope": {
+                "project_path": str(tmp_path),
+                "access_mode": "full",
+            },
+        },
+    )
+    chat_id = json.loads(conn.send.await_args_list[0].args[0])["chat_id"]
+    bus.publish_inbound.side_effect = RuntimeError("queue unavailable")
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        await channel._dispatch_envelope(
+            conn,
+            "tui-client",
+            {
+                "type": "message",
+                "chat_id": chat_id,
+                "content": "hello",
+                "webui": True,
+            },
+        )
+
+    assert sessions.list_sessions() == []
 
 
 @pytest.mark.asyncio
@@ -1536,6 +1813,7 @@ async def test_workspace_scope_change_invalidates_other_attached_clients(
     )
     origin = AsyncMock()
     origin.remote_address = ("127.0.0.1", 50123)
+    origin.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
     peer = AsyncMock()
     peer.remote_address = ("127.0.0.1", 50124)
     channel._attach(origin, "shared")
@@ -1658,6 +1936,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
     )
     conn = AsyncMock()
     conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
 
     await channel._dispatch_envelope(
         conn,
@@ -1671,7 +1950,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
             },
         },
     )
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
+    await _register_running_turn("chat-running", 123.0)
     try:
         await channel._dispatch_envelope(
             conn,
@@ -1689,7 +1968,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
             },
         )
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-running")
 
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
@@ -1729,9 +2008,13 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
             },
         },
     )
+    channel.gateway.workspaces.persist_scope(
+        "chat-running",
+        channel.gateway.workspaces.scope_for_session_key("websocket:chat-running"),
+    )
     conn.send.reset_mock()
 
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-running"] = 123.0
+    await _register_running_turn("chat-running", 123.0)
     try:
         await channel._dispatch_envelope(
             conn,
@@ -1746,7 +2029,7 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
             },
         )
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-running")
 
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
@@ -1795,6 +2078,13 @@ async def test_remote_webui_scope_allows_access_reduction(
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "session_updated"
     assert payload["workspace_scope"]["access_mode"] == "restricted"
+    assert sessions.list_sessions() == []
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-remote", "content": "hello", "webui": True},
+    )
     saved = sessions.read_session_file("websocket:chat-remote")
     assert saved["metadata"]["workspace_scope"] == {
         "project_path": str(default_workspace.resolve()),
@@ -1864,8 +2154,10 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
     release_hydrate.set()
     await message_task
 
-    saved = sessions.read_session_file(f"websocket:{chat_id}")
-    assert saved["metadata"]["workspace_scope"]["access_mode"] == "restricted"
+    assert sessions.read_session_file(f"websocket:{chat_id}") is None
+    assert channel.gateway.workspaces.scope_for_session_key(
+        f"websocket:{chat_id}"
+    ).access_mode == "restricted"
     payload = json.loads(message_conn.send.await_args.args[0])
     assert payload["event"] == "error"
     assert payload["detail"] == "workspace_scope_rejected"
@@ -1873,7 +2165,10 @@ async def test_remote_access_reduction_rejects_stale_in_flight_message_scope(
 
 
 @pytest.mark.asyncio
-async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp_path) -> None:
+async def test_remote_webui_scope_rejects_full_access_for_custom_scope(
+    bus: MagicMock,
+    tmp_path,
+) -> None:
     default_workspace = tmp_path / "default"
     project = tmp_path / "project"
     default_workspace.mkdir()
@@ -1903,7 +2198,7 @@ async def test_webui_scope_rejects_non_loopback_custom_scope(bus: MagicMock, tmp
     payload = json.loads(conn.send.await_args.args[0])
     assert payload["event"] == "error"
     assert payload["detail"] == "workspace_scope_rejected"
-    assert payload["reason"] == "workspace controls are localhost-only"
+    assert payload["reason"] == "full workspace access is unavailable for this connection"
     assert payload["chat_id"] == "chat-remote"
     assert sessions.read_session_file("websocket:chat-remote") is None
 
@@ -1953,8 +2248,10 @@ async def test_native_webui_scope_allows_custom_scope_without_loopback(
     assert payload["workspace_scope"]["restrict_to_workspace"] is False
     assert payload["workspace_scope"]["sandbox_status"]["restrict_to_workspace"] is False
     assert payload["workspace_scope"]["sandbox_status"]["workspace_root"] == str(project.resolve())
-    saved = sessions.read_session_file("websocket:chat-native")
-    assert saved["metadata"]["workspace_scope"] == {
+    assert sessions.read_session_file("websocket:chat-native") is None
+    assert channel.gateway.workspaces.scope_for_session_key(
+        "websocket:chat-native"
+    ).metadata() == {
         "project_path": str(project.resolve()),
         "access_mode": "full",
     }
@@ -2073,33 +2370,24 @@ async def test_send_scopes_turn_model_updates_to_the_subscribed_chat() -> None:
         "model_preset": "Deep Research",
         "context_window_tokens": 128_000,
     }
-    chat_two.send.assert_not_awaited()
 
-
-def test_attach_fields_restore_the_session_model_and_latest_usage() -> None:
-    manager = MagicMock()
-    manager.read_session_metadata.return_value = {
-        "metadata": {
-            SESSION_MODEL_PRESET_METADATA_KEY: "Deep Research",
-            "_last_usage": {
-                "prompt_tokens": 120,
-                "completion_tokens": 8,
-                "negative": -1,
-                "boolean": True,
-            },
-        }
-    }
-    bus = MagicMock()
-    channel = WebSocketChannel(
-        {"enabled": True, "allowFrom": ["*"]},
-        bus,
-        gateway=_basic_handler(bus, session_manager=manager),
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="",
+            event=TurnModelUpdatedEvent(
+                model="deepseek/deepseek-chat",
+                model_preset="Deep Research",
+                fallback=True,
+                reauth_provider="openai_codex",
+            ),
+        )
     )
-
-    assert channel._attached_model_fields("chat-1") == {
-        "model_preset": "Deep Research",
-        "usage": {"prompt_tokens": 120, "completion_tokens": 8},
-    }
+    fallback_payload = json.loads(chat_one.send.call_args.args[0])
+    assert fallback_payload["fallback"] is True
+    assert fallback_payload["reauth_provider"] == "openai_codex"
+    chat_two.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2154,6 +2442,7 @@ async def test_send_removes_connection_on_connection_closed() -> None:
 
     msg = OutboundMessage(channel="websocket", chat_id="chat-1", content="hello")
     await channel.send(msg)
+    await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
 
     assert "chat-1" not in channel._subs
     assert mock_ws not in channel._conn_chats
@@ -2211,6 +2500,56 @@ async def test_send_progress_includes_structured_tool_events() -> None:
             "embeds": [],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_send_progress_omits_binary_tool_results_from_wire_and_transcript() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-binary-tool-result")
+    data_url = f"data:image/png;base64,{'A' * (2 * 1024 * 1024)}"
+    tool_events = [
+        {
+            "version": 1,
+            "phase": "end",
+            "call_id": "call-image",
+            "name": "read_file",
+            "arguments": {"path": "/media/screenshot.png"},
+            "result": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                    "_meta": {"path": "/media/screenshot.png"},
+                },
+                {"type": "text", "text": "(Image file: /media/screenshot.png)"},
+            ],
+            "error": None,
+            "files": [],
+            "embeds": [],
+        }
+    ]
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-binary-tool-result",
+        content="read_file completed",
+        event=ProgressEvent(content="read_file completed", tool_events=tool_events),
+    ))
+
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    [wire_event] = payload["tool_events"]
+    assert wire_event["result"][0]["image_url"]["url"] == (
+        "[binary content omitted from WebUI]"
+    )
+    assert len(mock_ws.send.await_args.args[0].encode("utf-8")) < 4096
+
+    [persisted] = read_transcript_lines("websocket:chat-binary-tool-result")
+    assert persisted["tool_events"] == payload["tool_events"]
+    assert data_url not in json.dumps(persisted)
+
+    # WebUI projection must not alter the result that the runner sends back to the model.
+    assert tool_events[0]["result"][0]["image_url"]["url"] == data_url
 
 
 @pytest.mark.asyncio
@@ -2295,6 +2634,7 @@ async def test_send_delta_removes_connection_on_connection_closed() -> None:
     channel._attach(mock_ws, "chat-1")
 
     await channel.send_delta("chat-1", "chunk", stream_id="s1")
+    await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
 
     assert "chat-1" not in channel._subs
     assert mock_ws not in channel._conn_chats
@@ -2348,8 +2688,9 @@ async def test_send_delta_preserves_webui_source_metadata() -> None:
     assert second["event"] == "stream_end"
     assert second["source"] == source
     lines = read_transcript_lines("websocket:chat-source-stream")
-    assert lines[-2]["source"] == source
     assert lines[-1]["source"] == source
+    assert lines[-1]["event"] == "stream_end"
+    assert lines[-1]["text"] == "done"
 
 
 @pytest.mark.asyncio
@@ -2374,6 +2715,8 @@ async def test_send_delta_marks_resuming_stream_end() -> None:
 
 @pytest.mark.asyncio
 async def test_send_delta_keeps_buffer_across_merged_stream_boundary() -> None:
+    from nanobot.webui.transcript import build_webui_thread_response, read_transcript_lines
+
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "streaming": True},
@@ -2403,6 +2746,12 @@ async def test_send_delta_keeps_buffer_across_merged_stream_boundary() -> None:
         "second",
     ]
     assert ("chat-1", "sid") not in channel._stream_text_buffers
+    lines = read_transcript_lines("websocket:chat-1")
+    assert [line["event"] for line in lines] == ["stream_end", "stream_end"]
+    assert [line["text"] for line in lines] == ["first ", "first second"]
+    body = build_webui_thread_response("websocket:chat-1")
+    assert body is not None
+    assert _thread_conversation_events(body)[-1]["content"] == "first second"
 
 
 @pytest.mark.asyncio
@@ -2596,12 +2945,84 @@ async def test_stream_transcript_persists_without_subscribers() -> None:
 
     assert channel._subs == {}
     lines = read_transcript_lines("websocket:chat-1")
-    assert [line["event"] for line in lines] == ["delta", "delta", "stream_end", "turn_end"]
+    assert [line["event"] for line in lines] == ["stream_end", "turn_end"]
+    assert lines[0]["text"] == "hello world"
     body = build_webui_thread_response("websocket:chat-1")
     assert body is not None
-    assert body["messages"][-1]["role"] == "assistant"
-    assert body["messages"][-1]["content"] == "hello world"
-    assert body["messages"][-1]["latencyMs"] == 42
+    assert _thread_conversation_events(body)[-1]["role"] == "assistant"
+    assert _thread_conversation_events(body)[-1]["content"] == "hello world"
+    assert _thread_conversation_events(body)[-1]["latencyMs"] == 42
+
+
+@pytest.mark.asyncio
+async def test_stream_transcript_writes_once_per_completed_segment(monkeypatch) -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "streaming": True},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    append = MagicMock()
+    monkeypatch.setattr("nanobot.webui.transcript.append_transcript_object", append)
+
+    await channel.send_delta("chat-write-rate", "one", stream_id="s1")
+    await channel.send_delta("chat-write-rate", " two", stream_id="s1")
+    await channel.send_delta("chat-write-rate", " three", stream_id="s1")
+
+    append.assert_not_called()
+
+    await channel.send_delta("chat-write-rate", "", stream_id="s1", stream_end=True)
+
+    append.assert_called_once()
+    persisted = append.call_args.args[1]
+    assert persisted["event"] == "stream_end"
+    assert persisted["text"] == "one two three"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_transcript_persists_one_canonical_record(monkeypatch) -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    append = MagicMock()
+    monkeypatch.setattr("nanobot.webui.transcript.append_transcript_object", append)
+
+    await channel.send_reasoning_delta("chat-reasoning-write-rate", "plan ", stream_id="r1")
+    await channel.send_reasoning_delta("chat-reasoning-write-rate", "then act", stream_id="r1")
+
+    append.assert_not_called()
+
+    await channel.send_reasoning_end("chat-reasoning-write-rate", stream_id="r1")
+
+    append.assert_called_once()
+    persisted = append.call_args.args[1]
+    assert persisted["event"] == "reasoning_end"
+    assert persisted["text"] == "plan then act"
+
+
+@pytest.mark.asyncio
+async def test_turn_end_discards_unclosed_stream_buffers() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "streaming": True},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+
+    await channel.send_delta("chat-unclosed", "partial", stream_id="s1")
+    await channel.send_reasoning_delta("chat-unclosed", "thinking", stream_id="r1")
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-unclosed",
+        content="",
+        event=TurnEndEvent(),
+    ))
+
+    assert channel._stream_text_buffers == {}
+    assert channel._reasoning_text_buffers == {}
 
 
 @pytest.mark.asyncio
@@ -2622,6 +3043,212 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
         {"event": "turn_end", "chat_id": "chat-1"},
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_retry_status_is_transient_and_turn_scoped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.webui.outbound_wire.time.time", lambda: 120.0)
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={WEBUI_TURN_METADATA_KEY: "turn-1"},
+        event=RetryStatusEvent(
+            state="waiting",
+            attempt=2,
+            max_attempts=4,
+            error_kind="connection",
+            next_retry_at=123.5,
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [{
+        "event": "retry_status",
+        "chat_id": "chat-1",
+        "turn_id": "turn-1",
+        "state": "waiting",
+        "attempt": 2,
+        "max_attempts": 4,
+        "error_kind": "connection",
+        "retry_after_s": 3.5,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_legacy_retry_wait_is_not_sent_or_persisted() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    channel._persist_turn_transcript_event = MagicMock(return_value=True)
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="Model request failed, retry in 2s (attempt 1).",
+        event=RetryWaitEvent(
+            content="Model request failed, retry in 2s (attempt 1).",
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == []
+    channel._persist_turn_transcript_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_end_exposes_safe_terminal_outcome() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        event=TurnEndEvent(
+            outcome="failed",
+            failure_kind="model",
+            failure_error_kind="connection",
+            failure_attempts=4,
+            failure_message="Model provider request failed.",
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws)[0] == {
+        "event": "turn_end",
+        "chat_id": "chat-1",
+        "outcome": "failed",
+        "failure_kind": "model",
+        "failure_error_kind": "connection",
+        "failure_attempts": 4,
+        "failure_message": "Model provider request failed.",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("show_notices", [False, True])
+async def test_context_compaction_started_is_live_only(notify, show_notices) -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-compaction-started")
+    channel.show_compaction_notices = show_notices
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-compaction-started",
+        content="Compressing context…",
+        event=ContextCompactionEvent(
+            compaction_id="compact-started",
+            phase="started",
+            notify=notify,
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [{
+        "event": "context_compaction",
+        "chat_id": "chat-compaction-started",
+        "compaction_id": "compact-started",
+        "phase": "started",
+    }]
+    assert read_transcript_lines("websocket:chat-compaction-started") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("show_notices", [False, True])
+@pytest.mark.parametrize("phase", ["succeeded", "failed", "cancelled"])
+async def test_context_compaction_is_structured_persisted_and_summary_free(notify, show_notices, phase) -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-compaction")
+    channel.show_compaction_notices = show_notices
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-compaction",
+        content="Context compacted · LLM summary",
+        event=ContextCompactionEvent(
+            compaction_id="compact-1",
+            phase=phase,
+            notify=notify,
+        ),
+    ))
+
+    expected = {
+        "event": "context_compaction",
+        "chat_id": "chat-compaction",
+        "compaction_id": "compact-1",
+        "phase": phase,
+    }
+    assert _sent_ws_payloads(mock_ws) == [expected]
+    [persisted] = read_transcript_lines("websocket:chat-compaction")
+    assert {key: persisted[key] for key in expected} == expected
+
+
+@pytest.mark.asyncio
+async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        bus,
+        gateway=_basic_handler(bus),
+    )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    channel._persist_turn_transcript_event = MagicMock(return_value=True)
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        event=RecoveryStateEvent(
+            status="awaiting_user",
+            recovery_id="recovery-1",
+            reason="tool_state_unknown",
+            attempts=1,
+        ),
+    ))
+
+    assert _sent_ws_payloads(mock_ws) == [{
+        "event": "recovery_state",
+        "chat_id": "chat-1",
+        "status": "awaiting_user",
+        "recovery_id": "recovery-1",
+        "reason": "tool_state_unknown",
+        "attempts": 1,
+    }]
+    channel._persist_turn_transcript_event.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2669,7 +3296,7 @@ async def test_system_command_turn_end_only_refreshes_session_metadata() -> None
         ("owner-new", "owner-old", False),
     ],
 )
-async def test_turn_end_persists_and_conditionally_clears_when_fanout_fails(
+async def test_turn_end_persists_and_conditionally_clears_when_delivery_fails(
     active_owner: str,
     event_owner: str,
     expected_cleared: bool,
@@ -2684,27 +3311,24 @@ async def test_turn_end_persists_and_conditionally_clears_when_fanout_fails(
     mock_ws.send.side_effect = RuntimeError("fanout failed")
     chat_id = f"turn-end-failure-{expected_cleared}"
     channel._attach(mock_ws, chat_id)
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT[chat_id] = 1234.5
-    wth._WEBSOCKET_TURN_OWNERS[chat_id] = active_owner
+    await _register_running_turn(chat_id, 1234.5, owner=active_owner)
 
     try:
-        with pytest.raises(RuntimeError, match="fanout failed"):
-            await channel.send(OutboundMessage(
-                channel="websocket",
-                chat_id=chat_id,
-                content="",
-                metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: event_owner},
-                event=TurnEndEvent(),
-            ))
+        await channel.send(OutboundMessage(
+            channel="websocket",
+            chat_id=chat_id,
+            content="",
+            metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: event_owner},
+            event=TurnEndEvent(),
+        ))
+        await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
 
         assert read_transcript_lines(f"websocket:{chat_id}")[-1]["event"] == "turn_end"
         assert (wth.websocket_turn_wall_started_at(chat_id) is None) is expected_cleared
         if not expected_cleared:
             assert wth._WEBSOCKET_TURN_OWNERS[chat_id] == active_owner
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
-        wth._WEBSOCKET_TURN_IDS.pop(chat_id, None)
-        wth._WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
+        wth.clear_websocket_turns(chat_id)
 
 
 @pytest.mark.asyncio
@@ -2853,7 +3477,10 @@ async def test_durable_incomplete_marker_stays_pending_without_safe_session_reco
     assert body is not None
     assert read_transcript_lines(key)[-1]["transcript_incomplete"] is True
     assert body["completed_turn_ids"] == []
-    assert [(message["role"], message["content"]) for message in body["messages"]] == [
+    assert [
+        (message["role"], message["content"])
+        for message in _thread_conversation_events(body)
+    ] == [
         ("user", "question"),
     ]
     assert body["has_pending_tool_calls"] is True
@@ -2965,7 +3592,10 @@ async def test_http_replay_recovers_marked_answer_from_session_after_gateway_res
 
     assert response.status_code == 200
     body = json.loads(response.body.decode())
-    assert [(message["role"], message["content"]) for message in body["messages"]] == [
+    assert [
+        (message["role"], message["content"])
+        for message in _thread_conversation_events(body)
+    ] == [
         ("user", "question"),
         ("assistant", "durable answer"),
     ]
@@ -3061,7 +3691,7 @@ async def test_non_webui_transcript_failure_does_not_block_idle_cleanup(
 
 
 @pytest.mark.asyncio
-async def test_idle_clears_matching_owner_when_fanout_fails() -> None:
+async def test_idle_clears_matching_owner_when_delivery_fails() -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
@@ -3073,17 +3703,16 @@ async def test_idle_clears_matching_owner_when_fanout_fails() -> None:
     chat_id = "idle-failure"
     owner = "owner-idle"
     channel._attach(mock_ws, chat_id)
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT[chat_id] = 1234.5
-    wth._WEBSOCKET_TURN_OWNERS[chat_id] = owner
+    await _register_running_turn(chat_id, 1234.5, owner=owner)
 
-    with pytest.raises(RuntimeError, match="fanout failed"):
-        await channel.send(OutboundMessage(
-            channel="websocket",
-            chat_id=chat_id,
-            content="",
-            metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: owner},
-            event=GoalStatusEvent(status="idle"),
-        ))
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id=chat_id,
+        content="",
+        metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: owner},
+        event=GoalStatusEvent(status="idle"),
+    ))
+    await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
 
     assert wth.websocket_turn_wall_started_at(chat_id) is None
     assert chat_id not in wth._WEBSOCKET_TURN_OWNERS
@@ -3095,6 +3724,11 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
+    usage = LLMUsage.reported(
+        input_tokens=80,
+        output_tokens=20,
+        cache_read_tokens=40,
+    ).with_timing(generation_ms=500, ttft_ms=125)
 
     await channel.send(OutboundMessage(
         channel="websocket",
@@ -3102,7 +3736,8 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
         content="",
         event=TurnEndEvent(
             latency_ms=1500,
-            usage={"prompt_tokens": 80, "completion_tokens": 20, "cached_tokens": 40},
+            usage=usage,
+            round_usages=(usage,),
             context_window_tokens=128_000,
         ),
     ))
@@ -3112,7 +3747,34 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
             "event": "turn_end",
             "chat_id": "chat-1",
             "latency_ms": 1500,
-            "usage": {"prompt_tokens": 80, "completion_tokens": 20, "cached_tokens": 40},
+            "usage": {
+                "prompt_tokens": 80,
+                "completion_tokens": 20,
+                "total_tokens": 100,
+                "context_tokens": 80,
+                "cached_tokens": 40,
+                "request_count": 1,
+                "estimated_tokens": 0,
+                "generation_ms": 500,
+                "measured_completion_tokens": 20,
+                "ttft_ms": 125,
+                "timed_requests": 1,
+            },
+            "round_usages": [
+                {
+                    "prompt_tokens": 80,
+                    "completion_tokens": 20,
+                    "total_tokens": 100,
+                    "context_tokens": 80,
+                    "cached_tokens": 40,
+                    "request_count": 1,
+                    "estimated_tokens": 0,
+                    "generation_ms": 500,
+                    "measured_completion_tokens": 20,
+                    "ttft_ms": 125,
+                    "timed_requests": 1,
+                }
+            ],
             "context_window_tokens": 128_000,
         },
         {"event": "session_updated", "chat_id": "chat-1", "scope": "thread"},
@@ -3218,20 +3880,20 @@ async def test_send_goal_state_emits_blob_per_chat() -> None:
 
 
 @pytest.mark.asyncio
-async def test_maybe_push_active_goal_state_noop_without_session_manager() -> None:
+async def test_hydrate_noop_without_session_manager() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    await channel._maybe_push_persisted_goal_state("chat-1")
+    await channel._outbound.hydrate("chat-1")
     mock_ws.send.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_maybe_push_active_goal_state_skips_when_no_goal_on_disk() -> None:
+async def test_hydrate_skips_when_no_goal_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_file.return_value = None
+    sm.read_session_metadata.return_value = None
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
@@ -3239,15 +3901,15 @@ async def test_maybe_push_active_goal_state_skips_when_no_goal_on_disk() -> None
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    await channel._maybe_push_persisted_goal_state("chat-1")
+    await channel._outbound.hydrate("chat-1")
     mock_ws.send.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() -> None:
+async def test_hydrate_notifies_when_goal_active_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_file.return_value = {
+    sm.read_session_metadata.return_value = {
         "metadata": {
             "goal_state": {
                 "status": "active",
@@ -3264,7 +3926,7 @@ async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() 
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    await channel._maybe_push_persisted_goal_state("chat-1")
+    await channel._outbound.hydrate("chat-1")
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
     assert body["event"] == "goal_state"
@@ -3275,10 +3937,10 @@ async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() 
 
 
 @pytest.mark.asyncio
-async def test_maybe_push_goal_state_restores_blocked_attention_on_disk() -> None:
+async def test_hydrate_restores_blocked_attention_on_disk() -> None:
     bus = MagicMock()
     sm = MagicMock()
-    sm.read_session_file.return_value = {
+    sm.read_session_metadata.return_value = {
         "metadata": {
             "goal_state": {
                 "status": "blocked",
@@ -3296,7 +3958,7 @@ async def test_maybe_push_goal_state_restores_blocked_attention_on_disk() -> Non
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
 
-    await channel._maybe_push_persisted_goal_state("chat-1")
+    await channel._outbound.hydrate("chat-1")
 
     body = json.loads(mock_ws.send.await_args.args[0])
     assert body["goal_state"] == {
@@ -3308,7 +3970,7 @@ async def test_maybe_push_goal_state_restores_blocked_attention_on_disk() -> Non
 
 
 @pytest.mark.asyncio
-async def test_maybe_push_turn_run_wall_clock_skips_when_no_active_turn() -> None:
+async def test_hydrate_skips_when_no_active_turn() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
@@ -3316,12 +3978,12 @@ async def test_maybe_push_turn_run_wall_clock_skips_when_no_active_turn() -> Non
     from nanobot.session import webui_turns as wth
 
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
-    await channel._maybe_push_turn_run_wall_clock("chat-1")
+    await channel._outbound.hydrate("chat-1")
     mock_ws.send.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_maybe_push_turn_run_wall_clock_replays_running() -> None:
+async def test_hydrate_replays_running_turn() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
@@ -3330,10 +3992,10 @@ async def test_maybe_push_turn_run_wall_clock_replays_running() -> None:
 
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     try:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
-        await channel._maybe_push_turn_run_wall_clock("chat-1")
+        await _register_running_turn("chat-1", 1_700_000_000.0)
+        await channel._outbound.hydrate("chat-1")
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop("chat-1", None)
+        wth.clear_websocket_turns("chat-1")
 
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
@@ -3384,7 +4046,7 @@ async def test_send_session_updated_includes_scope_when_present() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_non_connection_closed_exception_is_raised() -> None:
+async def test_send_non_connection_closed_exception_is_isolated() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
@@ -3392,8 +4054,11 @@ async def test_send_non_connection_closed_exception_is_raised() -> None:
     channel._attach(mock_ws, "chat-1")
 
     msg = OutboundMessage(channel="websocket", chat_id="chat-1", content="hello")
-    with pytest.raises(RuntimeError, match="unexpected"):
-        await channel.send(msg)
+    await channel.send(msg)
+    await asyncio.wait_for(_wait_for_connection_cleanup(channel, mock_ws), timeout=1)
+
+    mock_ws.close.assert_awaited_once_with(code=1011, reason="outbound send failed")
+    assert "chat-1" not in channel._subs
 
 
 @pytest.mark.asyncio
@@ -4997,13 +5662,13 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
     )
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
 
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth.clear_websocket_turns("chat-1")
     try:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        asyncio.run(_register_running_turn("chat-1", 1_700_000_000.0))
         req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
         resp = asyncio.run(channel.gateway.http._handle_sessions_list(req))
     finally:
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+        wth.clear_websocket_turns("chat-1")
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
@@ -5064,10 +5729,81 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
     assert body["sessionKey"] == key
-    assert len(body["messages"]) == 1
-    assert body["messages"][0]["role"] == "user"
-    assert body["messages"][0]["content"] == "hi"
+    assert len(_thread_conversation_events(body)) == 1
+    assert _thread_conversation_events(body)[0]["role"] == "user"
+    assert _thread_conversation_events(body)[0]["content"] == "hi"
     assert body["has_pending_tool_calls"] is False
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_dispatch_runs_replay_off_event_loop(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:threaded-history"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "threaded-history", "text": "hi"},
+    )
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+    original = gateway.http._handle_webui_thread_get
+
+    def slow_replay(*args: Any, **kwargs: Any):
+        time.sleep(0.15)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(gateway.http, "_handle_webui_thread_get", slow_replay)
+    request_task = asyncio.create_task(
+        gateway.http._dispatch_session_routes(request, request.path)
+    )
+
+    await asyncio.sleep(0.03)
+
+    assert request_task.done() is False
+    response = await request_task
+    assert response is not None
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_diagnostics_hash_session_key(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.transcript._MAX_TRANSCRIPT_PAGE_RECORDS", 1)
+    key = "websocket:private-session-name"
+    for event in (
+        {"event": "user", "chat_id": "private-session-name", "text": "hi"},
+        {"event": "message", "chat_id": "private-session-name", "text": "hello"},
+        {"event": "turn_end", "chat_id": "private-session-name"},
+    ):
+        append_transcript_object(key, event)
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    gateway.http._log = MagicMock()
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    response = await gateway.http._dispatch_session_routes(request, request.path)
+
+    assert response is not None
+    assert response.status_code == 200
+    call = gateway.http._log.warning.call_args
+    assert call is not None
+    assert key not in " ".join(str(value) for value in call.args)
 
 
 @pytest.mark.asyncio
@@ -5079,10 +5815,16 @@ async def test_handle_session_context_get_reads_detached_session() -> None:
 
     from nanobot.session import Session
 
+    usage = LLMUsage.reported(
+        input_tokens=12,
+        output_tokens=3,
+        total_tokens=175,
+        cache_read_tokens=6,
+    ).with_timing(generation_ms=300, ttft_ms=45)
     session = Session(
         key="websocket:context-route",
         messages=[{"role": "user", "content": "hello"}],
-        metadata={"_last_usage": {"prompt_tokens": 12, "completion_tokens": 3}},
+        metadata={"_last_usage": usage.to_dict()},
     )
     manager = MagicMock()
     manager.read_session_snapshot.return_value = session
@@ -5099,7 +5841,19 @@ async def test_handle_session_context_get_reads_detached_session() -> None:
     assert response.status_code == 200
     body = json.loads(response.body.decode())
     assert body["replay_messages"] == 1
-    assert body["last_usage"] == {"prompt_tokens": 12, "completion_tokens": 3}
+    assert body["last_usage"] == {
+        "prompt_tokens": 12,
+        "completion_tokens": 3,
+        "total_tokens": 175,
+        "context_tokens": 12,
+        "cached_tokens": 6,
+        "request_count": 1,
+        "estimated_tokens": 0,
+        "generation_ms": 300,
+        "measured_completion_tokens": 3,
+        "ttft_ms": 45,
+        "timed_requests": 1,
+    }
     manager.read_session_snapshot.assert_called_once_with(session.key)
 
 
@@ -5143,7 +5897,7 @@ def test_handle_webui_thread_get_reports_registered_turn_as_pending(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert body["messages"][0]["content"] == "hi"
+    assert _thread_conversation_events(body)[0]["content"] == "hi"
     assert body["has_pending_tool_calls"] is True
 
 
@@ -5346,7 +6100,7 @@ def test_handle_webui_thread_get_reconciles_registered_turn_with_turn_end(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert body["messages"][-1]["content"] == "done"
+    assert _thread_conversation_events(body)[-1]["content"] == "done"
     assert body["has_pending_tool_calls"] is expected_pending
     assert body["active_turn_id"] == active_turn_id
 
@@ -5385,9 +6139,94 @@ def test_handle_webui_thread_get_accepts_pagination_query(tmp_path, monkeypatch)
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["content"] for message in body["messages"]] == ["q3", "a3"]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "q3", "a3",
+    ]
     assert body["page"]["has_more_before"] is True
     assert body["page"]["before_cursor"]
+
+
+@pytest.mark.parametrize("sources", [
+    None,
+    [],
+    [{"provider": "xai", "model": "grok", "preset": "saved backup", "fallback": True}],
+])
+def test_handle_webui_thread_get_returns_canonical_events_by_default(
+    tmp_path,
+    monkeypatch,
+    sources,
+) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:event-route"
+    append_transcript_object(
+        key,
+        {"event": "user", "chat_id": "event-route", "text": "question"},
+    )
+    append_transcript_object(
+        key,
+        {
+            "event": "message", "chat_id": "event-route", "text": "answer",
+            **({"response_sources": sources} if sources is not None else {}),
+        },
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "event-route"})
+
+    channel = _ch(MagicMock())
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    encoded = quote(key, safe="")
+    request = Request(
+        f"/api/sessions/{encoded}/webui-thread",
+        Headers([("Authorization", "Bearer tok")]),
+    )
+
+    response = channel.gateway.http._handle_webui_thread_get(request, encoded)
+
+    assert response.status_code == 200
+    body = json.loads(response.body.decode())
+    assert "messages" not in body
+    assert body["projection"] == "events"
+    assert [event["event"] for event in body["events"]] == [
+        "user_message",
+        "message",
+        "turn_end",
+    ]
+    answer = body["events"][1]
+    if sources is None:
+        assert "response_sources" not in answer
+    else:
+        assert answer["response_sources"] == sources
+
+
+@pytest.mark.parametrize("authorized", [True, False])
+def test_handle_file_reference_metadata_is_authenticated_and_no_store(tmp_path, authorized) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    source = tmp_path / "notes.bin"
+    source.write_bytes(b"\0binary")
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote("websocket:file-actions", safe="")
+    req = Request(
+        f"/api/sessions/{enc}/file-preview?path=notes.bin&metadata=1",
+        Headers([("Authorization", "Bearer tok")]) if authorized else Headers(),
+    )
+    resp = gateway.http._handle_file_preview(req, enc)
+    assert resp.status_code == (200 if authorized else 401)
+    if authorized:
+        assert json.loads(resp.body.decode()) == {
+            "path": str(source.resolve()), "relative_path": "notes.bin",
+        }
+        assert resp.headers["Cache-Control"] == "no-store"
 
 
 def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
@@ -5419,6 +6258,7 @@ def test_handle_file_preview_returns_workspace_file(tmp_path) -> None:
     assert body["language"] == "python"
     assert body["content"].splitlines() == ["print('hello')"]
     assert body["truncated"] is False
+    assert resp.headers["Cache-Control"] == "no-store"
 
 
 def test_handle_file_preview_probe_checks_availability_without_content(tmp_path) -> None:
@@ -5446,6 +6286,7 @@ def test_handle_file_preview_probe_checks_availability_without_content(tmp_path)
 
     assert resp.status_code == 200
     assert json.loads(resp.body.decode()) == {"available": True}
+    assert resp.headers["Cache-Control"] == "no-store"
 
 
 def test_handle_file_preview_probe_reports_missing_file_as_unavailable(tmp_path) -> None:
@@ -5604,8 +6445,10 @@ def test_handle_webui_thread_get_backfills_legacy_missing_user_rows(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
-    assert [message["content"] for message in body["messages"]] == [
+    assert [message["role"] for message in _thread_conversation_events(body)] == [
+        "user", "assistant",
+    ]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
         "legacy question",
         "legacy answer",
     ]
@@ -5653,8 +6496,10 @@ def test_handle_webui_thread_get_does_not_backfill_cron_internal_prompt(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["assistant"]
-    assert [message["content"] for message in body["messages"]] == ["提醒已经到期。"]
+    assert [message["role"] for message in _thread_conversation_events(body)] == ["assistant"]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "提醒已经到期。",
+    ]
 
 
 def test_handle_webui_thread_get_does_not_backfill_trigger_internal_prompt(
@@ -5699,8 +6544,10 @@ def test_handle_webui_thread_get_does_not_backfill_trigger_internal_prompt(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["assistant"]
-    assert [message["content"] for message in body["messages"]] == ["PR #4502 已经开始 review。"]
+    assert [message["role"] for message in _thread_conversation_events(body)] == ["assistant"]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "PR #4502 已经开始 review。",
+    ]
 
 
 def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
@@ -5745,5 +6592,41 @@ def test_handle_webui_thread_get_does_not_backfill_hidden_subagent_result(
 
     assert resp.status_code == 200
     body = json.loads(resp.body.decode())
-    assert [message["role"] for message in body["messages"]] == ["assistant"]
-    assert [message["content"] for message in body["messages"]] == ["subagent summary"]
+    assert [message["role"] for message in _thread_conversation_events(body)] == ["assistant"]
+    assert [message["content"] for message in _thread_conversation_events(body)] == [
+        "subagent summary",
+    ]
+
+
+@pytest.mark.parametrize("headers,allowed", [
+    (None, False),
+    ([], False),
+    ({}, False),
+    ({"Host": "localhost:8765"}, True),
+    ({"Host": "remote.example"}, False),
+    ({"Host": "localhost:8765", "X-Forwarded-For": "203.0.113.8"}, False),
+])
+async def test_full_access_requires_local_handshake(bus, tmp_path, headers, allowed):
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"], "host": "127.0.0.1"},
+        bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path,
+                               default_restrict_to_workspace=True),
+    )
+    conn = AsyncMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+    conn.request = SimpleNamespace(headers=headers) if headers is not None else None
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "set_workspace_scope",
+        "chat_id": "handshake-scope",
+        "workspace_scope": {"project_path": str(tmp_path), "access_mode": "full"},
+    })
+    result = json.loads(conn.send.await_args.args[0])
+    if allowed:
+        assert result["event"] == "session_updated"
+        assert result["workspace_scope"]["access_mode"] == "full"
+    else:
+        assert result["event"] == "error"
+        assert result["reason"] == "full workspace access is unavailable for this connection"
+        assert sessions.read_session_file("websocket:handshake-scope") is None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from nanobot.providers.base import LLMUsage
 from nanobot.session.manager import Session
 from nanobot.utils.helpers import estimate_message_tokens, truncate_text
 
@@ -36,24 +37,14 @@ def session_context_payload(session: Session) -> dict[str, Any]:
     summary_tokens = (
         estimate_message_tokens({"role": "system", "content": summary}) if summary else 0
     )
-    raw_usage = session.metadata.get("_last_usage")
-    last_usage = (
-        {
-            key: value
-            for key, value in cast(dict[object, object], raw_usage).items()
-            if isinstance(key, str)
-            and type(value) is int
-            and value >= 0
-        }
-        if isinstance(raw_usage, dict)
-        else None
-    )
+    stored_usage = LLMUsage.from_dict(session.metadata.get("_last_usage"))
+    last_usage = stored_usage.to_turn_dict() if stored_usage is not None else None
 
     return {
         "schema_version": 1,
         "session_key": session.key,
         "total_messages": len(session.messages),
-        "archived_messages": min(session.last_consolidated, len(session.messages)),
+        "archived_messages": min(session.last_archived, len(session.messages)),
         "replay_messages": len(replay),
         "estimated_replay_tokens": replay_tokens,
         "estimated_summary_tokens": summary_tokens,

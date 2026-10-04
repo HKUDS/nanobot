@@ -238,37 +238,51 @@ async def test_execute_timeout_kills_background_process_tree(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_execute_timeout_kills_descendant_after_root_exits(tmp_path):
-    """Tree ownership must outlive a root shell that exits before timeout."""
+async def test_kill_process_tree_kills_descendant_after_root_exits(tmp_path):
+    """Tree ownership must outlive a root shell that has demonstrably exited."""
     marker = tmp_path / "child-survived-root"
+    started = tmp_path / "child-started"
+    release = tmp_path / "release-child"
     child_code = (
-        "import pathlib,time; time.sleep(3.5); "
-        f"pathlib.Path({str(marker)!r}).write_text('alive')"
+        "import pathlib,time\n"
+        f"started=pathlib.Path({str(started)!r})\n"
+        f"release=pathlib.Path({str(release)!r})\n"
+        f"marker=pathlib.Path({str(marker)!r})\n"
+        "started.write_text('ready')\n"
+        "while not release.exists():\n"
+        "    time.sleep(0.01)\n"
+        "marker.write_text('alive')\n"
     )
     child_payload = base64.b64encode(child_code.encode()).decode()
+    # Do not let the descendant keep the root's captured pipes open; the test
+    # must observe root exit independently from descendant lifetime.
     parent_code = (
         "import base64,subprocess,sys; "
         f"child=base64.b64decode('{child_payload}').decode(); "
-        "subprocess.Popen([sys.executable, '-c', child])"
+        "subprocess.Popen([sys.executable, '-c', child], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
     )
-    spawned = []
-    original_spawn = ExecTool._spawn
+    tool = ExecTool(working_dir=str(tmp_path), timeout=10)
+    process = await tool._spawn(
+        _python_command(parent_code),
+        str(tmp_path),
+        tool._build_env(),
+        process_tree=True,
+    )
+    try:
+        await asyncio.wait_for(process.wait(), timeout=10)
+        assert process.returncode == 0
+        async with asyncio.timeout(10):
+            while not started.exists():
+                await asyncio.sleep(0.01)
 
-    async def capture_spawn(*args, **kwargs):
-        process = await original_spawn(*args, **kwargs)
-        spawned.append(process)
-        return process
-
-    with patch.object(ExecTool, "_spawn", side_effect=capture_spawn):
-        result = await ExecTool(working_dir=str(tmp_path), timeout=2).execute(
-            command=_python_command(parent_code),
-            timeout=2,
-        )
-
-    assert "timed out" in result.lower()
-    assert spawned[0].returncode == 0
-    await asyncio.sleep(2)
-    assert not marker.exists()
+        await ExecTool._kill_process_tree(process)
+        await asyncio.wait_for(process.communicate(), timeout=5)
+        release.write_text("go")
+        await asyncio.sleep(1)
+        assert not marker.exists()
+    finally:
+        await ExecTool._kill_process_tree(process)
 
 
 def _mock_session_process(*, pid: int, returncode: int | None):

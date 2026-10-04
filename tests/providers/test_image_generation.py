@@ -469,35 +469,26 @@ async def test_gemini_flash_forwards_aspect_ratio_and_image_size() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gemini_flash_2_5_drops_image_size() -> None:
+@pytest.mark.parametrize(
+    "aspect_ratio, model",
+    [
+        pytest.param("4:3", "gemini-2.5-flash-image", id="5_drops_image_size"),
+        pytest.param("16:9", "gemini-2.0-flash-preview-image-generation", id="0_drops_image_size"),
+    ],
+)
+async def test_gemini_flash_omits_unsupported_image_size(aspect_ratio, model) -> None:
     fake = FakeClient(_gemini_flash_image_response())
     client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
 
     await client.generate(
         prompt="draw a cat",
-        model="gemini-2.5-flash-image",
-        aspect_ratio="4:3",
+        model=model,
+        aspect_ratio=aspect_ratio,
         image_size="1K",
     )
 
     image_config = fake.calls[0]["json"]["generationConfig"]["imageConfig"]
-    assert image_config == {"aspectRatio": "4:3"}
-
-
-@pytest.mark.asyncio
-async def test_gemini_flash_2_0_drops_image_size() -> None:
-    fake = FakeClient(_gemini_flash_image_response())
-    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
-
-    await client.generate(
-        prompt="draw a cat",
-        model="gemini-2.0-flash-preview-image-generation",
-        aspect_ratio="16:9",
-        image_size="1K",
-    )
-
-    image_config = fake.calls[0]["json"]["generationConfig"]["imageConfig"]
-    assert image_config == {"aspectRatio": "16:9"}
+    assert image_config == {"aspectRatio": aspect_ratio}
 
 
 @pytest.mark.parametrize(
@@ -876,15 +867,27 @@ async def test_openai_multiple_images() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_aspect_ratio_to_size() -> None:
+@pytest.mark.parametrize(
+    "expected_size, model, aspect_ratio",
+    [
+        pytest.param("1024x1024", "dall-e-3", "1:1", id="aspect_ratio_to_size"),
+        pytest.param("1024x1024", "dall-e-2", "16:9", id="dalle2_uses_square_size_for_non_square_ratios"),
+        pytest.param("1536x1024", "gpt-image-1", "16:9", id="gpt_image_uses_supported_landscape_size"),
+    ],
+)
+async def test_openai_aspect_ratio_uses_model_supported_size(
+    expected_size,
+    model,
+    aspect_ratio,
+) -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = OpenAIImageGenerationClient(
         api_key="sk-openai-test",
         client=fake,  # type: ignore[arg-type]
     )
 
-    await client.generate(prompt="draw", model="dall-e-3", aspect_ratio="1:1")
-    assert fake.calls[0]["json"]["size"] == "1024x1024"
+    await client.generate(prompt="draw", model=model, aspect_ratio=aspect_ratio)
+    assert fake.calls[0]["json"]["size"] == expected_size
 
 
 @pytest.mark.asyncio
@@ -900,32 +903,6 @@ async def test_openai_dalle3_uses_supported_orientation_sizes() -> None:
 
     assert fake.calls[0]["json"]["size"] == "1024x1792"
     assert fake.calls[1]["json"]["size"] == "1792x1024"
-
-
-@pytest.mark.asyncio
-async def test_openai_dalle2_uses_square_size_for_non_square_ratios() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = OpenAIImageGenerationClient(
-        api_key="sk-openai-test",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(prompt="draw", model="dall-e-2", aspect_ratio="16:9")
-
-    assert fake.calls[0]["json"]["size"] == "1024x1024"
-
-
-@pytest.mark.asyncio
-async def test_openai_gpt_image_uses_supported_landscape_size() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = OpenAIImageGenerationClient(
-        api_key="sk-openai-test",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(prompt="draw", model="gpt-image-1", aspect_ratio="16:9")
-
-    assert fake.calls[0]["json"]["size"] == "1536x1024"
 
 
 @pytest.mark.asyncio
@@ -1098,7 +1075,14 @@ async def test_openai_default_size_when_no_aspect_ratio() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_ignores_explicit_size_unsupported_by_model_family() -> None:
+@pytest.mark.parametrize(
+    "expected_size, image_size",
+    [
+        pytest.param("1792x1024", "1536x1024", id="ignores_explicit_size_unsupported_by_model_family"),
+        pytest.param("1024x1024", "1024x1024", id="uses_explicit_image_size"),
+    ],
+)
+async def test_openai_validates_explicit_size_for_model_family(expected_size, image_size) -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = OpenAIImageGenerationClient(
         api_key="sk-openai-test",
@@ -1109,30 +1093,11 @@ async def test_openai_ignores_explicit_size_unsupported_by_model_family() -> Non
         prompt="draw",
         model="dall-e-3",
         aspect_ratio="16:9",
-        image_size="1536x1024",
+        image_size=image_size,
     )
 
     body = fake.calls[0]["json"]
-    assert body["size"] == "1792x1024"
-
-
-@pytest.mark.asyncio
-async def test_openai_uses_explicit_image_size() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = OpenAIImageGenerationClient(
-        api_key="sk-openai-test",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(
-        prompt="draw",
-        model="dall-e-3",
-        aspect_ratio="16:9",
-        image_size="1024x1024",
-    )
-
-    body = fake.calls[0]["json"]
-    assert body["size"] == "1024x1024"
+    assert body["size"] == expected_size
 
 
 @pytest.mark.asyncio
@@ -1180,7 +1145,14 @@ async def test_custom_generate_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_custom_generate_preserves_provider_size_hint() -> None:
+@pytest.mark.parametrize(
+    "expected_size, image_size",
+    [
+        pytest.param("2K", "2K", id="preserves_provider_size_hint"),
+        pytest.param("1024x1024", "1K", id="maps_one_k_to_openai_dimension"),
+    ],
+)
+async def test_custom_generate_maps_size_hint(expected_size, image_size) -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = CustomImageGenerationClient(
         api_key="sk-custom-test",
@@ -1191,28 +1163,10 @@ async def test_custom_generate_preserves_provider_size_hint() -> None:
     await client.generate(
         prompt="a cat on the moon",
         model="custom-image-model",
-        image_size="2K",
+        image_size=image_size,
     )
 
-    assert fake.calls[0]["json"]["size"] == "2K"
-
-
-@pytest.mark.asyncio
-async def test_custom_generate_maps_one_k_to_openai_dimension() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = CustomImageGenerationClient(
-        api_key="sk-custom-test",
-        api_base="https://custom.example/v1",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(
-        prompt="a cat on the moon",
-        model="custom-image-model",
-        image_size="1K",
-    )
-
-    assert fake.calls[0]["json"]["size"] == "1024x1024"
+    assert fake.calls[0]["json"]["size"] == expected_size
 
 
 @pytest.mark.asyncio

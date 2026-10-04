@@ -6,16 +6,34 @@ import {
   parseGenericToolTrace,
   type GenericToolStatus,
 } from "@/components/thread/activity/generic-tool-model";
+import i18n, { setAppLanguage } from "@/i18n";
 
 function describeRun(line: string, status: GenericToolStatus = "done") {
   const trace = parseGenericToolTrace(line);
   expect(trace).not.toBeNull();
-  return describeGenericToolRun([{ trace: trace!, status }]);
+  return describeGenericToolRun([{ trace: trace!, status }], i18n.t);
 }
 
 describe("generic tool activity semantics", () => {
+  it.each(["running", "done", "error"] as const)("shows rg arguments during %s", (status) => {
+    const presentation = describeRun('rg({"args":["-n","hello world","src"]})', status);
+    expect(presentation.detail).toBe('-n "hello world" src');
+    expect(presentation.status).toBe(status);
+  });
+
+  it("bounds and redacts rg argument previews", () => {
+    const presentation = describeRun(`rg(${JSON.stringify({ args: ["sk-proj-abcdefghijklmno", "x".repeat(120)] })})`);
+    expect(presentation.detail).toContain("<redacted>");
+    expect(presentation.detail.length).toBeLessThanOrEqual(88);
+  });
+
+  it("shows rg regex characters and empty arguments", () => {
+    const presentation = describeRun(`rg(${JSON.stringify({ args: [String.raw`resolve\(`, ""] })})`);
+    expect(presentation.detail).toBe('resolve\\( ""');
+  });
+
   it.each([
-    ['find_files({"glob":"*.tsx"})', "Found files", "*.tsx"],
+    ['find_files({"glob":"*.tsx"})', "File search complete", "*.tsx"],
     ['grep({"pattern":"dream_cursor"})', "Searched files", "“dream_cursor”"],
     ['list_dir({"path":"memory"})', "Listed files", "memory"],
     ['read_file({"path":"docs/guide.md"})', "Read file", "docs/guide.md"],
@@ -29,7 +47,8 @@ describe("generic tool activity semantics", () => {
     ['cron({"action":"remove","name":"Daily digest"})', "Removed automation", "Daily digest"],
     ['create_goal({"objective":"private objective","ui_summary":"Benchmark memory"})', "Started long task", "Benchmark memory"],
     ['update_goal({"action":"complete","recap":"private recap"})', "Updated long task", "complete"],
-    ['write_stdin({"session_id":"session-1234567890-secret","chars":"private input"})', "Continued command", "session…ecret"],
+    ['exec_session({"session_id":"session-1234567890-secret","until_exit":true})', "Continued command", "session…ecret"],
+    ['write_stdin({"session_id":"legacy-1234567890-secret","chars":"private input"})', "Completed Write stdin", ""],
     ['list_exec_sessions({})', "Checked running commands", ""],
     ['screenshot({"path":"artifacts/home.png"})', "Captured screenshot", ""],
     ['third_party_sync({"token":"secret","payload":"private payload"})', "Completed Third party sync", ""],
@@ -58,7 +77,7 @@ describe("generic tool activity semantics", () => {
     const presentation = describeGenericToolRun([
       { trace: first, status: "done" },
       { trace: second, status: "done" },
-    ]);
+    ], i18n.t);
 
     expect(presentation).toMatchObject({ label: "Reviewed sources", detail: "", aside: "2 files" });
     expect(JSON.stringify(presentation)).not.toContain("/Users/test");
@@ -76,6 +95,33 @@ describe("generic tool activity semantics", () => {
       'mcp_browser_click({"text":"private"})',
     ]) {
       expect(parseGenericToolTrace(line)).toBeNull();
+    }
+  });
+
+  it("localizes labels and counts without translating raw search text", async () => {
+    await setAppLanguage("zh-CN");
+    const first = parseGenericToolTrace('grep({"pattern":"release notes"})')!;
+    const second = parseGenericToolTrace('grep({"pattern":"API changes"})')!;
+
+    expect(describeGenericToolRun([
+      { trace: first, status: "done" },
+      { trace: second, status: "done" },
+    ], i18n.t)).toMatchObject({
+      label: "文件搜索完成",
+      aside: "2 次",
+    });
+  });
+
+  it("localizes command continuation events", async () => {
+    await setAppLanguage("zh-CN");
+    const line = 'exec_session({"session_id":"session-1234567890-secret"})';
+    for (const status of ["running", "done", "error"] as const) {
+      const key = status === "running" ? "continuingCommand"
+        : status === "done" ? "continuedCommand" : "continueCommandFailed";
+      expect(describeRun(line, status)).toMatchObject({
+        label: i18n.t(`message.agentActivity.${key}`),
+        detail: "session…ecret",
+      });
     }
   });
 

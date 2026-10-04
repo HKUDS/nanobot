@@ -1,11 +1,15 @@
-import type { LucideIcon } from "lucide-react";
+import type { ComponentType } from "react";
 
 export type ChannelPresentation = {
   displayName: string;
   initials: string;
   color: string;
-  icon?: LucideIcon;
+  icon?: ComponentType<{ className?: string; strokeWidth?: string | number }>;
   logoUrl?: string;
+  /** Official site favicon to use when the primary asset is hosted on a CDN. */
+  logoFallbackUrl?: string;
+  /** The primary asset already includes its own background and safe area. */
+  logoLayout?: "tile";
   setup?: ChannelCatalogSetupPresentation;
 };
 
@@ -15,23 +19,21 @@ export type ChannelSetupPresentation = {
   command?: string;
   docsUrl?: string;
   docsLabel?: string;
-  docsLogoUrl?: string;
   officialUrl?: string;
   officialLabel?: string;
-  summary?: string;
-  tryIt?: string;
-  steps: string[];
+  presetLabel?: string;
+  sectionLabels?: Record<string, string>;
   fields?: ChannelConfigField[];
   manualFields?: ChannelConfigField[];
+  requirements?: ChannelSetupRequirement[];
   actions?: ChannelSetupAction[];
   presets?: ChannelProviderPreset[];
 };
 
-export type ChannelCatalogSetupPresentation = {
+type ChannelCatalogSetupPresentation = {
   mode?: "webui" | "credentials" | "connect";
   command?: string;
   docsUrl?: string;
-  docsLogoUrl?: string;
   fields?: ChannelFieldPresentation[];
   manualFields?: ChannelFieldPresentation[];
   actions?: ChannelSetupActionDefinition[];
@@ -40,13 +42,27 @@ export type ChannelCatalogSetupPresentation = {
 
 export type ChannelFieldPresentation = {
   key: string;
+  section?: string;
 };
 
-export type ChannelSetupActionDefinition = Omit<ChannelSetupAction, "label">;
+export type ChannelFieldSection =
+  | "account"
+  | "credentials"
+  | "connection"
+  | "access"
+  | "behavior"
+  | "security"
+  | "advanced";
+
+export type ChannelSetupRequirement = {
+  alternatives: string[][];
+};
+
+type ChannelSetupActionDefinition = Omit<ChannelSetupAction, "label">;
 
 export type ChannelProviderPresetDefinition = Omit<ChannelProviderPreset, "label">;
 
-export type ChannelSetupAction = {
+type ChannelSetupAction = {
   id: string;
   label: string;
   url?: string;
@@ -66,13 +82,14 @@ export type ChannelConfigField = {
   placeholder?: string;
   secret?: boolean;
   optional?: boolean;
-  help?: string;
-  inputType?: "text" | "number";
+  inputType?: "text" | "number" | "url" | "email" | "tel";
+  kind?: "string" | "secret" | "int" | "bool" | "list" | "enum" | string;
+  section?: string;
   defaultValue?: string;
   options?: ChannelConfigOption[];
 };
 
-export type ChannelConfigOption = {
+type ChannelConfigOption = {
   value: string;
   label: string;
 };

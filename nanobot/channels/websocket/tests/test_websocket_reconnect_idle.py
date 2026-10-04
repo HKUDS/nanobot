@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from nanobot.channels.websocket.runtime import WebSocketChannel
+from nanobot.webui.outbound_projection import WebUIOutboundProjector
+from nanobot.webui.session_projection import WebUISessionProjection
 
 
 @pytest.mark.asyncio
@@ -13,7 +15,9 @@ async def test_hydrate_after_subscribe_is_quiet_when_no_turn_active():
     channel = WebSocketChannel.__new__(WebSocketChannel)
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
-    channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel.gateway.session_manager.read_session_metadata = MagicMock(return_value={})
+    channel._session_projection = WebUISessionProjection(channel.gateway.session_manager)
+    channel._outbound = WebUIOutboundProjector(channel, channel._session_projection)
     channel._turn_models = {}
 
     sent_events = []
@@ -27,7 +31,7 @@ async def test_hydrate_after_subscribe_is_quiet_when_no_turn_active():
     channel.send_goal_state = mock_send_goal_state
     channel.send_goal_status = mock_send_goal_status
 
-    with patch("nanobot.channels.websocket.runtime.websocket_turn_wall_started_at", return_value=None):
+    with patch("nanobot.webui.session_projection.websocket_turn_wall_started_at", return_value=None):
         await channel._hydrate_after_subscribe("test-chat")
 
     assert sent_events == []
@@ -39,7 +43,9 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
     channel = WebSocketChannel.__new__(WebSocketChannel)
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
-    channel.gateway.session_manager.read_session_file = MagicMock(return_value={})
+    channel.gateway.session_manager.read_session_metadata = MagicMock(return_value={})
+    channel._session_projection = WebUISessionProjection(channel.gateway.session_manager)
+    channel._outbound = WebUIOutboundProjector(channel, channel._session_projection)
     channel._turn_models = {}
 
     sent_events = []
@@ -55,11 +61,11 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
 
     with (
         patch(
-            "nanobot.channels.websocket.runtime.websocket_turn_wall_started_at",
+            "nanobot.webui.session_projection.websocket_turn_wall_started_at",
             return_value=1234567890.0,
         ),
         patch(
-            "nanobot.channels.websocket.runtime.websocket_turn_id",
+            "nanobot.webui.session_projection.websocket_turn_id",
             return_value="turn-active",
         ),
     ):

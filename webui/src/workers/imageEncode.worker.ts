@@ -23,7 +23,7 @@ export type EncodeInput = {
   file: File;
 };
 
-export type EncodeSuccess = {
+type EncodeSuccess = {
   id: string;
   ok: true;
   dataUrl: string;

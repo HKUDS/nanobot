@@ -201,7 +201,12 @@ class SkillsLoader:
             ),
         )
 
-    def build_skills_summary(self, exclude: set[str] | None = None) -> str:
+    def build_skills_summary(
+        self,
+        exclude: set[str] | None = None,
+        *,
+        workspace: Path | None = None,
+    ) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
 
@@ -210,6 +215,7 @@ class SkillsLoader:
 
         Args:
             exclude: Set of skill names to omit from the summary.
+            workspace: Effective project workspace used to choose safe display paths.
 
         Returns:
             Markdown-formatted skills summary.
@@ -218,6 +224,9 @@ class SkillsLoader:
         if not all_skills:
             return ""
 
+        agent_workspace = self.workspace.expanduser().resolve()
+        project_workspace = (workspace or self.workspace).expanduser().resolve()
+        use_relative_roots = project_workspace == agent_workspace
         sections: list[str] = []
         groups = (
             ("Workspace skills", "workspace", self.workspace_skills),
@@ -233,7 +242,12 @@ class SkillsLoader:
             if not entries:
                 continue
 
-            lines = [f"### {label} (`{root.expanduser().resolve()}`)"]
+            resolved_root = root.expanduser().resolve()
+            if use_relative_roots:
+                display_root = Path("plugins" if source == "plugin" else "skills")
+            else:
+                display_root = resolved_root
+            lines = [f"### {label} (`{display_root}`)"]
             for entry in entries:
                 skill_name = entry["name"]
                 meta = self._get_skill_meta(skill_name)

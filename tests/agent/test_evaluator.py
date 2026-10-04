@@ -12,7 +12,7 @@ from nanobot.utils.evaluator import (
 
 class DummyProvider(LLMProvider):
     def __init__(self, responses: list[LLMResponse]):
-        super().__init__()
+        super().__init__(provider_name="dummy")
         self._responses = list(responses)
 
     async def chat(self, *args, **kwargs) -> LLMResponse:
@@ -93,6 +93,25 @@ async def test_should_notify_false() -> None:
         evaluator_prompt=_EVAL_PROMPT,
     )
     assert result is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["false", "true", 0, 1, None, [], {"notify": True}])
+@pytest.mark.parametrize("default_notify", [False, True])
+async def test_invalid_notification_decision_uses_default(decision, default_notify) -> None:
+    response = LLMResponse(
+        content="",
+        tool_calls=[ToolCallRequest(
+            id="eval_1", name="evaluate_notification",
+            arguments={"should_notify": decision},
+        )],
+    )
+    result = await evaluate_response(
+        "All clear", "check status", DummyProvider([response]), "m",
+        evaluator_prompt=_EVAL_PROMPT, default_notify=default_notify,
+    )
+
+    assert result is default_notify
 
 
 @pytest.mark.asyncio

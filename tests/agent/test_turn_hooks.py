@@ -1,7 +1,10 @@
 import pytest
+from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentTurnHookContext
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
+from nanobot.providers.base import ToolCallRequest
+from nanobot.utils.progress_events import output_events
 
 
 class RecordingHook(AgentHook):
@@ -12,6 +15,39 @@ class RecordingHook(AgentHook):
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         self._events.append(f"{self._label}:{context.iteration}")
+
+
+@pytest.mark.parametrize("ephemeral", [True, False])
+@pytest.mark.parametrize("hosted", [True, False])
+async def test_tool_log_privacy_preserves_user_visible_progress(ephemeral, hosted) -> None:
+    secret = "synthetic-private-argument-测试"
+    events: list[dict] = []
+
+    async def on_progress(content, **kwargs):
+        events.extend(kwargs.get("tool_events") or [])
+
+    hook = build_agent_turn_hook(AgentTurnHookSpec(
+        ephemeral=ephemeral, events=output_events(on_progress=on_progress),
+    ))
+    context = AgentHookContext(iteration=1, messages=[], tool_calls=[
+        ToolCallRequest(id="private-call", name="web_search", arguments={"query": secret}),
+    ])
+    logs: list[str] = []
+    sink = logger.add(lambda message: logs.append(str(message)), format="{message}")
+    try:
+        if hosted:
+            await hook.on_provider_tool_event(context, {
+                "phase": "start", "name": "web_search", "call_id": "private-call",
+                "arguments": {"query": secret},
+            })
+        else:
+            await hook.before_execute_tools(context)
+    finally:
+        logger.remove(sink)
+
+    assert events[0]["arguments"] == {"query": secret}
+    assert "web_search" in "\n".join(logs)
+    assert (secret in "\n".join(logs)) is not ephemeral
 
 
 def test_turn_hook_context_preserves_legacy_positional_arguments(tmp_path) -> None:
@@ -32,32 +68,17 @@ def test_turn_hook_context_preserves_legacy_positional_arguments(tmp_path) -> No
 
 
 @pytest.mark.asyncio
-async def test_turn_hook_builder_runs_progress_hook_before_extra_hooks() -> None:
-    events: list[str] = []
-
-    hook = build_agent_turn_hook(AgentTurnHookSpec(
-        on_iteration=lambda iteration: events.append(f"progress:{iteration}"),
-        registered_hooks=[RecordingHook(events)],
-    ))
-
-    await hook.before_iteration(AgentHookContext(iteration=2, messages=[]))
-
-    assert events == ["progress:2", "hook:2"]
-
-
-@pytest.mark.asyncio
 async def test_turn_hook_builder_runs_registered_hooks_before_turn_hooks() -> None:
     events: list[str] = []
 
     hook = build_agent_turn_hook(AgentTurnHookSpec(
-        on_iteration=lambda iteration: events.append(f"progress:{iteration}"),
         registered_hooks=[RecordingHook(events, "registered")],
         turn_hooks=[RecordingHook(events, "turn")],
     ))
 
     await hook.before_iteration(AgentHookContext(iteration=2, messages=[]))
 
-    assert events == ["progress:2", "registered:2", "turn:2"]
+    assert events == ["registered:2", "turn:2"]
 
 
 @pytest.mark.asyncio
@@ -75,7 +96,6 @@ async def test_turn_hook_builder_runs_factories_with_matching_registration_order
         return _create
 
     hook = build_agent_turn_hook(AgentTurnHookSpec(
-        on_iteration=lambda iteration: events.append(f"progress:{iteration}"),
         channel="websocket",
         chat_id="chat-1",
         message_id="msg-1",
@@ -92,7 +112,6 @@ async def test_turn_hook_builder_runs_factories_with_matching_registration_order
     await hook.before_iteration(AgentHookContext(iteration=2, messages=[]))
 
     assert events == [
-        "progress:2",
         "registered_factory:2",
         "registered:2",
         "turn_factory:2",

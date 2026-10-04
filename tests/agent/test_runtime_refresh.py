@@ -29,7 +29,7 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
     return provider
 
 
-def test_provider_refresh_updates_only_runtime_resolver(tmp_path: Path) -> None:
+def test_provider_refresh_updates_runtime_resolver(tmp_path: Path) -> None:
     old_provider = _provider("old-model")
     new_provider = _provider("new-model", max_tokens=456)
     loop = AgentLoop(
@@ -53,36 +53,6 @@ def test_provider_refresh_updates_only_runtime_resolver(tmp_path: Path) -> None:
     assert loop.provider is new_provider
     assert loop.model == "new-model"
     assert loop.context_window_tokens == 2000
-    assert not hasattr(loop.runner, "provider")
-    assert not hasattr(loop.subagents, "provider")
-    assert not hasattr(loop.subagents, "model")
-    assert not hasattr(loop.subagents.runner, "provider")
-    assert not hasattr(loop.consolidator, "provider")
-    assert not hasattr(loop.consolidator, "model")
-    assert not hasattr(loop.consolidator, "context_window_tokens")
-    assert not hasattr(loop.consolidator, "max_completion_tokens")
-
-
-def test_loop_has_no_mutable_runtime_mirrors_or_legacy_snapshot_api(tmp_path: Path) -> None:
-    loop = AgentLoop(
-        bus=MessageBus(),
-        provider=_provider("test-model"),
-        workspace=tmp_path,
-        model="test-model",
-        context_window_tokens=1000,
-    )
-
-    assert {
-        "provider",
-        "model",
-        "context_window_tokens",
-        "model_presets",
-        "_active_preset",
-        "_provider_signature",
-        "_max_messages",
-    }.isdisjoint(loop.__dict__)
-    assert not hasattr(loop, "_apply_provider_snapshot")
-    assert not hasattr(loop, "_build_model_preset_snapshot")
 
 
 def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
@@ -108,7 +78,6 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     assert runtime.provider is new_provider
     assert runtime.model == "new-model"
     assert loop.provider is new_provider
-    assert not hasattr(loop.runner, "provider")
 
 
 def test_llm_runtime_surfaces_invalidated_config_errors(tmp_path: Path) -> None:
@@ -255,7 +224,7 @@ async def test_config_invalidation_defers_canonical_notification_until_default_r
         model_preset="fast",
         preset_snapshot_loader=load_preset,
     )
-    loop.runtime_events.subscribe(published.append, RuntimeModelChanged)
+    loop.bus.subscribe(published.append, RuntimeModelChanged)
     session = loop.sessions.get_or_create("websocket:chat")
     session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
     current_model = "model-b"
@@ -306,7 +275,7 @@ async def test_config_refresh_publishes_renamed_canonical_preset(tmp_path: Path)
         model_preset="fast",
         preset_snapshot_loader=load_preset,
     )
-    loop.runtime_events.subscribe(published.append, RuntimeModelChanged)
+    loop.bus.subscribe(published.append, RuntimeModelChanged)
     catalog["Codex"] = catalog.pop("fast")
     default_name = "Codex"
 

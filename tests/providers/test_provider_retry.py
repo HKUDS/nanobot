@@ -3,6 +3,7 @@ import copy
 
 import pytest
 
+from nanobot.events import RetryStatusEvent
 from nanobot.providers.base import (
     RETRY_AFTER_BUFFER,
     GenerationSettings,
@@ -15,7 +16,7 @@ from nanobot.providers.base import (
 
 class ScriptedProvider(LLMProvider):
     def __init__(self, responses):
-        super().__init__()
+        super().__init__(provider_name="scripted")
         self._responses = list(responses)
         self.calls = 0
         self.last_kwargs: dict = {}
@@ -65,6 +66,78 @@ async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_chat_with_retry_emits_structured_retry_lifecycle(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(
+            content="network connection failed",
+            finish_reason="error",
+            error_kind="connection",
+        ),
+        LLMResponse(content="ok"),
+    ])
+    statuses: list[RetryStatusEvent] = []
+
+    async def _fake_sleep(_delay: float) -> None:
+        return None
+
+    async def _status(status: RetryStatusEvent) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry_status=_status,
+    )
+
+    assert response.content == "ok"
+    assert [status.state for status in statuses] == ["waiting", "recovered"]
+    assert statuses[0].attempt == 1
+    assert statuses[0].max_attempts == 4
+    assert statuses[0].error_kind == "connection"
+    assert statuses[0].next_retry_at is not None
+    assert statuses[1].attempt == 2
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_clears_waiting_status_on_terminal_non_transient_error(
+    monkeypatch,
+) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(
+            content="network connection failed",
+            finish_reason="error",
+            error_kind="connection",
+        ),
+        LLMResponse(
+            content="401 unauthorized",
+            finish_reason="error",
+            error_status_code=401,
+            error_should_retry=False,
+        ),
+    ])
+    statuses: list[RetryStatusEvent] = []
+
+    async def _fake_sleep(_delay: float) -> None:
+        return None
+
+    async def _status(status: RetryStatusEvent) -> None:
+        statuses.append(status)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry_status=_status,
+    )
+
+    assert response.content == "401 unauthorized"
+    assert [status.state for status in statuses] == ["waiting", "cleared"]
+    assert statuses[-1].attempt == 2
+    assert statuses[-1].error_kind == "unknown"
+
+
+@pytest.mark.asyncio
 async def test_chat_with_retry_does_not_retry_non_transient_error(monkeypatch) -> None:
     provider = ScriptedProvider([
         LLMResponse(content="401 unauthorized", finish_reason="error"),
@@ -111,9 +184,14 @@ async def test_chat_with_retry_emits_terminal_progress_when_standard_retries_exh
         LLMResponse(content="429 rate limit a", finish_reason="error"),
         LLMResponse(content="429 rate limit b", finish_reason="error"),
         LLMResponse(content="429 rate limit c", finish_reason="error"),
-        LLMResponse(content="503 final server error", finish_reason="error"),
+        LLMResponse(
+            content="503 final server error",
+            finish_reason="error",
+            error_status_code=503,
+        ),
     ])
     progress: list[str] = []
+    statuses: list[RetryStatusEvent] = []
 
     async def _fake_sleep(delay: int) -> None:
         return None
@@ -121,15 +199,58 @@ async def test_chat_with_retry_emits_terminal_progress_when_standard_retries_exh
     async def _progress(msg: str) -> None:
         progress.append(msg)
 
+    async def _status(status: RetryStatusEvent) -> None:
+        statuses.append(status)
+
     monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
 
     response = await provider.chat_with_retry(
         messages=[{"role": "user", "content": "hello"}],
         on_retry_wait=_progress,
+        on_retry_status=_status,
     )
 
     assert response.content == "503 final server error"
-    assert progress[-1] == "Model request failed after 4 retries, giving up."
+    assert progress[-1] == "Model request failed after 4 attempts, giving up."
+    assert statuses[-1] == RetryStatusEvent(
+        state="exhausted",
+        attempt=4,
+        max_attempts=4,
+        error_kind="server",
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_routes_terminal_progress_to_explicit_callback(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(content="429 rate limit a", finish_reason="error"),
+        LLMResponse(content="429 rate limit b", finish_reason="error"),
+        LLMResponse(content="429 rate limit c", finish_reason="error"),
+        LLMResponse(content="503 final server error", finish_reason="error"),
+    ])
+    retry_progress: list[str] = []
+    terminal_progress: list[str] = []
+
+    async def _fake_sleep(delay: int) -> None:
+        return None
+
+    async def _retry_progress(msg: str) -> None:
+        retry_progress.append(msg)
+
+    async def _terminal_progress(msg: str) -> None:
+        terminal_progress.append(msg)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry_wait=_retry_progress,
+        on_retry_exhausted=_terminal_progress,
+    )
+
+    assert response.content == "503 final server error"
+    assert not any("giving up" in message for message in retry_progress)
+    assert terminal_progress == ["Model request failed after 4 attempts, giving up."]
 
 
 @pytest.mark.asyncio
@@ -398,13 +519,21 @@ async def test_image_retry_discards_provider_state_with_images(
 
     response = await provider.chat_with_retry(
         messages=messages,
-        provider_context=ProviderCallContext(conversation_state=state),
+        provider_context=ProviderCallContext(
+            conversation_state=state,
+            session_id="webui:cache-test",
+            response_preset="saved fallback",
+            response_is_fallback=True,
+        ),
     )
 
     assert response.content == "ok, no image"
     retry_context = provider.contexts[-1]
     assert isinstance(retry_context, ProviderCallContext)
     assert retry_context.conversation_state is None
+    assert retry_context.session_id == "webui:cache-test"
+    assert retry_context.response_preset == "saved fallback"
+    assert retry_context.response_is_fallback is True
     public_content = messages[0]["content"]
     if isinstance(public_content, list):
         assert all(block.get("type") != "image_url" for block in public_content)
@@ -490,6 +619,29 @@ def test_extract_retry_after_supports_common_provider_formats() -> None:
     assert LLMProvider._extract_retry_after('{"error":{"retry_after":20}}') == 20.0
     assert LLMProvider._extract_retry_after("Rate limit reached, please try again in 20s") == 20.0
     assert LLMProvider._extract_retry_after("retry-after: 20") == 20.0
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Rate limit reached for gpt-x. Please try again in 1m30s.", 90.0),
+        ("Please try again in 2m0.5s", 120.5),
+        ("Please try again in 1h2m3s", 3723.0),
+        ("Please try again in 6m0s. Visit https://example.com", 360.0),
+        ("Please try again in 1.5s", 1.5),
+        ("Please try again in 20ms", 0.1),
+        ("Please try again in 30 seconds", 30.0),
+        ("Please try again in 2 minutes", 120.0),
+    ],
+)
+def test_extract_retry_after_sums_compound_durations(message: str, expected: float) -> None:
+    assert LLMProvider._extract_retry_after(message) == pytest.approx(expected)
+
+
+def test_extract_retry_after_prefers_retry_after_over_try_again_in() -> None:
+    message = "retry after 5s; otherwise try again in 1m30s"
+
+    assert LLMProvider._extract_retry_after(message) == 5.0
 
 
 def test_extract_retry_after_from_headers_supports_numeric_and_http_date() -> None:

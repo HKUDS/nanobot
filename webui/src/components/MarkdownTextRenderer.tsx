@@ -7,15 +7,18 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import rehypeKatex from "rehype-katex";
 import { Check, Globe2 } from "lucide-react";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { Streamdown, type Components, type StreamdownProps } from "streamdown";
+import remend from "remend";
+
+import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
 import { CodeBlock } from "@/components/CodeBlock";
+import { WebLink } from "@/components/WebLink";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
@@ -35,7 +38,6 @@ import { browserSafeFaviconUrls } from "@/lib/provider-brand";
 import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
 
-import "katex/dist/katex.min.css";
 import "streamdown/styles.css";
 
 interface MarkdownTextRendererProps {
@@ -43,6 +45,7 @@ interface MarkdownTextRendererProps {
   className?: string;
   highlightCode?: boolean;
   streaming?: boolean;
+  preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
 }
 
@@ -285,8 +288,23 @@ const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkCjkStrongBoundaries,
   remarkSafeHtmlSubset,
 ];
-const rehypePlugins: NonNullable<StreamdownProps["rehypePlugins"]> = [rehypeKatex];
+type MathPlugin = typeof import("@/lib/markdown-math").default;
+let loadedMathPlugin: MathPlugin | undefined;
+let mathPluginPromise: Promise<MathPlugin> | undefined;
 
+function loadMathPlugin(): Promise<MathPlugin> {
+  return mathPluginPromise ??= import("@/lib/markdown-math").then((module) => {
+    loadedMathPlugin = module.default;
+    return module.default;
+  }).catch((error) => {
+    mathPluginPromise = undefined;
+    throw error;
+  });
+}
+
+// Remend mistakes math comparisons like `j<i` for incomplete HTML and truncates
+// the remaining text. HTML is handled by remarkSafeHtmlSubset, not raw rendering.
+const REMEND_OPTIONS = { htmlTags: false } as const;
 const DIRECT_LINKS = { enabled: false } as const;
 const SAFE_MARKDOWN_PROTOCOL = /^(https?|ircs?|mailto|xmpp)$/i;
 
@@ -438,7 +456,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
     : link.title;
 
   return (
-    <a
+    <WebLink
       href={link.href}
       target="_blank"
       rel="noreferrer noopener"
@@ -474,7 +492,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       <span className="min-w-0 [overflow-wrap:anywhere] leading-normal sm:truncate">
         {label}
       </span>
-    </a>
+    </WebLink>
   );
 }
 
@@ -516,9 +534,24 @@ export default function MarkdownTextRenderer({
   className,
   highlightCode = true,
   streaming = false,
+  preserveStreamingLayout = false,
   onOpenFilePreview,
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
+  const [mathPlugin, setMathPlugin] = useState(() => loadedMathPlugin);
+  const needsMath = /\$|\\[([]/.test(children);
+  useEffect(() => {
+    if (!needsMath || mathPlugin) return;
+    let cancelled = false;
+    void loadMathPlugin().then((plugin) => {
+      if (!cancelled) setMathPlugin(() => plugin);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [needsMath, mathPlugin]);
+  const rehypePlugins = useMemo<NonNullable<StreamdownProps["rehypePlugins"]>>(
+    () => needsMath && mathPlugin ? [mathPlugin] : [],
+    [needsMath, mathPlugin],
+  );
   const components = useMemo<Components>(
     () => ({
       code({ className: cls, children: kids, node: _node, ...props }) {
@@ -645,7 +678,7 @@ export default function MarkdownTextRenderer({
           return <>{markdownChildren}</>;
         }
         return (
-          <a
+          <WebLink
             href={href}
             target="_blank"
             rel="noreferrer noopener"
@@ -653,7 +686,7 @@ export default function MarkdownTextRenderer({
             {...props}
           >
             {markdownChildren}
-          </a>
+          </WebLink>
         );
       },
       // Streamdown decorates emphasis with spans by default. Preserve native
@@ -687,11 +720,13 @@ export default function MarkdownTextRenderer({
           >
             <table
               className={cn(
-                "w-full min-w-max border-collapse text-[13px] leading-5",
+                "w-full table-fixed border-collapse text-[13px] leading-5",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
-                "[&_th]:text-left [&_th]:font-medium",
+                "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
+                "[&_th]:[overflow-wrap:anywhere]",
                 "[&_td]:border-b [&_td]:border-border/55 [&_td]:px-3 [&_td]:py-2",
+                "[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]",
                 "[&_th:not(:last-child)]:border-r [&_th:not(:last-child)]:border-border/45",
                 "[&_td:not(:last-child)]:border-r [&_td:not(:last-child)]:border-border/45",
                 "[&_tbody_tr:last-child_td]:border-b-0",
@@ -795,8 +830,10 @@ export default function MarkdownTextRenderer({
 
   return (
     <Streamdown
-      mode={streaming ? "streaming" : "static"}
-      parseIncompleteMarkdown
+      key={needsMath && mathPlugin ? "math" : "text"}
+      mode={streaming || preserveStreamingLayout ? "streaming" : "static"}
+      parseIncompleteMarkdown={false}
+      parseMarkdownIntoBlocksFn={parseMathAwareMarkdownBlocks}
       isAnimating={false}
       animated={false}
       linkSafety={DIRECT_LINKS}
@@ -819,7 +856,8 @@ export default function MarkdownTextRenderer({
         className,
       )}
     >
-      {children}
+      {/* Streamdown 2.5 ignores repair-option changes in its memo comparator. */}
+      {streaming ? remend(children, REMEND_OPTIONS) : children}
     </Streamdown>
   );
 }

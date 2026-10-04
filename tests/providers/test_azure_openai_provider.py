@@ -279,7 +279,7 @@ def test_build_body_with_tools():
     body = provider._build_body(
         [{"role": "user", "content": "weather?"}], tools, None, 4096, 0.7, None, None,
     )
-    assert body["tools"] == [{"type": "function", "name": "get_weather", "description": "", "parameters": {}}]
+    assert body["tools"] == [{"type": "function", "name": "get_weather", "description": "", "parameters": {}, "strict": False}]
     assert body["tool_choice"] == "auto"
 
 
@@ -380,7 +380,8 @@ async def test_chat_success():
     assert isinstance(result, LLMResponse)
     assert result.content == "Hello!"
     assert result.finish_reason == "stop"
-    assert result.usage["prompt_tokens"] == 10
+    assert result.usage is not None
+    assert result.usage.input_tokens == 10
 
 
 @pytest.mark.asyncio
@@ -530,7 +531,9 @@ async def test_chat_stream_success():
             yield e
 
     provider._client.responses = MagicMock()
-    provider._client.responses.create = AsyncMock(return_value=mock_stream())
+    stream = MagicMock()
+    stream.__aiter__.side_effect = mock_stream
+    provider._client.responses.create = AsyncMock(return_value=stream)
 
     deltas: list[str] = []
 
@@ -544,6 +547,7 @@ async def test_chat_stream_success():
     assert result.content == "Hello world"
     assert result.finish_reason == "stop"
     assert deltas == ["Hello", " world"]
+    stream.__aexit__.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -576,7 +580,9 @@ async def test_chat_stream_with_tool_calls():
             yield e
 
     provider._client.responses = MagicMock()
-    provider._client.responses.create = AsyncMock(return_value=mock_stream())
+    stream = MagicMock()
+    stream.__aiter__.side_effect = mock_stream
+    provider._client.responses.create = AsyncMock(return_value=stream)
 
     result = await provider.chat_stream(
         [{"role": "user", "content": "weather?"}],
