@@ -72,6 +72,15 @@ def automation_history_overrides(
     return None, {}
 
 
+def is_automation_turn(metadata: Mapping[str, Any] | None) -> bool:
+    """True for delivery metadata originating from a cron or trigger turn.
+
+    Automation pushes reuse the session's route metadata but are not replies
+    to any inbound message.
+    """
+    return any(automation_trigger(metadata, spec) is not None for spec in _automation_specs())
+
+
 def is_automation_history_message(message: Mapping[str, Any] | None) -> bool:
     """True for hidden automation trigger records in session history."""
     if not message:
