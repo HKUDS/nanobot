@@ -113,6 +113,22 @@ def test_extension_asset_serves_default_entry(tmp_path) -> None:
     assert response.headers["Content-Type"].startswith("text/html")
 
 
+def test_extension_asset_rejects_disabled_extension(tmp_path) -> None:
+    _write_extension(tmp_path)
+    extension_dir = tmp_path / "demo"
+    manifest = json.loads((extension_dir / "extension.json").read_text(encoding="utf-8"))
+    manifest["enabled"] = False
+    (extension_dir / "extension.json").write_text(json.dumps(manifest), encoding="utf-8")
+    handler = _handler(tmp_path)
+
+    response = handler._handle_extension_asset(
+        _request("/extensions/demo/"), "demo", ""
+    )
+
+    assert response.status_code == 403
+    assert "disabled" in response.body.decode("utf-8").lower()
+
+
 def test_extension_asset_unknown_extension_404(tmp_path) -> None:
     handler = _handler(tmp_path)
 

@@ -57,7 +57,44 @@ describe("extensions catalog", () => {
 
     expect(screen.getByText(/1 enabled/i)).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: /toggle query quota/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /enable|disable/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /enabled|disabled/i }).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("supports filtering by search and blocks disabled extensions from opening", () => {
+    const onOpen = vi.fn();
+    render(
+      <ExtensionsCatalogSettings
+        extensions={[
+          {
+            id: "query-quota",
+            name: "Query Quota",
+            description: "Quota dashboard",
+            entry: "index.html",
+            version: "0.1.0",
+            enabled: true,
+          },
+          {
+            id: "skill-quota",
+            name: "Skill Quota",
+            description: "Skill dashboard",
+            entry: "index.html",
+            version: "0.1.0",
+            enabled: false,
+          },
+        ]}
+        onOpenExtension={onOpen}
+        onToggleExtension={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("searchbox", { name: /search extensions/i });
+    fireEvent.change(input, { target: { value: "quota" } });
+    expect(screen.getAllByRole("button", { name: /open/i })).toHaveLength(2);
+
+    const disabledButton = screen.getByRole("button", { name: /open skill quota/i });
+    expect(disabledButton).toBeDisabled();
+    fireEvent.click(disabledButton);
+    expect(onOpen).not.toHaveBeenCalledWith("skill-quota");
   });
 
   it("opens a config editor and saves edits", async () => {
