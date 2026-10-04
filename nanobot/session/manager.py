@@ -1,5 +1,6 @@
 """Session management for conversation history."""
 
+import asyncio
 import base64
 import errno
 import hashlib
@@ -1532,6 +1533,7 @@ class SessionManager:
         self._cache: OrderedDict[str, Session] = OrderedDict()
         # Preserve identity for sessions held by active callers without retaining idle ones.
         self._overflow_cache: WeakValueDictionary[str, Session] = WeakValueDictionary()
+        self._pending_session_loads: dict[str, set[object]] = {}
         self._max_cached_sessions = SESSION_CACHE_MAX_SIZE
         self._delete_observer: Callable[[str], None] | None = None
 
@@ -1630,6 +1632,33 @@ class SessionManager:
 
         self._remember(session)
         return session
+
+    async def get_existing(self, key: str) -> Session | None:
+        """Load an existing session, rejecting results invalidated while awaiting I/O."""
+        session = self._cached(key)
+        if session is not None:
+            return session
+
+        loads = self._pending_session_loads.setdefault(key, set())
+        token = object()
+        loads.add(token)
+        try:
+            # Only disk I/O runs in the worker. Cache access and registration stay
+            # on the event loop, including when the awaiting task is cancelled.
+            session = await asyncio.to_thread(self._load, key)
+            if self._pending_session_loads.get(key) is not loads:
+                return None
+            # Another caller may have loaded or created the live session meanwhile.
+            cached = self._cached(key)
+            if cached is not None:
+                return cached
+            if session is not None:
+                self._remember(session)
+            return session
+        finally:
+            loads.discard(token)
+            if not loads and self._pending_session_loads.get(key) is loads:
+                self._pending_session_loads.pop(key)
 
     def get_or_create_transient(
         self,
@@ -1736,7 +1765,8 @@ class SessionManager:
         return flushed
 
     def invalidate(self, key: str) -> None:
-        """Remove a session from the in-memory cache."""
+        """Forget cached state and reject outstanding loads for this session."""
+        self._pending_session_loads.pop(key, None)
         self._cache.pop(key, None)
         self._overflow_cache.pop(key, None)
 
