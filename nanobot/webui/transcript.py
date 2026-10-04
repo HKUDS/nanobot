@@ -1256,9 +1256,9 @@ class WebUITranscriptRecorder:
         cli_apps: list[dict[str, Any]] | None = None,
         mcp_presets: list[dict[str, Any]] | None = None,
         session_mentions: Sequence[Mapping[str, Any]] | None = None,
-    ) -> bool:
+    ) -> dict[str, Any] | None:
         if text.strip() == "/stop" and not media_paths:
-            return False
+            return None
         payload = build_user_transcript_event(
             chat_id,
             text,
@@ -1268,8 +1268,36 @@ class WebUITranscriptRecorder:
             session_mentions=session_mentions,
         )
         if payload is None:
-            return False
-        return self.prepare_and_append(chat_id, payload, metadata=metadata, phase="user")
+            return None
+        self.prepare_event(chat_id, payload, metadata=metadata, phase="user")
+        record = _record_for_append(payload)
+        return record if self.append(chat_id, record) else None
+
+    def discard_user_message(self, chat_id: str, record: dict[str, Any]) -> None:
+        """Remove only the receipt owned by one rejected ingress operation."""
+        session_key = webui_session_key(chat_id)
+        try:
+            with _manifest_rebuild_lock(session_key):
+                segment_ids = _load_segment_manifest_entries(session_key)
+                if segment_ids is None:
+                    segment_ids = _rebuild_segment_manifest(session_key)
+                paths = [webui_transcript_path(session_key)]
+                paths.extend(
+                    _segment_file_path(session_key, entry["id"]) for entry in segment_ids
+                )
+                for path in paths:
+                    rows = _read_transcript_file(path)
+                    # Turn sequence and timestamp identify the exact appended
+                    # record, including when another connection reused turn_id.
+                    for index, row in enumerate(rows):
+                        if row == record:
+                            del rows[index]
+                            _write_records_to_path(path, rows)
+                            if path != paths[0]:
+                                _rebuild_segment_manifest(session_key)
+                            return
+        except (OSError, ValueError) as exc:
+            self._log.warning("webui rejected user transcript cleanup failed: {}", exc)
 
     def append(self, chat_id: str, event: dict[str, Any]) -> bool:
         try:
