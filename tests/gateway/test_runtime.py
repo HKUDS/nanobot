@@ -22,6 +22,13 @@ from nanobot.gateway import (
 )
 from nanobot.gateway.runtime import monitor_gateway_clients
 from nanobot.process_runtime import process_is_running
+from nanobot.utils.rotating_output import (
+    BACKGROUND_LOG_BACKUP_COUNT_ENV,
+    BACKGROUND_LOG_MAX_BYTES_ENV,
+    BACKGROUND_LOG_PATH_ENV,
+    DEFAULT_BACKUP_COUNT,
+    DEFAULT_MAX_BYTES,
+)
 
 
 class FakeProcess:
@@ -234,12 +241,36 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
         "/tmp/config.json",
     ]
     assert calls[0]["kwargs"]["start_new_session"] is True
+    child_env = calls[0]["kwargs"]["env"]
+    assert child_env[BACKGROUND_LOG_PATH_ENV] == str(runtime.paths.log_path)
+    assert child_env[BACKGROUND_LOG_MAX_BYTES_ENV] == str(DEFAULT_MAX_BYTES)
+    assert child_env[BACKGROUND_LOG_BACKUP_COUNT_ENV] == str(DEFAULT_BACKUP_COUNT)
     state = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
     assert state["pid"] == 12345
     assert state["identity"] == 12345
     assert state["port"] == 18790
     assert state["launch_mode"] == "background"
     assert result.status.launch_mode == "background"
+
+
+def test_read_log_tail_spans_rotated_files(tmp_path: Path) -> None:
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    runtime.paths.logs_dir.mkdir(parents=True)
+    runtime.paths.log_path.write_text("current-1\ncurrent-2\n", encoding="utf-8")
+    runtime.paths.log_path.with_name("gateway.log.1").write_text(
+        "backup-1\nbackup-2\n", encoding="utf-8"
+    )
+    runtime.paths.log_path.with_name("gateway.log.2").write_text(
+        "oldest\n", encoding="utf-8"
+    )
+
+    assert runtime.read_log_tail(tail=5) == [
+        "oldest",
+        "backup-1",
+        "backup-2",
+        "current-1",
+        "current-2",
+    ]
 
 
 def test_foreground_gateway_claim_is_discoverable_and_released(tmp_path, monkeypatch):

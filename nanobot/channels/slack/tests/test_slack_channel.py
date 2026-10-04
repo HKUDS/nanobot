@@ -249,6 +249,34 @@ async def test_send_renders_buttons_on_last_message_chunk() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_with_buttons_keeps_text_beyond_section_limit() -> None:
+    """Button messages render via blocks, so every char must land in a section."""
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+    lines = [f"line {i:04d} " + "x" * 40 for i in range(200)]
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="\n".join(lines),
+            buttons=[["Yes", "No"]],
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 1
+    blocks = fake_web.chat_post_calls[0]["blocks"]
+    assert isinstance(blocks, list)
+    sections = [block for block in blocks if block["type"] == "section"]
+    assert len(sections) > 1
+    assert all(len(section["text"]["text"]) <= 3000 for section in sections)
+    rendered = "\n".join(section["text"]["text"] for section in sections)
+    assert rendered == "\n".join(lines)
+    assert blocks[-1]["type"] == "actions"
+
+
+@pytest.mark.asyncio
 async def test_send_updates_reaction_when_final_response_sent() -> None:
     channel = SlackChannel(SlackConfig(enabled=True, react_emoji="eyes"), MessageBus())
     fake_web = _FakeAsyncWebClient()

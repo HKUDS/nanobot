@@ -75,7 +75,8 @@ def prepare_responses_input(
         len(prior_items),
         len(state.pending_messages),
     )
-    return instructions, [*deepcopy(prior_items), *delta_items], True
+    replayed_items = _prepare_replayed_items(prior_items)
+    return instructions, [*replayed_items, *delta_items], True
 
 
 def build_responses_state(
@@ -216,3 +217,14 @@ def _state_items(
             return None
         items.append(cast(dict[str, Any], raw))
     return items
+
+
+def _prepare_replayed_items(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy provider state and remove output-only fields rejected on replay."""
+    replayed_items = deepcopy(items)
+    for item in replayed_items:
+        if item.get("type") == "reasoning":
+            item.pop("status", None)
+    return replayed_items

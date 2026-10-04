@@ -13,12 +13,12 @@ from urllib.parse import quote
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
+from nanobot.session.history import SessionHistoryReader
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import (
     SessionHandleResolver,
     normalize_session_handle,
 )
-from nanobot.webui.session_access import WebuiSessionAccess
 
 _SEARCH_LIMIT = 5
 _READ_LIMIT = 8
@@ -53,7 +53,7 @@ def _session_ref(session_key: str) -> str:
 
 class _SessionTool(Tool):
     def __init__(self, sessions: SessionManager) -> None:
-        self._access = WebuiSessionAccess(sessions)
+        self._access = SessionHistoryReader(sessions)
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:

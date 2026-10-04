@@ -37,6 +37,7 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
@@ -192,6 +193,11 @@ class QQConfig(Base):
     download_chunk_size: int = 1024 * 256  # 256KB
     download_max_bytes: int = 1024 * 1024 * 200  # 200MB safety limit
 
+    # QQ's C2C/group message API has no edit or recall endpoint, so automatic
+    # notices would land as separate permanent messages (#5784). Unset inherits
+    # the global policy (off by default); explicit legacy true/false still override it.
+    show_compaction_notices: bool | None = None
+
 
 class QQChannel(BaseChannel):
     """QQ channel using botpy SDK with WebSocket connection."""
@@ -201,13 +207,16 @@ class QQChannel(BaseChannel):
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
-        return QQConfig().model_dump(by_alias=True)
+        return QQConfig().model_dump(by_alias=True, exclude_none=True)
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
             config = QQConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: QQConfig = config
+        # Preserve explicitly configured notices for standalone channel callers.
+        # ChannelManager resolves global inheritance from the original section.
+        self.show_compaction_notices = bool(config.show_compaction_notices)
 
         self._client: Any | None = None
         self._http: aiohttp.ClientSession | None = None
@@ -298,6 +307,17 @@ class QQChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send attachments first, then text."""
+        # Compaction notices assume the channel can update one message in place
+        # (Telegram/Discord edit their notice; WebSocket projects it as status).
+        # QQ's C2C/group API has no edit or recall endpoint, so by default the
+        # automatic lifecycle is quiet by default (#5784). Explicit opt-in
+        # restores it; manual /compact always retains its requested feedback.
+        if (
+            isinstance(msg.event, ContextCompactionEvent)
+            and not (msg.event.notify or self.show_compaction_notices)
+        ):
+            return
+
         try:
             if not self._client:
                 raise RuntimeError("QQ client not initialized")
@@ -675,6 +695,15 @@ class QQChannel(BaseChannel):
         if url.startswith("//"):
             url = f"https:{url}"
 
+        # Inbound attachment URLs are attacker-influenceable (a compromised or
+        # redirecting CDN can point at an internal address), so validate them
+        # like outbound media and refuse redirects — matching napcat/dingtalk.
+        # The guard resolves DNS synchronously; do not block the gateway loop.
+        ok, err = await asyncio.to_thread(validate_url_target, url)
+        if not ok:
+            self.logger.warning("inbound media URL blocked url={} err={}", url, err)
+            return None
+
         if not self._http:
             self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
@@ -686,7 +715,7 @@ class QQChannel(BaseChannel):
             async with self._http.get(
                 url,
                 timeout=aiohttp.ClientTimeout(total=120),
-                allow_redirects=True,
+                allow_redirects=False,
             ) as resp:
                 if resp.status != 200:
                     self.logger.warning("download failed: status={} url={}", resp.status, url)

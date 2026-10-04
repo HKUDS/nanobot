@@ -21,7 +21,6 @@ def _make_loop(tmp_path):
     provider.generation = GenerationSettings(max_tokens=0)
     provider.estimate_prompt_tokens.return_value = (0, "test-counter")
     response = LLMResponse(content="done", tool_calls=[])
-    provider.chat_with_retry = AsyncMock(return_value=response)
     provider.chat_stream_with_retry = AsyncMock(return_value=response)
 
     loop = AgentLoop(

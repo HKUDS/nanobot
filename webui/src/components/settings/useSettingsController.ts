@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { imageGenerationFormFromPayload } from "@/components/settings/capabilities/ImageGenerationSettings";
@@ -12,7 +12,7 @@ import {
 } from "@/components/settings/capabilities/TranscriptionSettings";
 import { useCapabilitySettingsActions } from "@/components/settings/capabilities/useCapabilitySettingsActions";
 import { useCapabilitySettingsState } from "@/components/settings/capabilities/useCapabilitySettingsState";
-import { webSearchFormFromPayload } from "@/components/settings/capabilities/WebSettings";
+import { webSearchDraftState, webSearchFormFromPayload } from "@/components/settings/capabilities/WebSettings";
 import type {
   ApplySettingsPayload,
   PendingRestartSections,
@@ -27,11 +27,13 @@ import {
 } from "@/components/settings/models/useModelSettingsEffects";
 import { useModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
+import { useRuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
 import { createSystemSettingsActions } from "@/components/settings/system/createSystemSettingsActions";
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import { fetchSettings, fetchSettingsUsage } from "@/lib/api";
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
 import {
   readLocalPreferences,
   writeLocalPreferences,
@@ -88,6 +90,10 @@ export function useSettingsController({
   const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
     EMPTY_PENDING_RESTART_SECTIONS,
   );
+  const previousInitialSettingsRef = useRef(initialSettings);
+  const latestInitialSettingsRef = useRef(initialSettings);
+  latestInitialSettingsRef.current = initialSettings;
+  const restartRefreshRef = useRef<SettingsPayload | null>(null);
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
   const modelState = useModelSettingsState(initialSettings);
   const {
@@ -114,15 +120,14 @@ export function useSettingsController({
   const {
     apiService, apiServiceAction, apiServiceError, apiServiceLoading, appsKindFilter, appsQuery,
     automationAction, automationPendingDelete, automationPendingEdit, automations,
-    automationsError, automationsFilter, automationsLoading, automationsQuery, automationsSort,
-    channelsQuery, cliApps, cliAppsAction, cliAppsError, cliAppsFocusName, cliAppsLoading,
+    automationsError, automationsFilter, automationsLoading,
+    cliApps, cliAppsAction, cliAppsError, cliAppsFocusName, cliAppsLoading,
     cliAppsMessage, customMcpForm, mcpConfigImport, mcpError, mcpFieldValues, mcpMessage,
     mcpOAuthCallbackError, mcpOAuthCallbackUrl, mcpOAuthCompleting, mcpOAuthFlow,
     mcpOAuthPopupBlocked, mcpPresetAction, mcpPresets, mcpPresetsLoading, nanobotFeatureAction,
     nanobotFeatureConfirm, nanobotFeatures, nanobotFeaturesError, nanobotFeaturesLoading,
     setAppsKindFilter, setAppsQuery, setAutomationPendingDelete,
     setAutomationPendingEdit, setAutomationsFilter,
-    setAutomationsQuery, setAutomationsSort, setChannelsQuery,
     setCliAppsError,
     setCliAppsMessage, setCustomMcpForm, setMcpConfigImport, setMcpError, setMcpFieldValues,
     setMcpMessage, setMcpOAuthCallbackError, setMcpOAuthCallbackUrl,
@@ -145,7 +150,7 @@ export function useSettingsController({
   const applyPayload: ApplySettingsPayload = useCallback(
     (
       payload: SettingsPayload,
-      options: { preserveAgentForm?: boolean } = {},
+      options: { preserveAgentForm?: boolean; preserveCapabilityForms?: boolean } = {},
     ) => {
       setSettings(payload);
       if (!options.preserveAgentForm) {
@@ -153,12 +158,16 @@ export function useSettingsController({
         setForm(nextForm);
         setModelPresetEditingName(nextForm.modelPreset);
         setModelPresetCreating(false);
+      } else {
+        setForm((current) => ({ ...current, timezone: payload.agent.timezone }));
       }
       setModelCallOrder(payload.model_call_order ?? []);
-      setWebSearchForm((prev) => webSearchFormFromPayload(payload, prev));
-      setImageGenerationForm(imageGenerationFormFromPayload(payload));
-      setTranscriptionForm(transcriptionFormFromPayload(payload));
-      setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+      if (!options.preserveCapabilityForms) {
+        setWebSearchForm((prev) => webSearchFormFromPayload(payload, prev));
+        setImageGenerationForm(imageGenerationFormFromPayload(payload));
+        setTranscriptionForm(transcriptionFormFromPayload(payload));
+        setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+      }
       if (payload.restart_required_sections) {
         setPendingRestartSections(pendingRestartSectionsFromPayload(payload));
       }
@@ -167,13 +176,19 @@ export function useSettingsController({
     [onSettingsChange],
   );
 
-  const closeProviderOAuthFlow = useCallback(() => {
+  const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
+
+  const closeProviderOAuthFlow = useCallback((cancelPending = true) => {
+    const flow = providerOAuthFlowRef.current;
     providerOAuthFlowRef.current = null;
+    if (cancelPending && flow?.completion_input === "device_code") {
+      void cancelProviderOAuth(client, flow.provider, flow.flow_id).catch(() => {});
+    }
     setProviderOAuthFlow(null);
     setProviderOAuthResponse("");
     setProviderOAuthCompleting(false);
     setProviderOAuthDialogError(null);
-  }, []);
+  }, [client]);
   useProviderOAuthPolling({
     state: modelState,
     client,
@@ -189,12 +204,29 @@ export function useSettingsController({
   }, [applyPayload, initialSettings, settings]);
 
   useEffect(() => {
+    const previous = previousInitialSettingsRef.current;
+    previousInitialSettingsRef.current = initialSettings;
+    if (previous?.requires_restart && !initialSettings?.requires_restart) {
+      restartRefreshRef.current = initialSettings;
+    } else if (restartRefreshRef.current !== initialSettings) {
+      restartRefreshRef.current = null;
+    }
+    const shouldApplyRestartedSettings =
+      restartRefreshRef.current === initialSettings && settings?.requires_restart === true;
+    if (!shouldApplyRestartedSettings || !initialSettings) {
+      return;
+    }
+    applyPayload(initialSettings);
+  }, [applyPayload, initialSettings, settings]);
+
+  useEffect(() => {
     let cancelled = false;
     const showLoading = settings === null;
+    const requestInitialSettings = latestInitialSettingsRef.current;
     if (showLoading) setLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
-        if (!cancelled) {
+        if (!cancelled && latestInitialSettingsRef.current === requestInitialSettings) {
           applyPayload(payload);
           setError(null);
         }
@@ -314,15 +346,6 @@ export function useSettingsController({
     [settings],
   );
 
-  const hasPendingRestart = useMemo(
-    () =>
-      !!settings?.requires_restart ||
-      pendingRestartSections.runtime ||
-      pendingRestartSections.browser ||
-      pendingRestartSections.image,
-    [pendingRestartSections, settings?.requires_restart],
-  );
-
   const restartViaSettingsSurface = useCallback(async () => {
     const isNativeHost = (settings?.surface ?? settings?.runtime_surface) === "native";
     if (
@@ -412,7 +435,6 @@ export function useSettingsController({
     applyPayload,
     maybeRestartHostEngine,
     setPendingRestartSections,
-    setError,
     installCapabilities,
     imageGenerationDirty,
     transcriptionDirty,
@@ -441,6 +463,15 @@ export function useSettingsController({
     saveTranscriptionSettings,
     saveWebSearch,
   } = capabilityActions;
+  useAutoSave(imageGenerationForm, imageGenerationDirty, imageGenerationSaving, saveImageGenerationSettings,
+    !imageGenerationForm.enabled || Boolean(settings?.image_generation.providers.find(
+      (provider) => provider.name === imageGenerationForm.provider,
+    )?.configured));
+  useAutoSave(transcriptionForm, transcriptionDirty, transcriptionSaving, saveTranscriptionSettings);
+  const webDraft = settings ? webSearchDraftState(settings, webSearchForm) : null;
+  useAutoSave(webSearchForm, webDraft?.dirty ?? false, webSearchSaving, saveWebSearch,
+    !webDraft?.missingCredential && (webSearchForm.provider !== "olostep" ||
+      featureCatalog.some((feature) => feature.name === "olostep" && feature.installed)));
   const {
     handleApiServiceAction,
     handleAutomationAction,
@@ -459,6 +490,8 @@ export function useSettingsController({
 
   return {
     activeSection,
+    capabilityErrors: capabilityState.capabilityErrors,
+    runtimeConfigState,
     apiService,
     apiServiceAction,
     apiServiceError,
@@ -472,12 +505,9 @@ export function useSettingsController({
     automationsError,
     automationsFilter,
     automationsLoading,
-    automationsQuery,
-    automationsSort,
     beginModelPresetCreation,
     cancelModelPresetCreation,
     changeModelCallOrder,
-    channelsQuery,
     cliApps,
     cliAppsAction,
     cliAppsError,
@@ -510,7 +540,6 @@ export function useSettingsController({
     handleSaveCustomMcp,
     handleToggleProvider,
     handleWebSearchProviderChange,
-    hasPendingRestart,
     hostEngineApplying,
     imageGenerationDirty,
     imageGenerationForm,
@@ -572,9 +601,6 @@ export function useSettingsController({
     setAutomationPendingDelete,
     setAutomationPendingEdit,
     setAutomationsFilter,
-    setAutomationsQuery,
-    setAutomationsSort,
-    setChannelsQuery,
     setCliAppsError,
     setCliAppsMessage,
     setCustomMcpForm,

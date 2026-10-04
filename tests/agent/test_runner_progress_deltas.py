@@ -9,9 +9,11 @@ from agent.runner_helpers import make_run_spec
 from nanobot.agent.hooks import FileEditActivityHook
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner
+from nanobot.agent.tools.apply_patch import ApplyPatchTool
 from nanobot.agent.tools.filesystem import EditFileTool, WriteFileTool
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.utils.file_edit_events import Indel
 from nanobot.utils.progress_events import output_events
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
@@ -167,7 +169,7 @@ async def test_runner_fails_pending_hosted_tool_when_model_request_fails():
 
 
 @pytest.mark.asyncio
-async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_path):
+async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_path, monkeypatch):
     provider = MagicMock()
     call_count = 0
     progress_events: list[dict] = []
@@ -178,6 +180,8 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
             progress_events.extend(file_edit_events)
 
     tool = WriteFileTool(workspace=tmp_path)
+    align = MagicMock(wraps=Indel.opcodes)
+    monkeypatch.setattr(Indel, "opcodes", align)
 
     class Tools:
         def get_definitions(self):
@@ -186,7 +190,7 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -203,7 +207,7 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
             )
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -218,6 +222,7 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
     ))
 
     assert result.final_content == "done"
+    assert align.call_count == 1
     assert progress_events[0]["phase"] == "start"
     assert progress_events[0]["added"] == 0
     assert progress_events[0]["deleted"] == 0
@@ -232,7 +237,8 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_path):
+@pytest.mark.parametrize("tool_name", ["edit_file", "apply_patch"])
+async def test_runner_reuses_edit_diff_for_summary_and_progress(tmp_path, monkeypatch, tool_name):
     provider = MagicMock()
     call_count = 0
     progress_events: list[dict] = []
@@ -244,15 +250,28 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
             progress_events.extend(file_edit_events)
 
     tool = EditFileTool(workspace=tmp_path)
+    arguments = {
+        "path": str(target),
+        "old_text": "old\nkeep\n",
+        "new_text": "new\nkeep\nextra\n",
+    }
+    if tool_name == "apply_patch":
+        tool = ApplyPatchTool(workspace=tmp_path)
+        arguments = {"edits": [
+            {"path": str(target), "action": "replace", "old_text": "old", "new_text": "new"},
+            {"path": str(target), "action": "add", "new_text": "extra"},
+        ]}
+    align = MagicMock(wraps=Indel.opcodes)
+    monkeypatch.setattr(Indel, "opcodes", align)
 
     class Tools:
         def get_definitions(self):
-            return [{"type": "function", "function": {"name": "edit_file"}}]
+            return [{"type": "function", "function": {"name": tool_name}}]
 
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -261,19 +280,15 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
                 tool_calls=[
                     ToolCallRequest(
                         id="call-edit",
-                        name="edit_file",
-                        arguments={
-                            "path": "notes.txt",
-                            "old_text": "old\nkeep\n",
-                            "new_text": "new\nkeep\nextra\n",
-                        },
+                        name=tool_name,
+                        arguments=arguments,
                     )
                 ],
                 usage=None,
             )
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -288,8 +303,12 @@ async def test_runner_emits_edit_file_diff_from_tool_execution_snapshots(tmp_pat
     ))
 
     assert result.final_content == "done"
+    assert align.call_count == 1
+    assert target.read_text() == "new\nkeep\nextra\n"
+    observation = next(m["content"] for m in result.messages if m["role"] == "tool")
+    assert observation == "Patch applied:\n- update notes.txt (+2/-1)"
     assert any(
-        event["tool"] == "edit_file"
+        event["tool"] == tool_name
         and not event["approximate"]
         and event["phase"] == "end"
         and event["added"] == 2
@@ -318,7 +337,7 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -335,7 +354,7 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
             )
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = Tools()
 
     runner = AgentRunner()
@@ -382,7 +401,7 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
         def prepare_call(self, name, params):
             return tool, params, None
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         return LLMResponse(
             content=None,
             tool_calls=[
@@ -395,7 +414,7 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
             usage=None,
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = Tools()
 
     runner = AgentRunner()

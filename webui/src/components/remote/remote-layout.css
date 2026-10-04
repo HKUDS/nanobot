@@ -1,0 +1,70 @@
+/* Remote dialogs share typography and action sizing without changing app-wide controls. */
+.remote-dialog {
+  min-inline-size: 0;
+  max-block-size: min(85dvh, calc(100dvh - 2rem));
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+
+.remote-dialog h2 {
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.remote-dialog :is(p, label, summary) {
+  text-wrap: pretty;
+}
+
+.remote-action:is(button, a),
+.remote-dialog-actions > :is(button, a) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  block-size: auto;
+  min-block-size: 2.5rem;
+  padding-block: 0.5rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  line-height: 1.4;
+}
+
+.remote-action svg,
+.remote-dialog-actions > :is(button, a) svg {
+  flex-shrink: 0;
+}
+
+.remote-dialog-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.remote-alert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+/* Keep secondary actions readable when translations need a second line. */
+.remote-pair-alternatives {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+@media (max-width: 380px) {
+  .remote-dialog-actions > :is(button, a) {
+    padding-inline: 0.75rem;
+  }
+}
+
+@media (max-height: 540px) {
+  .remote-dialog[role="dialog"] {
+    overflow-y: auto;
+  }
+  .remote-dialog form,
+  .remote-dialog .remote-pair {
+    flex-shrink: 0;
+  }
+}

@@ -31,6 +31,7 @@ class BaseChannel(ABC):
     send_progress: bool = True
     send_tool_hints: bool = True
     show_reasoning: bool = True
+    show_compaction_notices: bool = False
 
     def __init__(self, config: Any, bus: MessageBus):
         """

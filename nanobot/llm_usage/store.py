@@ -466,6 +466,26 @@ class LLMUsageStore:
                 }
                 for row in provider_rows
             ]
+            model_days_30d = [
+                {
+                    "date": str(row["date"]),
+                    "provider": str(row["provider"]),
+                    "model": str(row["model"]),
+                    "total_tokens": int(row["total_tokens"]),
+                }
+                for row in connection.execute(
+                    """
+                    SELECT llm_usage_local_day(started_at_ms, ?) AS date, provider, model,
+                           COALESCE(SUM(total_tokens), 0) AS total_tokens
+                    FROM llm_calls
+                    WHERE started_at_ms >= ? AND started_at_ms < ?
+                    GROUP BY date, provider, model
+                    HAVING SUM(total_tokens) > 0
+                    ORDER BY date, provider, model
+                    """,
+                    (zone_name, last_30_start_ms, end_ms),
+                )
+            ]
 
             active_dates = {
                 date.fromisoformat(row["date"]) for row in daily if row["total_tokens"] > 0
@@ -516,6 +536,7 @@ class LLMUsageStore:
                 "requests_30d": totals_30["requests"],
                 "failed_requests_30d": totals_30["failed_requests"],
                 "providers_30d": providers_30d,
+                "model_days_30d": model_days_30d,
                 "updated_at": (
                     datetime.fromtimestamp(updated_at_ms / 1000, timezone.utc)
                     .isoformat()

@@ -81,7 +81,10 @@ def _channel() -> WebSocketChannel:
         runtime_surface="tui",
         runtime_capabilities_overrides=None,
     )
-    return WebSocketChannel(config, bus, gateway=gateway)
+    channel = WebSocketChannel(config, bus, gateway=gateway)
+    # Keep disk latency out of every connection delivery synchronization check.
+    channel._persist_turn_transcript_event = MagicMock(return_value=True)
+    return channel
 
 
 def _message(chat_id: str, text: str) -> OutboundMessage:

@@ -1,13 +1,12 @@
-export type LocalDensity = "comfortable" | "compact";
 export type LocalActivityMode = "auto" | "expanded";
 export type FileEditDisplayMode = "summary" | "diff" | "collapsed_diff";
 
 export interface LocalPreferences {
-  density: LocalDensity;
   activityMode: LocalActivityMode;
   codeWrap: boolean;
   brandLogos: boolean;
   browserNotifications: boolean;
+  notificationSound: boolean;
   fileEditDisplayMode: FileEditDisplayMode;
 }
 
@@ -20,11 +19,11 @@ type PersistedLocalPreferences = Partial<LocalPreferences> & {
 };
 
 export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
-  density: "comfortable",
   activityMode: "auto",
   codeWrap: true,
   brandLogos: true,
   browserNotifications: false,
+  notificationSound: false,
   fileEditDisplayMode: "summary",
 };
 
@@ -38,13 +37,13 @@ export function readLocalPreferences(): LocalPreferences {
     if (!raw) return DEFAULT_LOCAL_PREFS;
     const parsed = JSON.parse(raw) as PersistedLocalPreferences;
     return {
-      density: parsed.density === "compact" ? "compact" : "comfortable",
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
       codeWrap: parsed.codeWrap !== false,
       brandLogos: parsed.schemaVersion === LOCAL_PREFS_SCHEMA_VERSION
         ? parsed.brandLogos !== false
         : true,
       browserNotifications: parsed.browserNotifications === true,
+      notificationSound: parsed.notificationSound === true,
       fileEditDisplayMode: normalizeFileEditDisplayMode(parsed.fileEditDisplayMode),
     };
   } catch {

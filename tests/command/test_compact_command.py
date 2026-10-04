@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agent.session_helpers import run_session
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
@@ -14,6 +15,7 @@ from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.command.builtin import cmd_stop
 from nanobot.command.router import CommandContext
 from nanobot.providers.base import GenerationSettings, LLMResponse, ProviderConversationState
+from nanobot.session.history_visibility import is_hidden_history_message
 
 
 @pytest.fixture
@@ -23,7 +25,7 @@ async def loop(tmp_path):
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=100)
     provider.can_resume_conversation_state.return_value = True
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="Portable checkpoint.",
         finish_reason="stop",
     ))
@@ -69,18 +71,82 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert started.phase == "started"
     assert completed.phase == "succeeded"
     assert started.compaction_id == completed.compaction_id
+    assert started.notify is True
+    assert completed.notify is True
 
     loop.sessions.invalidate("cli:test")
     reloaded = loop.sessions.get_or_create("cli:test")
     assert reloaded.provider_state is None
-    assert reloaded.messages == session.messages
+    assert reloaded.messages[:-1] == session.messages
+    assert is_hidden_history_message(reloaded.messages[-1])
     assert reloaded.last_archived == 2
+    assert reloaded.get_history() == []
+    assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
     assert len(loop.consolidator.store.read_unprocessed_history(0)) == 1
 
     response = await loop._process_message(msg, runtime=loop.llm_runtime())
     assert response is None
     assert bus.outbound_size == 0
-    loop.provider.chat_with_retry.assert_awaited_once()
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("trigger", "summary"),
+    [
+        ("manual", "The checkpoint inspection is complete."),
+        ("idle", "(nothing)"),
+    ],
+)
+async def test_compacted_session_waits_for_new_input_without_continuation(
+    loop, trigger, summary,
+) -> None:
+    key = "cli:checkpoint-resume"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "Inspect the checkpoint")
+    session.add_message("assistant", "Inspection complete.")
+    loop.sessions.save(session)
+    loop.provider.estimate_prompt_tokens.return_value = (100, "test")
+    loop.provider.chat_stream_with_retry.return_value = LLMResponse(content=summary)
+
+    if trigger == "manual":
+        await loop._process_message(
+            InboundMessage(channel="cli", sender_id="user", chat_id="checkpoint-resume",
+                           content="/compact"),
+            runtime=loop.llm_runtime(),
+        )
+    else:
+        await loop.auto_compact._archive(key, runtime=loop.llm_runtime())
+
+    loop.sessions.invalidate(key)
+    loop.auto_compact._summaries.clear()
+    reloaded = loop.sessions.get_or_create(key)
+    assert reloaded.metadata["_last_summary"]["text"] == summary
+    assert reloaded.last_archived == 2
+    assert reloaded.get_history() == []
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
+    assert loop.bus.inbound_size == 0
+
+    loop.provider.chat_stream_with_retry.reset_mock()
+    loop.provider.chat_stream_with_retry.return_value = LLMResponse(content="Hello!")
+    response = await loop.process_direct("hi", session_key=key)
+    assert response.content == "Hello!"
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
+    sent = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
+    expected_summary = reloaded.metadata["_last_summary"] if summary != "(nothing)" else None
+    assert sent[0] == {
+        "role": "system",
+        "content": loop.context.build_system_prompt(channel="cli", session_summary=expected_summary),
+    }
+    assert [message["role"] for message in sent] == ["system", "user"]
+    assert sent[1]["content"] == "hi"
+
+    loop.sessions.invalidate(key)
+    resumed = loop.sessions.get_or_create(key)
+    assert resumed.get_history() == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "Hello!"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -100,7 +166,7 @@ async def test_empty_compact_finishes_silently_and_does_not_schedule_idle_archiv
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
 
-    await loop._dispatch(InboundMessage(
+    await run_session(loop, InboundMessage(
         channel="websocket", sender_id="user", chat_id="test", content="/compact",
         metadata={"webui_turn_id": "compact-turn"},
     ))
@@ -144,7 +210,7 @@ async def test_compact_during_active_turn_waits_for_the_session_lock(loop) -> No
     await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
     assert loop.bus.outbound_size == 2
     assert loop.sessions.get_or_create(key).last_archived == 2
-    loop.provider.chat_with_retry.assert_awaited_once()
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -167,6 +233,94 @@ async def test_stop_completes_a_compact_command_waiting_for_the_session_lock(loo
 
 
 @pytest.mark.asyncio
+async def test_compact_is_a_fifo_barrier_during_an_active_turn(loop) -> None:
+    key = "cli:test"
+    started = asyncio.Event()
+    release = asyncio.Event()
+    requests = []
+    compacted_history = []
+    compact = loop.consolidator.compact_idle_session
+
+    async def capture_compaction(*args, **kwargs):
+        compacted_history.extend(
+            dict(message) for message in loop.sessions.get_or_create(key).messages
+        )
+        return await compact(*args, **kwargs)
+
+    loop.consolidator.compact_idle_session = capture_compaction
+
+    async def chat(*, messages, **kwargs):
+        requests.append([dict(message) for message in messages])
+        if len(requests) == 1:
+            started.set()
+            await release.wait()
+        return LLMResponse(content="answer", finish_reason="stop")
+
+    loop.provider.chat_stream_with_retry = chat
+    task = asyncio.create_task(run_session(loop, InboundMessage(
+        channel="cli", sender_id="u", chat_id="test", content="initial question",
+    )))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        loop._enqueue_session_message(InboundMessage(
+            channel="cli", sender_id="u", chat_id="test", content="before compaction",
+        ))
+        command = InboundMessage(channel="cli", sender_id="u", chat_id="test", content="/compact")
+        await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
+        loop._enqueue_session_message(InboundMessage(
+            channel="cli", sender_id="u", chat_id="test", content="after compaction",
+        ))
+        release.set()
+        await asyncio.wait_for(task, timeout=5)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert [message["content"] for message in compacted_history if message["role"] == "user"] == [
+        "initial question", "before compaction",
+    ]
+    assert all("/compact" != message.get("content") for request in requests for message in request)
+    assert "after compaction" in str(requests[-1])
+    events = [loop.bus.outbound.get_nowait().event for _ in range(loop.bus.outbound_size)]
+    assert [event.phase for event in events if isinstance(event, ContextCompactionEvent)] == [
+        "started", "succeeded",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stop_completes_compact_queued_behind_an_active_turn(loop) -> None:
+    key = "websocket:test"
+    started = asyncio.Event()
+
+    async def chat(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    loop.provider.chat_stream_with_retry = chat
+    completions = []
+    loop.bus.subscribe(completions.append, TurnCompleted)
+    loop._enqueue_session_message(InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="question",
+    ))
+    task = next(iter(loop._active_tasks[key]))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    command = InboundMessage(
+        channel="websocket", sender_id="u", chat_id="test", content="/compact",
+        metadata={"webui_turn_id": "queued-compact"},
+    )
+    await loop._dispatch_command_inline(command, key, command.content, loop.commands.dispatch)
+    await cmd_stop(CommandContext(msg=command, session=None, key=key, raw="/stop", loop=loop))
+
+    assert task.cancelled()
+    assert sum(
+        event.context.metadata.get("webui_turn_id") == "queued-compact" for event in completions
+    ) == 1
+    assert key not in loop._pending_queues
+
+
+@pytest.mark.asyncio
 async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
     key = "websocket:test"
     session = loop.sessions.get_or_create(key)
@@ -179,15 +333,15 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
         entered.set()
         await asyncio.Event().wait()
 
-    loop.provider.chat_with_retry.side_effect = wait_for_cancel
+    loop.provider.chat_stream_with_retry.side_effect = wait_for_cancel
     completions = []
     loop.bus.subscribe(completions.append, TurnCompleted)
     msg = InboundMessage(
         channel="websocket", sender_id="user", chat_id="test", content="/compact",
         metadata={"webui_turn_id": "compact-turn"},
     )
-    task = asyncio.create_task(loop._dispatch(msg))
-    loop._track_active_task(key, task)
+    loop._enqueue_session_message(msg)
+    task = next(iter(loop._active_tasks[key]))
     await asyncio.wait_for(entered.wait(), timeout=5)
 
     reply = await cmd_stop(CommandContext(
@@ -206,3 +360,44 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop) -> None:
     reloaded = loop.sessions.get_or_create(key)
     assert reloaded.messages == session.messages
     assert reloaded.last_archived == 0
+    assert reloaded.get_history() == session.get_history()
+
+
+@pytest.mark.asyncio
+async def test_idle_and_manual_compact_share_persisted_checkpoint(loop) -> None:
+    loop.provider.estimate_prompt_tokens.return_value = (100, "test")
+    key = "cli:test"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "large tool turn")
+    for i in range(20):
+        session.add_message("assistant", "", tool_calls=[{
+            "id": f"tool-{i}", "type": "function",
+            "function": {"name": "exec", "arguments": "{}"},
+        }])
+        session.add_message("tool", "x" * 10_000, tool_call_id=f"tool-{i}")
+    session.add_message("assistant", "done")
+    loop.sessions.save(session)
+    runtime = loop.llm_runtime()
+    await loop.consolidator.compact_idle_session(key, runtime=runtime)
+    assert loop.sessions.get_or_create(key).get_history() == []
+
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/compact"),
+        runtime=runtime,
+    )
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
+    assert loop.bus.outbound_size == 0
+    loop.sessions.invalidate(key)
+    reloaded = loop.sessions.get_or_create(key)
+    assert len(reloaded.messages) == 43
+    assert is_hidden_history_message(reloaded.messages[-1])
+    assert reloaded.get_history() == []
+    assert reloaded.metadata["_last_summary"]["text"] == "Portable checkpoint."
+
+    reloaded.add_message("user", "next question")
+    reloaded.add_message("assistant", "next answer")
+    loop.sessions.save(reloaded)
+    await loop.consolidator.compact_idle_session(key, runtime=runtime)
+    loop.sessions.invalidate(key)
+    reloaded = loop.sessions.get_or_create(key)
+    assert reloaded.get_history() == []
