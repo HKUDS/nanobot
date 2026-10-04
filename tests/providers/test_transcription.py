@@ -312,6 +312,7 @@ async def test_transcribe_audio_file_routes_openrouter_provider(audio_file: Path
     assert captured == {
         "api_key": "sk-or-test",
         "api_base": "https://openrouter.ai/api/v1",
+        "proxy": None,
         "language": "en",
         "model": "nvidia/parakeet-tdt-0.6b-v3",
         "file_path": audio_file,
@@ -348,6 +349,7 @@ async def test_transcribe_audio_file_routes_xiaomi_mimo_provider(audio_file: Pat
     assert captured == {
         "api_key": "mimo-test",
         "api_base": "https://api.xiaomimimo.com/v1",
+        "proxy": None,
         "language": "zh",
         "model": "mimo-v2.5-asr",
         "file_path": audio_file,
@@ -384,6 +386,7 @@ async def test_transcribe_audio_file_routes_assemblyai_provider(audio_file: Path
     assert captured == {
         "api_key": "aai-test",
         "api_base": "https://assembly.example/v2",
+        "proxy": None,
         "language": "en",
         "model": "universal-3-pro",
         "file_path": audio_file,

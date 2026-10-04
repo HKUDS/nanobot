@@ -97,11 +97,6 @@ def _resolve_provider_setup(
     if spec and spec.is_transcription_only:
         raise ValueError(f"Provider '{provider_name}' only supports transcription.")
     backend = spec.backend if spec else "openai_compat"
-    if p and p.proxy and backend not in {"openai_compat", "openai_codex", "xai_grok"}:
-        raise ValueError(
-            f"providers.{provider_name}.proxy is only supported for "
-            "OpenAI-compatible providers, OpenAI Codex, and xAI Grok."
-        )
 
     if backend == "azure_openai":
         if not p or not p.api_base:
@@ -191,13 +186,18 @@ def _make_provider_core(
         provider = AzureOpenAIProvider(
             api_key=p.api_key or "",
             api_base=p.api_base,
+            proxy=p.proxy,
             default_model=model,
             provider_name=provider_name,
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
-        provider = GitHubCopilotProvider(default_model=model, provider_name=provider_name)
+        provider = GitHubCopilotProvider(
+            default_model=model,
+            proxy=p.proxy if p else None,
+            provider_name=provider_name,
+        )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
@@ -206,6 +206,7 @@ def _make_provider_core(
             api_base=config.get_api_base(model, preset=preset),
             default_model=model,
             extra_headers=_provider_extra_headers(spec, p),
+            proxy=p.proxy if p else None,
             provider_name=provider_name,
         )
     elif backend == "bedrock":
@@ -217,6 +218,7 @@ def _make_provider_core(
             default_model=model,
             region=getattr(p, "region", None) if p else None,
             profile=getattr(p, "profile", None) if p else None,
+            proxy=p.proxy if p else None,
             extra_body=p.extra_body if p else None,
             provider_name=provider_name,
         )

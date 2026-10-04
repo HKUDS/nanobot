@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, cast
 
 from loguru import logger
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
 from nanobot.providers.base import (
     LLMProvider,
@@ -64,7 +64,9 @@ class _AzureTokenProvider:
     ``azure-identity`` is not installed.
     """
 
-    def __init__(self, scope: str = _AZURE_OPENAI_SCOPE) -> None:
+    def __init__(
+        self, scope: str = _AZURE_OPENAI_SCOPE, *, proxy: str | None = None,
+    ) -> None:
         try:
             from azure.identity.aio import DefaultAzureCredential
         except ImportError as exc:
@@ -74,7 +76,15 @@ class _AzureTokenProvider:
             ) from exc
 
         self._scope = scope
-        self._credential = DefaultAzureCredential()
+        credential_kwargs: dict[str, Any] = {}
+        if proxy:
+            from azure.core.pipeline.transport import AioHttpTransport
+
+            credential_kwargs.update(
+                transport=AioHttpTransport(use_env_settings=False),
+                proxies={"http": proxy, "https": proxy},
+            )
+        self._credential = DefaultAzureCredential(**credential_kwargs)
 
     async def __call__(self) -> str:
         """Return a bearer token for the configured scope."""
@@ -110,6 +120,7 @@ class AzureOpenAIProvider(LLMProvider):
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
         *,
+        proxy: str | None = None,
         provider_name: str = "azure_openai",
     ):
         super().__init__(api_key, api_base, provider_name=provider_name)
@@ -133,12 +144,16 @@ class AzureOpenAIProvider(LLMProvider):
         if api_key:
             client_api_key = api_key
         else:
-            self._token_provider = _AzureTokenProvider()
+            self._token_provider = _AzureTokenProvider(proxy=proxy)
             client_api_key = self._token_provider
 
         # SDK client targeting the Azure Responses API endpoint
         base_url = f"{api_base.rstrip('/')}/openai/v1/"
+        client_kwargs: dict[str, Any] = {}
+        if proxy:
+            client_kwargs["http_client"] = DefaultAsyncHttpxClient(proxy=proxy, trust_env=False)
         self._client = AsyncOpenAI(
+            **client_kwargs,
             api_key=client_api_key,
             base_url=base_url,
             default_headers={"x-session-affinity": uuid.uuid4().hex},

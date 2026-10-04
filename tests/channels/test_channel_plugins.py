@@ -1035,9 +1035,14 @@ def test_manager_respects_explicitly_disabled_websocket_config():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("proxy_pair", [
+    (None, None),
+    ("http://127.0.0.1:7000", "http://127.0.0.1:8000"),
+])
 async def test_base_channel_reads_current_transcription_config_each_call(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    proxy_pair,
 ):
     """BaseChannel.transcribe_audio resolves config at call time, not manager init time."""
     from nanobot.providers import transcription as transcription_mod
@@ -1049,6 +1054,7 @@ async def test_base_channel_reads_current_transcription_config_each_call(
     config.transcription.language = "en"
     config.providers.openai.api_key = "openai-key"
     config.providers.openai.api_base = "http://openai.local/v1/audio/transcriptions"
+    config.providers.openai.proxy = proxy_pair[0]
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -1057,26 +1063,28 @@ async def test_base_channel_reads_current_transcription_config_each_call(
     calls: list[dict[str, object]] = []
 
     class _StubOpenAI:
-        def __init__(self, api_key=None, api_base=None, language=None, model=None):
+        def __init__(self, api_key=None, api_base=None, language=None, model=None, proxy=None):
             calls.append({
                 "provider": "openai",
                 "api_key": api_key,
                 "api_base": api_base,
                 "language": language,
                 "model": model,
+                "proxy": proxy,
             })
 
         async def transcribe(self, file_path):
             return "openai-ok"
 
     class _StubGroq:
-        def __init__(self, api_key=None, api_base=None, language=None, model=None):
+        def __init__(self, api_key=None, api_base=None, language=None, model=None, proxy=None):
             calls.append({
                 "provider": "groq",
                 "api_key": api_key,
                 "api_base": api_base,
                 "language": language,
                 "model": model,
+                "proxy": proxy,
             })
 
         async def transcribe(self, file_path):
@@ -1093,6 +1101,7 @@ async def test_base_channel_reads_current_transcription_config_each_call(
         config.transcription.language = "ko"
         config.providers.groq.api_key = "groq-key"
         config.providers.groq.api_base = "http://groq.local/v1/audio/transcriptions"
+        config.providers.groq.proxy = proxy_pair[1]
         save_config(config, config_path)
 
         assert await channel.transcribe_audio("/tmp/does-not-matter.wav") == "groq-ok"
@@ -1104,6 +1113,7 @@ async def test_base_channel_reads_current_transcription_config_each_call(
             "api_base": "http://openai.local/v1/audio/transcriptions",
             "language": "en",
             "model": "whisper-custom",
+            "proxy": proxy_pair[0],
         },
         {
             "provider": "groq",
@@ -1111,6 +1121,7 @@ async def test_base_channel_reads_current_transcription_config_each_call(
             "api_base": "http://groq.local/v1/audio/transcriptions",
             "language": "ko",
             "model": "whisper-large-v3-turbo",
+            "proxy": proxy_pair[1],
         },
     ]
 

@@ -92,13 +92,14 @@ class AnthropicProvider(LLMProvider):
         default_model: str = "claude-sonnet-4-6",
         extra_headers: dict[str, str] | None = None,
         *,
+        proxy: str | None = None,
         provider_name: str = "anthropic",
     ):
         super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
-        from anthropic import AsyncAnthropic
+        from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
         client_kw: dict[str, Any] = {}
         if api_key:
@@ -109,6 +110,8 @@ class AnthropicProvider(LLMProvider):
             client_kw["default_headers"] = extra_headers
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
+        if proxy:
+            client_kw["http_client"] = DefaultAsyncHttpxClient(proxy=proxy, trust_env=False)
         self._client = AsyncAnthropic(**client_kw)
 
     @staticmethod

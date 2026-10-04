@@ -202,6 +202,7 @@ async def _post_transcription_with_retry(
     model: str,
     provider_label: str,
     language: str | None = None,
+    proxy: str | None = None,
 ) -> str:
     """POST an audio file for transcription, retrying on transient errors.
 
@@ -229,7 +230,9 @@ async def _post_transcription_with_retry(
             files["language"] = (None, language)
         return {"url": url, "headers": headers, "files": files, "timeout": 60.0}
 
-    return await _post_with_retry(build_request, provider_label, _text_from_transcription_payload)
+    return await _post_with_retry(
+        build_request, provider_label, _text_from_transcription_payload, proxy=proxy,
+    )
 
 
 async def _post_json_transcription_with_retry(
@@ -240,6 +243,7 @@ async def _post_json_transcription_with_retry(
     model: str,
     provider_label: str,
     language: str | None = None,
+    proxy: str | None = None,
 ) -> str:
     """POST base64 JSON audio for providers that do not accept multipart uploads."""
     try:
@@ -264,7 +268,9 @@ async def _post_json_transcription_with_retry(
             body["language"] = language
         return {"url": url, "headers": headers, "json": body, "timeout": 60.0}
 
-    return await _post_with_retry(build_request, provider_label, _text_from_transcription_payload)
+    return await _post_with_retry(
+        build_request, provider_label, _text_from_transcription_payload, proxy=proxy,
+    )
 
 
 async def _post_xiaomi_mimo_asr_with_retry(
@@ -275,6 +281,7 @@ async def _post_xiaomi_mimo_asr_with_retry(
     model: str,
     provider_label: str,
     language: str | None = None,
+    proxy: str | None = None,
 ) -> str:
     """POST audio to Xiaomi MiMo ASR's chat-completions transcription API."""
     try:
@@ -312,7 +319,9 @@ async def _post_xiaomi_mimo_asr_with_retry(
     def build_request() -> dict[str, Any]:
         return {"url": url, "headers": headers, "json": body, "timeout": 60.0}
 
-    return await _post_with_retry(build_request, provider_label, _text_from_chat_payload)
+    return await _post_with_retry(
+        build_request, provider_label, _text_from_chat_payload, proxy=proxy,
+    )
 
 
 async def _post_stepfun_asr_with_retry(
@@ -323,6 +332,7 @@ async def _post_stepfun_asr_with_retry(
     model: str,
     provider_label: str,
     language: str | None = None,
+    proxy: str | None = None,
 ) -> str:
     """POST audio to StepFun ASR SSE endpoint and collect final text."""
     try:
@@ -355,7 +365,7 @@ async def _post_stepfun_asr_with_retry(
         "Accept": "text/event-stream",
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(**_proxy_client_kwargs(proxy)) as client:
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 async with client.stream(
@@ -434,8 +444,10 @@ async def _post_with_retry(
     build_request: Callable[[], dict[str, Any]],
     provider_label: str,
     extract_text: Callable[[dict[str, Any]], str],
+    *,
+    proxy: str | None = None,
 ) -> str:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(**_proxy_client_kwargs(proxy)) as client:
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 response = await client.post(**build_request())
@@ -525,6 +537,10 @@ def _assemblyai_speech_models(model: str | None) -> list[str]:
     return [part for part in (part.strip() for part in (model or "").split(",")) if part]
 
 
+def _proxy_client_kwargs(proxy: str | None) -> dict[str, Any]:
+    return {"proxy": proxy, "trust_env": False} if proxy else {}
+
+
 class AssemblyAITranscriptionProvider:
     """Voice transcription provider using AssemblyAI's asynchronous REST API."""
 
@@ -534,7 +550,10 @@ class AssemblyAITranscriptionProvider:
         api_base: str | None = None,
         language: str | None = None,
         model: str | None = None,
+        *,
+        proxy: str | None = None,
     ):
+        self._proxy = proxy
         base = api_base or os.environ.get("ASSEMBLYAI_BASE_URL")
         self.api_key = api_key or os.environ.get("ASSEMBLYAI_API_KEY")
         self.upload_url = _resolve_api_path(base, _ASSEMBLYAI_DEFAULT_API_BASE, "upload")
@@ -558,7 +577,7 @@ class AssemblyAITranscriptionProvider:
             return ""
 
         headers = {"Authorization": self.api_key}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(**_proxy_client_kwargs(self._proxy)) as client:
             upload = await _request_json_with_retry(
                 client,
                 "POST",
@@ -631,7 +650,10 @@ class OpenAITranscriptionProvider:
         api_base: str | None = None,
         language: str | None = None,
         model: str | None = None,
+        *,
+        proxy: str | None = None,
     ):
+        self._proxy = proxy
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self.api_url = _resolve_transcription_url(
             api_base or os.environ.get("OPENAI_TRANSCRIPTION_BASE_URL"),
@@ -656,6 +678,7 @@ class OpenAITranscriptionProvider:
             model=self.model,
             provider_label="OpenAI",
             language=self.language,
+            proxy=self._proxy,
         )
 
 
@@ -672,7 +695,10 @@ class GroqTranscriptionProvider:
         api_base: str | None = None,
         language: str | None = None,
         model: str | None = None,
+        *,
+        proxy: str | None = None,
     ):
+        self._proxy = proxy
         self.api_key = api_key or os.environ.get("GROQ_API_KEY")
         self.api_url = _resolve_transcription_url(
             api_base or os.environ.get("GROQ_BASE_URL"),
@@ -708,6 +734,7 @@ class GroqTranscriptionProvider:
             model=self.model,
             provider_label="Groq",
             language=self.language,
+            proxy=self._proxy,
         )
 
 
@@ -720,7 +747,10 @@ class OpenRouterTranscriptionProvider:
         api_base: str | None = None,
         language: str | None = None,
         model: str | None = None,
+        *,
+        proxy: str | None = None,
     ):
+        self._proxy = proxy
         self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
         self.api_url = _resolve_transcription_url(
             api_base or os.environ.get("OPENROUTER_BASE_URL"),
@@ -747,6 +777,7 @@ class OpenRouterTranscriptionProvider:
             model=self.model,
             provider_label="OpenRouter",
             language=self.language,
+            proxy=self._proxy,
         )
 
 
@@ -759,7 +790,10 @@ class XiaomiMiMoTranscriptionProvider:
         api_base: str | None = None,
         language: str | None = None,
         model: str | None = None,
+        *,
+        proxy: str | None = None,
     ):
+        self._proxy = proxy
         self.api_key = api_key or os.environ.get("MIMO_API_KEY")
         self.api_url = _resolve_chat_completions_url(
             api_base or os.environ.get("MIMO_API_BASE"),
@@ -786,6 +820,7 @@ class XiaomiMiMoTranscriptionProvider:
             model=self.model,
             provider_label="Xiaomi MiMo",
             language=self.language,
+            proxy=self._proxy,
         )
 
 
@@ -800,7 +835,10 @@ class StepFunTranscriptionProvider:
         api_base: str | None = None,
         language: str | None = None,
         model: str | None = None,
+        *,
+        proxy: str | None = None,
     ):
+        self._proxy = proxy
         self.api_key = api_key or os.environ.get("STEPFUN_API_KEY")
         # api_base accepts either a StepFun base URL or the full SSE endpoint.
         self.api_url = _resolve_stepfun_asr_url(api_base)
@@ -825,4 +863,5 @@ class StepFunTranscriptionProvider:
             model=self.model,
             provider_label="StepFun",
             language=self.language,
+            proxy=self._proxy,
         )

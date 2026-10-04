@@ -22,6 +22,7 @@ class TranscriptionProviderAdapter(Protocol):
         api_base: str | None = None,
         language: str | None = None,
         model: str | None = None,
+        proxy: str | None = None,
     ) -> None: ...
 
     async def transcribe(self, file_path: str | Path) -> str: ...
