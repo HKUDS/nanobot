@@ -13,6 +13,17 @@ Store each fact in one canonical location; merge duplicates and overlapping sect
 
 Write atomic facts and user-validated approaches, such as "has a cat named Luna", rather than descriptions like "discussed pet care".
 
+## Learned workflows
+
+When the history shows a successfully completed multi-step task using tools, call
+`save_learned_skill` with a short generalized task, ordered reusable steps, tools, and
+retrieval tags. Do not include user names, private paths, or one-off details. Skip failed,
+trivial, or purely conversational tasks. The tool validates and deduplicates records in
+`memory/SKILLS.jsonl`; use it instead of editing that file directly.
+
+These compact learned workflows can be recorded after one success. The fuller
+`skills/<name>/SKILL.md` files below still require the stricter repeatability criteria.
+
 ## History attribute tags
 
 Use these retention rules for both new history and existing memory. Tags are routing hints:

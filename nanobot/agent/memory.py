@@ -15,7 +15,7 @@ import weakref
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator, cast
+from typing import TYPE_CHECKING, Any, Callable, Iterator, TypedDict, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -56,8 +56,16 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
+class LearnedSkill(TypedDict):
+    task: str
+    steps: list[str]
+    tools: list[str]
+    tags: list[str]
+    recorded: str
+
+
 class MemoryStore:
-    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
+    """Pure file I/O for memory, history, learned skills, and agent profile files."""
 
     _DEFAULT_MAX_HISTORY = 1000
     # Durable files whose real working-tree delta grounds Dream commit messages.
@@ -75,6 +83,7 @@ class MemoryStore:
         self.max_history_entries = max_history_entries
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
+        self.skills_file = self.memory_dir / "SKILLS.jsonl"
         self.history_file = self.memory_dir / "history.jsonl"
         self.legacy_history_file = self.memory_dir / "HISTORY.md"
         self.soul_file = workspace / "SOUL.md"
@@ -103,6 +112,99 @@ class MemoryStore:
             return path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return ""
+
+    @staticmethod
+    def _parse_skill(value: object) -> LearnedSkill | None:
+        """Validate a persisted or tool-supplied workflow at the storage boundary."""
+        if not isinstance(value, dict):
+            return None
+        data = cast(dict[str, object], value)
+        task = data.get("task")
+        steps = data.get("steps")
+        tools = data.get("tools")
+        tags = data.get("tags")
+        if not isinstance(task, str) or not 1 <= len(task.strip()) <= 200:
+            return None
+        for items, minimum, maximum, item_limit in (
+            (steps, 2, 12, 400),
+            (tools, 0, 12, 80),
+            (tags, 1, 12, 80),
+        ):
+            if not isinstance(items, list):
+                return None
+            values = cast(list[object], items)
+            if not minimum <= len(values) <= maximum:
+                return None
+            if any(
+                not isinstance(item, str) or not 1 <= len(item.strip()) <= item_limit
+                for item in values
+            ):
+                return None
+        recorded = data.get("recorded")
+        return {
+            "task": task.strip(),
+            "steps": [item.strip() for item in cast(list[str], steps)],
+            "tools": [item.strip() for item in cast(list[str], tools)],
+            "tags": [item.strip().casefold() for item in cast(list[str], tags)],
+            "recorded": recorded if isinstance(recorded, str) else "",
+        }
+
+    def load_skills(self) -> list[LearnedSkill]:
+        """Read valid learned workflows; skip malformed JSONL records."""
+        skills: list[LearnedSkill] = []
+        for line in self.read_file(self.skills_file).splitlines():
+            try:
+                parsed = self._parse_skill(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+            if parsed is not None:
+                skills.append(parsed)
+        return skills
+
+    def save_skill(self, value: dict[str, Any]) -> bool:
+        """Append a validated workflow unless its tags overlap an existing one."""
+        skill = self._parse_skill(value)
+        if skill is None:
+            raise ValueError("learned skill needs a task, 2-12 steps, and at least one tag")
+        skill["recorded"] = datetime.now().isoformat(timespec="minutes")
+        new_tags = set(skill["tags"])
+        with self._append_lock:
+            for existing in self.load_skills():
+                old_tags = set(existing["tags"])
+                if len(new_tags & old_tags) / len(new_tags | old_tags) > 0.5:
+                    return False
+            with self.skills_file.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(skill, ensure_ascii=False) + "\n")
+        return True
+
+    @staticmethod
+    def _skill_tokens(value: str) -> set[str]:
+        return set(re.findall(r"[^\W_]+", value.casefold()))
+
+    def find_relevant_skills(self, query: str, top_k: int = 3) -> list[LearnedSkill]:
+        """Rank learned workflows by tag and task keyword overlap."""
+        query_tokens = self._skill_tokens(query)
+        if not query_tokens or top_k <= 0:
+            return []
+        scored: list[tuple[int, LearnedSkill]] = []
+        for skill in self.load_skills():
+            tokens = self._skill_tokens(skill["task"])
+            for tag in skill["tags"]:
+                tokens.update(self._skill_tokens(tag))
+            score = len(query_tokens & tokens)
+            if score:
+                scored.append((score, skill))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [skill for _, skill in scored[:top_k]]
+
+    def get_skills_context(self, query: str, top_k: int = 3) -> str:
+        """Format only workflows relevant to the current user request."""
+        parts: list[str] = []
+        for skill in self.find_relevant_skills(query, top_k):
+            steps = "\n".join(f"{index}. {step}" for index, step in enumerate(skill["steps"], 1))
+            tools = ", ".join(skill["tools"])
+            parts.append(f"### {skill['task']}\nTools: {tools}\nSteps:\n{steps}")
+        return "\n\n".join(parts)
 
     def _maybe_migrate_legacy_history(self) -> None:
         """One-time upgrade from legacy HISTORY.md to history.jsonl.
@@ -562,6 +664,7 @@ class MemoryStore:
         from nanobot.agent.tools.apply_patch import ApplyPatchTool
         from nanobot.agent.tools.file_state import FileStates
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
+        from nanobot.agent.tools.learned_skill import SaveLearnedSkillTool
         from nanobot.agent.tools.registry import ToolRegistry
 
         tools = ToolRegistry()
@@ -597,6 +700,7 @@ class MemoryStore:
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
+        tools.register(SaveLearnedSkillTool(self))
         return tools
 
     @staticmethod
