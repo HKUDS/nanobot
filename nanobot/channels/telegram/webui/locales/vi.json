@@ -23,6 +23,9 @@
           "allowlist": "Danh sách cho phép"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Ghi đè hành vi nhóm (JSON)"
+      },
       "mode": {
         "label": "Chế độ kết nối",
         "choices": {

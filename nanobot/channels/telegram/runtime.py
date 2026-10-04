@@ -432,6 +432,10 @@ class TelegramConfig(Base):
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
+    # Per-chat / per-forum-topic overrides for `group_policy`.
+    # Keys are either "<chat_id>" (whole chat) or "<chat_id>:<thread_id>"
+    # (one forum topic). An unlisted chat or topic falls back to `group_policy`.
+    group_policy_overrides: dict[str, Literal["open", "mention"]] = Field(default_factory=dict)
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -1813,9 +1817,31 @@ class TelegramChannel(BaseChannel):
                 return True
         return handle in text.lower()
 
+    def _effective_group_policy(self, message: Message) -> Literal["open", "mention"]:
+        """Resolve the group policy for a message's chat and forum topic.
+
+        Most specific match wins: ``"<chat_id>:<thread_id>"`` overrides
+        ``"<chat_id>"``, which overrides the channel-wide ``group_policy``.
+        """
+        overrides = self.config.group_policy_overrides
+        if not overrides:
+            return self.config.group_policy
+
+        chat_id = str(message.chat_id)
+        thread_id = getattr(message, "message_thread_id", None)
+        if thread_id is not None:
+            topic_policy = overrides.get(f"{chat_id}:{thread_id}")
+            if topic_policy is not None:
+                return topic_policy
+
+        chat_policy = overrides.get(chat_id)
+        if chat_policy is not None:
+            return chat_policy
+        return self.config.group_policy
+
     async def _is_group_message_for_bot(self, message: Message) -> bool:
         """Allow group messages when policy is open, @mentioned, or replying to the bot."""
-        if message.chat.type == "private" or self.config.group_policy == "open":
+        if message.chat.type == "private" or self._effective_group_policy(message) == "open":
             return True
 
         bot_id, bot_username = await self._ensure_bot_identity()
