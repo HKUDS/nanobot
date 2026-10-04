@@ -1747,10 +1747,10 @@ class AgentLoop:
         hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
         runtime: LLMRuntime | None = None,
-        session: Session | None = None,
         delivery: TurnDelivery | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
+        session: Session | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         kind = TurnKind.USER if msg.is_user_input else TurnKind.SYSTEM
@@ -2526,7 +2526,6 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         ephemeral: bool = False,
         _run_extra_hooks_for_ephemeral: bool = False,
-        _session_policy: SessionPolicy | None = None,
         hooks: list[AgentHook] | None = None,
         hook_factories: list[AgentTurnHookFactory] | None = None,
         tools: ToolRegistry | None = None,
@@ -2534,6 +2533,7 @@ class AgentLoop:
         runtime: LLMRuntime | None = None,
         on_runtime_admitted: Callable[[LLMRuntime], Awaitable[None]] | None = None,
         attributes: Mapping[str, Any] | None = None,
+        _session_policy: SessionPolicy | None = None,
     ) -> OutboundMessage | None:
         """Process an external message directly and return the outbound payload.
 
