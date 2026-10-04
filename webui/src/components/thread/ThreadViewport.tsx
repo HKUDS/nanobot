@@ -219,6 +219,9 @@ function canScrollInDirection(
 }
 
 function readSoftKeyboardInsetBottom(container: HTMLElement | null): number {
+  // The touch App shell already fits the visual viewport, including portaled
+  // composers. Keep the existing local inset only for unfitted/native layouts.
+  if (container?.closest("#root.visual-viewport")) return 0;
   const viewport = window.visualViewport;
   if (!viewport) return 0;
   const active = document.activeElement;

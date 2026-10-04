@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { floatingItemClassName, floatingItemFocusClassName, floatingSurfaceClassName, floatingSurfaceMotionClassName } from "@/components/ui/floating-surface";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { parseWebLink } from "@/lib/web-preview";
+import { currentWebPreviewRestriction, parseWebLink } from "@/lib/web-preview";
 import { cn } from "@/lib/utils";
 
 export const WebPreviewContext = createContext<((url: string) => void) | undefined>(undefined);
@@ -28,6 +28,7 @@ function WebsiteLink({ href, children, className, ...props }: ComponentPropsWith
   const openPreview = useContext(WebPreviewContext);
   const portal = useFloatingPortal();
   const [open, setOpen] = useState(false);
+  const restriction = open && openPreview ? currentWebPreviewRestriction(parseWebLink(href)) : null;
   const [feedback, setFeedback] = useState<"copied" | "copyFailed" | null>(null);
   const link = useRef<HTMLAnchorElement>(null);
   const point = useRef({ x: 0, y: 0 });
@@ -94,11 +95,12 @@ function WebsiteLink({ href, children, className, ...props }: ComponentPropsWith
           event.preventDefault();
           if (!interactedOutside.current) link.current?.focus();
         }}>
-        {openPreview ? <Menu.Item className={itemClassName} onSelect={() => openPreview(href)}>{t("webPreview.open")}</Menu.Item> : null}
+        {openPreview && !restriction ? <Menu.Item className={itemClassName} onSelect={() => openPreview(href)}>{t("webPreview.open")}</Menu.Item> : null}
         <Menu.Item asChild className={itemClassName}>
           <a href={href} target="_blank" rel="noreferrer noopener">{t("webPreview.external")}</a>
         </Menu.Item>
         <Menu.Item className={itemClassName} onSelect={(event) => { event.preventDefault(); void copy(); }}>{t("webPreview.copy")}</Menu.Item>
+        {restriction ? <p className="max-w-64 px-2.5 py-1.5 text-xs leading-relaxed text-muted-foreground">{t(`webPreview.${restriction}`)}</p> : null}
         {feedback === "copyFailed" ? <div role="status" className="max-w-64 px-2.5 py-1.5 text-xs text-muted-foreground">{t("webPreview.copyFailed")}</div> : null}
       </Menu.Content>
     </Menu.Portal>

@@ -122,6 +122,25 @@
     overflow: hidden;
   }
 
+  #root.visual-viewport {
+    position: fixed;
+    top: var(--app-viewport-top);
+    left: 0;
+    width: 100%;
+    height: var(--app-viewport-height);
+  }
+
+  /* A landscape keyboard can leave less room than the composer needs. Keep
+     navigation reachable and scroll the composer instead of overlapping it. */
+  #root.visual-viewport .workbench-body {
+    min-height: 2.75rem;
+  }
+
+  #root.short-visual-viewport .workbench-composer-footer {
+    max-height: max(0px, calc(var(--app-viewport-height) - 2.75rem));
+    overflow-y: auto;
+  }
+
   * {
     scrollbar-color: var(--scrollbar-thumb) transparent;
     scrollbar-width: thin;
@@ -858,6 +877,10 @@
   .touch-target {
     min-width: 2.75rem;
     min-height: 2.75rem;
+  }
+
+  .touch-target.preview-tab-close {
+    opacity: 1;
   }
 }
 
