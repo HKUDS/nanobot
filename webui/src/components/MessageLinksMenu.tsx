@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { WebPreviewContext } from "@/components/WebLink";
 import { floatingItemClassName, floatingItemFocusClassName } from "@/components/ui/floating-surface";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { parseWebLink } from "@/lib/web-preview";
+import { currentWebPreviewRestriction, parseWebLink } from "@/lib/web-preview";
 
 interface MessageWebLink { href: string; title: string }
 
@@ -72,6 +72,7 @@ function MessageLinkActions({ link, onClose, onPreview }: {
   onPreview?: () => void;
 }) {
   const { t } = useTranslation();
+  const restriction = onPreview ? currentWebPreviewRestriction(parseWebLink(link.href)) : null;
   const [feedback, setFeedback] = useState<"copied" | "copyFailed" | null>(null);
   const mounted = useRef(false);
   useLayoutEffect(() => {
@@ -84,9 +85,10 @@ function MessageLinkActions({ link, onClose, onPreview }: {
   };
   return <div className="border-t border-border/45 pt-1">
     <p className="max-h-24 overflow-y-auto px-2.5 py-2 text-xs text-muted-foreground [overflow-wrap:anywhere]" dir="auto">{link.href}</p>
-    {onPreview ? <button type="button" className={itemClassName} onClick={onPreview}>{t("webPreview.open")}</button> : null}
+    {onPreview && !restriction ? <button type="button" className={itemClassName} onClick={onPreview}>{t("webPreview.open")}</button> : null}
     <a className={itemClassName} href={link.href} target="_blank" rel="noreferrer noopener" onClick={onClose}>{t("webPreview.external")}</a>
     <button type="button" className={itemClassName} onClick={() => { void copy(); }}>{t("webPreview.copy")}</button>
+    {restriction ? <p className="px-2.5 py-1.5 text-xs leading-relaxed text-muted-foreground">{t(`webPreview.${restriction}`)}</p> : null}
     {feedback ? <p role="status" className="px-2.5 py-1.5 text-xs text-muted-foreground">{t(`webPreview.${feedback}`)}</p> : null}
   </div>;
 }
