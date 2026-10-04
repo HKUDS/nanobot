@@ -340,6 +340,39 @@ Arbitrary custom provider names are OpenAI-compatible only; they do not use the 
 
 DeepSeek is the model-level exception in the OpenAI-compatible provider: `deepseek-v4-flash` and `deepseek-v4-pro` automatically use DeepSeek's native Responses API. Its native `web_search` tool is enabled by default and shows its lifecycle in WebUI chat activity; set `providers.deepseek.extraBody.tools` to `[]` to disable it.
 
+### Tsubasa
+
+Select **Tsubasa** in **Settings → Models**, or configure a named preset:
+
+```json
+{
+  "providers": {
+    "tsubasa": {
+      "apiKey": "${TSUBASA_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "tsubasa",
+      "model": "tsubasa-pro",
+      "maxTokens": 4096,
+      "contextWindowTokens": 32768
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+The default endpoint is `https://api.tsubasa.sh/v1`. Both `tsubasa-fast` and
+`tsubasa-pro` use Chat Completions and share a 32,768-token input-plus-output
+context budget. The example reserves 4,096 tokens for output; keep the prompt
+and requested output within that total. The built-in model list is static
+metadata, not a service availability or capability check.
+
 ### Custom OpenAI-Compatible Endpoint
 
 The `custom` provider fits one OpenAI-compatible endpoint that is not represented by a named provider.
