@@ -1,9 +1,10 @@
 import asyncio
 import json
 import zipfile
+from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -45,6 +46,9 @@ class _FakeResponse:
         self.headers = headers or {"content-type": "application/json"}
         self.url = httpx.URL(url)
 
+    async def aiter_bytes(self):
+        yield self.content
+
     def json(self) -> dict:
         return self._json_body
 
@@ -58,6 +62,11 @@ class _FakeHttp:
         if self._responses:
             return self._responses.pop(0)
         return _FakeResponse()
+
+    @asynccontextmanager
+    async def stream(self, method, url, **kwargs):
+        assert method == "GET"
+        yield await self.get(url, **kwargs)
 
     async def post(self, url: str, json=None, headers=None, **kwargs):
         self.calls.append(
@@ -403,6 +412,61 @@ async def test_handler_uses_voice_recognition_text_when_text_is_empty(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_handler_retrieves_background_message_failure(monkeypatch) -> None:
+    bus = MessageBus()
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        bus,
+    )
+    handler = NanobotDingTalkHandler(channel)
+    failure = RuntimeError("inbound dispatch failed")
+    mock_logger = MagicMock()
+    channel.logger = mock_logger
+
+    class _FakeChatbotMessage:
+        text = SimpleNamespace(content="hello")
+        extensions = {}
+        sender_staff_id = "user1"
+        sender_id = "fallback-user"
+        sender_nick = "Alice"
+        message_type = "text"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeChatbotMessage()
+
+    async def fail(*_args) -> None:
+        raise failure
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", _FakeChatbotMessage)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+    monkeypatch.setattr(channel, "_on_message", fail)
+    event_loop = asyncio.get_running_loop()
+    previous_handler = event_loop.get_exception_handler()
+    loop_errors: list[dict[str, object]] = []
+    event_loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+
+    try:
+        status, body = await handler.process(
+            SimpleNamespace(data={"conversationType": "1", "text": {"content": "hello"}})
+        )
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if not channel._background_tasks:
+                break
+    finally:
+        event_loop.set_exception_handler(previous_handler)
+
+    assert (status, body) == ("OK", "OK")
+    assert not channel._background_tasks
+    assert not loop_errors
+    mock_logger.opt.assert_called_once_with(exception=failure)
+    mock_logger.opt.return_value.error.assert_called_once_with(
+        "DingTalk inbound message task failed"
+    )
+
+
+@pytest.mark.asyncio
 async def test_handler_processes_file_message(monkeypatch) -> None:
     """Test that file messages are handled and forwarded with downloaded path."""
     bus = MessageBus()
@@ -449,6 +513,72 @@ async def test_handler_processes_file_message(monkeypatch) -> None:
     assert (status, body) == ("OK", "OK")
     assert "[File]" in msg.content
     assert "/tmp/nanobot_dingtalk/user1/report.xlsx" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_handler_does_not_spawn_message_task_after_stop_during_download(
+    monkeypatch,
+) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["user1"]),
+        MessageBus(),
+    )
+    handler = NanobotDingTalkHandler(channel)
+    download_started = asyncio.Event()
+    release_download = asyncio.Event()
+    message_task_started = asyncio.Event()
+
+    class _FakeFileChatbotMessage:
+        text = None
+        extensions = {}
+        image_content = None
+        rich_text_content = None
+        sender_staff_id = "user1"
+        sender_id = "fallback-user"
+        sender_nick = "Alice"
+        message_type = "file"
+
+        @staticmethod
+        def from_dict(_data):
+            return _FakeFileChatbotMessage()
+
+    async def delayed_download(*_args):
+        download_started.set()
+        await release_download.wait()
+        return "/tmp/nanobot_dingtalk/user1/report.xlsx"
+
+    async def block_message(*_args) -> None:
+        message_task_started.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(dingtalk_module, "ChatbotMessage", _FakeFileChatbotMessage)
+    monkeypatch.setattr(dingtalk_module, "AckMessage", SimpleNamespace(STATUS_OK="OK"))
+    monkeypatch.setattr(channel, "_download_dingtalk_file", delayed_download)
+    monkeypatch.setattr(channel, "_on_message", block_message)
+
+    process_task = asyncio.create_task(handler.process(SimpleNamespace(data={
+        "conversationType": "1",
+        "content": {"downloadCode": "abc123", "fileName": "report.xlsx"},
+        "text": {"content": ""},
+    })))
+    await download_started.wait()
+
+    try:
+        await channel.stop()
+        release_download.set()
+        assert await process_task == ("OK", "OK")
+        await asyncio.sleep(0)
+
+        assert not message_task_started.is_set()
+        assert not channel._background_tasks
+    finally:
+        release_download.set()
+        if not process_task.done():
+            process_task.cancel()
+        pending = tuple(channel._background_tasks)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(process_task, *pending, return_exceptions=True)
 
 
 def _rich_text_message(rich_text_list):
@@ -651,6 +781,41 @@ async def test_stop_cancels_stream_client_after_sdk_swallows_first_cancel(monkey
 
 
 @pytest.mark.asyncio
+async def test_stop_waits_for_background_message_tasks() -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+    mock_logger = MagicMock()
+    channel.logger = mock_logger
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def wait_forever() -> None:
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    task = asyncio.create_task(wait_forever())
+    channel._background_tasks.add(task)
+    task.add_done_callback(channel._on_background_task_done)
+    await started.wait()
+
+    try:
+        await channel.stop()
+        assert task.done()
+        assert cancelled.is_set()
+        assert not channel._background_tasks
+        mock_logger.opt.assert_not_called()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
     """Test the two-step file download flow (get URL then download content)."""
     channel = DingTalkChannel(
@@ -825,8 +990,22 @@ async def test_read_media_bytes_follows_safe_redirect_when_explicitly_enabled() 
 
 
 @pytest.mark.asyncio
-async def test_read_media_bytes_blocks_cross_host_redirect_without_allowlist() -> None:
-    """Redirect opt-in should not allow arbitrary cross-host redirects by default."""
+@pytest.mark.parametrize(
+    "response_body, redirect_url",
+    [
+        pytest.param(
+            b'cross-host media',
+            "https://example.org/final.txt",
+            id="cross_host_redirect_without_allowlist",
+        ),
+        pytest.param(
+            b'internal secret',
+            "http://127.0.0.1/metadata",
+            id="private_redirect_even_when_redirects_enabled",
+        ),
+    ],
+)
+async def test_read_media_bytes_blocks_untrusted_redirects(response_body, redirect_url) -> None:
     channel = DingTalkChannel(
         DingTalkConfig(
             client_id="app",
@@ -840,14 +1019,14 @@ async def test_read_media_bytes_blocks_cross_host_redirect_without_allowlist() -
         responses=[
             _FakeResponse(
                 302,
-                headers={"location": "https://example.org/final.txt"},
+                headers={"location": redirect_url},
                 url="https://example.com/redirect.txt",
             ),
             _FakeResponse(
                 200,
-                content=b"cross-host media",
+                content=response_body,
                 headers={"content-type": "text/plain"},
-                url="https://example.org/final.txt",
+                url=redirect_url,
             ),
         ]
     )
@@ -894,40 +1073,6 @@ async def test_read_media_bytes_allows_cross_host_redirect_when_allowlisted() ->
         "https://example.com/redirect.txt",
         "https://example.org/final.txt",
     ]
-
-
-@pytest.mark.asyncio
-async def test_read_media_bytes_blocks_private_redirect_even_when_redirects_enabled() -> None:
-    """Redirect opt-in must still validate each hop before fetching it."""
-    channel = DingTalkChannel(
-        DingTalkConfig(
-            client_id="app",
-            client_secret="secret",
-            allow_from=["*"],
-            allow_remote_media_redirects=True,
-        ),
-        MessageBus(),
-    )
-    channel._http = _FakeHttp(
-        responses=[
-            _FakeResponse(
-                302,
-                headers={"location": "http://127.0.0.1/metadata"},
-                url="https://example.com/redirect.txt",
-            ),
-            _FakeResponse(
-                200,
-                content=b"internal secret",
-                headers={"content-type": "text/plain"},
-                url="http://127.0.0.1/metadata",
-            ),
-        ]
-    )
-
-    data, filename, content_type = await channel._read_media_bytes("https://example.com/redirect.txt")
-
-    assert (data, filename, content_type) == (None, None, None)
-    assert [call["url"] for call in channel._http.calls] == ["https://example.com/redirect.txt"]
 
 
 def test_normalize_upload_payload_zips_html_attachment() -> None:
@@ -1111,7 +1256,7 @@ async def test_send_media_ref_short_circuits_on_download_transport_error() -> No
     channel = DingTalkChannel(config, MessageBus())
 
     # First POST (sampleImageMsg) returns API error → False, then GET (download) raises transport error
-    class _MixedHttp:
+    class _MixedHttp(_FakeHttp):
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
@@ -1143,7 +1288,7 @@ async def test_send_media_ref_short_circuits_on_upload_transport_error() -> None
 
     image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # minimal JPEG-ish data
 
-    class _UploadFailsHttp:
+    class _UploadFailsHttp(_FakeHttp):
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
@@ -1170,3 +1315,29 @@ async def test_send_media_ref_short_circuits_on_upload_transport_error() -> None
     # POST (image URL), GET (download), POST (upload) attempted — no further sends
     methods = [c["method"] for c in channel._http.calls]
     assert methods == ["POST", "GET", "POST"]
+
+
+async def test_remote_media_stops_reading_at_limit_and_closes_stream(monkeypatch):
+    monkeypatch.setattr(dingtalk_module, "DINGTALK_MAX_REMOTE_MEDIA_BYTES", 8)
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    class BoundedStream(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield b"12345"
+            yield b"6789"
+            raise AssertionError("must stop consuming when the size limit is exceeded")
+
+        async def aclose(self):
+            self.closed = True
+
+    body = BoundedStream()
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=body))
+    async with httpx.AsyncClient(transport=transport) as client:
+        channel._http = client
+        assert await channel._fetch_remote_media_bytes("https://example.com/large") == (None, None)
+    assert body.closed

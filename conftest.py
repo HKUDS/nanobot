@@ -7,10 +7,18 @@ import ssl
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from threading import Thread
 
 import certifi
 import pytest
 from loguru import logger
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tokenizer_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests deterministic and out of the user's tokenizer cache and network."""
+    monkeypatch.setattr("nanobot.utils.token_encoding._encoding", None)
+    monkeypatch.setattr("nanobot.utils.token_encoding._warmup_thread", Thread())
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +55,16 @@ def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
         lambda: legacy_root,
     )
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_pairing_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep channel pairing tests out of the user's active pairing store."""
+    pairing_path = tmp_path / "pairing.json"
+    monkeypatch.setattr(
+        "nanobot.pairing.store._store_path",
+        lambda: pairing_path,
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

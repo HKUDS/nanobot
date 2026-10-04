@@ -11,10 +11,13 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from loguru import logger
+
 from nanobot import __version__
-from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.providers.base import LLMUsage
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -70,6 +73,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Reset this chat and start a fresh conversation.",
         "square-pen",
         lifecycle="finalize_active_turn",
+    ),
+    BuiltinCommandSpec(
+        "/compact",
+        "Compact context",
+        "Compact this chat's context and continue the conversation.",
+        "archive",
     ),
     BuiltinCommandSpec(
         "/stop",
@@ -335,6 +344,30 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         content="New session started.",
         metadata=dict(ctx.msg.metadata or {})
     )
+
+
+async def cmd_compact(ctx: CommandContext) -> None:
+    """Compact the current session without resetting the conversation."""
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    runtime = ctx.runtime or loop.runtime_for_session(session)
+    delivery = loop.turn_delivery_factory.create(ctx.msg, ctx.key)
+
+    try:
+        summary = await loop.consolidator.compact_idle_session(
+            ctx.key,
+            runtime=runtime,
+            events=delivery.events,
+            notify=True,
+        )
+    except Exception:
+        logger.exception("Manual context compaction failed for {}", ctx.key)
+        return
+
+    if summary:
+        refreshed = loop.sessions.get_or_create(ctx.key)
+        refreshed.provider_state = None
+        loop.sessions.save(refreshed)
 
 
 def _format_preset_names(names: list[str]) -> str:
@@ -870,26 +903,14 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
-    """Mark this turn as an explicit sustained-goal request."""
-    from nanobot.agent.goal_permission import goal_mutation_permission
-
+async def cmd_goal(ctx: CommandContext) -> InboundMessage | OutboundMessage:
+    """Expand an explicit goal command into model-only input."""
     goal = ctx.args.strip()
     if not goal:
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
             content="Usage: /goal <long-running task description>",
-            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-        )
-    if ctx.session is None:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content=(
-                "A task is already running for this chat. "
-                "Use `/stop` first, then send `/goal <long-running task description>` again."
-            ),
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
     if not ctx.is_user_turn:
@@ -900,16 +921,21 @@ async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
             metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
         )
 
-    ctx.turn_scopes.append(goal_mutation_permission(True))
-    ctx.msg.metadata = {
-        **dict(ctx.msg.metadata or {}),
-        "original_command": "/goal",
-        "original_content": ctx.raw,
-        "goal_requested": True,
-        "goal_started_at": time.time(),
-    }
-    ctx.msg.content = ctx.raw
-    return None
+    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    session.add_message("user", ctx.msg.content, _command=True, media=list(ctx.msg.media))
+    ctx.loop.sessions.save(session)
+    return replace(
+        ctx.msg,
+        content=goal,
+        metadata={
+            **ctx.msg.metadata,
+            "original_command": "/goal",
+            "original_content": ctx.msg.content,
+            "goal_requested": True,
+            "goal_started_at": time.time(),
+            HIDDEN_HISTORY_META: {"kind": "goal_request"},
+        },
+    )
 
 
 async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
@@ -1044,6 +1070,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
+    router.exact("/compact", cmd_compact)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)

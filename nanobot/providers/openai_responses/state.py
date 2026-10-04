@@ -75,7 +75,8 @@ def prepare_responses_input(
         len(prior_items),
         len(state.pending_messages),
     )
-    return instructions, [*deepcopy(prior_items), *delta_items], True
+    replayed_items = _prepare_replayed_items(prior_items)
+    return instructions, [*replayed_items, *delta_items], True
 
 
 def build_responses_state(
@@ -105,6 +106,28 @@ def build_responses_state(
         model=model,
         version=RESPONSES_STATE_VERSION,
         payload=payload,
+    )
+
+
+def build_responses_compaction_state(
+    *,
+    provider: str,
+    model: str,
+    output_items: list[dict[str, Any]],
+) -> ProviderConversationState | None:
+    """Return the state at the latest native compaction output boundary."""
+    latest = None
+    for index, item in enumerate(output_items):
+        if item.get("type") in _COMPACTION_ITEM_TYPES:
+            latest = index
+    if latest is None:
+        return None
+    return ProviderConversationState(
+        kind=RESPONSES_STATE_KIND,
+        provider=provider,
+        model=model,
+        version=RESPONSES_STATE_VERSION,
+        payload={_ITEMS_KEY: [deepcopy(output_items[latest])]},
     )
 
 
@@ -194,3 +217,14 @@ def _state_items(
             return None
         items.append(cast(dict[str, Any], raw))
     return items
+
+
+def _prepare_replayed_items(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy provider state and remove output-only fields rejected on replay."""
+    replayed_items = deepcopy(items)
+    for item in replayed_items:
+        if item.get("type") == "reasoning":
+            item.pop("status", None)
+    return replayed_items

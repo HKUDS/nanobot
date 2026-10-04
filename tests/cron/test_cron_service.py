@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.cron.service import CronJobSkippedError, CronService
 from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 
 
 async def _wait_until(predicate, *, timeout: float = 1.0, interval: float = 0.01) -> None:
@@ -156,6 +157,21 @@ def test_add_job_rejects_missing_cron_expression(tmp_path, expr: str | None) -> 
     assert service.list_jobs(include_disabled=True) == []
 
 
+@pytest.mark.parametrize("every_ms", [None, 0, -60_000])
+def test_add_job_rejects_non_positive_interval(tmp_path, every_ms: int | None) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="requires a positive 'every_ms'"):
+        service.add_job(
+            name="never runs",
+            schedule=CronSchedule(kind="every", every_ms=every_ms),
+            message="hello",
+            **_bound_chat(),
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
 def test_add_job_rejects_invalid_cron_expression_before_persisting(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 
@@ -292,7 +308,12 @@ def test_load_store_migrates_legacy_delivery_context(tmp_path) -> None:
                             "deliver": True,
                             "channel": "telegram",
                             "to": "user-1",
-                            "channelMeta": {"message_thread_id": 42},
+                            "channelMeta": {
+                                "message_thread_id": 42,
+                                RUNTIME_CONTEXT_INPUT_META: [
+                                    {"source": "webui_quote", "content": "stale quote"}
+                                ],
+                            },
                             "sessionKey": "telegram:user-1:topic:42",
                         },
                         "state": {},
@@ -409,6 +430,39 @@ def test_add_job_preserves_origin_delivery_context(tmp_path) -> None:
     assert reloaded.payload.origin_channel == "slack"
     assert reloaded.payload.origin_chat_id == "C123"
     assert reloaded.payload.origin_metadata == metadata
+
+
+@pytest.mark.asyncio
+async def test_start_heals_runtime_context_from_pending_external_add(tmp_path) -> None:
+    """Flattened runtime blocks from older action files must not be replayed."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    external = CronService(store_path)
+    job = external.add_job(
+        name="quoted reminder",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="remember this",
+        origin_metadata={"webui": True},
+        **_bound_chat("quoted"),
+    )
+
+    action_path = tmp_path / "cron" / "action.jsonl"
+    action = json.loads(action_path.read_text(encoding="utf-8"))
+    action["params"]["payload"]["origin_metadata"][RUNTIME_CONTEXT_INPUT_META] = [
+        {"source": "webui_quote", "content": "quoted reply"}
+    ]
+    action_path.write_text(json.dumps(action), encoding="utf-8")
+
+    owner = CronService(store_path)
+    await owner.start()
+    try:
+        loaded = owner.get_job(job.id)
+        assert loaded is not None
+        assert loaded.payload.origin_metadata == {"webui": True}
+
+        raw = json.loads(store_path.read_text(encoding="utf-8"))
+        assert raw["jobs"][0]["payload"]["originMetadata"] == {"webui": True}
+    finally:
+        owner.stop()
 
 
 @pytest.mark.asyncio
@@ -1193,7 +1247,14 @@ def test_update_job_rejects_system_job(tmp_path) -> None:
     assert service.get_job("dream").name == "dream"
 
 
-def test_update_job_validates_schedule(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "schedule,error",
+    [
+        (CronSchedule(kind="cron", expr="0 9 * * *", tz="Bad/Zone"), "unknown timezone"),
+        (CronSchedule(kind="every", every_ms=0), "positive 'every_ms'"),
+    ],
+)
+def test_update_job_validates_schedule(tmp_path, schedule, error) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
     job = service.add_job(
         name="validate",
@@ -1201,11 +1262,12 @@ def test_update_job_validates_schedule(tmp_path) -> None:
         message="hello",
         **_bound_chat(),
     )
-    with pytest.raises(ValueError, match="unknown timezone"):
-        service.update_job(
-            job.id,
-            schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="Bad/Zone"),
-        )
+    action_path = service.store_path.with_name("action.jsonl")
+    before = action_path.read_bytes()
+    with pytest.raises(ValueError, match=error):
+        service.update_job(job.id, schedule=schedule)
+    assert action_path.read_bytes() == before
+    assert service.get_job(job.id).schedule.every_ms == 60_000
 
 
 @pytest.mark.asyncio

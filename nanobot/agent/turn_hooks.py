@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,15 +15,15 @@ from nanobot.agent.hook import (
     CompositeHook,
 )
 from nanobot.agent.progress_hook import AgentProgressHook
+from nanobot.events import NO_EVENTS, EventSink
 
 
 @dataclass(slots=True)
 class AgentTurnHookSpec:
     """Inputs needed to build the hook chain for one agent turn."""
 
-    on_progress: Callable[..., Awaitable[None]] | None = None
-    on_stream: Callable[[str], Awaitable[None]] | None = None
-    on_stream_end: Callable[..., Awaitable[None]] | None = None
+    events: EventSink = NO_EVENTS
+    streaming: bool = False
     channel: str = "cli"
     chat_id: str = "direct"
     message_id: str | None = None
@@ -39,22 +38,24 @@ class AgentTurnHookSpec:
     ephemeral: bool = False
     run_extra_hooks_for_ephemeral: bool = False
     attributes: dict[str, Any] | None = None
+    log_content: bool = True
 
 
 def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
     """Build the hook chain used by ``AgentRunner`` for one turn."""
+    log_content = spec.log_content and not spec.ephemeral
     progress_hook = AgentProgressHook(
-        on_progress=spec.on_progress,
-        on_stream=spec.on_stream,
-        on_stream_end=spec.on_stream_end,
+        events=spec.events,
+        streaming=spec.streaming,
         session_key=spec.session_key,
         tool_hint_max_length=spec.tool_hint_max_length,
+        log_content=log_content,
     )
     if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:
         return progress_hook
 
     turn_context = AgentTurnHookContext(
-        on_progress=spec.on_progress,
+        events=spec.events,
         workspace=spec.workspace,
         channel=spec.channel,
         chat_id=spec.chat_id,
@@ -70,7 +71,10 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         try:
             created_hook = factory(turn_context)
         except Exception:
-            logger.exception("Agent turn hook factory failed: {}", factory)
+            logger.opt(exception=log_content).error(
+                "Agent turn hook factory failed: {}",
+                factory if log_content else type(factory).__name__,
+            )
             continue
         if created_hook is not None:
             hook_chain.append(created_hook)
@@ -81,7 +85,10 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         try:
             created_hook = factory(turn_context)
         except Exception:
-            logger.exception("Agent turn hook factory failed: {}", factory)
+            logger.opt(exception=log_content).error(
+                "Agent turn hook factory failed: {}",
+                factory if log_content else type(factory).__name__,
+            )
             continue
         if created_hook is not None:
             hook_chain.append(created_hook)

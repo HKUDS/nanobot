@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
+from nanobot.agent.memory import Consolidator
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
@@ -28,6 +30,7 @@ async def test_run_inline_returns_result_without_announcement(tmp_path):
 
     provider = MagicMock()
     manager = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -61,6 +64,7 @@ async def test_run_inline_returns_structured_error(tmp_path):
     from nanobot.bus.queue import MessageBus
 
     manager = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -96,6 +100,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -141,6 +146,7 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -184,6 +190,7 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -221,6 +228,7 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -321,6 +329,7 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
     from nanobot.bus.queue import MessageBus
 
     manager = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -386,6 +395,7 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
     from nanobot.providers.base import ToolCallRequest
 
     manager = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -455,6 +465,7 @@ async def test_cancel_by_session_cancels_inline_subagent(tmp_path):
     from nanobot.bus.queue import MessageBus
 
     manager = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -488,6 +499,7 @@ def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
 
     bus = MessageBus()
     mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -504,6 +516,7 @@ def test_subagent_default_max_iterations_matches_agent_defaults(tmp_path):
 
     bus = MessageBus()
     mgr = SubagentManager(
+        consolidator=MagicMock(spec=Consolidator),
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
@@ -568,7 +581,10 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
     loop.runner.run = AsyncMock(side_effect=fake_run)
     loop.max_iterations = 55
 
-    await loop._run_agent_loop([], runtime=loop.llm_runtime())
+    await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
+    )
 
     loop.runner.run.assert_awaited_once()
 
@@ -609,7 +625,7 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=runtime,
         session=None,
         request_context=RequestContext(channel="test", chat_id="c1", runtime=runtime),
@@ -668,7 +684,7 @@ async def test_terminal_drain_timeout(tmp_path):
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=runtime,
         session=session,
         request_context=RequestContext(
@@ -742,7 +758,7 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
     loop.subagents._running_tasks["sub-deadline-1"] = hang_task
 
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=loop.llm_runtime(),
         session=session,
         pending_queue=pending_queue,

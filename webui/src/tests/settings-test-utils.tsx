@@ -4,6 +4,9 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
+import type { NanobotClient } from "@/lib/nanobot-client";
+
+export { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 export const requestMutationMock = vi.fn();
 
@@ -91,7 +94,6 @@ export function settingsPayload(): SettingsPayload {
       heartbeat: {
         enabled: true,
         interval_s: 1800,
-        keep_recent_messages: 8,
       },
       dream: {
         schedule: "every 2h",
@@ -125,10 +127,12 @@ export function settingsPayload(): SettingsPayload {
 
 export function renderSettingsView(
   options: {
+    client?: NanobotClient;
     initialSection?:
       | "overview"
       | "appearance"
       | "apps"
+      | "skills"
       | "channels"
       | "automations"
       | "advanced"
@@ -138,23 +142,36 @@ export function renderSettingsView(
       | "runtime";
     initialSettings?: SettingsPayload;
     showSidebar?: boolean;
+    mainNavigationExpanded?: boolean;
     onBackToChat?: () => void;
     onSettingsChange?: (payload: SettingsPayload) => void;
+    onStartAutomationChat?: React.ComponentProps<typeof SettingsView>["onStartAutomationChat"];
     onNativeEngineRestart?: () => Promise<string>;
+    onRestart?: () => void;
   } = {},
 ) {
   render(
-    <ClientProvider client={{ requestMutation: requestMutationMock } as never} token="tok">
+    <ClientProvider client={options.client ?? {
+      requestMutation: requestMutationMock,
+      status: "open",
+      onStatus: (handler: (status: "open") => void) => {
+        handler("open");
+        return () => {};
+      },
+    } as never} token="tok">
       <SettingsView
         theme="light"
         initialSection={options.initialSection ?? "apps"}
         initialSettings={options.initialSettings}
         showSidebar={options.showSidebar}
+        mainNavigationExpanded={options.mainNavigationExpanded}
         onToggleTheme={() => {}}
         onBackToChat={options.onBackToChat ?? (() => {})}
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}
+        onStartAutomationChat={options.onStartAutomationChat}
         onNativeEngineRestart={options.onNativeEngineRestart}
+        onRestart={options.onRestart}
       />
     </ClientProvider>,
   );

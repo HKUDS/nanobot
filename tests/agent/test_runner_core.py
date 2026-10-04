@@ -1,15 +1,15 @@
 """Tests for core AgentRunner behavior: message passing, iteration limits,
-timeouts, empty-response handling, usage accumulation, and config passthrough."""
+empty-response handling, usage accumulation, and config passthrough."""
 
 from __future__ import annotations
 
-import asyncio
-import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agent.runner_helpers import make_run_spec
+from nanobot.agent.context import TranscriptInput
+from nanobot.agent.context_governance import ContextWindowExceededError
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import (
     LLMProvider,
@@ -34,6 +34,39 @@ def _make_usage_spec(provider, tools):
     )
 
 
+def test_initial_transcript_is_built_from_structured_turn_input() -> None:
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    transcript_input = TranscriptInput(
+        history=[{"role": "user", "content": "earlier"}],
+        current_message="fresh",
+    )
+    expected = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "earlier"},
+        {"role": "user", "content": "fresh"},
+    ]
+    transcript_builder = MagicMock(return_value=expected)
+    spec = make_run_spec(
+        provider,
+        initial_messages=None,
+        transcript_input=transcript_input,
+        transcript_builder=transcript_builder,
+        tools=MagicMock(),
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+
+    messages, compaction = AgentRunner._initial_transcript_and_compaction(spec)
+
+    assert messages == expected
+    assert compaction is not None
+    assert compaction.raw_messages == expected
+    transcript_builder.assert_called_once_with(transcript_input)
+
+
 def test_usage_or_estimate_replaces_reported_zero_for_content(monkeypatch) -> None:
     from nanobot.agent.runner import AgentRunner
 
@@ -56,6 +89,7 @@ def test_usage_or_estimate_replaces_reported_zero_for_content(monkeypatch) -> No
         _make_usage_spec(provider, tools),
         [{"role": "user", "content": "hello"}],
         response,
+        tool_definitions=tools.get_definitions(),
     )
 
     assert usage == LLMUsage.estimated(input_tokens=12, output_tokens=7).with_timing(
@@ -100,6 +134,7 @@ def test_usage_or_estimate_counts_tool_call_output_for_reported_zero(monkeypatch
         _make_usage_spec(provider, tools),
         [{"role": "user", "content": "hello"}],
         response,
+        tool_definitions=tools.get_definitions(),
     )
 
     assert usage == LLMUsage.estimated(input_tokens=13, output_tokens=9)
@@ -132,6 +167,7 @@ def test_usage_or_estimate_counts_error_without_estimating_tokens(
         _make_usage_spec(provider, tools),
         [{"role": "user", "content": "hello"}],
         response,
+        tool_definitions=tools.get_definitions(),
     )
 
     assert usage is not None
@@ -167,6 +203,7 @@ def test_usage_or_estimate_trusts_positive_reported_total(monkeypatch) -> None:
         _make_usage_spec(provider, tools),
         [{"role": "user", "content": "hello"}],
         response,
+        tool_definitions=tools.get_definitions(),
     )
 
     assert usage is not None
@@ -188,7 +225,7 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
     captured_second_call: list[dict] = []
     call_count = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -201,7 +238,7 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
         captured_second_call[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
@@ -266,7 +303,7 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
         payload={"items": [{"type": "message", "role": "assistant"}]},
     )
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -287,7 +324,7 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
         captured_second_kwargs.update(kwargs)
         return LLMResponse(content="done", provider_state=second_state)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
@@ -336,14 +373,12 @@ async def test_runner_replays_provider_state_without_chat_projection_duplicates(
 
 
 @pytest.mark.asyncio
-async def test_runner_governs_tool_result_before_adding_it_to_provider_state():
+async def test_runner_preserves_tool_result_before_rejecting_unfit_followup():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = True
-    provider.supports_native_compaction.return_value = False
     calls = 0
-    captured_context: ProviderCallContext | None = None
     checkpoints: list[dict] = []
     state = ProviderConversationState(
         kind="openai_responses",
@@ -353,8 +388,8 @@ async def test_runner_governs_tool_result_before_adding_it_to_provider_state():
         payload={"items": [{"type": "reasoning", "encrypted_content": "opaque"}]},
     )
 
-    async def chat_with_retry(**kwargs):
-        nonlocal calls, captured_context
+    async def chat_stream_with_retry(**kwargs):
+        nonlocal calls
         calls += 1
         if calls == 1:
             return LLMResponse(
@@ -368,10 +403,9 @@ async def test_runner_governs_tool_result_before_adding_it_to_provider_state():
                 ],
                 provider_state=state,
             )
-        captured_context = kwargs["provider_context"]
         return LLMResponse(content="done")
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="x" * 5_000)
@@ -379,37 +413,35 @@ async def test_runner_governs_tool_result_before_adding_it_to_provider_state():
     async def checkpoint(payload: dict) -> None:
         checkpoints.append(payload)
 
-    await AgentRunner().run(make_run_spec(
-        provider,
-        initial_messages=[
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "read the file"},
-        ],
-        tools=tools,
-        model="gpt-5.6",
-        context_window_tokens=3_000,
-        context_block_limit=200,
-        max_tokens=1_000,
-        max_iterations=3,
-        max_tool_result_chars=10_000,
-        checkpoint_callback=checkpoint,
-    ))
+    with pytest.raises(ContextWindowExceededError):
+        await AgentRunner().run(make_run_spec(
+            provider,
+            initial_messages=[
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "read the file"},
+            ],
+            tools=tools,
+            model="gpt-5.6",
+            context_window_tokens=2_224,
+            max_tokens=1_000,
+            max_iterations=3,
+            max_tool_result_chars=10_000,
+            checkpoint_callback=checkpoint,
+        ))
 
-    assert captured_context is not None
-    assert captured_context.conversation_state is not None
-    pending = captured_context.conversation_state.pending_messages
-    assert len(pending) == 1
-    assert pending[0]["role"] == "tool"
-    assert "compacted to fit context" in pending[0]["content"]
-    assert pending[0]["content"] != "x" * 5_000
+    assert calls == 1
     completed_checkpoint = next(
         checkpoint
         for checkpoint in checkpoints
         if checkpoint["phase"] == "tools_completed"
     )
     checkpoint_pending = completed_checkpoint["provider_state"].pending_messages
-    assert "compacted to fit context" in checkpoint_pending[0]["content"]
-    assert checkpoint_pending[0]["content"] != "x" * 5_000
+    assert checkpoint_pending == [{
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "name": "read_file",
+        "content": "x" * 5_000,
+    }]
 
 
 @pytest.mark.asyncio
@@ -433,7 +465,7 @@ async def test_injected_final_response_checkpoint_includes_provider_state():
         version=1,
         payload={"items": [{"type": "message", "content": "second answer"}]},
     )
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content="first answer", provider_state=first_state),
         LLMResponse(content="second answer", provider_state=second_state),
     ])
@@ -469,7 +501,7 @@ async def test_runner_preserves_last_completed_provider_state_on_model_error():
 
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = True
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="temporary upstream failure",
         finish_reason="error",
         error_kind="timeout",
@@ -512,7 +544,7 @@ async def test_runner_discards_provider_state_on_non_retryable_model_error():
 
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = True
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="context length exceeded",
         finish_reason="error",
         error_status_code=400,
@@ -547,7 +579,7 @@ async def test_runner_returns_max_iterations_fallback():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="still working",
         tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
     ))
@@ -571,8 +603,8 @@ async def test_runner_returns_max_iterations_fallback():
     )
     assert result.messages[-1]["role"] == "assistant"
     assert result.messages[-1]["content"] == result.final_content
-    assert provider.chat_with_retry.await_count == 3
-    assert provider.chat_with_retry.await_args_list[-1].kwargs["tools"] is None
+    assert provider.chat_stream_with_retry.await_count == 3
+    assert provider.chat_stream_with_retry.await_args_list[-1].kwargs["tools"] is None
     assert tools.execute.await_count == 2
 
 
@@ -583,7 +615,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
-    async def chat_with_retry(*, messages, tools=None, **kwargs):
+    async def chat_stream_with_retry(*, messages, tools=None, **kwargs):
         calls.append({"messages": messages, "tools": tools})
         if len(calls) <= 2:
             return LLMResponse(
@@ -595,6 +627,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
                         arguments={"path": "."},
                     )
                 ],
+                usage=LLMUsage.reported(input_tokens=1, output_tokens=1),
             )
         return LLMResponse(
             content="Read the directory twice. More investigation remains.",
@@ -602,7 +635,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
             usage=LLMUsage.reported(input_tokens=10, output_tokens=7),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
@@ -626,176 +659,14 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
     assert calls[-1]["tools"] is None
     assert "tool-call budget" in calls[-1]["messages"][-1]["content"]
     assert tools.execute.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_runner_times_out_hung_llm_request():
-    from nanobot.agent.runner import AgentRunner
-
-    provider = MagicMock(spec=LLMProvider)
-
-    async def chat_with_retry(**kwargs):
-        await asyncio.sleep(3600)
-
-    provider.chat_with_retry = chat_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    runner = AgentRunner()
-    started = time.monotonic()
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        llm_timeout_s=0.05,
-    ))
-
-    assert (time.monotonic() - started) < 1.0
-    assert result.stop_reason == "error"
-    assert "timed out" in (result.final_content or "").lower()
-
-
-@pytest.mark.asyncio
-async def test_runner_times_out_hung_max_iteration_finalization():
-    from nanobot.agent.runner import AgentRunner
-
-    provider = MagicMock()
-    calls = 0
-
-    async def chat_with_retry(**kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return LLMResponse(
-                content="",
-                tool_calls=[
-                    ToolCallRequest(
-                        id="call_1",
-                        name="probe",
-                        arguments={},
-                    )
-                ],
-                finish_reason="tool_calls",
-            )
-        await asyncio.Event().wait()
-
-    provider.chat_with_retry = chat_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    tools.execute = AsyncMock(return_value="ok")
-
-    result = await asyncio.wait_for(
-        AgentRunner().run(make_run_spec(
-            provider,
-            initial_messages=[{"role": "user", "content": "run the probe"}],
-            tools=tools,
-            model="test-model",
-            max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-            max_iterations_message="fallback after {max_iterations} iteration",
-            llm_timeout_s=0.01,
-        )),
-        timeout=1.0,
-    )
-
-    assert calls == 2
-    assert result.stop_reason == "max_iterations"
-    assert result.error is None
-    assert result.final_content == "fallback after 1 iteration"
-
-
-@pytest.mark.asyncio
-async def test_runner_applies_outer_wall_timeout_to_streaming_requests():
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunner
-
-    provider = MagicMock(spec=LLMProvider)
-    streamed: list[str] = []
-
-    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
-        await asyncio.sleep(0)
-        await on_content_delta("still ")
-        await asyncio.sleep(0)
-        await on_content_delta("alive")
-        return LLMResponse(content="still alive", tool_calls=[])
-
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    class StreamingHook(AgentHook):
-        def wants_streaming(self) -> bool:
-            return True
-
-        async def on_stream(self, context: AgentHookContext, delta: str) -> None:
-            streamed.append(delta)
-
-    runner = AgentRunner()
-    wait_for_calls: list[float] = []
-
-    async def fake_wait_for(coro, *, timeout):
-        wait_for_calls.append(timeout)
-        return await coro
-
-    with patch("nanobot.agent.runner.asyncio.wait_for", fake_wait_for):
-        result = await runner.run(make_run_spec(provider,
-            initial_messages=[{"role": "user", "content": "think for a while"}],
-            tools=tools,
-            model="test-model",
-            max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-            hook=StreamingHook(),
-            llm_timeout_s=0.01,
-        ))
-
-    assert result.stop_reason == "completed"
-    assert result.final_content == "still alive"
-    assert streamed == ["still ", "alive"]
-    provider.chat_with_retry.assert_not_awaited()
-    assert wait_for_calls == [300.0]
-
-
-@pytest.mark.asyncio
-async def test_runner_times_out_never_ending_streaming_request():
-    from nanobot.agent.hook import AgentHook
-    from nanobot.agent.runner import AgentRunner
-
-    provider = MagicMock(spec=LLMProvider)
-
-    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
-        await asyncio.sleep(3600)
-
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    provider.chat_with_retry = AsyncMock()
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    class StreamingHook(AgentHook):
-        def wants_streaming(self) -> bool:
-            return True
-
-    async def fake_wait_for(coro, *, timeout):
-        coro.close()
-        raise asyncio.TimeoutError
-
-    runner = AgentRunner()
-    with patch("nanobot.agent.runner.asyncio.wait_for", fake_wait_for):
-        result = await runner.run(make_run_spec(provider,
-            initial_messages=[{"role": "user", "content": "think forever"}],
-            tools=tools,
-            model="test-model",
-            max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-            hook=StreamingHook(),
-            llm_timeout_s=200,
-        ))
-
-    assert result.stop_reason == "error"
-    assert result.final_content == "Error calling LLM: timed out after 400s"
-    provider.chat_with_retry.assert_not_awaited()
+    assert result.usage is not None
+    assert result.usage.input_tokens == 12
+    assert result.usage.output_tokens == 9
+    assert [(item.input_tokens, item.output_tokens) for item in result.round_usages] == [
+        (1, 1),
+        (1, 1),
+        (10, 7),
+    ]
 
 
 @pytest.mark.asyncio
@@ -806,7 +677,7 @@ async def test_runner_replaces_empty_tool_result_with_marker():
     captured_second_call: list[dict] = []
     call_count = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -817,7 +688,7 @@ async def test_runner_replaces_empty_tool_result_with_marker():
         captured_second_call[:] = messages
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="")
@@ -844,7 +715,7 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
-    async def chat_with_retry(*, messages, tools=None, **kwargs):
+    async def chat_stream_with_retry(*, messages, tools=None, **kwargs):
         calls.append({"messages": messages, "tools": tools})
         if len(calls) <= 2:
             return LLMResponse(
@@ -858,7 +729,7 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
             usage=LLMUsage.reported(input_tokens=3, output_tokens=7),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -880,6 +751,11 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
     assert result.usage is not None
     assert result.usage.input_tokens == 13
     assert result.usage.output_tokens == 9
+    assert [(item.input_tokens, item.output_tokens) for item in result.round_usages] == [
+        (5, 1),
+        (5, 1),
+        (3, 7),
+    ]
 
 
 @pytest.mark.asyncio
@@ -891,7 +767,7 @@ async def test_runner_does_not_retry_blank_policy_terminal(
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content=None,
         finish_reason=finish_reason,
     ))
@@ -907,7 +783,7 @@ async def test_runner_does_not_retry_blank_policy_terminal(
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 1
+    assert provider.chat_stream_with_retry.await_count == 1
     assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
     assert result.stop_reason == "empty_final_response"
 
@@ -920,7 +796,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="Request blocked by provider policy.",
         finish_reason=finish_reason,
     ))
@@ -939,7 +815,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
         terminal_injection_callback=terminal_injection_callback,
     ))
 
-    assert provider.chat_with_retry.await_count == 1
+    assert provider.chat_stream_with_retry.await_count == 1
     terminal_injection_callback.assert_not_awaited()
     assert result.final_content == "Request blocked by provider policy."
     assert result.stop_reason == "completed"
@@ -953,10 +829,10 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
 
     provider = MagicMock(spec=LLMProvider)
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         return LLMResponse(content=None, tool_calls=[], usage=None)
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -993,7 +869,7 @@ async def test_empty_finalization_retry_discards_candidate_provider_state():
     )
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = True
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content=None, tool_calls=[], usage=None),
         LLMResponse(content=None, tool_calls=[], usage=None),
         LLMResponse(
@@ -1029,7 +905,7 @@ async def test_runner_length_recovery_returns_all_segments():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content="first ", finish_reason="length"),
         LLMResponse(content="second ", finish_reason="length"),
         LLMResponse(content="third", finish_reason="stop"),
@@ -1052,7 +928,7 @@ async def test_runner_length_recovery_returns_all_segments():
         for message in result.messages
         if message.get("role") == "assistant"
     ] == ["first", "second", "third"]
-    assert provider.chat_with_retry.await_count == 3
+    assert provider.chat_stream_with_retry.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -1061,7 +937,7 @@ async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(
+    provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="partial answer", finish_reason="length")
     )
     tools = MagicMock()
@@ -1095,7 +971,7 @@ async def test_runner_length_recovery_does_not_leak_across_tool_calls():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content="working", finish_reason="length"),
         LLMResponse(
             content=None,
@@ -1133,7 +1009,7 @@ async def test_runner_empty_response_does_not_break_tool_chain():
     provider = MagicMock(spec=LLMProvider)
     call_count = 0
 
-    async def chat_with_retry(*, messages, tools=None, **kwargs):
+    async def chat_stream_with_retry(*, messages, tools=None, **kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -1156,8 +1032,7 @@ async def test_runner_empty_response_does_not_break_tool_chain():
             usage=LLMUsage.reported(input_tokens=10, output_tokens=10),
         )
 
-    provider.chat_with_retry = chat_with_retry
-    provider.chat_stream_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
 
     async def fake_tool(name, args, **kw):
         return "file content"
@@ -1189,7 +1064,7 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
     provider = MagicMock(spec=LLMProvider)
     call_count = {"n": 0}
 
-    async def chat_with_retry(*, messages, **kwargs):
+    async def chat_stream_with_retry(*, messages, **kwargs):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return LLMResponse(
@@ -1203,7 +1078,7 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
             usage=LLMUsage.reported(input_tokens=200, output_tokens=20, cache_read_tokens=150),
         )
 
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="file content")
@@ -1224,21 +1099,29 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
     assert result.usage.cache_read_tokens == 230  # 80 + 150
     assert result.usage.context_tokens == 200
     assert result.usage.request_count == 2
+    assert [
+        (item.input_tokens, item.cache_read_tokens)
+        for item in result.round_usages
+    ] == [
+        (100, 80),
+        (200, 150),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_runner_binds_on_retry_wait_callback():
-    """Provider retry heartbeats use the explicitly supplied callback."""
+async def test_runner_carries_retry_notifications_in_provider_context():
+    """The runner carries a generic scope, not an event-specific callback."""
     from nanobot.agent.runner import AgentRunner
+    from nanobot.events import EventSink, RetryWaitEvent
 
     captured: dict = {}
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         captured.update(kwargs)
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -1254,10 +1137,13 @@ async def test_runner_binds_on_retry_wait_callback():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        retry_wait_callback=retry_wait_cb,
+        events=EventSink(retry_wait_cb),
     ))
 
-    assert captured["on_retry_wait"] is retry_wait_cb
+    assert "on_retry_wait" not in captured
+    event = RetryWaitEvent("waiting")
+    await captured["provider_context"].events.emit(event)
+    retry_wait_cb.assert_awaited_once_with(event)
 
 
 # ---------------------------------------------------------------------------
@@ -1267,17 +1153,17 @@ async def test_runner_binds_on_retry_wait_callback():
 
 @pytest.mark.asyncio
 async def test_runner_passes_temperature_to_provider():
-    """temperature from AgentRunSpec should reach provider.chat_with_retry."""
+    """temperature from AgentRunSpec should reach provider.chat_stream_with_retry."""
     from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         captured.update(kwargs)
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -1296,17 +1182,17 @@ async def test_runner_passes_temperature_to_provider():
 
 @pytest.mark.asyncio
 async def test_runner_passes_max_tokens_to_provider():
-    """max_tokens from AgentRunSpec should reach provider.chat_with_retry."""
+    """max_tokens from AgentRunSpec should reach provider.chat_stream_with_retry."""
     from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         captured.update(kwargs)
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
@@ -1325,17 +1211,17 @@ async def test_runner_passes_max_tokens_to_provider():
 
 @pytest.mark.asyncio
 async def test_runner_passes_reasoning_effort_to_provider():
-    """reasoning_effort from AgentRunSpec should reach provider.chat_with_retry."""
+    """reasoning_effort from AgentRunSpec should reach provider.chat_stream_with_retry."""
     from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
 
-    async def chat_with_retry(**kwargs):
+    async def chat_stream_with_retry(**kwargs):
         captured.update(kwargs)
         return LLMResponse(content="done", tool_calls=[], usage=None)
 
     provider = MagicMock(spec=LLMProvider)
-    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_stream_with_retry
     tools = MagicMock()
     tools.get_definitions.return_value = []
 

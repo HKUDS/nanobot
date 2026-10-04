@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -57,45 +58,20 @@ def _add_turns(session: Session, turns: int, *, prefix: str = "msg") -> None:
         session.add_message("assistant", f"{prefix} assistant {i}")
 
 
-# ---------------------------------------------------------------------------
-# __init__
-# ---------------------------------------------------------------------------
+def test_default_ttl_disables_idle_compaction():
+    sessions = MagicMock(spec=SessionManager)
+    sessions.list_sessions.return_value = [
+        {"key": "cli:idle", "updated_at": datetime.now() - timedelta(days=365)},
+    ]
+    sessions.get_or_create.return_value = _make_session(
+        key="cli:idle", messages=[{"role": "user", "content": "pending"}],
+    )
+    ac = AutoCompact(sessions=sessions, consolidator=MagicMock())
+    schedule = MagicMock(side_effect=lambda pending: pending.close())
 
+    ac.check_expired(schedule, _runtime)
 
-class TestInit:
-    """Test AutoCompact.__init__ stores constructor arguments correctly."""
-
-    def test_stores_ttl(self):
-        """_ttl should match session_ttl_minutes argument."""
-        ac = _make_autocompact(ttl=30)
-        assert ac._ttl == 30
-
-    def test_default_ttl_is_zero(self):
-        """Default TTL should be 0."""
-        ac = _make_autocompact(ttl=0)
-        assert ac._ttl == 0
-
-    def test_archiving_set_is_empty(self):
-        """_archiving should start as an empty set."""
-        ac = _make_autocompact()
-        assert ac._archiving == set()
-
-    def test_summaries_dict_is_empty(self):
-        """_summaries should start as an empty dict."""
-        ac = _make_autocompact()
-        assert ac._summaries == {}
-
-    def test_stores_sessions_reference(self):
-        """sessions attribute should reference the passed SessionManager."""
-        mock_sm = MagicMock(spec=SessionManager)
-        ac = _make_autocompact(sessions=mock_sm)
-        assert ac.sessions is mock_sm
-
-    def test_stores_consolidator_reference(self):
-        """consolidator attribute should reference the passed Consolidator."""
-        mock_c = MagicMock()
-        ac = _make_autocompact(consolidator=mock_c)
-        assert ac.consolidator is mock_c
+    assert schedule.call_count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +243,7 @@ class TestCheckExpired:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:old",
             runtime=admitted,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            events=NO_EVENTS,
         )
 
     @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
@@ -442,8 +418,38 @@ class TestArchiveDelegates:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:test",
             runtime=runtime,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            events=NO_EVENTS,
         )
+
+    @pytest.mark.asyncio
+    async def test_forwards_timeout_compaction_events_with_session_key(self):
+        sessions = MagicMock(spec=SessionManager)
+        consolidator = MagicMock()
+        observed: list[tuple[str, ContextCompactionEvent]] = []
+
+        def bind(key: str):
+            async def publish(event: ContextCompactionEvent) -> None:
+                observed.append((key, event))
+            return EventSink(publish)
+
+        async def compact(key: str, **kwargs):
+            event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
+            await kwargs["events"].emit(event)
+            return "Summary."
+
+        consolidator.compact_idle_session = AsyncMock(side_effect=compact)
+        ac = AutoCompact(
+            sessions=sessions,
+            consolidator=consolidator,
+            session_ttl_minutes=15,
+            bind_events=bind,
+        )
+
+        await ac._archive("cli:test", runtime=_runtime())
+
+        assert len(observed) == 1
+        assert observed[0][0] == "cli:test"
+        assert observed[0][1].phase == "started"
 
     @pytest.mark.asyncio
     async def test_dream_session_is_ignored(self):

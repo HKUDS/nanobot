@@ -55,6 +55,14 @@ def no_qr_poll_delay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(weixin_mod, "asyncio", AsyncioProxy())
 
 
+@pytest.fixture(autouse=True)
+def isolate_config_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep mocked QR credentials out of the user's real config file."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+
 def test_make_headers_includes_route_tag_when_configured() -> None:
     bus = MessageBus()
     channel = WeixinChannel(
@@ -887,7 +895,6 @@ async def test_qr_login_switches_polling_base_url_on_redirect_status(
             "ilink_user_id": "wx-user",
         },
     ]
-    channel._api_get = AsyncMock(side_effect=list(status_side_effect))
     channel._api_get_with_base = AsyncMock(side_effect=list(status_side_effect))
 
     ok = await channel._qr_login()
@@ -921,7 +928,6 @@ async def test_qr_login_redirect_without_host_keeps_current_polling_base_url(
             "ilink_user_id": "wx-user",
         },
     ]
-    channel._api_get = AsyncMock(side_effect=list(status_side_effect))
     channel._api_get_with_base = AsyncMock(side_effect=list(status_side_effect))
 
     ok = await channel._qr_login()

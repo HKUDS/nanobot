@@ -1,27 +1,42 @@
-Create a memory overview for only the final {{ archive_count }} conversation messages immediately before this instruction. Earlier messages are context for resolving references; do not summarize them again.
+Create a compact replacement checkpoint for this session.
 
-Use [skip] unless a fact meets all SNIP criteria:
-- Signal: would the user need to repeat this if forgotten?
-- Novel: not just a restatement of another fact in this same conversation chunk
-- Important: prevents rework or captures preferences / rules
-- Persistent: still relevant after 2 weeks
+When `[Archived Context Summary]` appears in the system prompt, update that previous checkpoint to reflect the current conversation state.
 
-Also preserve a compact working-state handoff even when it is not Persistent: the active objective, current status, completed steps, unresolved blockers, next action, and exact identifiers needed to continue without rework. Mark these facts [ephemeral].
+## Merge rules
 
-Format each fact as:
-- [mark] fact content
+- Use the latest correction or decision as the current version of a fact, and merge duplicates.
+- Preserve exact names, identifiers, paths, commands, decisions, results, and unresolved blockers when they are needed to continue the session.
+- Retain a fact already present in long-term memory when it is needed for session continuity.
 
-Marks (choose the best match):
-- [permanent] Core preferences, personal traits, habits — never becomes stale
-- [durable] Technical discoveries, project knowledge, config details — valid for months
-- [ephemeral] Active task state, temporary decisions — may change in weeks
-- [correction] Correction to a previous memory — state what changed
-- [skip] Conversational filler, code/source facts derivable from the repo, or audit-only breadcrumbs
+## What to retain
 
-Priority: user corrections and preferences > solutions > decisions > events > environment facts.
+Always retain a compact working-state handoff:
+- active objective
+- current status
+- completed results that constrain later work
+- unresolved blockers
+- next action
+- exact identifiers needed for that action
 
-Do not output facts already present in the system prompt's Recent History.
+Mark working-state facts `[ephemeral]`.
 
-Do not mark something [skip] merely because it might already exist in long-term memory.
+For other facts, retain a candidate only when it meets all four SNIP criteria:
+- Signal: remembering it saves the user from repeating it
+- Novel: it adds a distinct fact to this checkpoint
+- Important: losing it would cause rework or discard a preference or rule
+- Persistent: it is expected to remain useful for at least two weeks
 
-Return only formatted fact lines, or `(nothing)` if nothing noteworthy happened.
+Assign each retained fact its best current mark:
+- `[permanent]` for core preferences, personal traits, and habits that remain relevant indefinitely
+- `[durable]` for technical discoveries, project knowledge, and configuration that remains valid for months
+- `[ephemeral]` for active task state and temporary decisions that may change within weeks
+- `[correction]` for the current fact that supersedes conflicting earlier long-term memory
+
+When space is limited, prioritize user corrections and preferences, then solutions, decisions, events, and environment facts.
+
+## Output
+
+Return one concise retained fact per line in this form:
+- [mark] fact
+
+Use `(nothing)` when neither the previous checkpoint nor the current conversation contains a qualifying fact or active working state.

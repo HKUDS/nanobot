@@ -1,19 +1,10 @@
 {
-  "description": "在 Matrix 房間中使用 nanobot。",
-  "requirements": "主伺服器、帳戶權杖和房間存取權限",
   "setup": {
     "docsLabel": "開啟 Matrix 設定指南",
     "officialLabel": "開啟 Matrix 用戶端列表",
-    "tryIt": "將 Matrix 帳戶邀請進房間並傳送一則測試訊息。",
-    "summary": "Matrix 需要主伺服器帳戶，並使用密碼或存取權杖登入。",
-    "steps": [
-      "為 nanobot 建立或選擇一個 Matrix 帳戶。",
-      "填入主伺服器、使用者 ID，以及密碼或存取權杖憑證。",
-      "儲存並啟用 Matrix，將帳戶邀請進房間，然後傳送一則測試訊息。"
-    ],
     "fields": {
       "homeserver": {
-        "label": "主伺服器",
+        "label": "帳戶伺服器",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -22,18 +13,15 @@
       },
       "password": {
         "label": "密碼",
-        "placeholder": "••••••",
-        "help": "密碼登入和存取權杖登入任選其一。"
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "存取權杖",
-        "placeholder": "可選的權杖登入",
-        "help": "若 Matrix 用戶端可顯示存取權杖，建議使用此方式。"
+        "placeholder": "輸入存取權杖"
       },
       "deviceId": {
         "label": "裝置 ID",
-        "placeholder": "使用存取權杖時必填",
-        "help": "複製與存取權杖關聯的裝置 ID；密碼登入不需要。"
+        "placeholder": "使用存取權杖時必填"
       },
       "groupPolicy": {
         "label": "群組行為",
@@ -42,6 +30,53 @@
           "open": "所有訊息",
           "allowlist": "允許清單"
         }
+      },
+      "allowFrom": {
+        "label": "允許的用戶"
+      },
+      "e2eeEnabled": {
+        "label": "端對端加密",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 驗證",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "同步停止等待時間"
+      },
+      "maxMediaBytes": {
+        "label": "媒體大小上限"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "並發媒體下載數"
+      },
+      "groupAllowFrom": {
+        "label": "允許的群組"
+      },
+      "allowRoomMentions": {
+        "label": "響應房間提及",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "streaming": {
+        "label": "串流輸出",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "proxy": {
+        "label": "網路代理",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }
