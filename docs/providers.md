@@ -207,6 +207,48 @@ Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models)
 to choose a currently available model. The WebUI can also load that catalog
 after the Eden AI API key is saved under **Settings → Models**.
 
+### Opper Gateway
+
+[Opper](https://opper.ai/llm-gateway) is an EU-hosted AI gateway: 700+ models from 30+
+providers behind one OpenAI-compatible API and one key. Configure the built-in `opper`
+provider and use a model ID from [Opper's catalog](https://opper.ai/models):
+
+```json
+{
+  "providers": {
+    "opper": {
+      "apiKey": "${OPPER_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "opper",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+nanobot sends the model ID unchanged. Opper's primary model IDs are bare pool names such as
+`claude-sonnet-4-6`, `gpt-5.5`, `gpt-5.4-mini`, `gemini-3.8-flash`, or `deepseek-v4-pro`; a
+pool is every provider serving that model and Opper picks the route per request. Use the
+`provider/model` form (for example `azure/gpt-5.5` or `aws/claude-sonnet-4-6-eu`) to pin one
+provider or region. The default base URL is `https://api.opper.ai/v3/compat`; API keys are
+created at [platform.opper.ai](https://platform.opper.ai). The WebUI can load the account's
+model catalog after the API key is saved under **Settings → Models**.
+
+Opper is hosted in the EU (AWS Stockholm) and requests can be pinned to EU-hosted regions.
+Token rates are the model providers' rates with no markup; Opper charges a 3% fee when you buy
+credits (5.5% with Control Plane features), and BYOK is supported. See
+[opper.ai/pricing](https://opper.ai/pricing) and [docs.opper.ai](https://docs.opper.ai).
+
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models.
