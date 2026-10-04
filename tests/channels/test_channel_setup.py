@@ -37,6 +37,7 @@ EXPECTED_CHANNELS = {
 INTERNAL_CHANNEL_FIELDS = {
     "feishu": {"instanceId", "identityKey"},
     "signal": {"allowFrom"},
+    "telegram": {"extraHeaders"},
     "weixin": {"token"},
     "whatsapp": {"databasePath", "lidMappings"},
     # nanobot WebUI owns this transport and intentionally has no channel dialog.
