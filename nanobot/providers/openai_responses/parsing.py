@@ -310,6 +310,7 @@ def _extract_refusal_text_from_output(output: object) -> tuple[bool, str]:
 async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:
     """Yield parsed JSON events from a Responses API SSE stream."""
     buffer: list[str] = []
+    first_line = True
 
     def _flush() -> dict[str, Any] | None:
         data_lines = [line[5:].strip() for line in buffer if line.startswith("data:")]
@@ -326,6 +327,10 @@ async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], N
             return None
 
     async for line in response.aiter_lines():
+        if first_line:
+            # SSE permits one UTF-8 BOM at the beginning of the stream.
+            line = line.removeprefix("\ufeff")
+            first_line = False
         if line == "":
             if buffer:
                 event = _flush()

@@ -5,6 +5,7 @@ from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from loguru import logger
 
@@ -1043,6 +1044,36 @@ class _SseResponse:
 
 
 class TestConsumeSse:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prefix", ["", "\ufeff"])
+    async def test_leading_utf8_bom_preserves_first_content_delta(self, prefix):
+        events = [
+            {"type": "response.output_text.delta", "delta": "Hello "},
+            {"type": "response.output_text.delta", "delta": "\ufeff世界"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ]
+        wire = prefix + "".join(
+            f"data: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events
+        )
+        response = httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=wire.encode("utf-8"),
+        )
+        deltas = []
+
+        async def on_delta(delta):
+            deltas.append(delta)
+
+        content, tool_calls, finish_reason, _, _ = await consume_sse_with_reasoning(
+            response, on_content_delta=on_delta,
+        )
+
+        assert content == "Hello \ufeff世界"
+        assert deltas == ["Hello ", "\ufeff世界"]
+        assert tool_calls == []
+        assert finish_reason == "stop"
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
     async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
