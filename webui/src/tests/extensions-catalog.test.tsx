@@ -38,6 +38,28 @@ describe("extensions catalog", () => {
     expect(screen.getByText("2 installed")).toBeInTheDocument();
   });
 
+  it("renders extension enable/disable switches instead of status text", () => {
+    render(
+      <ExtensionsCatalogSettings
+        extensions={[{
+          id: "query-quota",
+          name: "Query Quota",
+          description: "Quota dashboard",
+          entry: "index.html",
+          version: "0.1.0",
+          enabled: true,
+          config: { title: "Daily quota" },
+        }]}
+        onOpenExtension={vi.fn()}
+        onToggleExtension={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/1 enabled/i)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /toggle query quota/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /enable|disable/i })).not.toBeInTheDocument();
+  });
+
   it("opens a config editor and saves edits", async () => {
     const onEdit = vi.fn().mockResolvedValue(undefined);
     render(
