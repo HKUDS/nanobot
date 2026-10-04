@@ -29,6 +29,7 @@ class ProviderModelSpec:
     context_window: int | None = None
     reasoning_efforts: tuple[str, ...] = ()
     supports_backend_search: bool = False
+    reasoning_efforts_from_provider: bool = False
 
 
 @dataclass(frozen=True)

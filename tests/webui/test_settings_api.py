@@ -2096,6 +2096,7 @@ def test_provider_models_payload_returns_online_openai_codex_models(
                     owned_by="OpenAI Codex",
                     context_window=272_000,
                     reasoning_efforts=("low", "medium", "high", "xhigh", "max", "ultra"),
+                    reasoning_efforts_from_provider=True,
                 ),
             ),
             source="remote",
@@ -2116,8 +2117,11 @@ def test_provider_models_payload_returns_online_openai_codex_models(
         "owned_by": "OpenAI Codex",
         "context_window": 272000,
         "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "reasoning_efforts_from_provider": True,
         "supports_backend_search": False,
     }
+    assert "api_key" not in payload["models"][0]
+    assert "token" not in payload["models"][0]
 
 
 @pytest.mark.parametrize("source", ["stale", "fallback"])
@@ -2238,6 +2242,7 @@ def test_provider_models_payload_returns_online_github_copilot_models(
     assert payload["catalog_kind"] == "hybrid"
     assert payload["source"] == "remote"
     assert payload["models"][0]["id"] == "github-copilot/claude-sonnet"
+    assert payload["models"][0]["reasoning_efforts_from_provider"] is False
 
 
 def test_provider_models_payload_returns_online_xai_grok_models(
@@ -2254,6 +2259,7 @@ def test_provider_models_payload_returns_online_xai_grok_models(
                     owned_by="xAI",
                     context_window=500_000,
                     reasoning_efforts=("xhigh", "high", "medium", "low"),
+                    reasoning_efforts_from_provider=True,
                     supports_backend_search=True,
                 ),
                 ProviderModelSpec(
@@ -2262,6 +2268,7 @@ def test_provider_models_payload_returns_online_xai_grok_models(
                     owned_by="xAI",
                     context_window=500_000,
                     reasoning_efforts=("high", "medium", "low"),
+                    reasoning_efforts_from_provider=True,
                     supports_backend_search=True,
                 ),
             ),
@@ -2284,6 +2291,7 @@ def test_provider_models_payload_returns_online_xai_grok_models(
             "owned_by": "xAI",
             "context_window": 500000,
             "reasoning_efforts": ["xhigh", "high", "medium", "low"],
+            "reasoning_efforts_from_provider": True,
             "supports_backend_search": True,
         },
         {
@@ -2293,6 +2301,7 @@ def test_provider_models_payload_returns_online_xai_grok_models(
             "owned_by": "xAI",
             "context_window": 500000,
             "reasoning_efforts": ["high", "medium", "low"],
+            "reasoning_efforts_from_provider": True,
             "supports_backend_search": True,
         },
     ]
