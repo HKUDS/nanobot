@@ -529,6 +529,7 @@ If QR login is unavailable for your account, use manual setup below.
 - Create a new app → Enable **Bot** capability
 - **Permissions**:
   - `im:message` (send messages) and `im:message.p2p_msg:readonly` (receive messages)
+  - To let **other bots** in the same group talk to this bot, add **`im:message.group_at_msg.include_bot:readonly`** (receive @mentions from other bots and users) and set `allowBotSenders` below
   - **Streaming replies** (default in nanobot): add **`cardkit:card:write`** (often labeled **Create and update cards** in the Feishu developer console). Required for CardKit entities and streamed assistant text. Older apps may not have it yet — open **Permission management**, enable the scope, then **publish** a new app version if the console requires it.
   - If you **cannot** add `cardkit:card:write`, set `"streaming": false` under `channels.feishu` (see below). The bot still works; replies use normal interactive cards without token-by-token streaming.
 - **Events**: Add `im.message.receive_v1` (receive messages)
@@ -567,6 +568,7 @@ If QR login is unavailable for your account, use manual setup below.
 > `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
 > `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`).
 > `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
+> **Bot-to-bot groups**: Feishu only delivers group messages that @ the bot. With `im:message.group_at_msg.include_bot:readonly` granted, messages from **other bots** are delivered too, and nanobot drops them by default so two bots cannot reply to each other forever. `allowBotSenders` (peer bot open_ids, `["*"]` for any) lets specific peers through, `botHopLimit` (default `2`) caps consecutive bot-triggered turns per chat — a human message resets it — and `replyWithMention` (default `false`) makes replies to an allowed peer carry a real `<at>` mention, without which the peer's own Feishu app never receives them.
 
 **3. Run**
 
