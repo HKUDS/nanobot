@@ -350,6 +350,11 @@ default **Ready** view shows only capabilities that can be used immediately:
   localhost WebUIs return automatically; a remote plain-HTTP WebUI shows one
   field for pasting the complete localhost callback URL.
 
+CLI Apps run with a limited environment that excludes provider API keys. On
+Unix, they inherit `XDG_RUNTIME_DIR` when it is set in the gateway's environment,
+so desktop CLIs such as Obsidian can locate the running application. Start the
+gateway in the same desktop session as the app to inherit that runtime directory.
+
 Apps intentionally does not list nanobot runtime support packages such as
 `api` or `bedrock`. Those packages enable providers, servers, or channels; they
 are not tools that can be attached to a turn with `@`. Manage them from
