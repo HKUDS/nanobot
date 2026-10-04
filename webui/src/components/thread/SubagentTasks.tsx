@@ -271,7 +271,7 @@ export function useSubagentTaskGroups(messages: UIMessage[]) {
   return { byMessage, unlinked };
 }
 
-export function SubagentWork({ tasks }: { tasks: ObservedSubagentTask[] }) {
+export function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask[]; unlinked?: boolean }) {
   const context = useContext(TasksContext);
   const { t } = useTranslation("common");
   const rowsId = useId();
@@ -284,13 +284,14 @@ export function SubagentWork({ tasks }: { tasks: ObservedSubagentTask[] }) {
   const summary = activeCount
     ? t("thread.subagents.progress", { completed: completedCount, total: tasks.length })
     : t("thread.subagents.finished", { count: tasks.length });
-  return <section data-subagent-work aria-label={t("thread.subagents.workTitle")} className="thread-message-row mt-3">
+  const title = t(unlinked ? "thread.subagents.otherWorkTitle" : "thread.subagents.workTitle");
+  return <section data-subagent-work aria-label={title} className="thread-message-row mt-3">
     <div className="overflow-hidden rounded-control border border-border/60 bg-muted/15">
       <button type="button" aria-expanded={open} aria-controls={rowsId}
         onClick={() => setExpanded(!open)}
         className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         <Workflow className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span className="font-medium">{t("thread.subagents.workTitle")}</span>
+        <span className="font-medium">{title}</span>
         <span className="ml-auto min-w-0 text-right">
           {summary}{activeCount ? ` · ${t("thread.subagents.running", { count: activeCount })}` : ""}
           {failedCount ? <span className="ml-2 text-destructive">{t("thread.subagents.needsReview", { count: failedCount })}</span> : null}
@@ -298,6 +299,7 @@ export function SubagentWork({ tasks }: { tasks: ObservedSubagentTask[] }) {
         <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
       </button>
       <div id={rowsId} hidden={!open} className="border-t border-border/50 py-0.5">
+        {unlinked ? <p className="px-3 py-2 text-xs text-muted-foreground">{t("thread.subagents.unlinkedHelp")}</p> : null}
         {tasks.map((task) => <div key={task.task_id} className="flex items-center gap-1 pr-1">
           <TaskButton task={task} />
           {task.state === "queued" || task.state === "running" ? <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0"

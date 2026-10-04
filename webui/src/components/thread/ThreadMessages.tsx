@@ -173,6 +173,7 @@ export function ThreadMessages({
         containerRef={messageListRef}
         onQuoteSelection={onQuoteSelection}
       />
+      <SubagentWork tasks={taskGroups.unlinked} unlinked />
       {units.map((unit, index) => {
         const next = units[index + 1];
         const hasBodyBelow =
@@ -273,7 +274,6 @@ export function ThreadMessages({
           </Fragment>
         );
       })}
-      <SubagentWork tasks={taskGroups.unlinked} />
       <SubagentTaskErrors />
       {pendingActivity ? (
         <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>

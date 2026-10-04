@@ -103,7 +103,7 @@ describe("session-owned task UI", () => {
     expect(within(detail).getByText(/has not been restarted automatically/)).toBeVisible();
     expect(within(detail).getByText("Partial result")).toBeVisible();
     expect(within(detail).getByText("Found a conflicting setting")).toBeVisible();
-    await user.click(within(detail).getByText("Message receipts"));
+    await user.click(within(detail).getByText("Message delivery"));
     expect(within(detail).getByText("Delivered: 1")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -157,7 +157,7 @@ describe("session-owned task UI", () => {
     expect(screen.getByText("Cannot stop task")).toBeVisible();
     vi.mocked(fetch).mockRejectedValue(new Error("offline"));
     fireEvent(window, new Event("focus"));
-    await screen.findByText("Could not load subagent tasks.");
+    await screen.findByText("Could not load subtasks.");
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
   });
 
@@ -166,12 +166,12 @@ describe("session-owned task UI", () => {
       tasks: [{ ...task(), label: { unexpected: true } }],
     }), { headers: { "content-type": "application/json" } }));
     render(layout());
-    await screen.findByText("Could not load subagent tasks.");
+    await screen.findByText("Could not load subtasks.");
     expect(screen.queryByText("Config check")).not.toBeInTheDocument();
     vi.mocked(fetch).mockImplementation(async () => response([task(), task()]));
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("Could not load subagent tasks.")).toBeVisible();
+    expect(screen.getByText("Could not load subtasks.")).toBeVisible();
     expect(screen.queryByText("Config check")).not.toBeInTheDocument();
   });
 
@@ -239,6 +239,59 @@ describe("session-owned task UI", () => {
     expect(screen.getByText("Check more").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("keeps legacy work with an unknown origin separate from the latest request after refresh", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ task_id: "legacy", revision: 0, label: "Nanjing weather", state: "done", completed_at: 102,
+        origin_turn_id: "websocket:a:1791046873588004336", result: "## Nanjing\n\n- **Rain**" }),
+      task({ created_at: 200 }),
+    ]));
+    const user = userEvent.setup();
+    const view = render(layout());
+    await screen.findByRole("button", { name: /Config check Running/ });
+    const otherWork = screen.getByRole("region", { name: "Other delegated work" });
+    const header = within(otherWork).getByRole("button", { name: /Other delegated work/ });
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    expect(otherWork.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Delegated work" })).queryByText("Nanjing weather")).not.toBeInTheDocument();
+    await user.click(header);
+    expect(within(otherWork).getByText("These tasks have no matching request in the displayed messages.")).toBeVisible();
+    await user.click(within(otherWork).getByRole("button", { name: /Nanjing weather Completed/ }));
+    const detail = screen.getByRole("dialog", { name: "Nanjing weather" });
+    expect(within(detail).getByRole("heading", { name: "Nanjing" })).toBeVisible();
+    expect(within(detail).getByRole("list")).toHaveTextContent("Rain");
+    await user.keyboard("{Escape}");
+    view.unmount();
+    render(layout());
+    const restored = await screen.findByRole("region", { name: "Other delegated work" });
+    expect(within(restored).getByRole("button", { name: /Other delegated work/ })).toHaveAttribute("aria-expanded", "false");
+    expect(restored.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("reattaches work when its initiating prompt is loaded without duplicating it or closing details", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ task_id: "older", label: "Earlier check", origin_turn_id: "older-turn", origin_message_id: "older-prompt" }),
+      task({ created_at: 200 }),
+    ]));
+    const user = userEvent.setup();
+    const view = render(layout());
+    const otherWork = await screen.findByRole("region", { name: "Other delegated work" });
+    await user.click(within(otherWork).getByRole("button", { name: /Earlier check Running/ }));
+    const detail = screen.getByRole("dialog", { name: "Earlier check" });
+    view.rerender(layout({ threadMessages: [
+      { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn" },
+      ...messages,
+    ] }));
+    expect(detail).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Other delegated work" })).not.toBeInTheDocument();
+    const row = screen.getByRole("button", { name: /Earlier check Running/ });
+    expect(screen.getAllByRole("button", { name: /Earlier check Running/ })).toHaveLength(1);
+    expect(screen.getByText("Inspect earlier work").compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Inspect config").compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    await waitFor(() => expect(row).toHaveFocus());
+  });
+
   it("merges live work before the initial read without polling or rolling back completed work", async () => {
     let resolveRead!: (value: Response) => void;
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
@@ -285,7 +338,7 @@ describe("session-owned task UI", () => {
     expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
     expect(fetch).toHaveBeenCalledTimes(3);
     emitTask({ ...task(), revision: -1 });
-    expect(screen.getByText("Could not load subagent tasks.")).toBeVisible();
+    expect(screen.getByText("Could not load subtasks.")).toBeVisible();
   });
 
   it("keeps protocol 1 task controls usable on a host without event support", async () => {
