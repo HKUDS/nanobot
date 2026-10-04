@@ -2300,7 +2300,7 @@ Select a task to open its details on the right, or across the screen on mobile. 
 
 Use `/stop` to stop the current session and its subagent tasks; other sessions are unaffected. Cancellation does not remove files already created, and some operations may take time to stop.
 
-Each subagent has a private child session in the existing session store. Its transcript uses the same JSONL format as a conversation; session metadata records its parent, task ID, initiating turn, timestamps, status, exit reason, message receipts, and bounded final or partial output. These sessions have no public handle and do not appear as conversation topics or in general session search, reading, or messaging tools. The parent manages them through the `subagent` tool.
+Each subagent has a private child session in the existing session store. Its transcript uses the same JSONL format as a conversation; session metadata records its parent, task ID, initiating turn, timestamps, status, exit reason, message receipts, and bounded final or partial output. Response records also retain structured tool activity and file edits from the shared runner hooks, including errors and diffs. These display fields are excluded from model input and remain available after refresh or restart. These sessions have no public handle and do not appear as conversation topics or in general session search, reading, or messaging tools. The parent manages them through the `subagent` tool.
 
 Deleting a parent conversation stops its work and removes its child sessions. The runtime's 128-record cache does not limit saved task history. Forking a conversation does not transfer task ownership or copy child sessions. Children of temporary conversations also remain temporary.
 

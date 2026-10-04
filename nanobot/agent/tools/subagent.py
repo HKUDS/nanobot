@@ -135,7 +135,7 @@ class SubagentTool(Tool):
         )
         if not session_key:
             return ToolResult.error("Error: create requires an active session identity")
-        inline = wait or not request_ctx.background_subagents or not request_ctx.persist_session
+        inline = wait or not request_ctx.can_receive_background_results or not request_ctx.persist_session
         method = self._manager.run_inline if inline else self._manager.spawn
         return await method(
             task=task,

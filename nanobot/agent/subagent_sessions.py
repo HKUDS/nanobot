@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import math
 import time
+from copy import deepcopy
 from typing import Any, cast
 
 from loguru import logger
 from pydantic import TypeAdapter, ValidationError
 
+from nanobot.agent.subagent_status import SubagentSessionError as SubagentSessionError
 from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.session.manager import Session, SessionManager, SessionPolicy
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionType
@@ -17,10 +19,6 @@ SUBAGENT = SessionType("subagent", needs_handle=False, public_history=False)
 TASK_METADATA_KEY = "subagent_task"
 _STATUS = TypeAdapter(SubagentStatus)
 _ACTIVE_STATES = {"queued", "running", "stopping"}
-
-
-class SubagentSessionError(ValueError):
-    """A private task session could not be read safely."""
 
 
 class SubagentSessions:
@@ -42,6 +40,14 @@ class SubagentSessions:
         child = self.sessions.get_cached(key)
         metadata = child.metadata if child is not None else (self.sessions.read_session_metadata(key) or {}).get("metadata", {})
         return metadata.get(SESSION_TYPE_KEY) == SUBAGENT.name and metadata.get(PARENT_SESSION_KEY) == owner
+
+    def snapshot(self, task_id: str, owner: str) -> Session | None:
+        """Read a detached child only while its parent still owns it."""
+        with self.sessions.locked_session_files():
+            if not self.exists(owner) or not self.contains(task_id, owner):
+                return None
+            child = self.sessions.get_cached(self.key(task_id))
+            return deepcopy(child) if child is not None else self.sessions.read_session_snapshot(self.key(task_id))
 
     @staticmethod
     def _payload(status: SubagentStatus) -> dict[str, Any]:

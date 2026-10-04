@@ -27,6 +27,7 @@ from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import atomic_write_lines
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from nanobot.webui.outbound_wire import project_tool_events
 from nanobot.webui.session_identity import webui_chat_id, webui_session_key
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
@@ -2431,9 +2432,6 @@ def build_session_thread_response(
     augment_assistant_text: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
     """Project a Session snapshot without creating a second display transcript."""
-    results = {message["tool_call_id"]: message.get("content") for message in session.messages
-               if message.get("role") == "tool" and isinstance(message.get("tool_call_id"), str)
-               and not is_hidden_history_message(message)}
     rows: list[dict[str, Any]] = []
     chat_id = session.key.split(":", 1)[-1]
     turn_id = f"session:{session.key}:0"
@@ -2455,35 +2453,28 @@ def build_session_thread_response(
         if message.get("role") == "assistant" and isinstance(reasoning, str) and reasoning:
             records.append({"event": "message", "text": reasoning, "kind": "reasoning"})
         calls = message.get("tool_calls")
-        if row is not None:
-            if isinstance(calls, list) and calls:
-                row["kind"] = "progress"
+        has_calls = isinstance(calls, list) and len(cast(list[object], calls)) > 0
+        if row is not None and has_calls:
+            row["kind"] = "progress"
             records.append(row)
-        if message.get("role") == "assistant" and isinstance(calls, list):
-            tool_events: list[dict[str, Any]] = []
-            for call in cast(list[object], calls):
-                if not isinstance(call, dict):
-                    continue
-                call_data = cast(dict[str, Any], call)
-                if _format_tool_call_trace(call_data) is None:
-                    continue
-                raw_call_id = call_data.get("id")
-                call_id = raw_call_id if isinstance(raw_call_id, str) else None
-                event = {**call_data, "call_id": call_id,
-                         "phase": "end" if call_id in results else "start"}
-                if call_id in results:
-                    event["result"] = results[call_id]
-                tool_events.append(event)
-            if tool_events:
+        if message.get("role") == "assistant":
+            tools = project_tool_events(_normalize_tool_events(message.get("tool_events")))
+            if tools:
                 records.append({"event": "message", "kind": "tool_hint",
-                                "text": "\n".join(tool_trace_lines_from_events(tool_events)),
-                                "tool_events": tool_events})
+                                "text": "\n".join(tool_trace_lines_from_events(tools)),
+                                "tool_events": tools})
+            edits = message.get("file_edit_events")
+            if isinstance(edits, list) and edits:
+                records.append({"event": "file_edit", "edits": edits})
+        if row is not None and not has_calls:
+            records.append(row)
         for offset, record in enumerate(records):
             record.update({
                 "chat_id": chat_id, "turn_id": turn_id,
                 "turn_phase": "user" if record["event"] == "user" else
                     "reasoning" if record.get("kind") == "reasoning" else
-                    "activity" if record.get("kind") in {"progress", "tool_hint"} else "answer",
+                    "activity" if record["event"] == "file_edit" or record.get("kind") in {"progress", "tool_hint"}
+                    else "answer",
                 "created_at_ms": created_at_ms,
                 _WEBUI_REPLAY_IDENTITY_KEY: f"session:{session.key}:{index}:{offset}",
             })

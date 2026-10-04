@@ -613,8 +613,8 @@ class TestRunningCounts:
 
 class TestSubagentHook:
     @pytest.mark.asyncio
-    async def test_before_execute_tools_logs(self, tmp_path):
-        hook = _SubagentHook("t1")
+    async def test_before_execute_tools_without_status_preserves_calls(self):
+        hook = _SubagentHook()
         tool_call = MagicMock()
         tool_call.name = "read_file"
         tool_call.arguments = {"path": "/tmp/test"}
@@ -628,7 +628,7 @@ class TestSubagentHook:
         status = SubagentStatus(
             task_id="t1", label="test", task_description="do", started_at=time.monotonic(),
         )
-        hook = _SubagentHook("t1", status)
+        hook = _SubagentHook(status)
         ctx = _make_hook_context(
             iteration=3,
             tool_events=[{"name": "read_file", "status": "ok", "detail": ""}],
@@ -641,7 +641,7 @@ class TestSubagentHook:
 
     @pytest.mark.asyncio
     async def test_after_iteration_no_status_noop(self):
-        hook = _SubagentHook("t1", status=None)
+        hook = _SubagentHook()
         ctx = _make_hook_context(iteration=5)
         result = await hook.after_iteration(ctx)
         assert result is None
@@ -652,7 +652,7 @@ class TestSubagentHook:
         status = SubagentStatus(
             task_id="t1", label="test", task_description="do", started_at=time.monotonic(),
         )
-        hook = _SubagentHook("t1", status)
+        hook = _SubagentHook(status)
         ctx = _make_hook_context(error="something broke")
         await hook.after_iteration(ctx)
         assert status.error == "something broke"

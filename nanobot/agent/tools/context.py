@@ -41,8 +41,8 @@ class RequestContext:
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
     log_content: bool = True
-    # The host has a live consumer for automatic child completion notices.
-    background_subagents: bool = True
+    # The host can consume completion messages after this request returns.
+    can_receive_background_results: bool = True
     persist_session: bool = True
 
 

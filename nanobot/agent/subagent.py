@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.session_activity import SessionActivity
 from nanobot.agent.subagent_sessions import SubagentSessions
 from nanobot.agent.subagent_status import SubagentState as SubagentState
 from nanobot.agent.subagent_status import SubagentStatus
@@ -27,16 +29,17 @@ from nanobot.agent.tools.context import (
     ToolContext,
     bind_request_context,
     reset_request_context,
-    tool_log_content_allowed,
 )
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, SubagentTaskChanged
 from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.events import AgentEvent, EventSink
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
 from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.security.workspace_access import (
@@ -150,26 +153,19 @@ class _SubagentTask:
 
 
 class _SubagentHook(AgentHook):
-    """Hook for subagent execution — logs tool calls and updates status."""
+    """Update task status at runner boundaries."""
 
-    def __init__(self, task_id: str, status: SubagentStatus | None = None,
+    def __init__(self, status: SubagentStatus | None = None,
                  *, check_active: Callable[[], None] | None = None,
                  max_result_chars: int = 16000,
-                 on_status: Callable[[SubagentStatus], None] | None = None,
-                 session: Session | None = None) -> None:
+                 on_status: Callable[[SubagentStatus], None] | None = None) -> None:
         super().__init__()
-        self._task_id = task_id
         self._status = status
         self._check_active = check_active
         self._max_result_chars = max_result_chars
         self._on_status = on_status
-        self._session = session
 
     def _remember_output(self, context: AgentHookContext) -> None:
-        if self._session is not None and context.messages:
-            self._session.messages = deepcopy([
-                message for message in context.messages if message.get("role") != "system"
-            ])
         if self._status is None or context.error or context.response is None:
             return
         content = context.response.content
@@ -185,13 +181,6 @@ class _SubagentHook(AgentHook):
             ]
         if self._status is not None and self._on_status is not None:
             self._on_status(self._status)
-        for tool_call in context.tool_calls:
-            args_str = (json.dumps(tool_call.arguments, ensure_ascii=False)
-                        if tool_log_content_allowed() else "[content hidden]")
-            logger.debug(
-                "Subagent [{}] executing: {} with arguments: {}",
-                self._task_id, tool_call.name, args_str,
-            )
 
     async def before_execute_tool(
         self, context: AgentHookContext, tool_call: ToolCallRequest,
@@ -372,6 +361,21 @@ class SubagentManager:
     def check(self, task_id: str, owner: str | None) -> SubagentStatus:
         """Return detached status for one task owned by the caller's session."""
         return deepcopy(self._owned_status(task_id, owner))
+
+    def accepts_result(self, msg: InboundMessage, owner: str) -> bool:
+        """Reject a completion whose owning child was removed after publication."""
+        task_id = msg.metadata.get("subagent_task_id")
+        if msg.sender_id != "subagent" or not isinstance(task_id, str) or self.sessions is None:
+            return True
+        return self.sessions.contains(task_id, owner)
+
+    def read_session(self, task_id: str, owner: str) -> tuple[SubagentStatus, Session]:
+        """Return task status and detached history through the ownership boundary."""
+        status = self.check(task_id, owner)
+        child = self.sessions.snapshot(task_id, owner) if self.sessions is not None else None
+        if child is None:
+            raise SubagentControlError("task unavailable")
+        return status, child
 
     def send(self, task_id: str, owner: str | None,
              message: str | None) -> SubagentMessageReceipt:
@@ -713,6 +717,35 @@ class SubagentManager:
             {"role": "system", "content": system_prompt},
             *record.session.get_history(),
         ]
+        activity = SessionActivity()
+
+        def save_observation(status: SubagentStatus) -> None:
+            record.session.messages = activity.transcript()
+            self._save_status(status)
+
+        async def publish_activity(event: AgentEvent) -> None:
+            if activity.remember(event):
+                save_observation(status)
+
+        events = EventSink(publish_activity)
+        hook = build_agent_turn_hook(AgentTurnHookSpec(
+            events=events,
+            streaming=True,
+            channel=origin["channel"],
+            chat_id=origin["chat_id"],
+            message_id=origin_message_id,
+            session_key=record.session.key,
+            workspace=root,
+            registered_hook_factories=[create_file_edit_activity_hook],
+            turn_hooks=[activity, _SubagentHook(
+                status, check_active=record.raise_if_stopping,
+                max_result_chars=self.max_tool_result_chars,
+                on_status=save_observation,
+            )],
+            ephemeral=not record.session.policy.persist,
+            run_extra_hooks_for_ephemeral=True,
+            log_content=record.session.policy.log_content,
+        ))
 
         request_token = bind_request_context(RequestContext(
             channel=origin["channel"],
@@ -746,12 +779,7 @@ class SubagentManager:
                 runtime=runtime,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
-                hook=_SubagentHook(
-                    task_id, status, check_active=record.raise_if_stopping,
-                    max_result_chars=self.max_tool_result_chars,
-                    on_status=self._save_status,
-                    session=record.session,
-                ),
+                hook=hook,
                 max_iterations_message="Task stopped at its iteration limit before producing a final response.",
                 finalize_on_max_iterations=False,
                 error_message=None,
@@ -765,6 +793,7 @@ class SubagentManager:
                 ),
                 consolidate_history=consolidate_history,
                 consolidate_provider_compaction=consolidate_provider_compaction,
+                events=events,
             ))
         finally:
             if token is not None:
@@ -772,9 +801,7 @@ class SubagentManager:
             reset_request_context(request_token)
         status.usage = result.usage
         if result.messages:
-            record.session.messages = deepcopy([
-                message for message in result.messages if message.get("role") != "system"
-            ])
+            record.session.messages = activity.transcript(result.messages)
         record.session.provider_state = result.provider_state
         checkpoint = result.summary_checkpoint
         if checkpoint is not None:

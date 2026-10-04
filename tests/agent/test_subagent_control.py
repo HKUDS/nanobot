@@ -438,7 +438,7 @@ async def test_empty_final_response_is_a_failure(tmp_path):
 async def test_host_without_background_consumer_returns_the_child_result(tmp_path):
     manager, _, ctx = setup(tmp_path)
     ctx = RequestContext("cli", "oneshot", session_key="cli:oneshot", runtime=ctx.runtime,
-                         background_subagents=False)
+                         can_receive_background_results=False)
     manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="verified"))
     with request_context(ctx):
         result = await SubagentTool(manager).execute("create", task="verify")

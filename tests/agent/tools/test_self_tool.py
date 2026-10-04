@@ -40,6 +40,7 @@ def _make_mock_loop(**overrides):
     loop._unified_session = False
     loop._extra_hooks = []
     loop.set_runtime_model.side_effect = lambda value: setattr(loop, "model", value)
+    loop.set_runtime_max_iterations.side_effect = lambda value: setattr(loop, "max_iterations", value)
     loop.set_runtime_context_window.side_effect = lambda value: setattr(
         loop,
         "context_window_tokens",
@@ -596,7 +597,7 @@ class TestSubagentHookStatus:
             task_description="test",
             started_at=time.monotonic(),
         )
-        hook = _SubagentHook("test", status)
+        hook = _SubagentHook(status)
 
         context = AgentHookContext(
             iteration=5,
@@ -623,7 +624,7 @@ class TestSubagentHookStatus:
             task_description="test",
             started_at=time.monotonic(),
         )
-        hook = _SubagentHook("test", status)
+        hook = _SubagentHook(status)
 
         context = AgentHookContext(
             iteration=1,
@@ -640,7 +641,7 @@ class TestSubagentHookStatus:
         from nanobot.agent.hook import AgentHookContext
         from nanobot.agent.subagent import _SubagentHook
 
-        hook = _SubagentHook("test")
+        hook = _SubagentHook()
         context = AgentHookContext(iteration=1, messages=[])
         result = await hook.after_iteration(context)
 

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
 if TYPE_CHECKING:
-    from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.agent.tools.web import WebToolsConfig
     from nanobot.config.schema import ModelPresetConfig
@@ -116,7 +115,6 @@ class _RuntimeControlTarget(Protocol):
     max_tool_result_chars: int
     web_config: WebToolsConfig
     exec_config: ExecToolConfig
-    subagents: SubagentManager
 
     @property
     def model(self) -> str: ...
@@ -139,6 +137,8 @@ class _RuntimeControlTarget(Protocol):
     def set_runtime_model(self, model: str) -> LLMRuntime: ...
 
     def set_runtime_context_window(self, context_window_tokens: int) -> LLMRuntime: ...
+
+    def set_runtime_max_iterations(self, value: int) -> None: ...
 
     def set_model_preset(self, name: str | None) -> LLMRuntime: ...
 
@@ -188,8 +188,7 @@ class AgentRuntimeControl:
         return self.__target.set_model_preset(name)
 
     def set_max_iterations(self, value: int) -> None:
-        self.__target.max_iterations = value
-        self.__target.subagents.max_iterations = value
+        self.__target.set_runtime_max_iterations(value)
 
     def set_context_window_tokens(self, value: int) -> LLMRuntime:
         return self.__target.set_runtime_context_window(value)

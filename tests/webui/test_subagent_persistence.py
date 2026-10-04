@@ -157,6 +157,130 @@ async def test_new_unsaved_parent_has_an_empty_task_collection(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
+    workspace, root = tmp_path / "agent", tmp_path / "sessions"
+    workspace.mkdir()
+    (workspace / "example.txt").write_text("before\n", encoding="utf-8")
+    manager, sessions, runtime = manager_with_storage(workspace, root)
+    entered, release = asyncio.Event(), asyncio.Event()
+    responses = iter([
+        LLMResponse(content="Read the file", tool_calls=[
+            ToolCallRequest("read", "read_file", {"path": "example.txt"}),
+        ]),
+        LLMResponse(content="Edit the file", tool_calls=[
+            ToolCallRequest("edit", "edit_file", {
+                "path": "example.txt", "old_text": "before", "new_text": "after",
+            }),
+        ]),
+        LLMResponse(content="Check the missing file", tool_calls=[
+            ToolCallRequest("missing", "read_file", {"path": "missing.txt"}),
+        ]),
+    ])
+
+    async def respond(**kwargs):
+        for message in kwargs["messages"]:
+            assert not ({"tool_events", "file_edit_events"} & message.keys())
+        response = next(responses, None)
+        if response is not None:
+            return response
+        entered.set()
+        await release.wait()
+        return LLMResponse(content="Edited the file; the other file does not exist.")
+
+    runtime.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    gateway, connection, headers = gateway_for(manager, sessions, workspace)
+    try:
+        await manager.spawn("Edit and inspect files", session_key="websocket:parent", runtime=runtime)
+        await asyncio.wait_for(entered.wait(), 5)
+        task_id, = manager.statuses_for_session("websocket:parent")
+        path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
+
+        async def assert_activity(gateway, connection, headers):
+            before = {file.name: file.read_bytes() for file in root.glob("*.jsonl")}
+            response = await gateway.http.dispatch(connection, Request(path, headers))
+            assert response.status_code == 200
+            thread = json.loads(response.body)
+            tools = [tool for event in thread["events"] for tool in event.get("tool_events", [])]
+            failure = next(tool for tool in tools if tool["call_id"] == "missing" and tool["phase"] == "error")
+            assert "File not found" in failure["error"]
+            edits = [edit for event in thread["events"] if event["event"] == "file_edit" for edit in event["edits"]]
+            completed = next(edit for edit in edits if edit["phase"] == "end")
+            assert completed["added"] == completed["deleted"] == 1
+            assert "+after" in completed["diff"]["text"]
+            assert "-before" in completed["diff"]["text"]
+            assert (workspace / "example.txt").read_text(encoding="utf-8") == "after\n"
+            assert {file.name: file.read_bytes() for file in root.glob("*.jsonl")} == before
+            return thread
+
+        assert (await assert_activity(gateway, connection, headers))["active_turn_id"]
+        release.set()
+        await asyncio.gather(*list(manager._running_tasks.values()))
+        await manager.close()
+        manager, sessions, _ = manager_with_storage(workspace, root)
+        gateway, connection, headers = gateway_for(manager, sessions, workspace)
+        assert (await assert_activity(gateway, connection, headers))["active_turn_id"] is None
+        assert manager.check(task_id, "websocket:parent").state == "done"
+    finally:
+        release.set()
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_hosted_activity_is_visible_before_response_and_replays_in_order(tmp_path):
+    workspace, root = tmp_path / "agent", tmp_path / "sessions"
+    workspace.mkdir()
+    manager, sessions, runtime = manager_with_storage(workspace, root)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def respond(*, on_tool_call_delta, messages, **_kwargs):
+        assert all(not ({"tool_events", "file_edit_events"} & message.keys()) for message in messages)
+        activity = {
+            "kind": "hosted_tool", "call_id": "hosted-search", "name": "web_search",
+            "arguments": {"query": "nanobot"},
+        }
+        await on_tool_call_delta({**activity, "phase": "start"})
+        entered.set()
+        await release.wait()
+        await on_tool_call_delta({**activity, "phase": "end", "result": "Found documentation"})
+        return LLMResponse(content="## Findings\n\nFound documentation.")
+
+    runtime.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    gateway, connection, headers = gateway_for(manager, sessions, workspace)
+    try:
+        await manager.spawn("Search documentation", session_key="websocket:parent", runtime=runtime)
+        await asyncio.wait_for(entered.wait(), 5)
+        task_id, = manager.statuses_for_session("websocket:parent")
+        path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
+        response = await gateway.http.dispatch(connection, Request(path, headers))
+        running = json.loads(response.body)
+        tool = next(event for event in running["events"] if event.get("kind") == "tool_hint")
+        assert tool["tool_events"][0]["phase"] == "start"
+        assert running["active_turn_id"]
+        _, child = manager.read_session(task_id, "websocket:parent")
+        assert child.get_history() == [{"role": "user", "content": "Search documentation"}]
+
+        release.set()
+        await asyncio.gather(*list(manager._running_tasks.values()))
+        await manager.close()
+        manager, sessions, _ = manager_with_storage(workspace, root)
+        gateway, connection, headers = gateway_for(manager, sessions, workspace)
+        response = await gateway.http.dispatch(connection, Request(path, headers))
+        completed = json.loads(response.body)
+        assert completed["active_turn_id"] is None
+        activity_index = next(i for i, event in enumerate(completed["events"]) if event.get("kind") == "tool_hint")
+        answer_index = next(i for i, event in enumerate(completed["events"]) if event.get("turn_phase") == "answer")
+        assert activity_index < answer_index
+        tool = completed["events"][activity_index]["tool_events"][0]
+        assert tool["phase"] == "end"
+        assert tool["result"] == "Found documentation"
+        _, child = manager.read_session(task_id, "websocket:parent")
+        assert all(not ({"tool_events", "file_edit_events"} & message.keys()) for message in child.get_history())
+    finally:
+        release.set()
+        await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_task_changes_use_parent_chat_events_and_saved_child_observations(tmp_path):
     manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
     gateway, _, _ = gateway_for(manager, sessions, tmp_path / "agent")

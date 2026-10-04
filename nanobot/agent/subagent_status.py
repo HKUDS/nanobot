@@ -11,6 +11,10 @@ from nanobot.providers.base import LLMUsage
 SubagentState = Literal["queued", "running", "stopping", "done", "incomplete", "error", "cancelled", "interrupted"]
 
 
+class SubagentSessionError(ValueError):
+    """A private task session could not be read safely."""
+
+
 @dataclass(slots=True)
 class SubagentStatus:
     """Observable task data, detached from execution and process resources."""

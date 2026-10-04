@@ -519,6 +519,10 @@ class AgentLoop:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
 
+    def set_runtime_max_iterations(self, value: int) -> None:
+        self.max_iterations = value
+        self._sync_subagent_runtime_limits()
+
     def invalidate_runtime_config(self) -> None:
         """Invalidate runtime config for lazy refresh at the next admission."""
         self.runtime_resolver.invalidate()
@@ -738,7 +742,7 @@ class AgentLoop:
             workspace=scope.project_path,
             log_content=ctx.session.policy.log_content and not ctx.ephemeral,
             persist_session=ctx.session.policy.persist and not ctx.ephemeral,
-            background_subagents=self._running,
+            can_receive_background_results=self._running,
         )
 
     async def _resolve_runtime_context_for_turn(
@@ -1169,7 +1173,7 @@ class AgentLoop:
             chat_id="direct",
             session_key=session.key if session is not None else None,
             runtime=runtime,
-            background_subagents=self._running,
+            can_receive_background_results=self._running,
         )
         active_session_key = session.key if session else request_ctx.session_key
         consolidation_session_key = active_session_key or "agent:transient"
@@ -1437,16 +1441,10 @@ class AgentLoop:
         self.sessions.save(session)
         return pending_msg
 
-    def _accepts_subagent_result(self, msg: InboundMessage, session_key: str) -> bool:
-        task_id = msg.metadata.get("subagent_task_id")
-        if msg.sender_id != "subagent" or not isinstance(task_id, str) or self.subagents.sessions is None:
-            return True
-        return self.subagents.sessions.contains(task_id, session_key)
-
     def _enqueue_session_message(self, msg: InboundMessage) -> None:
         """Admit session work without waiting for its execution or result."""
         session_key = self._effective_session_key(msg)
-        if not self._accepts_subagent_result(msg, session_key):
+        if not self.subagents.accepts_result(msg, session_key):
             return
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
@@ -1761,7 +1759,7 @@ class AgentLoop:
             key = session_key or msg.session_key_override or f"{destination[0]}:{destination[1]}"
         else:
             key = session_key or msg.session_key
-        if not self._accepts_subagent_result(msg, key):
+        if not self.subagents.accepts_result(msg, key):
             return None
         if delivery is None:
             delivery = self.turn_delivery_factory.create(msg, key)

@@ -27,7 +27,7 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.agent.subagent import SubagentControlError
-from nanobot.agent.subagent_sessions import SubagentSessionError, SubagentSessions
+from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -941,17 +941,14 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid task key")
         if not is_webui_session_key(session_key):
             return _http_error(404, "task unavailable")
-        if self.subagent_manager is None or self.session_manager is None:
+        if self.subagent_manager is None:
             return _http_error(503, "task history unavailable")
         try:
-            status = self.subagent_manager.check(decoded_task_id, session_key)
-            child = self.session_manager.read_session_snapshot(SubagentSessions.key(decoded_task_id))
+            status, child = self.subagent_manager.read_session(decoded_task_id, session_key)
         except SubagentControlError:
             return _http_error(404, "task unavailable")
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
-        if child is None:
-            return _http_error(404, "task unavailable")
         scope = self.workspaces.scope_for_session_key(session_key)
         data = build_session_thread_response(
             child,
