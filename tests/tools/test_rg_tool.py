@@ -121,7 +121,7 @@ def test_schema_exposes_arguments_and_exec_controls():
 async def test_native_search_and_file_discovery_via_exec(tmp_path):
     (tmp_path / "source.py").write_text("before\nneedle\nafter\n", encoding="utf-8")
     (tmp_path / "other.txt").write_text("unrelated\n", encoding="utf-8")
-    tool = RgTool(working_dir=str(tmp_path), restrict_to_workspace=True)
+    tool = RgTool(working_dir=str(tmp_path), restrict_to_workspace=False)
     result = await tool.execute(args=["-n", "-C1", "-g", "*.py", "needle", "."])
     assert "2:needle" in result
     assert "before" in result and "after" in result
@@ -225,11 +225,17 @@ async def test_direct_search_uses_configured_path(tmp_path, monkeypatch):
 @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
 def test_direct_search_preserves_sandbox_and_arguments(tmp_path, monkeypatch, backend):
     monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
+    launcher = str(tmp_path / "trusted launcher")
+    monkeypatch.setattr(
+        "nanobot.agent.tools.sandbox.resolve_sandbox_launcher", lambda name: launcher,
+    )
     args = ["rg", "-F", "hello | $HOME; 'world'", "."]
-    prepared = RgTool(working_dir=str(tmp_path), sandbox=backend)._prepare_command(args)
+    prepared = RgTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True, sandbox=backend,
+    )._prepare_command(args)
     assert isinstance(prepared, _PreparedCommand)
     assert isinstance(prepared.command, list)
-    assert prepared.command[0] == ("bwrap" if backend == "bwrap" else "/usr/bin/sandbox-exec")
+    assert prepared.command[0] == launcher
     assert prepared.command[-2] == "-c"
     inner_command = prepared.command[-1].split("\n")[-1]
     assert shlex.split(inner_command) == args

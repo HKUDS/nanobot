@@ -1,12 +1,13 @@
 """Sandbox backends for shell command execution.
 
 To add a new backend, implement a function with the signature:
-    _wrap_<name>(command: str, workspace: str, cwd: str) -> str
+    _wrap_<name>(command: str, workspace: str, cwd: str, *, launcher: str | None) -> str
 and register it in _BACKENDS below.
 """
 
 import os
 import shlex
+import shutil
 from pathlib import Path
 from typing import Iterable
 
@@ -50,6 +51,7 @@ def _bwrap(
     workspace: str,
     cwd: str,
     *,
+    launcher: str | None = None,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
 ) -> str:
@@ -81,7 +83,7 @@ def _bwrap(
         "/etc/ld.so.cache",
     ]
 
-    args = ["bwrap", "--new-session", "--die-with-parent", "--setenv", "HOME", str(ws)]
+    args = [launcher or "bwrap", "--new-session", "--die-with-parent", "--setenv", "HOME", str(ws)]
     for p in required:
         args += ["--ro-bind", p, p]
     for p in optional:
@@ -186,6 +188,7 @@ def _seatbelt(
     workspace: str,
     cwd: str,
     *,
+    launcher: str | None = None,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
 ) -> str:
@@ -293,7 +296,7 @@ def _seatbelt(
     # the submitted shell list; `cd ... && a; b` would still execute b on failure.
     args = [
         # Resolve the security boundary before consulting operator tool PATHs.
-        "/usr/bin/sandbox-exec",
+        launcher or "/usr/bin/sandbox-exec",
         "-p",
         "\n".join(rules),
         "/usr/bin/env",
@@ -309,21 +312,40 @@ def _seatbelt(
 _BACKENDS = {"bwrap": _bwrap, "seatbelt": _seatbelt}
 
 
+def resolve_sandbox_launcher(sandbox: str) -> str:
+    """Resolve a trusted absolute launcher before per-command PATH changes."""
+    if sandbox not in _BACKENDS:
+        raise ValueError(
+            f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}"
+        )
+    # Seatbelt is the backend name; its launcher is a fixed system binary,
+    # never a same-named executable supplied by a tool's PATH.
+    executable = shutil.which("/usr/bin/sandbox-exec" if sandbox == "seatbelt" else sandbox)
+    if executable is None:
+        raise FileNotFoundError(f"Sandbox backend {sandbox!r} is not installed")
+    return str(Path(executable).resolve(strict=True))
+
+
 def wrap_command(
     sandbox: str,
     command: str,
     workspace: str,
     cwd: str,
     *,
+    launcher: str | None = None,
+    resolve_launcher: bool = False,
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
 ) -> str:
     """Wrap *command* using the named sandbox backend."""
     if backend := _BACKENDS.get(sandbox):
+        if resolve_launcher:
+            launcher = resolve_sandbox_launcher(sandbox)
         return backend(
             command,
             workspace,
             cwd,
+            launcher=launcher,
             sandbox_ro_binds=sandbox_ro_binds,
             sandbox_rw_binds=sandbox_rw_binds,
         )

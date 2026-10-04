@@ -39,8 +39,10 @@ Start with workspace restriction:
 }
 ```
 
-`bwrap` is Linux-only and requires bubblewrap. On macOS or Windows, keep
-`restrictToWorkspace` enabled and review shell access carefully.
+`bwrap` is Linux-only and requires bubblewrap. On macOS or Windows, restricted
+shell execution fails closed unless an external process sandbox is explicitly
+enforced; keep shell execution disabled or use Full Access only for commands
+you explicitly trust.
 
 ## Production notes
 
@@ -55,7 +57,8 @@ Start with workspace restriction:
 
 ## Security notes
 
-- `restrictToWorkspace` is an application-level guard, not an OS sandbox.
+- `restrictToWorkspace` provides application-level guards, while restricted
+  shell execution additionally requires an OS-level sandbox.
 - `tools.exec.enable: false` removes shell execution entirely.
 - HTTP web fetch and HTTP MCP use SSRF protections by default.
 - Adding broad `tools.ssrfWhitelist` ranges increases exposure.
