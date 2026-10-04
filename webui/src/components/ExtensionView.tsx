@@ -39,8 +39,11 @@ export function ExtensionView({ extensionId }: ExtensionViewProps) {
     fetchExtension(getToken(), extensionId)
       .then((payload) => {
         if (cancelled) return;
-        if (!payload) setNotFound(true);
-        else setExtension(payload);
+        if (!payload) {
+          setNotFound(true);
+          return;
+        }
+        setExtension(payload);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -132,6 +135,13 @@ export function ExtensionView({ extensionId }: ExtensionViewProps) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         …
+      </div>
+    );
+  }
+  if (extension.enabled === false) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        {t("extensions.disabled", { defaultValue: "This extension is disabled." })}
       </div>
     );
   }
