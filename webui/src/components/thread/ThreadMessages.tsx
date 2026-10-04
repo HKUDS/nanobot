@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { fmtDateTime, formatMessageHoverTime } from "@/lib/format";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import { cn } from "@/lib/utils";
@@ -100,6 +101,7 @@ export function ThreadMessages({
   onActivityToggle,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
+  const { activityMode } = useLocalPreferences();
   const messageListRef = useRef<HTMLDivElement>(null);
   const mobileActions = useMediaQuery("(max-width: 767px)");
   const units = useMemo(
@@ -141,17 +143,19 @@ export function ThreadMessages({
     ),
     [activeTurnId, currentTurnStartIndex, isStreaming, unitKeys, units],
   );
-  const [expandedActivityKeys, setExpandedActivityKeys] = useState<Set<string>>(() => new Set());
+  const [activityOverrides, setActivityOverrides] = useState<Map<string, boolean>>(() => new Map());
+  useEffect(() => {
+    setActivityOverrides(new Map());
+  }, [activityMode]);
   const [activeContextBlockKey, setActiveContextBlockKey] = useState<string | null>(null);
   const [openContextBlockKey, setOpenContextBlockKey] = useState<string | null>(null);
   const pointedContextBlockRef = useRef<string | null>(null);
   const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
     onActivityToggle?.();
-    setExpandedActivityKeys((current) => {
-      if (current.has(key) === expanded) return current;
-      const next = new Set(current);
-      if (expanded) next.add(key);
-      else next.delete(key);
+    setActivityOverrides((current) => {
+      if (current.get(key) === expanded) return current;
+      const next = new Map(current);
+      next.set(key, expanded);
       return next;
     });
   }, [onActivityToggle]);
@@ -200,7 +204,7 @@ export function ThreadMessages({
           : marginAfterPrevUnit(units[previousVisibleIndex]);
         const blockActivityExpanded = showBlockContext
           && contextBlockKey !== undefined
-          && expandedActivityKeys.has(contextBlockKey);
+          && (activityOverrides.get(contextBlockKey) ?? activityMode === "expanded");
         const deferOffscreenRender =
           index < units.length - 1
           && (

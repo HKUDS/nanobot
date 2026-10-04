@@ -6,6 +6,7 @@ import { SubagentTasksProvider, SubagentThreadMessages as ThreadMessages } from 
 import { buildDisplayUnits, unitKeysForDisplay } from "@/components/thread/ThreadMessages";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { setAppLanguage } from "@/i18n";
+import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
 import type { ConnectionStatus, InboundEvent, SubagentTaskSnapshot, UIMessage } from "@/lib/types";
 
 const requestMutation = vi.fn();
@@ -66,6 +67,7 @@ function layout({ enabled = true, liveEvents = true, historyEnabled = false, ses
 
 describe("session-owned task UI", () => {
   beforeEach(async () => {
+    localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY);
     await setAppLanguage("en");
     requestMutation.mockReset();
     client.onChat.mockClear();
@@ -74,7 +76,37 @@ describe("session-owned task UI", () => {
     statusHandlers.clear();
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response([task()])));
   });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
+
+  it("applies the browser activity preference to delegated work and its shared child chat", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/webui-thread")
+      ? childThread("Configuration verified", false)
+      : response([task({ state: "done", completed_at: 102 })])));
+    const user = userEvent.setup();
+    const view = render(layout({ historyEnabled: true }));
+    const work = await screen.findByRole("button", { name: /Delegated work/ });
+    expect(work).toHaveAttribute("aria-expanded", "false");
+
+    act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
+    expect(work).toHaveAttribute("aria-expanded", "true");
+    await user.click(screen.getByRole("button", { name: /Config check Completed/ }));
+    const detail = screen.getByRole("dialog", { name: "Config check" });
+    expect(await within(detail).findByText("Configuration verified")).toBeVisible();
+    expect(within(detail).getByTestId("agent-activity-content")).toBeVisible();
+    await user.click(within(detail).getByRole("button", { name: /Collapse activity details/ }));
+    expect(within(detail).queryByTestId("agent-activity-content")).not.toBeInTheDocument();
+
+    act(() => { writeLocalPreferences(DEFAULT_LOCAL_PREFS); });
+    expect(work).toHaveAttribute("aria-expanded", "false");
+    act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
+    expect(within(detail).getByTestId("agent-activity-content")).toBeVisible();
+    view.unmount();
+
+    render(layout({ historyEnabled: true }));
+    expect(await screen.findByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Config check Completed/ }));
+    expect(await within(screen.getByRole("dialog")).findByTestId("agent-activity-content")).toBeVisible();
+  });
 
   it("renders the child Session in the shared chat view and refreshes it from task events", async () => {
     let completed = false;

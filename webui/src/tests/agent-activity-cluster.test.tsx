@@ -1,10 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { setAppLanguage } from "@/i18n";
-import { DEFAULT_LOCAL_PREFS, writeLocalPreferences } from "@/lib/local-preferences";
+import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
 const BLENDER_CLI_APP: CliAppInfo = {
@@ -98,6 +98,21 @@ function installReducedMotion() {
 }
 
 describe("AgentActivityCluster", () => {
+  afterEach(() => { localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
+
+  it("honors the activity preference for standalone completed activity with manual overrides", () => {
+    render(<AgentActivityCluster messages={activityMessages()} isTurnStreaming={false} hasBodyBelow={false} />);
+    const disclosure = screen.getByRole("button", { name: /Worked/ });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    act(() => { writeLocalPreferences(DEFAULT_LOCAL_PREFS); });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  });
   it("updates existing activity when the language changes without altering raw values", async () => {
     const query = "release notes";
     const path = "src/app.tsx";

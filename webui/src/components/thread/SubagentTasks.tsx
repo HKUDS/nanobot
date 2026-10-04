@@ -7,6 +7,7 @@ import { SubagentThread } from "@/components/thread/SubagentThread";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import { cancelSubagentTask, fetchSubagentTasks } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
@@ -171,8 +172,9 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
           <div className="shrink-0 space-y-2 border-b px-5 py-5 pr-14">
             <SheetTitle className="break-words text-base">{selected?.label}</SheetTitle>
             <SheetDescription className="flex items-center gap-2">
-              {selected ? <><TaskStateIcon task={selected} />{t(`thread.subagents.states.${selected.state}`)}
-                <span className="tabular-nums">· <TaskElapsed task={selected} /></span></> : null}
+              {selected ? <><TaskStateIcon task={selected} />
+                <span className={selected.state === "done" ? "sr-only" : undefined}>{t(`thread.subagents.states.${selected.state}`)}</span>
+                <span className="tabular-nums">{selected.state !== "done" ? "· " : null}<TaskElapsed task={selected} /></span></> : null}
             </SheetDescription>
           </div>
           {selected && sessionKey ? <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-5">
@@ -275,13 +277,15 @@ export function SubagentThreadMessages(props: ComponentProps<typeof ThreadMessag
 function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask[]; unlinked?: boolean }) {
   const context = useContext(TasksContext);
   const { t } = useTranslation("common");
+  const { activityMode } = useLocalPreferences();
   const rowsId = useId();
   const [expanded, setExpanded] = useState<boolean | null>(null);
+  useEffect(() => { setExpanded(null); }, [activityMode]);
   if (!context || !tasks.length) return null;
   const activeCount = tasks.filter(isActive).length;
   const completedCount = tasks.filter((task) => task.state === "done").length;
   const failedCount = tasks.filter((task) => ["error", "incomplete", "interrupted"].includes(task.state)).length;
-  const open = expanded ?? activeCount > 0;
+  const open = expanded ?? (activityMode === "expanded" || activeCount > 0);
   const summary = activeCount
     ? t("thread.subagents.progress", { completed: completedCount, total: tasks.length })
     : t("thread.subagents.finished", { count: tasks.length });
