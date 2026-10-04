@@ -1356,6 +1356,19 @@ def _load_current_servers() -> dict[str, MCPServerConfig]:
     return _configured_servers(resolve_config_env_vars(load_config()))
 
 
+_active_provider: MCPProvider | None = None
+
+
+def _set_active_mcp_provider(provider: MCPProvider) -> None:
+    global _active_provider
+    _active_provider = provider
+
+
+def get_active_mcp_provider() -> MCPProvider | None:
+    """Return the process-wide MCP provider, if one has been constructed."""
+    return _active_provider
+
+
 class MCPProvider:
     """Own configured MCP connections and their dynamic tool registrations."""
 
@@ -1373,6 +1386,7 @@ class MCPProvider:
         self._runtime_statuses: dict[str, MCPRuntimeStatus] = {}
         self._lock = asyncio.Lock()
         self._closing = False
+        _set_active_mcp_provider(self)
 
     @classmethod
     def from_config(
@@ -1675,6 +1689,27 @@ class MCPProvider:
                 )
                 return None
             return self._registry.get(tool_name)
+
+    async def restart_server(self, server_name: str) -> bool:
+        """Close and reconnect one configured server so it re-reads external
+        state such as secrets files that are only loaded at process start."""
+        async with self._lock:
+            if self._closing:
+                return False
+            cfg = self._servers.get(server_name)
+            if cfg is None:
+                return False
+            _unregister_server_tools(self._registry, server_name)
+            await self._close_server(server_name)
+            self._set_runtime_status({server_name}, "connecting")
+            connected = await connect_mcp_servers({server_name: cfg}, self._registry)
+            if self._closing:
+                await _close_mcp_connections(connected)
+                return False
+            self._connections.update(connected)
+            self._record_connection_result({server_name}, connected)
+            self._attach_reconnect_handlers(connected)
+            return server_name in connected
 
     async def _close_server(self, server_name: str) -> None:
         connection = self._connections.pop(server_name, None)

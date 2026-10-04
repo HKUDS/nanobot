@@ -37,6 +37,7 @@ from nanobot.session.webui_turns import (
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
+from nanobot.webui.credential_prompts import credential_prompts
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
     file_preview_availability_payload,
@@ -217,6 +218,9 @@ class WebUICommandRouter:
         self._transport.webui_clear_connection_default(connection)
         self.gateway.endpoint.discard_connection(connection)
         self.discard_request_lock_if_idle(connection)
+        for chat_id in chat_ids:
+            if not self._transport.webui_subscribers(chat_id):
+                credential_prompts.cancel_chat_prompts(chat_id)
 
     async def broadcast_webui_event(self, event: str, **fields: Any) -> None:
         for connection in tuple(self._webui_connections):
@@ -470,6 +474,12 @@ class WebUICommandRouter:
             )
             await self._transport.webui_send_event(connection, event, **payload)
             return
+        if command_type == "credential_submit":
+            await self._handle_credential_prompt(connection, envelope, submit=True)
+            return
+        if command_type == "credential_cancel":
+            await self._handle_credential_prompt(connection, envelope, submit=False)
+            return
         if command_type == "message":
             await self._dispatch_message(connection, client_id, envelope)
             return
@@ -478,6 +488,99 @@ class WebUICommandRouter:
             "error",
             detail=f"unknown type: {command_type!r}",
         )
+
+    async def _handle_credential_prompt(
+        self,
+        connection: ServerConnection,
+        envelope: dict[str, Any],
+        *,
+        submit: bool,
+    ) -> None:
+        """Resolve a pending credential form opened by the ``request_secret``
+        tool. Values go straight into the waiting future and are never routed
+        through message dispatch, transcripts, or the model."""
+        request_id = envelope.get("request_id")
+        envelope_chat_id = envelope.get("chat_id")
+        chat_id = envelope_chat_id if isinstance(envelope_chat_id, str) else None
+        if not isinstance(request_id, str) or not request_id:
+            await self._transport.webui_send_event(
+                connection,
+                "credential_result",
+                request_id="",
+                status="invalid",
+                **({"chat_id": chat_id} if chat_id else {}),
+            )
+            return
+
+        async def reject(status: str) -> None:
+            prompt_chat = credential_prompts.get(request_id)
+            resolved_chat_id = (
+                prompt_chat.chat_id
+                if prompt_chat is not None
+                else chat_id
+            )
+            await self._transport.webui_send_event(
+                connection,
+                "credential_result",
+                request_id=request_id,
+                status=status,
+                **({"chat_id": resolved_chat_id} if resolved_chat_id else {}),
+            )
+
+        prompt = credential_prompts.get(request_id)
+        if prompt is None:
+            await reject(credential_prompts.resolved_status(request_id) or "unknown")
+            return
+        if (
+            connection not in self._webui_connections
+            or connection not in self._transport.webui_subscribers(prompt.chat_id)
+        ):
+            await reject("forbidden")
+            return
+        if not submit:
+            credential_prompts.cancel(request_id)
+            await self._broadcast_credential_resolved(
+                prompt.chat_id,
+                request_id,
+                "cancelled",
+            )
+            return
+
+        values = envelope.get("values")
+        if not isinstance(values, dict):
+            await reject("invalid")
+            return
+        typed_values = cast(dict[str, Any], values)
+        missing = [
+            field.key
+            for field in prompt.fields
+            if field.required
+            and not str(typed_values.get(field.key, "")).strip()
+        ]
+        if missing:
+            await reject("missing_fields")
+            return
+        credential_prompts.resolve(request_id, typed_values)
+        await self._broadcast_credential_resolved(
+            prompt.chat_id,
+            request_id,
+            "submitted",
+        )
+
+    async def _broadcast_credential_resolved(
+        self,
+        chat_id: str,
+        request_id: str,
+        status: str,
+    ) -> None:
+        for conn in self._transport.webui_subscribers(chat_id):
+            await self._transport.webui_send_event(
+                conn,
+                "credential_resolved",
+                chat_id=chat_id,
+                request_id=request_id,
+                status=status,
+            )
 
     async def _dispatch_message(
         self,

@@ -2153,6 +2153,18 @@
     "copy": "복사",
     "copied": "복사됨"
   },
+  "credentials": {
+    "title": "{{service}} 자격 증명",
+    "notice": "값은 로컬 nanobot 런타임으로 직접 전송되어 이름 지정된 시크릿으로 저장됩니다. 채팅 메시지로 전송되지 않습니다.",
+    "optional": "(선택 사항)",
+    "submit": "제출",
+    "submitting": "제출 중…",
+    "cancel": "취소",
+    "statusSubmitted": "자격 증명이 안전하게 전송되었습니다.",
+    "statusCancelled": "요청이 취소되었습니다.",
+    "statusExpired": "이 자격 증명 요청이 만료되었습니다.",
+    "statusClosed": "이 자격 증명 요청은 더 이상 활성 상태가 아닙니다."
+  },
   "workbench": {
     "aria": "대화 워크벤치",
     "panes": "창",

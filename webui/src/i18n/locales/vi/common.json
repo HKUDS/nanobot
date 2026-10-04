@@ -2153,6 +2153,18 @@
     "copy": "Sao chép",
     "copied": "Đã sao chép"
   },
+  "credentials": {
+    "title": "Thông tin xác thực cho {{service}}",
+    "notice": "Các giá trị được gửi trực tiếp tới runtime nanobot cục bộ và được lưu dưới dạng secret có tên. Chúng không được gửi như tin nhắn chat.",
+    "optional": "(tùy chọn)",
+    "submit": "Gửi",
+    "submitting": "Đang gửi…",
+    "cancel": "Hủy",
+    "statusSubmitted": "Đã gửi thông tin xác thực một cách an toàn.",
+    "statusCancelled": "Đã hủy yêu cầu.",
+    "statusExpired": "Yêu cầu thông tin xác thực này đã hết hạn.",
+    "statusClosed": "Yêu cầu thông tin xác thực này không còn hoạt động."
+  },
   "workbench": {
     "aria": "Không gian hội thoại",
     "panes": "Khung",

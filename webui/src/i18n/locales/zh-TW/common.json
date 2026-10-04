@@ -2153,6 +2153,18 @@
     "copy": "複製",
     "copied": "已複製"
   },
+  "credentials": {
+    "title": "{{service}} 的憑證",
+    "notice": "這些值會直接傳送到本機 nanobot 執行環境，並以具名密鑰的形式儲存，不會作為聊天訊息傳送。",
+    "optional": "（選用）",
+    "submit": "提交",
+    "submitting": "正在提交…",
+    "cancel": "取消",
+    "statusSubmitted": "憑證已安全提交。",
+    "statusCancelled": "要求已取消。",
+    "statusExpired": "此憑證要求已過期。",
+    "statusClosed": "此憑證要求已不再有效。"
+  },
   "workbench": {
     "aria": "對話工作台",
     "panes": "窗格",

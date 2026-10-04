@@ -43,6 +43,25 @@ type PendingStreamEvent =
   | { kind: "delta"; text: string; turn: UIMessageTurnFields; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"] }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
 
+/** Fold a terminal credential-form status into the request card that opened
+ * it, so other tabs and late renders reflect the outcome. */
+function withCredentialStatus(
+  messages: UIMessage[],
+  requestId: string,
+  status: string,
+): UIMessage[] {
+  return messages.map((message) => {
+    const blob = message.agentUi;
+    if (blob?.kind !== "credential_request") return message;
+    const data = blob.data as { request_id?: string } | undefined;
+    if (data?.request_id !== requestId) return message;
+    return {
+      ...message,
+      agentUi: { ...blob, data: { ...data, status } },
+    };
+  });
+}
+
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
 // Markdown and layout work must leave room for input between visible updates.
 const VISIBLE_STREAM_FLUSH_INTERVAL_MS = 50;
@@ -582,6 +601,13 @@ export function useNanobotStream(
             turnId: ev.turn_id,
           });
         }
+        return;
+      }
+      if (
+        ev.event === "credential_resolved"
+        || ev.event === "credential_result"
+      ) {
+        setMessages((prev) => withCredentialStatus(prev, ev.request_id, ev.status));
         return;
       }
       const turnId = eventTurnId(ev);

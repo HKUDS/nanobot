@@ -2153,6 +2153,18 @@
     "copy": "コピー",
     "copied": "コピーしました"
   },
+  "credentials": {
+    "title": "{{service}} の認証情報",
+    "notice": "入力値はローカルの nanobot ランタイムに直接送信され、名前付きシークレットとして保存されます。チャットメッセージとしては送信されません。",
+    "optional": "（任意）",
+    "submit": "送信",
+    "submitting": "送信中…",
+    "cancel": "キャンセル",
+    "statusSubmitted": "認証情報を安全に送信しました。",
+    "statusCancelled": "リクエストをキャンセルしました。",
+    "statusExpired": "この認証情報リクエストは期限切れです。",
+    "statusClosed": "この認証情報リクエストは無効です。"
+  },
   "workbench": {
     "aria": "会話ワークベンチ",
     "panes": "ペイン",

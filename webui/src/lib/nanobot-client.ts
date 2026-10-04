@@ -916,6 +916,32 @@ export class NanobotClient {
   }
 
   /**
+   * Submit a credential form opened by the ``request_secret`` tool. Values
+   * travel on this dedicated envelope, never as a chat ``message``, so they
+   * bypass transcript persistence and model context.
+   */
+  submitCredential(
+    chatId: string,
+    requestId: string,
+    values: Record<string, string>,
+  ): void {
+    this.queueSend({
+      type: "credential_submit",
+      chat_id: chatId,
+      request_id: requestId,
+      values,
+    });
+  }
+
+  cancelCredential(chatId: string, requestId: string): void {
+    this.queueSend({
+      type: "credential_cancel",
+      chat_id: chatId,
+      request_id: requestId,
+    });
+  }
+
+  /**
    * Send one WebUI mutation over the authenticated socket. Pending requests are
    * replayed with the same request_id after reconnect so the gateway can join or
    * replay the original operation. A client-side timeout still ends all retries.

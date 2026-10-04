@@ -148,6 +148,9 @@ export interface UIMessage {
   deliveryStatus?: MessageDeliveryStatus;
   /** Structured rejection reason shown with a failed optimistic message. */
   deliveryErrorKind?: MessageDeliveryErrorKind;
+  /** Structured UI payload carried on the wire ``message`` frame (e.g. an
+   * inline credential request rendered as a form card). */
+  agentUi?: AgentUIBlob;
 }
 
 export interface UICliAppAttachment {
@@ -344,10 +347,30 @@ export interface SkillInstallPayload extends SkillsPayload {
   };
 }
 
-/** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
-interface AgentUIBlob {
+/** Structured UI blob on ``progress``/``message`` WS frames; channels may add
+ * more ``kind`` values later. */
+export interface AgentUIBlob {
   kind: string;
   data?: unknown;
+}
+
+/** ``agent_ui`` payload for ``kind === "credential_request"``: an inline
+ * credential form opened by the ``request_secret`` tool. */
+export interface CredentialRequestUIData {
+  request_id: string;
+  chat_id?: string;
+  service: string;
+  reason?: string;
+  fields: Array<{
+    key: string;
+    label: string;
+    sensitive?: boolean;
+    required?: boolean;
+  }>;
+  /** Unix seconds when the request stops accepting submissions. */
+  expires_at?: number;
+  /** Terminal status set by ``credential_resolved``/``credential_result``. */
+  status?: string;
 }
 
 /** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
@@ -1497,6 +1520,18 @@ export type InboundEvent =
       event: "sidebar_state_updated";
       state: SidebarStatePayload;
     }
+  | {
+      event: "credential_resolved";
+      chat_id: string;
+      request_id: string;
+      status: string;
+    }
+  | {
+      event: "credential_result";
+      chat_id?: string;
+      request_id: string;
+      status: string;
+    }
   | { event: "transcription_result"; request_id: string; text: string }
   | {
       event: "transcription_error";
@@ -1640,6 +1675,13 @@ export type Outbound =
   | { type: "discard_temporary_chat"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
+  | {
+      type: "credential_submit";
+      chat_id: string;
+      request_id: string;
+      values: Record<string, string>;
+    }
+  | { type: "credential_cancel"; chat_id: string; request_id: string }
   | {
       type: "message";
       chat_id: string;
