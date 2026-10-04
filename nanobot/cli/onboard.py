@@ -27,8 +27,8 @@ from rich.table import Table
 
 from nanobot.cli.models import (
     format_token_count,
+    get_model_catalog,
     get_model_context_limit,
-    get_model_suggestions,
 )
 from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
 from nanobot.config.schema import Config, ModelPresetConfig
@@ -650,18 +650,17 @@ def _get_current_provider(model: BaseModel) -> str:
 
 
 def _input_model_with_autocomplete(
-    display_name: str, current: Any, provider: str
+    display_name: str, current: Any, provider: str, *, config: Config
 ) -> str | None | object:
     """Get model input with autocomplete suggestions.
 
     """
     default = str(current) if current else ""
 
-    class DynamicModelCompleter(Completer):
-        """Completer that dynamically fetches model suggestions."""
+    models = get_model_catalog(config, provider, default)
 
-        def __init__(self, provider_name: str):
-            self.provider = provider_name
+    class DynamicModelCompleter(Completer):
+        """Filter one provider snapshot without network requests while typing."""
 
         def get_completions(
             self,
@@ -670,11 +669,8 @@ def _input_model_with_autocomplete(
         ) -> Iterable[Completion]:
             _ = complete_event
             text = document.text_before_cursor
-            suggestions = get_model_suggestions(text, provider=self.provider, limit=50)
+            suggestions = [row.id for row in models if text.lower() in row.id.lower()][:50]
             for model in suggestions:
-                # Skip if model doesn't contain the typed text
-                if text.lower() not in model.lower():
-                    continue
                 yield Completion(
                     model,
                     start_position=-len(text),
@@ -685,7 +681,7 @@ def _input_model_with_autocomplete(
         _get_questionary().autocomplete(
             f"{display_name}:",
             choices=[""],  # Placeholder, actual completions from completer
-            completer=DynamicModelCompleter(provider),
+            completer=DynamicModelCompleter(),
             default=default,
             key_bindings=_input_back_key_bindings(),
             qmark=">",
@@ -698,7 +694,7 @@ def _input_model_with_autocomplete(
 
 
 def _input_context_window_with_recommendation(
-    display_name: str, current: Any, model_obj: BaseModel
+    display_name: str, current: Any, model_obj: BaseModel, *, config: Config
 ) -> int | None | object:
     """Get context window input with option to fetch recommended value."""
     current_val = current if current else ""
@@ -728,7 +724,7 @@ def _input_context_window_with_recommendation(
             return None
 
         provider = _get_current_provider(model_obj)
-        context_limit = get_model_context_limit(model_name, provider)
+        context_limit = get_model_context_limit(model_name, provider, config=config)
 
         if context_limit:
             console.print(
@@ -760,24 +756,26 @@ def _input_context_window_with_recommendation(
 
 
 def _handle_model_field(
-    working_model: BaseModel, field_name: str, field_display: str, current_value: Any
+    working_model: BaseModel, field_name: str, field_display: str, current_value: Any,
+    *, config: Config,
 ) -> None:
     """Handle the 'model' field with autocomplete and context-window auto-fill."""
     provider = _get_current_provider(working_model)
-    new_value = _input_model_with_autocomplete(field_display, current_value, provider)
+    new_value = _input_model_with_autocomplete(field_display, current_value, provider, config=config)
     if new_value is _BACK_PRESSED:
         return
     if new_value is not None and new_value != current_value:
         setattr(working_model, field_name, new_value)
-        _try_auto_fill_context_window(working_model, cast(str, new_value))
+        _try_auto_fill_context_window(working_model, cast(str, new_value), config=config)
 
 
 def _handle_context_window_field(
-    working_model: BaseModel, field_name: str, field_display: str, current_value: Any
+    working_model: BaseModel, field_name: str, field_display: str, current_value: Any,
+    *, config: Config,
 ) -> None:
     """Handle context_window_tokens with recommendation lookup."""
     new_value = _input_context_window_with_recommendation(
-        field_display, current_value, working_model
+        field_display, current_value, working_model, config=config
     )
     if new_value is _BACK_PRESSED:
         return
@@ -930,6 +928,7 @@ def _configure_pydantic_model(
     display_name: str,
     *,
     skip_fields: set[str] | None = None,
+    config: Config | None = None,
 ) -> _ModelT | None:
     """Configure a Pydantic model interactively.
 
@@ -997,7 +996,7 @@ def _configure_pydantic_model(
             if nested is None and ftype.inner_type:
                 nested = ftype.inner_type()
             if nested and isinstance(nested, BaseModel):
-                updated = _configure_pydantic_model(nested, field_display)
+                updated = _configure_pydantic_model(nested, field_display, config=config)
                 if updated is not None:
                     setattr(working_model, field_name, updated)
                 elif created:
@@ -1007,7 +1006,10 @@ def _configure_pydantic_model(
         # Registered special-field handlers
         handler = _resolve_field_handler(working_model, field_name)
         if handler:
-            handler(working_model, field_name, field_display, current_value)
+            if field_name in {"model", "context_window_tokens"}:
+                handler(working_model, field_name, field_display, current_value, config=config or Config())
+            else:
+                handler(working_model, field_name, field_display, current_value)
             continue
 
         # Select fields with hints (e.g. reasoning_effort)
@@ -1050,7 +1052,9 @@ def _configure_pydantic_model(
             setattr(working_model, field_name, new_value)
 
 
-def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None:
+def _try_auto_fill_context_window(
+    model: BaseModel, new_model_name: str, *, config: Config,
+) -> None:
     """Try to auto-fill context_window_tokens if it's at default value.
 
     Note:
@@ -1074,7 +1078,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
         return  # User has customized it, don't override
 
     provider = _get_current_provider(model)
-    context_limit = get_model_context_limit(new_model_name, provider)
+    context_limit = get_model_context_limit(new_model_name, provider, config=config)
 
     if context_limit:
         setattr(model, "context_window_tokens", context_limit)
@@ -1083,7 +1087,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
             f"{format_token_count(context_limit)} tokens[/]"
         )
     else:
-        console.print("[dim]Could not auto-fill context window - model not in database[/dim]")
+        console.print("[dim]Could not auto-fill context window - provider did not return a context limit[/dim]")
 
 
 # --- Model Preset Configuration ---
@@ -1157,7 +1161,7 @@ def _configure_model_presets(config: Config) -> None:
                     _pause()
                     continue
                 new_preset = ModelPresetConfig(model="")
-                updated = _configure_pydantic_model(new_preset, f"New Preset: {name}")
+                updated = _configure_pydantic_model(new_preset, f"New Preset: {name}", config=config)
                 if updated is not None:
                     config.model_presets[name] = updated
                     _sync_preset_cache(config)
@@ -1197,7 +1201,7 @@ def _configure_model_presets(config: Config) -> None:
                 continue
 
             if action == "Edit":
-                updated = _configure_pydantic_model(preset, f"Edit Preset: {preset_name}")
+                updated = _configure_pydantic_model(preset, f"Edit Preset: {preset_name}", config=config)
                 if updated is not None:
                     config.model_presets[preset_name] = updated
                     _sync_preset_cache(config)
@@ -1493,7 +1497,7 @@ def _configure_general_settings(config: Config, section: str) -> None:
         return
     display_name, _subtitle, skip = meta
     model = _SETTINGS_GETTER[section](config)
-    updated = _configure_pydantic_model(model, display_name, skip_fields=skip)
+    updated = _configure_pydantic_model(model, display_name, skip_fields=skip, config=config)
     if updated is not None:
         _SETTINGS_SETTER[section](config, updated)
 
@@ -1837,10 +1841,18 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
             console.print(f"[red]Unknown provider: {provider_name}[/red]")
             return False
 
+        catalog_config = config.model_copy(deep=True)
+        catalog_provider = getattr(catalog_config.providers, provider_name)
+        if api_key is not None:
+            catalog_provider.api_key = api_key
+        if api_base and (base_was_prompted or not catalog_provider.api_base):
+            catalog_provider.api_base = api_base
+
         model = _input_model_with_autocomplete(
             "Model ID",
             provider_info.default_model if provider_info else "",
             provider_name,
+            config=catalog_config,
         )
         if model is _BACK_PRESSED:
             continue
@@ -2119,12 +2131,3 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
             return OnboardResult(config=original_config, should_save=False)
         if answer == "[A] Advanced Settings":
             _configure_advanced_settings(config)
-
-
-def run_quick_start_onboard(initial_config: Config) -> OnboardResult:
-    """Run the compact provider + local WebUI setup path directly."""
-    _get_questionary()
-    draft = initial_config.model_copy(deep=True)
-    if _configure_quick_start(draft):
-        return OnboardResult(config=draft, should_save=True)
-    return OnboardResult(config=initial_config, should_save=False)

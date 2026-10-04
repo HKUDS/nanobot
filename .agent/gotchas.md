@@ -1,31 +1,33 @@
 # Common Gotchas
 
-## Do not use `ruff format`
+## Channel dependencies for strict type checking
 
-`CONTRIBUTING.md` mentions `ruff format`, but **do not run it** — it destroys git blame history. Only `ruff check` should be used.
+Channel dependencies come from channel package manifests, outside the main extras. Reproduce CI's setup with `uv sync --all-extras --dev`, then `uv run --no-sync python -m scripts.install_channel_dependencies --all-channels`. Keep `--no-sync` on subsequent `uv run` commands so syncing does not remove those dependencies. See `.github/workflows/ci.yml` for checks.
+
+## Channel-owned UI and WebUI transport
+
+Channels can own frontend code in `nanobot/channels/*/webui/` and tests in `nanobot/channels/*/tests/`, including `tests/webui/`. The WebUI's lint and test configurations include those frontend paths. Do not assume all channel tests live under the root `tests/` or all frontend code lives under `webui/`.
+
+Vite proxies `/api`, `/webui`, and `/auth`; the application's WebSocket connects directly to the gateway. `NANOBOT_API_URL` sets the HTTP proxy target, whose default is `http://127.0.0.1:8765`. See `webui/vite.config.ts`.
 
 ## Config `${VAR}` References
 
-`config/loader.py` resolves `${VAR}` patterns in `config.json` at load time. This is **not** a shell-like default-value syntax. If the environment variable is missing, `load_config` raises `ValueError` and the agent falls back to default configuration.
-
-Example valid usage:
-```json
-{ "providers": { "openrouter": { "apiKey": "${OPENROUTER_KEY}" } } }
-```
+`nanobot/config/loader.py` loads and validates the config; `resolve_config_env_vars` resolves `${VAR}` references before runtime use. This is not shell-like default-value syntax. Missing referenced variables raise `ConfigLoadError` with field locations; invalid existing config files also raise `ConfigLoadError`. Defaults are created when the config file is absent, not as recovery from an invalid file.
 
 ## Windows Compatibility
 
 nanobot explicitly supports Windows. Key differences to keep in mind:
 - `ExecTool` defaults to PowerShell on Windows (`pwsh` when available, otherwise Windows PowerShell); pass `shell="cmd"` for cmd.exe syntax or cmd built-ins (`shell.py`).
-- `cli/commands.py` forces `sys.stdout`/`stderr` to UTF-8 on startup to handle emoji and multilingual input.
+- `nanobot/cli/entry.py` configures Windows console output as UTF-8 before dispatch to handle emoji and multilingual input.
 - MCP stdio server commands are normalized for Windows path separators (`mcp.py`).
-- Always use `pathlib.Path` for path manipulation; do not assume `/` separators.
 
 ## Prompt Templates
 
-Agent system prompts and scenario-specific instructions live in `nanobot/templates/` as Jinja2 markdown files (`identity.md`, `platform_policy.md`, `HEARTBEAT.md`, `SOUL.md`, etc.). Changing these files alters agent behavior as directly as changing Python code. They are loaded by `utils/prompt_templates.py`.
+Agent system prompts and scenario-specific instructions live in `nanobot/templates/`, including `agent/identity.md` and `agent/platform_policy.md`; workspace defaults include `AGENTS.md`, `HEARTBEAT.md`, and `SOUL.md`. Prompt rendering is handled by `nanobot/utils/prompt_templates.py`. Changing these files alters agent behavior as directly as changing Python code.
 
-Tool descriptions, skills, and replayed session history also shape model behavior. Treat changes to those surfaces like runtime code: keep them narrow, add a focused regression test when possible, and avoid teaching the model to repeat internal markers, local paths, or tool-call text.
+The repository's root `AGENTS.md` guides coding agents; `nanobot/templates/AGENTS.md` is a default for nanobot workspaces. `nanobot/agent/context.py` loads project `AGENTS.md` and global `SOUL.md`/`USER.md`, skipping unchanged bundled `AGENTS.md` and `USER.md` defaults. It does not implement Codex's ancestor-directory instruction chain.
+
+Tool descriptions, skills, and replayed session history also shape model behavior. Treat changes to those surfaces like runtime code: keep them focused, verify the affected contract, and avoid teaching the model to repeat internal markers, local paths, or tool-call text. Add a regression test when it proves a reachable failure that existing coverage does not address.
 
 ## Context Pollution Persists
 
@@ -35,6 +37,8 @@ Anything written into memory, session history, or prompt inputs can be replayed 
 
 Built-in skills live in `nanobot/skills/` (markdown + YAML frontmatter format). Agent capabilities that are "know-how" rather than code should be added as skills, not hardcoded into the agent loop. External skills can be published to and installed from ClawHub.
 
-## Atomic Session Writes
+## Persistence and durability
 
-`agent/memory.py` writes `history.jsonl` atomically (temp file + fsync + rename + directory fsync). This guarantees durability across crashes. Do not replace this with a plain `open(..., "w")` write.
+`nanobot/agent/memory.py` owns the memory journal `memory/history.jsonl`; ordinary entries are appended under a lock, without explicit fsync. Full journal rewrites use `atomic_write_lines` with its default file and directory fsync. Preserve that atomic replacement path rather than truncating the live journal in place.
+
+Conversation history belongs to `nanobot/session/manager.py`. Session saves use atomic replacement, with fsync controlled by the caller; the default is `False`, while durable shutdown and other explicit durability paths request `True`. Preserve the distinction between atomic visibility and crash durability, and retain locks and explicit fsync on paths that require them.

@@ -1,16 +1,14 @@
 """Session metadata helpers for explicit sustained goals.
 
 Tools set ``metadata[GOAL_STATE_KEY]``. Reads accept the legacy session key ``thread_goal``
-for older sessions. Callers use ``goal_state_runtime_lines``, ``goal_state_ws_blob``, and
-``runner_wall_llm_timeout_s`` without importing tool implementations.
+for older sessions. Callers use ``goal_state_runtime_lines`` and ``goal_state_ws_blob`` without
+importing tool implementations.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any, Mapping, MutableMapping, cast
-
-from nanobot.session.manager import SessionManager
 
 GOAL_STATE_KEY = "goal_state"
 GOAL_COMMAND = "/goal"
@@ -114,23 +112,3 @@ def goal_state_ws_blob(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
             blob["recap"] = recap
         return blob
     return {"active": False}
-
-
-def runner_wall_llm_timeout_s(
-    sessions: SessionManager,
-    session_key: str | None,
-    *,
-    metadata: Mapping[str, Any] | None = None,
-    message_metadata: Mapping[str, Any] | None = None,
-) -> float | None:
-    """Wall-clock cap for :class:`~nanobot.agent.runner.AgentRunner` when streaming an LLM.
-
-    Returns ``0.0`` to disable ``asyncio.wait_for`` around the request when this is a
-    sustained-goal turn; ``None`` means use ``NANOBOT_LLM_TIMEOUT_S``. Pass in-memory
-    ``metadata`` when the caller already holds :attr:`~nanobot.session.manager.Session.metadata`
-    for this turn.
-    """
-    meta: Mapping[str, Any] | None = metadata
-    if meta is None and session_key:
-        meta = sessions.get_or_create(session_key).metadata
-    return 0.0 if sustained_goal_turn(meta, message_metadata=message_metadata) else None

@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import {
   isAbsoluteWorkspacePath,
   projectNameFromPath,
+  sameWorkspacePath,
   scopeWithAccessMode,
   selectedProjectScope,
   shortWorkspacePath,
@@ -81,7 +82,9 @@ export function WorkspaceProjectPicker({
     && !!defaultScope
     && !!onChange
     && controls?.can_change_project !== false;
-  const pickFolder = getRuntimeHost().pickFolder ?? onPickFolder;
+  const pickFolder = controls?.can_pick_folder
+    ? getRuntimeHost().pickFolder ?? onPickFolder
+    : undefined;
   const nativeProjectPicker = !!pickFolder;
 
   useEffect(() => {
@@ -115,16 +118,22 @@ export function WorkspaceProjectPicker({
         setPathError(t("workspace.dialog.absolutePathRequired"));
         return;
       }
+      const accessMode =
+        controls?.can_use_full_access === false
+        && !sameWorkspacePath(trimmed, base.project_path)
+          ? "restricted"
+          : base.access_mode;
       onChange({
         ...base,
         project_path: trimmed,
         project_name: projectName || projectNameFromPath(trimmed),
-        restrict_to_workspace: base.access_mode === "restricted",
+        access_mode: accessMode,
+        restrict_to_workspace: accessMode === "restricted",
       });
       setPathError(null);
       setOpen(false);
     },
-    [defaultScope, onChange, scope, t],
+    [controls?.can_use_full_access, defaultScope, onChange, scope, t],
   );
 
   const pickNativeFolder = useCallback(async () => {
@@ -303,6 +312,7 @@ export function WorkspaceAccessMenu({
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
   const { t } = useTranslation();
+  const dismissedByPointerRef = useRef(false);
   const mode = scope.access_mode;
   const isFull = mode === "full";
   const accessLabel = t(
@@ -349,7 +359,15 @@ export function WorkspaceAccessMenu({
           <ChevronDown className={cn("thread-composer-access-chevron ml-1.5 shrink-0", isHero ? "h-3 w-3" : "h-3 w-3")} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent
+        align="start"
+        className="w-56"
+        onPointerDownOutside={() => { dismissedByPointerRef.current = true; }}
+        onCloseAutoFocus={(event) => {
+          if (dismissedByPointerRef.current) event.preventDefault();
+          dismissedByPointerRef.current = false;
+        }}
+      >
         <AccessMenuItem
           icon={<Hand className="h-4 w-4" />}
           label={t("thread.composer.workspace.default")}
@@ -389,7 +407,7 @@ function AccessMenuItem({
       disabled={disabled}
       onSelect={onSelect}
       className={cn(
-        "flex h-10 items-center gap-3 px-3 text-[13.5px] font-semibold",
+        "flex h-10 items-center gap-3 px-3 text-[13.5px] font-semibold max-sm:min-h-11",
         warning && "text-orange-600 focus:text-orange-600 dark:text-orange-300 dark:focus:text-orange-300",
       )}
     >

@@ -25,12 +25,14 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
   className,
   highlightCode,
   streaming,
+  preserveStreamingLayout,
   onOpenFilePreview,
 }: {
   source: string;
   className?: string;
   highlightCode: boolean;
   streaming: boolean;
+  preserveStreamingLayout: boolean;
   onOpenFilePreview?: (path: string) => void;
 }) {
   return (
@@ -38,6 +40,7 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
       className={className}
       highlightCode={highlightCode}
       streaming={streaming}
+      preserveStreamingLayout={preserveStreamingLayout}
       onOpenFilePreview={onOpenFilePreview}
     >
       {source}
@@ -81,7 +84,6 @@ export function MarkdownText({
   const renderedSource = children;
   const renderPhase = streaming ? "streaming" : "complete";
   const highlightCode = !streaming;
-  const renderWithStreamingLayout = streaming || preserveStreamingLayout;
 
   useEffect(() => {
     if (streaming) void preloadMarkdownText();
@@ -106,7 +108,8 @@ export function MarkdownText({
           source={renderedSource}
           className={className}
           highlightCode={highlightCode}
-          streaming={renderWithStreamingLayout}
+          streaming={streaming}
+          preserveStreamingLayout={preserveStreamingLayout}
           onOpenFilePreview={onOpenFilePreview}
         />
       </Suspense>

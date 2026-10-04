@@ -38,7 +38,7 @@ from nanobot.bus.runtime_events import (
 )
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
-from nanobot.providers.fallback_provider import FallbackModelObserver
+from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackModelSelection
 from nanobot.runtime_context import public_history_message
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -56,6 +56,7 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.session_identity import is_webui_session_key
+from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import append_session_message_input
 
 WEBUI_SESSION_METADATA_KEY = "webui"
@@ -63,7 +64,6 @@ WEBUI_TITLE_METADATA_KEY = "title"
 WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
 TITLE_MAX_CHARS = 60
 TITLE_GENERATION_MAX_TOKENS = 96
-TITLE_GENERATION_REASONING_EFFORT = "none"
 
 # Latest active turn projection per ``chat_id`` (websocket only). It survives browser refresh
 # while the gateway process stays up and is implicitly dropped on restart.
@@ -255,8 +255,11 @@ async def maybe_generate_webui_title(
         prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
 
     try:
-        with llm_usage_source("system"):
-            response = await provider.chat_with_retry(
+        with (
+            llm_usage_source("system"),
+            logger.contextualize(purpose="webui_title", session_key=target_session.key),
+        ):
+            response = await provider.chat_stream_with_retry(
                 [
                     {
                         "role": "system",
@@ -271,11 +274,13 @@ async def maybe_generate_webui_title(
                 model=model,
                 max_tokens=TITLE_GENERATION_MAX_TOKENS,
                 temperature=0.2,
-                reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
+                reasoning_effort=None,
                 retry_mode="standard",
             )
     except Exception:
-        logger.debug("Failed to generate webui session title for {}", session_key, exc_info=True)
+        logger.opt(exception=True).debug(
+            "Failed to generate webui session title for {}", session_key
+        )
         return False
 
     title = clean_generated_title(response.content)
@@ -388,26 +393,13 @@ def clear_websocket_turn_if_current(
     if not owner:
         return False
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
-    if turns is not None:
-        if owner not in turns:
-            return False
-        if preserve_persistence_failure and turns[owner].transcript_persistence_failed:
-            return False
-        turns.pop(owner)
-        _sync_websocket_turn_projection(chat_id)
-        return True
-
-    # Compatibility for callers/tests that populated the legacy projection
-    # directly before the multi-owner registry existed.
-    if (
-        chat_id in _WEBSOCKET_TURN_WALL_STARTED_AT
-        and _WEBSOCKET_TURN_OWNERS.get(chat_id) == owner
-    ):
-        _WEBSOCKET_TURN_WALL_STARTED_AT.pop(chat_id, None)
-        _WEBSOCKET_TURN_IDS.pop(chat_id, None)
-        _WEBSOCKET_TURN_OWNERS.pop(chat_id, None)
-        return True
-    return False
+    if turns is None or owner not in turns:
+        return False
+    if preserve_persistence_failure and turns[owner].transcript_persistence_failed:
+        return False
+    turns.pop(owner)
+    _sync_websocket_turn_projection(chat_id)
+    return True
 
 
 def clear_websocket_turns(chat_id: str) -> None:
@@ -523,7 +515,7 @@ class WebuiTurnRoutePolicy:
 def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserver:
     """Translate provider fallback choices into chat-scoped WebUI events."""
 
-    async def _publish(model: str) -> None:
+    async def _publish(selection: FallbackModelSelection) -> None:
         context = current_request_context()
         if context is None or context.channel != "websocket":
             return
@@ -535,13 +527,14 @@ def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserve
                 channel=context.channel,
                 chat_id=chat_id,
                 event=TurnModelUpdatedEvent(
-                    model=model,
+                    model=selection.model,
                     model_preset=(
                         context.runtime.model_preset
                         if context.runtime is not None
                         else None
                     ),
                     fallback=True,
+                    reauth_provider=selection.reauth_provider,
                 ),
                 metadata=context.metadata,
             )
@@ -558,7 +551,6 @@ class WebuiTurnCoordinator:
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
     recovery: RecoveryCoordinator | None = None
-
     def subscribe(self) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
         unsubscribe = [
@@ -650,10 +642,9 @@ class WebuiTurnCoordinator:
                 session_message=public_metadata,
             )
         except (OSError, TypeError, ValueError):
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "Failed to persist session input {}",
                 envelope["message_id"],
-                exc_info=True,
             )
         await self.bus.publish_outbound(outbound_message_for_event(
             channel="websocket",
@@ -710,9 +701,20 @@ class WebuiTurnCoordinator:
             context_window_tokens=(
                 event.runtime.context_window_tokens if event.runtime is not None else None
             ),
+            outcome=event.outcome,
+            failure_kind=event.failure_kind,
+            failure_error_kind=event.failure_error_kind,
+            failure_attempts=event.failure_attempts,
         )
         if self.recovery is not None:
             await self.recovery.turn_completed(event.context.session_key)
+        if event.outcome == "completed" and is_webui_session_key(event.context.session_key):
+            turn_id = event.context.metadata.get(WEBUI_TURN_METADATA_KEY)
+            if isinstance(turn_id, str) and turn_id:
+                try:
+                    update_star_prompt("completed", turn_id=turn_id)
+                except (OSError, ValueError, TimeoutError):
+                    logger.warning("Could not persist Star invitation usage")
         self._schedule_title_update_from_event(event)
 
     async def _handle_goal_state_changed(self, event: GoalStateChanged) -> None:
@@ -753,6 +755,10 @@ class WebuiTurnCoordinator:
         usage: LLMUsage | None = None,
         round_usages: tuple[LLMUsage, ...] = (),
         context_window_tokens: int | None = None,
+        outcome: str = "completed",
+        failure_kind: str | None = None,
+        failure_error_kind: str | None = None,
+        failure_attempts: int | None = None,
     ) -> None:
         if msg.channel != "websocket":
             return
@@ -768,6 +774,18 @@ class WebuiTurnCoordinator:
                     usage=usage,
                     round_usages=round_usages,
                     context_window_tokens=context_window_tokens,
+                    outcome=outcome,
+                    failure_kind=failure_kind,
+                    failure_error_kind=failure_error_kind,
+                    failure_attempts=failure_attempts,
+                    failure_message=(
+                        "Model provider request failed. Check the provider configuration or "
+                        "service status, then try again."
+                        if failure_kind == "model"
+                        else "This turn failed and has ended."
+                        if outcome == "failed"
+                        else None
+                    ),
                 ),
                 metadata=msg.metadata,
             )

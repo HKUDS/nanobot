@@ -1,0 +1,137 @@
+{
+  "description": "Trabaja con nanobot desde incidencias de Linear mediante sesiones de agente nativas.",
+  "requirements": "Una aplicación OAuth privada de Linear y una URL HTTPS pública y estable para las devoluciones de llamada",
+  "setup": {
+    "docsLabel": "Abrir la guía de configuración de Linear",
+    "officialLabel": "Crear una aplicación OAuth de Linear",
+    "tryIt": "Menciona la aplicación o delégale una incidencia; no necesitas volver a mencionarla dentro de la sesión de agente.",
+    "summary": "Crea una aplicación OAuth privada de Linear, guarda sus credenciales y la URL pública y autoriza el espacio de trabajo. Inicia una sesión mencionando la aplicación o delegándole una incidencia; los comentarios normales se ignoran.",
+    "steps": [
+      "Expón esta instancia de nanobot mediante una URL HTTPS estable (puedes usar un túnel).",
+      "Crea una aplicación OAuth privada en Linear con los permisos read, write, app:mentionable y app:assignable.",
+      "Suscribe el webhook de la aplicación a AgentSessionEvent, PermissionChange y OAuthAuthorization con la URL generada.",
+      "Conecta el espacio de trabajo con OAuth y menciona la aplicación o delégale una incidencia."
+    ],
+    "fields": {
+      "clientId": {
+        "label": "ID de cliente OAuth",
+        "placeholder": "ID de cliente OAuth de Linear",
+        "help": "Cópialo de la aplicación OAuth privada en Linear."
+      },
+      "clientSecret": {
+        "label": "Secreto de cliente OAuth",
+        "placeholder": "••••••",
+        "help": "Solo se guarda en esta instancia de nanobot."
+      },
+      "webhookSigningSecret": {
+        "label": "Secreto de firma del webhook",
+        "placeholder": "••••••",
+        "help": "Se usa para verificar Linear-Signature antes de analizar el cuerpo del webhook."
+      },
+      "publicBaseUrl": {
+        "label": "URL HTTPS pública",
+        "placeholder": "https://nanobot.example.com",
+        "help": "Un origen HTTPS estable dirigido al listener indicado abajo; no incluyas una ruta."
+      },
+      "host": {
+        "label": "Host de escucha",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "Puerto de escucha",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Ruta del webhook",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "Ruta de devolución OAuth",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "Usuarios de Linear permitidos",
+        "placeholder": "ID de usuarios de Linear separados por comas",
+        "help": "Déjalo vacío para usar el emparejamiento de nanobot, o usa * para permitir a todos los usuarios de los espacios conectados."
+      },
+      "showReasoning": {
+        "label": "Mostrar razonamiento",
+        "help": "Publica el razonamiento del modelo como actividades de pensamiento en Linear. Desactívalo para una sesión más limpia."
+      }
+    }
+  },
+  "custom": {
+    "secretSaved": "Guardado",
+    "replaceSecret": "Cambiar",
+    "replaceSecretLabel": "Cambiar {{name}}",
+    "enterSecret": "Introduce el secreto",
+    "secretSaveFailed": "No se pudo confirmar el guardado. Reintenta o cancela.",
+    "authorizeTitle": "Autorizar en Linear",
+    "authorizeDescription": "Continúa en Linear para elegir un espacio de trabajo y autorizar a nanobot. Vuelve aquí cuando termines.",
+    "waiting": "Esperando la autorización de Linear...",
+    "connected": "Linear está conectado.",
+    "stopped": "La autorización se detuvo.",
+    "connecting": "Conectando...",
+    "connect": "Conectar Linear",
+    "openLinear": "Continuar en Linear",
+    "createApp": "Crear aplicación de Linear",
+    "savePublicUrl": "Introduce una URL HTTPS pública para crear una aplicación de Linear.",
+    "retrySave": "Reintentar",
+    "channelRunning": "Canal en ejecución",
+    "accessAll": "Todos los miembros de un espacio autorizado pueden ejecutar este agente.",
+    "accessRestricted": "Solo los ID de usuario de Linear indicados en Avanzado pueden ejecutar este agente.",
+    "accessPairing": "Empareja en el primer uso y conecta Linear MCP para buscar o editar issues.",
+    "configureTools": "Configurar Linear MCP",
+    "workspacesTitle": "Espacios autorizados",
+    "refreshWorkspaces": "Actualizar espacios",
+    "loadingWorkspaces": "Cargando espacios",
+    "noWorkspaces": "No hay espacios autorizados. Conecta uno para recibir solicitudes del agente de Linear.",
+    "refreshRequired": "Es necesario renovar la autorización",
+    "missingScopes": "Vuelve a conectar para conceder: {{scopes}}",
+    "authorized": "Autorizado",
+    "confirmDisconnect": "Eliminar conexión",
+    "disconnect": "Eliminar conexión",
+    "workspaceActions": "Administrar {{name}}",
+    "reauthorize": "Volver a autorizar",
+    "disconnectTitle": "¿Eliminar {{name}}?",
+    "disconnectDescription": "Revoca la autorización y borra los ajustes de acceso de este espacio en nanobot. Se conservan las incidencias, los comentarios y el historial de nanobot. No afecta a otros espacios. Puedes volver a autorizarlo después.",
+    "disconnectLast": "Es el último espacio de trabajo conectado, por lo que también se desactivará el canal de Linear.",
+    "disconnecting": "Eliminando…",
+    "addWorkspace": "Conectar espacio de trabajo",
+    "addWorkspaceDetails": "Acerca de conectar espacios",
+    "addWorkspaceHelp": "Usa la aplicación Linear actual. Para conectar otros espacios, debe permitir su instalación en ellos; las aplicaciones privadas solo funcionan en su propio espacio. Volver a autorizar un espacio actualiza su conexión sin duplicarlo.",
+    "resetConnection": "Restablecer conexión con Linear",
+    "resetTitle": "¿Restablecer Linear?",
+    "resetDescription": "Desconecta todos los espacios vinculados a esta aplicación y detiene el canal.",
+    "resetClears": "Elimina",
+    "resetClearsDetail": "Ajustes de acceso de miembros y configuración de la aplicación en esta instancia, incluidas las credenciales guardadas.",
+    "resetKeeps": "Conserva",
+    "resetKeepsDetail": "La aplicación de Linear, las incidencias, los comentarios, el historial y los emparejamientos aprobados.",
+    "resetConfirm": "Restablecer",
+    "resetting": "Restableciendo…",
+    "resetIncomplete": "Restablecimiento incompleto. Los espacios ya eliminados no se restauran; reintenta para terminar.",
+    "resetInspectFailed": "No se pudieron verificar los espacios conectados. Se conservó la configuración.",
+    "resetChanged": "Se conectó otro espacio. Revisa las conexiones y reintenta.",
+    "resetStopFailed": "No se pudo detener el canal de Linear. Se conservó la configuración.",
+    "resetSaveFailed": "No se pudo borrar la configuración. Reintenta."
+  },
+  "members": {
+    "title": "Acceso de miembros",
+    "help": "Permite que los miembros usen nanobot sin código de vinculación. Se mantiene el alcance autorizado en Linear y no se concede acceso al panel de administración de nanobot. Desactivar el acceso bloquea nuevas solicitudes, no las tareas en curso.",
+    "allowAll": "La configuración avanzada permite a todos los miembros (*), incluidos los nuevos. Los interruptores desactivados tienen prioridad. Elimina * para exigir aprobación a los nuevos miembros.",
+    "search": "Buscar miembros",
+    "refresh": "Actualizar miembros",
+    "working": "Guardando…",
+    "saved": "Guardado",
+    "retry": "Actualiza los miembros para comprobar el estado actual y vuelve a intentarlo.",
+    "empty": "No hay miembros activos que coincidan.",
+    "allow": "Permitir que {{name}} use nanobot",
+    "saveUnconfirmed": "No se confirmó el acceso. Actualiza los miembros antes de reintentar.",
+    "guide": "Usa Acceso de miembros para aprobar compañeros sin códigos. Las aprobaciones existentes siguen vigentes salvo que se desactiven. Conecta Linear MCP para buscar o editar issues.",
+    "intro": "Elige quién puede usar nanobot en Linear, sin códigos de vinculación.",
+    "details": "Acerca del acceso de miembros",
+    "summary": "{{allowed}} habilitados",
+    "loading": "Buscando miembros…",
+    "refreshing": "Buscando actualizaciones…"
+  }
+}

@@ -67,6 +67,10 @@ class TurnCompleted(AgentEvent):
     usage: LLMUsage | None = None
     # Logical model rounds in display order; recovery dispatches are aggregated.
     round_usages: tuple[LLMUsage, ...] = ()
+    outcome: str = "completed"
+    failure_kind: str | None = None
+    failure_error_kind: str | None = None
+    failure_attempts: int | None = None
 
 
 @dataclass(frozen=True)
@@ -259,6 +263,10 @@ class RuntimeEventPublisher:
         chat_id: str,
         session_key: str,
         metadata: dict[str, Any] | None,
+        outcome: str = "completed",
+        failure_kind: str | None = None,
+        failure_error_kind: str | None = None,
+        failure_attempts: int | None = None,
     ) -> None:
         await self.bus.publish(
             TurnCompleted(
@@ -272,6 +280,10 @@ class RuntimeEventPublisher:
                 runtime=self._turn_runtime.pop(session_key, None),
                 usage=self._turn_usage.pop(session_key, None),
                 round_usages=self._turn_round_usages.pop(session_key, ()),
+                outcome=outcome,
+                failure_kind=failure_kind,
+                failure_error_kind=failure_error_kind,
+                failure_attempts=failure_attempts,
             )
         )
 

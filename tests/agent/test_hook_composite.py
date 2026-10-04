@@ -455,7 +455,7 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
             events.append(f"after_run:{context.stop_reason}")
 
     loop = _make_loop(tmp_path, hooks=[TrackingHook()])
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="done", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -496,7 +496,7 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
         return _create
 
     loop = _make_loop(tmp_path, hook_factories=[factory("registered")])
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="done", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -548,7 +548,7 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
             raise RuntimeError("I am broken")
 
     loop = _make_loop(tmp_path, hooks=[BadHook()])
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="still works", tool_calls=[], usage=None)
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -567,7 +567,7 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
     from nanobot.providers.base import LLMResponse, ToolCallRequest
 
     loop = _make_loop(tmp_path, hooks=[AgentHook()])
-    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
         tool_calls=[ToolCallRequest(id="c1", name="list_dir", arguments={"path": "."})],
         usage=None,
@@ -592,7 +592,7 @@ async def test_agent_loop_no_hooks_backward_compat(tmp_path):
     from nanobot.providers.base import LLMResponse, ToolCallRequest
 
     loop = _make_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
         content="working",
         tool_calls=[ToolCallRequest(id="c1", name="list_dir", arguments={"path": "."})],
     ))

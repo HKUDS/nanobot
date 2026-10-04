@@ -4,7 +4,7 @@ This guide has one goal: get a normal nanobot reply in your browser. Do not add 
 
 If terminals, Python, or API keys are unfamiliar, use the [beginner walkthrough](./start-without-technical-background.md), which explains each term and screen.
 
-These repository docs follow current `main`. The recommended installer uses the stable package, so a newly documented WebUI screen may not appear until the next release. Each advanced guide also provides a CLI or manual config path.
+These repository docs describe `main`, which can be newer than the released package. The installer below installs the latest stable release. Check `nanobot --version` and use the [matching stable guide](https://nanobot.wiki/docs/latest/getting-started/quick-start) if its setup screens differ from this page.
 
 ## What You Need
 
@@ -12,7 +12,7 @@ These repository docs follow current `main`. The recommended installer uses the 
 - Access to one supported AI provider, company endpoint, or local model server.
 - The credential, endpoint URL, and model ID required by that service. Local providers such as Ollama may not require a key.
 
-Git and [Bun](https://bun.sh/) are only needed for a source install. The published package already contains the WebUI and fetches a checksummed, version-matched TUI archive with its licenses, notices, corresponding application source, source offer, and relinking instructions on first use.
+Git and [Bun](https://bun.sh/) are only needed for an editable source install. Platform wheels contain both the WebUI and the matching native TUI, including its licenses, notices, corresponding application source, source offer, and relinking instructions. They support macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. Pip selects the right wheel; first TUI launch does not download anything from GitHub. Other platforms and source-distribution builds can use the WebUI or `nanobot --classic`; see the [terminal requirements](./cli-reference.md#agent-cli) for native TUI availability.
 
 ## 1. Install nanobot
 

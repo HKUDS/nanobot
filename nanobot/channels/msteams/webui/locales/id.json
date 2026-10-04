@@ -1,26 +1,15 @@
 {
-  "description": "Gunakan nanobot dari chat Microsoft Teams.",
-  "requirements": "Kredensial aplikasi bot Azure dan endpoint callback publik",
   "setup": {
     "docsLabel": "Buka panduan Teams",
     "officialLabel": "Buka portal pengembang Teams",
-    "tryIt": "Pasang aplikasi Teams dan kirim pesan uji.",
-    "summary": "Teams menerima pesan melalui URL callback Bot Framework. Produksi memerlukan endpoint HTTPS yang dapat dijangkau.",
-    "steps": [
-      "Buat Azure Bot atau aplikasi Teams dan salin App ID serta client secret.",
-      "Paparkan jalur callback melalui HTTPS dan jadikan endpoint pesan bot.",
-      "Simpan dan aktifkan Teams, lalu pasang aplikasi dan kirim pesan uji."
-    ],
     "fields": {
       "appId": {
         "label": "App ID",
-        "placeholder": "Microsoft App ID",
-        "help": "Salin dari pendaftaran Azure Bot atau aplikasi Teams."
+        "placeholder": "Microsoft App ID"
       },
       "appPassword": {
         "label": "Client secret",
-        "placeholder": "••••••",
-        "help": "Buat client secret untuk aplikasi Microsoft."
+        "placeholder": "••••••"
       },
       "tenantId": {
         "label": "Tenant ID",
@@ -33,6 +22,52 @@
       "allowFrom": {
         "label": "Pengguna yang diizinkan",
         "placeholder": "ID pengguna Teams, dipisahkan koma"
+      },
+      "host": {
+        "label": "Dengarkan tuan rumah"
+      },
+      "port": {
+        "label": "Dengarkan pelabuhan"
+      },
+      "replyInThread": {
+        "label": "Balas di thread",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "mentionOnlyResponse": {
+        "label": "Balasan yang hanya disebutkan saja"
+      },
+      "validateInboundAuth": {
+        "label": "Validasi permintaan masuk",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "refTtlDays": {
+        "label": "Percakapan seumur hidup"
+      },
+      "pruneWebChatRefs": {
+        "label": "Hapus percakapan Obrolan Web",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "pruneNonPersonalRefs": {
+        "label": "Hapus percakapan non-pribadi",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "refTouchIntervalS": {
+        "label": "Interval penyegaran percakapan"
+      },
+      "trustedServiceUrlHosts": {
+        "label": "Host layanan tepercaya"
       }
     }
   }

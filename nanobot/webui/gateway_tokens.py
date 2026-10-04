@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -19,6 +20,7 @@ class GatewayTokenStore:
     """Own short-lived WebSocket and WebUI API tokens for one gateway process."""
 
     max_tokens: int = 10_000
+    instance_id: str = field(default_factory=lambda: str(uuid.uuid4()), init=False)
     issued_tokens: dict[str, float] = field(default_factory=dict)
     issued_token_audiences: dict[str, IssuedTokenAudience] = field(default_factory=dict)
     api_tokens: dict[str, float] = field(default_factory=dict)

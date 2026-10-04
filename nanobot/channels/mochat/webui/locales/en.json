@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "Open MoChat setup guide",
+    "officialLabel": "Open MoChat",
+    "fields": {
+      "clawToken": {
+        "label": "Claw token",
+        "placeholder": "MoChat Claw token"
+      },
+      "baseUrl": {
+        "label": "Server URL",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "Agent user ID",
+        "placeholder": "Optional agent user ID"
+      },
+      "sessions": {
+        "label": "Sessions",
+        "placeholder": "Session IDs, comma separated"
+      },
+      "panels": {
+        "label": "Panels",
+        "placeholder": "Panel IDs, comma separated"
+      },
+      "allowFrom": {
+        "label": "Allowed users",
+        "placeholder": "User IDs, comma separated"
+      },
+      "socketUrl": {
+        "label": "Socket URL"
+      },
+      "socketPath": {
+        "label": "Socket path"
+      },
+      "socketDisableMsgpack": {
+        "label": "Disable MessagePack",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "Reconnect delay"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "Maximum reconnect delay"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "Connection timeout"
+      },
+      "refreshIntervalMs": {
+        "label": "Refresh interval"
+      },
+      "watchTimeoutMs": {
+        "label": "Watch timeout"
+      },
+      "watchLimit": {
+        "label": "Watch batch size"
+      },
+      "retryDelayMs": {
+        "label": "Retry delay"
+      },
+      "maxRetryAttempts": {
+        "label": "Maximum retries"
+      },
+      "mention_requireInGroups": {
+        "label": "Require mentions in groups",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
+      "groups": {
+        "label": "Group rules (JSON)"
+      },
+      "replyDelayMode": {
+        "label": "Reply delay mode"
+      },
+      "replyDelayMs": {
+        "label": "Reply delay"
+      }
+    }
+  }
+}

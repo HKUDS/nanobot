@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
+from agent.session_helpers import run_session
 from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunResult
@@ -52,11 +53,9 @@ from nanobot.session.summary import (
 )
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
-    INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
 )
 from nanobot.session.webui_turns import (
     TITLE_GENERATION_MAX_TOKENS,
-    TITLE_GENERATION_REASONING_EFFORT,
     WEBUI_SESSION_METADATA_KEY,
     WEBUI_TITLE_METADATA_KEY,
     WebuiTurnCoordinator,
@@ -121,9 +120,10 @@ def _runtime_message(content, blocks: list[RuntimeContextBlock]) -> dict:
 
 def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
+    provider.provider_name = "test"
     provider.get_default_model.return_value = "test-model"
     provider.generation = SimpleNamespace(max_tokens=4096)
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     WebuiTurnCoordinator(
         bus=loop.bus,
@@ -315,7 +315,7 @@ async def test_invalid_slash_command_is_rejected_without_calling_provider(
 
     assert response is not None
     assert response.content == expected
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
     session = loop.sessions.get_or_create("websocket:chat-1")
     persisted = [
         (message["role"], message["content"], message.get("_command"))
@@ -335,7 +335,7 @@ def test_clean_generated_title_strips_reasoning_tags() -> None:
 @pytest.mark.asyncio
 async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content='"优化 WebUI 侧边栏。"', finish_reason="stop")
     )
     session = loop.sessions.get_or_create("websocket:chat-title")
@@ -353,18 +353,18 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
 
     assert generated is True
     assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
-    loop.provider.chat_with_retry.assert_awaited_once()
-    assert loop.provider.chat_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
+    assert loop.provider.chat_stream_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
     assert (
-        loop.provider.chat_with_retry.await_args.kwargs["reasoning_effort"]
-        == TITLE_GENERATION_REASONING_EFFORT
+        loop.provider.chat_stream_with_retry.await_args.kwargs["reasoning_effort"]
+        is None
     )
 
 
 @pytest.mark.asyncio
 async def test_generate_webui_title_skips_plain_websocket_sessions(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="Plain websocket title", finish_reason="stop")
     )
     session = loop.sessions.get_or_create("websocket:custom-client")
@@ -380,7 +380,7 @@ async def test_generate_webui_title_skips_plain_websocket_sessions(tmp_path: Pat
 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -405,7 +405,7 @@ async def test_generate_webui_title_ignores_command_only_sessions(tmp_path: Path
 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -430,7 +430,7 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -438,7 +438,7 @@ async def test_generate_webui_title_projects_onto_chat_session_under_unified_rou
     tmp_path: Path,
 ) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content='"查询临期 IP"', finish_reason="stop")
     )
     unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
@@ -464,7 +464,7 @@ async def test_generate_webui_title_projects_onto_chat_session_under_unified_rou
     chat = loop.sessions.get_or_create("websocket:chat-projection")
     assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "查询临期 IP"
     assert unified.metadata[WEBUI_TITLE_METADATA_KEY] == "开启私聊Topic功能"
-    prompt = loop.provider.chat_with_retry.await_args.args[0][1]["content"]
+    prompt = loop.provider.chat_stream_with_retry.await_args.args[0][1]["content"]
     assert "帮我查一下临期IP有哪些" in prompt
     assert "很早以前的问题" not in prompt
 
@@ -492,7 +492,7 @@ async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Pa
 
     assert generated is False
     assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "Existing title"
-    loop.provider.chat_with_retry.assert_not_awaited()
+    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 def test_save_turn_keeps_multimodal_runtime_context_for_model_replay() -> None:
@@ -558,7 +558,6 @@ def test_save_turn_commits_summary_boundary_without_rewriting_raw_history() -> N
         "Current working-memory checkpoint."
     )
     assert [message["content"] for message in session.get_history()] == [
-        SUMMARY_CONTINUATION_TEXT,
         "",
         "full current result",
         "done",
@@ -638,6 +637,46 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
     ]
 
 
+def test_save_turn_redacts_tool_image_without_truncating_text() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:tool-image")
+    text = "start-" + ("x" * 20_000) + "-end"
+
+    loop._save_turn(
+        session,
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_image",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_image",
+                "name": "read_file",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc"},
+                        "_meta": {"path": "media/photo.png"},
+                    },
+                    {"type": "text", "text": text},
+                ],
+            },
+        ],
+        skip=0,
+    )
+
+    assert session.messages[1]["content"] == [
+        {"type": "text", "text": "[image: media/photo.png]"},
+        {"type": "text", "text": text},
+    ]
+
+
 def test_save_turn_persists_runtime_context_and_public_view_hides_it() -> None:
     loop = _mk_loop()
     session = Session(key="test:suffix-strip")
@@ -710,10 +749,10 @@ def test_save_turn_keeps_string_when_only_runtime_context() -> None:
     assert public_history_message(session.messages[0])["content"] == ""
 
 
-def test_save_turn_keeps_tool_results_under_16k() -> None:
+def test_save_turn_keeps_full_processed_tool_result() -> None:
     loop = _mk_loop()
     session = Session(key="test:tool-result")
-    content = "x" * 12_000
+    content = "start-" + ("x" * 20_000) + "-end"
 
     loop._save_turn(
         session,
@@ -990,7 +1029,7 @@ async def test_runtime_checkpoint_keeps_provider_state_out_of_public_metadata(
         },
     )
     loop.provider.can_resume_conversation_state.return_value = True
-    loop.provider.chat_with_retry = AsyncMock(
+    loop.provider.chat_stream_with_retry = AsyncMock(
         return_value=LLMResponse(content="done", provider_state=state)
     )
     session = loop.sessions.get_or_create("cli:private-checkpoint")
@@ -1472,7 +1511,7 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
-    await loop._dispatch(InboundMessage(
+    await run_session(loop, InboundMessage(
         channel="feishu",
         sender_id="u1",
         chat_id="c-stream",
@@ -1483,15 +1522,6 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
             "origin_message_id": "root_001",
         },
     ))
-
-    assert loop.bus.outbound_size == 0
-    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
-    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
-    assert queued.metadata["_wants_stream"] is True
-    assert queued.metadata["message_id"] == "om_001"
-    assert queued.metadata["origin_message_id"] == "root_001"
-
-    await loop._dispatch(queued)
 
     outbound = []
     while loop.bus.outbound_size:
@@ -1508,6 +1538,8 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
     assert ends[0].metadata["origin_message_id"] == "root_001"
     assert isinstance(ends[0].event.stream_id, str)
     assert streamed_markers and streamed_markers[-1].content == "done"
+    assert loop.bus.inbound_size == 0
+    assert calls == 2
 
 
 @pytest.mark.asyncio
@@ -1541,7 +1573,7 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
-    await loop._dispatch(InboundMessage(
+    await run_session(loop, InboundMessage(
         channel="websocket",
         sender_id="u1",
         chat_id="c-auto",
@@ -1553,26 +1585,15 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
     while loop.bus.outbound_size:
         first_outbound.append(await loop.bus.consume_outbound())
     first_statuses = [m.event for m in first_outbound if isinstance(m.event, GoalStatusEvent)]
-    assert [m.status for m in first_statuses] == ["running"]
-    assert not [m for m in first_outbound if isinstance(m.event, TurnEndEvent)]
+    assert [m.status for m in first_statuses] == ["running", "running", "idle"]
     started_at = first_statuses[0].started_at
-
-    queued = await asyncio.wait_for(loop.bus.consume_inbound(), timeout=0.5)
-    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
-    assert queued.metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == started_at
-
-    await loop._dispatch(queued)
-
-    second_outbound = []
-    while loop.bus.outbound_size:
-        second_outbound.append(await loop.bus.consume_outbound())
-    second_statuses = [m.event for m in second_outbound if isinstance(m.event, GoalStatusEvent)]
-    assert [m.status for m in second_statuses] == ["running", "idle"]
-    assert second_statuses[0].started_at == started_at
-    turn_end = [m for m in second_outbound if isinstance(m.event, TurnEndEvent)]
+    assert first_statuses[1].started_at == started_at
+    turn_end = [m for m in first_outbound if isinstance(m.event, TurnEndEvent)]
     assert len(turn_end) == 1
     assert isinstance(turn_end[0].event, TurnEndEvent)
     assert isinstance(turn_end[0].event.latency_ms, int)
+    assert loop.bus.inbound_size == 0
+    assert calls == 2
 
 
 @pytest.mark.asyncio
@@ -1763,7 +1784,7 @@ async def test_request_context_uses_effective_key_for_spawn_tool(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(return_value=MagicMock())  # unused because _run_agent_loop is stubbed
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=MagicMock())  # unused because _run_agent_loop is stubbed
 
     session = loop.sessions.get_or_create("feishu:c3")
     session.add_message("user", "old question")
@@ -2084,8 +2105,8 @@ async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Pat
 
     loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
 
-    logs: list[str] = []
-    sink_id = logger.add(logs.append, level="DEBUG", format="{message}")
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="DEBUG")
     try:
         await loop._process_message(
             InboundMessage(
@@ -2108,9 +2129,64 @@ async def test_system_subagent_followup_uses_common_turn_lifecycle(tmp_path: Pat
         "_persist_turn",
         "_prepare_outbound",
     ]
-    logged = "".join(logs)
+    logged = "\n".join(record["message"] for record in records)
     for stage in ("restore", "compact", "command", "build", "run", "save", "respond"):
         assert f"Stage {stage} completed in" in logged
+    stage_records = [record for record in records if record["extra"].get("event") == "turn_stage"]
+    assert {record["extra"]["stage"] for record in stage_records} == {
+        "restore",
+        "compact",
+        "command",
+        "build",
+        "run",
+        "save",
+        "respond",
+    }
+    assert {record["extra"]["session_key"] for record in stage_records} == {"cli:test"}
+    assert len({record["extra"]["turn_id"] for record in stage_records}) == 1
+    completion = next(
+        record for record in records if record["extra"].get("event") == "turn_completed"
+    )
+    assert completion["extra"]["outcome"] == "stop"
+    assert completion["extra"]["duration_ms"] >= 0
+    assert completion["extra"]["provider"] == "test"
+    assert completion["extra"]["model"] == "test-model"
+    assert "response=[content hidden]" in completion["message"]
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_stage_logs_exception_and_correlation(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    async def fail_restore(_ctx) -> None:
+        raise RuntimeError("restore failed")
+
+    loop._restore_turn = fail_restore  # type: ignore[method-assign]
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="ERROR")
+    try:
+        with pytest.raises(RuntimeError, match="restore failed"):
+            await loop._process_message(
+                InboundMessage(
+                    channel="cli",
+                    sender_id="user",
+                    chat_id="failure",
+                    content="hello",
+                )
+            )
+    finally:
+        logger.remove(sink_id)
+
+    failure = next(
+        record
+        for record in records
+        if record["extra"].get("event") == "turn_stage"
+        and record["extra"].get("outcome") == "error"
+    )
+    assert failure["exception"] is not None
+    assert failure["extra"]["stage"] == "restore"
+    assert failure["extra"]["session_key"] == "cli:failure"
+    assert failure["extra"]["turn_id"].startswith("cli:failure:")
 
 
 @pytest.mark.asyncio
