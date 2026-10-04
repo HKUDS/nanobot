@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,6 +26,10 @@ function SidebarFocusCase() {
       }]}
       activeKey={topic.key}
       paneGroups={{
+        [topic.key]: {
+          tabKey: "tab:review", title: "Review", activePaneKey: topic.key, visible: false,
+          panes: [{ key: topic.key, chatId: topic.chatId, title: "Review" }],
+        },
         "websocket:group": {
           tabKey: "websocket:group", title: "Group", activePaneKey: "websocket:group",
           panes: [
@@ -38,6 +42,7 @@ function SidebarFocusCase() {
       onRequestDelete={vi.fn()}
       onTogglePin={vi.fn()}
       onToggleArchive={vi.fn()}
+      onAttachPane={vi.fn()}
       onRequestRename={(_key, title) => setRename(title)}
       onRequestRenameTab={(_key, title) => setRename(title)}
       onRequestRenameProject={(_key, title) => setRename(title)}
@@ -103,6 +108,40 @@ describe("sidebar action focus", () => {
     await user.click(outside);
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(outside).toHaveFocus();
+  });
+
+  it("returns Escape from Move to to the root action button", async () => {
+    const user = userEvent.setup();
+    render(<SidebarFocusCase />);
+    const trigger = screen.getByRole("button", { name: "Topic actions for Review" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    const move = await screen.findByRole("menuitem", { name: "Move to", exact: true });
+    act(() => move.focus());
+    await user.keyboard("{ArrowRight}");
+    await screen.findByRole("menuitem", { name: "Group · 2/4" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("keeps ArrowLeft within the parent menu, then hands Rename its input focus", async () => {
+    const user = userEvent.setup();
+    render(<SidebarFocusCase />);
+    const trigger = screen.getByRole("button", { name: "Topic actions for Review" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    const move = await screen.findByRole("menuitem", { name: "Move to", exact: true });
+    act(() => move.focus());
+    await user.keyboard("{ArrowRight}");
+    await screen.findByRole("menuitem", { name: "Group · 2/4" });
+    await user.keyboard("{ArrowLeft}");
+    await waitFor(() => expect(move).toHaveFocus());
+    expect(screen.queryByRole("menuitem", { name: "Group · 2/4" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Rename", exact: true }));
+    const input = await screen.findByPlaceholderText("Topic name");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(input).toHaveFocus();
   });
 
   it("allows Select to remove the trigger without restoring focus to it", async () => {

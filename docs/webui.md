@@ -115,7 +115,9 @@ On touch devices, sidebar action buttons stay visible with larger touch areas
 for topics, conversation groups, panes, and projects. Tap a title to select it
 or the adjacent action button for its menu. Desktop actions still appear on
 hover or keyboard focus. Press Escape in an action menu to return focus to its
-button and continue with Tab. Choosing Rename instead moves focus into the
+button and continue with Tab, including from the **Move to** submenu. ArrowLeft
+leaves the submenu and returns to **Move to** without closing the parent menu.
+Choosing Rename instead moves focus into the
 dialog; clicking outside a menu keeps focus at the clicked destination.
 
 Drag a topic within its current sidebar group to keep frequently used work in

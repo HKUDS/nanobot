@@ -1,6 +1,8 @@
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -87,6 +89,8 @@ interface SidebarActionMenuController {
   openFromContextMenu: (event: ReactMouseEvent<HTMLElement>, id: string) => void;
 }
 
+const SidebarActionMenuEscapeContext = createContext<(() => void) | undefined>(undefined);
+
 function SidebarActionMenuContent({
   children,
   portalContainer,
@@ -95,21 +99,24 @@ function SidebarActionMenuContent({
   portalContainer?: HTMLElement | null;
 }) {
   const restoreFocusOnEscape = useRef(false);
+  const markEscape = () => { restoreFocusOnEscape.current = true; };
   return (
-    <DropdownMenuContent
-      align="end"
-      className={ACTION_MENU_CONTENT_CLASS}
-      portalContainer={portalContainer}
-      onEscapeKeyDown={() => { restoreFocusOnEscape.current = true; }}
-      onCloseAutoFocus={(event) => {
-        // Actions can open a dialog or remove the trigger. Only Escape returns
-        // to it; Radix still owns the trigger and outside-interaction handling.
-        if (!restoreFocusOnEscape.current) event.preventDefault();
-        restoreFocusOnEscape.current = false;
-      }}
-    >
-      {children}
-    </DropdownMenuContent>
+    <SidebarActionMenuEscapeContext.Provider value={markEscape}>
+      <DropdownMenuContent
+        align="end"
+        className={ACTION_MENU_CONTENT_CLASS}
+        portalContainer={portalContainer}
+        onEscapeKeyDown={markEscape}
+        onCloseAutoFocus={(event) => {
+          // Actions can open a dialog or remove the trigger. Only Escape returns
+          // to it; Radix still owns the trigger and outside-interaction handling.
+          if (!restoreFocusOnEscape.current) event.preventDefault();
+          restoreFocusOnEscape.current = false;
+        }}
+      >
+        {children}
+      </DropdownMenuContent>
+    </SidebarActionMenuEscapeContext.Provider>
   );
 }
 
@@ -1617,6 +1624,8 @@ function MoveToGroupSubmenu({
   onMove: (targetKey: string) => void;
 }) {
   const { t } = useTranslation();
+  // Radix sends Escape only to the topmost submenu before closing the root.
+  const onEscapeKeyDown = useContext(SidebarActionMenuEscapeContext);
   if (targets.length === 0) return null;
   return (
     <DropdownMenuSub>
@@ -1624,7 +1633,7 @@ function MoveToGroupSubmenu({
         <MoveRight className="h-4 w-4 shrink-0" aria-hidden />
         {t("workbench.moveTo")}
       </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
+      <DropdownMenuSubContent onEscapeKeyDown={onEscapeKeyDown}>
         {targets.map((target) => (
           <DropdownMenuItem
             key={target.key}
