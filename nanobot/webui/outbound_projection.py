@@ -95,8 +95,6 @@ class WebUIOutboundTransport(Protocol):
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None: ...
 
-    async def send_subagent_task(self, chat_id: str, task_id: str) -> None: ...
-
     async def send_file_edit_events(
         self,
         chat_id: str,
@@ -250,7 +248,13 @@ class WebUIOutboundProjector:
             return
         if isinstance(event, SubagentTaskChanged):
             if conns:
-                await self._transport.send_subagent_task(msg.chat_id, event.task_id)
+                task = self._session_projection.subagent_task(webui_session_key(msg.chat_id), event.task_id)
+                if task is not None:
+                    await self._transport.send_payload(
+                        msg.chat_id,
+                        {"event": "subagent_task", "chat_id": msg.chat_id, "task": task},
+                        persistence="transient",
+                    )
             return
         if isinstance(event, SessionUpdatedEvent):
             if conns:

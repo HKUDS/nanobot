@@ -115,7 +115,7 @@ def build_gateway_services(
         workspaces=workspaces,
         logger=logger,
     )
-    session_projection = WebUISessionProjection(session_manager, log=logger)
+    session_projection = WebUISessionProjection(session_manager, subagent_manager=subagent_manager, log=logger)
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,

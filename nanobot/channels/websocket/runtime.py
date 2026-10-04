@@ -21,7 +21,6 @@ from websockets.asyncio.server import Server, ServerConnection, serve, unix_serv
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
-from nanobot.agent.subagent import SubagentControlError
 from nanobot.bus.events import (
     OUTBOUND_META_AGENT_UI,
     OutboundMessage,
@@ -55,7 +54,7 @@ from nanobot.webui.outbound_wire import (
     WebUIWirePersistence,
     project_tool_events,
 )
-from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
+from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
 
@@ -1464,20 +1463,6 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" goal_status ")
-
-    async def send_subagent_task(self, chat_id: str, task_id: str) -> None:
-        manager = self.gateway.http.subagent_manager
-        if manager is None:
-            return
-        try:
-            task = manager.check(task_id, webui_session_key(chat_id))
-        except SubagentControlError:
-            return
-        raw = json.dumps({
-            "event": "subagent_task", "chat_id": chat_id, "task": task.as_dict(),
-        }, ensure_ascii=False)
-        for connection in list(self._subs.get(chat_id, ())):
-            await self._safe_send_to(connection, raw, label=" subagent_task ")
 
     async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None:
         """Notify WebUI clients that a session row should refresh."""
